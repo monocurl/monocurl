@@ -1,0 +1,155 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = BLACK
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+	
+	/* centers = to origin */
+	func Equation(tex) = identity:
+		var ret = Tex:
+			tex: tex
+			scale: 1
+			color: default
+		let current = mesh_center:
+			root: ret
+			tag_predicate(tag): 200 in tag
+		ret = Shifted:
+			mesh: ret
+			delta: vec_sub(ORIGIN, current)
+		element: ret
+[slide name: "slide_1"]
+	/* pins give a certain substring of the resulting mesh */
+	/* the specified tag */
+	/* I will admit I am not happy with the way text turned out */
+	/* (in particular how much labor is needed, and how hard they */
+	/* are to understand. I'll look for elegant solutions in */
+	/* the coming future) */  
+	/* However, you can still do some cool things */
+	
+	/* you can use functors to help with tex strings */
+	func Matrix(a, b, c, d, pin) = identity:
+		var ret = ""
+		/* NOTE: "%{var}" is string interpolation */
+		ret += "\pin{%{pin}}{"
+		ret += "\begin{pmatrix}"
+		ret += "%{a} & %{b} \\"
+		ret += "%{c} & %{d}   "
+		ret += "\end{pmatrix}"
+		ret += "}"
+		
+		element: ret
+		
+	func Vec(x, y, pin) = identity:
+		var ret = ""
+		ret += "\pin{%{pin}}{"
+		ret += "\begin{pmatrix} %{x} \\ %{y} \end{pmatrix}"
+		ret += "}"
+		element: ret
+		
+		
+	let mat = Matrix:
+		a: "a"
+		b: "b"
+		c: "c"
+		d: "d"
+		pin: 0	
+	
+	tree main = Equation:
+		var str = ""
+		
+		str += mat
+		str += Vec:
+			x: "x"
+			y: "y"
+			pin: 1
+			
+		str += "\pin{200}{\ =\  }"
+		
+		str += Matrix:
+			a: "\pin3{a}"
+			b: "\pin4{b}"
+			c: "\pin5{c}"
+			d: "\pin6{d}"
+			pin: 2
+		str += Vec:
+			x: "\pin8{x}"
+			y: "\pin9{y}"
+			pin: 7
+	
+		tex: str
+	
+	p += Write:
+		meshes&: main
+		time: 1
+[slide name: "slide_2"]
+	main = Equation:
+		var str = ""
+		
+		str += mat	
+		str += Vec:
+			x: "x"
+			y: "y"
+			pin: 1
+			
+		str += "\pin{200}{\ =\ }"
+		
+		str += "\pin8{x}"
+		str += Vec:
+			x: "\pin3{a}"
+			y: "\pin5{c}"
+			pin: 2
+		
+		str += "+ \pin9{y}"
+		str += Vec:
+			x: "\pin4{b}"
+			y: "\pin6{d}"
+			pin: 7
+		tex: str
+	
+	p += TagTransform:
+		meshes&: main
+		time: 2
+		unit_map(u): smooth(u)
+		path_arc: {0, 0, 2}
+	
+	main = {}
+	p += Write:
+		meshes&: main
+		time: 1
+[slide name: "slide_3"]
+	main = Equation:
+		tex: "\pin{200}{x^{\pin5{5}}}"
+	p += Write:
+		meshes&: main
+		time: 1
+	
+	for i in 0 :< 5
+		let max_term = 5 - i
+		var next = ""
+		for j in 0 :< i + 1
+			next += "\pin{%{5 - j}}{%{5 -  j}}"
+			next += "\pin{100}{\cdot}"
+				
+				
+		let next_exp = max_term - 1
+		
+		var replace = next
+		replace += "\pin{200} {x^{\pin{%{max_term}}{%{next_exp}}}}"
+		
+		main.tex = replace
+		p += TagTransform:
+			meshes&: main
+			time: 1
+		
+		/* switch exponent tag so next run will work properly */
+		replace = next
+		replace += "\pin{200} {x^{\pin{%{next_exp}}{%{next_exp}}}}"
+		main.tex = replace
+		p += Set:
+			vars&: main
+			

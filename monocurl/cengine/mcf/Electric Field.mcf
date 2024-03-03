@@ -1,0 +1,161 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = WHITE
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+		
+	func Space(n) = identity:
+		var ret = {}
+		for i in 0 :< n * 2 + 1
+			ret += Line:
+				start: vec_mul(2, {-n, -n+i, 0})
+				end: vec_mul(2, {n, -n+i, 0})
+				tag: {0}
+				stroke: LIGHT_GRAY
+			ret += Line:
+				start: vec_mul(2, {-n+i, -n, 0})
+				end:   vec_mul(2, {-n+i,  n, 0})
+				tag: {0}
+				stroke: LIGHT_GRAY
+		ret += Line:
+			start: {0,0,-10}
+			end: {0,0,10}
+			tag: {1}
+			stroke: DARK_GRAY
+		ret = WithZIndex:
+			mesh: ret
+			index: -1
+		element: ret
+[slide name: "slide_1"]
+	tree charge = Annulus:
+		center: ORIGIN
+		inner: 0.95
+		outer: 1
+		tag: {}
+		stroke: CLEAR
+		fill: BLACK
+	tree static = Space:
+		n: 7
+	tree labels = Label:
+		mesh: charge
+		str: "$Q$ (charge carrier)"
+		scale: 1
+		dir: UP
+		stroke: CLEAR
+		fill: BLACK
+	p += Set:
+		vars&: {charge, static}
+	p += Write:
+		meshes&: labels
+		time: 1
+	
+[slide name: "slide_2"]
+	camera = Camera:
+		near: 0.1
+		far: 20
+		up: UP
+		origin: {-2, 1, 4}
+		target: {0, 0, 2}
+	
+	p += CameraLerp:
+		camera&: camera
+		time: 1
+	
+	tree targ = Sphere:
+		center: {0,0,2}
+		radius: 0.05
+		tag: {}
+		surface: PURPLE
+	
+	p += Fade:
+		meshes&: targ
+		time: 1
+	
+	
+	labels += Label:
+		mesh: targ
+		str: "Test Point"
+		scale: 1
+		dir: {0,1,0}
+		stroke: CLEAR
+		fill: BLACK
+	p += Write:
+		meshes&: labels
+		time: 1
+	p += Wait(1)
+	
+	labels = {}
+	p += Fade:
+		meshes&: labels
+		time: 1
+[slide name: "slide_3"]
+	let n = 15
+	let point = targ.center
+	var lines = map:
+		v: 0 :< n
+		f(x): Line:
+			let theta = x / n * TAU
+			start: {cos(theta), sin(theta), 0}
+			end: point
+			tag: {}
+			stroke: BLACK
+		
+	p += Flash:
+		value: lines
+		time: 2
+	p += Flash:
+		value: lines
+		time: 2
+	
+	let n2 = 12
+	/* used to interpolate between vector and orthogonal decomp */
+	func Vectors(factor) = identity:
+		var ret = {}
+		let r = point[2]
+		let base = {0, 0, r + factor}
+		
+		for i in 0 :< n2
+			let theta = i / n2 * TAU
+			ret += Vector:
+				tail: base
+				delta: {-cos(theta) / r, -sin(theta) / r, 1 - factor}
+				tag: {-1 - i}
+				stroke: CLEAR
+				fill: keyframe_lerp({0: PURPLE, 1: BLUE}, factor)
+		ret += Vector:
+			tail: point
+			delta: {0, 0, factor}
+			normal: LEFT
+			tag: {0}
+			stroke: CLEAR
+			fill: keyframe_lerp({0: PURPLE, 1: RED}, factor)
+		element: ret
+	
+	tree vectors = Vectors:
+		factor: 0
+	
+	var sub = {}
+	sub += Wait(0.75, )
+	sub += Write:
+		meshes&: vectors
+		time: 1
+	p += sticky sub
+[slide name: "slide_4"]
+	vectors.factor = 1
+	p += Lerp:
+		vars&: vectors
+		time: 1
+	
+	p += Wait(1)
+	vectors = mesh_select:
+		root: vectors
+		tag_predicate(tag): tag[0] == 0
+	p += Fade:
+		meshes&: vectors
+		time: 1
+	p += Wait(1)

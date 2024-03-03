@@ -1,0 +1,83 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = BLACK
+	camera = Camera:
+		near: 0.1 
+		far: 100
+		up: {0,1,0}
+		origin: {4,2,4}
+		target: {0,0,0}
+	
+	/* LONG render time */
+	/* The True Monocurl Logo uses u, v = 512 */
+	let u_samples = 128
+	let v_samples = 512
+[slide name: "slide_1"]
+	/* reference: https://virtualmathmuseum.org/Surface/breather/breather.html */
+	func Breather(a, u_rad, v_rad) = identity:
+		let du = 2 * u_rad / u_samples
+		let dv = 2 * v_rad / v_samples
+		
+		func f(u, v) = identity:
+			let wsqr = 1 - a * a
+			let w = sqrt(wsqr)
+			let denom = a * ((w * cosh(a * u)) ** 2 + (a * sin(w * v)) ** 2))
+			let x = -u + (2 * wsqr * cosh(a * u) * sinh(a * u) / denom)
+			let y = 2 * w * cosh(a * u) * (-(w * cos(v) * cos(w * v)) - (sin(v) * sin(w * v))) / denom
+			let z = 2 * w * cosh(a * u) * (-(w * sin(v) * cos(w * v)) + (cos(v) * sin(w * v))) / denom
+			element: {x, y, z}
+		
+		var ret = ColorGrid:
+			x_min: -u_rad
+			x_max: u_rad
+			y_min: -v_rad
+			y_max: v_rad
+			x_step: du
+			y_step: dv
+			tag: {}
+			color_at(pos): DARK_GRAY
+			stroke: CLEAR
+		ret = PointMapped:
+			mesh: ret
+			point_map(point): f(point[0], point[1])
+		ret = ColorMapped:
+			mesh: ret
+			/* +1 adds opacity, not vector addition */
+			color_map(point): f(1.5 * point[0], point[0]) + 1
+		ret = AddedGloss:
+			mesh: ret
+		element: ret
+	
+	let a = 0.8
+	tree logo = Breather:
+		a: a
+		u_rad: 3
+		v_rad: TAU * 4 / 3 / a
+	p += Set:
+		vars&: logo
+	
+	func View(camera&, at) = CameraLerp:
+		camera.origin = at
+		camera&: camera
+		time: 3
+		
+	p += View:
+		camera&: camera
+		at: {0, 2, 4}
+		
+	p += View:
+		camera&: camera
+		at: {-4, 2, -4}
+	
+	p += View:
+		camera&: camera
+		at: {4, 2, 0}
+	
+	p += View:
+		camera&: camera
+		at: {6, -2, 0}
+	
+	p += View:
+		camera&: camera
+		at: {1, 1, 0}

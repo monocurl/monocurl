@@ -1,0 +1,360 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	/* Some slides may not have visuals, others do! */
+[slide name: "slide_1"]
+	/* We recommend you check out the online lessons first! */
+	/*  https://www.monocurl.com/learn/0_What_is_Monocurl   */
+	
+	tree welcome = Text:
+		text: "Welcome to Monocurl!"
+		scale: 1
+		color: default
+	welcome = Centered:
+		mesh: welcome
+		at: ORIGIN
+	p += Set:
+		vars&: welcome
+	p += Wait(1)
+	
+	welcome = {}
+	p += Fade:
+		meshes&: welcome
+		time: 1
+[slide name: "slide_2"]
+	/* basics (vars) */
+	
+	let constant_example = 3 + 4 - 2 * 5
+	var mutable_variable = 4 - 2
+	mutable_variable = constant_example + 1
+	
+	let vector = {0, 1, {2, 3}}
+	var copy_by_value = vector
+	/* this only modifies copy_by_value! */
+	copy_by_value[0] = 1 
+	 
+	let dict = {0: 1, 2: 3, 4: 5}
+	
+	func det(a, b, c, d) = a * d - b * c
+	
+	let M = {{1, 0}, {2, 0}}
+	let mat_det = det(M[0][0], M[0][1], M[1][0], M[1][1])
+	
+	/* for more ... */
+	/* https://www.monocurl.com/learn/1_Monocurl_Language */
+[slide name: "slide_3"]
+	/* functors */
+	
+	/* DEFINITION: functor */
+	/* - an invocation of a function that remembers the */
+	/*   function it called and arguments passed in     */
+	/*   This alows for easy reinvocation.              */
+	
+	/* at this point, det_functor has value 1 */
+	var det_functor = det:
+		a: 1
+		b: 0
+		c: 0
+		d: 1
+	
+	det_functor.a = 2 /* now its value is 2 (2 * 1 - 0 * 0) */
+	det_functor.d = 2 /* now 4    (2 * 2 - 0 * 0) */
+	det_functor.c = 1 /* still 4  (2 * 2 - 1 * 0) */
+	
+	/* in certain operations, the functor is unwrapped */
+	/* to its underlying value                        */
+	let arithmetic = det_functor + 2 /* =6 */
+	
+	/* for more ... */
+	/* https://www.monocurl.com/learn/1_Monocurl_Language */
+[slide name: "slide_8"]
+	/* editor */
+	
+	/* LEFT HAND SIDE: editor */
+	/*  - home to actual code (as well as media/images) */
+	
+	/* TOP RIGHT: viewport */
+	/*  - live preview of current timestamp */
+	
+	/* BOTTOM RIGHT: timeline */
+	/*  - allows seeking and displays length of each slide */
+	
+	/* USEFUL SHORTCUTS */
+	/* "," = prev slide */
+	/* "." = next slide */
+	/* ", + SHIFT" = scene start */
+	/* ". + SHIFT" = scene end */
+	/* "CTRL/CONTROL + F" = presentation mode */
+	/* "CTRL/COMMAND + [" = deindent */
+	/* "CTRL/COMMAND + ]" = indent   */
+	/* "TAB" = next field */
+	/* "SHIFT + TAB" = prev field */
+	
+	/* for more ... */
+	/* https://www.monocurl.com/learn/2_Using_the_Editor */
+[slide name: "slide_4"]
+	/* meshes */
+	
+	var circle = Circle:
+		center: ORIGIN
+		radius: 1
+		tag: {}
+		stroke: {1, 0, 0, 1} /* rgba */
+		fill: {1, 1, 1, 1}
+	
+	/* use functors to easily change radius */
+	circle.radius = 0.5
+	
+	let square = Square:
+		center: {-1, 0, 0}
+		width: 1
+		tag: {}
+		color: default
+	
+	/* (recursive) DEFINITION: mesh-tree */
+	/*  - a mesh is a mesh-tree. a vector of mesh-trees is */
+	/*    a mesh-tree. */
+	
+	let mesh = circle
+	var mesh_tree = {mesh, square}
+	/* {{{square}}, circle } is another valid mesh tree */
+	
+	/* code to show mesh, it'll make sense soon */
+	tree main = mesh_tree
+	p += Set:
+		vars&: main
+	p += Wait(1)
+	p += Set:
+		main = {}
+		vars&: main
+	
+	/* for more ... */
+	/* https://www.monocurl.com/learn/3_Meshes */
+[slide name: "slide_5"]
+	/* iterator-follower */
+	
+	/* tree declares an iterator and follower pair */
+	/* the iterator is a normal variable */
+	/* the follower is on-screen and starts off as {} */
+	tree example = Circle:
+		center: ORIGIN
+		radius: 1
+		tag: {}
+		color: default
+	
+	/* we can use "follower animations" */
+	/* to update the follower to the state of the iterator */
+	/* the simplest is Set, which does so instantly */
+	/* note: p is the global play variable list */
+	p += Set:
+		vars&: example
+	
+	tree write_example = Square:
+		center: LEFT
+		width: 1
+		tag: {}
+		color: default
+	/* we can use Write/Fade/Grow for complex show/hide */
+	p += Write:
+		meshes&: write_example
+		time: 1
+	
+	/* we can also just wait */
+	p += Wait(1)
+	
+	example.radius = 0.5
+	write_example = Text:
+		text: "Hello World!"
+		scale: 1
+		color: default
+	/* we can use transform to do pointwise interpolation */
+	/* to a new state. Some animations allow many vars!  */
+	p += Transform:
+		meshes&: {example, write_example}
+		time: 1
+	
+	p += Wait(1)
+	
+	/* clear to empty state */
+	write_example = example = {}
+	p += Set:
+		vars&: {write_example, example}
+	
+	/* for more ... */
+	/* https://www.monocurl.com/learn/4_Iterator_Follower_Paradigm */
+[slide name: "slide_6"]
+	/* lerp */
+	
+	/* Transform does pointwise interpolation,           */
+	/* but what if we want to interpolate based on type? */
+	/* Lerp is a follower animation that linearly        */
+	/* interpolates the fields from the follower to the  */
+	/* iterator. The follower and iterator must be the   */
+	/* same type of functor (e.g. Cardiod and Cardiod)!  */
+	
+	func Cardiod(N, r) = identity:
+		let n = round(N)
+		
+		var ret = {}
+		ret += Circle:
+			center: ORIGIN
+			radius: r
+			tag: {}
+			stroke: LIGHT_GRAY
+	
+		func theta_to_point(theta) = {r * cos(theta), r * sin(theta), 0}
+		for i in 0 :< n
+			let next = mod(i * 2, n)
+			let org_theta = TAU * i / n
+			let new_theta = TAU * next / n
+			ret += Line:
+				start: theta_to_point(org_theta)
+				end: theta_to_point(new_theta)
+				tag: {}
+				color: default
+	
+		element: ret
+	
+	/* mesh using custom functor! */
+	/* we will interpolate n */
+	tree card = Cardiod:	
+		N: 1
+		r: 1
+	
+	p += Set:	
+		vars&: card
+	
+	/* lerp N 1 -> 128 */
+	/* it might not be an integer, but we round */
+	/* in the cardiod functor */
+	card.N = 128
+	p += Lerp:
+		vars&: card
+		time: 1
+	
+	card = {}
+	p += Write:
+		meshes&: card
+		time: 3
+	/* for more ... */
+	/* https://www.monocurl.com/learn/5_Lerp */
+[slide name: "slide_7"]
+	/* progressors */
+	
+	/* DEFINITION: progressors */
+	/* - animations that modify the input iterator */
+	
+	func Rotate(mesh&, rotation, time) = identity:
+		var ret = {}
+		
+		/* make sure follower is of type Rotated, so we can lerp the rotation field */
+		mesh = Rotated:
+			mesh: mesh
+			rotation: 0
+		ret += Set:
+			vars&: mesh
+		
+		mesh.rotation = rotation
+		ret += Lerp:
+			vars&: mesh
+			time: time
+		
+		element: ret
+	
+	tree s = Square:
+		center: ORIGIN
+		width: 1
+		tag: {}
+		color: default
+	
+	/* custom animation! */
+	p += Rotate:
+		mesh&: s
+		rotation: TAU * 9 / 8
+		time: 1
+	
+	s = {}
+	p += Fade:
+		meshes&: s
+		time: 1
+	
+	/* for more ... */
+	/* https://www.monocurl.com/learn/6_Progressors */
+[slide name: "slide_9"]
+	/* tagging */
+	
+	/* we can attach identifiers (i.e. tags) to each mesh */
+	/* this allows for nice matching in transform */
+	func Bars(tagged_array) = identity:
+		var ret = {}
+		for pair in tagged_array
+			ret += Rect:
+				center: ORIGIN
+				width: 0.25
+				height: pair[0] / 2
+				tag: {pair[1]}
+				color: default
+	
+		ret = XStack:
+			mesh_vector: ret
+			align_dir: DOWN
+	
+		ret = Centered(ret, ORIGIN)
+		element: ret
+	
+	tree bars = Bars:
+		tagged_array: right_key({3,1,0,2,2,1,4,5,1})
+	
+	p += Set:
+		vars&: bars
+	
+	bars.tagged_array = sort(bars.tagged_array)
+	/* try seeing what happens with regular transform */
+	p += TagTransform:
+		meshes&: bars
+		time: 1
+	
+	bars = {}
+	p += Set:
+		vars&: bars
+	
+	/* tags also allow us to select */
+	/* subsets of mesh-trees. See more in the main lesson! */
+	
+	/* for more ... */
+	/* https://www.monocurl.com/learn/7_Tagging_Mechanics */
+[slide name: "slide_10"]
+	/* parallel animations */
+	
+	/* DEFINITION: sticky */
+	/*  - operator that makes an animation play in parallel with previous */
+	
+	tree up = ColorGrid:
+		x_min: 0
+		x_max: 1
+		y_min: 0
+		y_max: 1
+		tag: {}
+		color_at(pos): {pos[0], pos[1], 0, 1}
+	
+	tree down = RegularPolygon:
+		center: {-0.5, -0.5, 0}
+		n: 8
+		circumradius: 0.5
+		tag: {}
+		stroke: WHITE
+		fill: RED
+	
+	p += Fade:
+		meshes&: up
+		time: 1
+	p += sticky Write:
+		meshes&: down
+		time: 2
+	
+	
+	/* You can even have multiple animations on the same */
+	/* variable (see main lesson). */
+	
+	/* for more ... */
+	/* https://www.monocurl.com/learn/8_Parallel_Animations */

@@ -1,0 +1,216 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = WHITE
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+	
+	/* centers = to origin */
+	func Tx(tex, at) = identity:
+		var ret = Tex:
+			tex: tex
+			scale: 1
+			stroke: CLEAR
+			fill: BLACK
+		let current = mesh_center:
+			root: ret
+			tag_predicate(tag): 1 in tag
+		ret = Shifted:
+			mesh: ret
+			delta: vec_sub(at, current)
+		element: ret
+	
+	let R = 0.05
+	let DX = 0.2
+	func Spot(pos, tag, color) = Circle:
+		center: pos
+		radius: R
+		tag: tag
+		stroke: CLEAR
+		fill: color
+	
+	func Triangular(n, pos, ellipsis, color, reverse) = identity:
+		var dx = DX
+		if reverse
+			dx = -dx
+		
+		var ret = {}
+		for i in 1 :< n + 1
+			for j in 0 :< i
+				ret += Spot:
+					pos: vec_add(pos, {i * dx, j * dx, 0})
+					tag: {i, j}
+					color: color
+		if ellipsis
+			let raw = Tex:
+				tex: "\pin{%{n+1}}{\text{\dots}}"
+				scale: 1
+				stroke: CLEAR
+				fill: BLACK
+			ret += Centered:
+				mesh: raw
+				at: vec_add(pos, {(n + 2) * dx, 0, 0})
+		element: ret
+[slide name: "slide_1"]
+	tree labels = Tx:
+		tex: "\pin0{S} \pin1{\ =\ } \pin2{\sum_{i=1}^{n} i}"
+		at: ORIGIN
+	
+	p += Write:
+		meshes&: labels
+		time: 1
+	p += Wait(1)
+	
+	labels = mesh_select:
+		root: labels
+		tag_predicate(tag): 0 in tag || 1 in tag
+	p += Fade:
+		meshes&: labels
+		time: 1
+[slide name: "slide_2"]
+	tree dots = Triangular:
+		n: 5
+		pos: {0.2, 0, 0}
+		ellipsis: 1
+		color: BLUE
+		reverse: 0
+	
+	p += Fade:
+		meshes&: dots
+		time: 1
+		unit_map(u): smooth(u)
+		delta: {-0.1, 0, 0}
+	
+	p += Wait(0.5)
+	
+	/* hide ellipsis */
+	dots.ellipsis = 0
+	p += TagTransform:
+		meshes&: dots
+		time: 1
+[slide name: "slide_3"]
+	func LabeledMeasure(label, target, dir) = identity:
+		var ret = {}
+		ret += Measure:
+			mesh: target
+			dir: dir
+			tag: {-1}
+			stroke: BLACK
+		ret += Label:
+			mesh: ret
+			str: label
+			scale: 0.7
+			dir: dir
+			stroke: CLEAR
+			fill: BLACK
+		element: ret
+		
+	tree measure = {}
+	measure += LabeledMeasure: 
+		label: "\pin{3}{$n$}"
+		target: dots
+		dir: DOWN
+	measure += LabeledMeasure:
+		label: "\pin{4}{$n$}"
+		target: dots
+		dir: RIGHT
+	p += Fade:
+		meshes&: measure
+		time: 1
+[slide name: "slide_4"]
+	dots = {dots}
+	dots += Triangular:
+		n: 5
+		pos: {0.2 + DX * 6, DX * 5, 0}
+		ellipsis: 0
+		color: RED
+		reverse: 1
+	labels = Tx:
+		tex: "\pin0{2S} \pin1{\ =\ }"
+		at: ORIGIN
+	
+	p += TagTransform:
+		meshes&: dots
+		time: 1.5
+		unit_map(u): smooth(u)
+		path_arc: {0, 0, -2}
+	
+	p += sticky TagTransform:
+		meshes&: labels
+		time: 1
+	
+	/* rescale somewhat in parallel */
+	measure[0].target = dots
+	measure[1].target = dots
+	measure[1].label = "\pin4{$n + 1$}"
+	
+	p += Wait(1)
+	p += TagTransform:
+		meshes&: measure
+		time: 1
+	p += Wait(1)
+[slide name: "slide_5"]
+	/* this animation and relatives are done a lot */
+	/* it may be added into the stdlib at some point */
+	func TransformInto(from&, into&, target) = identity:
+		tree aux = {}
+		var ret = {}
+		ret += Transfer:
+			from&: from
+			into&: aux
+		aux = target
+		ret += TagTransform:
+			meshes&: aux
+			time: 1
+		ret += Transfer:
+			from&: aux
+			into&: into
+		element: ret
+	
+	/* pins and tags are important here! */
+	let full_label = Tx:
+		tex: "\pin2{2}\pin0{S} \pin1{\ =\ } \pin3{n}\pin4{(n+1)}"
+		at: ORIGIN
+	
+	/* initially only have the left half */
+	/* and then the right half will come from the TransformInto */
+	labels = mesh_select:
+		root: full_label
+		tag_predicate(tag): tag[0] <= 2
+	let target = mesh_select:
+		root: full_label
+		tag_predicate(tag): tag[0] > 2
+	
+	p += Set:
+		vars&: labels
+	dots = {}
+	p += Fade:
+		meshes&: dots
+		time: 1
+	p += TransformInto:
+		from&: measure
+		into&: labels
+		target: target
+	
+	p += Wait(1)
+[slide name: "slide_6"]
+	/* NOTE: right before this point labels is still untyped */
+	/* that is, we can't do labels.tex = ... "
+	/* because we collpased type information with the mesh_select: */
+	labels = Tx:
+		tex: "\pin0{S} \pin1{\ =\ } \frac{\pin3{n}\pin4{(n+1)}}{\pin2{2}}"
+		at: ORIGIN
+	p += TagTransform:
+		meshes&: labels
+		time: 1
+	
+	p += Wait(1)
+	
+	labels.tex = "\pin0{\sum_{i=1}^{n}i} \pin1{\ =\ } \frac{\pin3{n}\pin4{(n+1)}}{\pin2{2}}"
+	p += TagTransform:
+		meshes&: labels
+		time: 1

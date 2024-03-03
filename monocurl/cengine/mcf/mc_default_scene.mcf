@@ -1,0 +1,12 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = BLACK
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+
+[slide name: "slide_1"]

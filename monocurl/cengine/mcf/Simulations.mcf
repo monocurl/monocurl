@@ -1,0 +1,135 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = BLACK
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+	
+	let n = 100
+	let runs = 5
+[slide name: "slide_1"]
+	func f(x) = cos(x)
+	tree title = Tex:
+		tex: "f(x) = \cos(x)"
+		scale: 1
+		color: default
+	title = Centered:
+		mesh: title
+		at: UP
+		
+	p += Write:
+		meshes&: title
+		time: 1
+	
+	tree axes = Axis1d:
+		center: ORIGIN
+		x_unit: 1
+		x_rad: 4
+		x_label: ""
+		x_label_rate: 0
+		tag: {}
+		color: WHITE
+	p += sticky Set:
+		vars&: axes
+	
+	let range = 4
+	tree dots = map:
+		v: 1 :< n
+		f(x): Circle:
+			center: {-range + 2 * range * x / n, 0, 0}
+			radius: 0.05
+			tag: {}
+			stroke: CLEAR
+			fill: ORANGE
+	
+	let u = dots[0].center
+	p += Fade:
+		meshes&: dots
+		time: 1
+	
+	
+	for i in 0 :< runs
+		for j in 0 :< len(dots)
+			dots[j].center[0] = f(dots[j].center[0])
+		
+		p += Transform:
+			meshes&: dots
+			time: 1
+[slide name: "slide_2"]
+	title = Text:
+		text: "Binomial Distribution"
+		scale: 1
+		color: default
+	title = Centered:
+		mesh: title
+		at: {0, 1.5, 0}
+	axes = dots = {}
+	
+	p += Set:
+		vars&: {title, axes, dots}
+		
+	/* you can only use random at the top level */
+	/* therefore, it's common to create a vector of random values */
+	/* and pass that into functions */
+	/* or have them capture it */
+	var rand_vector = {}
+	for i in 0 :< 100000
+		rand_vector += random(0, 1)
+	
+	/* really inefficient */
+	/* but it's usually okay */
+	func Histogram(rand_vector, choices, first) = identity:
+		let buckets = choices + 1
+		var counts = {:}
+		for i in 0 :< buckets
+			counts[i] = 0
+			
+		/* simulation */
+		for i in 0 :< first
+			var pos = 0
+			for j in 0 :< choices
+				if rand_vector[i * choices + j] > 0.5
+					pos += 1
+			
+			counts[pos] += 1
+	
+		var ret = {}
+		for i in 0 :< buckets
+			ret += Rect:
+				center: ORIGIN
+				width: 6 / choices
+				height: 4 * counts[i] / max(first, 1)
+				tag: {i}
+				stroke: CLEAR
+				fill: CLEAR
+		ret = XStack:
+			mesh_vector: ret
+			align_dir: DOWN
+		ret = Shifted:
+			mesh: ret
+			let x = mesh_center(ret)
+			delta: {-x[0], -1, 0}
+		ret = Refilled:
+			mesh: ret
+			start_color: ORANGE
+			end_color: RED
+			start_vec: LEFT
+			end_vec: RIGHT
+		element: ret
+		
+	tree histogram = Histogram:
+		rand_vector: rand_vector
+		choices: 12
+		first: 0
+	
+	p += Set:
+		vars&: histogram
+		
+	histogram.first = 1000
+	p += Lerp:
+		vars&: histogram
+		time: 5

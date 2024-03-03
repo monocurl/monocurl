@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Monocurl": {
+      "commandName": "Project",
+      "nativeDebugging": true
+    }
+  }
+}

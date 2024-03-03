@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\packages\Microsoft.Windows.CppWinRT.2.0.240111.5\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.240111.5\build\native\Microsoft.Windows.CppWinRT.props')" />
+  <Import Project="..\..\packages\Microsoft.Windows.CppWinRT.2.0.220531.1\build\native\Microsoft.Windows.CppWinRT.props" Condition="Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.220531.1\build\native\Microsoft.Windows.CppWinRT.props')" />
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\main\callback.c" />
+    <ClCompile Include="src\main\monocurl.c" />
+    <ClCompile Include="src\main\scene_handle.c" />
+    <ClCompile Include="src\serial\file_manager+decode.c" />
+    <ClCompile Include="src\serial\file_manager+encode.c" />
+    <ClCompile Include="src\serial\state_converter.c" />
+    <ClCompile Include="src\state\actions.c" />
+    <ClCompile Include="src\state\constructor.c" />
+    <ClCompile Include="src\state\entry.c" />
+    <ClCompile Include="src\state\group.c" />
+    <ClCompile Include="src\state\media.c" />
+    <ClCompile Include="src\state\scene.c" />
+    <ClCompile Include="src\state\slide.c" />
+    <ClCompile Include="src\state\tree.c" />
+    <ClCompile Include="src\stdlib\anim_indication.c" />
+    <ClCompile Include="src\stdlib\anim_invariants.c" />
+    <ClCompile Include="src\stdlib\anim_show.c" />
+    <ClCompile Include="src\stdlib\anim_transform.c" />
+    <ClCompile Include="src\stdlib\anim_util.c" />
+    <ClCompile Include="src\stdlib\mc_anims.c" />
+    <ClCompile Include="src\stdlib\mc_lib_helpers.c" />
+    <ClCompile Include="src\stdlib\mc_meshes.c" />
+    <ClCompile Include="src\stdlib\mc_stdlib.c" />
+    <ClCompile Include="src\stdlib\mc_util.c" />
+    <ClCompile Include="src\stdlib\mesh_geometry.c" />
+    <ClCompile Include="src\stdlib\mesh_graphs.c" />
+    <ClCompile Include="src\stdlib\mesh_image.c" />
+    <ClCompile Include="src\stdlib\mesh_operators.c" />
+    <ClCompile Include="src\stdlib\mesh_tex.c" />
+    <ClCompile Include="src\stdlib\mesh_util.c" />
+    <ClCompile Include="src\timeline\expression_tokenizer.c" />
+    <ClCompile Include="src\timeline\interpreter.c" />
+    <ClCompile Include="src\timeline\thread_queue.c" />
+    <ClCompile Include="src\timeline\timeline+export.c" />
+    <ClCompile Include="src\timeline\timeline+simulate.c" />
+    <ClCompile Include="src\timeline\timeline.c" />
+    <ClCompile Include="src\timeline\timeline_execution_context.c" />
+    <ClCompile Include="src\timeline\timeline_instruction.c" />
+    <ClCompile Include="src\util\geo.c" />
+    <ClCompile Include="src\util\mc_file_ops.c" />
+    <ClCompile Include="src\util\mc_memory.c" />
+    <ClCompile Include="src\util\mc_svg.c" />
+    <ClCompile Include="src\util\mc_threading.c" />
+    <ClCompile Include="src\util\mc_time_util.c" />
+    <ClCompile Include="src\util\strutil.c" />
+    <ClCompile Include="src\util\unowned_map.c" />
+    <ClCompile Include="src\vector\animation.c" />
+    <ClCompile Include="src\vector\function.c" />
+    <ClCompile Include="src\vector\functor.c" />
+    <ClCompile Include="src\vector\lvalue.c" />
+    <ClCompile Include="src\vector\map.c" />
+    <ClCompile Include="src\vector\primitives.c" />
+    <ClCompile Include="src\vector\tetramesh.c" />
+    <ClCompile Include="src\vector\vector.c" />
+    <ClCompile Include="src\vector\vector_field.c" />
+    <ClCompile Include="src\viewport\viewport.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\main\callback.h" />
+    <ClInclude Include="src\main\config.h" />
+    <ClInclude Include="src\main\monocurl.h" />
+    <ClInclude Include="src\main\scene_handle.h" />
+    <ClInclude Include="src\serial\file_manager.h" />
+    <ClInclude Include="src\serial\state_converter.h" />
+    <ClInclude Include="src\state\actions.h" />
+    <ClInclude Include="src\state\constructor.h" />
+    <ClInclude Include="src\state\entry.h" />
+    <ClInclude Include="src\state\group.h" />
+    <ClInclude Include="src\state\media.h" />
+    <ClInclude Include="src\state\scene.h" />
+    <ClInclude Include="src\state\slide.h" />
+    <ClInclude Include="src\state\tree.h" />
+    <ClInclude Include="src\stdlib\anim_indication.h" />
+    <ClInclude Include="src\stdlib\anim_invariants.h" />
+    <ClInclude Include="src\stdlib\anim_show.h" />
+    <ClInclude Include="src\stdlib\anim_transform.h" />
+    <ClInclude Include="src\stdlib\anim_util.h" />
+    <ClInclude Include="src\stdlib\mc_anims.h" />
+    <ClInclude Include="src\stdlib\mc_lib_helpers.h" />
+    <ClInclude Include="src\stdlib\mc_meshes.h" />
+    <ClInclude Include="src\stdlib\mc_stdlib.h" />
+    <ClInclude Include="src\stdlib\mc_util.h" />
+    <ClInclude Include="src\stdlib\mesh_geometry.h" />
+    <ClInclude Include="src\stdlib\mesh_graphs.h" />
+    <ClInclude Include="src\stdlib\mesh_image.h" />
+    <ClInclude Include="src\stdlib\mesh_operators.h" />
+    <ClInclude Include="src\stdlib\mesh_tex.h" />
+    <ClInclude Include="src\stdlib\mesh_util.h" />
+    <ClInclude Include="src\timeline\expression_tokenizer.h" />
+    <ClInclude Include="src\timeline\interpreter.h" />
+    <ClInclude Include="src\timeline\thread_queue.h" />
+    <ClInclude Include="src\timeline\timeline+export.h" />
+    <ClInclude Include="src\timeline\timeline+simulate.h" />
+    <ClInclude Include="src\timeline\timeline.h" />
+    <ClInclude Include="src\timeline\timeline_execution_context.h" />
+    <ClInclude Include="src\timeline\timeline_instruction.h" />
+    <ClInclude Include="src\util\geo.h" />
+    <ClInclude Include="src\util\mc_assert.h" />
+    <ClInclude Include="src\util\mc_env.h" />
+    <ClInclude Include="src\util\mc_file_ops.h" />
+    <ClInclude Include="src\util\mc_log.h" />
+    <ClInclude Include="src\util\mc_macro_util.h" />
+    <ClInclude Include="src\util\mc_memory.h" />
+    <ClInclude Include="src\util\mc_svg.h" />
+    <ClInclude Include="src\util\mc_threading.h" />
+    <ClInclude Include="src\util\mc_time_util.h" />
+    <ClInclude Include="src\util\mc_types.h" />
+    <ClInclude Include="src\util\strutil.h" />
+    <ClInclude Include="src\util\unowned_map.h" />
+    <ClInclude Include="src\vector\animation.h" />
+    <ClInclude Include="src\vector\function.h" />
+    <ClInclude Include="src\vector\functor.h" />
+    <ClInclude Include="src\vector\lvalue.h" />
+    <ClInclude Include="src\vector\map.h" />
+    <ClInclude Include="src\vector\primitives.h" />
+    <ClInclude Include="src\vector\tetramesh.h" />
+    <ClInclude Include="src\vector\vector.h" />
+    <ClInclude Include="src\vector\vector_field.h" />
+    <ClInclude Include="src\viewport\viewport.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include=".clang-format" />
+    <None Include="include\.gitignore" />
+    <None Include="lib\.gitignore" />
+    <None Include="packages.config" />
+    <None Include="stdlib\libmc.mcf" />
+    <None Include="stdlib\mc_default_scene.mcf" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>16.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{12b3a7c0-5d29-45b3-adaa-72a4ca8c054b}</ProjectGuid>
+    <RootNamespace>cengine</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>Cengine</ProjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;_MC_INTERNAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(SolutionDir)monocurl\cengine\src\serial;$(SolutionDir)monocurl\cengine\src\stdlib;$(SolutionDir)monocurl\cengine\src\main;$(SolutionDir)monocurl\cengine\src\parser;$(SolutionDir)monocurl\cengine\src\state;$(SolutionDir)monocurl\cengine\src\timeline;$(SolutionDir)monocurl\cengine\src\util;$(SolutionDir)monocurl\cengine\src\vector;$(SolutionDir)monocurl\cengine\src\viewport;$(SolutionDir)monocurl\cengine\include\libtess2;$(SolutionDir)monocurl\cengine\include\ffmpeg;$(SolutionDir)monocurl\cengine\include\plibsys;$(SolutionDir)monocurl\cengine\include\nanosvg</AdditionalIncludeDirectories>
+      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <CompileAsManaged>false</CompileAsManaged>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+    <PreBuildEvent>
+      <Command>
+      </Command>
+    </PreBuildEvent>
+    <PreBuildEvent>
+      <Message>Writing subdirectories for include</Message>
+    </PreBuildEvent>
+    <Lib>
+      <AdditionalLibraryDirectories>$(SolutionDir)monocurl\cengine\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>plibsys/plibsys.lib;libtess2/libtess2.lib;ffmpeg/avcodec.lib;ffmpeg/avutil.lib;ffmpeg/avformat.lib;ffmpeg/swscale.lib;ffmpeg/swresample.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Lib>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;_MC_INTERNAL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(SolutionDir)monocurl\cengine\src\serial;$(SolutionDir)monocurl\cengine\src\stdlib;$(SolutionDir)monocurl\cengine\src\main;$(SolutionDir)monocurl\cengine\src\parser;$(SolutionDir)monocurl\cengine\src\state;$(SolutionDir)monocurl\cengine\src\timeline;$(SolutionDir)monocurl\cengine\src\util;$(SolutionDir)monocurl\cengine\src\vector;$(SolutionDir)monocurl\cengine\src\viewport;$(SolutionDir)monocurl\cengine\include\libtess2;$(SolutionDir)monocurl\cengine\include\ffmpeg;$(SolutionDir)monocurl\cengine\include\plibsys;$(SolutionDir)monocurl\cengine\include\nanosvg</AdditionalIncludeDirectories>
+      <DisableSpecificWarnings>4996</DisableSpecificWarnings>
+      <CompileAsManaged>false</CompileAsManaged>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+    <PreBuildEvent>
+      <Command>
+      </Command>
+    </PreBuildEvent>
+    <PreBuildEvent>
+      <Message>Writing subdirectories for include</Message>
+    </PreBuildEvent>
+    <Lib>
+      <AdditionalLibraryDirectories>$(SolutionDir)monocurl\cengine\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>plibsys/plibsys.lib;libtess2/libtess2.lib;ffmpeg/avcodec.lib;ffmpeg/avutil.lib;ffmpeg/avformat.lib;ffmpeg/swscale.lib;ffmpeg/swresample.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Lib>
+  </ItemDefinitionGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\..\packages\Microsoft.Windows.CppWinRT.2.0.220531.1\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.220531.1\build\native\Microsoft.Windows.CppWinRT.targets')" />
+    <Import Project="..\..\packages\Microsoft.Windows.CppWinRT.2.0.240111.5\build\native\Microsoft.Windows.CppWinRT.targets" Condition="Exists('..\..\packages\Microsoft.Windows.CppWinRT.2.0.240111.5\build\native\Microsoft.Windows.CppWinRT.targets')" />
+  </ImportGroup>
+</Project>

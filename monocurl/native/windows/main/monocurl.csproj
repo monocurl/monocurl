@@ -1,0 +1,97 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net6.0-windows7.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <RunPostBuildEvent>OnBuildSuccess</RunPostBuildEvent>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <BaseOutputPath>$(SolutionDir)bin</BaseOutputPath>
+    <BaseIntermediateOutputPath>$(SolutionDir)obj</BaseIntermediateOutputPath>
+    <ApplicationIcon>res\monocurl.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <GenerateSerializationAssemblies>Off</GenerateSerializationAssemblies>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="obj\**" />
+    <EmbeddedResource Remove="obj\**" />
+    <None Remove="obj\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="avcodec-59.def" />
+    <None Remove="avdevice-59.def" />
+    <None Remove="avfilter-8.def" />
+    <None Remove="avformat-59.def" />
+    <None Remove="avutil-57.def" />
+    <None Remove="libavcodec.dll.a" />
+    <None Remove="libavdevice.dll.a" />
+    <None Remove="libavfilter.dll.a" />
+    <None Remove="libavformat.dll.a" />
+    <None Remove="libavutil.dll.a" />
+    <None Remove="libmc.mcn" />
+    <None Remove="libswresample.dll.a" />
+    <None Remove="libswscale.dll.a" />
+    <None Remove="libtess2.lib" />
+    <None Remove="mc_default_scene.mcn" />
+    <None Remove="plibsys.lib" />
+    <None Remove="res\shader.hlsl" />
+    <None Remove="swresample-4.def" />
+    <None Remove="swscale-6.def" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="res\monocurl.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\bridge\bridge.vcxproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="res\blank1x1.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\dot_shader.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\frame_shader.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\image_not_found.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\lin_shader.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\scene_start.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\prev_slide.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\pause.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\play.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="res\tri_shader.hlsl">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="echo &quot;[monocurl_build] running post build dll copy. if your program is still not compiling, clean the target directory manually to override cached libraries&quot;&#xD;&#xA;for /r &quot;$(SolutionDir)monocurl\cengine\lib&quot; %25%25f in (*.*) do xcopy &quot;%25%25f&quot; $(TargetDir) /y /d &gt; NUL&#xD;&#xA;for /r &quot;$(SolutionDir)monocurl\cengine\mcf&quot; %25%25f in (*.*) do xcopy &quot;%25%25f&quot; $(TargetDir) /y /d &gt; NUL&#xD;&#xA;xcopy &quot;$(SolutionDir)monocurl\cengine\executables&quot; &quot;$(TargetDir)&quot; /s /d /Y /e &gt; NUL" />
+  </Target>
+
+</Project>

@@ -1,0 +1,62 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = WHITE
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+	
+	let max_terms = 10
+	
+	/* taylor series of sine */
+	func TaylorSeries(terms) = ExplicitFunc:
+		start: -4
+		stop: 4
+		f(x): identity:
+			var ret = 0
+			for i in 0 :< terms
+				ret += (-1) ** i * x ** (2 * i + 1) / factorial(2 * i + 1)
+			element: ret
+		tag: {}
+		stroke: RED
+[slide name: "slide_1"]
+	tree static = {} + Axis2d:
+		center: ORIGIN
+		x_unit: 1
+		x_rad: 4
+		x_label: ""
+		x_label_rate: 0
+		y_unit: 1
+		y_rad: 3
+		y_label: ""
+		y_label_rate: 0
+		grid: off
+		tag: {}
+		color: BLACK
+	static += ExplicitFunc:
+		start: -4
+		stop: 4
+		f(x): sin(x)
+		tag: {}
+		stroke: BLACK
+	
+	tree taylor = TaylorSeries:
+		terms: 0
+	
+	p += Set:
+		vars&: static
+	p += sticky Write:
+		meshes&: taylor
+		time: 1
+	
+	for i in 1 :< max_terms + 1
+		taylor.terms = i
+		
+		p += Wait(0.5)
+		p += Transform:
+			meshes&: taylor
+			time: 1
+	

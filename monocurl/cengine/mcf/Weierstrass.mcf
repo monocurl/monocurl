@@ -1,0 +1,52 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = WHITE
+	camera = Camera:
+		near: 0.1
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+	
+	/* if this is lagging, try reducing this value */
+	let samples = 1024
+[slide name: "slide_1"]
+	let n = 50
+	func ws(a,b,x) = identity:
+		var s = 0
+		for i in 0:<n
+			s += a ** i * cos((b ** i) * PI * x)
+		element: s
+	
+	func Weierstrass(a,b) = ExplicitFunc:
+		start: -4
+		stop: 4
+		samples: samples
+		f(x): ws(a,b,x)
+		tag: {}
+		stroke: BLUE
+	
+	tree w = Weierstrass:
+		a: 0.5
+		b: 0.1
+	tree axis = Axis2d:
+		center: ORIGIN
+		x_unit: 1
+		x_rad: 4
+		x_label: "x"
+		y_unit: 1
+		y_rad: 3
+		y_label: "y"
+		grid: off
+		tag: {}
+		color: BLACK
+	
+	p += Set:
+		vars&: {w, axis}
+	
+	w.b = 4
+	p += Lerp:
+		vars&: w
+		time: 4
+		

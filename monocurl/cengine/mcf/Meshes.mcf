@@ -1,0 +1,396 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = WHITE
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+	
+	/* animation for flashing meshes on screen for one second */
+	func SWH(mesh&) = identity:
+		var ret = {}
+		ret += Set:
+			vars&: mesh
+		ret += Wait(1)
+		ret += Set:
+			mesh = {}
+			vars&: mesh
+		element: ret
+	
+[slide name: "slide_1"]
+	func move(start, mag, rotation) = identity:
+		let delta = {mag * cos(rotation), mag * sin(rotation), 0}
+		element: vec_add(start, delta)
+	
+	func KochCurve(level, start, length, rotation) = identity:
+		var ret = {}
+		if level > 0
+			var pos = start
+			var rot = rotation
+			ret += KochCurve:
+				level: level - 1
+				start: pos
+				length: length / 3
+				rotation: rot
+	
+			pos = move(pos, length / 3, rot)
+			rot += PI / 3
+			ret += KochCurve:
+				level: level - 1
+				start: pos
+				length: length / 3
+				rotation: rot
+	
+			pos = move(pos, length / 3, rot)
+			rot += 4 * PI / 3
+			ret += KochCurve:
+				level: level - 1
+				start: pos
+				length: length / 3
+				rotation: rot
+	
+			pos = move(pos, length / 3, rot)
+			rot += PI / 3
+			ret += KochCurve:
+				level: level - 1
+				start: pos
+				length: length / 3
+				rotation: rot
+		else
+			ret += Line:
+				start: start
+				end: move(start, length, rotation)
+				tag: {}
+				stroke: BLACK
+	
+		element: ret
+	
+	let l = 4
+	tree k = KochCurve:
+		level: 5
+		start: {-l / 2, 0, 0}
+		length: l
+		rotation: 0
+	
+	p+= SWH:
+		mesh&: k
+[slide name: "slide_2"]
+	func f(x) = sin(x) ** 2
+	func g(x) = sin(x) * 4 / 5
+	
+	tree mesh = {}
+	mesh += Axis2d:
+		center: ORIGIN
+		x_unit: 2
+		x_rad: 4
+		x_label: "x"
+		y_unit: 1
+		y_rad: 1.5
+		y_label: "y"
+		grid: off
+		tag: {}
+		color: BLACK
+	
+	var graphs = {}
+	graphs += ExplicitFunc:
+		start: -4
+		stop: 4
+		f(x): f(x)
+		tag: {}
+		stroke: RED
+	
+	graphs += ExplicitFunc:
+		start: -4
+		stop: 4
+		f(x): g(x)
+		tag: {}
+		stroke: BLUE
+	
+	graphs += ExplicitFuncDiff:
+		start: -4
+		stop: 4
+		f(x): f(x)
+		g(x): g(x)
+		tag: {}
+		pos_fill: {1,0,0,0.2}
+		neg_fill: {0,0,1,0.2}
+	
+	/* helps morph functions into the axis space */
+	mesh += EmbedInSpace:
+		mesh: graphs
+		axis_center: ORIGIN
+		x_unit: 2
+		y_unit: 1
+		z_unit: 1
+	
+	p += SWH:
+		mesh&: mesh
+[slide name: "slide_3"]
+	func LRAM(start, stop, n, q(x)) = identity:
+		var ret = {}
+		let delta = (stop - start) / n
+		for i in 0 :< n
+			let x_start = start + delta * i
+			let x_end = x_start + delta
+			let val = q(x_start)
+			ret += Rect:
+				center: {(x_start + x_end) / 2, val / 2, 0}
+				width: delta
+				height: val
+				tag: {}
+				stroke: BLACK
+				fill: {1,1,0,0.2}
+	
+		element: ret
+	
+	func q(x) = x * x
+	
+	mesh = {}
+	mesh += Axis2d:
+		center: {-1.5,-1.5,0}
+		x_unit: 1
+		x_min: 0
+		x_max: 3
+		x_label: "x"
+		y_unit: 3
+		y_min: 0
+		y_max: 9
+		y_label: "y"
+		grid: off
+		tag: {}
+		color: BLACK
+	
+	graphs = {}
+	graphs += ExplicitFunc:
+		start: 0
+		stop: 3
+		f(x): q(x)
+		tag: {}
+		stroke: RED
+	graphs += LRAM:
+		start: 0
+		stop: 3
+		n: 6
+		q(x): q(x)
+	mesh += EmbedInSpace:
+		mesh: graphs
+		axis_center: mesh[0].center
+		x_unit: 1
+		y_unit: 3
+		z_unit: 1
+	
+	p += SWH:
+		mesh&: mesh
+[slide name: "slide_4"]
+	tree grid = ColorGrid:
+		x_min: 0
+		x_max: 1
+		y_min: 0
+		y_max: 1
+		x_step: 0.2
+		y_step: 0.2
+		tag: {}
+		color_at(pos): {pos[0], pos[1], 1, 1}
+		stroke: BLACK
+	
+	p += SWH:
+		mesh&: grid
+[slide name: "slide_5"]
+	tree equations = Text:
+		var str = "\begin{align*}"
+		str += "\int_{-\infty}^{\infty}e^{-x^2}dx &= \sqrt{\pi} \\"
+		str += "e^{\pi i} + 1 &= 0 \\"
+		str += "x &= \frac{-b \pm \sqrt{b^2 - 4ac}}{2a} \\"
+		str += "\end{align*}"
+		text: str
+		scale: 0.75
+		stroke: CLEAR
+		fill: BLACK
+	equations = Centered:
+		mesh: equations
+		at: ORIGIN
+	
+	p += SWH:
+		mesh&: equations
+[slide name: "slide_6"]
+	/* checkerboard */
+	let uv_base = ColorGrid:
+		x_min: 0
+		x_max: 1
+		y_min: 0
+		y_max: 1
+		x_step: 0.05
+		y_step: 0.05
+		tag: {}
+		color_at(pos): identity:
+			let r = round(pos[0] / 0.05)
+			let c = round(pos[1] / 0.05)
+			var col = BLACK
+			if mod(r + c, 2)
+				col = RED
+			element: col
+	
+	let r1 = 1
+	let r2 = 0.5
+	tree torus = PointMapped:
+		mesh: uv_base
+		point_map(point): identity:
+			let u = point[0] * TAU
+			let v = point[1] * TAU
+			let x = (r1 + r2 * cos(v)) * cos(u)
+			let y = (r1 + r2 * cos(v)) * sin(u)
+			let z = r2 * sin(v)
+			element: {x,y,z}
+	
+	p += SWH:
+		mesh&: torus
+[slide name: "slide_7"]
+	/* somewhat hard coded for sake of example */
+	
+	let min_norm = 1
+	let max_norm = 5
+	let max_scaled_norm = 0.4
+	
+	var gradient = {:}
+	gradient[min_norm] = PURPLE
+	gradient[1.5] = GREEN
+	gradient[max_norm] = BLUE
+	let gradient_c = gradient
+	
+	func VectorField(f(x,y)) = Field:
+		x_min: -4
+		x_max: 4
+		y_min: -2
+		y_max: 2
+	
+		mesh_at(pos): Vector:
+			var raw_delta = f(pos[0], pos[1]) + 0
+	
+			let mag = norm(raw_delta)
+			let color = keyframe_lerp(gradient_c, mag)
+	
+			var scale = 1
+			if mag > max_scaled_norm
+				scale = max_scaled_norm / mag
+				raw_delta = vec_mul(scale, raw_delta)
+	
+			tail: pos
+			delta: raw_delta
+			tag: {}
+			stroke: CLEAR
+			fill: color
+	
+	tree field = VectorField:
+		f(x, y):  {-y+x+1,x*y}
+	
+	p += SWH:
+		mesh&: field
+[slide name: "slide_8"]
+	func tint(color) = {color[0], color[1], color[2], 0.1}
+	func Node(position, color, label) = identity:
+		var ret = {}
+		ret += Circle:
+			center: position
+			radius: 0.2
+			tag: {}
+			stroke: BLACK
+			fill: tint(color)
+	
+		ret += Number:
+			value: label
+			precision: 0
+			scale: 0.5
+			tag: {}
+			stroke: CLEAR
+			fill: BLACK
+	
+		ret[1] = Centered:
+			mesh: ret[1]
+			at: position
+	
+		element: ret
+	
+	/* we can add edges as well using a technique in lesson 7 */
+	/* without that, they are hard to add unfortunately */
+	func Tree(adj, colors, curr, position) = identity:
+		var ret = {}
+		ret += Node:
+			position: position
+			color: colors[curr]
+			label: curr
+	
+		var children = {}
+		for child in adj[curr]
+			children += Tree(adj, colors, child, position)
+	
+		/* position */
+		children = XStack:
+			mesh_vector: children
+			align_dir: UP
+	
+		ret += children
+		ret = Stack:
+			mesh_vector: ret
+			dir: DOWN
+			align: center
+	
+		element: ret
+	
+	/* adjacency list */
+	let adj = {{1,2}, {3, 4}, {5, 8}, {6}, {7}, {}, {}, {}, {}}
+	let colors = {RED, ORANGE, YELLOW, RED, GREEN, BLUE, RED, BLUE, ORANGE}
+	tree graph = Tree:
+		adj: adj
+		colors: colors
+	
+		/* 0 is root */
+		curr: 0
+		position: {0,1,0}
+	
+	p += SWH:
+		mesh&: graph
+[slide name: "slide_9"]
+	func NeuralNetwork(layer_counts) = identity:
+		var layers = {}
+		var edges = {}
+	
+		var last_layer = {}
+		for i in 0 :< len(layer_counts)
+			
+			var new_layer = {}
+			for j in 0 :< layer_counts[i]
+				new_layer += Circle:
+					center: {0, 0, 0}
+					radius: 0.2
+					tag: {}
+					stroke: RED
+					fill: WHITE
+			new_layer = YStack(new_layer)
+			new_layer = Centered:
+				mesh: new_layer
+				at: {i, 0, 0}
+	
+			layers += new_layer
+	
+			for prev in last_layer
+				for curr in new_layer
+					edges += Line:
+						start: prev
+						end: curr
+						tag: {}
+						stroke: BLACK
+	
+			last_layer = new_layer
+	
+		element: Centered:
+			mesh: {edges, layers}
+			at: ORIGIN
+	
+	tree nn = NeuralNetwork:
+		layer_counts: {4, 6, 6, 2, 1}
+	
+	p += SWH:
+		mesh&: nn

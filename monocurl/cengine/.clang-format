@@ -1,0 +1,20 @@
+BasedOnStyle: LLVM
+
+ColumnLimit: 80
+
+PointerAlignment: Right
+BreakBeforeBraces: Stroustrup
+AlignAfterOpenBracket: BlockIndent
+
+ReflowComments: true
+InsertBraces: true
+AlwaysBreakAfterReturnType: All
+
+BraceWrapping:
+  AfterStruct: true
+
+SpaceAfterCStyleCast: true
+Cpp11BracedListStyle: false
+
+UseTab: Never
+IndentWidth: 4

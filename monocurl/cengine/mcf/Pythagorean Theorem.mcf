@@ -1,0 +1,245 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = BLACK
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+	
+	func Tri(p, q, r, tag) = Triangle:
+		p: p
+		q: q
+		r: r
+		tag: {tag}
+		stroke: WHITE
+		fill: BLUE
+	
+	func Left(r, u, labels) = identity:
+		var ret = {}
+		ret += Tri:
+			p: ORIGIN
+			q: {r,0,0}
+			r: {0,u,0}
+			tag: 0
+		ret += Tri:
+			p: {r,0,0}
+			q: {r+u,0,0}
+			r: {r+u,r,0}
+			tag: 1
+		ret += Tri:
+			p: {r+u,r,0}
+			q: {r+u,r+u,0}
+			r: {u,r+u,0}
+			tag: 2
+		ret += Tri:
+			p: {u,r+u,0}
+			q: {0,r+u,0}
+			r: {0,u,0}
+			tag: 3
+		if labels
+			let c2 = Tex:
+				tex: "C^2"
+				scale: 1
+				color: default
+			ret += Centered(c2, {(u + r) / 2, (u + r) / 2, 0})
+		ret = Scaled(ret, 0.5)
+		ret = Centered(ret, {-1.5, -0.5, 0})
+		element: ret
+	
+	/* use tags to align with left */
+	func Right(r, u, labels) = identity:
+		var ret = {}
+		ret += Tri:
+			p: {u,u,0}
+			q: {u,u+r,0}
+			r: {0,u,0}
+			tag: 0
+		ret += Tri:
+			p: {0,u,0}
+			q: {u,u+r,0}
+			r: {0,u+r,0}
+			tag: 3
+		ret += Tri:
+			p: {u,u,0}
+			q: {u,0,0}
+			r: {u+r,0,0}
+			tag: 1
+		ret += Tri:
+			p: {u+r,0,0}
+			q: {u+r,u,0}
+			r: {u,u,0}
+			tag: 2
+		ret += Rect:
+			center: {(u + r) / 2, (u + r) / 2, 0}
+			width: u + r
+			height: u + r
+			tag: {-1}
+			color: default
+		if labels
+			let a2 = Tex:
+				tex: "A^2"
+				scale: 1
+				color: default
+			let b2 = Tex:
+				tex: "B^2"
+				scale: 1
+				color: default
+			ret += Centered(a2, {u / 2, u / 2, 0})
+			ret += Centered(b2, {u + r / 2, u + r / 2, 0})
+		ret = Scaled(ret, 0.5)
+		ret = Centered(ret, {1.5,-0.5,0})
+		element: ret
+[slide name: "slide_1"]
+	let R = 2
+	let U = 1
+	
+	let t = Tri:
+		p: ORIGIN
+		q: {R,0,0}
+		r: {0,U,0}
+		tag: 0
+	
+	tree start = {} + t
+	start += Label:
+		mesh: t
+		str: "C"
+		scale: 1
+		dir: {U,R,0}
+		color: default
+	start += Label:
+		mesh: t
+		str: "A"
+		scale: 1
+		dir: LEFT
+		color: default
+	start += Label:
+		mesh: t
+		str: "B"
+		scale: 1
+		dir: DOWN
+		color: default
+	
+	p += Fade:
+		meshes&: start
+		time: 1
+	
+	let left_base = Left:
+		r: R
+		u: U
+		labels: 0
+	
+	/* move to bottom left */
+	start = mesh_select:
+		root: left_base
+		tag_predicate(tag): tag[0] == 0
+	p += TagTransform:
+		meshes&: start
+		time: 1
+[slide name: "slide_4"]
+	/* a transfer isn't strictly necessary */
+	/* but it conveys ownership properly */
+	tree left = {}
+	p += Transfer:
+		from&: start
+		into&: left
+		
+	left = left_base
+	p += Transform:
+		meshes&: left
+		time: 1
+	
+[slide name: "slide_3"]
+	tree right = left
+	p += Set:
+		vars&: right
+	right = Right:
+		r: R
+		u: U
+		labels: 0
+	p += TagTransform:
+		meshes&: right
+		time: 1.5
+[slide name: "slide_5"]
+	/* add labels */
+	left.labels = right.labels = 1
+	p += TagTransform:
+		meshes&: {left, right}
+		time: 1
+	
+	let rs = {0: 2, 1: 2, 2: 0.75, 4: 0.75}
+	let us = {0: 1, 1: 2, 2: 0.75, 4: 2}
+	
+	/* vary through states */
+	var last_time = 0
+	for time in map_keys(rs)
+		left.r = right.r = rs[time]
+		left.u = right.u = us[time]
+		
+		p += Lerp:
+			vars&: {left, right}
+			time: time - last_time
+		
+		last_time = time
+[slide name: "slide_2"]
+	/* continous version of transfer */
+	/* This highlights how auxiliary (e.g. short-lived) */
+	/* tree variables can be very useful! */
+	func TransformInto(from&, pred(tag), into&, target) = identity:
+		tree aux = {}
+		
+		var ret = {}
+		ret += CopySubset:
+			from&: from
+			tag_predicate(tag): pred(tag)
+			into&: aux
+		
+		aux = target
+		ret += Transform:
+			meshes&: aux
+			time: 1
+	
+		/* not necessary in this case, but in many cases */
+		/* its desirable to transfer from the aux to dst */
+		ret += Transfer:
+			from&: aux
+			into&: into
+			
+		element: ret
+	
+	var theorem = Tex:
+		tex: "\pin1{C^2} = \pin2{A^2} + \pin3{B^2}"
+		scale: 1
+		color: default
+	theorem = Centered:
+		mesh: theorem
+		at: {0, 1, 0}
+		
+	tree equation = mesh_select:
+		root: theorem
+		tag_predicate(tag): len(tag) == 0
+	
+	/* write the symbols */
+	p += Write:
+		meshes&: equation
+		time: 1
+	
+	/* transfer C^2 */
+	p += sticky TransformInto:
+		from&: left
+		pred(tag): len(tag) == 0 /* C^2 */
+		into&: equation
+		target: mesh_select:
+			root: theorem
+			tag_predicate(tag): 1 in tag
+	
+	/* transfer A^2, B^2 */
+	p += sticky TransformInto:
+		from&: right
+		pred(tag): len(tag) == 0
+		into&: equation
+		target: mesh_select:
+			root: theorem
+			tag_predicate(tag): 2 in tag || 3 in tag

@@ -1,0 +1,102 @@
+[monocurl version: "0.1.0" type: "scene"]
+
+[slide name: "config"]
+	background = WHITE
+	camera = Camera:
+		near: 0.1 
+		far: 10
+		up: {0,1,0}
+		origin: {0,0,4}
+		target: {0,0,0}
+	
+	let step = 0.05
+	func q(x,y) = 1.2 * ((x-0.5)**2 + (y-0.5)**2)
+	func col(x,y) = identity:
+		let val = q(x,-y)
+		let colors = {0:BLUE,0.15:YELLOW,0.25:ORANGE,0.5:RED}
+		let color = keyframe_lerp(colors, val)
+		element: color
+[slide name: "slide_1"]
+	/* meshes */
+	tree tex = Text:
+		text: "Monocurl"
+		scale: 1.5
+		stroke: BLACK
+		fill: BLACK
+	tex = Centered:
+		mesh: tex
+		at: {0,1,0}
+	
+	tree grid = ColorGrid:
+		x_min: 0
+		x_max: 1
+		y_min: -1
+		y_max: 0
+		x_step: step
+		y_step: step
+		tag: {}
+		color_at(pos): BLACK
+		stroke: BLACK
+	
+	tree axis = Axis3d:
+		center: {0,0,-0.01}
+		pos_x_axis: {1,0,0}
+		pos_y_axis: {0,-1,0}
+		pos_z_axis: {0,0,1}
+		x_unit: 1
+		x_min: 0
+		x_max: 1
+		x_label: "x"
+		y_unit: 1
+		y_min: 0
+		y_max: 1
+		y_label: "y"
+		z_unit: 1
+		z_min: 0
+		z_max: 1
+		z_label: "z"
+		grid: on
+		tag: {}
+		color: BLACK
+	
+	/* intro */
+	p += Write:
+		meshes&: tex
+		time: 1
+	p += sticky Fade:
+		meshes&: {axis, grid}
+		time: 1
+		
+	/* main animation */
+	var grid_anim = {}
+	grid_anim += Transform:
+		grid = ColorGrid:
+			x_min: 0
+			x_max: 1
+			y_min: -1
+			y_max: 0
+			x_step: step
+			y_step: step
+			tag: {}
+			color_at(pos): col(pos[0], pos[1])
+			stroke: BLACK
+		meshes&: grid
+		time: 1
+	
+	grid_anim += Transform:
+		grid = PointMapped:
+			mesh: grid
+			point_map(point): {point[0], point[1], q(point[0], point[1] + 1)}
+		meshes&: grid
+		time: 2
+	p += grid_anim
+	
+	/* camera movement */
+	p += sticky CameraLerp:
+		camera.origin = {2,-2,1.4}
+		camera.up = {0,0,1}
+		
+		camera&: camera
+		time: 3
+	
+	p += Wait(1)
