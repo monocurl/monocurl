@@ -42,6 +42,11 @@
 		B4750E0C2B8DAF4A000610C4 /* Monocurl Intro Video.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750E002B8DAF49000610C4 /* Monocurl Intro Video.mcf */; };
 		B4750E0D2B8DAF4A000610C4 /* Simulations.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750E012B8DAF49000610C4 /* Simulations.mcf */; };
 		B4750E0F2B8DAF64000610C4 /* Welcome to Monocurl.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750E0E2B8DAF64000610C4 /* Welcome to Monocurl.mcf */; };
+		B4750E132B9510E4000610C4 /* PLIBSYS_LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B4750E122B9510E4000610C4 /* PLIBSYS_LICENSE */; };
+		B4750E162B951146000610C4 /* LIBTESS2_LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B4750E152B951146000610C4 /* LIBTESS2_LICENSE */; };
+		B4750E182B951195000610C4 /* NANOSVG_LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B4750E172B951195000610C4 /* NANOSVG_LICENSE */; };
+		B4750E1A2B9511E7000610C4 /* FFMPEG_LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B4750E192B9511E7000610C4 /* FFMPEG_LICENSE */; };
+		B4750E1C2B951225000610C4 /* TEX_LIVE_LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B4750E1B2B951225000610C4 /* TEX_LIVE_LICENSE */; };
 		B47E71D92965511100BF85FB /* cengine_tests.c in Sources */ = {isa = PBXBuildFile; fileRef = B47E71D829654FBE00BF85FB /* cengine_tests.c */; };
 		B47FE3062964C850006B47D7 /* expression_tests.c in Sources */ = {isa = PBXBuildFile; fileRef = B47FE3032964C841006B47D7 /* expression_tests.c */; };
 		B47FE32B2964CA83006B47D7 /* AudioToolbox.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B43D1BED293439B70072E40E /* AudioToolbox.framework */; };
@@ -275,6 +280,11 @@
 		B4750E002B8DAF49000610C4 /* Monocurl Intro Video.mcf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Monocurl Intro Video.mcf"; path = "monocurl/cengine/mcf/Monocurl Intro Video.mcf"; sourceTree = SOURCE_ROOT; };
 		B4750E012B8DAF49000610C4 /* Simulations.mcf */ = {isa = PBXFileReference; lastKnownFileType = file; name = Simulations.mcf; path = monocurl/cengine/mcf/Simulations.mcf; sourceTree = SOURCE_ROOT; };
 		B4750E0E2B8DAF64000610C4 /* Welcome to Monocurl.mcf */ = {isa = PBXFileReference; lastKnownFileType = file; name = "Welcome to Monocurl.mcf"; path = "monocurl/cengine/mcf/Welcome to Monocurl.mcf"; sourceTree = SOURCE_ROOT; };
+		B4750E122B9510E4000610C4 /* PLIBSYS_LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = PLIBSYS_LICENSE; sourceTree = "<group>"; };
+		B4750E152B951146000610C4 /* LIBTESS2_LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LIBTESS2_LICENSE; sourceTree = "<group>"; };
+		B4750E172B951195000610C4 /* NANOSVG_LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = NANOSVG_LICENSE; sourceTree = "<group>"; };
+		B4750E192B9511E7000610C4 /* FFMPEG_LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = FFMPEG_LICENSE; sourceTree = "<group>"; };
+		B4750E1B2B951225000610C4 /* TEX_LIVE_LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = TEX_LIVE_LICENSE; sourceTree = "<group>"; };
 		B479A97628E409CB0078CAEA /* CallbackBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallbackBridge.swift; sourceTree = "<group>"; };
 		B47E71D729654F6800BF85FB /* cengine_tests.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = cengine_tests.h; sourceTree = "<group>"; };
 		B47E71D829654FBE00BF85FB /* cengine_tests.c */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.c; path = cengine_tests.c; sourceTree = "<group>"; };
@@ -699,6 +709,18 @@
 			path = editing_table;
 			sourceTree = "<group>";
 		};
+		B4750E142B951128000610C4 /* legal */ = {
+			isa = PBXGroup;
+			children = (
+				B4750E122B9510E4000610C4 /* PLIBSYS_LICENSE */,
+				B4750E152B951146000610C4 /* LIBTESS2_LICENSE */,
+				B4750E172B951195000610C4 /* NANOSVG_LICENSE */,
+				B4750E192B9511E7000610C4 /* FFMPEG_LICENSE */,
+				B4750E1B2B951225000610C4 /* TEX_LIVE_LICENSE */,
+			);
+			path = legal;
+			sourceTree = "<group>";
+		};
 		B47FE2FF2964C78D006B47D7 /* cengine */ = {
 			isa = PBXGroup;
 			children = (
@@ -843,6 +865,7 @@
 				B424394D2B3237DE00D53967 /* .gitignore */,
 				B4F880882A908ACB004C5FD7 /* .clang-format */,
 				B42C7EEE2B30E5B40054E0B2 /* executables */,
+				B4750E142B951128000610C4 /* legal */,
 				B4047269290F40D60064F353 /* lib */,
 				B4F87F2D2A90796A004C5FD7 /* include */,
 				B495EB4C2B82D8A100AE094A /* mcf */,
@@ -1269,6 +1292,7 @@
 				B4750E052B8DAF4A000610C4 /* Taylor Series.mcf in Resources */,
 				B4750E072B8DAF4A000610C4 /* Weierstrass.mcf in Resources */,
 				B4750E0D2B8DAF4A000610C4 /* Simulations.mcf in Resources */,
+				B4750E1A2B9511E7000610C4 /* FFMPEG_LICENSE in Resources */,
 				B4750E0F2B8DAF64000610C4 /* Welcome to Monocurl.mcf in Resources */,
 				B42C7EFD2B3143B60054E0B2 /* tex-live in Resources */,
 				B4750E0A2B8DAF4A000610C4 /* Electric Field.mcf in Resources */,
@@ -1276,11 +1300,15 @@
 				B495EB4F2B82D8B700AE094A /* libmc.mcf in Resources */,
 				B4750E062B8DAF4A000610C4 /* Logo.mcf in Resources */,
 				B4750E082B8DAF4A000610C4 /* Monotonic Stacks.mcf in Resources */,
+				B4750E182B951195000610C4 /* NANOSVG_LICENSE in Resources */,
+				B4750E132B9510E4000610C4 /* PLIBSYS_LICENSE in Resources */,
 				B4750E0C2B8DAF4A000610C4 /* Monocurl Intro Video.mcf in Resources */,
 				B4750E032B8DAF4A000610C4 /* Meshes.mcf in Resources */,
 				B495EB502B82D8B700AE094A /* mc_default_scene.mcf in Resources */,
 				B4843397293098B6009DFB9C /* Assets.xcassets in Resources */,
+				B4750E1C2B951225000610C4 /* TEX_LIVE_LICENSE in Resources */,
 				B4750E042B8DAF4A000610C4 /* Mobius Strip.mcf in Resources */,
+				B4750E162B951146000610C4 /* LIBTESS2_LICENSE in Resources */,
 				B4750E0B2B8DAF4A000610C4 /* Pythagorean Theorem.mcf in Resources */,
 				B484336D293097E5009DFB9C /* 1x1.png in Resources */,
 				B484336C293097E3009DFB9C /* image_not_found.png in Resources */,
