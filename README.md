@@ -1,5 +1,5 @@
 # Monocurl (beta v0.1.0)
-![Monocurl](.github/monocurl_intro.mp4)
+![Monocurl](.github/monocurl.png)
 
 *Make videos and slideshow presentations using math*
 
@@ -27,7 +27,7 @@ p += Fade:
 
 Result:
 
-![Minimal Example](.github/minimal_example.mp4)
+![Minimal Example](.github/minimal_example.gif)
 
 
 ## High Level Idea
