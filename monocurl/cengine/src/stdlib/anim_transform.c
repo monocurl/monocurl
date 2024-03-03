@@ -1874,22 +1874,22 @@ match_planar(
         );
         for (mc_ind_t j = 0; j < a_mesh[u]->lin_count; ++j) {
             a->lins[k + j] = a_mesh[u]->lins[j];
-            a->lins[k + j].antinorm += k;
-            a->lins[k + j].inverse += k;
-            a->lins[k + j].next += k;
-            a->lins[k + j].prev += k;
+            a->lins[k + j].antinorm += kp;
+            a->lins[k + j].inverse += kp;
+            a->lins[k + j].next += kp;
+            a->lins[k + j].prev += kp;
 
             b->lins[k + j] = b_mesh[v]->lins[j];
-            b->lins[k + j].antinorm += k;
-            b->lins[k + j].inverse += k;
-            b->lins[k + j].next += k;
-            b->lins[k + j].prev += k;
+            b->lins[k + j].antinorm += kp;
+            b->lins[k + j].inverse += kp;
+            b->lins[k + j].next += kp;
+            b->lins[k + j].prev += kp;
 
             dmp->lins[k + j] = dump->lins[j];
-            dmp->lins[k + j].antinorm += k;
-            dmp->lins[k + j].inverse += k;
-            dmp->lins[k + j].next += k;
-            dmp->lins[k + j].prev += k;
+            dmp->lins[k + j].antinorm += kp;
+            dmp->lins[k + j].inverse += kp;
+            dmp->lins[k + j].next += kp;
+            dmp->lins[k + j].prev += kp;
         }
 
         tetramesh_unref(dump);

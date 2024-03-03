@@ -72,7 +72,7 @@ void Bridge::Viewport::Update() {
 
     this->renderer->recache(this->viewport);
 
-    int slide = viewport->handle->timeline->timestamp.slide;
+    int slide = (int) viewport->handle->timeline->timestamp.slide;
     double offset = viewport->handle->timeline->timestamp.offset;
     this->timestamp->Text = System::String::Format("{0}:{1:0.000}", slide, offset);
 }

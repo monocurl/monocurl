@@ -40,11 +40,6 @@ namespace Bridge {
 
 		void frame(void);
 		void finish(System::String^ string);
-
-		~ExportForm() {
-			delete this->renderer;
-			delete this->data;
-		}
 	};
 };
 

@@ -86,7 +86,7 @@ to_dvi(char const *path, char const *out)
 
     int ret;
 #if MC_ENV_OS & MC_ENV_OS_WINDOWS
-    STARTUPINFO si;
+    STARTUPINFOA si;
     PROCESS_INFORMATION pi;
 
     ZeroMemory(&si, sizeof(si));
@@ -135,7 +135,7 @@ to_svg(char const *path, char const *out)
 
     int ret;
 #if MC_ENV_OS & MC_ENV_OS_WINDOWS
-    STARTUPINFO si;
+    STARTUPINFOA si;
     PROCESS_INFORMATION pi;
 
     ZeroMemory(&si, sizeof(si));

@@ -430,7 +430,7 @@ void MCRenderer::init_device() {
 void MCRenderer::init_shader(void) {
     ID3DBlob* frameBlob;
     compile_vertex_shader(d, L"res/frame_shader.hlsl", "frame_vert", &frame_vert_shader, &frameBlob);
-    !compile_frag_shader(d, L"res/frame_shader.hlsl", "frame_frag", &frame_frag_shader);
+    compile_frag_shader(d, L"res/frame_shader.hlsl", "frame_frag", &frame_frag_shader);
 
     {
         D3D11_INPUT_ELEMENT_DESC inputElementDesc[] =
@@ -462,8 +462,8 @@ void MCRenderer::init_shader(void) {
     }
 
     ID3DBlob* linBlob;
-    !compile_vertex_shader(d, L"res/lin_shader.hlsl", "lin_vert", &lin_vert_shader, &linBlob);
-    !compile_frag_shader(d,  L"res/lin_shader.hlsl", "lin_frag", &lin_frag_shader);
+    compile_vertex_shader(d, L"res/lin_shader.hlsl", "lin_vert", &lin_vert_shader, &linBlob);
+    compile_frag_shader(d,  L"res/lin_shader.hlsl", "lin_frag", &lin_frag_shader);
     { 
         D3D11_INPUT_ELEMENT_DESC inputElementDesc[] =
         {
@@ -716,7 +716,7 @@ void MCRenderer::update_frame(void) {
 
     {
         float u, v;
-        float padding = this->in_presentation_mode ? min_padding_presentation : min_padding;
+        float padding = (float) (this->in_presentation_mode ? min_padding_presentation : min_padding);
         if ((float)w / h > this->aspect_ratio) {
             v = (1 - (float)padding / (h / 2.0f));
             u = v * aspect_ratio * h / w;
@@ -941,7 +941,7 @@ void MCRenderer::set_uniforms(struct tetramesh* mesh)
 	vu.viewport_size = { (float)w, (float)h };
 	vu.inlet_size = { (float)vw, (float)vh };
     vu.z_offset = z_offset;
-    z_offset += 3e-6;
+    z_offset += 3e-6f;
 	resource_manager->write(&vu, 1, mesh->vert_uniform_handle, true);
 	buffer& vert_uniform = resource_manager->buffer_for(mesh->vert_uniform_handle);
     c->VSSetConstantBuffers(0, 1, &vert_uniform.b);
@@ -987,7 +987,7 @@ void MCRenderer::render_single_mesh(struct tetramesh* mesh)
         if (mesh->modded) {
             size_t size = 0;
             tri_in const* tris = tri_buffer_pointer_for(mesh, &size);
-            resource_manager->write(tris, size * 3, mesh->tri_handle, false);
+            resource_manager->write(tris, (int) size * 3, mesh->tri_handle, false);
             free((tri_in *) tris);
         }
 
@@ -1022,7 +1022,7 @@ void MCRenderer::render_single_mesh(struct tetramesh* mesh)
         if (mesh->modded) {
             size_t size = 0;
             lin_in const* lins = lin_buffer_pointer_for(mesh, &size);
-            resource_manager->write(lins, size, mesh->lin_handle, false);
+            resource_manager->write(lins, (int) size, mesh->lin_handle, false);
             free((lin_in *) lins);
         }
 
@@ -1053,7 +1053,7 @@ void MCRenderer::render_single_mesh(struct tetramesh* mesh)
         if (mesh->modded) {
             size_t size = 0;
             dot_in const* dots = dot_buffer_pointer_for(mesh, &size);
-            resource_manager->write(dots, size, mesh->dot_handle, false);
+            resource_manager->write(dots, (int) size, mesh->dot_handle, false);
             free((dot_in *) dots);
         }
 

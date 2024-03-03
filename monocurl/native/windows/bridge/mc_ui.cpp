@@ -300,9 +300,9 @@ public:
 
     void Update(Bridge::Slide^ up, raw_slide_model::slide_functor_group g) {
         this->up = up;
-        this->curr_line = g.line;
-        this->curr_lines = g.modes[g.current_mode].arg_count;
-        this->curr_tabs = g.tabs;
+        this->curr_line = (int) g.line;
+        this->curr_lines = (int) g.modes[g.current_mode].arg_count;
+        this->curr_tabs = (int) g.tabs;
 
         if (g.mode_count > 1) {
 			this->prev->Clear();
@@ -339,9 +339,9 @@ public:
             this->Controls->Remove(this->line);
         }
 
-        this->Left = (g.tabs - 1) * this->Width;
-        this->Height = max(1, g.modes[g.current_mode].arg_count) * 20 - 2;
-        this->Top = g.line * 20 + 1;
+        this->Left = (int) (g.tabs - 1) * this->Width;
+        this->Height = (int) max(1, g.modes[g.current_mode].arg_count) * 20 - 2;
+        this->Top = (int) g.line * 20 + 1;
     }
 };
 
@@ -443,8 +443,8 @@ void Bridge::Slide::Update(raw_slide_model* slide) {
     this->functor_start->Clear();
     this->functor_end->Clear();
     for (int i = 0; i < slide->total_functor_args; ++i) {
-        functor_start->Add(slide->functor_arg_start[i]);
-        functor_end->Add(slide->functor_arg_end[i]);
+        functor_start->Add((int) slide->functor_arg_start[i]);
+        functor_end->Add((int) slide->functor_arg_end[i]);
     }
 
     bool deletable = index > 1 || index == 1 && slide->scene->slide_count > 2;
@@ -465,14 +465,14 @@ void Bridge::Slide::Update(raw_slide_model* slide) {
     if (slide->error.message) {
         this->tooltip->SetToolTip(error, gcnew String(slide->error.message));
 		this->error->Left = this->Width - 35;
-        this->error->Top = slide->error.line * 20;
+        this->error->Top = (int) slide->error.line * 20;
         this->error->Height = 20;
     }
     else {
         this->error->Height = 0;
     }
 
-    int used_count = cache->group_count;
+    int used_count = (int) cache->group_count;
     for (int i = 0; i < index; ++i) {
         raw_slide_model* s = slide->scene->slides[i];
         if (s->error.message && s->error.type == raw_slide_model::slide_error::SLIDE_ERROR_SYNTAX) {

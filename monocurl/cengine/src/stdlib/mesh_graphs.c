@@ -927,7 +927,7 @@ lib_mc_implicit_func_2d(
             }
 
             for (mc_ind_t i = 0; i < 2; ++i) {
-                if (result & (1 << (i + 4))) {
+                if (result & (1ull << (i + 4))) {
                     int32_t lin[2] = { (int32_t) args[i],
                                        (int32_t) args[(i + 2) % 4] };
 

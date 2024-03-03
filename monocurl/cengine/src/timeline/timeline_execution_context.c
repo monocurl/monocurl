@@ -1335,8 +1335,6 @@ timeline_executor_ref_capture(
     return MC_STATUS_SUCCESS;
 }
 
-#include <execinfo.h>
-
 mc_bool_t
 timeline_executor_check_interrupt(
     struct timeline_execution_context *executor, mc_bool_t force
