@@ -91,7 +91,7 @@
   </ItemGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Exec Command="echo &quot;[monocurl_build] running post build dll copy. if your program is still not compiling, clean the target directory manually to override cached libraries&quot;&#xD;&#xA;for /r &quot;$(SolutionDir)monocurl\cengine\lib&quot; %25%25f in (*.*) do xcopy &quot;%25%25f&quot; $(TargetDir) /y /d &gt; NUL&#xD;&#xA;for /r &quot;$(SolutionDir)monocurl\cengine\mcf&quot; %25%25f in (*.*) do xcopy &quot;%25%25f&quot; $(TargetDir) /y /d &gt; NUL&#xD;&#xA;xcopy &quot;$(SolutionDir)monocurl\cengine\executables&quot; &quot;$(TargetDir)&quot; /s /d /Y /e &gt; NUL" />
+    <Exec Command="echo &quot;[monocurl_build] running post build dll copy. if your program is still not compiling, clean the target directory manually to override cached libraries&quot;&#xD;&#xA;for /r &quot;$(SolutionDir)monocurl\cengine\lib&quot; %25%25f in (*.*) do xcopy &quot;%25%25f&quot; $(TargetDir) /y /d &gt; NUL&#xD;&#xA;for /r &quot;$(SolutionDir)monocurl\cengine\mcf&quot; %25%25f in (*.*) do xcopy &quot;%25%25f&quot; $(TargetDir) /y /d &gt; NUL&#xD;&#xA;for /r &quot;$(SolutionDir)monocurl\cengine\legal&quot; %25%25f in (*.*) do xcopy &quot;%25%25f&quot; $(TargetDir) /y /d &gt; NUL&#xD;&#xA;xcopy &quot;$(SolutionDir)monocurl\cengine\executables&quot; &quot;$(TargetDir)&quot; /s /d /Y /e &gt; NUL" />
   </Target>
 
 </Project>

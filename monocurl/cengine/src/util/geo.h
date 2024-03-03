@@ -207,16 +207,16 @@ inline struct plane3
 vec3_plane_basis(struct vec3 normal)
 {
     struct vec3 i_hat;
-    if (fabsf(normal.x) > FLT_EPSILON) {
-        i_hat = (struct vec3){ -normal.z, 0, normal.x };
+    if (fabsf(normal.z) > FLT_EPSILON) {
+        i_hat = (struct vec3){ normal.z, 0, -normal.x };
     }
     else {
-        i_hat = (struct vec3){ 0, normal.z, -normal.y };
+        i_hat = (struct vec3){ normal.y, -normal.x, 0 };
     }
 
     i_hat = vec3_unit(i_hat);
 
-    return (struct plane3){ vec3_unit(vec3_cross(i_hat, normal)), i_hat };
+    return (struct plane3){ i_hat, vec3_cross(normal, i_hat) };
 }
 
 struct vec3

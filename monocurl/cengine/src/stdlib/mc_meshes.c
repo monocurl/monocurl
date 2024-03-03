@@ -11,7 +11,6 @@
 #define _USE_MATH_DEFINES
 #include <math.h>
 #include <string.h>
-
 #include "tesselator.h"
 
 #include "lvalue.h"
@@ -546,24 +545,29 @@ uprank_loop(
     has_different_norms = 1;
 
     /* offset each one ever so slightly to avoid triangulation issues */
+    
     for (mc_ind_t q = 1; q < contour_count; ++q) {
         float const norm = 2e-3f;
         struct plane3 const plane = vec3_plane_basis(prev_norm);
         float const theta =
             2 * (float) M_PI * q * (contour_count - 1) / contour_count;
-        float const cos = cosf(theta) * norm;
-        float const sin = sinf(theta) * norm;
+        float const c = (float) cos(theta) * norm;
+        float const s = (float) sin(theta) * norm;
         struct vec3 const delta = vec3_add(
-            vec3_mul_scalar(cos, plane.a), vec3_mul_scalar(sin, plane.b)
+            vec3_mul_scalar(c, plane.a), vec3_mul_scalar(s, plane.b)
         );
 
+        float const x = delta.x;
+        float const y = delta.y;
+        float const z = delta.z;
+
         for (mc_ind_t k = 0; k < sub_counts[q]; ++k) {
-            vertices[q][3 * k] += delta.x;
-            vertices[q][3 * k + 1] += delta.y;
-            vertices[q][3 * k + 2] += delta.z;
+            vertices[q][3 * k] += x;
+            vertices[q][3 * k + 1] += y;
+            vertices[q][3 * k + 2] += z;
         }
     }
-
+    
     for (mc_ind_t i = 0; i < contour_count; ++i) {
         if (sub_counts[i] == 0) {
             continue;
@@ -714,15 +718,15 @@ uprank_loop(
 
             int32_t ab_n = (int32_t
             ) integer_map_set(&edge_map, ab,
-                              (union ptr_int64){ .int_value = 2 * (int64_t) k })
+                              (union ptr_int64){ .int_value = 2 * (int64_t) k, })
                                .int_value;
             int32_t bc_n = (int32_t
             ) integer_map_set(&edge_map, bc,
-                              (union ptr_int64){ .int_value = 2 * (int64_t) k })
+                              (union ptr_int64){ .int_value = 2 * (int64_t) k, })
                                .int_value;
             int32_t ca_n = (int32_t
             ) integer_map_set(&edge_map, ca,
-                              (union ptr_int64){ .int_value = 2 * (int64_t) k })
+                              (union ptr_int64){ .int_value = 2 * (int64_t) k, })
                                .int_value;
 
             int32_t ab_an, bc_an, ca_an;

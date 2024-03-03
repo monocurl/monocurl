@@ -189,7 +189,6 @@ namespace Monocurl
 
         #endregion
 
-        private Panel root;
         private SplitContainer rootContainer;
         private SplitContainer timelineViewportContainer;
         private TabControl editorTabs;
