@@ -1355,6 +1355,7 @@ timeline_executor_check_interrupt(
         mc_rwlock_writer_unlock(timeline->state_lock);
         mc_rwlock_writer_lock(timeline->state_lock);
         if (timeline->tasks->count > 1) {
+            printf("INTERRUPTED\n");
             timeline->executor->state = TIMELINE_EXECUTOR_STATE_ERROR;
             return 1;
         }

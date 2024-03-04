@@ -711,8 +711,13 @@ expression_not_execute(
         VECTOR_FIELD_FREE(executor, x);
         return VECTOR_FIELD_NULL;
     }
+    
+    struct vector_field const boolean = x.vtable->op_bool(executor, x);
+    if (!boolean.vtable) {
+        return VECTOR_FIELD_NULL;
+    }
     return double_init(
-        executor, !VECTOR_FIELD_DBOOL(x.vtable->op_bool(executor, x))
+                       executor, !VECTOR_FIELD_DBOOL(boolean)
     );
 }
 
@@ -821,9 +826,15 @@ expression_or_execute(
         );
         return VECTOR_FIELD_NULL;
     }
-    else if (VECTOR_FIELD_DBOOL(lhs.vtable->op_bool(executor, lhs))) {
+    else {
+        struct vector_field boolean = lhs.vtable->op_bool(executor, lhs);
         VECTOR_FIELD_FREE(executor, lhs);
-        return double_init(executor, 1);
+        if (!boolean.vtable) {
+            return VECTOR_FIELD_NULL;
+        }
+        else if (VECTOR_FIELD_DBOOL(boolean)) {
+            return double_init(executor, 1);
+        }
     }
 
     struct vector_field const rhs = bin->r->execute(bin->r, executor);
@@ -836,11 +847,16 @@ expression_or_execute(
         );
         return VECTOR_FIELD_NULL;
     }
-    else if (VECTOR_FIELD_DBOOL(lhs.vtable->op_bool(executor, rhs))) {
+    else {
+        struct vector_field boolean = rhs.vtable->op_bool(executor, rhs);
         VECTOR_FIELD_FREE(executor, rhs);
-        return double_init(executor, 1);
+        if (!boolean.vtable) {
+            return VECTOR_FIELD_NULL;
+        }
+        else if (VECTOR_FIELD_DBOOL(boolean)) {
+            return double_init(executor, 1);
+        }
     }
-
     return double_init(executor, 0);
 }
 
@@ -864,9 +880,15 @@ expression_and_execute(
         );
         return VECTOR_FIELD_NULL;
     }
-    else if (!VECTOR_FIELD_DBOOL(lhs.vtable->op_bool(executor, lhs))) {
+    else {
+        struct vector_field boolean = lhs.vtable->op_bool(executor, lhs);
         VECTOR_FIELD_FREE(executor, lhs);
-        return double_init(executor, 0);
+        if (!boolean.vtable) {
+            return VECTOR_FIELD_NULL;
+        }
+        else if (!VECTOR_FIELD_DBOOL(boolean)) {
+            return double_init(executor, 0);
+        }
     }
 
     struct vector_field const rhs = bin->r->execute(bin->r, executor);
@@ -879,9 +901,15 @@ expression_and_execute(
         );
         return VECTOR_FIELD_NULL;
     }
-    else if (!VECTOR_FIELD_DBOOL(lhs.vtable->op_bool(executor, rhs))) {
+    else {
+        struct vector_field boolean = rhs.vtable->op_bool(executor, rhs);
         VECTOR_FIELD_FREE(executor, rhs);
-        return double_init(executor, 0);
+        if (!boolean.vtable) {
+            return VECTOR_FIELD_NULL;
+        }
+        else if (!VECTOR_FIELD_DBOOL(boolean)) {
+            return double_init(executor, 0);
+        }
     }
 
     return double_init(executor, 1);
@@ -1296,16 +1324,19 @@ expression_if_execute(
     struct timeline_execution_context *executor
 )
 {
+    printf("Enter If\n");
     struct expression_if *const node = (void *) expression;
 
     struct vector_field container =
         node->condition->execute(node->condition, executor);
+    printf("Call Condition \n");
 
     struct vector_field const cast = vector_field_extract_type(
         executor, timeline_executor_temporary_push(executor, container),
         VECTOR_FIELD_TYPE_DOUBLE
     );
 
+    printf("Extract Type \n");
     if (!cast.vtable) {
         return VECTOR_FIELD_NULL;
     }
@@ -1320,6 +1351,7 @@ expression_if_execute(
         node->caller->next = node->caller->in_order_next;
     }
 
+    printf("EXIT IF\n");
     return double_init(executor, 0);
 }
 

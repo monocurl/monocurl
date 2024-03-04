@@ -2294,12 +2294,12 @@ match_tree(
     else if (tag_map_index == 1) {
         for (mc_ind_t i = 0; i < a_vec->field_count; ++i) {
             struct tetramesh *const mesh = a_vec->fields[i].value.pointer;
-            mesh->payload = i + 5;
+            mesh->payload = i;
         }
 
         for (mc_ind_t i = 0; i < b_vec->field_count; ++i) {
             struct tetramesh *const mesh = b_vec->fields[i].value.pointer;
-            mesh->payload = i + 5;
+            mesh->payload = i;
         }
 
         // tag to tag (sort)
