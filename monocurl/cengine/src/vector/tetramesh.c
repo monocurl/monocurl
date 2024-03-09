@@ -194,7 +194,7 @@ tetramesh_hash(
 #pragma message(                                                               \
     "OPTIMIZATION: make this better! and avoid packing assumptions as well..." \
 )
-        hash ^= 0x9e3779b9 + (mc_hash_t) (mesh->uniform.z_class * 0xFFFF) +
+        hash ^= 0x9e3779b9 + (mc_hash_t) ((mesh->uniform.z_class + 1e3) * 0xFFFF) +
                 (hash << 16) + (hash >> 12);
         hash ^= 0x9e3779b9 + (mc_hash_t) mesh->uniform.smooth ^
                 (mc_hash_t) (mesh->uniform.opacity * 0xFF) + (hash << 16) +

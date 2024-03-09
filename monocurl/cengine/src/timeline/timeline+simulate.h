@@ -26,7 +26,7 @@ timeline_step(struct timeline *timeline, double dt);
 mc_ternary_status_t
 timeline_frame(struct timeline *timeline, double dt, unsigned int upf);
 
-void
+mc_status_t
 timeline_blit_trailing_cache(struct timeline *timeline);
 
 void

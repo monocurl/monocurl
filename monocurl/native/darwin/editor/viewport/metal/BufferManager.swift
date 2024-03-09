@@ -137,6 +137,7 @@ class TextureManager {
         descriptor.pixelFormat = .bgra8Unorm;
         descriptor.usage = .renderTarget;
         descriptor.sampleCount = self.gpu.supportedSampleCount
+        descriptor.storageMode = .private
         
         let multi = self.loader.device.makeTexture(descriptor: descriptor)
         
@@ -161,6 +162,7 @@ class TextureManager {
         descriptor.pixelFormat = .depth32Float;
         descriptor.usage = .renderTarget;
         descriptor.sampleCount = self.gpu.supportedSampleCount
+        descriptor.storageMode = .private
         
         return self.loader.device.makeTexture(descriptor: descriptor)
     }

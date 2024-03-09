@@ -1626,9 +1626,10 @@ func TransferSubset([subset] {[main] {from&, tag_predicate(tag)}}, into&) = Anim
 	/* that's it */
 	let expected_hash = native mesh_hash(1, native read_followers(from), tag_predicate!)
 	let region = native transfer(into, 1, from, tag_predicate!, 0)
+	native set_followers({from, into})
 	pull&: into
 	push&: from
-	sentinel(t, dt, pull&, push&): 1
+	sentinel(t, dt, pull&, push&): native transfer_runtime(pull, 1, push, tag_predicate!, 0, region, expected_hash)
 
 /* ABSTRACT: An animation that copies the entirety of the from variable to the into variable. If into is empty, then type information is preserved. Otherwise, it is lost. However, do note that the from variables are not modified at all during this process (as it is a copy). Also, to make semantics clear, we required that the into variable be in line with its follower (that is, there cannot be any changes to the into variable since its last Set). This is easy to fix by simply calling Set: on the into variable right before this animation if you need to. */
 /* PARAMETER[from&]: The sources of the animation. Note that from can be a variable tree */

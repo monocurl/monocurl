@@ -344,6 +344,7 @@ class ExportController: MetalController, ObservableObject {
         
         commandBuffer.addCompletedHandler { _ in
             self.resolveTexture.getBytes(self.pixelBuffer, bytesPerRow: self.texture.width * MemoryLayout<Int32>.stride, from: MTLRegionMake2D(0, 0, self.texture.width, self.texture.height), mipmapLevel: 0)
+            
             timeline_write_frame(self.cache.ref.pointee.handle.pointee.timeline, self.pixelBuffer)
             self.semaphore.signal()
         }

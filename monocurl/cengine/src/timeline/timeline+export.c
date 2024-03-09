@@ -156,8 +156,14 @@ export_slide(
         mc_rwlock_writer_lock(timeline->state_lock);
         ++timeline->timestamp.slide;
         timeline->timestamp.offset = 0;
-        timeline_blit_trailing_cache(timeline);
+        mc_status_t ret = timeline_blit_trailing_cache(timeline);
         mc_rwlock_writer_unlock(timeline->state_lock);
+        if (ret != MC_STATUS_SUCCESS) {
+            export_finish(
+                timeline, "Operation cancelled by user or execution error"
+            );
+            return MC_TERNARY_STATUS_FAIL;
+        }
     }
     else {
         return MC_TERNARY_STATUS_FINISH; // finished
@@ -346,13 +352,19 @@ timeline_export(struct timeline *timeline)
         }
     }
 
-    mc_rwlock_reader_lock(timeline->state_lock);
-    export_finish(timeline, NULL);
-    mc_rwlock_reader_unlock(timeline->state_lock);
 
     encoder_context.frame = NULL;
     write_frame(timeline, NULL, encoder_context);
-    av_write_trailer(fc);
+    if (av_write_trailer(fc) != 0) {
+        mc_rwlock_reader_lock(timeline->state_lock);
+        export_finish(timeline, "Could not write file trail");
+        mc_rwlock_reader_unlock(timeline->state_lock);
+        goto deconstructor;
+    }
+    
+    mc_rwlock_reader_lock(timeline->state_lock);
+    export_finish(timeline, NULL);
+    mc_rwlock_reader_unlock(timeline->state_lock);
 
 deconstructor:
     if (fc && !(fc->oformat->flags & AVFMT_NOFILE)) {

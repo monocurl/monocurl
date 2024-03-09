@@ -48,11 +48,10 @@ timeline_step(struct timeline *timeline, double dt)
     return timeline_executor_step(timeline->executor, dt);
 }
 
-// end (no error)
-void
+mc_status_t
 timeline_blit_trailing_cache(struct timeline *timeline)
 {
-    timeline_executor_blit_cache(timeline->executor);
+    return timeline_executor_blit_cache(timeline->executor);
 }
 
 static void
@@ -139,28 +138,32 @@ timeline_play(struct timeline *timeline)
         }
         else if (error == MC_TERNARY_STATUS_FINISH) {
             if (timeline->timestamp.slide < scene->slide_count - 1) {
-                // write cache
-                timeline_blit_trailing_cache(timeline);
-
-                ++timeline->timestamp.slide;
-                timeline->timestamp.offset = 0;
-                curr = timeline->timestamp.slide;
-                viewport_set_state(viewport, VIEWPORT_LOADING);
-
-#pragma message("TODO see if it's actually a startup")
-                if (timeline->in_presentation_mode) {
-                    viewport_set_state(viewport, VIEWPORT_IDLE);
+                // error generally indicates interrupt of some sort
+                if (timeline_blit_trailing_cache(timeline) != MC_STATUS_SUCCESS) {
                     timeline->is_playing = 0;
                     finished = 1;
-                }
-                else if (timeline_slide_startup(timeline, curr, 1) < 0) {
-                    viewport_set_state(viewport, VIEWPORT_RUNTIME_ERROR);
-                    timeline->is_playing = 0;
-                    finished = 1;
+                    timeline_flush(timeline);
                 }
                 else {
-                    viewport_set_state(viewport, VIEWPORT_PLAYING);
-                    last_time = mc_timestamp_now();
+                    ++timeline->timestamp.slide;
+                    timeline->timestamp.offset = 0;
+                    curr = timeline->timestamp.slide;
+                    viewport_set_state(viewport, VIEWPORT_LOADING);
+                    
+                    if (timeline->in_presentation_mode) {
+                        viewport_set_state(viewport, VIEWPORT_IDLE);
+                        timeline->is_playing = 0;
+                        finished = 1;
+                    }
+                    else if (timeline_slide_startup(timeline, curr, 1) != MC_STATUS_SUCCESS) {
+                        viewport_set_state(viewport, VIEWPORT_RUNTIME_ERROR);
+                        timeline->is_playing = 0;
+                        finished = 1;
+                    }
+                    else {
+                        viewport_set_state(viewport, VIEWPORT_PLAYING);
+                        last_time = mc_timestamp_now();
+                    }
                 }
             }
             else {
@@ -172,7 +175,7 @@ timeline_play(struct timeline *timeline)
                     timeline->timestamp.slide, timeline->timestamp.offset
                 );
             }
-
+            
             timeline->seekstamp = timeline->timestamp;
             timeline_visual_flush(timeline);
         }
@@ -249,9 +252,9 @@ timeline_skip_over_seconds(
         }
         else if (error == MC_TERNARY_STATUS_FINISH) {
             // finished frame
-            timeline_blit_trailing_cache(timeline);
+            mc_status_t ret = timeline_blit_trailing_cache(timeline);
             mc_rwlock_writer_unlock(timeline->state_lock);
-            return MC_STATUS_SUCCESS;
+            return ret;
         }
         else if (elapsed >= delta) {
             mc_rwlock_writer_unlock(timeline->state_lock);

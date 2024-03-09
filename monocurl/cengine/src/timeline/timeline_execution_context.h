@@ -325,7 +325,8 @@ timeline_executor_startup(
 // error or positive for it finished
 mc_ternary_status_t
 timeline_executor_step(struct timeline_execution_context *executor, double dt);
-void
+
+mc_status_t
 timeline_executor_blit_cache(struct timeline_execution_context *executor);
 
 void

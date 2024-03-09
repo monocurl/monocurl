@@ -1324,19 +1324,16 @@ expression_if_execute(
     struct timeline_execution_context *executor
 )
 {
-    printf("Enter If\n");
     struct expression_if *const node = (void *) expression;
 
     struct vector_field container =
         node->condition->execute(node->condition, executor);
-    printf("Call Condition \n");
 
     struct vector_field const cast = vector_field_extract_type(
         executor, timeline_executor_temporary_push(executor, container),
         VECTOR_FIELD_TYPE_DOUBLE
     );
 
-    printf("Extract Type \n");
     if (!cast.vtable) {
         return VECTOR_FIELD_NULL;
     }
@@ -1351,7 +1348,6 @@ expression_if_execute(
         node->caller->next = node->caller->in_order_next;
     }
 
-    printf("EXIT IF\n");
     return double_init(executor, 0);
 }
 

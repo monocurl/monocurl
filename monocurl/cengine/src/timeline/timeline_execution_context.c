@@ -735,8 +735,17 @@ timeline_executor_startup(
     }
 
     verify_scene_options(executor);
-    if (slide_num > 0) {
-        verify_play_list(executor, &executor->stack[PLAY_VARIABLE_INDEX]);
+    verify_play_list(executor, &executor->stack[PLAY_VARIABLE_INDEX]);
+    if (slide_num == 0) {
+        if (!(executor->stack[PLAY_VARIABLE_INDEX].vtable->type & VECTOR_FIELD_TYPE_VECTOR)) {
+            VECTOR_FIELD_ERROR(executor, "No animations allowed in config slide");
+        }
+        else {
+            struct vector *v = executor->stack[PLAY_VARIABLE_INDEX].value.pointer;
+            if (v->field_count) {
+                VECTOR_FIELD_ERROR(executor, "No animations allowed in config slide");
+            }
+        }
     }
 
     if (executor->state == TIMELINE_EXECUTOR_STATE_ERROR) {
@@ -1046,7 +1055,7 @@ effectively_different(
 }
 
 /* cut down on repetition at some point */
-void
+mc_status_t
 timeline_executor_blit_cache(struct timeline_execution_context *executor)
 {
     VECTOR_FIELD_FREE(executor, executor->stack[PLAY_VARIABLE_INDEX]);
@@ -1133,7 +1142,7 @@ timeline_executor_blit_cache(struct timeline_execution_context *executor)
             }
             else {
                 slide->creation_follower_jump_to[i] =
-                    executor->slides[executor->curr_slide].stack_jump_to[i];
+                    executor->slides[executor->curr_slide].creation_follower_jump_to[i];
                 slide->creation_follower_stack[i] = VECTOR_FIELD_NULL;
             }
         }
@@ -1215,7 +1224,7 @@ timeline_executor_blit_cache(struct timeline_execution_context *executor)
     }
 
     slide->trailing_valid = 1;
-    return;
+    return MC_STATUS_SUCCESS;
 
 exit_mesh:
     for (mc_ind_t j = 0; j < slide->mesh_count; ++j) {
@@ -1244,6 +1253,8 @@ exit_stack:
     mc_free(slide->stack_jump_to);
     mc_free(slide->creation_follower_jump_to);
     slide->stack = NULL;
+    
+    return MC_STATUS_FAIL;
 }
 
 void
@@ -1355,7 +1366,6 @@ timeline_executor_check_interrupt(
         mc_rwlock_writer_unlock(timeline->state_lock);
         mc_rwlock_writer_lock(timeline->state_lock);
         if (timeline->tasks->count > 1) {
-            printf("INTERRUPTED\n");
             timeline->executor->state = TIMELINE_EXECUTOR_STATE_ERROR;
             return 1;
         }
@@ -1874,6 +1884,9 @@ timeline_meshes(
             executor->meshes[j] = executor->meshes[i];
             executor->mesh_hashes[j] = executor->mesh_hashes[i];
             ++j;
+        }
+        else {
+            VECTOR_FIELD_FREE(executor, executor->meshes[i]);
         }
     }
     executor->mesh_count = j;

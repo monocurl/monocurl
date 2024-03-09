@@ -262,7 +262,7 @@ lvalue_copy(
 {
     struct vector_field *const dst = lvalue.value.pointer;
     if (!dst->vtable || !dst->vtable->copy) {
-        VECTOR_FIELD_ERROR(executor, "Unable to copy field");
+        VECTOR_FIELD_ERROR(executor, "Unable to copy field (likely uninitialized)");
         return VECTOR_FIELD_NULL;
     }
 

@@ -14,6 +14,8 @@ struct LandingPage: View {
     //you can create either image or a scene
     @EnvironmentObject private var storage: StorageEnvironment
     
+    @State var deletionURL: URL?
+    @State var deleting = false
     @Binding var url: URL?
  
     var controls: some View {
@@ -47,7 +49,8 @@ struct LandingPage: View {
     func project(url: URL) -> some View {
         HStack {
             Button {
-                self.storage.remove(url: url)
+                deleting = true
+                deletionURL = url
             } label: {
                 Image(systemName: "trash")
             }
@@ -142,5 +145,25 @@ struct LandingPage: View {
             
         }
         .background(Color.black)
+        .sheet(isPresented: $deleting) {
+            VStack {
+                Text("Confirm Deletion?")
+                
+                HStack {
+                    Button("Delete") {
+                        self.storage.remove(url: self.deletionURL!)
+                        self.deleting = false
+                        self.deletionURL = nil
+                    }
+                    
+                    Button("Cancel") {
+                        self.deleting = false
+                        self.deletionURL = nil
+                    }
+                }
+                .padding()
+            }
+            .padding()
+        }
     }
 }
