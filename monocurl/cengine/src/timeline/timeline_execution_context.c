@@ -737,13 +737,19 @@ timeline_executor_startup(
     verify_scene_options(executor);
     verify_play_list(executor, &executor->stack[PLAY_VARIABLE_INDEX]);
     if (slide_num == 0) {
-        if (!(executor->stack[PLAY_VARIABLE_INDEX].vtable->type & VECTOR_FIELD_TYPE_VECTOR)) {
-            VECTOR_FIELD_ERROR(executor, "No animations allowed in config slide");
+        if (!(executor->stack[PLAY_VARIABLE_INDEX].vtable->type &
+              VECTOR_FIELD_TYPE_VECTOR)) {
+            VECTOR_FIELD_ERROR(
+                executor, "No animations allowed in config slide"
+            );
         }
         else {
-            struct vector *v = executor->stack[PLAY_VARIABLE_INDEX].value.pointer;
+            struct vector *v =
+                executor->stack[PLAY_VARIABLE_INDEX].value.pointer;
             if (v->field_count) {
-                VECTOR_FIELD_ERROR(executor, "No animations allowed in config slide");
+                VECTOR_FIELD_ERROR(
+                    executor, "No animations allowed in config slide"
+                );
             }
         }
     }
@@ -1142,7 +1148,8 @@ timeline_executor_blit_cache(struct timeline_execution_context *executor)
             }
             else {
                 slide->creation_follower_jump_to[i] =
-                    executor->slides[executor->curr_slide].creation_follower_jump_to[i];
+                    executor->slides[executor->curr_slide]
+                        .creation_follower_jump_to[i];
                 slide->creation_follower_stack[i] = VECTOR_FIELD_NULL;
             }
         }
@@ -1253,7 +1260,7 @@ exit_stack:
     mc_free(slide->stack_jump_to);
     mc_free(slide->creation_follower_jump_to);
     slide->stack = NULL;
-    
+
     return MC_STATUS_FAIL;
 }
 

@@ -342,8 +342,15 @@ class ExportController: MetalController, ObservableObject {
         
         renderEncoder.endEncoding();
         
+        guard let blitEncoder = commandBuffer.makeBlitCommandEncoder() else {
+            semaphore.signal()
+            return
+        }
+        blitEncoder.synchronize(texture: resolveTexture, slice: 0, level: 0)
+        blitEncoder.endEncoding()
+        
         commandBuffer.addCompletedHandler { _ in
-            self.resolveTexture.getBytes(self.pixelBuffer, bytesPerRow: self.texture.width * MemoryLayout<Int32>.stride, from: MTLRegionMake2D(0, 0, self.texture.width, self.texture.height), mipmapLevel: 0)
+            self.resolveTexture.getBytes(self.pixelBuffer, bytesPerRow: self.resolveTexture.width * MemoryLayout<Int32>.stride, from: MTLRegionMake2D(0, 0, self.resolveTexture.width, self.resolveTexture.height), mipmapLevel: 0)
             
             timeline_write_frame(self.cache.ref.pointee.handle.pointee.timeline, self.pixelBuffer)
             self.semaphore.signal()

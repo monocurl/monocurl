@@ -8,6 +8,21 @@
 
 /* Begin PBXBuildFile section */
 		B4193AF129A3F9650035DC21 /* Polyfills.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4193AF029A3F9650035DC21 /* Polyfills.swift */; };
+		B41ECEB02B9D28A100A0EBFF /* Mobius Strip.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA12B9D28A000A0EBFF /* Mobius Strip.mcf */; };
+		B41ECEB12B9D28A100A0EBFF /* Monocurl Intro Video.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA22B9D28A000A0EBFF /* Monocurl Intro Video.mcf */; };
+		B41ECEB22B9D28A100A0EBFF /* Triangular Numbers.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA32B9D28A000A0EBFF /* Triangular Numbers.mcf */; };
+		B41ECEB32B9D28A100A0EBFF /* libmc.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA42B9D28A000A0EBFF /* libmc.mcf */; };
+		B41ECEB42B9D28A100A0EBFF /* Weierstrass.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA52B9D28A000A0EBFF /* Weierstrass.mcf */; };
+		B41ECEB52B9D28A100A0EBFF /* Monotonic Stacks.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA62B9D28A100A0EBFF /* Monotonic Stacks.mcf */; };
+		B41ECEB62B9D28A100A0EBFF /* Logo.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA72B9D28A100A0EBFF /* Logo.mcf */; };
+		B41ECEB72B9D28A100A0EBFF /* Simulations.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA82B9D28A100A0EBFF /* Simulations.mcf */; };
+		B41ECEB82B9D28A100A0EBFF /* Welcome to Monocurl.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEA92B9D28A100A0EBFF /* Welcome to Monocurl.mcf */; };
+		B41ECEB92B9D28A100A0EBFF /* Electric Field.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEAA2B9D28A100A0EBFF /* Electric Field.mcf */; };
+		B41ECEBA2B9D28A100A0EBFF /* Pythagorean Theorem.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEAB2B9D28A100A0EBFF /* Pythagorean Theorem.mcf */; };
+		B41ECEBB2B9D28A100A0EBFF /* Taylor Series.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEAC2B9D28A100A0EBFF /* Taylor Series.mcf */; };
+		B41ECEBC2B9D28A100A0EBFF /* Meshes.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEAD2B9D28A100A0EBFF /* Meshes.mcf */; };
+		B41ECEBD2B9D28A100A0EBFF /* Simple Text.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEAE2B9D28A100A0EBFF /* Simple Text.mcf */; };
+		B41ECEBE2B9D28A100A0EBFF /* mc_default_scene.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B41ECEAF2B9D28A100A0EBFF /* mc_default_scene.mcf */; };
 		B42C7EF72B3102750054E0B2 /* mc_svg.c in Sources */ = {isa = PBXBuildFile; fileRef = B42C7EF52B3102750054E0B2 /* mc_svg.c */; };
 		B42C7EFD2B3143B60054E0B2 /* tex-live in Resources */ = {isa = PBXBuildFile; fileRef = B42C7EFC2B3143B60054E0B2 /* tex-live */; };
 		B42C7F012B3145010054E0B2 /* mc_file_ops.c in Sources */ = {isa = PBXBuildFile; fileRef = B42C7EFF2B3145010054E0B2 /* mc_file_ops.c */; };
@@ -29,19 +44,6 @@
 		B458AF5E293AF694005E0448 /* libavcodec.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B49DEB1E2935CC6900CA4531 /* libavcodec.a */; };
 		B458AF5F293AF698005E0448 /* libplibsysstatic.a in Frameworks */ = {isa = PBXBuildFile; fileRef = B46F0FB329317110003DE0B2 /* libplibsysstatic.a */; };
 		B47243D42950E8900074379F /* SectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B47243D32950E8900074379F /* SectionView.swift */; };
-		B4750E022B8DAF4A000610C4 /* Simple Text.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DF62B8DAF49000610C4 /* Simple Text.mcf */; };
-		B4750E032B8DAF4A000610C4 /* Meshes.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DF72B8DAF49000610C4 /* Meshes.mcf */; };
-		B4750E042B8DAF4A000610C4 /* Mobius Strip.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DF82B8DAF49000610C4 /* Mobius Strip.mcf */; };
-		B4750E052B8DAF4A000610C4 /* Taylor Series.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DF92B8DAF49000610C4 /* Taylor Series.mcf */; };
-		B4750E062B8DAF4A000610C4 /* Logo.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DFA2B8DAF49000610C4 /* Logo.mcf */; };
-		B4750E072B8DAF4A000610C4 /* Weierstrass.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DFB2B8DAF49000610C4 /* Weierstrass.mcf */; };
-		B4750E082B8DAF4A000610C4 /* Monotonic Stacks.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DFC2B8DAF49000610C4 /* Monotonic Stacks.mcf */; };
-		B4750E092B8DAF4A000610C4 /* Triangular Numbers.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DFD2B8DAF49000610C4 /* Triangular Numbers.mcf */; };
-		B4750E0A2B8DAF4A000610C4 /* Electric Field.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DFE2B8DAF49000610C4 /* Electric Field.mcf */; };
-		B4750E0B2B8DAF4A000610C4 /* Pythagorean Theorem.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750DFF2B8DAF49000610C4 /* Pythagorean Theorem.mcf */; };
-		B4750E0C2B8DAF4A000610C4 /* Monocurl Intro Video.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750E002B8DAF49000610C4 /* Monocurl Intro Video.mcf */; };
-		B4750E0D2B8DAF4A000610C4 /* Simulations.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750E012B8DAF49000610C4 /* Simulations.mcf */; };
-		B4750E0F2B8DAF64000610C4 /* Welcome to Monocurl.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B4750E0E2B8DAF64000610C4 /* Welcome to Monocurl.mcf */; };
 		B4750E132B9510E4000610C4 /* PLIBSYS_LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B4750E122B9510E4000610C4 /* PLIBSYS_LICENSE */; };
 		B4750E162B951146000610C4 /* LIBTESS2_LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B4750E152B951146000610C4 /* LIBTESS2_LICENSE */; };
 		B4750E182B951195000610C4 /* NANOSVG_LICENSE in Resources */ = {isa = PBXBuildFile; fileRef = B4750E172B951195000610C4 /* NANOSVG_LICENSE */; };
@@ -90,8 +92,6 @@
 		B484339429309845009DFB9C /* ViewportBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4E124E62914DEC100725AE6 /* ViewportBridge.swift */; };
 		B484339529309845009DFB9C /* Viewport.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4737A7D28CC38CC00CBD794 /* Viewport.swift */; };
 		B4843397293098B6009DFB9C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B4843396293098B6009DFB9C /* Assets.xcassets */; };
-		B495EB4F2B82D8B700AE094A /* libmc.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B495EB4D2B82D8B700AE094A /* libmc.mcf */; };
-		B495EB502B82D8B700AE094A /* mc_default_scene.mcf in Resources */ = {isa = PBXBuildFile; fileRef = B495EB4E2B82D8B700AE094A /* mc_default_scene.mcf */; };
 		B49DEB262935CD0300CA4531 /* liblzma.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = B49DEB252935CD0300CA4531 /* liblzma.tbd */; };
 		B4D6E69D24BD57E200C98994 /* MonocurlTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4D6E69C24BD57E200C98994 /* MonocurlTests.swift */; };
 		B4D6E6A824BD57E200C98994 /* MonocurlUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4D6E6A724BD57E200C98994 /* MonocurlUITests.swift */; };
@@ -230,6 +230,21 @@
 		B4047293290F5F1C0064F353 /* shader.metal */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.metal; path = shader.metal; sourceTree = "<group>"; };
 		B4047295291038940064F353 /* shader.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = shader.h; sourceTree = "<group>"; };
 		B4193AF029A3F9650035DC21 /* Polyfills.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Polyfills.swift; sourceTree = "<group>"; };
+		B41ECEA12B9D28A000A0EBFF /* Mobius Strip.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Mobius Strip.mcf"; sourceTree = "<group>"; };
+		B41ECEA22B9D28A000A0EBFF /* Monocurl Intro Video.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Monocurl Intro Video.mcf"; sourceTree = "<group>"; };
+		B41ECEA32B9D28A000A0EBFF /* Triangular Numbers.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Triangular Numbers.mcf"; sourceTree = "<group>"; };
+		B41ECEA42B9D28A000A0EBFF /* libmc.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = libmc.mcf; sourceTree = "<group>"; };
+		B41ECEA52B9D28A000A0EBFF /* Weierstrass.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = Weierstrass.mcf; sourceTree = "<group>"; };
+		B41ECEA62B9D28A100A0EBFF /* Monotonic Stacks.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Monotonic Stacks.mcf"; sourceTree = "<group>"; };
+		B41ECEA72B9D28A100A0EBFF /* Logo.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = Logo.mcf; sourceTree = "<group>"; };
+		B41ECEA82B9D28A100A0EBFF /* Simulations.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = Simulations.mcf; sourceTree = "<group>"; };
+		B41ECEA92B9D28A100A0EBFF /* Welcome to Monocurl.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Welcome to Monocurl.mcf"; sourceTree = "<group>"; };
+		B41ECEAA2B9D28A100A0EBFF /* Electric Field.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Electric Field.mcf"; sourceTree = "<group>"; };
+		B41ECEAB2B9D28A100A0EBFF /* Pythagorean Theorem.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Pythagorean Theorem.mcf"; sourceTree = "<group>"; };
+		B41ECEAC2B9D28A100A0EBFF /* Taylor Series.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Taylor Series.mcf"; sourceTree = "<group>"; };
+		B41ECEAD2B9D28A100A0EBFF /* Meshes.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = Meshes.mcf; sourceTree = "<group>"; };
+		B41ECEAE2B9D28A100A0EBFF /* Simple Text.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = "Simple Text.mcf"; sourceTree = "<group>"; };
+		B41ECEAF2B9D28A100A0EBFF /* mc_default_scene.mcf */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; path = mc_default_scene.mcf; sourceTree = "<group>"; };
 		B424394D2B3237DE00D53967 /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 		B424394F2B32381200D53967 /* .gitignore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitignore; sourceTree = "<group>"; };
 		B42C7EF42B3102750054E0B2 /* mc_svg.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = mc_svg.h; sourceTree = "<group>"; };
@@ -267,19 +282,6 @@
 		B4737A8C28CD7B5F00CBD794 /* monocurl_bridging_header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = monocurl_bridging_header.h; sourceTree = "<group>"; };
 		B4737A9228CD864D00CBD794 /* ViewportFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewportFrame.swift; sourceTree = "<group>"; };
 		B4737A9628CE730400CBD794 /* Media.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Media.swift; sourceTree = "<group>"; };
-		B4750DF62B8DAF49000610C4 /* Simple Text.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Simple Text.mcf"; path = "monocurl/cengine/mcf/Simple Text.mcf"; sourceTree = SOURCE_ROOT; };
-		B4750DF72B8DAF49000610C4 /* Meshes.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = Meshes.mcf; path = monocurl/cengine/mcf/Meshes.mcf; sourceTree = SOURCE_ROOT; };
-		B4750DF82B8DAF49000610C4 /* Mobius Strip.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Mobius Strip.mcf"; path = "monocurl/cengine/mcf/Mobius Strip.mcf"; sourceTree = SOURCE_ROOT; };
-		B4750DF92B8DAF49000610C4 /* Taylor Series.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Taylor Series.mcf"; path = "monocurl/cengine/mcf/Taylor Series.mcf"; sourceTree = SOURCE_ROOT; };
-		B4750DFA2B8DAF49000610C4 /* Logo.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = Logo.mcf; path = monocurl/cengine/mcf/Logo.mcf; sourceTree = SOURCE_ROOT; };
-		B4750DFB2B8DAF49000610C4 /* Weierstrass.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = Weierstrass.mcf; path = monocurl/cengine/mcf/Weierstrass.mcf; sourceTree = SOURCE_ROOT; };
-		B4750DFC2B8DAF49000610C4 /* Monotonic Stacks.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Monotonic Stacks.mcf"; path = "monocurl/cengine/mcf/Monotonic Stacks.mcf"; sourceTree = SOURCE_ROOT; };
-		B4750DFD2B8DAF49000610C4 /* Triangular Numbers.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Triangular Numbers.mcf"; path = "monocurl/cengine/mcf/Triangular Numbers.mcf"; sourceTree = SOURCE_ROOT; };
-		B4750DFE2B8DAF49000610C4 /* Electric Field.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Electric Field.mcf"; path = "monocurl/cengine/mcf/Electric Field.mcf"; sourceTree = SOURCE_ROOT; };
-		B4750DFF2B8DAF49000610C4 /* Pythagorean Theorem.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Pythagorean Theorem.mcf"; path = "monocurl/cengine/mcf/Pythagorean Theorem.mcf"; sourceTree = SOURCE_ROOT; };
-		B4750E002B8DAF49000610C4 /* Monocurl Intro Video.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Monocurl Intro Video.mcf"; path = "monocurl/cengine/mcf/Monocurl Intro Video.mcf"; sourceTree = SOURCE_ROOT; };
-		B4750E012B8DAF49000610C4 /* Simulations.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = Simulations.mcf; path = monocurl/cengine/mcf/Simulations.mcf; sourceTree = SOURCE_ROOT; };
-		B4750E0E2B8DAF64000610C4 /* Welcome to Monocurl.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = "Welcome to Monocurl.mcf"; path = "monocurl/cengine/mcf/Welcome to Monocurl.mcf"; sourceTree = SOURCE_ROOT; };
 		B4750E122B9510E4000610C4 /* PLIBSYS_LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = PLIBSYS_LICENSE; sourceTree = "<group>"; };
 		B4750E152B951146000610C4 /* LIBTESS2_LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LIBTESS2_LICENSE; sourceTree = "<group>"; };
 		B4750E172B951195000610C4 /* NANOSVG_LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = NANOSVG_LICENSE; sourceTree = "<group>"; };
@@ -294,8 +296,6 @@
 		B484335929309708009DFB9C /* Monocurl.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Monocurl.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B484336B293097B3009DFB9C /* monocurl.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = monocurl.entitlements; sourceTree = "<group>"; };
 		B4843396293098B6009DFB9C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		B495EB4D2B82D8B700AE094A /* libmc.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = libmc.mcf; path = monocurl/cengine/mcf/libmc.mcf; sourceTree = SOURCE_ROOT; };
-		B495EB4E2B82D8B700AE094A /* mc_default_scene.mcf */ = {isa = PBXFileReference; lastKnownFileType = text; name = mc_default_scene.mcf; path = monocurl/cengine/mcf/mc_default_scene.mcf; sourceTree = SOURCE_ROOT; };
 		B49DEB1B2935CC6600CA4531 /* libswresample.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libswresample.a; sourceTree = "<group>"; };
 		B49DEB1C2935CC6700CA4531 /* libavutil.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libavutil.a; sourceTree = "<group>"; };
 		B49DEB1D2935CC6700CA4531 /* libswscale.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libswscale.a; sourceTree = "<group>"; };
@@ -585,6 +585,28 @@
 			path = metal;
 			sourceTree = "<group>";
 		};
+		B41ECEA02B9D287200A0EBFF /* mcf */ = {
+			isa = PBXGroup;
+			children = (
+				B41ECEAA2B9D28A100A0EBFF /* Electric Field.mcf */,
+				B41ECEA42B9D28A000A0EBFF /* libmc.mcf */,
+				B41ECEA72B9D28A100A0EBFF /* Logo.mcf */,
+				B41ECEAF2B9D28A100A0EBFF /* mc_default_scene.mcf */,
+				B41ECEAD2B9D28A100A0EBFF /* Meshes.mcf */,
+				B41ECEA12B9D28A000A0EBFF /* Mobius Strip.mcf */,
+				B41ECEA22B9D28A000A0EBFF /* Monocurl Intro Video.mcf */,
+				B41ECEA62B9D28A100A0EBFF /* Monotonic Stacks.mcf */,
+				B41ECEAB2B9D28A100A0EBFF /* Pythagorean Theorem.mcf */,
+				B41ECEAE2B9D28A100A0EBFF /* Simple Text.mcf */,
+				B41ECEA82B9D28A100A0EBFF /* Simulations.mcf */,
+				B41ECEAC2B9D28A100A0EBFF /* Taylor Series.mcf */,
+				B41ECEA32B9D28A000A0EBFF /* Triangular Numbers.mcf */,
+				B41ECEA52B9D28A000A0EBFF /* Weierstrass.mcf */,
+				B41ECEA92B9D28A100A0EBFF /* Welcome to Monocurl.mcf */,
+			);
+			path = mcf;
+			sourceTree = "<group>";
+		};
 		B4294B4F292071E100706D86 /* libavcodec */ = {
 			isa = PBXGroup;
 			children = (
@@ -769,29 +791,6 @@
 			path = plibsys;
 			sourceTree = "<group>";
 		};
-		B495EB4C2B82D8A100AE094A /* mcf */ = {
-			isa = PBXGroup;
-			children = (
-				B4750DFE2B8DAF49000610C4 /* Electric Field.mcf */,
-				B4750DFA2B8DAF49000610C4 /* Logo.mcf */,
-				B4750DF72B8DAF49000610C4 /* Meshes.mcf */,
-				B4750DF82B8DAF49000610C4 /* Mobius Strip.mcf */,
-				B4750E002B8DAF49000610C4 /* Monocurl Intro Video.mcf */,
-				B4750DFC2B8DAF49000610C4 /* Monotonic Stacks.mcf */,
-				B4750DFF2B8DAF49000610C4 /* Pythagorean Theorem.mcf */,
-				B4750DF62B8DAF49000610C4 /* Simple Text.mcf */,
-				B4750E012B8DAF49000610C4 /* Simulations.mcf */,
-				B4750DF92B8DAF49000610C4 /* Taylor Series.mcf */,
-				B4750DFD2B8DAF49000610C4 /* Triangular Numbers.mcf */,
-				B4750DFB2B8DAF49000610C4 /* Weierstrass.mcf */,
-				B4750E0E2B8DAF64000610C4 /* Welcome to Monocurl.mcf */,
-				B495EB4D2B82D8B700AE094A /* libmc.mcf */,
-				B495EB4E2B82D8B700AE094A /* mc_default_scene.mcf */,
-			);
-			name = mcf;
-			path = ../mcf;
-			sourceTree = "<group>";
-		};
 		B4C13C90268AC2B800D8EB90 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
@@ -868,7 +867,7 @@
 				B4750E142B951128000610C4 /* legal */,
 				B4047269290F40D60064F353 /* lib */,
 				B4F87F2D2A90796A004C5FD7 /* include */,
-				B495EB4C2B82D8A100AE094A /* mcf */,
+				B41ECEA02B9D287200A0EBFF /* mcf */,
 				B4F87EA52A90794D004C5FD7 /* src */,
 			);
 			path = cengine;
@@ -1288,29 +1287,29 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B4750E092B8DAF4A000610C4 /* Triangular Numbers.mcf in Resources */,
-				B4750E052B8DAF4A000610C4 /* Taylor Series.mcf in Resources */,
-				B4750E072B8DAF4A000610C4 /* Weierstrass.mcf in Resources */,
-				B4750E0D2B8DAF4A000610C4 /* Simulations.mcf in Resources */,
 				B4750E1A2B9511E7000610C4 /* FFMPEG_LICENSE in Resources */,
-				B4750E0F2B8DAF64000610C4 /* Welcome to Monocurl.mcf in Resources */,
 				B42C7EFD2B3143B60054E0B2 /* tex-live in Resources */,
-				B4750E0A2B8DAF4A000610C4 /* Electric Field.mcf in Resources */,
-				B4750E022B8DAF4A000610C4 /* Simple Text.mcf in Resources */,
-				B495EB4F2B82D8B700AE094A /* libmc.mcf in Resources */,
-				B4750E062B8DAF4A000610C4 /* Logo.mcf in Resources */,
-				B4750E082B8DAF4A000610C4 /* Monotonic Stacks.mcf in Resources */,
 				B4750E182B951195000610C4 /* NANOSVG_LICENSE in Resources */,
+				B41ECEB42B9D28A100A0EBFF /* Weierstrass.mcf in Resources */,
+				B41ECEB52B9D28A100A0EBFF /* Monotonic Stacks.mcf in Resources */,
+				B41ECEB22B9D28A100A0EBFF /* Triangular Numbers.mcf in Resources */,
+				B41ECEB32B9D28A100A0EBFF /* libmc.mcf in Resources */,
+				B41ECEBD2B9D28A100A0EBFF /* Simple Text.mcf in Resources */,
+				B41ECEB82B9D28A100A0EBFF /* Welcome to Monocurl.mcf in Resources */,
+				B41ECEBE2B9D28A100A0EBFF /* mc_default_scene.mcf in Resources */,
 				B4750E132B9510E4000610C4 /* PLIBSYS_LICENSE in Resources */,
-				B4750E0C2B8DAF4A000610C4 /* Monocurl Intro Video.mcf in Resources */,
-				B4750E032B8DAF4A000610C4 /* Meshes.mcf in Resources */,
-				B495EB502B82D8B700AE094A /* mc_default_scene.mcf in Resources */,
+				B41ECEB12B9D28A100A0EBFF /* Monocurl Intro Video.mcf in Resources */,
 				B4843397293098B6009DFB9C /* Assets.xcassets in Resources */,
 				B4750E1C2B951225000610C4 /* TEX_LIVE_LICENSE in Resources */,
-				B4750E042B8DAF4A000610C4 /* Mobius Strip.mcf in Resources */,
+				B41ECEB92B9D28A100A0EBFF /* Electric Field.mcf in Resources */,
+				B41ECEBA2B9D28A100A0EBFF /* Pythagorean Theorem.mcf in Resources */,
 				B4750E162B951146000610C4 /* LIBTESS2_LICENSE in Resources */,
-				B4750E0B2B8DAF4A000610C4 /* Pythagorean Theorem.mcf in Resources */,
+				B41ECEB02B9D28A100A0EBFF /* Mobius Strip.mcf in Resources */,
+				B41ECEB62B9D28A100A0EBFF /* Logo.mcf in Resources */,
+				B41ECEBC2B9D28A100A0EBFF /* Meshes.mcf in Resources */,
+				B41ECEB72B9D28A100A0EBFF /* Simulations.mcf in Resources */,
 				B484336D293097E5009DFB9C /* 1x1.png in Resources */,
+				B41ECEBB2B9D28A100A0EBFF /* Taylor Series.mcf in Resources */,
 				B484336C293097E3009DFB9C /* image_not_found.png in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

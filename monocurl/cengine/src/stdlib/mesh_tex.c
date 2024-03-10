@@ -83,7 +83,7 @@ to_dvi(char const *path, char const *out)
     str_dynamic_append(&arg, "\" \"");
     str_dynamic_append(&arg, path);
     str_dynamic_append(&arg, "\"");
-    
+
     int ret;
 #if MC_ENV_OS & MC_ENV_OS_WINDOWS
     STARTUPINFOA si;

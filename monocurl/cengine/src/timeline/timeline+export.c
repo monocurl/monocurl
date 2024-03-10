@@ -352,7 +352,6 @@ timeline_export(struct timeline *timeline)
         }
     }
 
-
     encoder_context.frame = NULL;
     write_frame(timeline, NULL, encoder_context);
     if (av_write_trailer(fc) != 0) {
@@ -361,7 +360,7 @@ timeline_export(struct timeline *timeline)
         mc_rwlock_reader_unlock(timeline->state_lock);
         goto deconstructor;
     }
-    
+
     mc_rwlock_reader_lock(timeline->state_lock);
     export_finish(timeline, NULL);
     mc_rwlock_reader_unlock(timeline->state_lock);

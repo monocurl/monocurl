@@ -82,6 +82,7 @@ struct AppRoot: App {
                 .frame(minWidth: 1200, maxWidth: .infinity, minHeight: 800, maxHeight: .infinity)
                 .environmentObject(self.storage)
                 .environmentObject(self.environment)
+                .preferredColorScheme(.dark)
                 .onAppear {
                     delegate.storage = storage;
                     delegate.environment = environment;

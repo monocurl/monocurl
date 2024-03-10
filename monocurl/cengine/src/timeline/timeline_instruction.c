@@ -711,14 +711,12 @@ expression_not_execute(
         VECTOR_FIELD_FREE(executor, x);
         return VECTOR_FIELD_NULL;
     }
-    
+
     struct vector_field const boolean = x.vtable->op_bool(executor, x);
     if (!boolean.vtable) {
         return VECTOR_FIELD_NULL;
     }
-    return double_init(
-                       executor, !VECTOR_FIELD_DBOOL(boolean)
-    );
+    return double_init(executor, !VECTOR_FIELD_DBOOL(boolean));
 }
 
 static struct timeline_expression_node *

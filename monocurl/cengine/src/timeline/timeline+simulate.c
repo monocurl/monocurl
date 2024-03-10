@@ -139,7 +139,8 @@ timeline_play(struct timeline *timeline)
         else if (error == MC_TERNARY_STATUS_FINISH) {
             if (timeline->timestamp.slide < scene->slide_count - 1) {
                 // error generally indicates interrupt of some sort
-                if (timeline_blit_trailing_cache(timeline) != MC_STATUS_SUCCESS) {
+                if (timeline_blit_trailing_cache(timeline) !=
+                    MC_STATUS_SUCCESS) {
                     timeline->is_playing = 0;
                     finished = 1;
                     timeline_flush(timeline);
@@ -149,7 +150,7 @@ timeline_play(struct timeline *timeline)
                     timeline->timestamp.offset = 0;
                     curr = timeline->timestamp.slide;
                     viewport_set_state(viewport, VIEWPORT_LOADING);
-                    
+
                     if (timeline->in_presentation_mode) {
                         viewport_set_state(viewport, VIEWPORT_IDLE);
                         timeline->is_playing = 0;
@@ -175,7 +176,7 @@ timeline_play(struct timeline *timeline)
                     timeline->timestamp.slide, timeline->timestamp.offset
                 );
             }
-            
+
             timeline->seekstamp = timeline->timestamp;
             timeline_visual_flush(timeline);
         }
