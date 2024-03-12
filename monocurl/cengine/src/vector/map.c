@@ -114,14 +114,15 @@ map_index(
     struct vector_field *index
 )
 {
-    if (!index->vtable) {
+    struct vector_field rhs =
+        vector_field_extract_type(executor, index, VECTOR_FIELD_PURE);
+    /* take ownership */
+    *index = VECTOR_FIELD_NULL;
+    
+    if (!rhs.vtable) {
         return VECTOR_FIELD_NULL;
     }
 
-    /* take ownership */
-    struct vector_field rhs =
-        vector_field_extract_type(executor, index, VECTOR_FIELD_PURE);
-    *index = VECTOR_FIELD_NULL;
 
     struct map *const m = map.value.pointer;
 
@@ -135,9 +136,13 @@ map_index(
     mc_ind_t bucket = hash % m->node_capacity;
     for (struct map_node *node = m->nodes[bucket]; node;
          node = node->next_bucket) {
-        if (!VECTOR_FIELD_DBOOL(
-                VECTOR_FIELD_BINARY(executor, node->field, op_comp, &rhs)
-            )) {
+        struct vector_field const sub = VECTOR_FIELD_BINARY(executor, node->field, op_comp, &rhs);
+        if (!sub.vtable) {
+            VECTOR_FIELD_FREE(executor, rhs);
+            return VECTOR_FIELD_NULL;
+        }
+        if (!VECTOR_FIELD_DBOOL(sub)) {
+            VECTOR_FIELD_FREE(executor, rhs);
             return lvalue_init(executor, &node->value);
         }
     }
@@ -151,9 +156,11 @@ map_index(
 
         for (struct map_node *node = m->head.next_ins; node;
              node = node->next_ins) {
+            /* guaranteed success (since field immutable) */
             mc_ind_t const buck =
                 VECTOR_FIELD_HASH(executor, node->field) % m->node_capacity;
-
+            assert(hash);
+            
             node->next_bucket = m->nodes[buck];
             m->nodes[buck] = node;
         }
@@ -246,14 +253,14 @@ map_comp(
                      (vret = VECTOR_FIELD_BINARY(
                           executor, node->field, op_comp, &cnode->field
                       ))
-                 )) {
+                 ) || !vret.vtable) {
             return vret;
         }
         else if (VECTOR_FIELD_DBOOL(
                      (vret = VECTOR_FIELD_BINARY(
                           executor, node->value, op_comp, &cnode->value
                       ))
-                 )) {
+                 ) || !vret.vtable) {
             return vret;
         }
     }

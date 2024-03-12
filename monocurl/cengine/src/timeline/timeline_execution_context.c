@@ -1061,6 +1061,7 @@ effectively_different(
 }
 
 /* cut down on repetition at some point */
+#pragma message("TODO, the entire interrupt system is terrible")
 mc_status_t
 timeline_executor_blit_cache(struct timeline_execution_context *executor)
 {
@@ -1109,9 +1110,12 @@ timeline_executor_blit_cache(struct timeline_execution_context *executor)
                     vector_field_lvalue_copy(executor, executor->stack[i]);
                 slide->stack_jump_to[i] = (mc_ind_t) (executor->curr_slide + 1);
             }
-            else {
+            else if (!early_exit) {
                 slide->stack_jump_to[i] =
                     executor->slides[executor->curr_slide].stack_jump_to[i];
+                slide->stack[i] = VECTOR_FIELD_NULL;
+            }
+            else {
                 slide->stack[i] = VECTOR_FIELD_NULL;
             }
         }
@@ -1146,10 +1150,13 @@ timeline_executor_blit_cache(struct timeline_execution_context *executor)
                 slide->creation_follower_jump_to[i] =
                     (mc_ind_t) (executor->curr_slide + 1);
             }
-            else {
+            else if (!early_exit) {
                 slide->creation_follower_jump_to[i] =
                     executor->slides[executor->curr_slide]
                         .creation_follower_jump_to[i];
+                slide->creation_follower_stack[i] = VECTOR_FIELD_NULL;
+            }
+            else {
                 slide->creation_follower_stack[i] = VECTOR_FIELD_NULL;
             }
         }
@@ -1183,9 +1190,12 @@ timeline_executor_blit_cache(struct timeline_execution_context *executor)
                 vector_field_lvalue_copy(executor, executor->capture_frame[i]);
             slide->capture_jump_to[i] = (mc_ind_t) (executor->curr_slide + 1);
         }
-        else {
+        else if (!early_exit) {
             slide->capture_jump_to[i] =
                 executor->slides[executor->curr_slide].capture_jump_to[i];
+            slide->capture_frame[i] = VECTOR_FIELD_NULL;
+        }
+        else {
             slide->capture_frame[i] = VECTOR_FIELD_NULL;
         }
 
@@ -1217,9 +1227,12 @@ timeline_executor_blit_cache(struct timeline_execution_context *executor)
                 vector_field_lvalue_copy(executor, executor->meshes[i]);
             slide->mesh_jump_to[i] = (mc_ind_t) (executor->curr_slide + 1);
         }
-        else {
+        else if (!early_exit) {
             slide->mesh_jump_to[i] =
                 executor->slides[executor->curr_slide].mesh_jump_to[i];
+            slide->meshes[i] = VECTOR_FIELD_NULL;
+        }
+        else {
             slide->meshes[i] = VECTOR_FIELD_NULL;
         }
         slide->mesh_hashes[i] = executor->mesh_hashes[i];

@@ -267,7 +267,7 @@ animation_comp(
             vret = function_comp(
                 executor, animation->sentinel, &ranimation->sentinel
             )
-        )) {
+        ) || !vret.vtable) {
         return vret;
     }
     if ((ret = animation->sticky - ranimation->sticky)) {

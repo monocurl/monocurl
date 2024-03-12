@@ -29,10 +29,10 @@
 
 #define OVERFLOW_BUFFER (1 << 4)
 #define MAX_STACK_FRAME (1 << 12)
-#define MAX_FUNCTION_CALL (1 << 5)
+#define MAX_FUNCTION_CALL (48)
 #define MAX_TEMPORARIES (1 << 12)
 #define MAX_CAPTURES (1 << 14)
-#define MAX_HEAP (1 << 25)
+#define MAX_HEAP (1 << 27)
 
 struct expression_tokenizer;
 struct timeline;

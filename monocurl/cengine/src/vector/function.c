@@ -153,7 +153,7 @@ function_comp(
                 vret = VECTOR_FIELD_BINARY(
                     executor, function->caches[i], op_comp, &rhs_v->caches[i]
                 )
-            )) {
+            ) || !vret.vtable) {
             return vret;
         }
     }

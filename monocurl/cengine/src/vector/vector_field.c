@@ -327,7 +327,7 @@ vector_field_lvalue_copy(
                 );
                 return VECTOR_FIELD_NULL;
             }
-            vector_plus(executor, dump, &copy);
+            vector_literal_plus(executor, dump, &copy);
         }
 
         return dump;

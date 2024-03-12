@@ -45,15 +45,32 @@ static struct vector_field_vtable const vtable = {
     .out_of_frame_like = 0,
 };
 
+static struct shared_vector_field *
+shared_init(struct vector_field val) {
+    struct shared_vector_field *ret = mc_malloc(sizeof(struct shared_vector_field));
+    ret->ref_count = 1;
+    ret->res = val;
+    return ret;
+}
+
+static void
+unref_shared(struct timeline_execution_context *executor, struct shared_vector_field *shared) {
+    if (shared && !--shared->ref_count) {
+        VECTOR_FIELD_FREE(executor, shared->res);
+        mc_free(shared);
+    }
+}
+
 struct vector_field
 functor_get_res(
     struct timeline_execution_context *executor, struct vector_field field
 )
 {
     struct functor *const functor = field.value.pointer;
+    
     // first call from the arguments
     if (functor->force_const || !functor->dirty) {
-        return functor->result;
+        return functor->result->res;
     }
 
     functor->dirty = 0;
@@ -75,7 +92,7 @@ functor_get_res(
         /* it's possible a reference still exists and may need to be assigned */
         /* but for now we know nothing has changed */
         functor->dirty = 1;
-        return functor->result;
+        return functor->result->res;
     }
 
     mc_count_t const org = executor->stack_frame;
@@ -96,24 +113,32 @@ functor_get_res(
 
     functor->dirty = 0;
 
-    VECTOR_FIELD_FREE(executor, functor->result);
-    functor->result = vector_field_extract_type(
-        executor, &executor->return_register, VECTOR_FIELD_PURE
-    );
+    unref_shared(executor, functor->result);
+    struct vector_field new = vector_field_extract_type(
+                                                        executor, &executor->return_register, VECTOR_FIELD_PURE
+                                                    );
+    functor->result = shared_init(new);
     executor->return_register = VECTOR_FIELD_NULL;
-    return functor->result;
+    return new;
 }
 
+/* only called when just about to free functor */
 struct vector_field
 functor_steal_res(
     struct timeline_execution_context *executor, struct vector_field functor
 )
 {
     struct functor *func = functor.value.pointer;
-    struct vector_field const ret = functor_get_res(executor, functor);
-
-    func->result = VECTOR_FIELD_NULL;
-    func->dirty = 1;
+    struct vector_field ret = functor_get_res(executor, functor);
+    if (func->result->ref_count > 1) {
+        ret = VECTOR_FIELD_COPY(executor, ret);
+    }
+    else {
+        mc_free(func->result);
+        func->result = NULL;
+        func->dirty = 1;
+    }
+    
     return ret;
 }
 
@@ -131,12 +156,12 @@ functor_init(
     func->argument_count = arg_c;
     func->force_const = force_const;
     func->function = function;
-    func->result = current;
+    func->result = shared_init(current);
 
     executor->byte_alloc += arg_c;
 
     struct vector_field const ret = { .value = { .pointer = func },
-                                      .vtable = &vtable };
+                                      .vtable = &vtable, };
 
     return ret;
 }
@@ -149,7 +174,13 @@ functor_copy(
     struct functor *const src = functor.value.pointer;
     struct functor *const copy = mc_malloc(sizeof(struct functor));
 
-    copy->result = VECTOR_FIELD_COPY(executor, src->result);
+    if (!src->dirty) {
+        copy->result = src->result;
+        copy->result->ref_count++;
+    }
+    else {
+        copy->result = shared_init(VECTOR_FIELD_COPY(executor, src->result->res));
+    }
 
     copy->force_const = src->force_const;
     copy->dirty = src->dirty;
@@ -160,8 +191,7 @@ functor_copy(
     for (mc_ind_t i = 0; i < copy->argument_count; i++) {
         /* unowned pointer */
         copy->arguments[i].name = src->arguments[i].name;
-        copy->arguments[i].field =
-            vector_field_lvalue_copy(executor, src->arguments[i].field);
+        copy->arguments[i].field = vector_field_lvalue_copy(executor, src->arguments[i].field);
         copy->arguments[i].dirty = src->arguments[i].dirty;
         copy->arguments[i].last_hash = src->arguments[i].last_hash;
     }
@@ -182,7 +212,7 @@ functor_add(
     struct vector_field *rhs
 )
 {
-    struct vector_field res = functor_get_res(executor, lhs);
+    struct vector_field res = functor_steal_res(executor, lhs);
     if (!res.vtable || !res.vtable->op_add) {
         VECTOR_FIELD_ERROR(
             executor, "Cannot add field (you might want to surround this "
@@ -191,7 +221,6 @@ functor_add(
         return VECTOR_FIELD_NULL;
     }
 
-    res = VECTOR_FIELD_COPY(executor, res);
     functor_free(executor, lhs);
     return VECTOR_FIELD_BINARY(executor, res, op_add, rhs);
 }
@@ -295,7 +324,7 @@ functor_comp(
                             executor, this->arguments[i].field, op_comp,
                             &other->arguments[i].field
                         )
-                    )) {
+                    ) || !dret.vtable) {
                     return dret;
                 }
             }
@@ -320,11 +349,20 @@ functor_index(
     struct vector_field *index
 )
 {
-    struct vector_field const res = functor_get_res(executor, functor);
+#pragma message("TODO, this should actually elide the functor entirely since its state is inconsistent...")
+    struct vector_field res = functor_get_res(executor, functor);
     if (!res.vtable || !res.vtable->op_index) {
         VECTOR_FIELD_ERROR(executor, "Cannot index field");
         return VECTOR_FIELD_NULL;
+    }    
+    
+    /* need this to be owned operation! */
+    struct functor* func = functor.value.pointer;
+    if (func->result->ref_count > 1) {
+        func->result = shared_init(VECTOR_FIELD_COPY(executor, func->result->res));
+        res = func->result->res;
     }
+
 
     return VECTOR_FIELD_BINARY(executor, res, op_index, index);
 }
@@ -336,18 +374,13 @@ functor_attribute(
 )
 {
     struct functor *const functor = field.value.pointer;
-
-#pragma message(                                                                                                                                                                                  \
-    "OPTIMIZATION: instead of marking functors dirty immediately (which results in TERRIBLE performance for cached hashing...) mark only when there's an actual write through specialized lvalue" \
-)
+    if (functor->force_const) {
+        VECTOR_FIELD_ERROR(executor, "Cannot read attributes of a functor with functional or reference parameters (this behavior may be changed in the future)");
+        return VECTOR_FIELD_NULL;
+    }
     for (mc_ind_t i = 0; i < functor->argument_count; i++) {
         if (functor->arguments[i].name &&
             !strcmp(attribute, functor->arguments[i].name)) {
-            if (functor->force_const) {
-                return lvalue_const_init(
-                    executor, &functor->arguments[i].field
-                );
-            }
             functor->dirty = 1;
             functor->arguments[i].dirty = 1;
             return lvalue_init(executor, &functor->arguments[i].field);
@@ -365,7 +398,7 @@ functor_bytes(
 {
     struct functor *f = functor.value.pointer;
     mc_count_t ret = sizeof(*f) + sizeof(functor);
-    ret += VECTOR_FIELD_BYTES(executor, f->result);
+    ret += VECTOR_FIELD_BYTES(executor, f->result->res);
     ret += VECTOR_FIELD_BYTES(executor, f->function);
     for (mc_ind_t i = 0; i < f->argument_count; ++i) {
         ret += VECTOR_FIELD_BYTES(executor, f->arguments[i].field);
@@ -424,7 +457,7 @@ functor_free(
 {
     struct functor *const func = functor.value.pointer;
 
-    VECTOR_FIELD_FREE(executor, func->result);
+    unref_shared(executor, func->result);
 
     function_free(executor, func->function);
 

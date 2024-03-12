@@ -1257,11 +1257,11 @@ expression_while_execute(
             return VECTOR_FIELD_NULL;
         }
 
-        struct vector_field const cond =
+        struct vector_field cond =
             node->condition->execute(node->condition, executor);
 
         struct vector_field const cast = vector_field_extract_type(
-            executor, timeline_executor_temporary_push(executor, cond),
+            executor, &cond,
             VECTOR_FIELD_TYPE_DOUBLE
         );
 

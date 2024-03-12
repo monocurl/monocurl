@@ -263,7 +263,7 @@ transfer_subset(
             }
         }
 
-        return MC_STATUS_FAIL;
+        return MC_STATUS_SUCCESS;
     }
     else {
         return MC_STATUS_FAIL;
@@ -410,6 +410,7 @@ lib_mc_transfer_runtime(
     }
     else {
         transfer = vector_init(executor);
+        struct vector_field const all = fields[2];
         if (transfer_subset(
                 executor, &fields[1], fields[2], transfer, copy.value.doub != 0
             ) != MC_STATUS_SUCCESS) {
@@ -417,6 +418,7 @@ lib_mc_transfer_runtime(
             executor->return_register = VECTOR_FIELD_NULL;
             return;
         }
+        fields[2] = all;
     }
     mc_hash_t comp = VECTOR_FIELD_HASH(executor, transfer);
     if (!comp) {
