@@ -328,7 +328,7 @@ timeline_really_seek_to(struct timeline *timeline)
 
     if (ret == MC_STATUS_SUCCESS) {
         viewport_set_state(viewport, VIEWPORT_IDLE);
-        
+
         mc_rwlock_writer_lock(timeline->state_lock);
         timeline->seekstamp = timeline->timestamp;
         timeline_visual_flush(timeline);

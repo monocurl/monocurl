@@ -46,15 +46,21 @@ static struct vector_field_vtable const vtable = {
 };
 
 static struct shared_vector_field *
-shared_init(struct vector_field val) {
-    struct shared_vector_field *ret = mc_malloc(sizeof(struct shared_vector_field));
+shared_init(struct vector_field val)
+{
+    struct shared_vector_field *ret =
+        mc_malloc(sizeof(struct shared_vector_field));
     ret->ref_count = 1;
     ret->res = val;
     return ret;
 }
 
 static void
-unref_shared(struct timeline_execution_context *executor, struct shared_vector_field *shared) {
+unref_shared(
+    struct timeline_execution_context *executor,
+    struct shared_vector_field *shared
+)
+{
     if (shared && !--shared->ref_count) {
         VECTOR_FIELD_FREE(executor, shared->res);
         mc_free(shared);
@@ -67,7 +73,7 @@ functor_get_res(
 )
 {
     struct functor *const functor = field.value.pointer;
-    
+
     // first call from the arguments
     if (functor->force_const || !functor->dirty) {
         return functor->result->res;
@@ -115,8 +121,8 @@ functor_get_res(
 
     unref_shared(executor, functor->result);
     struct vector_field new = vector_field_extract_type(
-                                                        executor, &executor->return_register, VECTOR_FIELD_PURE
-                                                    );
+        executor, &executor->return_register, VECTOR_FIELD_PURE
+    );
     functor->result = shared_init(new);
     executor->return_register = VECTOR_FIELD_NULL;
     return new;
@@ -138,7 +144,7 @@ functor_steal_res(
         func->result = NULL;
         func->dirty = 1;
     }
-    
+
     return ret;
 }
 
@@ -160,8 +166,10 @@ functor_init(
 
     executor->byte_alloc += arg_c;
 
-    struct vector_field const ret = { .value = { .pointer = func },
-                                      .vtable = &vtable, };
+    struct vector_field const ret = {
+        .value = { .pointer = func },
+        .vtable = &vtable,
+    };
 
     return ret;
 }
@@ -179,7 +187,8 @@ functor_copy(
         copy->result->ref_count++;
     }
     else {
-        copy->result = shared_init(VECTOR_FIELD_COPY(executor, src->result->res));
+        copy->result =
+            shared_init(VECTOR_FIELD_COPY(executor, src->result->res));
     }
 
     copy->force_const = src->force_const;
@@ -191,7 +200,8 @@ functor_copy(
     for (mc_ind_t i = 0; i < copy->argument_count; i++) {
         /* unowned pointer */
         copy->arguments[i].name = src->arguments[i].name;
-        copy->arguments[i].field = vector_field_lvalue_copy(executor, src->arguments[i].field);
+        copy->arguments[i].field =
+            vector_field_lvalue_copy(executor, src->arguments[i].field);
         copy->arguments[i].dirty = src->arguments[i].dirty;
         copy->arguments[i].last_hash = src->arguments[i].last_hash;
     }
@@ -324,7 +334,8 @@ functor_comp(
                             executor, this->arguments[i].field, op_comp,
                             &other->arguments[i].field
                         )
-                    ) || !dret.vtable) {
+                    ) ||
+                    !dret.vtable) {
                     return dret;
                 }
             }
@@ -349,20 +360,22 @@ functor_index(
     struct vector_field *index
 )
 {
-#pragma message("TODO, this should actually elide the functor entirely since its state is inconsistent...")
+#pragma message(                                                                               \
+    "TODO, this should actually elide the functor entirely since its state is inconsistent..." \
+)
     struct vector_field res = functor_get_res(executor, functor);
     if (!res.vtable || !res.vtable->op_index) {
         VECTOR_FIELD_ERROR(executor, "Cannot index field");
         return VECTOR_FIELD_NULL;
-    }    
-    
-    /* need this to be owned operation! */
-    struct functor* func = functor.value.pointer;
-    if (func->result->ref_count > 1) {
-        func->result = shared_init(VECTOR_FIELD_COPY(executor, func->result->res));
-        res = func->result->res;
     }
 
+    /* need this to be owned operation! */
+    struct functor *func = functor.value.pointer;
+    if (func->result->ref_count > 1) {
+        func->result =
+            shared_init(VECTOR_FIELD_COPY(executor, func->result->res));
+        res = func->result->res;
+    }
 
     return VECTOR_FIELD_BINARY(executor, res, op_index, index);
 }
@@ -375,7 +388,11 @@ functor_attribute(
 {
     struct functor *const functor = field.value.pointer;
     if (functor->force_const) {
-        VECTOR_FIELD_ERROR(executor, "Cannot read attributes of a functor with functional or reference parameters (this behavior may be changed in the future)");
+        VECTOR_FIELD_ERROR(
+            executor,
+            "Cannot read attributes of a functor with functional or reference "
+            "parameters (this behavior may be changed in the future)"
+        );
         return VECTOR_FIELD_NULL;
     }
     for (mc_ind_t i = 0; i < functor->argument_count; i++) {

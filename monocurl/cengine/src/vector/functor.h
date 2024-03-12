@@ -30,14 +30,14 @@ struct shared_vector_field {
 #pragma message("TODO, move to full on COW at some point? ")
 struct functor {
     struct vector_field function;
-    
+
     mc_bool_t force_const; /* whenever theres a reference argument */
     mc_count_t argument_count;
     /* names are reused and therefore unowned */
     struct vector_named_field *arguments;
-    
+
     struct shared_vector_field *result;
-    
+
     mc_bool_t dirty;
 };
 

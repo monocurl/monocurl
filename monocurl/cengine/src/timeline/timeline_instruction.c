@@ -1261,8 +1261,7 @@ expression_while_execute(
             node->condition->execute(node->condition, executor);
 
         struct vector_field const cast = vector_field_extract_type(
-            executor, &cond,
-            VECTOR_FIELD_TYPE_DOUBLE
+            executor, &cond, VECTOR_FIELD_TYPE_DOUBLE
         );
 
         if (!cast.vtable) {

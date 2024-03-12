@@ -325,7 +325,8 @@ vector_comp(
                 (vret = VECTOR_FIELD_BINARY(
                      executor, vec->fields[i], op_comp, rhs_v->fields + i
                  ))
-            ) || !vret.vtable) {
+            ) ||
+            !vret.vtable) {
             return vret;
         }
     }

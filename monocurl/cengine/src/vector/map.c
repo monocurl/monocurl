@@ -118,11 +118,10 @@ map_index(
         vector_field_extract_type(executor, index, VECTOR_FIELD_PURE);
     /* take ownership */
     *index = VECTOR_FIELD_NULL;
-    
+
     if (!rhs.vtable) {
         return VECTOR_FIELD_NULL;
     }
-
 
     struct map *const m = map.value.pointer;
 
@@ -136,7 +135,8 @@ map_index(
     mc_ind_t bucket = hash % m->node_capacity;
     for (struct map_node *node = m->nodes[bucket]; node;
          node = node->next_bucket) {
-        struct vector_field const sub = VECTOR_FIELD_BINARY(executor, node->field, op_comp, &rhs);
+        struct vector_field const sub =
+            VECTOR_FIELD_BINARY(executor, node->field, op_comp, &rhs);
         if (!sub.vtable) {
             VECTOR_FIELD_FREE(executor, rhs);
             return VECTOR_FIELD_NULL;
@@ -160,7 +160,7 @@ map_index(
             mc_ind_t const buck =
                 VECTOR_FIELD_HASH(executor, node->field) % m->node_capacity;
             assert(hash);
-            
+
             node->next_bucket = m->nodes[buck];
             m->nodes[buck] = node;
         }
