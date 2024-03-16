@@ -360,9 +360,6 @@ functor_index(
     struct vector_field *index
 )
 {
-#pragma message(                                                                               \
-    "TODO, this should actually elide the functor entirely since its state is inconsistent..." \
-)
     struct vector_field res = functor_get_res(executor, functor);
     if (!res.vtable || !res.vtable->op_index) {
         VECTOR_FIELD_ERROR(executor, "Cannot index field");
@@ -376,6 +373,10 @@ functor_index(
             shared_init(VECTOR_FIELD_COPY(executor, func->result->res));
         res = func->result->res;
     }
+#pragma message(                                                                               \
+    "TODO, this should actually elide the functor entirely since its state is inconsistent..." \
+)
+    func->force_const = 1;
 
     return VECTOR_FIELD_BINARY(executor, res, op_index, index);
 }
@@ -391,7 +392,7 @@ functor_attribute(
         VECTOR_FIELD_ERROR(
             executor,
             "Cannot read attributes of a functor with functional or reference "
-            "parameters (this behavior may be changed in the future)"
+            "parameters, or that has been modified through an index operation (this behavior may be changed in the future)"
         );
         return VECTOR_FIELD_NULL;
     }
