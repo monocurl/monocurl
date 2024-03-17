@@ -1,12 +1,21 @@
 # Monocurl (beta v0.1.0)
 <img width="1312" alt="monocurl" src="https://github.com/monocurl/monocurl/assets/43832426/d9be28e4-9916-4b18-949a-1b1f9b5d5530">
 
+![image](https://github.com/monocurl/monocurl/assets/43832426/ec18e407-31cb-4e6d-ae50-c44e4cef668d)
+![image](https://github.com/monocurl/monocurl/assets/43832426/2df89fb8-2e8e-439c-b1d9-7119884ba10e)
+![image](https://github.com/monocurl/monocurl/assets/43832426/031e366d-7a8b-4b0a-a4c4-60ecf0973324)
+![image](https://github.com/monocurl/monocurl/assets/43832426/689e05fa-1b7d-41e2-b43a-f87f4e939fd7)
+![image](https://github.com/monocurl/monocurl/assets/43832426/29c5bd64-9875-48de-a90e-fa00f3adaa81)
+![image](https://github.com/monocurl/monocurl/assets/43832426/76fc0d65-a04c-459e-b7ea-50aaa450d0b7)
+![image](https://github.com/monocurl/monocurl/assets/43832426/05821b7d-f89d-465c-b8e7-1d1a0f986ac4)
+
 
 *Make videos and slideshow presentations using math*
 
 Monocurl is a scripting language and a desktop application used to create STEM videos and slideshow. The core idea of Monocurl is to combine the benefits of programmatic animations with the traditional feel of a video editor. 
 
-[Website](https://www.monocurl.com/) | [Discord](https://discord.com/invite/7g94JR3SAD)
+## Download
+The beta edition for macOS and Windows is available on our [website](https://www.monocurl.com/). Please give feedback in our [Discord](https://discord.com/invite/7g94JR3SAD) server!
 
 ## Minimal Working Example
 
