@@ -376,7 +376,6 @@ functor_index(
 #pragma message(                                                                               \
     "TODO, this should actually elide the functor entirely since its state is inconsistent..." \
 )
-    func->force_const = 1;
 
     return VECTOR_FIELD_BINARY(executor, res, op_index, index);
 }
