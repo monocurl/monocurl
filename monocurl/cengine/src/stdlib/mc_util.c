@@ -164,7 +164,7 @@ lib_mc_zip(
         push = VECTOR_FIELD_COPY(executor, rv->fields[i]);
         vector_plus(executor, inner, &push);
 
-        vector_plus(executor, ret, &push);
+        vector_plus(executor, ret, &inner);
     }
 
     executor->return_register = ret;
