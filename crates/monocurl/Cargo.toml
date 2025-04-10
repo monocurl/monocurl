@@ -4,3 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+mc_ui = { path = "../mc_ui" }
+quarve = "0.1.2"

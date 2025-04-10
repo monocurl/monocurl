@@ -1,14 +1,35 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+use quarve::core::Environment;
+use quarve::prelude::{IntoViewProvider, StandardConstEnv, StandardVarEnv};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod editor;
+mod home;
+mod timeline;
+mod viewport;
+mod project_window;
+pub mod home_window;
+mod menu;
+mod theme;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+pub struct Env(StandardConstEnv, StandardVarEnv);
+
+impl Environment for Env {
+    type Const = StandardConstEnv;
+    type Variable = StandardVarEnv;
+
+    fn root_environment() -> Self {
+        Env(StandardConstEnv::new(), StandardVarEnv::new())
     }
+
+    fn const_env(&self) -> &Self::Const {
+        &self.0
+    }
+
+    fn variable_env(&self) -> &Self::Variable { &self.1 }
+
+    fn variable_env_mut(&mut self) -> &mut Self::Variable { &mut self.1 }
 }
+
+pub(crate) trait IVP: IntoViewProvider<Env, UpContext=(), DownContext=()> { }
+
+impl<I> IVP for I where I: IntoViewProvider<Env, UpContext=(), DownContext=()> { }
+

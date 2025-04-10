@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
 
-members = [ "crates/mc_compiler", "crates/mc_executor", "crates/mc_exporter", "crates/mc_geo", "crates/mc_lexer", "crates/mc_parser", "crates/mc_renderer", "crates/mc_server", "crates/mc_stdlib", "crates/mc_ui", "crates/mc_util","crates/monocurl" ]
+members = [ "crates/mc_autocomplete", "crates/mc_compiler", "crates/mc_executor", "crates/mc_exporter", "crates/mc_geo", "crates/mc_lexer", "crates/mc_parser", "crates/mc_renderer", "crates/mc_server", "crates/mc_stdlib", "crates/mc_ui", "crates/mc_util","crates/monocurl" ]

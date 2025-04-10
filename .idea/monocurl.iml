@@ -2,6 +2,19 @@
 <module type="EMPTY_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_autocomplete/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_compiler/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_executor/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_exporter/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_geo/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_lexer/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_libmc/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_parser/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_renderer/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_server/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_stdlib/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_ui/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/mc_util/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/monocurl/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

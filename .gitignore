@@ -1,6 +1,7 @@
 *.p12
 .DS_Store
 target
+quarve_target
 *.swp
 
 # idea
