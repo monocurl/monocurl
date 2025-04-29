@@ -1,16 +1,15 @@
-use quarve::prelude::*;
-use quarve::view::text::TextModifier;
 use crate::home::logo::logo;
 use crate::home::projects::projects;
+use crate::theme::TRANSLUCENT_PURPLE;
 use crate::IVP;
-use crate::theme::{TRANSLUCENT_PURPLE};
+use quarve::prelude::*;
+use quarve::view::text::TextModifier;
 
 mod logo {
+    use crate::IVP;
     use quarve::prelude::*;
-    use quarve::view::color_view::EmptyView;
     use quarve::view::image_view::ImageView;
     use quarve::view::text::TextModifier;
-    use crate::IVP;
 
     pub fn logo() -> impl IVP {
         vstack()
@@ -38,11 +37,11 @@ mod logo {
 }
 
 mod projects {
+    use crate::theme::{SUPER_DARK_GRAY, TRANSLUCENT_PURPLE};
+    use crate::IVP;
     use quarve::prelude::*;
     use quarve::view::scroll::ScrollView;
     use quarve::view::text::TextModifier;
-    use crate::IVP;
-    use crate::theme::{SUPER_DARK_GRAY, TRANSLUCENT_PURPLE};
 
     fn header() -> impl IVP {
         hstack()
