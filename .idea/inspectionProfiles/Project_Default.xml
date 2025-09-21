@@ -2,5 +2,14 @@
   <profile version="1.0">
     <option name="myName" value="Project Default" />
     <inspection_tool class="LatexLineBreak" enabled="false" level="WEAK WARNING" enabled_by_default="false" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <value>
+          <list size="1">
+            <item index="0" class="java.lang.String" itemvalue="infra" />
+          </list>
+        </value>
+      </option>
+    </inspection_tool>
   </profile>
 </component>

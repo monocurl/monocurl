@@ -1,8 +1,0 @@
-[package]
-name = "mc_ui"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-quarve = "0.1.2"
-log = "0.4.25"

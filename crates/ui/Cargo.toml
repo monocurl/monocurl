@@ -1,0 +1,11 @@
+[package]
+name = "ui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+structs.workspace = true
+
+log.workspace = true
+gpui.workspace = true
+unicode-segmentation.workspace = true

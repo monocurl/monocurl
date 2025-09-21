@@ -1,4 +1,41 @@
 [workspace]
 resolver = "2"
 
-members = [ "crates/mc_autocomplete", "crates/mc_compiler", "crates/mc_executor", "crates/mc_exporter", "crates/mc_geo", "crates/mc_lexer", "crates/mc_parser", "crates/mc_renderer", "crates/mc_server", "crates/mc_stdlib", "crates/mc_ui", "crates/mc_util","crates/monocurl" ]
+members = [
+    "crates/autocomplete",
+    "crates/cli",
+    "crates/compiler",
+    "crates/executor",
+    "crates/exporter",
+    "crates/geo",
+    "crates/lexer",
+    "crates/parser",
+    "crates/renderer",
+    "crates/server",
+    "crates/stdlib",
+    "crates/structs",
+    "crates/ui",
+    "crates/monocurl",
+]
+
+[workspace.dependencies]
+log = "0.4.25"
+arrayvec = "0.7.6"
+unicode-segmentation = "1.12.0"
+
+gpui = { path = "../gpui/crates/gpui" }
+
+autocomplete = { path = "crates/autocomplete" }
+cli = { path = "crates/cli" }
+compiler = { path = "crates/compiler" }
+executor = { path = "crates/executor" }
+exporter = { path = "crates/exporter" }
+geo = { path = "crates/geo" }
+lexer = { path = "crates/lexer" }
+parser = { path = "crates/parser" }
+renderer = { path = "crates/renderer" }
+server = { path = "crates/server" }
+stdlib = { path = "crates/stdlib" }
+structs = { path = "crates/structs" }
+ui = { path = "crates/ui" }
+monocurl = { path = "crates/monocurl" }

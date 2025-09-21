@@ -1,8 +1,0 @@
-[package]
-name = "mc_server"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-quarve = "0.1.2"
-quarve_derive = "0.1.0"
