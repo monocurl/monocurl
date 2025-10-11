@@ -1,4 +1,4 @@
-use crate::state::EditorState;
+// use crate::state::EditorState;
 
 pub trait OrchestratorService {}
 
@@ -19,7 +19,7 @@ impl Orchestrator {
 
 // maybe have this be a trait and depending on rendering / live we do different things?
 pub struct Editor {
-    state: EditorState,
+    // state: EditorState,
 }
 
 impl Editor {

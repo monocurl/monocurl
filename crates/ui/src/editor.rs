@@ -1,11 +1,13 @@
 use gpui::*;
 
+pub mod text_editor;
+mod backing;
 
-pub struct Viewport {
+pub struct Editor {
 
 }
 
-impl Viewport {
+impl Editor {
     pub fn new(_cx: &mut gpui::Context<Self>) -> Self {
         Self {
 
@@ -13,9 +15,9 @@ impl Viewport {
     }
 }
 
-impl Render for Viewport {
+impl Render for Editor {
     fn render(&mut self, _window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        gpui::div()
-            .child("Viewport")
+        div()
+            .child("Editor")
     }
 }

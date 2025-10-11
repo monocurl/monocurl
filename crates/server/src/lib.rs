@@ -1,3 +1,4 @@
+pub mod doc_type;
 mod orchestrator;
 mod state;
 

@@ -66,7 +66,7 @@ pub enum Token {
 pub struct Lexer {}
 
 impl Lexer {
-    pub fn token_stream(&self) -> &Vec<Lexer> {}
+    // pub fn token_stream(&self) -> &Vec<Lexer> {}
 
     pub fn clear(&self) {}
 

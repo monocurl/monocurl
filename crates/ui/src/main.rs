@@ -1,0 +1,123 @@
+use std::borrow::Cow;
+
+use gpui::*;
+use structs::assets::Assets;
+use crate::{actions::{Copy, Cut, Paste, Quit, Redo, SaveActiveDocument, Undo}, window::MonocurlWindow};
+
+mod document;
+mod editor;
+mod home;
+mod navbar;
+mod state;
+mod theme;
+mod timeline;
+mod util;
+mod viewport;
+mod window;
+mod actions;
+
+pub struct MonocurlLauncher;
+
+impl MonocurlLauncher {
+
+    fn setup_fonts(cx: &mut App) {
+        cx.text_system()
+            .add_fonts(vec![Cow::Owned(
+                std::fs::read(Assets::font("IBMPlexMono-Regular.ttf")).unwrap(),
+            )])
+            .unwrap();
+
+        cx.text_system()
+            .add_fonts(vec![Cow::Owned(
+                std::fs::read(Assets::font("Lilex-Regular.ttf")).unwrap(),
+            )])
+            .unwrap();
+    }
+
+    fn setup_global_actions(cx: &mut App) {
+        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+
+        cx.bind_keys([KeyBinding::new("cmd-s", SaveActiveDocument, None)]);
+    }
+
+    fn setup_menus(cx: &mut App) {
+        cx.set_menus(vec![
+            Menu {
+                name: "Monocurl".into(),
+                items: vec![
+                    #[cfg(target_os = "macos")]
+                    MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Monocurl", Quit),
+                ],
+            },
+            Menu {
+                name: "File".into(),
+                items: vec![
+                    MenuItem::action("Save", SaveActiveDocument),
+                ],
+            },
+            Menu {
+                name: "Edit".into(),
+                items: vec![
+                    MenuItem::os_action("Undo", Undo, OsAction::Undo),
+                    MenuItem::os_action("Redo", Redo, OsAction::Redo),
+                    MenuItem::separator(),
+                    MenuItem::os_action("Cut", Cut, OsAction::Cut),
+                    MenuItem::os_action("Copy", Copy, OsAction::Copy),
+                    MenuItem::os_action("Paste", Paste, OsAction::Paste),
+                ],
+            },
+            Menu {
+                name: "Help".into(),
+                items: vec![],
+            },
+            ]
+        );
+    }
+
+    fn setup_modules(cx: &mut App) {
+       document::init(cx);
+    }
+
+    fn create_window(cx: &mut App) {
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some("Monocurl".into()),
+                ..Default::default()
+            }),
+            window_min_size: Some(size(px(900.), px(600.))),
+            focus: true,
+            ..Default::default()
+        };
+        cx.open_window(options, |_, cx| cx.new(|cx| MonocurlWindow::new(cx)))
+            .unwrap();
+
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
+    }
+
+    fn launch() {
+        Application::new().run(|cx: &mut App| {
+            Self::setup_fonts(cx);
+            Self::setup_modules(cx);
+            Self::setup_global_actions(cx);
+            Self::setup_menus(cx);
+            Self::create_window(cx);
+        });
+    }
+
+}
+
+fn main() {
+    env_logger::Builder::from_default_env()
+          .filter_level(log::LevelFilter::Info)
+          .init();
+
+    MonocurlLauncher::launch();
+}

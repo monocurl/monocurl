@@ -1,37 +1,13 @@
 use std::ops::Range;
 
-use gpui::{
-    actions, black, div, fill, hsla, opaque_grey, point, prelude::*, px, relative, rgb, rgba, size,
-    white, yellow, App, Application, Bounds, ClipboardItem, Context, CursorStyle, ElementId,
-    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, GlobalElementId,
-    KeyBinding, Keystroke, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    PaintQuad, Pixels, Point, ShapedLine, SharedString, Style, TextRun, UTF16Selection,
-    UnderlineStyle, Window, WindowBounds, WindowOptions,
-};
-use structs::text::{Count16, Count8, Location16, Location8, Span16, Span8};
 use crate::editor::backing::{NaiveBackend, TextBackend};
+use gpui::*;
+use structs::text::{Count16, Count8, Location16, Location8, Span16, Span8};
 
-actions!(
-    text_input,
-    [
-        Backspace,
-        Delete,
-        Left,
-        Right,
-        SelectLeft,
-        SelectRight,
-        SelectAll,
-        Home,
-        End,
-        ShowCharacterPalette,
-        Paste,
-        Cut,
-        Copy,
-    ]
-);
+use crate::actions::*;
 
 // Supports text highlights
-pub struct TextEditor<B: TextBackend = NaiveBackend> {
+pub struct TextEditor<B: TextBackend> {
     pub focus_handle: FocusHandle,
     pub backend: B,
     pub placeholder: String,
@@ -43,7 +19,7 @@ pub struct TextEditor<B: TextBackend = NaiveBackend> {
     pub is_selecting: bool,
 }
 
-impl TextEditor {
+impl TextEditor<NaiveBackend> {
     pub fn new(cx: &mut Context<Self>) -> Self {
         TextEditor {
             focus_handle: cx.focus_handle(),
@@ -345,8 +321,8 @@ impl<B: TextBackend> EntityInputHandler for TextEditor<B> {
     }
 }
 
-struct TextElement {
-    input: Entity<TextEditor>,
+struct TextElement<B: TextBackend> {
+    input: Entity<TextEditor<B>>,
 }
 
 struct PrepaintState {
@@ -355,7 +331,7 @@ struct PrepaintState {
     selection: Option<PaintQuad>,
 }
 
-impl IntoElement for TextElement {
+impl<B: TextBackend> IntoElement for TextElement<B> {
     type Element = Self;
 
     fn into_element(self) -> Self::Element {
@@ -363,7 +339,7 @@ impl IntoElement for TextElement {
     }
 }
 
-impl Element for TextElement {
+impl<B: TextBackend> Element for TextElement<B> {
     type RequestLayoutState = ();
     type PrepaintState = PrepaintState;
 
@@ -522,13 +498,13 @@ impl Element for TextElement {
     }
 }
 
-impl Focusable for TextEditor {
+impl<B: TextBackend> Focusable for TextEditor<B> {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for TextEditor {
+impl<B: TextBackend> Render for TextEditor<B> {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()

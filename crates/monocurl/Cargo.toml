@@ -4,5 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+unicode-segmentation = "1.10.0"
 ui.workspace = true
 gpui.workspace = true

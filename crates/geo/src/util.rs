@@ -33,5 +33,4 @@ impl Mesh {
 
 // MARK: color / visuals
 impl Mesh {
-    p
 }
