@@ -1,4 +1,4 @@
-use gpui::Rgba;
+use gpui::{rgb, Rgba};
 
 pub struct ColorSet;
 
@@ -12,16 +12,51 @@ impl ColorSet {
     };
 
     pub const PURPLE: Rgba = Rgba {
-        r: 35.0 / 255.0,
-        g: 16.0 / 255.0,
-        b: 44.0 / 255.0,
+        r: 135.0 / 255.0,
+        g: 116.0 / 255.0,
+        b: 144.0 / 255.0,
         a:  1.0
     };
 
+    pub const SIDE_PANEL_GRAY: Rgba = Rgba {
+        r: 230.0 / 255.0,
+        g: 233.0 / 255.0,
+        b: 238.0 / 255.0,
+        a: 1.0
+    };
+
+    pub const TOOLBAR_GRAY: Rgba = Rgba {
+        r: 211.0 / 255.0,
+        g: 215.0 / 255.0,
+        b: 225.0 / 255.0,
+        a: 1.0
+    };
+
+    pub const SUPER_LIGHT_GRAY: Rgba = Rgba {
+        r: 239.0 / 255.0,
+        g: 241.0 / 255.0,
+        b: 245.0 / 255.0,
+        a: 1.0
+    };
+
     pub const LIGHT_GRAY: Rgba = Rgba {
-        r: 180.0 / 255.0,
-        g: 180.0 / 255.0,
-        b: 180.0 / 255.0,
+        r: 221.0 / 255.0,
+        g: 224.0 / 255.0,
+        b: 231.0 / 255.0,
+        a: 1.0
+    };
+
+    pub const GRAY: Rgba = Rgba {
+        r: 85.0 / 255.0,
+        g: 85.0 / 255.0,
+        b: 85.0 / 255.0,
+        a: 1.0
+    };
+
+    pub const DARK_GRAY: Rgba = Rgba {
+        r: 43.0 / 255.0,
+        g: 46.0 / 255.0,
+        b: 47.0 / 255.0,
         a: 1.0
     };
 

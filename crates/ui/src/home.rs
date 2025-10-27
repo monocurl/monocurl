@@ -5,9 +5,9 @@ use log::{log, Level};
 use server::doc_type::DocumentType;
 use structs::assets::Assets;
 
-use crate::{state::{ActiveScreen, WindowState}, theme::ColorSet, util::link_button};
+use crate::{navbar::Navbar, state::{ActiveScreen, WindowState}, theme::ColorSet, util::link_button};
 
-const SHOULD_PROMPT_ON_DELETE: bool = false;
+const SHOULD_PROMPT_ON_DELETE: bool = true;
 
 fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
     let home_dir = dirs::home_dir()?;
@@ -19,44 +19,55 @@ fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
 }
 
 pub struct HomeView {
+    navbar: Entity<Navbar>,
     state: Entity<WindowState>
 }
 
 impl HomeView {
-    pub fn new(_cx: &mut Context<HomeView>, state: Entity<WindowState>) -> Self {
+    pub fn new(cx: &mut Context<HomeView>, state: Entity<WindowState>) -> Self {
+        let navbar = cx.new(|cx| {
+            Navbar::new(state.downgrade(), cx)
+        });
+
         Self {
+            navbar,
             state
         }
     }
 
-    fn open(&mut self, path: std::path::PathBuf, cx: &mut App) {
-        log::info!("Opening project {:?}", path);
+    fn open(&mut self, internal_path: std::path::PathBuf, user_path: Option<std::path::PathBuf>, cx: &mut App) {
+        log::info!("Opening project {:?}", user_path);
 
         self.state.update(cx, move |state, cx| {
-            state.navigate_to(path.clone(), cx.entity(), cx);
+            state.navigate_to(user_path.clone(), internal_path.clone(), cx.entity(), cx);
         });
     }
 
-    fn add(&mut self, path: std::path::PathBuf, cx: &mut App) -> Result<(), String> {
+    fn import(&mut self, path: std::path::PathBuf, cx: &mut App) -> Result<(), String> {
         log::info!("Adding project {:?}", path);
 
         self.state.update(cx, move |state, _cx| {
-            state.add(path)
+            state.import(path)
         })
     }
 
-    fn create_default(&mut self, path: std::path::PathBuf, dtype: DocumentType, _cx: &mut App) {
-        log::info!("Creating default {:?} at {:?}", dtype, path);
+    fn create_default(&mut self, dtype: DocumentType, cx: &mut App) {
+        log::info!("Creating default {:?}", dtype);
 
-        let content = dtype.default_file();
-        let _ = std::fs::write(&path, content);
+        let path = self.state.update(cx, move |state, _cx| {
+            state.create_new_document(dtype)
+        });
+
+        self.state.update(cx, move |state, cx| {
+            state.navigate_to(None, path, cx.entity(), cx);
+        });
     }
 
-    fn delete(&mut self, path: std::path::PathBuf, cx: &mut App) {
-        log::info!("Deleting project {:?}", path);
+    fn forget(&mut self, internal_path: std::path::PathBuf, cx: &mut App) {
+        log::info!("Forgetting project {:?}", internal_path);
 
         self.state.update(cx, move |state, _cx| {
-            state.remove(path);
+            state.forget_project(&internal_path);
         });
     }
 
@@ -64,49 +75,75 @@ impl HomeView {
         div()
             .flex()
             .flex_col()
+            .justify_center()
             .items_center()
             .child(
-                img(Assets::image("monocurl-1024.png"))
-                    .w(px(400.))
-                    .h(px(400.))
-                    .p_10()
-            )
-            .child(
                 div()
-                    .child("Monocurl")
-                    .text_2xl()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .child(
+                                img(Assets::image("monocurl-1024.png"))
+                                    .w(px(400.))
+                                    .h(px(400.))
+                                    .p_10()
+                            )
+                            .child(
+                                div()
+                                    .child("Monocurl")
+                                    .text_2xl()
+                                    .text_color(white())
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .child(link_button("Website", cx.listener(|_, _, _, _| {
+                                        let _ = open::that("https://monocurl.com");
+                                    })))
+                                    .child(link_button("Source Code", cx.listener(|_, _, _, _| {
+                                        let _ =open::that("https://github.com/monocurl/monocurl");
+                                    })))
+                                    .child(link_button("Discord", cx.listener(|_, _, _, _| {
+                                        let _ = open::that("https://discord.com/invite/7g94JR3SAD");
+                                    })))
+                                    .gap_3()
+                            )
+                            .rounded(px(6.))
+                            .bg(black())
+                            .p_8()
+                            .w(px(400.))
+                    )
             )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .child(link_button("Website", cx.listener(|_, _, _, _| {
-                        let _ = open::that("https://monocurl.com");
-                    })))
-                    .child(link_button("Source Code", cx.listener(|_, _, _, _| {
-                        let _ =open::that("https://github.com/monocurl/monocurl");
-                    })))
-                    .child(link_button("Discord", cx.listener(|_, _, _, _| {
-                        let _ = open::that("https://discord.com/invite/7g94JR3SAD");
-                    })))
-                    .gap_3()
-            )
+            .bg(ColorSet::SIDE_PANEL_GRAY)
             .min_w(px(500.))
             .w(relative(0.5))
             .max_w(px(600.))
-            .pt_32()
     }
 
-    fn single_project(&self, raw_path: &std::path::Path, cx: &Context<Self>) -> impl IntoElement {
-        let path = sub_home_dir(raw_path)
-            .unwrap_or(raw_path.to_path_buf())
-            .to_string_lossy().to_string();
-        let path_for_open = raw_path.to_path_buf();
-        let path_for_remove = raw_path.to_path_buf();
+    fn single_project(&self, internal_path: &std::path::Path, user_path: Option<&std::path::PathBuf>, cx: &Context<Self>) -> impl IntoElement {
+        let path = if let Some(path) = user_path {
+            sub_home_dir(path)
+            .unwrap_or(path.to_path_buf())
+            .to_string_lossy().to_string()
+        } else {
+            "Untitled".to_string()
+        };
 
-        let name = raw_path.file_name()
+        let path_for_open = user_path
+            .map(|p| p.to_path_buf());
+        let path_for_remove = user_path
+            .map(|p| p.to_path_buf());
+
+        let internal_path = internal_path.to_path_buf();
+        let internal_path_for_remove = internal_path.clone();
+
+        let name = user_path
+            .and_then(|f| f.file_name())
             .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or("<unknown>".to_string());
+            .unwrap_or("Untitled".to_string());
 
         let id: SharedString = format!("project {}", path).into();
         let group_name: SharedString = "project-group".into();
@@ -123,7 +160,7 @@ impl HomeView {
                     .left(px(0.))
                     .size_full()
                     .bg(black().opacity(0.0))
-                    .group_hover(group_name.clone(), |this| this.bg(black().opacity(0.3)))
+                    .group_hover(group_name.clone(), |this| this.bg(black().opacity(0.1)))
             )
             .child(
                 div()
@@ -135,7 +172,7 @@ impl HomeView {
                     .w_full()
                     .p_2()
                     .on_click(cx.listener(move |this, _event, _window, cx| {
-                        this.open(path_for_open.clone(), cx);
+                        this.open(internal_path.clone(), path_for_open.clone(), cx);
                     }))
                     .child(
                         div()
@@ -147,12 +184,12 @@ impl HomeView {
                                 div()
                                     .child(name.clone())
                                     .text_sm()
-                                    .text_color(gpui::white())
+                                    .text_color(gpui::black())
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(ColorSet::LIGHT_GRAY)
+                                    .text_color(ColorSet::GRAY)
                                     .child(path)
                                     .truncate()
                             )
@@ -180,15 +217,19 @@ impl HomeView {
                                 window.prevent_default();
 
                                 if SHOULD_PROMPT_ON_DELETE {
+                                    let name = path_for_remove
+                                        .as_ref()
+                                        .and_then(|f| f.file_name())
+                                        .map(|f| f.to_string_lossy().to_string())
+                                        .unwrap_or("Untitled".into());
                                     let confirm = window.prompt(
                                         PromptLevel::Warning,
-                                        &format!("Forget \"{}\"?", path_for_remove.file_name().map(
-                                            |f| f.to_string_lossy()).unwrap_or("Unknown".into())),
-                                        Some("This action will not delete any files on your disk."),
+                                        &format!("Forget \"{}\"?", name),
+                                        None,
                                         &[PromptButton::Cancel("Cancel".into()), PromptButton::Ok("Forget Project".into())],
                                         cx);
 
-                                    let path_copy = path_for_remove.clone();
+                                    let path_copy = internal_path_for_remove.clone();
                                     cx.spawn(async move |this, app| {
                                         let Some(this) = this.upgrade() else {
                                             return;
@@ -197,14 +238,14 @@ impl HomeView {
                                         if confirm.await == Ok(1) {
                                             let _ = app.update(move |cx| {
                                                 let _ = this.update(cx, move |this, cx| {
-                                                    this.delete(path_copy, cx);
+                                                    this.forget(path_copy, cx);
                                                 });
                                             });
                                         }
                                     }).detach();
                                 }
                                 else {
-                                    this.delete(path_for_remove.clone(), cx);
+                                    this.forget(internal_path_for_remove.clone(), cx);
                                 }
                             }))
                     )
@@ -233,7 +274,7 @@ impl HomeView {
 
                             projects[range]
                                 .iter()
-                                .map(|p| this.single_project(p, cx))
+                                .map(|p| this.single_project(&p.internal_path, p.user_path.as_ref(), cx))
                                 .collect()
                         })
                     )
@@ -246,24 +287,6 @@ impl HomeView {
 
     fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
         fn new_file(dtype: DocumentType, cx: &Context<HomeView>) {
-            let dir = dirs::home_dir().unwrap_or_default();
-            let path = cx.prompt_for_new_path(dir.as_ref(), Some(&("Untitled.".to_string() + dtype.extension())));
-
-            cx.spawn(async move |this, app| {
-                let Some(this) = this.upgrade() else {
-                    return;
-                };
-                let Ok(Ok(Some(path))) = path.await else {
-                    return;
-                };
-
-                let _ = app.update(move |cx| {
-                    let _ = this.update(cx, move |this, cx| {
-                        this.create_default(path.clone(), dtype, cx);
-                        let _ = this.add(path, cx);
-                    });
-                });
-            }).detach();
         };
 
         div()
@@ -306,20 +329,20 @@ impl HomeView {
 
                                 let _ = app.update(move |app| {
                                     let _ = this.update(app, |this, cx| {
-                                        let _ = this.add(path, cx);
+                                        let _ = this.import(path, cx);
                                     });
                                 });
                             }).detach();
                         }))
                     )
                     .child(
-                        link_button("New Scene", cx.listener(move |_, _, _, cx| {
-                            new_file(DocumentType::Scene, cx);
+                        link_button("New Scene", cx.listener(move |this, _, _, cx| {
+                            this.create_default(DocumentType::Scene, cx);
                         }))
                     )
                     .child(
-                        link_button("New Library", cx.listener(move |_, _, _, cx| {
-                            new_file(DocumentType::Library, cx);
+                        link_button("New Library", cx.listener(move |this, _, _, cx| {
+                            this.create_default(DocumentType::Library, cx);
                         }))
                     )
                     .gap_2()
@@ -332,24 +355,32 @@ impl HomeView {
                     .bg(ColorSet::PURPLE)
             )
             .child(self.projects_list(cx))
-            .bg(ColorSet::SUPER_DARK_GRAY)
+            .bg(ColorSet::SUPER_LIGHT_GRAY)
     }
 }
 
 impl Render for HomeView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .flex()
-            .flex_row()
-            .child(self.render_logo(cx))
+            .flex_col()
+            .child(
+                self.navbar.clone()
+            )
             .child(
                 div()
-                    .w(px(4.))
-                    .h_full()
-                    .bg(ColorSet::PURPLE)
+                    .flex()
+                    .flex_row()
+                    .child(self.render_logo(cx))
+                    .child(
+                        div()
+                            .w(px(4.))
+                            .h_full()
+                            .bg(ColorSet::PURPLE)
+                    )
+                    .child(self.render_projects(cx))
+                    .size_full()
             )
-            .child(self.render_projects(cx))
-            .text_color(gpui::white())
+            .text_color(gpui::black())
             .size_full()
     }
 }

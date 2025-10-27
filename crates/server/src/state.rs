@@ -1,17 +1,35 @@
 use std::path::PathBuf;
 
+use lexer::stateful_lexer::StatefulLexer;
+
 // pub struct ImportResolver {}
+//
+
+pub struct Document {
+    location: PathBuf,
+
+    content_rope: String,
+    content_stack: Vec<String>,
+
+    lexing_attribute_rope: String,
+    compiler_attribute_rope: String,
+
+    parameter_state: Vec<String>,
+    error_state: Vec<String>,
+    autocompletion_state: Vec<String>,
+
+    dirty: bool,
+
+    lexer: StatefulLexer,
+    // parser: Parser,
+    // compiler: Compiler,
+    // executor: Executor,
+}
 
 // pub struct Document {
-//     location: PathBuf,
 
 //     // each one of these components acts as a state machine, and uses
 //     // channels to communicate information to other components
-//     lexer: Lexer,
-//     parser: Parser,
-//     compiler: Compiler,
-//     autocompletor: AutoCompletor,
-//     executor: Executor,
 // }
 
 // pub struct Executor {

@@ -15,6 +15,7 @@ mod util;
 mod viewport;
 mod window;
 mod actions;
+mod components;
 
 pub struct MonocurlLauncher;
 

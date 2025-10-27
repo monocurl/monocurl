@@ -4716,6 +4716,7 @@ dependencies = [
 name = "server"
 version = "0.1.0"
 dependencies = [
+ "lexer",
  "schemars",
 ]
 
@@ -5630,6 +5631,7 @@ dependencies = [
  "server",
  "structs",
  "unicode-segmentation",
+ "uuid",
 ]
 
 [[package]]
