@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use gpui::{App, AppContext, Context, ElementClickedState, Entity, PromptButton, PromptLevel, ScrollHandle};
+use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle};
 use serde::{Deserialize, Serialize};
 use server::doc_type::DocumentType;
 
@@ -301,7 +301,7 @@ impl WindowState {
 
                 if confirm.await == Ok(1) {
                     let _ = app.update(move |cx| {
-                        let _ = this.update(cx, move |this, cx| {
+                        let _ = this.update(cx, move |this, _cx| {
                             actually_close(this, &user_path, &internal_path);
                         });
                     });

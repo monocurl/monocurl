@@ -29,7 +29,7 @@ impl MonocurlWindow {
         self.render_screen(self.home.clone())
     }
 
-    pub fn render_editor(&self, document: &OpenDocument, cx: &Context<Self>) -> impl IntoElement {
+    pub fn render_editor(&self, document: &OpenDocument, _cx: &Context<Self>) -> impl IntoElement {
         self.render_screen(document.view.clone())
     }
 

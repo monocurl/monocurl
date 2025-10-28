@@ -123,7 +123,7 @@ impl Element for Split {
 
     fn paint(
         &mut self,
-        id: Option<&GlobalElementId>,
+        _id: Option<&GlobalElementId>,
         _inspector_id: Option<&gpui::InspectorElementId>,
         _bounds: Bounds<Pixels>,
         _state: &mut Self::RequestLayoutState,
@@ -134,7 +134,7 @@ impl Element for Split {
         self.first.paint(window, cx);
         self.second.paint(window, cx);
 
-        paint_split_handle(id, layout, window, cx);
+        paint_split_handle(layout, window, cx);
     }
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
@@ -152,7 +152,6 @@ pub struct SplitLayout {
 }
 
 fn paint_split_handle(
-    id: Option<&GlobalElementId>,
     layout: &mut SplitLayout,
     window: &mut Window,
     _cx: &mut App,

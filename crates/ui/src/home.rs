@@ -1,11 +1,10 @@
 use std::{ops::Range, path::PathBuf};
 
 use gpui::*;
-use log::{log, Level};
 use server::doc_type::DocumentType;
 use structs::assets::Assets;
 
-use crate::{navbar::Navbar, state::{ActiveScreen, WindowState}, theme::ColorSet, util::link_button};
+use crate::{navbar::Navbar, state::WindowState, theme::ColorSet, util::link_button};
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
 
@@ -286,9 +285,6 @@ impl HomeView {
     }
 
     fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        fn new_file(dtype: DocumentType, cx: &Context<HomeView>) {
-        };
-
         div()
             .flex()
             .flex_col()

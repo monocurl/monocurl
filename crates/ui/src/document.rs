@@ -75,7 +75,7 @@ impl DocumentView {
         cx.notify();
     }
 
-    fn toggle_playing(&mut self, _ : &TogglePlaying, _w: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_playing(&mut self, _ : &TogglePlaying, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Toggle Playing");
     }
 
@@ -83,31 +83,31 @@ impl DocumentView {
         // for now, not going to do anything?
     }
 
-    fn prev_slide(&mut self, _ : &PrevSlide, _w: &mut Window, cx: &mut Context<Self>) {
+    fn prev_slide(&mut self, _ : &PrevSlide, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Prev Slide");
     }
 
-    fn next_slide(&mut self, _ : &NextSlide, _w: &mut Window, cx: &mut Context<Self>) {
+    fn next_slide(&mut self, _ : &NextSlide, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Next Slide");
     }
 
-    fn scene_start(&mut self, _ : &SceneStart, _w: &mut Window, cx: &mut Context<Self>) {
+    fn scene_start(&mut self, _ : &SceneStart, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Scene Start");
     }
 
-    fn scene_end(&mut self, _ : &SceneEnd, _w: &mut Window, cx: &mut Context<Self>) {
+    fn scene_end(&mut self, _ : &SceneEnd, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Scene End");
     }
 
-    fn epsilon_forward(&mut self, _ : &EpsilonForward, _w: &mut Window, cx: &mut Context<Self>) {
+    fn epsilon_forward(&mut self, _ : &EpsilonForward, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Epsilon Forward");
     }
 
-    fn epsilon_backward(&mut self, _ : &EpsilonBackward, _w: &mut Window, cx: &mut Context<Self>) {
+    fn epsilon_backward(&mut self, _ : &EpsilonBackward, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Epsilon Backward");
     }
 
-    fn save_document(&mut self, _ : &SaveActiveDocument, _w: &mut Window, cx: &mut Context<Self>) {
+    fn save_document(&mut self, _ : &SaveActiveDocument, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Saving Document Backward");
 
         // TODO
