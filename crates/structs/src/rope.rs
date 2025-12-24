@@ -21,7 +21,7 @@ pub trait LeafData: Clone + Sized {
     fn try_append(&mut self, from: Self) -> Option<Self>;
 
     fn iterator(&self, at: Count8, to: Count8) -> Self::Iterator<'_>;
-    fn utf8_bytes(&self) -> Count8;
+    fn codeunits(&self) -> usize;
 }
 
 pub trait AggregateData: Clone + Sized {
@@ -30,9 +30,9 @@ pub trait AggregateData: Clone + Sized {
     fn from_leaf(data: &Self::LeafData) -> Self;
     fn merge(children: &[Self]) -> Self;
 
-    fn bytes_utf8(&self) -> Count8;
+    fn codeunits(&self) -> usize;
     fn depth(&self) -> u32;
-    fn weight(&self) -> usize;
+    fn nodes(&self) -> usize;
 }
 
 mod internal {
@@ -40,7 +40,6 @@ mod internal {
 
     use crate::{rope::{AggregateData, DEFAULT_CHILDREN, TextAggregate, TextPrefixSummary}, text::{Count8, Count16}};
 
-    // weight is calculated with respect to utf8
     pub(super) enum RopeNode<S: AggregateData, const N: usize = DEFAULT_CHILDREN> {
         Internal {
             agg: S,
@@ -80,7 +79,7 @@ mod internal {
             F: FnMut(&TextPrefixSummary, &RopeNode<TextAggregate, N>) -> ChildIterationResult,
         {
             let mut bytes_utf8 = 0;
-            let mut bytes_utf16 = 0;
+            let mut codeunits_utf16 = 0;
             let mut newlines = 0;
             let mut bytes_utf8_since_newline = 0;
 
@@ -91,13 +90,13 @@ mod internal {
                     ChildIterationResult::AggregateNone => break,
                     ChildIterationResult::AggregateFull => {
                         bytes_utf8 += child_summary.bytes_utf8;
-                        bytes_utf16 += child_summary.codeunits_utf16;
+                        codeunits_utf16 += child_summary.codeunits_utf16;
                         newlines += child_summary.newlines;
                         bytes_utf8_since_newline = child_summary.bytes_utf8_since_newline;
                     }
                     ChildIterationResult::AggregatePrefix(summary) => {
                         bytes_utf8 += summary.bytes_utf8;
-                        bytes_utf16 += summary.codeunits_utf16;
+                        codeunits_utf16 += summary.codeunits_utf16;
                         newlines += summary.newlines;
                         bytes_utf8_since_newline = summary.bytes_utf8_since_newline;
                         break;
@@ -107,7 +106,7 @@ mod internal {
 
             TextPrefixSummary {
                 bytes_utf8,
-                codeunits_utf16: bytes_utf16,
+                codeunits_utf16,
                 newlines,
                 bytes_utf8_since_newline,
             }
@@ -138,7 +137,7 @@ mod internal {
                 RopeNode::Leaf { data, .. } => {
                     let hunk = &data.0[..at.min(data.0.len())];
                     let bytes_utf8 = hunk.len();
-                    let bytes_utf16 = hunk.encode_utf16().count();
+                    let codeunits_utf16 = hunk.encode_utf16().count();
                     let newlines = hunk.chars().filter(|&c| c == '\n').count();
                     let bytes_utf8_since_newline = match hunk.rfind('\n') {
                         Some(pos) => hunk.len() - pos - 1,
@@ -147,7 +146,7 @@ mod internal {
 
                     TextPrefixSummary {
                         bytes_utf8,
-                        codeunits_utf16: bytes_utf16,
+                        codeunits_utf16,
                         newlines,
                         bytes_utf8_since_newline,
                     }
@@ -163,12 +162,12 @@ mod internal {
                     Self::aggregate_children(
                         children,
                         |child_summary, child| {
-                            let child_bytes_utf16 = child_summary.codeunits_utf16;
+                            let child_codeunits_utf16 = child_summary.codeunits_utf16;
 
                             if remaining == 0 {
                                 ChildIterationResult::AggregateNone
-                            } else if remaining > child_bytes_utf16 {
-                                remaining -= child_bytes_utf16;
+                            } else if remaining > child_codeunits_utf16 {
+                                remaining -= child_codeunits_utf16;
                                 ChildIterationResult::AggregateFull
                             } else {
                                 let summary = child.utf16_prefix_summary(remaining);
@@ -180,17 +179,17 @@ mod internal {
                 }
                 RopeNode::Leaf { data, .. } => {
                     let hunk = &data.0;
-                    let mut bytes_utf16 = 0;
+                    let mut codeunits_utf16 = 0;
                     let mut bytes_utf8 = 0;
                     let mut newlines = 0;
                     let mut bytes_utf8_since_newline = 0;
 
                     for c in hunk.chars() {
                         let byte_len_utf16 = c.len_utf16();
-                        if bytes_utf16 + byte_len_utf16 > at {
+                        if codeunits_utf16 + byte_len_utf16 > at {
                             break;
                         }
-                        bytes_utf16 += byte_len_utf16;
+                        codeunits_utf16 += byte_len_utf16;
                         bytes_utf8 += c.len_utf8();
                         if c == '\n' {
                             newlines += 1;
@@ -202,7 +201,7 @@ mod internal {
 
                     TextPrefixSummary {
                         bytes_utf8,
-                        codeunits_utf16: bytes_utf16,
+                        codeunits_utf16,
                         newlines,
                         bytes_utf8_since_newline,
                     }
@@ -318,7 +317,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
     }
 
     pub fn bytes_utf8(&self) -> Count8 {
-        self.root.aggregate().bytes_utf8()
+        self.root.aggregate().codeunits()
     }
 }
 
@@ -344,7 +343,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         }
 
         let (left, right) = self.split_node(&self.root, pos);
-        (left.rebalance_if_needed(), right.rebalance_if_needed())
+        (left, right)
     }
 
     fn split_node(
@@ -375,7 +374,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
             RopeNode::Internal { children, .. } => {
                 let mut utf8 = 0;
                 for (i, child) in children.iter().enumerate() {
-                    let child_size = child.aggregate().bytes_utf8();
+                    let child_size = child.aggregate().codeunits();
 
                     if pos < utf8 + child_size {
                         let local_pos = pos - utf8;
@@ -398,8 +397,8 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
                         }
 
                         return (
-                            Self::from_children(left_children),
-                            Self::from_children(right_children),
+                            Self::from_children(left_children).rebalance_if_needed(),
+                            Self::from_children(right_children).rebalance_if_needed(),
                         );
                     }
 
@@ -424,7 +423,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
     pub fn from_leaves(leaves: Vec<S::LeafData>) -> Self {
         let leaf_nodes: Vec<_> = leaves
             .into_iter()
-            .filter(|leaf| leaf.utf8_bytes() > 0) // Skip empty leaves
+            .filter(|leaf| leaf.codeunits() > 0) // Skip empty leaves
             .map(|data| {
                 Arc::new(RopeNode::Leaf {
                     agg: S::from_leaf(&data),
@@ -501,7 +500,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 
     fn rebalance_if_needed(self) -> Self {
         let depth = self.root.aggregate().depth();
-        let size = self.root.aggregate().weight();
+        let size = self.root.aggregate().nodes();
 
         // Rebalance if depth is more than 2 * log2(weight)
         let max_depth = if size > 0 {
@@ -531,7 +530,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
     fn collect_and_merge_rec(&self, node: &Arc<RopeNode<S, N>>, result: &mut Vec<S::LeafData>) {
         match &**node {
             RopeNode::Leaf { data, .. } => {
-                if data.utf8_bytes() == 0 {
+                if data.codeunits() == 0 {
                     return;
                 }
 
@@ -547,7 +546,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
             }
             RopeNode::Internal { children, .. } => {
                 for child in children.iter() {
-                    if child.aggregate().bytes_utf8() > 0 {
+                    if child.aggregate().codeunits() > 0 {
                         self.collect_and_merge_rec(child, result);
                     }
                 }
@@ -591,7 +590,7 @@ mod iterator {
             match &**node {
                 RopeNode::Leaf { data, .. } => {
                     if F {
-                        data.iterator(local_pos, data.utf8_bytes())
+                        data.iterator(local_pos, data.codeunits())
                     } else {
                         data.iterator(0, local_pos)
                     }
@@ -599,7 +598,7 @@ mod iterator {
                 RopeNode::Internal { children, .. } => {
                     let mut utf8 = 0usize;
                     for (index, child) in children.iter().enumerate() {
-                        let end = utf8 + child.aggregate().bytes_utf8();
+                        let end = utf8 + child.aggregate().codeunits();
                         let in_child = if F {
                             local_pos < end
                         } else {
@@ -662,7 +661,7 @@ mod iterator {
                             let (index, pos) = if F {
                                 (last_index + 1, 0)
                             } else {
-                                (last_index - 1, children[last_index - 1].aggregate().bytes_utf8())
+                                (last_index - 1, children[last_index - 1].aggregate().codeunits())
                             };
 
                             self.stack.push((&children[index], index));
@@ -689,7 +688,7 @@ mod iterator {
                     unreachable!();
                 };
 
-                data.iterator(0,agg.bytes_utf8())
+                data.iterator(0,agg.codeunits())
             });
 
             result
@@ -777,7 +776,7 @@ impl LeafData for TextData {
         self.0[at..to].chars()
     }
 
-    fn utf8_bytes(&self) -> Count8 {
+    fn codeunits(&self) -> Count8 {
         self.0.len()
     }
 
@@ -787,7 +786,7 @@ impl AggregateData for TextAggregate {
     type LeafData = TextData;
 
     fn from_leaf(data: &Self::LeafData) -> Self {
-        let bytes_utf8 = data.utf8_bytes();
+        let bytes_utf8 = data.codeunits();
         let bytes_utf16 = data.0.encode_utf16().count();
         let newlines = data.0.chars().filter(|&c| c == '\n').count();
         let bytes_utf8_since_newline = match data.0.rfind('\n') {
@@ -836,7 +835,7 @@ impl AggregateData for TextAggregate {
         }
     }
 
-    fn bytes_utf8(&self) -> Count8 {
+    fn codeunits(&self) -> Count8 {
         self.prefix_summary.bytes_utf8
     }
 
@@ -844,7 +843,7 @@ impl AggregateData for TextAggregate {
         self.depth as u32
     }
 
-    fn weight(&self) -> usize {
+    fn nodes(&self) -> usize {
         self.nodes
     }
 }
@@ -946,7 +945,7 @@ where
         std::iter::once((to - at, self.attribute.clone()))
     }
 
-    fn utf8_bytes(&self) -> Count8 {
+    fn codeunits(&self) -> Count8 {
         self.bytes_utf8
     }
 }
@@ -957,7 +956,7 @@ impl<T> AggregateData for RLEAggregate<T>
     type LeafData = RLEData<T>;
 
     fn from_leaf(data: &Self::LeafData) -> Self {
-        let bytes_utf8 = data.utf8_bytes();
+        let bytes_utf8 = data.codeunits();
         RLEAggregate {
             bytes_utf8,
             depth: 0,
@@ -979,7 +978,7 @@ impl<T> AggregateData for RLEAggregate<T>
         }
     }
 
-    fn bytes_utf8(&self) -> Count8 {
+    fn codeunits(&self) -> Count8 {
         self.bytes_utf8
     }
 
@@ -987,7 +986,7 @@ impl<T> AggregateData for RLEAggregate<T>
         self.depth as u32
     }
 
-    fn weight(&self) -> usize {
+    fn nodes(&self) -> usize {
         self.nodes
     }
 }
@@ -1298,7 +1297,7 @@ mod tests {
         let agg2 = TextAggregate::from_leaf(&TextData(ArrayString::from("world").unwrap()));
 
         let merged = TextAggregate::merge(&[agg1, agg2]);
-        assert_eq!(merged.bytes_utf8(), 11);
+        assert_eq!(merged.codeunits(), 11);
         assert_eq!(merged.prefix_summary.newlines, 1);
         assert_eq!(merged.prefix_summary.bytes_utf8_since_newline, 5); // "world"
     }
