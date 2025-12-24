@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use gpui::*;
 
-use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, ToggleTextEditor, Undo}, components::split_pane::Split, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};
+use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, components::split_pane::Split, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};
 
 
 pub fn init(cx: &mut App) {
@@ -13,7 +13,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-z", Undo, None),
         KeyBinding::new("secondary-shift-z", Redo, None),
 
-        KeyBinding::new("secondary-shift-l", ToggleTextEditor, None),
         KeyBinding::new("secondary-p", TogglePresentationMode, None),
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
 
@@ -36,6 +35,7 @@ pub struct OpenDocument {
     pub internal_path: PathBuf,
     pub user_path: Option<PathBuf>,
     pub view: Entity<DocumentView>,
+    pub dirty: Entity<bool>,
 }
 
 pub struct DocumentView {
@@ -45,6 +45,7 @@ pub struct DocumentView {
     was_fullscreen_before_presenting: bool,
     is_presenting: bool,
 
+    dirty: Entity<bool>,
     state: Entity<()>,
     window_state: WeakEntity<WindowState>,
 
@@ -56,9 +57,25 @@ pub struct DocumentView {
     focus_handle: FocusHandle,
 }
 
+fn dirty_file(internal: &PathBuf, user: &Option<PathBuf>) -> bool {
+    let Some(user) = user else {
+        return true;
+    };
+
+    let content_ip = std::fs::read_to_string(internal);
+    let content_up = std::fs::read_to_string(user);
+
+    match (content_ip, content_up) {
+        (Ok(ci), Ok(cu)) => ci != cu,
+        _ => true,
+    }
+}
+
 /* action handlers */
 impl DocumentView {
-    fn toggle_presentation(&mut self, _ : &TogglePresentationMode, w: &mut Window, cx: &mut Context<Self>) { if self.is_presenting {
+
+    fn toggle_presentation(&mut self, _ : &TogglePresentationMode, w: &mut Window, cx: &mut Context<Self>) {
+        if self.is_presenting {
             if w.is_fullscreen() && !self.was_fullscreen_before_presenting {
                 w.toggle_fullscreen();
             }
@@ -77,10 +94,6 @@ impl DocumentView {
 
     fn toggle_playing(&mut self, _ : &TogglePlaying, _w: &mut Window, _cx: &mut Context<Self>) {
         println!("Toggle Playing");
-    }
-
-    fn toggle_text_editor(&mut self, _ : &ToggleTextEditor, _w: &mut Window, _cx: &mut Context<Self>) {
-        // for now, not going to do anything?
     }
 
     fn prev_slide(&mut self, _ : &PrevSlide, _w: &mut Window, _cx: &mut Context<Self>) {
@@ -107,10 +120,12 @@ impl DocumentView {
         println!("Epsilon Backward");
     }
 
-    fn save_document(&mut self, _ : &SaveActiveDocument, _w: &mut Window, _cx: &mut Context<Self>) {
-        println!("Saving Document Backward");
+    fn save_document(&mut self, _ : &SaveActiveDocument, _w: &mut Window, cx: &mut Context<Self>) {
+        println!("Saving Document");
 
-        // TODO
+        self.dirty.update(cx, |dirty, _| {
+            *dirty = dirty_file(&self.internal_path, &self.user_path);
+        })
     }
 
     fn close_document(&mut self, _ : &CloseActiveDocument, w: &mut Window, cx: &mut Context<Self>) {
@@ -126,16 +141,20 @@ impl DocumentView {
 }
 
 impl DocumentView {
-    pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>, window_state: WeakEntity<WindowState>, cx: &mut Context<Self>) -> Self {
+    pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>, window_state: WeakEntity<WindowState>, dirty: Entity<bool>, cx: &mut Context<Self>) -> Self {
         let editor = cx.new(|cx| Editor::new(cx));
         let viewport = cx.new(|cx| Viewport::new(cx));
         let timeline = cx.new(|cx| Timeline::new(cx));
 
+        dirty.update(cx, |dirty, _| {
+            *dirty = dirty_file(&internal_path, &user_path);
+        });
         Self {
             internal_path,
             user_path,
             was_fullscreen_before_presenting: false,
             is_presenting: false,
+            dirty,
             window_state: window_state.clone(),
             state: cx.new(|_| ()),
             navbar: cx.new(move |cx| Navbar::new(window_state, cx)),
@@ -187,7 +206,6 @@ impl DocumentView {
             .size_full()
             .key_context("document")
             .track_focus(&self.focus_handle)
-            .on_action(cx.listener(Self::toggle_text_editor))
             .on_action(cx.listener(Self::toggle_presentation))
             .on_action(cx.listener(Self::toggle_playing))
             .on_action(cx.listener(Self::prev_slide))

@@ -1,6 +1,5 @@
 use gpui::*;
 
-pub mod text_editor;
 mod backing;
 
 pub struct Editor {

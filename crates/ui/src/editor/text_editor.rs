@@ -6,17 +6,33 @@ use structs::text::{Count16, Count8, Location16, Location8, Span16, Span8};
 
 use crate::actions::*;
 
+struct Operation {
+    range: Range<usize>,
+    with: String,
+    external: bool
+}
+
 // Supports text highlights
+
 pub struct TextEditor<B: TextBackend> {
     pub focus_handle: FocusHandle,
-    pub backend: B,
-    pub placeholder: String,
+    pub scroll_handle: ScrollHandle,
+
+    pub text: B,
+    pub lexing_attributes: B,
+    pub parsing_attributes: B,
+    pub compiler_attributes: B,
+
+    pub undo_stack: Vec<Operation>,
+    pub redo_stack: Vec<Operation>,
+
+    pub is_selecting: bool,
     pub selected_range: Range<usize>,
     pub selection_reversed: bool,
     pub marked_range: Option<Range<usize>>,
+
     pub last_layout: Option<ShapedLine>,
     pub last_bounds: Option<Bounds<Pixels>>,
-    pub is_selecting: bool,
 }
 
 impl TextEditor<NaiveBackend> {
@@ -24,7 +40,6 @@ impl TextEditor<NaiveBackend> {
         TextEditor {
             focus_handle: cx.focus_handle(),
             backend: NaiveBackend("".into()),
-            placeholder: "Type here...".into(),
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
@@ -36,12 +51,20 @@ impl TextEditor<NaiveBackend> {
 }
 
 impl<B: TextBackend> TextEditor<B> {
+    fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(self.backend.prev_boundary(self.cursor_offset()), cx);
+    }
+
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if self.selected_range.is_empty() {
             self.move_to(self.backend.prev_boundary(self.cursor_offset()), cx);
         } else {
             self.move_to(self.selected_range.start, cx)
         }
+    }
+
+    fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_to(self.backend.prev_boundary(self.cursor_offset()), cx);
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
@@ -87,6 +110,14 @@ impl<B: TextBackend> TextEditor<B> {
         self.replace_text_in_range(None, "", window, cx)
     }
 
+    fn backspace_word(&mut self, _: &BackspaceWord, window: &mut Window, cx: &mut Context<Self>) {
+
+    }
+
+    fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
+
+    }
+
     fn on_mouse_down(
         &mut self,
         event: &MouseDownEvent,
@@ -123,7 +154,7 @@ impl<B: TextBackend> TextEditor<B> {
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            self.replace_text_in_range(None, &text.replace("\n", " "), window, cx);
+            self.replace_text_in_range(None, &text, window, cx);
         }
     }
 
@@ -379,11 +410,7 @@ impl<B: TextBackend> Element for TextElement<B> {
         let cursor = input.cursor_offset();
         let style = window.text_style();
 
-        let (display_text, text_color) = if content.is_empty() {
-            (input.placeholder.clone(), hsla(0., 0., 0., 0.2))
-        } else {
-            (content, style.color)
-        };
+        let (display_text, text_color) = (content, style.color);
 
         let run = TextRun {
             len: display_text.len(),
@@ -513,8 +540,12 @@ impl<B: TextBackend> Render for TextEditor<B> {
             .cursor(CursorStyle::IBeam)
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
+            .on_action(cx.listener(Self::backspace_word))
+            .on_action(cx.listener(Self::backspace_line))
+            .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
+            .on_action(cx.listener(Self::down))
             .on_action(cx.listener(Self::select_left))
             .on_action(cx.listener(Self::select_right))
             .on_action(cx.listener(Self::select_all))

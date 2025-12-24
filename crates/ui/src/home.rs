@@ -85,8 +85,8 @@ impl HomeView {
                             .items_center()
                             .child(
                                 img(Assets::image("monocurl-1024.png"))
-                                    .w(px(400.))
-                                    .h(px(400.))
+                                    .w(px(300.))
+                                    .h(px(300.))
                                     .p_10()
                             )
                             .child(

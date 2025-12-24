@@ -26,10 +26,13 @@ impl DocumentList {
                     .unwrap_or_default()
             );
 
+        let dirty = *doc.dirty.read(cx);
 
         let up = doc.user_path.clone();
         let ip0 = doc.internal_path.clone();
         let ip = doc.internal_path.clone();
+
+        let col = if is_active { ColorSet::SUPER_LIGHT_GRAY } else { ColorSet::TOOLBAR_GRAY };
 
         div()
             .flex()
@@ -42,12 +45,13 @@ impl DocumentList {
             .border_r(px(0.5))
             .border_color(ColorSet::PURPLE)
             .h(px(30.))
-            .when(!is_active, |this| {
-                this.bg(ColorSet::TOOLBAR_GRAY)
-            })
-            .when(is_active, |this| {
-                this.bg(ColorSet::SUPER_LIGHT_GRAY)
-            })
+            .bg(col)
+            .child(
+                div()
+                    .size_1()
+                    .rounded_full()
+                    .bg(if dirty { ColorSet::PURPLE } else { col })
+            )
             .child(filename)
             .text_color(black())
             .id(SharedString::new(doc.internal_path.to_string_lossy().to_string()))

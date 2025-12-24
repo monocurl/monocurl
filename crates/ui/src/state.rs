@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle};
 use serde::{Deserialize, Serialize};
@@ -82,10 +82,14 @@ impl WindowState {
             let state: WindowStateSerde = serde_json::from_str(&data).ok()?;
 
             let weak_state = cx.weak_entity();
-            let open_documents: Vec<_> = state.open_documents.into_iter().map(|serde| OpenDocument {
-                internal_path: serde.internal_path.clone(),
-                user_path: serde.user_path.clone(),
-                view: cx.new(|cx| DocumentView::new(serde.internal_path, serde.user_path, weak_state.clone(), cx)),
+            let open_documents: Vec<_> = state.open_documents.into_iter().map(|serde| {
+                let dirty = cx.new(|cx| false);
+                OpenDocument {
+                    internal_path: serde.internal_path.clone(),
+                    user_path: serde.user_path.clone(),
+                    view: cx.new(|cx| DocumentView::new(serde.internal_path, serde.user_path, weak_state.clone(), dirty.clone(), cx)),
+                    dirty
+                }
             }).collect();
 
             let screen = match state.screen {
@@ -219,12 +223,17 @@ impl WindowState {
             self.recently_opened.insert(0, old);
         }
         else {
+            let internal = Self::allocate_internal_file(
+                user_path.extension()
+                    .map(|ext| ext.to_string_lossy())
+                    .unwrap_or_default().as_ref()
+            );
+            // copy to internal
+            let _ = std::fs::copy(&user_path, &internal)
+                .inspect_err(|e| log::error!("Failed to copy file: {e}"));
+
             self.recently_opened.insert(0, RecentlyOpened {
-                internal_path: Self::allocate_internal_file(
-                    user_path.extension()
-                        .map(|ext| ext.to_string_lossy())
-                        .unwrap_or_default().as_ref()
-                ),
+                internal_path: internal,
                 user_path: Some(user_path.clone())
             });
         }
@@ -253,15 +262,7 @@ impl WindowState {
         };
 
         // warn if not the same
-        let diff = document.user_path.as_ref().is_none_or(|up| {
-            let content_up = std::fs::read_to_string(up);
-            let content_ip = std::fs::read_to_string(&document.internal_path);
-
-            match (content_up, content_ip) {
-                (Ok(cu), Ok(ci)) => cu != ci,
-                _ => true,
-            }
-        });
+        let diff = *document.dirty.read(cx);
 
         fn actually_close(this: &mut WindowState, user_path: &Option<PathBuf>, internal_path: &PathBuf) {
             if let Some(ref path) = user_path {
@@ -356,10 +357,14 @@ impl WindowState {
         });
 
         if !self.open_documents.iter().any(|doc| doc.internal_path == internal_path) {
-            self.open_documents.push(OpenDocument {
-                internal_path: internal_path.clone(),
-                user_path: user_path.clone(),
-                view: cx.new(|cx| DocumentView::new( internal_path.clone(), user_path.clone(), window_state.downgrade(), cx))
+            self.open_documents.push({
+                let dirty = cx.new(|_cx| { false });
+                OpenDocument {
+                    internal_path: internal_path.clone(),
+                    user_path: user_path.clone(),
+                    view: cx.new(|cx| DocumentView::new( internal_path.clone(), user_path.clone(), window_state.downgrade(), dirty.clone(), cx)),
+                    dirty: dirty
+                }
             });
         }
 
