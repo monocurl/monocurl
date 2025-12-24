@@ -155,7 +155,7 @@ impl TextBackend for NaiveBackend {
 fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Count8, forward: bool) -> Count8 {
     use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
 
-    let len = rope.bytes_utf8();
+    let len = rope.codeunits();
 
     if forward && offset >= len {
         return len;
@@ -164,7 +164,7 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
         return 0;
     }
 
-    // for some reason, this works for chunk size >= 24, but is failing for smaller ones. Will just keep at 24 until issue is resolved
+    // this works (on local tests) for chunk size >= 24, but is failing for smaller ones. Will just keep at 24 until issue is resolved
     //
     // Failing test case
     // related? https://github.com/unicode-rs/unicode-segmentation/issues/115
@@ -278,7 +278,7 @@ impl<const N: usize> TextBackend for Rope<TextAggregate, N> {
     }
 
     fn replace(&self, span: Span8, new_text: &str) -> Self {
-        self.replace_utf8_range(span, Self::leaves_from_str(new_text))
+        self.replace_range(span, Self::leaves_from_str(new_text))
     }
 
     fn read(&self, span: Span8) -> String {
@@ -292,7 +292,7 @@ impl<const N: usize> TextBackend for Rope<TextAggregate, N> {
     }
 
     fn len(&self) -> Count8 {
-        self.bytes_utf8()
+        self.codeunits()
     }
 
     fn next_boundary(&self, offset: Count8) -> Count8 {

@@ -1,9 +1,9 @@
 use arrayvec::ArrayString;
+use std::ops::Range;
 use std::{marker::PhantomData, sync::Arc};
 use std::iter::Once;
 use std::str::Chars;
 use crate::rope::internal::RopeNode;
-use crate::text::Span8;
 use crate::{rope::iterator::{RopeIterator}, text::{Count8, Count16}};
 
 // Inspired by: https://zed.dev/blog/zed-decoded-rope-sumtree
@@ -16,7 +16,7 @@ pub trait LeafData: Clone + Sized {
 
     fn identity() -> Self;
 
-    fn split(&self, at: Count8) -> (Self, Self);
+    fn subrange(&self, range: Range<usize>) -> Self;
     // returns the portion that wasn't appended
     fn try_append(&mut self, from: Self) -> Option<Self>;
 
@@ -316,14 +316,14 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         RopeIterator::<'_, S, N, false>::new(self, pos)
     }
 
-    pub fn bytes_utf8(&self) -> Count8 {
+    pub fn codeunits(&self) -> usize {
         self.root.aggregate().codeunits()
     }
 }
 
 impl<S: AggregateData, const N: usize> Rope<S, N> {
     /// returns a new rope with the modification applied (persistent structure).
-    pub fn replace_utf8_range(&self, range: Span8, new_data: impl Into<Vec<S::LeafData>>) -> Self {
+    pub fn replace_range(&self, range: Range<usize>, new_data: impl Into<Vec<S::LeafData>>) -> Self {
         let leaves = new_data.into();
 
         let (before, rest) = self.split_at(range.start);
@@ -333,12 +333,12 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         Self::concat([before, middle, after]).rebalance_if_needed()
     }
 
-    /// split the rope at a given UTF-8 position into [0, pos) and [pos, end)
-    pub fn split_at(&self, pos: Count8) -> (Self, Self) {
+    /// split the rope at a given position into [0, pos) and [pos, end)
+    pub fn split_at(&self, pos: usize) -> (Self, Self) {
         if pos == 0 {
             return (Self::empty(), self.clone());
         }
-        if pos >= self.bytes_utf8() {
+        if pos >= self.codeunits() {
             return (self.clone(), Self::empty());
         }
 
@@ -349,12 +349,13 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
     fn split_node(
         &self,
         node: &Arc<RopeNode<S, N>>,
-        pos: Count8,
+        pos: usize,
     ) -> (Self, Self) {
         match &**node {
             RopeNode::Leaf { data, .. } => {
                 // Split the leaf data
-                let (left_data, right_data) = data.split(pos);
+                let left_data = data.subrange(0..pos);
+                let right_data = data.subrange(pos..data.codeunits());
 
                 let left_leaf = RopeNode::Leaf {
                     agg: S::from_leaf(&left_data),
@@ -384,12 +385,12 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
                         for j in 0..i {
                             left_children.push(children[j].clone());
                         }
-                        if left_child.bytes_utf8() > 0 {
+                        if left_child.codeunits() > 0 {
                             left_children.push(left_child.root.clone());
                         }
 
                         let mut right_children = Vec::new();
-                        if right_child.bytes_utf8() > 0 {
+                        if right_child.codeunits() > 0 {
                             right_children.push(right_child.root.clone());
                         }
                         for j in (i + 1)..children.len() {
@@ -413,7 +414,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
     pub fn concat<const U: usize>(ropes: [Self; U]) -> Self {
         let children = ropes
             .into_iter()
-            .filter(|r| r.bytes_utf8() > 0)
+            .filter(|r| r.codeunits() > 0)
             .map(|r| r.root)
             .collect();
 
@@ -553,6 +554,51 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
             }
         }
     }
+
+    pub fn subrange_aggregate(&self, range: Range<usize>) -> S {
+        self.subrange_aggregate_rec(&self.root, range)
+    }
+
+    fn subrange_aggregate_rec(&self, node: &Arc<RopeNode<S, N>>, local_range: Range<usize>) -> S {
+        if local_range.start == 0 && local_range.end >= node.aggregate().codeunits() {
+            return node.aggregate().clone();
+        }
+
+        match &**node {
+            RopeNode::Leaf { data, .. } => {
+                let sub_data = data.subrange(local_range);
+                S::from_leaf(&sub_data)
+            }
+            RopeNode::Internal { children, .. } => {
+                let mut collected_aggs = Vec::new();
+
+                let mut utf8 = 0;
+                for child in children.iter() {
+                    let child_size = child.aggregate().codeunits();
+
+                    if local_range.start >= utf8 + child_size {
+                        utf8 += child_size;
+                        continue;
+                    }
+
+                    if local_range.end <= utf8 {
+                        break;
+                    }
+
+                    // Overlapping range
+                    let start_in_child = local_range.start.saturating_sub(utf8);
+                    let end_in_child = (local_range.end - utf8).min(child_size);
+
+                    let child_agg = self.subrange_aggregate_rec(child, start_in_child..end_in_child);
+                    collected_aggs.push(child_agg);
+
+                    utf8 += child_size;
+                }
+
+                S::merge(&collected_aggs)
+            }
+        }
+    }
 }
 
 // if out of bounds, returns 0 or len
@@ -616,9 +662,9 @@ mod iterator {
         }
 
         pub fn new(rope: &'a Rope<S, N>, pos: Count8) -> Self {
-            assert!(pos <= rope.bytes_utf8());
+            assert!(pos <= rope.codeunits());
             let end = if F {
-                pos == rope.bytes_utf8()
+                pos == rope.codeunits()
             } else {
                 pos == 0
             };
@@ -744,10 +790,8 @@ impl LeafData for TextData {
         TextData(ArrayString::new_const())
     }
 
-    fn split(&self, at: Count8) -> (Self, Self) {
-        let left = ArrayString::from(&self.0[..at]).unwrap();
-        let right = ArrayString::from(&self.0[at..]).unwrap();
-        (TextData(left), TextData(right))
+    fn subrange(&self, range: Range<usize>) -> Self {
+        TextData(ArrayString::from(&self.0[range]).unwrap())
     }
 
     fn try_append(&mut self, from: Self) -> Option<Self> {
@@ -868,7 +912,7 @@ impl<const N: usize> Rope<TextAggregate, N> {
 
             if adjusted_end == start {
                 // This should never happen with valid UTF-8
-                panic!("Invalid UTF-8 or character larger than MAX_LEAF_SIZE");
+                unreachable!("Invalid UTF-8 or character larger than MAX_LEAF_SIZE");
             }
 
             let slice = &text[start..adjusted_end];
@@ -880,7 +924,7 @@ impl<const N: usize> Rope<TextAggregate, N> {
     }
 
     pub fn from_str(s: &str) -> Self {
-        Self::default().replace_utf8_range(0..0, Self::leaves_from_str(s))
+        Self::default().replace_range(0..0, Self::leaves_from_str(s))
     }
 }
 
@@ -911,16 +955,11 @@ where
         }
     }
 
-    fn split(&self, at: Count8) -> (Self, Self) {
-        let left = RLEData {
-            bytes_utf8: at,
+    fn subrange(&self, range: Range<usize>) -> Self {
+        RLEData {
+            bytes_utf8: range.len(),
             attribute: self.attribute.clone(),
-        };
-        let right = RLEData {
-            bytes_utf8: self.bytes_utf8 - at,
-            attribute: self.attribute.clone(),
-        };
-        (left, right)
+        }
     }
 
     fn try_append(&mut self, from: Self) -> Option<Self> {
@@ -1045,7 +1084,7 @@ mod tests {
     #[test]
     fn test_unicode_reverse_iterator() {
         let rope = rope_from_str("hello 🦀 world");
-        let count = rope.bytes_utf8();
+        let count = rope.codeunits();
         let chars: String = rope.rev_iterator_utf8(count).collect();
         assert_eq!(chars, "dlrow 🦀 olleh");
     }
@@ -1089,7 +1128,7 @@ mod tests {
     fn test_multi_node_reverse_iterator() {
         let text = "a".repeat(100);
         let rope = rope_from_str(&text);
-        let count = rope.bytes_utf8();
+        let count = rope.codeunits();
         let chars: String = rope.rev_iterator_utf8(count).collect();
         assert_eq!(chars, text);
     }
@@ -1242,7 +1281,8 @@ mod tests {
     #[test]
     fn test_text_data_split() {
         let data = TextData(ArrayString::from("hello world").unwrap());
-        let (left, right) = data.split(6);
+        let left = data.subrange(0..6);
+        let right = data.subrange(6..11);
         assert_eq!(left.0.as_str(), "hello ");
         assert_eq!(right.0.as_str(), "world");
     }
@@ -1284,7 +1324,8 @@ mod tests {
             bytes_utf8: 20,
             attribute: 42,
         };
-        let (left, right) = rle.split(12);
+        let left = rle.subrange(0..12);
+        let right = rle.subrange(12..20);
         assert_eq!(left.bytes_utf8, 12);
         assert_eq!(left.attribute, 42);
         assert_eq!(right.bytes_utf8, 8);
@@ -1324,12 +1365,12 @@ mod replace_tests {
         let rope = Rope::<TextAggregate, 8>::from_str("hello");
 
         let (left, right) = rope.split_at(0);
-        assert_eq!(left.bytes_utf8(), 0);
-        assert_eq!(right.bytes_utf8(), 5);
+        assert_eq!(left.codeunits(), 0);
+        assert_eq!(right.codeunits(), 5);
 
         let (left, right) = rope.split_at(5);
-        assert_eq!(left.bytes_utf8(), 5);
-        assert_eq!(right.bytes_utf8(), 0);
+        assert_eq!(left.codeunits(), 5);
+        assert_eq!(right.codeunits(), 0);
     }
 
     #[test]
@@ -1348,7 +1389,7 @@ mod replace_tests {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
         let new_data = vec![TextData(ArrayString::from("beautiful ").unwrap())];
 
-        let result = rope.replace_utf8_range(6..11, new_data);
+        let result = rope.replace_range(6..11, new_data);
         let result_str: String = result.iterator_utf8(0).collect();
 
         assert_eq!(result_str, "hello beautiful ");
@@ -1357,7 +1398,7 @@ mod replace_tests {
     #[test]
     fn test_replace_range_delete() {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
-        let result = rope.replace_utf8_range(5..11, vec![]);
+        let result = rope.replace_range(5..11, vec![]);
         let result_str: String = result.iterator_utf8(0).collect();
 
         assert_eq!(result_str, "hello");
@@ -1368,7 +1409,7 @@ mod replace_tests {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
         let new_data = vec![TextData(ArrayString::from(" beautiful").unwrap())];
 
-        let result = rope.replace_utf8_range(5..5, new_data);
+        let result = rope.replace_range(5..5, new_data);
         let result_str: String = result.iterator_utf8(0).collect();
 
         assert_eq!(result_str, "hello beautiful world");
@@ -1381,7 +1422,7 @@ mod replace_tests {
         let after_crab = crab_pos + "🦀".len();
 
         let new_data = vec![TextData(ArrayString::from("🎉").unwrap())];
-        let result = rope.replace_utf8_range(crab_pos..after_crab, new_data);
+        let result = rope.replace_range(crab_pos..after_crab, new_data);
         let result_str: String = result.iterator_utf8(0).collect();
 
         assert_eq!(result_str, "hello 🎉 world");
@@ -1392,7 +1433,7 @@ mod replace_tests {
         let rope1 = Rope::<TextAggregate, 8>::from_str("hello world");
         let new_data = vec![TextData(ArrayString::from("REPLACED").unwrap())];
 
-        let rope2 = rope1.replace_utf8_range(6..11, new_data);
+        let rope2 = rope1.replace_range(6..11, new_data);
 
         // Original rope should be unchanged
         let rope1_str: String = rope1.iterator_utf8(0).collect();
@@ -1416,7 +1457,7 @@ mod replace_tests {
             })
             .collect();
 
-        let result = rope.replace_utf8_range(50..150, leaves);
+        let result = rope.replace_range(50..150, leaves);
         let result_str: String = result.iterator_utf8(0).collect();
 
         let expected = format!("{}{}{}",
