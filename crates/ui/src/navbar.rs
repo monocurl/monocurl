@@ -1,4 +1,4 @@
-use gpui::{prelude::FluentBuilder, *};
+use gpui::*;
 
 use crate::{document::OpenDocument, state::{ActiveScreen, WindowState}, theme::ColorSet, util::link_button};
 

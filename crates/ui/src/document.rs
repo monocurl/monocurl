@@ -16,17 +16,17 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-p", TogglePresentationMode, None),
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
 
-        KeyBinding::new("space", TogglePlaying, None),
+        KeyBinding::new("space", TogglePlaying, Some("!editor")),
 
         // all of these should also allow a combination with "secondary" to use with editor
-        KeyBinding::new(",", PrevSlide, None),
-        KeyBinding::new(".", NextSlide, None),
+        KeyBinding::new(",", PrevSlide, Some("!editor")),
+        KeyBinding::new(".", NextSlide, Some("!editor")),
 
-        KeyBinding::new("<", SceneStart, None),
-        KeyBinding::new(">", SceneEnd, None),
+        KeyBinding::new("<", SceneStart, Some("!editor")),
+        KeyBinding::new(">", SceneEnd, Some("!editor")),
 
-        KeyBinding::new(";", EpsilonBackward, None),
-        KeyBinding::new("'", EpsilonForward, None),
+        KeyBinding::new(";", EpsilonBackward, Some("!editor")),
+        KeyBinding::new("'", EpsilonForward, Some("!editor")),
     ]);
 }
 
@@ -221,7 +221,7 @@ impl DocumentView {
 
 impl Render for DocumentView {
     fn render(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        window.focus(&self.focus_handle);
+        // window.focus(&self.focus_handle);
 
         if self.is_presenting {
             self.render_presentation(cx).into_any_element()

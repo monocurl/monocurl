@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use gpui::*;
 use structs::assets::Assets;
-use crate::{actions::{Copy, Cut, Paste, Quit, Redo, SaveActiveDocument, Undo}, window::MonocurlWindow};
+use crate::{actions::{Copy, Cut, Paste, Quit, Redo, SaveActiveDocument, Undo}, editor::text_editor, window::MonocurlWindow};
 
 mod document;
 mod editor;
@@ -80,6 +80,7 @@ impl MonocurlLauncher {
 
     fn setup_modules(cx: &mut App) {
        document::init(cx);
+       text_editor::init(cx);
     }
 
     fn create_window(cx: &mut App) {

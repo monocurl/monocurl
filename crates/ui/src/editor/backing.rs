@@ -1,9 +1,7 @@
-use std::io::Cursor;
-
 use unicode_segmentation::*;
-use structs::{rope::{self, AggregateData, Rope, TextAggregate}, text::{Count8, Count16, Location8, Location16, Span8, Span16}};
+use structs::{rope::{Rope, TextAggregate}, text::{Count8, Count16, Location8, Location16, Span8, Span16}};
 
-pub trait TextBackend: 'static {
+pub trait TextBackend: Default + Clone + 'static {
     fn offset8_to_offset16(&self, offset: Count8) -> Count16;
     fn offset16_to_offset8(&self, offset: Count16) -> Count8;
     fn loc8_to_offset8(&self, loc: Location8) -> Count8;
@@ -47,6 +45,7 @@ pub trait TextBackend: 'static {
     fn reset(&mut self);
 }
 
+#[derive(Default, Clone, Debug)]
 pub struct NaiveBackend(pub String);
 
 impl TextBackend for NaiveBackend {

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 
 use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle};
 use serde::{Deserialize, Serialize};

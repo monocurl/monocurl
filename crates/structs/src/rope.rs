@@ -92,13 +92,21 @@ mod internal {
                         bytes_utf8 += child_summary.bytes_utf8;
                         codeunits_utf16 += child_summary.codeunits_utf16;
                         newlines += child_summary.newlines;
-                        bytes_utf8_since_newline = child_summary.bytes_utf8_since_newline;
+                        bytes_utf8_since_newline = if child_summary.newlines > 0 {
+                            child_summary.bytes_utf8_since_newline
+                        } else {
+                            child_summary.bytes_utf8_since_newline + bytes_utf8_since_newline
+                        };
                     }
                     ChildIterationResult::AggregatePrefix(summary) => {
                         bytes_utf8 += summary.bytes_utf8;
                         codeunits_utf16 += summary.codeunits_utf16;
                         newlines += summary.newlines;
-                        bytes_utf8_since_newline = summary.bytes_utf8_since_newline;
+                        bytes_utf8_since_newline = if summary.newlines > 0 {
+                            summary.bytes_utf8_since_newline
+                        } else {
+                            summary.bytes_utf8_since_newline + bytes_utf8_since_newline
+                        };
                         break;
                     }
                 }
