@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use gpui::*;
 use structs::assets::Assets;
-use crate::{actions::{Copy, Cut, Paste, Quit, Redo, SaveActiveDocument, Undo}, editor::text_editor, window::MonocurlWindow};
+use crate::{actions::{Copy, Cut, EpsilonBackward, EpsilonForward, NextSlide, Paste, PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, editor::text_editor, window::MonocurlWindow};
 
 mod document;
 mod editor;
@@ -57,6 +57,9 @@ impl MonocurlLauncher {
                 name: "File".into(),
                 items: vec![
                     MenuItem::action("Save", SaveActiveDocument),
+                    MenuItem::action("Save As", SaveActiveDocumentCustomPath),
+                    MenuItem::separator(),
+                    MenuItem::action("Present", TogglePresentationMode)
                 ],
             },
             Menu {
@@ -68,6 +71,18 @@ impl MonocurlLauncher {
                     MenuItem::os_action("Cut", Cut, OsAction::Cut),
                     MenuItem::os_action("Copy", Copy, OsAction::Copy),
                     MenuItem::os_action("Paste", Paste, OsAction::Paste),
+                ],
+            },
+            Menu {
+                name: "Editor".into(),
+                items: vec![
+                    MenuItem::action("Toggle Playing", TogglePlaying),
+                    MenuItem::action("Epsilon Forward", EpsilonForward),
+                    MenuItem::action("Epsilon Backward", EpsilonBackward),
+                    MenuItem::action("Next Slide", NextSlide),
+                    MenuItem::action("Previous Slide", PrevSlide),
+                    MenuItem::action("Scene Start", SceneStart),
+                    MenuItem::action("Scene End", SceneEnd),
                 ],
             },
             Menu {

@@ -1,13 +1,15 @@
-use std::path::PathBuf;
+use std::path::{PathBuf};
 
 use gpui::*;
+use server::doc_type::DocumentType;
 
-use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, components::split_pane::Split, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};
+use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, components::split_pane::Split, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};
 
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-s", SaveActiveDocument, None),
+        KeyBinding::new("secondary-shift-s", SaveActiveDocumentCustomPath, None),
         KeyBinding::new("secondary-w", CloseActiveDocument, None),
 
         KeyBinding::new("secondary-z", Undo, None),
@@ -16,17 +18,23 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-p", TogglePresentationMode, None),
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
 
-        KeyBinding::new("space", TogglePlaying, Some("!editor")),
+        KeyBinding::new("space shift-space", TogglePlaying, Some("!editor")),
+        KeyBinding::new("secondary-shift-space,", TogglePlaying, None),
 
-        // all of these should also allow a combination with "secondary" to use with editor
         KeyBinding::new(",", PrevSlide, Some("!editor")),
+        KeyBinding::new("secondary-,", PrevSlide, None),
         KeyBinding::new(".", NextSlide, Some("!editor")),
+        KeyBinding::new("secondary-.", NextSlide, None),
 
         KeyBinding::new("<", SceneStart, Some("!editor")),
+        KeyBinding::new("secondary-<", SceneStart, None),
         KeyBinding::new(">", SceneEnd, Some("!editor")),
+        KeyBinding::new("secondary->", SceneEnd, None),
 
         KeyBinding::new(";", EpsilonBackward, Some("!editor")),
+        KeyBinding::new("secondary-;", EpsilonBackward, None),
         KeyBinding::new("'", EpsilonForward, Some("!editor")),
+        KeyBinding::new("secondary-'", EpsilonForward, None),
     ]);
 }
 
@@ -75,6 +83,8 @@ fn dirty_file(internal: &PathBuf, user: &Option<PathBuf>) -> bool {
 impl DocumentView {
 
     fn toggle_presentation(&mut self, _ : &TogglePresentationMode, w: &mut Window, cx: &mut Context<Self>) {
+        w.focus(&self.focus_handle);
+
         if self.is_presenting {
             if w.is_fullscreen() && !self.was_fullscreen_before_presenting {
                 w.toggle_fullscreen();
@@ -120,12 +130,60 @@ impl DocumentView {
         println!("Epsilon Backward");
     }
 
-    fn save_document(&mut self, _ : &SaveActiveDocument, _w: &mut Window, cx: &mut Context<Self>) {
-        println!("Saving Document");
+    fn really_save(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        if Some(path.clone()) != self.user_path {
+            self.user_path = Some(path.clone());
+            self.editor.read(cx).write_to_user_path(&path);
+        }
+
+        self.window_state.upgrade().inspect(|ws| {
+            ws.update(cx, |state, _cx| {
+                state.set_user_path(&self.internal_path, path.clone());
+            })
+        });
 
         self.dirty.update(cx, |dirty, _| {
-            *dirty = dirty_file(&self.internal_path, &self.user_path);
+            *dirty = false;
         })
+    }
+
+    fn save_document_custom_path(&mut self, _ : &SaveActiveDocumentCustomPath, _w: &mut Window, cx: &mut Context<Self>) {
+        let directory =
+            self.user_path
+                .as_ref().and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                .unwrap_or(dirs::home_dir().unwrap());
+        let name =
+            self.user_path
+                .as_ref().and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+                .unwrap_or("Untitled.".to_string() + self.internal_path.extension().and_then(|e| e.to_str()).unwrap_or(DocumentType::Scene.extension()));
+        let path = cx.prompt_for_new_path(&directory, Some(name.as_str()));
+        cx.spawn(async move |this, app| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
+            let Some(path) = path.await
+                .ok().map(|s| s.ok())
+                .flatten().flatten() else {
+                return;
+            };
+
+            log::info!("Saving document to new path {:?}", &path);
+
+            let _ = app.update(move |app| {
+                let _ = this.update(app, |this, cx| {
+                    this.really_save(path, cx);
+                });
+            });
+        }).detach();
+    }
+
+    fn save_document(&mut self, _ : &SaveActiveDocument, w: &mut Window, cx: &mut Context<Self>) {
+        log::info!("Saving document {:?} {:?}", &self.internal_path, &self.user_path);
+        if let Some(user_path) = &self.user_path {
+            self.really_save(user_path.clone(), cx);
+        } else {
+            self.save_document_custom_path(&SaveActiveDocumentCustomPath, w, cx);
+        }
     }
 
     fn close_document(&mut self, _ : &CloseActiveDocument, w: &mut Window, cx: &mut Context<Self>) {
@@ -142,7 +200,7 @@ impl DocumentView {
 
 impl DocumentView {
     pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>, window_state: WeakEntity<WindowState>, dirty: Entity<bool>, cx: &mut Context<Self>) -> Self {
-        let editor = cx.new(|cx| Editor::new(cx));
+        let editor = cx.new(|cx| Editor::new(internal_path.clone(), cx));
         let viewport = cx.new(|cx| Viewport::new(cx));
         let timeline = cx.new(|cx| Timeline::new(cx));
 
@@ -181,7 +239,6 @@ impl DocumentView {
             .on_action(cx.listener(Self::epsilon_backward))
     }
 
-
     fn viewport_timeline(&self) -> Split {
         Split::new(
             Axis::Vertical,
@@ -215,13 +272,16 @@ impl DocumentView {
             .on_action(cx.listener(Self::epsilon_forward))
             .on_action(cx.listener(Self::epsilon_backward))
             .on_action(cx.listener(Self::save_document))
+            .on_action(cx.listener(Self::save_document_custom_path))
             .on_action(cx.listener(Self::close_document))
     }
 }
 
 impl Render for DocumentView {
     fn render(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
-        // window.focus(&self.focus_handle);
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus_handle);
+        }
 
         if self.is_presenting {
             self.render_presentation(cx).into_any_element()

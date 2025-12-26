@@ -1,27 +1,13 @@
+use std::usize;
+
 use unicode_segmentation::*;
-use structs::{rope::{Rope, TextAggregate}, text::{Count8, Count16, Location8, Location16, Span8, Span16}};
+use structs::{rope::{Rope, TextAggregate}, text::{Count8, Count16, Location8, Span8, Span16}};
 
 pub trait TextBackend: Default + Clone + 'static {
     fn offset8_to_offset16(&self, offset: Count8) -> Count16;
     fn offset16_to_offset8(&self, offset: Count16) -> Count8;
     fn loc8_to_offset8(&self, loc: Location8) -> Count8;
     fn offset8_to_loc8(&self, offset: Count8) -> Location8;
-
-    fn loc16_to_offset16(&self, loc: Location16) -> Count16 {
-        let offset8_col = self.offset16_to_offset8(loc.col);
-        let loc8 = Location8 { row: loc.row, col: offset8_col };
-
-        let offset8 = self.loc8_to_offset8(loc8);
-        self.offset8_to_offset16(offset8)
-    }
-
-    fn offset16_to_loc16(&self, offset: Count16) -> Location16 {
-        let offset8 = self.offset16_to_offset8(offset);
-        let loc8 = self.offset8_to_loc8(offset8);
-        let col16 = self.offset8_to_offset16(loc8.col);
-
-        Location16 { row: loc8.row, col: col16 }
-    }
 
     fn span8_to_span16(&self, span8: &Span8) -> Span16 {
         self.offset8_to_offset16(span8.start)..self.offset8_to_offset16(span8.end)
@@ -34,15 +20,75 @@ pub trait TextBackend: Default + Clone + 'static {
     fn replace(&self, span: Span8, new_text: &str) -> Self;
     fn read(&self, span: Span8) -> String;
 
-    fn content(&self) -> String {
-        self.read(0..self.len())
-    }
-
     fn len(&self) -> Count8;
 
     fn next_boundary(&self, offset: Count8) -> Count8;
     fn prev_boundary(&self, offset: Count8) -> Count8;
-    fn reset(&mut self);
+
+    // maximal word containing position
+    // or, if this is empty due to whitespace, the previous word (along with contents up till offset)
+    fn word(&self, offset: Count8, only_expand_left: bool) -> Span8 {
+        let not_separator = |c: char| {
+            c.is_alphanumeric() || c == '_'
+        };
+
+        let mut start  = offset;
+        while start > 0 {
+            let prev = self.prev_boundary(start);
+            let ch = self.read(prev..start);
+            if ch.chars().all(not_separator) {
+                start = prev;
+            } else {
+                break;
+            }
+        }
+
+        let mut end = offset;
+        let len = self.len();
+        if !only_expand_left {
+            while end < len {
+                let next = self.next_boundary(end);
+                let ch = self.read(end..next);
+                if ch.chars().all(not_separator) {
+                    end = next;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if start > 0 && start == offset && end == offset {
+            // try to include at least one character that is not whitespace (not crossing newline)
+            let mut first_nonwhitespace = usize::MAX;
+            while start > 0 {
+                let prev = self.prev_boundary(start);
+                let ch = self.read(prev..start);
+
+                if ch == "\n" {
+                    break;
+                }
+                let is_whitespace = ch.chars().all(|c| c.is_whitespace());
+                if is_whitespace && first_nonwhitespace == usize::MAX {
+                    start = prev;
+                }
+                else {
+                    first_nonwhitespace = first_nonwhitespace.min(start);
+                    if ch.chars().all(not_separator) {
+                        start = prev;
+                    }
+                    else if start == first_nonwhitespace {
+                        start = prev;
+                        break;
+                    }
+                    else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        start..end
+    }
 }
 
 #[derive(Default, Clone, Debug)]
@@ -144,10 +190,6 @@ impl TextBackend for NaiveBackend {
             .rev()
             .find_map(|(idx, _)| (idx < offset).then_some(idx))
             .unwrap_or(0)
-    }
-
-    fn reset(&mut self) {
-        self.0 = "".into();
     }
 }
 
@@ -300,10 +342,6 @@ impl<const N: usize> TextBackend for Rope<TextAggregate, N> {
 
     fn prev_boundary(&self, offset: Count8) -> Count8 {
         grapheme_boundary(&self, offset, false)
-    }
-
-    fn reset(&mut self) {
-        *self = Self::default();
     }
 }
 

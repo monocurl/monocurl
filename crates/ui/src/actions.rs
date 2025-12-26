@@ -7,7 +7,7 @@ actions!(
 
 actions!(
     document,
-    [SaveActiveDocument, CloseActiveDocument]
+    [SaveActiveDocumentCustomPath, SaveActiveDocument, CloseActiveDocument]
 );
 
 actions!(

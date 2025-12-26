@@ -10,6 +10,8 @@ use crate::actions::*;
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, None),
+        KeyBinding::new("alt-backspace", BackspaceWord, None),
+        KeyBinding::new("secondary-backspace", BackspaceLine, None),
         KeyBinding::new("delete", Delete, None),
         KeyBinding::new("up", Up, None),
         KeyBinding::new("down", Down, None),
@@ -383,8 +385,10 @@ impl<B: TextBackend> TextEditor<B> {
     }
 
     fn backspace_word(&mut self, _: &BackspaceWord, window: &mut Window, cx: &mut Context<Self>) {
-        // TODO: Implement word boundary detection
-        self.backspace(&Backspace, window, cx);
+        let mut selection = self.cursor.range(&self.backend);
+        let word = self.backend.word(selection.start, true);
+        selection.start = word.start;
+        self.replace_text_in_range(Some(selection), "", window, cx);
     }
 
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {

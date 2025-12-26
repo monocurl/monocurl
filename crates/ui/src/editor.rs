@@ -1,7 +1,9 @@
+use std::path::PathBuf;
+
 use gpui::*;
 use structs::rope::{Rope, TextAggregate};
 
-use crate::editor::{backing::NaiveBackend, text_editor::TextEditor};
+use crate::editor::{text_editor::TextEditor};
 
 mod backing;
 pub mod text_editor;
@@ -12,10 +14,14 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new(cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(internal_path: PathBuf, cx: &mut gpui::Context<Self>) -> Self {
         Self {
             editor: cx.new(|cx| TextEditor::new(cx))
         }
+    }
+
+    pub fn write_to_user_path(&self, path: &std::path::Path) {
+        // self.editor.guser_et_mut().save_to_path(path);
     }
 }
 
