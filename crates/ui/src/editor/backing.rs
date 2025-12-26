@@ -56,9 +56,9 @@ pub trait TextBackend: Default + Clone + 'static {
             }
         }
 
-        if start > 0 && start == offset && end == offset {
+        if start == offset && end == offset {
             // try to include at least one character that is not whitespace (not crossing newline)
-            let mut first_nonwhitespace = usize::MAX;
+            let mut first_nonwhitespace = -1;
             while start > 0 {
                 let prev = self.prev_boundary(start);
                 let ch = self.read(prev..start);
@@ -67,15 +67,15 @@ pub trait TextBackend: Default + Clone + 'static {
                     break;
                 }
                 let is_whitespace = ch.chars().all(|c| c.is_whitespace());
-                if is_whitespace && first_nonwhitespace == usize::MAX {
+                if is_whitespace && first_nonwhitespace == -1 {
                     start = prev;
                 }
                 else {
-                    first_nonwhitespace = first_nonwhitespace.min(start);
+                    first_nonwhitespace = first_nonwhitespace.max(start as isize);
                     if ch.chars().all(not_separator) {
                         start = prev;
                     }
-                    else if start == first_nonwhitespace {
+                    else if start as isize == first_nonwhitespace {
                         start = prev;
                         break;
                     }

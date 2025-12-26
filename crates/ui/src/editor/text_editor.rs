@@ -101,14 +101,16 @@ pub struct TextEditor<B: TextBackend> {
     undo_stack: Vec<Operation<B>>,
     redo_stack: Vec<Operation<B>>,
 
-    cursor: Cursor,
     pub marked_range: Option<Span8>,
-    pub cursor_blink_state: bool,
-    pub cursor_blink_epoch: usize,
-    pub cursor_blink_interval: Duration,
-    pub cursor_blink_delay: Duration,
-
     pub is_selecting: bool,
+    cursor: Cursor,
+    cursor_blink_state: bool,
+    cursor_blink_epoch: usize,
+    cursor_blink_interval: Duration,
+    cursor_blink_delay: Duration,
+
+    last_click_position: Option<Location8>,
+    click_count: usize,
 
     line_cache: LineCache,
     pub line_height: Pixels,
@@ -126,19 +128,23 @@ impl<B: TextBackend> TextEditor<B> {
             backend: B::default(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
-            cursor: Cursor::collapsed(Location8 { row: 0, col: 0 }),
             marked_range: None,
             is_selecting: false,
-            line_cache: LineCache::new(),
-            line_height: px(20.0),
-            gutter_width: px(50.0),
-            viewport_height: px(600.0),
-            last_bounds: None,
+            cursor: Cursor::collapsed(Location8 { row: 0, col: 0 }),
 
             cursor_blink_state: true,
             cursor_blink_epoch: 0,
             cursor_blink_interval: Duration::from_millis(500),
             cursor_blink_delay: Duration::from_millis(500),
+
+            last_click_position: None,
+            click_count: 0,
+
+            line_cache: LineCache::new(),
+            line_height: px(20.0),
+            gutter_width: px(50.0),
+            viewport_height: px(600.0),
+            last_bounds: None,
         }
     }
 }
@@ -366,6 +372,7 @@ impl<B: TextBackend> TextEditor<B> {
 }
 
 impl<B: TextBackend> TextEditor<B> {
+
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.cursor.is_empty() {
             let offset = self.backend.loc8_to_offset8(self.cursor.head);
@@ -438,6 +445,52 @@ impl<B: TextBackend> TextEditor<B> {
             self.select_to(pos, cx);
         } else {
             self.move_to(pos, cx);
+        }
+
+        let pos = self.index_for_mouse_position(event.position, window);
+
+        // check if double-tap/triple tap
+        let is_multi_click = self.last_click_position == Some(pos);
+
+        if is_multi_click {
+            self.click_count += 1;
+        } else {
+            self.click_count = 1;
+        }
+
+        self.last_click_position = Some(pos);
+
+        match self.click_count {
+            1 => {
+                self.is_selecting = true;
+                if event.modifiers.shift {
+                    self.select_to(pos, cx);
+                } else {
+                    self.move_to(pos, cx);
+                }
+            }
+            2 => {
+                let offset = self.backend.loc8_to_offset8(pos);
+                let word_range = self.backend.word(offset, false);
+
+                self.cursor.anchor = self.backend.offset8_to_loc8(word_range.start);
+                self.cursor.head = self.backend.offset8_to_loc8(word_range.end);
+                self.is_selecting = true;
+                self.reset_cursor_blink(cx);
+            }
+            _ => {
+                let line_start = Location8 { row: pos.row, col: 0 };
+                let line_end_offset = self.backend.loc8_to_offset8(
+                    Location8 { row: pos.row + 1, col: 0 }
+                );
+                let line_end_offset = line_end_offset.min(self.backend.len());
+                let line_end = self.backend.offset8_to_loc8(line_end_offset);
+
+                self.cursor.anchor = line_start;
+                self.cursor.head = line_end;
+                self.is_selecting = true;
+                self.reset_cursor_blink(cx);
+            }
         }
     }
 
@@ -738,7 +791,7 @@ impl<B: TextBackend> Element for TextElement<B> {
                         };
 
                         let x1 = shaped.x_for_index(line_start as usize);
-                        let x2 = shaped.x_for_index(line_end as usize);
+                        let x2 = shaped.x_for_index(line_end as usize).max(x1 + px(5.0));
                         let y = px(line_num as f32 * line_height.0) - scroll_offset.y;
 
                         selection_bounds.push(Bounds::from_corners(
