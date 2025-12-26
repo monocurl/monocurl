@@ -1,4 +1,4 @@
-use gpui::{Rgba};
+use gpui::{Font, Hsla, Pixels, Rgba, px};
 
 pub struct ColorSet;
 
@@ -74,4 +74,21 @@ pub struct FontSet;
 impl FontSet {
     pub const MONOSPACE: &'static str = "IBMPlex Mono";
     pub const UI: &'static str = "Lilex";
+}
+
+
+pub struct TextEditorStyles {
+    pub base_font: Font,
+    pub base_size: Pixels,
+    pub base_color: Hsla,
+}
+
+impl Default for TextEditorStyles {
+    fn default() -> Self {
+        Self {
+            base_font: gpui::font(FontSet::MONOSPACE),
+            base_size: px(14.0),
+            base_color: gpui::black()
+        }
+    }
 }

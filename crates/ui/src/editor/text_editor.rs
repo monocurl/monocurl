@@ -1,6 +1,7 @@
 use std::{collections::HashMap, time::Duration};
 use std::ops::Range;
 
+use crate::theme::{TextEditorStyles};
 use crate::{editor::backing::{TextBackend}};
 use gpui::*;
 use structs::text::{Location8, Span8};
@@ -112,8 +113,9 @@ pub struct TextEditor<B: TextBackend> {
     last_click_position: Option<Location8>,
     click_count: usize,
 
+    text_styles: TextEditorStyles,
     line_cache: LineCache,
-    pub line_height: Pixels,
+    line_height: Pixels,
     pub gutter_width: Pixels,
 
     pub viewport_height: Pixels,
@@ -140,6 +142,7 @@ impl<B: TextBackend> TextEditor<B> {
             last_click_position: None,
             click_count: 0,
 
+            text_styles: TextEditorStyles::default(),
             line_cache: LineCache::new(),
             line_height: px(20.0),
             gutter_width: px(50.0),
@@ -249,18 +252,17 @@ impl<B: TextBackend> TextEditor<B> {
         }
 
         let text = self.line_text(line);
-        let style = window.text_style();
 
         let run = TextRun {
             len: text.len(),
-            font: style.font(),
-            color: gpui::black(),
+            font: self.text_styles.base_font.clone(),
+            color: self.text_styles.base_color,
             background_color: None,
             underline: None,
             strikethrough: None,
         };
 
-        let font_size = style.font_size.to_pixels(window.rem_size());
+        let font_size = self.text_styles.base_size;
         let shaped = window.text_system().shape_line(
             text.into(),
             font_size,
