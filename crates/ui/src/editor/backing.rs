@@ -1,6 +1,5 @@
 use std::usize;
 
-use unicode_segmentation::*;
 use structs::{rope::{Rope, TextAggregate}, text::{Count8, Count16, Location8, Span8, Span16}};
 
 pub trait TextBackend: Default + Clone + 'static {
@@ -246,6 +245,7 @@ impl<const N: usize> TextBackend for Rope<TextAggregate, N> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use unicode_segmentation::*;
 
     #[derive(Default, Clone, Debug)]
     pub struct NaiveBackend(pub String);
