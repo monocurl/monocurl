@@ -32,7 +32,6 @@ pub trait AggregateData: Clone + Sized {
 
     fn codeunits(&self) -> usize;
     fn height(&self) -> u32;
-    fn nonzero_leaves(&self) -> usize;
 }
 
 mod internal {
@@ -497,6 +496,14 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
     }
 
     fn join_subtree(left: &Arc<RopeNode<S, N>>, right: &Arc<RopeNode<S, N>>) -> (Option<Arc<RopeNode<S, N>>>, Option<Arc<RopeNode<S, N>>>) {
+        if left.is_empty() {
+            return (None, Some(right.clone()));
+        }
+
+        if right.is_empty() {
+            return (Some(left.clone()), None);
+        }
+
         let lh = left.aggregate().height();
         let rh = right.aggregate().height();
         if lh == rh {
@@ -572,33 +579,60 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         }
 
         let (left, right) = self.split_node(&self.root, pos);
-        (left, right)
+        (Rope { root: left }.check_invariants(), Rope { root: right }.check_invariants())
     }
 
+    // helper method for splitting
+    // cut_child follows the properties specified in split_node
+    fn balanced_merge(siblings: &[Arc<RopeNode<S, N>>], cut_child: Arc<RopeNode<S, N>>, merge_front: bool) -> Arc<RopeNode<S, N>> {
+        if siblings.is_empty() {
+            return cut_child.clone();
+        }
+
+        let new_children = if merge_front {
+            let (lp, rp) = Self::join_subtree(&cut_child, &siblings[0]);
+
+            ArrayVec::from_iter(
+                lp.into_iter()
+                    .chain(rp.into_iter())
+                    .chain(siblings[1..].iter().cloned())
+            )
+        } else {
+            let (lp, rp) = Self::join_subtree(&siblings[siblings.len() - 1], &cut_child);
+
+            ArrayVec::from_iter(
+                siblings[..(siblings.len() - 1)].iter().cloned()
+                    .chain(lp.into_iter())
+                    .chain(rp.into_iter())
+            )
+        };
+
+        Arc::new(RopeNode::new_internal(new_children))
+    }
+
+    // returns a tree that maintains all invariants
+    // except that each returned root node (XOR)
+    // a. have less height than it originally did
+    // b. have less than minimum children
+    // c. have proper height and children
     fn split_node(
         &self,
         node: &Arc<RopeNode<S, N>>,
         pos: usize,
-    ) -> (Self, Self) {
+    ) -> (Arc<RopeNode<S, N>>, Arc<RopeNode<S, N>>) {
         match &**node {
             RopeNode::Leaf { data, .. } => {
                 // split the leaf data
                 let left_data = data.subrange(0..pos);
                 let right_data = data.subrange(pos..data.codeunits());
 
-                let left_leaf = RopeNode::Leaf {
-                    agg: S::from_leaf(&left_data),
-                    data: left_data,
-                };
+                let left_leaf = RopeNode::new_leaf(left_data);
 
-                let right_leaf = RopeNode::Leaf {
-                    agg: S::from_leaf(&right_data),
-                    data: right_data,
-                };
+                let right_leaf = RopeNode::new_leaf(right_data);
 
                 (
-                    Rope { root: Arc::new(left_leaf) },
-                    Rope { root: Arc::new(right_leaf) },
+                    Arc::new(left_leaf),
+                    Arc::new(right_leaf),
                 )
             }
             RopeNode::Internal { children, .. } => {
@@ -608,28 +642,13 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 
                     if pos < utf8 + child_size {
                         let local_pos = pos - utf8;
+
                         let (left_child, right_child) = self.split_node(child, local_pos);
 
-                        let mut left_children = Vec::new();
-                        for j in 0..i {
-                            left_children.push(children[j].clone());
-                        }
-                        if left_child.codeunits() > 0 {
-                            left_children.push(left_child.root.clone());
-                        }
+                        let left = Self::balanced_merge(&children[..i], left_child, false);
+                        let right = Self::balanced_merge(&children[(i + 1)..], right_child, true);
 
-                        let mut right_children = Vec::new();
-                        if right_child.codeunits() > 0 {
-                            right_children.push(right_child.root.clone());
-                        }
-                        for j in (i + 1)..children.len() {
-                            right_children.push(children[j].clone());
-                        }
-
-                        return (
-                            Self::from_children(left_children),
-                            Self::from_children(right_children)
-                        );
+                        return (left, right);
                     }
 
                     utf8 += child_size;
@@ -860,7 +879,6 @@ pub struct TextData(pub ArrayString<MAX_LEAF_SIZE>);
 pub struct TextAggregate {
     prefix_summary: TextPrefixSummary,
     height: usize,
-    nonzero_leaves: usize,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -935,7 +953,6 @@ impl AggregateData for TextAggregate {
         TextAggregate {
             prefix_summary,
             height: 0,
-            nonzero_leaves: if bytes_utf8 > 0 { 1 } else { 0 },
         }
     }
 
@@ -956,7 +973,6 @@ impl AggregateData for TextAggregate {
         }
 
         let depth = children.clone().map(|c| c.height).max().unwrap_or(0) + 1;
-        let nonzero_leaves = children.clone().map(|c| c.nonzero_leaves).sum::<usize>();
 
         let prefix_summary = TextPrefixSummary {
             bytes_utf8,
@@ -968,7 +984,6 @@ impl AggregateData for TextAggregate {
         TextAggregate {
             prefix_summary,
             height: depth,
-            nonzero_leaves,
         }
     }
 
@@ -978,10 +993,6 @@ impl AggregateData for TextAggregate {
 
     fn height(&self) -> u32 {
         self.height as u32
-    }
-
-    fn nonzero_leaves(&self) -> usize {
-        self.nonzero_leaves
     }
 }
 
@@ -1025,7 +1036,6 @@ impl<const N: usize> Rope<TextAggregate, N> {
 pub struct RLEAggregate<T> {
     bytes_utf8: usize,
     height: usize,
-    nonzero_leaves: usize,
     phantom_t: PhantomData<T>
 }
 
@@ -1092,7 +1102,6 @@ impl<T> AggregateData for RLEAggregate<T>
         RLEAggregate {
             bytes_utf8,
             height: 0,
-            nonzero_leaves: if bytes_utf8 > 0 { 1 } else { 0 },
             phantom_t: PhantomData,
         }
     }
@@ -1100,12 +1109,10 @@ impl<T> AggregateData for RLEAggregate<T>
     fn merge(children: impl DoubleEndedIterator<Item=Self> + Clone) -> Self {
         let bytes_utf8 = children.clone().map(|c| c.bytes_utf8).sum();
         let height = children.clone().map(|c| c.height).max().unwrap_or(0) + 1;
-        let nonzero_leaves = children.clone().map(|c| c.nonzero_leaves).sum::<usize>();
 
         RLEAggregate {
             bytes_utf8,
             height,
-            nonzero_leaves,
             phantom_t: PhantomData,
         }
     }
@@ -1116,10 +1123,6 @@ impl<T> AggregateData for RLEAggregate<T>
 
     fn height(&self) -> u32 {
         self.height as u32
-    }
-
-    fn nonzero_leaves(&self) -> usize {
-        self.nonzero_leaves
     }
 }
 
@@ -1441,6 +1444,15 @@ mod tests {
 mod replace_tests {
     use super::*;
 
+
+    fn assert_invariants<S: AggregateData, const N: usize>(rope: &Rope<S, N>) {
+        rope.clone().check_invariants();
+    }
+
+    fn collect_string(rope: &Rope<TextAggregate, 8>) -> String {
+        rope.iterator_utf8(0).collect()
+    }
+
     #[test]
     fn test_split_at_simple() {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
@@ -1561,4 +1573,164 @@ mod replace_tests {
 
         assert_eq!(result_str, expected);
     }
+
+    #[test]
+    fn split_at_every_position_small() {
+        let text = "abcdefghijklmnopqrstuvwxyz";
+        let rope = Rope::<TextAggregate, 8>::from_str(text);
+
+        for i in 0..=text.len() {
+            let (l, r) = rope.split_at(i);
+            assert_eq!(
+                collect_string(&l) + &collect_string(&r),
+                text
+            );
+            assert_invariants(&l);
+            assert_invariants(&r);
+        }
+    }
+
+    #[test]
+    fn split_at_every_position_large() {
+        let text = "a".repeat(2000);
+        let rope = Rope::<TextAggregate, 8>::from_str(&text);
+
+        for i in (0..=text.len()).step_by(17) {
+            let (l, r) = rope.split_at(i);
+            assert_eq!(
+                collect_string(&l) + &collect_string(&r),
+                text
+            );
+            assert_invariants(&l);
+            assert_invariants(&r);
+        }
+    }
+
+    #[test]
+    fn repeated_split_cascade() {
+        let mut rope = Rope::<TextAggregate, 8>::from_str(&"x".repeat(1500));
+
+        for _ in 0..20 {
+            let mid = rope.codeunits() / 2;
+            let (l, r) = rope.split_at(mid);
+            assert_invariants(&l);
+            assert_invariants(&r);
+            rope = Rope::join(l, r);
+            assert_invariants(&rope);
+        }
+    }
+
+    #[test]
+    fn join_different_heights() {
+        let small = Rope::<TextAggregate, 8>::from_str("small");
+        let large = Rope::<TextAggregate, 8>::from_str(&"L".repeat(2000));
+
+        let joined1 = Rope::join(small.clone(), large.clone());
+        let joined2 = Rope::join(large, small);
+
+        assert_eq!(
+            collect_string(&joined1),
+            "small".to_string() + &"L".repeat(2000)
+        );
+        assert_eq!(
+            collect_string(&joined2),
+            "L".repeat(2000) + "small"
+        );
+
+        assert_invariants(&joined1);
+        assert_invariants(&joined2);
+    }
+
+    #[test]
+    fn join_many_small_roots() {
+        let mut rope = Rope::<TextAggregate, 8>::default();
+
+        for _ in 0..100 {
+            let leaf = Rope::<TextAggregate, 8>::from_str("abc");
+            rope = Rope::join(rope, leaf);
+            assert_invariants(&rope);
+        }
+
+        assert_eq!(collect_string(&rope), "abc".repeat(100));
+    }
+
+    #[test]
+    fn join_after_many_splits() {
+        let rope = Rope::<TextAggregate, 8>::from_str(&"x".repeat(1000));
+        let mut pieces = Vec::new();
+
+        let mut current = rope;
+        for _ in 0..10 {
+            let (l, r) = current.split_at(current.codeunits() / 2);
+            pieces.push(l);
+            current = r;
+        }
+        pieces.push(current);
+
+        let rebuilt = pieces.into_iter().reduce(Rope::join).unwrap();
+        assert_eq!(collect_string(&rebuilt), "x".repeat(1000));
+        assert_invariants(&rebuilt);
+    }
+
+    #[test]
+    fn delete_entire_rope_incrementally() {
+        let mut rope = Rope::<TextAggregate, 8>::from_str(&"a".repeat(1024));
+
+        while rope.codeunits() > 0 {
+            let len = rope.codeunits();
+            rope = rope.replace_range(0..(len / 2).max(1), vec![]);
+            assert_invariants(&rope);
+        }
+
+        assert_eq!(rope.codeunits(), 0);
+    }
+    #[test]
+    fn alternating_delete_ranges() {
+        let mut rope = Rope::<TextAggregate, 8>::from_str(&"0123456789".repeat(100));
+
+        for i in 0..50 {
+            let start = (i * 10) % rope.codeunits();
+            let end = (start + 5).min(rope.codeunits());
+            rope = rope.replace_range(start..end, vec![]);
+            assert_invariants(&rope);
+        }
+    }
+
+    #[test]
+    fn split_join_roundtrip_identity() {
+        let text = "roundtrip test ".repeat(100);
+        let rope = Rope::<TextAggregate, 8>::from_str(&text);
+
+        for i in (0..text.len()).step_by(13) {
+            let (l, r) = rope.split_at(i);
+            let rebuilt = Rope::join(l, r);
+            assert_eq!(collect_string(&rebuilt), text);
+            assert_invariants(&rebuilt);
+        }
+    }
+
+    #[test]
+    fn height_shrinks_after_mass_deletion() {
+        let rope = Rope::<TextAggregate, 8>::from_str(&"x".repeat(3000));
+        let h1 = rope.root.aggregate().height();
+
+        let rope2 = rope.replace_range(0..2900, vec![]);
+        let h2 = rope2.root.aggregate().height();
+
+        assert!(h2 <= h1);
+        assert_invariants(&rope2);
+    }
+
+    #[test]
+    fn deterministic_fuzz_split_join() {
+        let mut rope = Rope::<TextAggregate, 8>::from_str(&"abcdefghijklmnopqrstuvwxyz".repeat(50));
+
+        for i in 0..100 {
+            let pos = (i * 37) % rope.codeunits();
+            let (l, r) = rope.split_at(pos);
+            rope = Rope::join(l, r);
+            assert_invariants(&rope);
+        }
+    }
+
 }
