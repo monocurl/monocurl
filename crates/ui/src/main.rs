@@ -38,8 +38,6 @@ impl MonocurlLauncher {
     fn setup_global_actions(cx: &mut App) {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-
-        cx.bind_keys([KeyBinding::new("cmd-s", SaveActiveDocument, None)]);
     }
 
     fn setup_menus(cx: &mut App) {

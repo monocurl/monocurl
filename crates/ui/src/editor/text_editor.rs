@@ -1,3 +1,4 @@
+use std::usize;
 use std::{collections::HashMap, time::Duration};
 use std::ops::Range;
 
@@ -98,6 +99,7 @@ pub struct TextEditor<B: TextBackend> {
     pub scroll_handle: ScrollHandle,
 
     pub backend: B,
+    dirty: Entity<bool>,
 
     undo_stack: Vec<Operation<B>>,
     redo_stack: Vec<Operation<B>>,
@@ -123,25 +125,29 @@ pub struct TextEditor<B: TextBackend> {
 }
 
 impl<B: TextBackend> TextEditor<B> {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>, content: String, dirty: Entity<bool>) -> Self {
+        let backend = B::default()
+            .replace(0..0, &content);
+
         TextEditor {
             focus_handle: cx.focus_handle(),
             scroll_handle: ScrollHandle::new(),
-            backend: B::default(),
+            backend,
+            dirty,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             marked_range: None,
             is_selecting: false,
-            cursor: Cursor::collapsed(Location8 { row: 0, col: 0 }),
 
+            cursor: Cursor::collapsed(Location8 { row: 0, col: 0 }),
             cursor_blink_state: true,
             cursor_blink_epoch: 0,
             cursor_blink_interval: Duration::from_millis(500),
+
             cursor_blink_delay: Duration::from_millis(500),
-
             last_click_position: None,
-            click_count: 0,
 
+            click_count: 0,
             text_styles: TextEditorStyles::default(),
             line_cache: LineCache::new(),
             line_height: px(20.0),
@@ -290,7 +296,7 @@ impl<B: TextBackend> TextEditor<B> {
 
 impl<B: TextBackend> TextEditor<B> {
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        let current = self.cursor.head;
+        let current = self.cursor.anchor.min(self.cursor.head);
         if current.row == 0 {
             self.move_to(Location8 { row: 0, col: 0 }, cx);
         } else {
@@ -299,7 +305,7 @@ impl<B: TextBackend> TextEditor<B> {
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        let current = self.cursor.head;
+        let current = self.cursor.anchor.max(self.cursor.head);
         let new_pos = Location8 { row: current.row + 1, col: current.col };
         self.move_to(new_pos, cx);
     }
@@ -483,7 +489,7 @@ impl<B: TextBackend> TextEditor<B> {
             _ => {
                 let line_start = Location8 { row: pos.row, col: 0 };
                 let line_end_offset = self.backend.loc8_to_offset8(
-                    Location8 { row: pos.row + 1, col: 0 }
+                    Location8 { row: pos.row, col: usize::MAX }
                 );
                 let line_end_offset = line_end_offset.min(self.backend.len());
                 let line_end = self.backend.offset8_to_loc8(line_end_offset);
@@ -604,6 +610,9 @@ impl<B: TextBackend> EntityInputHandler for TextEditor<B> {
             .unwrap_or_else(|| self.cursor.range(&self.backend));
 
         self.backend = self.backend.replace(range.clone(), new_text);
+        self.dirty.update(cx, |dirty, _cx| {
+            *dirty = true;
+        });
 
         let new_offset = range.start + new_text.len();
         self.cursor = Cursor::collapsed(self.backend.offset8_to_loc8(new_offset));

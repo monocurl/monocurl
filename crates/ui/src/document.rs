@@ -133,8 +133,9 @@ impl DocumentView {
     fn really_save(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if Some(path.clone()) != self.user_path {
             self.user_path = Some(path.clone());
-            self.editor.read(cx).write_to_user_path(&path);
         }
+
+        self.editor.read(cx).write_to_user_path(&path, cx);
 
         self.window_state.upgrade().inspect(|ws| {
             ws.update(cx, |state, _cx| {
@@ -143,7 +144,7 @@ impl DocumentView {
         });
 
         self.dirty.update(cx, |dirty, _| {
-            *dirty = false;
+            *dirty = dirty_file(&self.internal_path, &self.user_path);
         })
     }
 
@@ -200,7 +201,7 @@ impl DocumentView {
 
 impl DocumentView {
     pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>, window_state: WeakEntity<WindowState>, dirty: Entity<bool>, cx: &mut Context<Self>) -> Self {
-        let editor = cx.new(|cx| Editor::new(internal_path.clone(), cx));
+        let editor = cx.new(|cx| Editor::new(internal_path.clone(), dirty.clone(), cx));
         let viewport = cx.new(|cx| Viewport::new(cx));
         let timeline = cx.new(|cx| Timeline::new(cx));
 
