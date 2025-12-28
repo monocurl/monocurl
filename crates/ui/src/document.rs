@@ -250,6 +250,8 @@ impl DocumentView {
 
     fn render_editing(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .flex()
+            .flex_col()
             .child(self.navbar.clone())
             .child(
                 Split::new(

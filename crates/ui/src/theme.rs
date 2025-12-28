@@ -1,4 +1,4 @@
-use gpui::{Font, Hsla, Pixels, Rgba, px};
+use gpui::{Font, Hsla, Pixels, Rgba, px, rgba};
 
 pub struct ColorSet;
 
@@ -78,17 +78,28 @@ impl FontSet {
 
 
 pub struct TextEditorStyles {
-    pub base_font: Font,
-    pub base_size: Pixels,
-    pub base_color: Hsla,
+    pub bg_color: Hsla,
+
+    pub text_font: Font,
+    pub text_size: Pixels,
+    pub text_color: Hsla,
+
+    pub gutter_font: Font,
+
+    pub selection_color: Rgba,
+    pub active_line_color: Rgba,
 }
 
 impl Default for TextEditorStyles {
     fn default() -> Self {
         Self {
-            base_font: gpui::font(FontSet::MONOSPACE),
-            base_size: px(14.0),
-            base_color: gpui::black()
+            bg_color: gpui::white(),
+            text_font: gpui::font(FontSet::MONOSPACE),
+            text_size: px(14.0),
+            text_color: gpui::black(),
+            gutter_font: gpui::font(FontSet::MONOSPACE),
+            selection_color: rgba(0x3311ff30),
+            active_line_color: rgba(0xeeeeee55),
         }
     }
 }

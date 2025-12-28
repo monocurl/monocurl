@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use gpui::*;
 use structs::rope::{Rope, TextAggregate};
 
-use crate::editor::{backing::TextBackend, text_editor::TextEditor};
+use crate::editor::{backing::{TextBackend}, text_editor::TextEditor};
 
 mod backing;
 pub mod text_editor;

@@ -18,6 +18,8 @@ actions!(
         BackspaceWord,
         BackspaceLine,
         Enter,
+        Tab,
+        Untab,
         Up,
         Left,
         Right,

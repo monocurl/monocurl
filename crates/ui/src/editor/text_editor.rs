@@ -9,6 +9,16 @@ use structs::text::{Location8, Span8};
 
 use crate::actions::*;
 
+const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
+const CURSOR_BLINK_DELAY: Duration = Duration::from_millis(500);
+const TAB_SIZE: usize = 4;
+const SCROLL_MARGIN: f32 = 4.0;
+const AUTO_SCROLL_MAX_SPEED: f32 = 100.0;
+const AUTO_SCROLL_INTERVAL: Duration = Duration::from_millis(16);
+const AUTO_SCROLL_MIN_THRESHOLD: f32 = -15.0;
+const AUTO_SCROLL_MAX_THRESHOLD: f32 = 70.0;
+const BOTTOM_SCROLL_PADDING: f32 = 400.0;
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, None),
@@ -20,6 +30,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("left", Left, None),
         KeyBinding::new("right", Right, None),
         KeyBinding::new("enter", Enter, None),
+        KeyBinding::new("tab", Tab, None),
+        KeyBinding::new("shift-tab", Untab, None),
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-up", SelectUp, None),
@@ -34,7 +46,6 @@ pub fn init(cx: &mut App) {
     ]);
 }
 
-// undo/redo operation storing complete backend state
 struct Operation<B: TextBackend> {
     backend: B,
     cursor: Location8,
@@ -95,8 +106,8 @@ impl LineCache {
 }
 
 pub struct TextEditor<B: TextBackend> {
-    pub focus_handle: FocusHandle,
-    pub scroll_handle: ScrollHandle,
+    focus_handle: FocusHandle,
+    scroll_handle: ScrollHandle,
 
     pub backend: B,
     dirty: Entity<bool>,
@@ -104,24 +115,23 @@ pub struct TextEditor<B: TextBackend> {
     undo_stack: Vec<Operation<B>>,
     redo_stack: Vec<Operation<B>>,
 
-    pub marked_range: Option<Span8>,
-    pub is_selecting: bool,
+    marked_range: Option<Span8>,
+    is_selecting: bool,
+    auto_scroll_epoch: usize,
+    auto_scroll_last_mouse_position: Option<Point<Pixels>>,
     cursor: Cursor,
     cursor_blink_state: bool,
     cursor_blink_epoch: usize,
-    cursor_blink_interval: Duration,
-    cursor_blink_delay: Duration,
 
-    last_click_position: Option<Location8>,
+    last_click_position: Point<Pixels>,
     click_count: usize,
 
     text_styles: TextEditorStyles,
     line_cache: LineCache,
     line_height: Pixels,
-    pub gutter_width: Pixels,
+    gutter_width: Pixels,
 
-    pub viewport_height: Pixels,
-    pub last_bounds: Option<Bounds<Pixels>>,
+    last_bounds: Option<Bounds<Pixels>>,
 }
 
 impl<B: TextBackend> TextEditor<B> {
@@ -138,21 +148,19 @@ impl<B: TextBackend> TextEditor<B> {
             redo_stack: Vec::new(),
             marked_range: None,
             is_selecting: false,
+            auto_scroll_epoch: 0,
+            auto_scroll_last_mouse_position: None,
 
             cursor: Cursor::collapsed(Location8 { row: 0, col: 0 }),
             cursor_blink_state: true,
             cursor_blink_epoch: 0,
-            cursor_blink_interval: Duration::from_millis(500),
 
-            cursor_blink_delay: Duration::from_millis(500),
-            last_click_position: None,
-
+            last_click_position: point(px(-1.0), px(0.0)),
             click_count: 0,
             text_styles: TextEditorStyles::default(),
             line_cache: LineCache::new(),
             line_height: px(20.0),
             gutter_width: px(50.0),
-            viewport_height: px(600.0),
             last_bounds: None,
         }
     }
@@ -165,9 +173,8 @@ impl<B: TextBackend> TextEditor<B> {
         cx.notify();
 
         let epoch = self.cursor_blink_epoch;
-        let delay = self.cursor_blink_delay;
         cx.spawn(async move |editor: WeakEntity<TextEditor<B>>, cx: &mut AsyncApp| {
-            cx.background_executor().timer(delay).await;
+            cx.background_executor().timer(CURSOR_BLINK_DELAY).await;
             editor
                 .update(cx, |editor, cx| {
                     if editor.cursor_blink_epoch == epoch {
@@ -181,7 +188,6 @@ impl<B: TextBackend> TextEditor<B> {
 
     fn start_cursor_blinking(&mut self, cx: &mut Context<Self>) {
         let epoch = self.cursor_blink_epoch;
-        let interval = self.cursor_blink_interval;
 
         cx.spawn(async move |editor: WeakEntity<TextEditor<B>>, cx: &mut AsyncApp| {
             loop {
@@ -202,23 +208,107 @@ impl<B: TextBackend> TextEditor<B> {
                     break;
                 }
 
-                cx.background_executor().timer(interval).await;
+                cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
             }
         })
         .detach();
     }
 
-    fn move_to(&mut self, pos: Location8, cx: &mut Context<Self>) {
+    fn move_to(&mut self, pos: Location8, mouse_origin: bool, cx: &mut Context<Self>) {
         self.cursor = Cursor::collapsed(pos);
         self.reset_cursor_blink(cx);
+        if !mouse_origin {
+            self.discretely_scroll_to_cursor();
+        }
     }
 
-    fn select_to(&mut self, pos: Location8, cx: &mut Context<Self>) {
+    fn select_to(&mut self, pos: Location8, mouse_origin: bool, cx: &mut Context<Self>) {
         self.cursor.head = pos;
         self.reset_cursor_blink(cx);
+        if !mouse_origin {
+            self.discretely_scroll_to_cursor();
+        }
+    }
+
+    fn discretely_scroll_to_cursor(&mut self) {
+        let cursor_row = self.cursor.head.row as f32;
+        let cursor_y = cursor_row * self.line_height;
+        let scroll_offset = self.scroll_handle.offset();
+        let viewport_height = self.scroll_handle.bounds().size.height;
+
+        let visible_top = -scroll_offset.y;
+        let visible_bottom = visible_top + viewport_height;
+
+        let margin_height = SCROLL_MARGIN * self.line_height;
+
+        if cursor_y < visible_top {
+            let new_scroll_y = -(cursor_y - margin_height).max(px(0.0));
+            self.scroll_handle.set_offset(point(scroll_offset.x, new_scroll_y));
+        } else if cursor_y + self.line_height > visible_bottom {
+            let new_scroll_y = -(cursor_y + self.line_height - viewport_height + margin_height);
+            self.scroll_handle.set_offset(point(scroll_offset.x, new_scroll_y));
+        }
+    }
+
+    fn start_responding_to_mouse_movements(&mut self, cx: &mut Context<Self>) {
+        self.auto_scroll_epoch += 1;
+        let epoch = self.auto_scroll_epoch;
+
+        cx.spawn(async move |editor: WeakEntity<TextEditor<B>>, cx: &mut AsyncApp| {
+            loop {
+                cx.background_executor().timer(AUTO_SCROLL_INTERVAL).await;
+
+                let should_continue = editor.update(cx, |editor, cx| {
+                    if !editor.is_selecting || editor.auto_scroll_epoch != epoch {
+                        return false;
+                    }
+
+                    if let Some(mouse_pos) = editor.auto_scroll_last_mouse_position {
+                        // update selection
+                        let pos = editor.index_for_mouse_position(mouse_pos);
+                        editor.select_to(pos, true, cx);
+
+                        // possibly scroll towards cursor
+                        let scroll_bounds = editor.scroll_handle.bounds();
+                        let viewport_top = scroll_bounds.top();
+                        let viewport_bottom = scroll_bounds.bottom();
+
+                        let distance_above = (viewport_top - mouse_pos.y - px(AUTO_SCROLL_MIN_THRESHOLD)).max(px(0.0));
+                        let distance_below = (mouse_pos.y - viewport_bottom - px(AUTO_SCROLL_MIN_THRESHOLD)).max(px(0.0));
+
+                        if distance_above > px(0.0) || distance_below > px(0.0) {
+                            let scroll_offset = editor.scroll_handle.offset();
+                            let distance = distance_above.max(distance_below);
+
+                            let interpolate = |x: f64| x;
+                            let t = (distance / (AUTO_SCROLL_MAX_THRESHOLD - AUTO_SCROLL_MIN_THRESHOLD)).min(px(1.0));
+                            let scroll_speed = px(interpolate(t.to_f64()) as f32) * AUTO_SCROLL_MAX_SPEED;
+
+                            let new_scroll_y = if distance_above > px(0.0) {
+                                scroll_offset.y + scroll_speed
+                            } else {
+                                scroll_offset.y - scroll_speed
+                            };
+
+                            editor.scroll_handle.set_offset(point(scroll_offset.x, new_scroll_y));
+                            cx.notify();
+                        }
+                    }
+
+                    true
+                }).ok().unwrap_or(false);
+
+                if !should_continue {
+                    break;
+                }
+            }
+        }).detach();
+    }
+
+    fn stop_responding_to_mouse_movements(&mut self) {
+        self.auto_scroll_epoch += 1;
     }
 }
-
 
 impl<B: TextBackend> TextEditor<B> {
     fn line_count(&self) -> usize {
@@ -242,8 +332,9 @@ impl<B: TextBackend> TextEditor<B> {
 
     fn visible_lines(&self) -> Range<usize> {
         let scroll_offset = self.scroll_handle.offset();
-        let start_line = (scroll_offset.y / self.line_height).floor() as usize;
-        let visible_line_count = (self.viewport_height / self.line_height).ceil() as usize;
+        let start_line = (-scroll_offset.y / self.line_height).floor().max(0.) as usize;
+        let viewport_height = self.scroll_handle.bounds().size.height;
+        let visible_line_count = (viewport_height / self.line_height).ceil() as usize;
         let end_line = (start_line + visible_line_count + 1).min(self.line_count());
         start_line..end_line
     }
@@ -261,14 +352,14 @@ impl<B: TextBackend> TextEditor<B> {
 
         let run = TextRun {
             len: text.len(),
-            font: self.text_styles.base_font.clone(),
-            color: self.text_styles.base_color,
+            font: self.text_styles.text_font.clone(),
+            color: self.text_styles.text_color,
             background_color: None,
             underline: None,
             strikethrough: None,
         };
 
-        let font_size = self.text_styles.base_size;
+        let font_size = self.text_styles.text_size;
         let shaped = window.text_system().shape_line(
             text.into(),
             font_size,
@@ -280,7 +371,6 @@ impl<B: TextBackend> TextEditor<B> {
         Some(shaped)
     }
 }
-
 
 impl<B: TextBackend> TextEditor<B> {
     fn push_undo(&mut self) {
@@ -298,94 +388,111 @@ impl<B: TextBackend> TextEditor<B> {
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
         let current = self.cursor.anchor.min(self.cursor.head);
         if current.row == 0 {
-            self.move_to(Location8 { row: 0, col: 0 }, cx);
+            self.move_to(Location8 { row: 0, col: 0 }, false, cx);
         } else {
-            self.move_to(Location8 { row: current.row - 1, col: current.col }, cx);
+            self.move_to(Location8 { row: current.row - 1, col: current.col }, false, cx);
         }
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
         let current = self.cursor.anchor.max(self.cursor.head);
         let new_pos = Location8 { row: current.row + 1, col: current.col };
-        self.move_to(new_pos, cx);
+        self.move_to(new_pos, false, cx);
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         if !self.cursor.is_empty() {
             let range = self.cursor.range(&self.backend);
-            self.move_to(self.backend.offset8_to_loc8(range.start), cx);
+            self.move_to(self.backend.offset8_to_loc8(range.start), false, cx);
         } else {
             let offset = self.backend.loc8_to_offset8(self.cursor.head);
             let new_offset = self.backend.prev_boundary(offset);
-            self.move_to(self.backend.offset8_to_loc8(new_offset), cx);
+            self.move_to(self.backend.offset8_to_loc8(new_offset), false, cx);
         }
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
         if !self.cursor.is_empty() {
             let range = self.cursor.range(&self.backend);
-            self.move_to(self.backend.offset8_to_loc8(range.end), cx);
+            self.move_to(self.backend.offset8_to_loc8(range.end), false, cx);
         } else {
             let offset = self.backend.loc8_to_offset8(self.cursor.head);
             let new_offset = self.backend.next_boundary(offset);
-            self.move_to(self.backend.offset8_to_loc8(new_offset), cx);
+            self.move_to(self.backend.offset8_to_loc8(new_offset), false, cx);
         }
     }
 
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         let offset = self.backend.loc8_to_offset8(self.cursor.head);
         let new_offset = self.backend.prev_boundary(offset);
-        self.select_to(self.backend.offset8_to_loc8(new_offset), cx);
+        self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
     }
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         let offset = self.backend.loc8_to_offset8(self.cursor.head);
         let new_offset = self.backend.next_boundary(offset);
-        self.select_to(self.backend.offset8_to_loc8(new_offset), cx);
+        self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
     }
 
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
         let current = self.cursor.head;
         if current.row == 0 {
-            self.select_to(Location8 { row: 0, col: 0 }, cx);
+            self.select_to(Location8 { row: 0, col: 0 }, false, cx);
         } else {
             let new_pos = Location8 { row: current.row - 1, col: current.col };
-            self.select_to(new_pos, cx);
+            self.select_to(new_pos, false, cx);
         }
     }
 
     fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
         let current = self.cursor.head;
         let new_pos = Location8 { row: current.row + 1, col: current.col };
-        self.select_to(new_pos, cx);
+        self.select_to(new_pos, false, cx);
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.cursor.anchor = Location8 { row: 0, col: 0 };
         self.cursor.head = self.backend.offset8_to_loc8(self.backend.len());
+        self.discretely_scroll_to_cursor();
         cx.notify();
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
         let new_pos = Location8 { row: self.cursor.head.row, col: 0 };
-        self.move_to(new_pos, cx);
+        self.move_to(new_pos, false, cx);
     }
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
         let row = self.cursor.head.row;
         let next_line = self.backend.loc8_to_offset8(Location8 { row: row + 1, col: 0 });
         let line_end = next_line.saturating_sub(1).min(self.backend.len());
-        self.move_to(self.backend.offset8_to_loc8(line_end), cx);
+        self.move_to(self.backend.offset8_to_loc8(line_end), false, cx);
     }
 }
 
 impl<B: TextBackend> TextEditor<B> {
-
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.cursor.is_empty() {
             let offset = self.backend.loc8_to_offset8(self.cursor.head);
-            let new_offset = self.backend.prev_boundary(offset);
-            self.select_to(self.backend.offset8_to_loc8(new_offset), cx);
+
+            let line_start = self.backend.loc8_to_offset8(Location8 {
+                row: self.cursor.head.row,
+                col: 0
+            });
+            let text_before = self.backend.read(line_start..offset);
+
+            if text_before.chars().all(|c| c == ' ') && text_before.len() >= TAB_SIZE {
+                let spaces_to_delete = if text_before.len() % TAB_SIZE == 0 {
+                    TAB_SIZE
+                } else {
+                    text_before.len() % TAB_SIZE
+                };
+                let new_offset = offset.saturating_sub(spaces_to_delete);
+                self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+            } else {
+                let new_offset = self.backend.prev_boundary(offset);
+                self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+            }
         }
         self.replace_text_in_range(None, "", window, cx);
     }
@@ -394,7 +501,7 @@ impl<B: TextBackend> TextEditor<B> {
         if self.cursor.is_empty() {
             let offset = self.backend.loc8_to_offset8(self.cursor.head);
             let new_offset = self.backend.next_boundary(offset);
-            self.select_to(self.backend.offset8_to_loc8(new_offset), cx);
+            self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
         }
         self.replace_text_in_range(None, "", window, cx);
     }
@@ -403,32 +510,117 @@ impl<B: TextBackend> TextEditor<B> {
         let mut selection = self.cursor.range(&self.backend);
         let word = self.backend.word(selection.start, true);
         selection.start = word.start;
-        self.replace_text_in_range(Some(selection), "", window, cx);
+        let utf16 = self.backend.span8_to_span16(&selection);
+        self.replace_text_in_range(Some(utf16), "", window, cx);
     }
 
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
         self.replace_text_in_range(None, "\n", window, cx);
     }
 
+    fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor.is_empty() {
+            self.replace_text_in_range(None, &" ".repeat(TAB_SIZE), window, cx);
+        } else {
+            let start_loc = self.cursor.anchor.min(self.cursor.head);
+            let end_loc = self.cursor.anchor.max(self.cursor.head);
+
+            self.push_undo();
+
+            for row in start_loc.row..=end_loc.row {
+                let line_start = self.backend.loc8_to_offset8(Location8 { row, col: 0 });
+                self.backend = self.backend.replace(
+                    line_start..line_start,
+                    &" ".repeat(TAB_SIZE)
+                );
+            }
+
+            self.cursor.anchor.col += TAB_SIZE;
+            self.cursor.head.col += TAB_SIZE;
+            self.line_cache.invalidate();
+            self.dirty.update(cx, |dirty, _| *dirty = true);
+            self.reset_cursor_blink(cx);
+        }
+    }
+
+    fn untab(&mut self, _: &Untab, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.cursor.is_empty() {
+            let line_start = self.backend.loc8_to_offset8(Location8 {
+                row: self.cursor.head.row,
+                col: 0
+            });
+            let cursor_offset = self.backend.loc8_to_offset8(self.cursor.head);
+            let text_before = self.backend.read(line_start..cursor_offset);
+
+            let spaces_to_remove = text_before.chars()
+                .rev()
+                .take(TAB_SIZE)
+                .take_while(|&c| c == ' ')
+                .count();
+
+            if spaces_to_remove > 0 {
+                let remove_start = cursor_offset.saturating_sub(spaces_to_remove);
+                self.push_undo();
+                self.backend = self.backend.replace(remove_start..cursor_offset, "");
+                self.cursor = Cursor::collapsed(self.backend.offset8_to_loc8(remove_start));
+                self.line_cache.invalidate();
+                self.dirty.update(cx, |dirty, _| *dirty = true);
+                self.reset_cursor_blink(cx);
+            }
+        } else {
+            let start_loc = self.cursor.anchor.min(self.cursor.head);
+            let end_loc = self.cursor.anchor.max(self.cursor.head);
+
+            self.push_undo();
+
+            for row in (start_loc.row..=end_loc.row).rev() {
+                let line_start = self.backend.loc8_to_offset8(Location8 { row, col: 0 });
+                let line_end = self.backend.loc8_to_offset8(Location8 { row: row + 1, col: 0 })
+                    .min(self.backend.len());
+                let line_text = self.backend.read(line_start..line_end);
+
+                let spaces_to_remove = line_text.chars()
+                    .take(TAB_SIZE)
+                    .take_while(|&c| c == ' ')
+                    .count();
+
+                if spaces_to_remove > 0 {
+                    self.backend = self.backend.replace(
+                        line_start..line_start + spaces_to_remove,
+                        ""
+                    );
+
+                    if row == self.cursor.anchor.row {
+                        self.cursor.anchor.col = self.cursor.anchor.col.saturating_sub(spaces_to_remove);
+                    }
+                    if row == self.cursor.head.row {
+                        self.cursor.head.col = self.cursor.head.col.saturating_sub(spaces_to_remove);
+                    }
+                }
+            }
+
+            self.line_cache.invalidate();
+            self.dirty.update(cx, |dirty, _| *dirty = true);
+            self.reset_cursor_blink(cx);
+        }
+    }
+
     fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
-        self.select_to(Location8 { row: self.cursor.head.row, col: 0 }, cx);
+        self.select_to(Location8 { row: self.cursor.head.row, col: 0 }, false, cx);
         self.replace_text_in_range(None, "", window, cx);
     }
 }
 
 impl<B: TextBackend> TextEditor<B> {
-    fn index_for_mouse_position(&self, position: Point<Pixels>, _window: &Window) -> Location8 {
+    fn index_for_mouse_position(&self, position: Point<Pixels>) -> Location8 {
         let Some(bounds) = self.last_bounds else {
             return Location8 { row: 0, col: 0 };
         };
 
-        // which line was clicked
-        let scroll_offset = self.scroll_handle.offset();
-        let y = position.y - bounds.top() + scroll_offset.y;
+        let y = position.y - bounds.top();
         let line = (y / self.line_height).floor() as usize;
         let line = line.min(self.line_count().saturating_sub(1));
 
-        // find the shaped line
         if let Some(cached) = self.line_cache.get(line) {
             let x = position.x - bounds.left() - self.gutter_width;
             let col_offset = cached.closest_index_for_x(x);
@@ -446,35 +638,25 @@ impl<B: TextBackend> TextEditor<B> {
     ) {
         self.focus_handle.focus(window);
 
-        self.is_selecting = true;
-        let pos = self.index_for_mouse_position(event.position, window);
-
-        if event.modifiers.shift {
-            self.select_to(pos, cx);
-        } else {
-            self.move_to(pos, cx);
-        }
-
-        let pos = self.index_for_mouse_position(event.position, window);
-
-        // check if double-tap/triple tap
-        let is_multi_click = self.last_click_position == Some(pos);
-
-        if is_multi_click {
+        if self.last_click_position == event.position {
             self.click_count += 1;
         } else {
             self.click_count = 1;
         }
 
-        self.last_click_position = Some(pos);
+        self.is_selecting = true;
+        self.last_click_position = event.position;
+        self.auto_scroll_last_mouse_position = Some(event.position);
+        self.start_responding_to_mouse_movements(cx);
 
+        let pos = self.index_for_mouse_position(event.position);
         match self.click_count {
             1 => {
                 self.is_selecting = true;
                 if event.modifiers.shift {
-                    self.select_to(pos, cx);
+                    self.select_to(pos, true, cx);
                 } else {
-                    self.move_to(pos, cx);
+                    self.move_to(pos, true, cx);
                 }
             }
             2 => {
@@ -504,26 +686,23 @@ impl<B: TextBackend> TextEditor<B> {
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_selecting = false;
+        self.stop_responding_to_mouse_movements();
+        self.auto_scroll_last_mouse_position = None;
     }
 
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.is_selecting {
-            let pos = self.index_for_mouse_position(event.position, window);
-            self.select_to(pos, cx);
-
-            // TODO: Auto-scroll when mouse is above/below viewport
-        }
+    fn on_mouse_move(&mut self, _event: &MouseMoveEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        // mouse position tracking is mainly done in the listener registered in the paint
+        // since we don't get mouse move events if the mouse is outside the view in this method
     }
+}
 
-    // clipboard operations
+impl<B: TextBackend> TextEditor<B> {
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.replace_text_in_range(None, &text, window, cx);
         }
     }
-}
 
-impl<B: TextBackend> TextEditor<B> {
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.cursor.is_empty() {
             let range = self.cursor.range(&self.backend);
@@ -553,7 +732,6 @@ impl<B: TextBackend> TextEditor<B> {
     }
 }
 
-// EntityInputHandler implementation for OS text input
 impl<B: TextBackend> EntityInputHandler for TextEditor<B> {
     fn text_for_range(
         &mut self,
@@ -616,6 +794,7 @@ impl<B: TextBackend> EntityInputHandler for TextEditor<B> {
 
         let new_offset = range.start + new_text.len();
         self.cursor = Cursor::collapsed(self.backend.offset8_to_loc8(new_offset));
+        self.discretely_scroll_to_cursor();
 
         self.marked_range = None;
         self.line_cache.invalidate();
@@ -669,17 +848,17 @@ impl<B: TextBackend> EntityInputHandler for TextEditor<B> {
 
         let shaped = self.line_cache.get(start_loc.row as usize)?;
 
-        let line_y = start_loc.row as f32 * self.line_height.0;
+        let line_y = start_loc.row as f32 * self.line_height;
         let scroll_offset = self.scroll_handle.offset();
 
         Some(Bounds::from_corners(
             point(
                 bounds.left() + self.gutter_width + shaped.x_for_index(start_loc.col as usize),
-                bounds.top() + px(line_y) - scroll_offset.y,
+                bounds.top() + line_y - scroll_offset.y,
             ),
             point(
                 bounds.left() + self.gutter_width + shaped.x_for_index(end_loc.col as usize),
-                bounds.top() + px(line_y) + self.line_height - scroll_offset.y,
+                bounds.top() + line_y + self.line_height - scroll_offset.y,
             ),
         ))
     }
@@ -687,10 +866,10 @@ impl<B: TextBackend> EntityInputHandler for TextEditor<B> {
     fn character_index_for_point(
         &mut self,
         point: Point<Pixels>,
-        window: &mut Window,
+        _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<usize> {
-        let loc8 = self.index_for_mouse_position(point, window);
+        let loc8 = self.index_for_mouse_position(point);
         let offset8 = self.backend.loc8_to_offset8(loc8);
         Some(self.backend.offset8_to_offset16(offset8) as usize)
     }
@@ -701,10 +880,10 @@ struct TextElement<B: TextBackend> {
 }
 
 struct PrepaintState {
-    lines: Vec<(usize, ShapedLine)>,  // (line_number, content)
+    lines: Vec<(usize, ShapedLine)>,
     cursor_bounds: Option<Bounds<Pixels>>,
     selection_bounds: Vec<Bounds<Pixels>>,
-    total_height: Pixels,
+    active_line_bounds: Option<Bounds<Pixels>>,
 }
 
 impl<B: TextBackend> IntoElement for TextElement<B> {
@@ -734,11 +913,11 @@ impl<B: TextBackend> Element for TextElement<B> {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let editor = self.editor.read(cx);
-        let total_height = editor.line_count() as f32 * editor.line_height.0;
+        let total_height = editor.line_count() as f32 * editor.line_height;
 
         let mut style = Style::default();
         style.size.width = relative(1.).into();
-        style.size.height = px(total_height).into();
+        style.size.height = px(f32::from(total_height) + BOTTOM_SCROLL_PADDING).into();
 
         (window.request_layout(style, [], cx), ())
     }
@@ -753,28 +932,23 @@ impl<B: TextBackend> Element for TextElement<B> {
         cx: &mut App,
     ) -> Self::PrepaintState {
         self.editor.update(cx, |editor, _cx| {
-            editor.viewport_height = bounds.size.height;
-
             let visible_lines = editor.visible_lines();
             let mut lines = Vec::new();
 
-            // shape visible lines
             for line_num in visible_lines.clone() {
                 if let Some(shaped) = editor.shape_line(line_num, window) {
                     lines.push((line_num, shaped));
                 }
             }
 
-            let scroll_offset = editor.scroll_handle.offset();
             let line_height = editor.line_height;
             let gutter_width = editor.gutter_width;
 
-            // calculate cursor bounds - only if visible and blink state is true
             let cursor_bounds = if editor.cursor.is_empty() && editor.cursor_blink_state {
                 let line_num = editor.cursor.head.row as usize;
                 if let Some(shaped) = editor.line_cache.get(line_num) {
                     let x = shaped.x_for_index(editor.cursor.head.col as usize);
-                    let y = px(line_num as f32 * line_height.0) - scroll_offset.y;
+                    let y = line_num as f32 * line_height;
                     Some(Bounds::new(
                         point(bounds.left() + gutter_width + x, bounds.top() + y),
                         size(px(1.5), line_height),
@@ -786,7 +960,17 @@ impl<B: TextBackend> Element for TextElement<B> {
                 None
             };
 
-            // calculate selection bounds (unchanged)
+            let active_line_bounds = if editor.cursor.is_empty() {
+                let line_num = editor.cursor.head.row as usize;
+                let y = line_num as f32 * line_height;
+                Some(Bounds::new(
+                    point(bounds.left(), bounds.top() + y),
+                    size(bounds.size.width, line_height),
+                ))
+            } else {
+                None
+            };
+
             let mut selection_bounds = Vec::new();
             if !editor.cursor.is_empty() {
                 let start_loc = editor.cursor.anchor.min(editor.cursor.head);
@@ -803,7 +987,7 @@ impl<B: TextBackend> Element for TextElement<B> {
 
                         let x1 = shaped.x_for_index(line_start as usize);
                         let x2 = shaped.x_for_index(line_end as usize).max(x1 + px(5.0));
-                        let y = px(line_num as f32 * line_height.0) - scroll_offset.y;
+                        let y = line_num as f32 * line_height;
 
                         selection_bounds.push(Bounds::from_corners(
                             point(bounds.left() + gutter_width + x1, bounds.top() + y),
@@ -813,13 +997,11 @@ impl<B: TextBackend> Element for TextElement<B> {
                 }
             }
 
-            let total_height = px(editor.line_count() as f32 * line_height.0);
-
             PrepaintState {
                 lines,
                 cursor_bounds,
                 selection_bounds,
-                total_height,
+                active_line_bounds,
             }
         })
     }
@@ -836,31 +1018,43 @@ impl<B: TextBackend> Element for TextElement<B> {
     ) {
         let editor = self.editor.read(cx);
         let focus_handle = editor.focus_handle.clone();
-        let scroll_offset = editor.scroll_handle.offset();
         let line_height = editor.line_height;
+
+        let gutter_font = editor.text_styles.gutter_font.clone();
         let gutter_width = editor.gutter_width;
 
+        if editor.is_selecting {
+            let editor = self.editor.clone();
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+                if phase == DispatchPhase::Bubble {
+                    editor.update(cx, |editor, _| {
+                        editor.auto_scroll_last_mouse_position = Some(event.position);
+                    });
+                }
+            });
+        }
         window.handle_input(
             &focus_handle,
             ElementInputHandler::new(bounds, self.editor.clone()),
             cx,
         );
 
-        // selection
-        for sel_bounds in &prepaint.selection_bounds {
-            window.paint_quad(fill(*sel_bounds, rgba(0x3311ff30)));
+        if let Some(active_bounds) = prepaint.active_line_bounds {
+            window.paint_quad(fill(active_bounds, editor.text_styles.active_line_color));
         }
 
-        // gutter and text
+        for sel_bounds in &prepaint.selection_bounds {
+            window.paint_quad(fill(*sel_bounds, editor.text_styles.selection_color));
+        }
+
         for (line_num, shaped) in &prepaint.lines {
-            let y = px(*line_num as f32 * line_height.0) - scroll_offset.y;
+            let y = *line_num as f32 * line_height;
             let line_origin = point(bounds.left() + gutter_width, bounds.top() + y);
 
-            // draw line number in gutter
             let line_number = format!("{}", line_num + 1);
             let gutter_run = TextRun {
                 len: line_number.len(),
-                font: window.text_style().font(),
+                font: gutter_font.clone(),
                 color: gpui::red(),
                 background_color: None,
                 underline: None,
@@ -880,11 +1074,9 @@ impl<B: TextBackend> Element for TextElement<B> {
                 cx,
             ).ok();
 
-            // main text
             shaped.paint(line_origin, line_height, window, cx).ok();
         }
 
-        // draw cursor
         if focus_handle.is_focused(window) {
             if let Some(cursor_bounds) = prepaint.cursor_bounds {
                 window.paint_quad(fill(cursor_bounds, gpui::blue()));
@@ -905,8 +1097,6 @@ impl<B: TextBackend> Focusable for TextEditor<B> {
 
 impl<B: TextBackend> Render for TextEditor<B> {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let total_height = self.line_count() as f32 * self.line_height.0;
-
         div()
             .flex()
             .flex_col()
@@ -918,6 +1108,8 @@ impl<B: TextBackend> Render for TextEditor<B> {
             .on_action(cx.listener(Self::backspace_word))
             .on_action(cx.listener(Self::backspace_line))
             .on_action(cx.listener(Self::enter))
+            .on_action(cx.listener(Self::tab))
+            .on_action(cx.listener(Self::untab))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))
@@ -936,22 +1128,16 @@ impl<B: TextBackend> Render for TextEditor<B> {
             .child(
                 div()
                     .id("text-editor-scroll")
-                    .flex()
                     .size_full()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll_handle)
                     .cursor(CursorStyle::IBeam)
-                    .bg(white())
+                    .bg(self.text_styles.bg_color)
                     .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_move(cx.listener(Self::on_mouse_move))
-                    .child(
-                        div()
-                            .h(px(total_height))
-                            .w_full()
-                            .child( TextElement { editor: cx.entity() })
-                    )
+                    .child( TextElement { editor: cx.entity() } )
             )
     }
 }

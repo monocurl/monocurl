@@ -83,7 +83,7 @@ impl WindowState {
 
             let weak_state = cx.weak_entity();
             let open_documents: Vec<_> = state.open_documents.into_iter().map(|serde| {
-                let dirty = cx.new(|cx| false);
+                let dirty = cx.new(|_cx| false);
                 OpenDocument {
                     internal_path: serde.internal_path.clone(),
                     user_path: serde.user_path.clone(),
