@@ -942,27 +942,6 @@ impl<B: BackendTrait> Element for TextElement<B> {
                         Some(ret)
                     })
                     .collect();
-
-                // for line_num in visible_selection {
-                //     let line_start = if line_num == start_loc.row { start_loc.col } else { 0 };
-                //     let line_end = if line_num == end_loc.row {
-                //         end_loc.col
-                //     } else {
-                //         editor.line_map.line_len(line_num)
-                //     };
-
-                //     let loc1 = editor.line_map.point_for_location(Location8 { row: line_num, col: line_start });
-                //     let x1 = loc1.x;
-                //     let y = loc1.y;
-                //     let loc2 = editor.line_map.point_for_location(Location8 { row: line_num, col: line_end });
-                //     let x2 = loc2.x;
-
-                //     // TODO need to adjust this for multi line
-                //     selection_bounds.push(Bounds::from_corners(
-                //         point(bounds.left() + gutter_width + x1, bounds.top() + y),
-                //         point(bounds.left() + gutter_width + x2, bounds.top() + y + line_height),
-                //     ));
-                // }
             }
 
             PrepaintState {
