@@ -24,7 +24,7 @@ const BOTTOM_SCROLL_PADDING: f32 = 400.0;
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, None),
-        KeyBinding::new("alt-backspace shift-alt-backspace", BackspaceWord, None),
+        KeyBinding::new("alt-backspace", BackspaceWord, None),
         KeyBinding::new("secondary-backspace", BackspaceLine, None),
         KeyBinding::new("delete shift-delete", Delete, None),
         KeyBinding::new("up", Up, None),
@@ -105,6 +105,7 @@ pub struct TextEditor<B: BackendTrait> {
     right_gutter_width: Pixels,
 
     last_bounds: Option<Bounds<Pixels>>,
+    resize_anchor_line: Option<(usize, Pixels)>,
 }
 
 impl<B: BackendTrait> TextEditor<B> {
@@ -134,6 +135,7 @@ impl<B: BackendTrait> TextEditor<B> {
             gutter_width: px(50.0),
             right_gutter_width: px(10.0),
             last_bounds: None,
+            resize_anchor_line: None,
         };
         ret.replace(0..0, &content, window, cx);
         ret
@@ -155,6 +157,22 @@ impl<B: BackendTrait> TextEditor<B> {
         };
         self.line_map.replace_lines(del_range, self.shape_lines(ins_range, window).into_iter());
         self.dirty.update(cx, |dirty, _| *dirty = true);
+    }
+
+    fn capture_top_visible_line(&mut self) {
+        let scroll_y = -self.scroll_handle.offset().y;
+        let top_most = self.visible_lines().start;
+        let y_range = self.line_map.y_range(top_most..top_most + 1);
+        self.resize_anchor_line = Some((top_most, scroll_y - y_range.start));
+    }
+
+    fn restore_scroll_to_anchor_line(&mut self) {
+        if let Some((anchor_line, offset)) = self.resize_anchor_line.take() {
+            let target_y = self.line_map.y_range(anchor_line..anchor_line + 1).start +
+                offset;
+            let scroll_offset = self.scroll_handle.offset();
+            self.scroll_handle.set_offset(point(scroll_offset.x, -target_y));
+        }
     }
 }
 
@@ -259,11 +277,9 @@ impl<B: BackendTrait> TextEditor<B> {
                     }
 
                     if let Some(mouse_pos) = editor.auto_scroll_last_mouse_position {
-                        // update selection
                         let pos = editor.index_for_mouse_position(mouse_pos);
                         editor.select_to(pos, true, cx);
 
-                        // possibly scroll towards cursor
                         let scroll_bounds = editor.scroll_handle.bounds();
                         let viewport_top = scroll_bounds.top();
                         let viewport_bottom = scroll_bounds.bottom();
@@ -330,7 +346,6 @@ impl<B: BackendTrait> TextEditor<B> {
             Pixels::MAX
         };
 
-        // must incorporate lexing and static analysis at some point
         range.map(move |line_no| {
             let line_text = self.line_text(line_no);
             let run = TextRun {
@@ -351,6 +366,15 @@ impl<B: BackendTrait> TextEditor<B> {
             )
         })
         .collect()
+    }
+
+    fn reshape_dirty_lines(&mut self, window: &mut Window) {
+        if let Some(dirty) = self.backend.take_dirty_region() {
+            self.line_map.replace_lines(
+                self.visible_lines(),
+                self.shape_lines(dirty, window).into_iter()
+            );
+        }
     }
 
     fn visible_lines(&self) -> Range<usize> {
@@ -827,6 +851,122 @@ impl<B: BackendTrait> IntoElement for TextElement<B> {
     }
 }
 
+impl<B: BackendTrait> TextElement<B> {
+    fn compute_cursor_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>) -> Option<Bounds<Pixels>> {
+        if !editor.cursor.is_empty() || !editor.cursor_blink_state {
+            return None;
+        }
+
+        let Point { x, y } = editor.line_map.point_for_location(editor.cursor.head);
+        Some(Bounds::new(
+            point(bounds.left() + editor.gutter_width + x, bounds.top() + y),
+            size(px(1.5), editor.line_height),
+        ))
+    }
+
+    fn compute_active_line_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>, window: &Window) -> Option<Bounds<Pixels>> {
+        if !editor.cursor.is_empty() || !editor.focus_handle.is_focused(window) {
+            return None;
+        }
+
+        let line_num = editor.cursor.head.row as usize;
+        let y_range = editor.line_map.y_range(line_num..line_num + 1);
+        Some(Bounds::new(
+            point(bounds.left(), bounds.top() + y_range.start),
+            size(bounds.size.width, y_range.end - y_range.start),
+        ))
+    }
+
+    fn compute_selection_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>, visible_lines: Range<usize>, window: &Window) -> Vec<Bounds<Pixels>> {
+        if editor.cursor.is_empty() || !editor.focus_handle.is_focused(window) {
+            return Vec::new();
+        }
+
+        let start_loc = editor.cursor.anchor.min(editor.cursor.head);
+        let end_loc = editor.cursor.anchor.max(editor.cursor.head);
+
+        let visible_selection = visible_lines.start.max(start_loc.row) ..
+            visible_lines.end.min(end_loc.row + 1);
+        let mut y = editor.line_map.y_range(0..visible_selection.start).end;
+
+        editor.line_map
+            .unwrapped_lines_iter(visible_selection.start)
+            .take(visible_selection.len())
+            .flat_map(|multi_line| {
+                let line_num = multi_line.unwrapped_line_no;
+                let line_start = if line_num == start_loc.row { start_loc.col } else { 0 };
+                let line_end = if line_num == end_loc.row {
+                    end_loc.col
+                } else {
+                    editor.line_map.line_len(line_num)
+                };
+                multi_line.line.iter()
+                    .map(move |single_line| {
+                        (line_start..line_end, single_line)
+                    })
+            })
+            .filter_map(|(local_range, single_line)| {
+                y += editor.line_height;
+                let mut x_pixels = single_line.x_range(local_range)?;
+                x_pixels.end = x_pixels.end.max(x_pixels.start + px(5.0));
+                Some(Bounds::from_corners(
+                    point(bounds.left() + editor.gutter_width + x_pixels.start, bounds.top() + y - editor.line_height),
+                    point(bounds.left() + editor.gutter_width + x_pixels.end, bounds.top() + y),
+                ))
+            })
+            .collect()
+    }
+
+    fn paint_gutter_line(&self, line_num: usize, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+        let editor = self.editor.read(cx);
+        let line_range = editor.cursor.line_range();
+        let line_selected = line_range.contains(&line_num);
+        let gutter_color = if line_selected {
+            editor.text_styles.gutter_active_color
+        } else {
+            editor.text_styles.gutter_text_color
+        };
+
+        let line_number = format!("{}", line_num + 1);
+        let gutter_run = TextRun {
+            len: line_number.len(),
+            font: editor.text_styles.gutter_font.clone(),
+            color: gutter_color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+
+        let gutter_shaped = window.text_system().shape_line(
+            line_number.into(),
+            editor.text_styles.text_size,
+            &[gutter_run],
+            None,
+        );
+        let gutter_x = editor.gutter_width - gutter_shaped.width - px(10.0);
+        gutter_shaped.paint(
+            point(bounds.left() + gutter_x, bounds.top() + y),
+            editor.line_height,
+            window,
+            cx,
+        ).ok();
+    }
+
+    fn paint_text_line(&self, editor: &TextEditor<B>, shaped: &WrappedLine, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &App) {
+        let line_origin = point(bounds.left() + editor.gutter_width, bounds.top() + y);
+        shaped.paint(line_origin, editor.line_height, window, cx).ok();
+    }
+
+    fn handle_width_resize(&self, editor: &mut TextEditor<B>, bounds: Bounds<Pixels>) {
+        if editor.last_bounds.is_none_or(|b| b.size.width != bounds.size.width) {
+            println!("Rerender Please");
+            editor.capture_top_visible_line();
+            editor.backend.mark_region_as_dirty(0..editor.line_map.line_count());
+        }
+        editor.last_bounds = Some(bounds);
+    }
+}
+
 impl<B: BackendTrait> Element for TextElement<B> {
     type RequestLayoutState = ();
     type PrepaintState = PrepaintState;
@@ -846,11 +986,12 @@ impl<B: BackendTrait> Element for TextElement<B> {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
+        println!("Did the rerender");
         self.editor.update(cx, |editor, _cx| {
-            if let Some(dirty) = editor.backend.take_dirty_region() {
-                let new_lines = editor.shape_lines(dirty.clone(), window);
-                editor.line_map.replace_lines(dirty, new_lines.into_iter());
-            };
+            editor.reshape_dirty_lines(window);
+            if editor.resize_anchor_line.is_some() {
+                editor.restore_scroll_to_anchor_line();
+            }
         });
 
         let editor = self.editor.read(cx);
@@ -873,6 +1014,12 @@ impl<B: BackendTrait> Element for TextElement<B> {
         cx: &mut App,
     ) -> Self::PrepaintState {
         self.editor.update(cx, |editor, _cx| {
+            self.handle_width_resize(editor, bounds);
+            // in case any new dirty lines due to resize, make a best effort of adapting to the new layout
+            // it is possible (and likely) that now our bounds are slightly off from what they really should be, but this should not be that bad and will be
+            // fixed by next frame (so should be relatively transparent to user)
+            editor.reshape_dirty_lines(window);
+
             let visible_lines = editor.visible_lines();
 
             let lines = editor.line_map.unwrapped_lines_iter(visible_lines.start)
@@ -880,69 +1027,9 @@ impl<B: BackendTrait> Element for TextElement<B> {
                 .map(|line| (line.unwrapped_line_no, line.line.clone()))
                 .collect();
 
-            let line_height = editor.line_height;
-            let gutter_width = editor.gutter_width;
-
-            let cursor_bounds = if editor.cursor.is_empty() && editor.cursor_blink_state {
-                let Point { x, y} = editor.line_map.point_for_location(editor.cursor.head);
-                Some(Bounds::new(
-                    point(bounds.left() + gutter_width + x, bounds.top() + y),
-                    size(px(1.5), line_height),
-                ))
-            } else {
-                None
-            };
-
-            let active_line_bounds = if editor.cursor.is_empty() && editor.focus_handle.is_focused(window) {
-                let line_num = editor.cursor.head.row as usize;
-                let y_range = editor.line_map.y_range(line_num..line_num+1);
-                Some(Bounds::new(
-                    point(bounds.left(), bounds.top() + y_range.start),
-                    size(bounds.size.width, y_range.end - y_range.start),
-                ))
-            } else {
-                None
-            };
-
-            let mut selection_bounds = Vec::new();
-            if !editor.cursor.is_empty() {
-                let start_loc = editor.cursor.anchor.min(editor.cursor.head);
-                let end_loc = editor.cursor.anchor.max(editor.cursor.head);
-
-                let visible_selection = visible_lines.start.max(start_loc.row) ..
-                    visible_lines.end.min(end_loc.row + 1);
-                let mut y = editor.line_map.y_range(0..visible_selection.start).end;
-                selection_bounds = editor.line_map
-                    .unwrapped_lines_iter(visible_selection.start)
-                    .take(visible_selection.len())
-                    .flat_map(|multi_line| {
-                        let line_num = multi_line.unwrapped_line_no;
-                        // range for this line
-                        let line_start = if line_num == start_loc.row { start_loc.col } else { 0 };
-                        let line_end = if line_num == end_loc.row {
-                            end_loc.col
-                        } else {
-                            editor.line_map.line_len(line_num)
-                        };
-                        multi_line.line.iter()
-                            .map(move |single_line| {
-                                (line_start..line_end, single_line)
-                            })
-                    })
-                    .filter_map(|(local_range, single_line)| {
-                        y += line_height;
-                        let mut x_pixels = single_line.x_range(local_range)?;
-                        // make sure it's visible even if it's zero-width
-                        x_pixels.end = x_pixels.end.max(x_pixels.start + px(5.0));
-                        let ret = Bounds::from_corners(
-                            point(bounds.left() + gutter_width + x_pixels.start, bounds.top() + y - line_height),
-                            point(bounds.left() + gutter_width + x_pixels.end, bounds.top() + y),
-                        );
-
-                        Some(ret)
-                    })
-                    .collect();
-            }
+            let cursor_bounds = self.compute_cursor_bounds(editor, bounds);
+            let active_line_bounds = self.compute_active_line_bounds(editor, bounds, window);
+            let selection_bounds = self.compute_selection_bounds(editor, bounds, visible_lines, window);
 
             PrepaintState {
                 lines,
@@ -965,19 +1052,9 @@ impl<B: BackendTrait> Element for TextElement<B> {
     ) {
         let editor = self.editor.read(cx);
         let focus_handle = editor.focus_handle.clone();
-        let line_height = editor.line_height;
-
-        let line_range = editor.cursor.line_range();
-
-        let text_size = editor.text_styles.text_size;
-
         let cursor_color = editor.text_styles.cursor_color;
 
-        let gutter_font = editor.text_styles.gutter_font.clone();
-        let gutter_width = editor.gutter_width;
-        let gutter_active_color = editor.text_styles.gutter_active_color;
-        let gutter_default_color = editor.text_styles.gutter_text_color;
-
+        // handle input
         if editor.is_selecting {
             let editor = self.editor.clone();
             window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
@@ -1005,34 +1082,9 @@ impl<B: BackendTrait> Element for TextElement<B> {
         for (line_num, shaped) in &prepaint.lines {
             let editor = self.editor.read(cx);
             let y = editor.line_map.point_for_location(Location8 { row: *line_num, col: 0}).y;
-            let line_origin = point(bounds.left() + gutter_width, bounds.top() + y);
 
-            let line_number = format!("{}", line_num + 1);
-            let line_selected = line_range.contains(line_num);
-            let gutter_color = if line_selected { gutter_active_color } else { gutter_default_color };
-            let gutter_run = TextRun {
-                len: line_number.len(),
-                font: gutter_font.clone(),
-                color: gutter_color,
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            };
-            let gutter_shaped = window.text_system().shape_line(
-                line_number.into(),
-                text_size,
-                &[gutter_run],
-                None,
-            );
-            let gutter_x = gutter_width - gutter_shaped.width - px(10.0);
-            gutter_shaped.paint(
-                point(bounds.left() + gutter_x, bounds.top() + y),
-                line_height,
-                window,
-                cx,
-            ).ok();
-
-            shaped.paint(line_origin, line_height, window, cx).ok();
+            self.paint_text_line(editor, shaped, y, bounds, window, cx);
+            self.paint_gutter_line(*line_num, y, bounds, window, cx);
         }
 
         if focus_handle.is_focused(window) {
@@ -1040,14 +1092,6 @@ impl<B: BackendTrait> Element for TextElement<B> {
                 window.paint_quad(fill(cursor_bounds, cursor_color));
             }
         }
-
-        self.editor.update(cx, |editor, cx| {
-            if editor.last_bounds.is_none_or(|b| b.size.width != bounds.size.width) {
-                editor.backend.mark_region_as_dirty(0..editor.line_map.line_count());
-                cx.notify();
-            }
-            editor.last_bounds = Some(bounds);
-        });
     }
 }
 

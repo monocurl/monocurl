@@ -69,6 +69,8 @@ impl DocumentList {
                         let state = this.window_state.upgrade().unwrap();
                         let ip = ip0.clone();
                         state.update(cx, move |wstate, cx| {
+                            cx.stop_propagation();
+                            window.prevent_default();
                             wstate.close_tab(&ip, cx, window);
                         })
                     }))

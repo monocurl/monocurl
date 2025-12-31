@@ -258,6 +258,7 @@ impl WindowState {
     pub fn close_tab(&mut self, internal_path: &PathBuf, cx: &mut Context<Self>, window: &mut gpui::Window) {
         let Some(document) = self.open_documents.iter()
             .find(|p| &p.internal_path == internal_path) else {
+            log::warn!("Tried to close tab for non-open document: {:?}", internal_path);
             return;
         };
 

@@ -195,7 +195,7 @@ impl WrappedLine {
         })
     }
 
-    pub fn paint(&self, origin: Point<Pixels>, line_height: Pixels, window: &mut Window, cx: &mut App) -> Result<(), anyhow::Error> {
+    pub fn paint(&self, origin: Point<Pixels>, line_height: Pixels, window: &mut Window, cx: &App) -> Result<(), anyhow::Error> {
         let layout = &self.unwrapped_layout;
         let wrap_boundaries = &self.wrap_boundaries;
         let decoration_runs = &self.decoration_runs;

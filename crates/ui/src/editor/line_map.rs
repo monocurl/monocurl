@@ -1,7 +1,7 @@
 use std::{ops::Range, option::IntoIter};
 
-use gpui::{Pixels, Point, WrapBoundary};
-use structs::{rope::{self, Rope}, text::{Location8, Span8}};
+use gpui::{Pixels, Point};
+use structs::{rope::{self, Rope}, text::{Location8}};
 
 use crate::{editor::{wrapped_line::WrappedLine}};
 
