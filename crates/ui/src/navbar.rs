@@ -73,13 +73,13 @@ impl DocumentList {
                         })
                     }))
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
+            .on_click(cx.listener(move |this, _, w, cx| {
                 let state = this.window_state.upgrade().unwrap();
                 let statec = state.clone();
                 let up = up.clone();
                 let ip = ip.clone();
                 state.update(cx, move |wstate, cx| {
-                    wstate.navigate_to(up.clone(), ip.clone(), statec, cx);
+                    wstate.navigate_to(up.clone(), ip.clone(), statec, w, cx);
                 })
             }))
             .cursor_pointer()

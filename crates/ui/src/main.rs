@@ -106,7 +106,7 @@ impl MonocurlLauncher {
             focus: true,
             ..Default::default()
         };
-        cx.open_window(options, |_, cx| cx.new(|cx| MonocurlWindow::new(cx)))
+        cx.open_window(options, |window, cx| cx.new(|cx| MonocurlWindow::new(window, cx)))
             .unwrap();
 
         cx.on_window_closed(|cx| {

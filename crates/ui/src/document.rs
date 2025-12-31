@@ -3,7 +3,7 @@ use std::path::{PathBuf};
 use gpui::*;
 use server::doc_type::DocumentType;
 
-use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, components::split_pane::Split, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};
+use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, UnfocusEditor, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, components::split_pane::Split, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};
 
 
 pub fn init(cx: &mut App) {
@@ -17,6 +17,7 @@ pub fn init(cx: &mut App) {
 
         KeyBinding::new("secondary-p", TogglePresentationMode, None),
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
+        KeyBinding::new("escape", UnfocusEditor, Some("!presenter")),
 
         KeyBinding::new("space shift-space", TogglePlaying, Some("!editor")),
         KeyBinding::new("secondary-shift-space,", TogglePlaying, None),
@@ -100,6 +101,10 @@ impl DocumentView {
         }
         log::info!("Toggled presentation mode to {}", self.is_presenting);
         cx.notify();
+    }
+
+    fn unfocus_editor(&mut self, _ : &UnfocusEditor, w: &mut Window, cx: &mut Context<Self>) {
+        w.focus(&self.focus_handle);
     }
 
     fn toggle_playing(&mut self, _ : &TogglePlaying, _w: &mut Window, _cx: &mut Context<Self>) {
@@ -200,8 +205,8 @@ impl DocumentView {
 }
 
 impl DocumentView {
-    pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>, window_state: WeakEntity<WindowState>, dirty: Entity<bool>, cx: &mut Context<Self>) -> Self {
-        let editor = cx.new(|cx| Editor::new(internal_path.clone(), dirty.clone(), cx));
+    pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>, window_state: WeakEntity<WindowState>, dirty: Entity<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let editor = cx.new(|cx| Editor::new(internal_path.clone(), dirty.clone(), window, cx));
         let viewport = cx.new(|cx| Viewport::new(cx));
         let timeline = cx.new(|cx| Timeline::new(cx));
 
@@ -268,6 +273,7 @@ impl DocumentView {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_presentation))
             .on_action(cx.listener(Self::toggle_playing))
+            .on_action(cx.listener(Self::unfocus_editor))
             .on_action(cx.listener(Self::prev_slide))
             .on_action(cx.listener(Self::next_slide))
             .on_action(cx.listener(Self::scene_start))

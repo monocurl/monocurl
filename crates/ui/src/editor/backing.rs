@@ -1,9 +1,24 @@
 use std::usize;
 
-use structs::{rope::{Rope, TextAggregate}, text::{Count8, Count16, Location8, Span8, Span16}};
-use unicode_segmentation::UnicodeSegmentation;
+use structs::{rope::{Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
 
-pub trait TextBackend: Default + Clone + 'static {
+pub struct AutoCompleteItem {
+    pub head: String,
+    pub replacement: String,
+    pub cursor_position: isize,
+}
+
+struct Operation<B: BackendTrait> {
+    backend: B,
+    cursor: Location8,
+    anchor: Location8,
+}
+
+struct Diagnostic {
+    version: usize,
+}
+
+pub trait BackendTrait: Default + 'static {
     fn offset8_to_offset16(&self, offset: Count8) -> Count16;
     fn offset16_to_offset8(&self, offset: Count16) -> Count8;
     fn loc8_to_offset8(&self, loc: Location8) -> Count8;
@@ -17,7 +32,7 @@ pub trait TextBackend: Default + Clone + 'static {
         self.offset16_to_offset8(span16.start)..self.offset16_to_offset8(span16.end)
     }
 
-    fn replace(&self, span: Span8, new_text: &str) -> Self;
+    fn replace(&mut self, span: Span8, new_text: &str);
     fn read(&self, span: Span8) -> String;
 
     fn len(&self) -> Count8;
@@ -89,7 +104,26 @@ pub trait TextBackend: Default + Clone + 'static {
 
         start..end
     }
+
+    fn version(&self) -> usize;
+
+    fn diagnostics(&self) -> &[Diagnostic];
+
+    // characters that have modified attributes
+    // and resets their dirty status to non dirty
+    fn mark_region_as_dirty(&mut self, span: Span8);
+    fn take_dirty_region(&mut self) -> Option<Span8>;
+
+    fn add_listener(&mut self, f: impl FnMut() + 'static);
+
+    fn autocomplete_list(&self) -> &[AutoCompleteItem];
+
+    fn do_undo(&mut self);
+
+    fn do_redo(&mut self);
+
 }
+
 
 fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Count8, forward: bool) -> Count8 {
     use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
@@ -142,7 +176,7 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
                 // need forward text
                 let mut utf8 = 0;
                 chunk.clear();
-                for ch in rope.iterator_utf8(chunk_end) {
+                for ch in rope.iterator(chunk_end) {
                     if utf8 >= CHUNK { break; }
                     chunk.push(ch);
                     utf8 += ch.len_utf8();
@@ -155,7 +189,7 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
                 // need backward text
                 let mut buffer = String::new();
                 let mut utf8 = 0;
-                for ch in rope.rev_iterator_utf8(chunk_start) {
+                for ch in rope.rev_iterator(chunk_start) {
                     if utf8 >= CHUNK { break; }
                     buffer.push(ch);
                     utf8 += ch.len_utf8();
@@ -168,7 +202,7 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
             Err(GraphemeIncomplete::PreContext(ctx_end)) => {
                 let mut buffer = String::new();
                 let mut bytes = 0;
-                for ch in rope.rev_iterator_utf8(ctx_end) {
+                for ch in rope.rev_iterator(ctx_end) {
                     if bytes >= CHUNK { break; }
                     buffer.push(ch);
                     bytes += ch.len_utf8();
@@ -192,37 +226,46 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
     }
 }
 
-impl<const N: usize> TextBackend for Rope<TextAggregate, N> {
+#[derive(Default)]
+pub struct EditorBackend {
+    pub rope: Rope<TextAggregate>,
+    pub dirty_range: Option<Span8>,
+    pub version: usize,
+}
+
+impl BackendTrait for EditorBackend {
     fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
-        let summary = self.utf8_prefix_summary(offset);
+        let summary = self.rope.utf8_prefix_summary(offset);
         summary.codeunits_utf16
     }
 
     fn offset16_to_offset8(&self, offset: Count16) -> Count8 {
-        let summary = self.utf16_prefix_summary(offset);
+        let summary = self.rope.utf16_prefix_summary(offset);
         summary.bytes_utf8
     }
 
     fn loc8_to_offset8(&self, loc: Location8) -> Count8 {
-        let summary = self.utf8_line_pos_prefix(loc.row, loc.col);
+        let summary = self.rope.utf8_line_pos_prefix(loc.row, loc.col);
         summary.bytes_utf8
     }
 
     fn offset8_to_loc8(&self, offset: Count8) -> Location8 {
-        let summary = self.utf8_prefix_summary(offset);
+        let summary = self.rope.utf8_prefix_summary(offset);
         Location8 {
             row: summary.newlines,
             col: summary.bytes_utf8_since_newline,
         }
     }
 
-    fn replace(&self, span: Span8, new_text: &str) -> Self {
-        self.replace_range(span, Self::leaves_from_str(new_text))
+    fn replace(&mut self, span: Span8, new_text: &str) {
+        self.rope = self.rope.replace_range(span.clone(), leaves_from_str(new_text));
+        self.version += 1;
     }
 
     fn read(&self, span: Span8) -> String {
         let mut utf8 = 0;
-        self.iterator_utf8(span.start)
+        self.rope
+            .iterator(span.start)
             .take_while(|c| {
                 utf8 += c.len_utf8();
                 utf8 <= span.len()
@@ -231,129 +274,89 @@ impl<const N: usize> TextBackend for Rope<TextAggregate, N> {
     }
 
     fn len(&self) -> Count8 {
-        self.codeunits()
+        self.rope.codeunits()
     }
 
     fn next_boundary(&self, offset: Count8) -> Count8 {
-        grapheme_boundary(&self, offset, true)
+        grapheme_boundary(&self.rope, offset, true)
     }
 
     fn prev_boundary(&self, offset: Count8) -> Count8 {
-        grapheme_boundary(&self, offset, false)
+        grapheme_boundary(&self.rope, offset, false)
+    }
+
+    fn autocomplete_list(&self) -> &[AutoCompleteItem] {
+        &[]
+    }
+
+    fn do_undo(&mut self) {
+
+    }
+
+    fn do_redo(&mut self) {
+
+    }
+
+    fn version(&self) -> usize {
+        todo!()
+    }
+
+    fn diagnostics(&self) -> &[Diagnostic] {
+        todo!()
+    }
+
+    fn mark_region_as_dirty(&mut self, span: Span8) {
+        if let Some(dirty) = &mut self.dirty_range {
+            dirty.start = dirty.start.min(span.start);
+            dirty.end = dirty.end.max(span.end);
+        } else {
+            self.dirty_range = Some(span);
+        }
+    }
+
+    fn take_dirty_region(&mut self) -> Option<Span8> {
+        self.dirty_range.take()
+    }
+
+    fn add_listener(&mut self, _f: impl FnMut() + 'static) {
+        todo!()
     }
 }
 
-
-#[allow(unused)]
-#[derive(Default, Clone, Debug)]
-pub struct NaiveBackend(pub String);
-
-impl TextBackend for NaiveBackend {
-    fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
-        let mut utf16_offset = 0;
-        let mut utf8_count = 0;
-
-        for ch in self.0.chars() {
-            if utf8_count >= offset {
-                break;
-            }
-            utf8_count += ch.len_utf8();
-            utf16_offset += ch.len_utf16();
-        }
-
-        utf16_offset
-    }
-
-    fn offset16_to_offset8(&self, offset: Count16) -> Count8 {
-        let mut utf8_offset = 0;
-        let mut utf16_count = 0;
-
-        for ch in self.0.chars() {
-            if utf16_count >= offset {
-                break;
-            }
-            utf16_count += ch.len_utf16();
-            utf8_offset += ch.len_utf8();
-        }
-
-        utf8_offset
-    }
-
-    fn loc8_to_offset8(&self, loc: Location8) -> Count8 {
-        let mut current_row = 0;
-        let mut offset = 0;
-
-        for line in self.0.lines() {
-            if current_row == loc.row {
-                return offset + loc.col.min(line.len());
-            }
-            current_row += 1;
-            offset += line.len() + 1; // newline
-        }
-
-        // EOf
-        self.0.len()
-    }
-
-    fn offset8_to_loc8(&self, offset: Count8) -> Location8 {
-        let mut current_offset = 0;
-        let mut row = 0;
-
-        for line in self.0.lines() {
-            let line_end_offset = current_offset + line.len();
-
-            if offset <= line_end_offset {
-                let col = offset - current_offset;
-                return Location8 { row, col };
-            }
-
-            // dont forget newline
-            current_offset = line_end_offset + 1;
-            if offset == current_offset - 1 {
-                return Location8 { row, col: line.len() };
-            }
-            row += 1;
-        }
-
-        // EOF
-        Location8 { row, col: 0 }
-    }
-
-    fn replace(&self, span: Span8, new_text: &str) -> Self {
-        Self(self.0[..span.start].to_string() + new_text + &self.0[span.end..])
-    }
-
-    fn read(&self, span: Span8) -> String {
-        self.0[span].into()
-    }
-
-    fn len(&self) -> Count8 {
-        self.0.as_str().len()
-    }
-
-    fn next_boundary(&self, offset: Count8) -> Count8 {
-        self.0
-            .grapheme_indices(true)
-            .find_map(|(idx, _)| (idx > offset).then_some(idx))
-            .unwrap_or(self.0.len())
-    }
-
-    fn prev_boundary(&self, offset: Count8) -> Count8 {
-        self.0
-            .grapheme_indices(true)
-            .rev()
-            .find_map(|(idx, _)| (idx < offset).then_some(idx))
-            .unwrap_or(0)
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use unicode_segmentation::UnicodeSegmentation;
+
+    #[derive(Default, Clone, Debug)]
+    pub struct NaiveBackend(pub String);
+
+    impl NaiveBackend {
+
+        fn next_boundary(&self, offset: Count8) -> Count8 {
+            self.0
+                .grapheme_indices(true)
+                .find_map(|(idx, _)| (idx > offset).then_some(idx))
+                .unwrap_or(self.0.len())
+        }
+
+        fn prev_boundary(&self, offset: Count8) -> Count8 {
+            self.0
+                .grapheme_indices(true)
+                .rev()
+                .find_map(|(idx, _)| (idx < offset).then_some(idx))
+                .unwrap_or(0)
+        }
+
+    }
 
     fn assert_grapheme_boundaries(s: &str) {
         let naive = NaiveBackend(s.to_string());
-        let rope: Rope<_, 8> = Rope::from_str(s);
+        let rope = EditorBackend {
+            rope: Rope::from_str(s),
+            ..Default::default()
+        };
 
         let len = s.len();
 

@@ -1,11 +1,13 @@
 [package]
 name = "ui"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 structs.workspace = true
 server.workspace = true
+smallvec.workspace = true
 
 log.workspace = true
 env_logger.workspace = true

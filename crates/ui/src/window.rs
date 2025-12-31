@@ -8,8 +8,8 @@ pub struct MonocurlWindow {
 }
 
 impl MonocurlWindow {
-    pub fn new(cx: &mut Context<Self>) -> Self {
-        let state = cx.new(|cx| WindowState::new(cx));
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let state = cx.new(|cx| WindowState::new(window, cx));
         let home = cx.new(|cx| HomeView::new(cx, state.clone()));
 
         Self {

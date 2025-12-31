@@ -76,30 +76,39 @@ impl FontSet {
     pub const UI: &'static str = "Lilex";
 }
 
-
+#[derive(Clone)]
 pub struct TextEditorStyles {
     pub bg_color: Hsla,
 
     pub text_font: Font,
     pub text_size: Pixels,
+    pub line_height: Pixels,
     pub text_color: Hsla,
 
-    pub gutter_font: Font,
+    pub cursor_color: Hsla,
 
-    pub selection_color: Rgba,
-    pub active_line_color: Rgba,
+    pub gutter_font: Font,
+    pub gutter_text_color: Hsla,
+    pub gutter_active_color: Hsla,
+
+    pub selection_color: Hsla,
+    pub active_line_color: Hsla,
 }
 
 impl Default for TextEditorStyles {
     fn default() -> Self {
         Self {
-            bg_color: gpui::white(),
+            bg_color: rgba(0xf0eee7ff).into(),
             text_font: gpui::font(FontSet::MONOSPACE),
             text_size: px(14.0),
-            text_color: gpui::black(),
+            line_height: px(20.0),
+            text_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
+            cursor_color: gpui::blue(),
             gutter_font: gpui::font(FontSet::MONOSPACE),
-            selection_color: rgba(0x3311ff30),
-            active_line_color: rgba(0xeeeeee55),
+            gutter_text_color: gpui::hsla(0.0, 0.0, 0.3, 1.0),
+            gutter_active_color: gpui::hsla(0.05, 0.0, 0.3, 1.0),
+            selection_color: rgba(0x3311ff30).into(),
+            active_line_color: rgba(0xffff0030).into(),
         }
     }
 }

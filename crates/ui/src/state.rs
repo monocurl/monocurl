@@ -1,6 +1,6 @@
 use std::path::{PathBuf};
 
-use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle};
+use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle, Window};
 use serde::{Deserialize, Serialize};
 use server::doc_type::DocumentType;
 
@@ -75,7 +75,7 @@ impl WindowState {
         path
     }
 
-    fn load_saved_state(cx: &mut Context<Self>) -> Option<Self> {
+    fn load_saved_state(window: &mut Window, cx: &mut Context<Self>) -> Option<Self> {
         let path = Self::save_file();
         if path.exists() {
             let data = std::fs::read_to_string(&path).ok()?;
@@ -87,7 +87,7 @@ impl WindowState {
                 OpenDocument {
                     internal_path: serde.internal_path.clone(),
                     user_path: serde.user_path.clone(),
-                    view: cx.new(|cx| DocumentView::new(serde.internal_path, serde.user_path, weak_state.clone(), dirty.clone(), cx)),
+                    view: cx.new(|cx| DocumentView::new(serde.internal_path, serde.user_path, weak_state.clone(), dirty.clone(), window, cx)),
                     dirty
                 }
             }).collect();
@@ -118,8 +118,8 @@ impl WindowState {
         }
     }
 
-    pub fn new(cx: &mut Context<Self>) -> Self {
-        if let Some(saved) = Self::load_saved_state(cx) {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        if let Some(saved) = Self::load_saved_state(window, cx) {
             log::info!("Successfuly loaded window state from previous run");
             return saved;
         }
@@ -265,7 +265,7 @@ impl WindowState {
         let diff = *document.dirty.read(cx);
 
         fn actually_close(this: &mut WindowState, user_path: &Option<PathBuf>, internal_path: &PathBuf) {
-            if let Some(ref path) = user_path {
+            if let Some(path) = &user_path {
                 // if user path exists, copy it to internal path (resetting any progress)
 
                 match std::fs::copy(path, internal_path) {
@@ -349,7 +349,7 @@ impl WindowState {
         self.save();
     }
 
-    pub fn navigate_to(&mut self, user_path: Option<PathBuf>, internal_path: PathBuf, window_state: Entity<WindowState>, cx: &mut App) {
+    pub fn navigate_to(&mut self, user_path: Option<PathBuf>, internal_path: PathBuf, window_state: Entity<WindowState>, window: &mut Window, cx: &mut App) {
         self.recently_opened.retain(|p| p.user_path != user_path);
         self.recently_opened.insert(0, RecentlyOpened {
             internal_path: internal_path.clone(),
@@ -362,7 +362,7 @@ impl WindowState {
                 OpenDocument {
                     internal_path: internal_path.clone(),
                     user_path: user_path.clone(),
-                    view: cx.new(|cx| DocumentView::new( internal_path.clone(), user_path.clone(), window_state.downgrade(), dirty.clone(), cx)),
+                    view: cx.new(|cx| DocumentView::new( internal_path.clone(), user_path.clone(), window_state.downgrade(), dirty.clone(), window, cx)),
                     dirty: dirty
                 }
             });

@@ -43,6 +43,7 @@ actions!(
     [
         Undo,
         Redo,
+        UnfocusEditor,
         TogglePresentationMode,
         TogglePlaying,
         SceneStart,

@@ -39,7 +39,7 @@ mod internal {
 
     use arrayvec::ArrayVec;
 
-    use crate::{rope::{AggregateData, DEFAULT_CHILDREN, TextAggregate, TextPrefixSummary}, text::{Count8, Count16}};
+    use crate::{rope::{AggregateData, DEFAULT_CHILDREN}};
 
     pub(super) enum RopeNode<S: AggregateData, const N: usize = DEFAULT_CHILDREN> {
         Internal {
@@ -81,241 +81,6 @@ mod internal {
             }
         }
     }
-
-    enum ChildIterationResult {
-        // use none of child prefix summary (and break)
-        AggregateNone,
-        // use entire child prefix summary
-        AggregateFull,
-        // use a prefix of child prefix summary
-        AggregatePrefix(TextPrefixSummary)
-    }
-
-    impl<const N: usize> RopeNode<TextAggregate, N> {
-        /// helper function to accumulate prefix summaries from children
-        fn aggregate_children<F>(
-            children: &[Arc<RopeNode<TextAggregate, N>>],
-            mut f: F,
-        ) -> TextPrefixSummary
-        where
-            F: FnMut(&TextPrefixSummary, &RopeNode<TextAggregate, N>) -> ChildIterationResult,
-        {
-            let mut bytes_utf8 = 0;
-            let mut codeunits_utf16 = 0;
-            let mut newlines = 0;
-            let mut bytes_utf8_since_newline = 0;
-
-            for child in children.iter() {
-                let child_summary = child.aggregate().prefix_summary;
-
-                match f(&child_summary, child) {
-                    ChildIterationResult::AggregateNone => break,
-                    ChildIterationResult::AggregateFull => {
-                        bytes_utf8 += child_summary.bytes_utf8;
-                        codeunits_utf16 += child_summary.codeunits_utf16;
-                        newlines += child_summary.newlines;
-                        bytes_utf8_since_newline = if child_summary.newlines > 0 {
-                            child_summary.bytes_utf8_since_newline
-                        } else {
-                            child_summary.bytes_utf8_since_newline + bytes_utf8_since_newline
-                        };
-                    }
-                    ChildIterationResult::AggregatePrefix(summary) => {
-                        bytes_utf8 += summary.bytes_utf8;
-                        codeunits_utf16 += summary.codeunits_utf16;
-                        newlines += summary.newlines;
-                        bytes_utf8_since_newline = if summary.newlines > 0 {
-                            summary.bytes_utf8_since_newline
-                        } else {
-                            summary.bytes_utf8_since_newline + bytes_utf8_since_newline
-                        };
-                        break;
-                    }
-                }
-            }
-
-            TextPrefixSummary {
-                bytes_utf8,
-                codeunits_utf16,
-                newlines,
-                bytes_utf8_since_newline,
-            }
-        }
-
-        pub fn utf8_prefix_summary(&self, at: Count8) -> TextPrefixSummary {
-            match self {
-                RopeNode::Internal { children, .. } => {
-                    let mut remaining = at;
-
-                    Self::aggregate_children(children,
-                        |child_summary, child| {
-                            let child_bytes_utf8 = child_summary.bytes_utf8;
-
-                            if remaining == 0 {
-                                ChildIterationResult::AggregateNone
-                            } else if remaining > child_bytes_utf8 {
-                                remaining -= child_bytes_utf8;
-                                ChildIterationResult::AggregateFull
-                            } else {
-                                let summary = child.utf8_prefix_summary(remaining);
-                                remaining = 0;
-                                ChildIterationResult::AggregatePrefix(summary)
-                            }
-                        }
-                    )
-                }
-                RopeNode::Leaf { data, .. } => {
-                    let hunk = &data.0[..at.min(data.0.len())];
-                    let bytes_utf8 = hunk.len();
-                    let codeunits_utf16 = hunk.encode_utf16().count();
-                    let newlines = hunk.chars().filter(|&c| c == '\n').count();
-                    let bytes_utf8_since_newline = match hunk.rfind('\n') {
-                        Some(pos) => hunk.len() - pos - 1,
-                        None => hunk.len(),
-                    };
-
-                    TextPrefixSummary {
-                        bytes_utf8,
-                        codeunits_utf16,
-                        newlines,
-                        bytes_utf8_since_newline,
-                    }
-                }
-            }
-        }
-
-        pub fn utf16_prefix_summary(&self, at: Count16) -> TextPrefixSummary {
-            match self {
-                RopeNode::Internal { children, .. } => {
-                    let mut remaining = at;
-
-                    Self::aggregate_children(
-                        children,
-                        |child_summary, child| {
-                            let child_codeunits_utf16 = child_summary.codeunits_utf16;
-
-                            if remaining == 0 {
-                                ChildIterationResult::AggregateNone
-                            } else if remaining > child_codeunits_utf16 {
-                                remaining -= child_codeunits_utf16;
-                                ChildIterationResult::AggregateFull
-                            } else {
-                                let summary = child.utf16_prefix_summary(remaining);
-                                remaining = 0;
-                                ChildIterationResult::AggregatePrefix(summary)
-                            }
-                        }
-                    )
-                }
-                RopeNode::Leaf { data, .. } => {
-                    let hunk = &data.0;
-                    let mut codeunits_utf16 = 0;
-                    let mut bytes_utf8 = 0;
-                    let mut newlines = 0;
-                    let mut bytes_utf8_since_newline = 0;
-
-                    for c in hunk.chars() {
-                        let byte_len_utf16 = c.len_utf16();
-                        if codeunits_utf16 + byte_len_utf16 > at {
-                            break;
-                        }
-                        codeunits_utf16 += byte_len_utf16;
-                        bytes_utf8 += c.len_utf8();
-                        if c == '\n' {
-                            newlines += 1;
-                            bytes_utf8_since_newline = 0;
-                        } else {
-                            bytes_utf8_since_newline += c.len_utf8();
-                        }
-                    }
-
-                    TextPrefixSummary {
-                        bytes_utf8,
-                        codeunits_utf16,
-                        newlines,
-                        bytes_utf8_since_newline,
-                    }
-                }
-            }
-        }
-
-        pub fn utf8_line_pos_prefix(&self, row: usize, col: Count8) -> TextPrefixSummary {
-            match self {
-                RopeNode::Internal { children, .. } => {
-                    let mut remaining_row = row;
-                    let mut remaining_col = col;
-
-                    Self::aggregate_children(
-                        children,
-                        |child_summary, child| {
-                            if remaining_row == 0 && remaining_col == 0 {
-                                ChildIterationResult::AggregateNone
-                            } else if (remaining_row, remaining_col) > (child_summary.newlines, child_summary.bytes_utf8_since_newline) {
-                                remaining_row -= child_summary.newlines;
-                                if remaining_row == 0 {
-                                    remaining_col -= child_summary.bytes_utf8_since_newline;
-                                }
-                                ChildIterationResult::AggregateFull
-                            } else {
-                                let summary = child.utf8_line_pos_prefix(remaining_row, remaining_col);
-                                remaining_row = 0;
-                                remaining_col = 0;
-                                ChildIterationResult::AggregatePrefix(summary)
-                            }
-                        }
-                    )
-                }
-                RopeNode::Leaf { data, .. } => {
-                    let hunk = &data.0;
-                    let mut remaining_row = row;
-                    let mut remaining_col = col;
-                    let mut bytes_utf8 = 0;
-                    let mut codeunits_utf16 = 0;
-                    let mut newlines = 0;
-                    let mut bytes_utf8_since_newline = 0;
-
-                    for c in hunk.chars() {
-                        if remaining_row == 0 && remaining_col == 0 {
-                            break;
-                        }
-
-                        if c == '\n' {
-                            if remaining_row == 0 {
-                                // We're on the target row, stop at newline
-                                break;
-                            }
-                            bytes_utf8 += c.len_utf8();
-                            codeunits_utf16 += c.len_utf16();
-                            remaining_row -= 1;
-                            newlines += 1;
-                            bytes_utf8_since_newline = 0;
-                        } else {
-                            if remaining_row == 0 && remaining_col > 0 {
-                                // only decrement col if we're on target row and haven't reached target col
-                                let char_len = c.len_utf8();
-                                if remaining_col >= char_len {
-                                    remaining_col -= char_len;
-                                } else {
-                                    // don't consume partial character
-                                    break;
-                                }
-                            }
-                            bytes_utf8 += c.len_utf8();
-                            codeunits_utf16 += c.len_utf16();
-                            bytes_utf8_since_newline += c.len_utf8();
-                        }
-                    }
-
-                    TextPrefixSummary {
-                        bytes_utf8,
-                        codeunits_utf16,
-                        newlines,
-                        bytes_utf8_since_newline,
-                    }
-                }
-            }
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -338,11 +103,11 @@ impl<S: AggregateData, const N: usize> Default for Rope<S, N> {
 
 impl<S: AggregateData, const N: usize> Rope<S, N> {
 
-    pub fn iterator_utf8(&self, pos: Count8) -> impl Iterator<Item=<<S::LeafData as LeafData>::Iterator<'_> as Iterator>::Item> {
+    pub fn iterator(&self, pos: Count8) -> impl Iterator<Item=<<S::LeafData as LeafData>::Iterator<'_> as Iterator>::Item> {
         RopeIterator::<'_, S, N, true>::new(self, pos)
     }
 
-    pub fn rev_iterator_utf8(&self, pos: Count8) -> impl Iterator<Item=<<S::LeafData as LeafData>::Iterator<'_> as Iterator>::Item> {
+    pub fn rev_iterator(&self, pos: Count8) -> impl Iterator<Item=<<S::LeafData as LeafData>::Iterator<'_> as Iterator>::Item> {
         RopeIterator::<'_, S, N, false>::new(self, pos)
     }
 
@@ -405,6 +170,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         Rope { root: nodes[0].clone() }.check_invariants()
     }
 
+    #[must_use]
     pub fn replace_range(&self, range: Range<usize>, new_data: impl Into<Vec<S::LeafData>>) -> Self {
         let leaves = new_data
             .into()
@@ -661,6 +427,71 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 }
 
 impl<S: AggregateData, const N: usize> Rope<S, N> {
+    // finds the first leaf, such that the prefix excluding that leaf does not satisfy the predicate
+    pub fn find_leaf(&self, mut lt: impl FnMut(&S) -> bool) -> &S::LeafData {
+        let mut agg = S::from_leaf(&S::LeafData::identity());
+        self.find_leaf_rec(&mut agg, &self.root, &mut lt)
+    }
+
+     fn find_leaf_rec<'a>(
+        &'a self,
+        agg: &mut S,
+        node: &'a Arc<RopeNode<S, N>>,
+        lt: &mut impl FnMut(&S) -> bool,
+     ) -> &'a S::LeafData {
+        match &**node {
+            RopeNode::Leaf { data, .. } => {
+                data
+            }
+            RopeNode::Internal { children, .. } => {
+                for child in children.iter() {
+                    let combined = S::merge([agg.clone(), child.aggregate().clone()].into_iter());
+                    if lt(&combined) {
+                        *agg = combined;
+                    } else {
+                        return self.find_leaf_rec(agg, child, lt);
+                    }
+                }
+
+                panic!("Predicate should have failed before exhausting all children")
+            }
+        }
+     }
+
+    // Find the last leaf where the predicate is true
+    // le returns true to fully consume over the current aggregate
+    // walk_leaf is called with the prefix aggregate when we find the target leaf
+    // NOTE returned value of height is unspecified
+    pub fn walk(&self, mut le: impl FnMut(&S) -> bool, walk_leaf: impl FnOnce(&mut S, &S::LeafData)) -> S {
+        let mut agg = S::from_leaf(&S::LeafData::identity());
+        self.walk_rec(&mut agg, &self.root, &mut le, walk_leaf);
+        agg
+    }
+
+    fn walk_rec(
+        &self,
+        agg: &mut S,
+        node: &Arc<RopeNode<S, N>>,
+        le: &mut impl FnMut(&S) -> bool,
+        walk_leaf: impl FnOnce(&mut S, &S::LeafData)
+    ) {
+        match &**node {
+            RopeNode::Leaf { data, .. } => {
+                walk_leaf(agg, data);
+            }
+            RopeNode::Internal { children, .. } => {
+                for child in children.iter() {
+                    let combined = S::merge([agg.clone(), child.aggregate().clone()].into_iter());
+                    if le(&combined) {
+                        *agg = combined;
+                    } else {
+                        self.walk_rec(agg, child, le, walk_leaf);
+                        return;
+                    }
+                }
+            }
+        }
+    }
 
     pub fn subrange_aggregate(&self, range: Range<usize>) -> S {
         self.subrange_aggregate_rec(&self.root, range)
@@ -710,20 +541,64 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 
 // if out of bounds, returns 0 or len
 impl<const N: usize> Rope<TextAggregate, N> {
+    fn walk_chars_until(
+        agg: &mut TextAggregate,
+        chars: impl Iterator<Item = char>,
+        mut should_take: impl FnMut(&TextAggregate) -> bool,
+    ) {
+        for c in chars {
+            let char_utf8_len = c.len_utf8();
+            let char_utf16_len = c.len_utf16();
+
+            let new_summary = TextPrefixSummary {
+                bytes_utf8: agg.prefix_summary.bytes_utf8 + char_utf8_len,
+                codeunits_utf16: agg.prefix_summary.codeunits_utf16 + char_utf16_len,
+                newlines: agg.prefix_summary.newlines + if c == '\n' { 1 } else { 0 },
+                bytes_utf8_since_newline: if c == '\n' {
+                    0
+                } else {
+                    agg.prefix_summary.bytes_utf8_since_newline + char_utf8_len
+                },
+            };
+
+            let tentative = TextAggregate {
+                prefix_summary: new_summary,
+                height: 0,
+            };
+
+            if !should_take(&tentative) {
+                break;
+            }
+
+            agg.prefix_summary = new_summary;
+        }
+    }
+
+    fn text_walk(&self, le: impl FnMut(&TextAggregate) -> bool + Clone) -> TextPrefixSummary {
+        self.walk(le.clone(), |agg, leaf_data| {
+            Self::walk_chars_until(
+                agg,
+                leaf_data.0.chars(),
+                le.clone()
+            );
+        }).prefix_summary
+    }
 
     pub fn utf8_prefix_summary(&self, at: Count8) -> TextPrefixSummary {
-        self.root.utf8_prefix_summary(at)
+        self.text_walk(|agg| agg.prefix_summary.bytes_utf8 <= at)
     }
 
     pub fn utf16_prefix_summary(&self, at: Count16) -> TextPrefixSummary {
-        self.root.utf16_prefix_summary(at)
+        self.text_walk(|agg| agg.prefix_summary.codeunits_utf16 <= at)
     }
 
     pub fn utf8_line_pos_prefix(&self, row: usize, col: Count8) -> TextPrefixSummary {
-        self.root.utf8_line_pos_prefix(row, col)
+        self.text_walk(|agg| {
+            let s = &agg.prefix_summary;
+            (s.newlines, s.bytes_utf8_since_newline) <= (row, col)
+        })
     }
 }
-
 mod iterator {
     use std::sync::Arc;
 
@@ -996,39 +871,39 @@ impl AggregateData for TextAggregate {
     }
 }
 
-impl<const N: usize> Rope<TextAggregate, N> {
-    pub fn leaves_from_str(text: &str) -> Vec<TextData> {
-        if text.is_empty() {
-            return Vec::new();
-        }
-
-        let mut leaves = Vec::new();
-        let mut start = 0;
-
-        while start < text.len() {
-            let end = (start + MAX_LEAF_SIZE).min(text.len());
-
-            // Find UTF-8 boundary
-            let mut adjusted_end = end;
-            while adjusted_end > start && !text.is_char_boundary(adjusted_end) {
-                adjusted_end -= 1;
-            }
-
-            if adjusted_end == start {
-                // This should never happen with valid UTF-8
-                unreachable!("Invalid UTF-8 or character larger than MAX_LEAF_SIZE");
-            }
-
-            let slice = &text[start..adjusted_end];
-            leaves.push(TextData(ArrayString::from(slice).unwrap()));
-            start = adjusted_end;
-        }
-
-        leaves
+pub fn leaves_from_str(text: &str) -> Vec<TextData> {
+    if text.is_empty() {
+        return Vec::new();
     }
 
+    let mut leaves = Vec::new();
+    let mut start = 0;
+
+    while start < text.len() {
+        let end = (start + MAX_LEAF_SIZE).min(text.len());
+
+        // Find UTF-8 boundary
+        let mut adjusted_end = end;
+        while adjusted_end > start && !text.is_char_boundary(adjusted_end) {
+            adjusted_end -= 1;
+        }
+
+        if adjusted_end == start {
+            // This should never happen with valid UTF-8
+            unreachable!("Invalid UTF-8 or character larger than MAX_LEAF_SIZE");
+        }
+
+        let slice = &text[start..adjusted_end];
+        leaves.push(TextData(ArrayString::from(slice).unwrap()));
+        start = adjusted_end;
+    }
+
+    leaves
+}
+
+impl<const N: usize> Rope<TextAggregate, N> {
     pub fn from_str(s: &str) -> Self {
-        Self::default().replace_range(0..0, Self::leaves_from_str(s))
+        Self::default().replace_range(0..0, leaves_from_str(s))
     }
 }
 
@@ -1138,42 +1013,42 @@ mod tests {
     #[test]
     fn test_empty_rope_iterator() {
         let rope = rope_from_str("");
-        let chars: Vec<char> = rope.iterator_utf8(0).collect();
+        let chars: Vec<char> = rope.iterator(0).collect();
         assert_eq!(chars, vec![]);
     }
 
     #[test]
     fn test_single_node_forward_iterator() {
         let rope = rope_from_str("hello");
-        let chars: String = rope.iterator_utf8(0).collect();
+        let chars: String = rope.iterator(0).collect();
         assert_eq!(chars, "hello");
     }
 
     #[test]
     fn test_single_node_reverse_iterator() {
         let rope = rope_from_str("hello");
-        let chars: String = rope.rev_iterator_utf8(5).collect();
+        let chars: String = rope.rev_iterator(5).collect();
         assert_eq!(chars, "olleh");
     }
 
     #[test]
     fn test_forward_iterator_from_middle() {
         let rope = rope_from_str("hello world");
-        let chars: String = rope.iterator_utf8(6).collect();
+        let chars: String = rope.iterator(6).collect();
         assert_eq!(chars, "world");
     }
 
     #[test]
     fn test_reverse_iterator_from_middle() {
         let rope = rope_from_str("hello world");
-        let chars: String = rope.rev_iterator_utf8(5).collect();
+        let chars: String = rope.rev_iterator(5).collect();
         assert_eq!(chars, "olleh");
     }
 
     #[test]
     fn test_unicode_forward_iterator() {
         let rope = rope_from_str("hello 🦀 world");
-        let chars: String = rope.iterator_utf8(0).collect();
+        let chars: String = rope.iterator(0).collect();
         assert_eq!(chars, "hello 🦀 world");
     }
 
@@ -1181,21 +1056,21 @@ mod tests {
     fn test_unicode_reverse_iterator() {
         let rope = rope_from_str("hello 🦀 world");
         let count = rope.codeunits();
-        let chars: String = rope.rev_iterator_utf8(count).collect();
+        let chars: String = rope.rev_iterator(count).collect();
         assert_eq!(chars, "dlrow 🦀 olleh");
     }
 
     #[test]
     fn test_iterator_from_end() {
         let rope = rope_from_str("hello");
-        let chars: Vec<char> = rope.iterator_utf8(5).collect();
+        let chars: Vec<char> = rope.iterator(5).collect();
         assert_eq!(chars, vec![]);
     }
 
     #[test]
     fn test_iterator_from_start_reverse() {
         let rope = rope_from_str("hello");
-        let chars: Vec<char> = rope.rev_iterator_utf8(0).collect();
+        let chars: Vec<char> = rope.rev_iterator(0).collect();
         assert_eq!(chars, vec![]);
     }
 
@@ -1204,7 +1079,7 @@ mod tests {
         // Create rope with multiple nodes (>64 chars per node)
         let text = "a".repeat(100);
         let rope = rope_from_str(&text);
-        let chars: String = rope.iterator_utf8(0).collect();
+        let chars: String = rope.iterator(0).collect();
         assert_eq!(chars, text);
     }
 
@@ -1214,7 +1089,7 @@ mod tests {
         let rope = rope_from_str(&text);
         let cands = [0, 500, 512, 1000, 1150, 1151];
         for &cand in &cands {
-            let chars: String = rope.iterator_utf8(cand).collect();
+            let chars: String = rope.iterator(cand).collect();
             let expected = text[cand..].to_string();
             assert_eq!(chars, expected);
         }
@@ -1225,7 +1100,7 @@ mod tests {
         let text = "a".repeat(100);
         let rope = rope_from_str(&text);
         let count = rope.codeunits();
-        let chars: String = rope.rev_iterator_utf8(count).collect();
+        let chars: String = rope.rev_iterator(count).collect();
         assert_eq!(chars, text);
     }
 
@@ -1235,7 +1110,7 @@ mod tests {
         let rope = rope_from_str(&text);
         let cands = [0, 500, 512, 1000, 1150, 1151];
         for &cand in &cands {
-            let chars: String = rope.rev_iterator_utf8(cand).collect();
+            let chars: String = rope.rev_iterator(cand).collect();
             let expected: String = text[..cand].chars().rev().collect();
             assert_eq!(chars, expected);
         }
@@ -1339,10 +1214,30 @@ mod tests {
 
     #[test]
     fn test_utf8_line_pos_prefix_end_of_line() {
-        let rope = rope_from_str("hello\nworld");
+        let rope = rope_from_str("hello\nwrld");
+        let summary = rope.utf8_line_pos_prefix(0, 100); // end of "hello"
+        assert_eq!(summary.bytes_utf8, 5);
+        assert_eq!(summary.newlines, 0);
+
         let summary = rope.utf8_line_pos_prefix(0, 5); // end of "hello"
         assert_eq!(summary.bytes_utf8, 5);
         assert_eq!(summary.newlines, 0);
+
+        let summary = rope.utf8_line_pos_prefix(0, 4);
+        assert_eq!(summary.bytes_utf8, 4);
+        assert_eq!(summary.newlines, 0);
+
+        let summary = rope.utf8_line_pos_prefix(1, 100);
+        assert_eq!(summary.bytes_utf8, 10);
+        assert_eq!(summary.newlines, 1);
+
+        let summary = rope.utf8_line_pos_prefix(1, 0);
+        assert_eq!(summary.bytes_utf8, 6);
+        assert_eq!(summary.newlines, 1);
+
+        let summary = rope.utf8_line_pos_prefix(1, 4);
+        assert_eq!(summary.bytes_utf8, 10);
+        assert_eq!(summary.newlines, 1);
     }
 
     #[test]
@@ -1450,7 +1345,7 @@ mod replace_tests {
     }
 
     fn collect_string(rope: &Rope<TextAggregate, 8>) -> String {
-        rope.iterator_utf8(0).collect()
+        rope.iterator(0).collect()
     }
 
     #[test]
@@ -1458,8 +1353,8 @@ mod replace_tests {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
         let (left, right) = rope.split_at(6);
 
-        let left_str: String = left.iterator_utf8(0).collect();
-        let right_str: String = right.iterator_utf8(0).collect();
+        let left_str: String = left.iterator(0).collect();
+        let right_str: String = right.iterator(0).collect();
 
         assert_eq!(left_str, "hello ");
         assert_eq!(right_str, "world");
@@ -1484,7 +1379,7 @@ mod replace_tests {
         let rope2 = Rope::<TextAggregate, 8>::from_str(" world");
 
         let result = Rope::join(rope1, rope2);
-        let result_str: String = result.iterator_utf8(0).collect();
+        let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello world");
     }
@@ -1495,7 +1390,7 @@ mod replace_tests {
         let new_data = vec![TextData(ArrayString::from("beautiful ").unwrap())];
 
         let result = rope.replace_range(6..11, new_data);
-        let result_str: String = result.iterator_utf8(0).collect();
+        let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello beautiful ");
     }
@@ -1504,7 +1399,7 @@ mod replace_tests {
     fn test_replace_range_delete() {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
         let result = rope.replace_range(5..11, vec![]);
-        let result_str: String = result.iterator_utf8(0).collect();
+        let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello");
     }
@@ -1515,7 +1410,7 @@ mod replace_tests {
         let new_data = vec![TextData(ArrayString::from(" beautiful").unwrap())];
 
         let result = rope.replace_range(5..5, new_data);
-        let result_str: String = result.iterator_utf8(0).collect();
+        let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello beautiful world");
     }
@@ -1528,7 +1423,7 @@ mod replace_tests {
 
         let new_data = vec![TextData(ArrayString::from("🎉").unwrap())];
         let result = rope.replace_range(crab_pos..after_crab, new_data);
-        let result_str: String = result.iterator_utf8(0).collect();
+        let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello 🎉 world");
     }
@@ -1541,8 +1436,8 @@ mod replace_tests {
         let rope2 = rope1.replace_range(6..11, new_data);
 
         // Original rope should be unchanged
-        let rope1_str: String = rope1.iterator_utf8(0).collect();
-        let rope2_str: String = rope2.iterator_utf8(0).collect();
+        let rope1_str: String = rope1.iterator(0).collect();
+        let rope2_str: String = rope2.iterator(0).collect();
 
         assert_eq!(rope1_str, "hello world");
         assert_eq!(rope2_str, "hello REPLACED");
@@ -1563,7 +1458,7 @@ mod replace_tests {
             .collect();
 
         let result = rope.replace_range(50..150, leaves);
-        let result_str: String = result.iterator_utf8(0).collect();
+        let result_str: String = result.iterator(0).collect();
 
         let expected = format!("{}{}{}",
             "a".repeat(50),

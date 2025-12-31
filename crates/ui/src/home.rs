@@ -34,11 +34,11 @@ impl HomeView {
         }
     }
 
-    fn open(&mut self, internal_path: std::path::PathBuf, user_path: Option<std::path::PathBuf>, cx: &mut App) {
+    fn open(&mut self, internal_path: std::path::PathBuf, user_path: Option<std::path::PathBuf>, window: &mut Window, cx: &mut App) {
         log::info!("Opening project {:?}", user_path);
 
         self.state.update(cx, move |state, cx| {
-            state.navigate_to(user_path.clone(), internal_path.clone(), cx.entity(), cx);
+            state.navigate_to(user_path.clone(), internal_path.clone(), cx.entity(), window, cx);
         });
     }
 
@@ -50,7 +50,7 @@ impl HomeView {
         })
     }
 
-    fn create_default(&mut self, dtype: DocumentType, cx: &mut App) {
+    fn create_default(&mut self, dtype: DocumentType, window: &mut Window, cx: &mut App) {
         log::info!("Creating default {:?}", dtype);
 
         let path = self.state.update(cx, move |state, _cx| {
@@ -58,7 +58,7 @@ impl HomeView {
         });
 
         self.state.update(cx, move |state, cx| {
-            state.navigate_to(None, path, cx.entity(), cx);
+            state.navigate_to(None, path, cx.entity(), window, cx);
         });
     }
 
@@ -122,24 +122,23 @@ impl HomeView {
             .max_w(px(600.))
     }
 
-    fn single_project(&self, internal_path: &std::path::Path, user_path: Option<&std::path::PathBuf>, cx: &Context<Self>) -> impl IntoElement {
-        let path = if let Some(path) = user_path {
-            sub_home_dir(path)
+    fn single_project(&self, internal_path: std::path::PathBuf, user_path: Option<std::path::PathBuf>, cx: &Context<HomeView>) -> impl IntoElement + use<> {
+        let path = if let Some(ref path) = user_path {
+            sub_home_dir(&path)
             .unwrap_or(path.to_path_buf())
             .to_string_lossy().to_string()
         } else {
             "Untitled".to_string()
         };
 
-        let path_for_open = user_path
-            .map(|p| p.to_path_buf());
-        let path_for_remove = user_path
-            .map(|p| p.to_path_buf());
+        let path_for_open = user_path.clone();
+        let path_for_remove = user_path.clone();
 
-        let internal_path = internal_path.to_path_buf();
+        let internal_path = internal_path;
         let internal_path_for_remove = internal_path.clone();
 
         let name = user_path
+            .as_ref()
             .and_then(|f| f.file_name())
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or("Untitled".to_string());
@@ -170,8 +169,8 @@ impl HomeView {
                     .justify_between()
                     .w_full()
                     .p_2()
-                    .on_click(cx.listener(move |this, _event, _window, cx| {
-                        this.open(internal_path.clone(), path_for_open.clone(), cx);
+                    .on_click(cx.listener(move |this, _event, window, cx| {
+                        this.open(internal_path.clone(), path_for_open.clone(), window, cx);
                     }))
                     .child(
                         div()
@@ -269,11 +268,10 @@ impl HomeView {
                         "project-list",
                         projects.len(),
                         cx.processor(move |this, range: Range<usize>, _, cx| {
-                            let projects = &this.state.read(cx).recently_opened;
-
-                            projects[range]
+                            this.state.read(cx)
+                                .recently_opened[range]
                                 .iter()
-                                .map(|p| this.single_project(&p.internal_path, p.user_path.as_ref(), cx))
+                                .map(|p| this.single_project(p.internal_path.clone(), p.user_path.clone(), cx))
                                 .collect()
                         })
                     )
@@ -332,13 +330,13 @@ impl HomeView {
                         }))
                     )
                     .child(
-                        link_button("New Scene", cx.listener(move |this, _, _, cx| {
-                            this.create_default(DocumentType::Scene, cx);
+                        link_button("New Scene", cx.listener(move |this, _, window, cx| {
+                            this.create_default(DocumentType::Scene, window, cx);
                         }))
                     )
                     .child(
-                        link_button("New Library", cx.listener(move |this, _, _, cx| {
-                            this.create_default(DocumentType::Library, cx);
+                        link_button("New Library", cx.listener(move |this, _, window, cx| {
+                            this.create_default(DocumentType::Library, window, cx);
                         }))
                     )
                     .gap_2()

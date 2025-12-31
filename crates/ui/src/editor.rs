@@ -1,25 +1,26 @@
 use std::path::PathBuf;
 
 use gpui::*;
-use structs::rope::{Rope, TextAggregate};
 
-use crate::editor::{backing::{TextBackend}, text_editor::TextEditor};
+use crate::editor::{backing::{BackendTrait, EditorBackend}, text_editor::TextEditor};
 
 mod backing;
+mod line_map;
+mod wrapped_line;
 pub mod text_editor;
 
 pub struct Editor {
     internal_path: PathBuf,
-    editor: Entity<text_editor::TextEditor<Rope<TextAggregate>>>,
+    editor: Entity<TextEditor<EditorBackend>>,
     // editor: Entity<text_editor::TextEditor<NaiveBackend>>,
 }
 
 impl Editor {
-    pub fn new(internal_path: PathBuf, dirty: Entity<bool>, cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(internal_path: PathBuf, dirty: Entity<bool>, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
         let content = std::fs::read_to_string(internal_path.clone()).unwrap_or_default();
         Self {
             internal_path,
-            editor: cx.new(|cx| TextEditor::new(cx, content, dirty)),
+            editor: cx.new(|cx| TextEditor::new(window, cx, content, dirty)),
         }
     }
 
