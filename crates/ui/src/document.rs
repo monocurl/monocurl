@@ -103,7 +103,7 @@ impl DocumentView {
         cx.notify();
     }
 
-    fn unfocus_editor(&mut self, _ : &UnfocusEditor, w: &mut Window, cx: &mut Context<Self>) {
+    fn unfocus_editor(&mut self, _ : &UnfocusEditor, w: &mut Window, _cx: &mut Context<Self>) {
         w.focus(&self.focus_handle);
     }
 

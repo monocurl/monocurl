@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 use gpui::{App, Bounds, DecorationRun, Half, Hsla, LineLayout, Pixels, Point, StrikethroughStyle, TextRun, UnderlineStyle, Window, WrapBoundary, black, fill, point, px, size};
 use smallvec::SmallVec;
-use structs::text::Count8;
+use structs::text::{Count8, Span8};
 
 // adapted from gpui's wrapped line
 #[derive(Clone, Debug, Default)]
@@ -172,6 +172,27 @@ impl WrappedLine {
 
     pub fn line_count(&self) -> usize {
         self.wrap_boundaries.len() + 1
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item=SingleWrappedLine<'_>> {
+        (0..self.line_count()).map(move |line_ix| {
+            let prev_boundary = if line_ix > 0 {
+                Some(&self.wrap_boundaries[line_ix - 1])
+            } else {
+                None
+            };
+            let next_boundary = if line_ix < self.wrap_boundaries.len() {
+                Some(&self.wrap_boundaries[line_ix])
+            } else {
+                None
+            };
+
+            SingleWrappedLine {
+                line: self,
+                prev_boundary,
+                next_boundary,
+            }
+        })
     }
 
     pub fn paint(&self, origin: Point<Pixels>, line_height: Pixels, window: &mut Window, cx: &mut App) -> Result<(), anyhow::Error> {
@@ -512,5 +533,46 @@ impl WrappedLine {
 
             Ok(())
         })
+    }
+}
+
+pub struct SingleWrappedLine<'a> {
+    pub line: &'a WrappedLine,
+    pub prev_boundary: Option<&'a (WrapBoundary, Pixels)>,
+    pub next_boundary: Option<&'a (WrapBoundary, Pixels)>,
+}
+
+impl<'a> SingleWrappedLine<'a> {
+    pub fn x_range(&self, unwrapped_char_range: Span8) -> Option<Range<Pixels>> {
+        let (start_x, org_start_x, line_start_index) = if let Some((prev_boundary, indent)) = self.prev_boundary {
+            let glyph = &self.line.unwrapped_layout.runs[prev_boundary.run_ix].glyphs[prev_boundary.glyph_ix];
+            (*indent, glyph.position.x, glyph.index)
+        } else {
+            (px(0.0), px(0.0), 0)
+        };
+
+        let line_end_index = if let Some((next_boundary, _)) = self.next_boundary {
+            let glyph = &self.line.unwrapped_layout.runs[next_boundary.run_ix].glyphs[next_boundary.glyph_ix];
+            glyph.index
+        } else {
+            self.line.unwrapped_layout.len
+        };
+
+        let pos = |index: usize| {
+            let x = self.line.unwrapped_layout.x_for_index(index);
+            start_x + (x - org_start_x)
+        };
+
+        if line_start_index >= unwrapped_char_range.end || line_end_index <= unwrapped_char_range.start {
+            return None;
+        }
+
+        let clamped_start_index = unwrapped_char_range.start.clamp(line_start_index, line_end_index);
+        let clamped_end_index = unwrapped_char_range.end.clamp(line_start_index, line_end_index);
+
+        let range_start_x = pos(clamped_start_index);
+        let range_end_x = pos(clamped_end_index);
+
+        Some(range_start_x..range_end_x)
     }
 }

@@ -8,13 +8,13 @@ pub struct AutoCompleteItem {
     pub cursor_position: isize,
 }
 
-struct Operation<B: BackendTrait> {
+pub struct Operation<B: BackendTrait> {
     backend: B,
     cursor: Location8,
     anchor: Location8,
 }
 
-struct Diagnostic {
+pub struct Diagnostic {
     version: usize,
 }
 

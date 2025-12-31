@@ -1,7 +1,7 @@
 use std::{ops::Range, option::IntoIter};
 
-use gpui::{Pixels, Point};
-use structs::{rope::{self, Rope}, text::Location8};
+use gpui::{Pixels, Point, WrapBoundary};
+use structs::{rope::{self, Rope}, text::{Location8, Span8}};
 
 use crate::{editor::{wrapped_line::WrappedLine}};
 
@@ -123,20 +123,15 @@ impl LineMap {
         }
     }
 
-    pub fn y_range(&self, line_no: Range<usize>) -> Range<Pixels> {
-        let pref1 = self.rope.subrange_aggregate(0..line_no.start);
-        let pref2 = self.rope.subrange_aggregate(0..line_no.end);
-        pref1.wrapped_line_count as f32 * self.line_height .. pref2.wrapped_line_count as f32 * self.line_height
+    pub fn wrapped_count_before(&self, unwrapped_line_index: usize) -> usize {
+        let agg = self.rope.subrange_aggregate(0..unwrapped_line_index);
+        agg.wrapped_line_count
     }
 
-    pub fn wrapped_lines(&self, line_range: Range<usize>) -> Vec<(usize, WrappedLine)> {
-        let mut ret = Vec::with_capacity(line_range.len());
-        let mut it = self.rope.iterator(line_range.start);
-        for i in line_range {
-            ret.push((i, it.next().unwrap().clone()));
-        }
-
-        ret
+    pub fn y_range(&self, line_no: Range<usize>) -> Range<Pixels> {
+        let s = self.wrapped_count_before(line_no.start);
+        let e = self.wrapped_count_before(line_no.end);
+        s as f32 * self.line_height .. e as f32 * self.line_height
     }
 
     // also = index of last line that starts < pos
@@ -231,4 +226,22 @@ impl LineMap {
             prefix.wrapped_line_count as f32 * self.line_height + delta.y
         )
     }
+
+    pub fn unwrapped_lines_iter(&self, unwrapped_line_start_no: usize) -> impl Iterator<Item=ContextifiedLine<'_>> {
+        let mut line_no = unwrapped_line_start_no;
+        self.rope.iterator(unwrapped_line_start_no)
+            .map(move |line| {
+                let ret = ContextifiedLine {
+                    line: line,
+                    unwrapped_line_no: line_no,
+                };
+                line_no += 1;
+                ret
+            })
+    }
+}
+
+pub struct ContextifiedLine<'a> {
+    pub line: &'a WrappedLine,
+    pub unwrapped_line_no: usize,
 }
