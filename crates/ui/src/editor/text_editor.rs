@@ -371,7 +371,7 @@ impl<B: BackendTrait> TextEditor<B> {
     fn reshape_dirty_lines(&mut self, window: &mut Window) {
         if let Some(dirty) = self.backend.take_dirty_region() {
             self.line_map.replace_lines(
-                self.visible_lines(),
+                dirty.clone(),
                 self.shape_lines(dirty, window).into_iter()
             );
         }
@@ -959,7 +959,6 @@ impl<B: BackendTrait> TextElement<B> {
 
     fn handle_width_resize(&self, editor: &mut TextEditor<B>, bounds: Bounds<Pixels>) {
         if editor.last_bounds.is_none_or(|b| b.size.width != bounds.size.width) {
-            println!("Rerender Please");
             editor.capture_top_visible_line();
             editor.backend.mark_region_as_dirty(0..editor.line_map.line_count());
         }
@@ -986,7 +985,6 @@ impl<B: BackendTrait> Element for TextElement<B> {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        println!("Did the rerender");
         self.editor.update(cx, |editor, _cx| {
             editor.reshape_dirty_lines(window);
             if editor.resize_anchor_line.is_some() {

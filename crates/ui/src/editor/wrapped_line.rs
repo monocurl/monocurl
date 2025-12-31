@@ -570,7 +570,11 @@ impl<'a> SingleWrappedLine<'a> {
         let clamped_start_index = unwrapped_char_range.start.clamp(line_start_index, line_end_index);
         let clamped_end_index = unwrapped_char_range.end.clamp(line_start_index, line_end_index);
 
-        let range_start_x = pos(clamped_start_index);
+        let range_start_x = if unwrapped_char_range.start < line_start_index {
+            px(0.0)
+        } else {
+            pos(clamped_start_index)
+        };
         let range_end_x = pos(clamped_end_index);
 
         Some(range_start_x..range_end_x)
