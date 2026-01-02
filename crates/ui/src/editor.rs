@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use gpui::*;
 
-use crate::editor::{backing::{BackendTrait, EditorBackend}, text_editor::TextEditor};
+use crate::{document_state::DocumentState, editor::{backing::EditorBackend, text_editor::TextEditor}};
 
 mod backing;
 mod line_map;
@@ -11,22 +11,23 @@ pub mod text_editor;
 
 pub struct Editor {
     internal_path: PathBuf,
-    editor: Entity<TextEditor<EditorBackend>>,
-    // editor: Entity<text_editor::TextEditor<NaiveBackend>>,
+    editor: Entity<TextEditor<DocumentState>>,
+    state: Entity<DocumentState>,
 }
 
 impl Editor {
-    pub fn new(internal_path: PathBuf, dirty: Entity<bool>, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(state: Entity<DocumentState>, internal_path: PathBuf, dirty: Entity<bool>, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
         let content = std::fs::read_to_string(internal_path.clone()).unwrap_or_default();
         Self {
             internal_path,
-            editor: cx.new(|cx| TextEditor::new(window, cx, content, dirty)),
+            editor: cx.new(|cx| TextEditor::new(state.clone(), window, cx, content, dirty)),
+            state,
         }
     }
 
     fn write_to_path(&self, path: &std::path::Path, cx: &App) {
-        let editor = self.editor.read(cx);
-        let content = editor.backend.read(0..editor.backend.len());
+        let state = self.state.read(cx);
+        let content = state.read(0..state.len());
         let _ = std::fs::write(path, content).inspect_err(|e| {
             log::error!("Failed to save file to {}: {}", path.display(), e);
         });

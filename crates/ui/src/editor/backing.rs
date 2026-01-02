@@ -2,13 +2,15 @@ use std::usize;
 
 use structs::{rope::{Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
 
+use crate::document_state::DocumentState;
+
 pub struct AutoCompleteItem {
     pub head: String,
     pub replacement: String,
     pub cursor_position: isize,
 }
 
-pub struct Operation<B: BackendTrait> {
+pub struct Operation<B: EditorBackend> {
     backend: B,
     cursor: Location8,
     anchor: Location8,
@@ -18,7 +20,7 @@ pub struct Diagnostic {
     version: usize,
 }
 
-pub trait BackendTrait: Default + 'static {
+pub trait EditorBackend: Default + 'static {
     fn offset8_to_offset16(&self, offset: Count8) -> Count16;
     fn offset16_to_offset8(&self, offset: Count16) -> Count8;
     fn loc8_to_offset8(&self, loc: Location8) -> Count8;
@@ -114,7 +116,6 @@ pub trait BackendTrait: Default + 'static {
     fn mark_region_as_dirty(&mut self, span: Span8);
     fn take_dirty_region(&mut self) -> Option<Span8>;
 
-    fn add_listener(&mut self, f: impl FnMut() + 'static);
 
     fn autocomplete_list(&self) -> &[AutoCompleteItem];
 
@@ -226,31 +227,25 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
     }
 }
 
-#[derive(Default)]
-pub struct EditorBackend {
-    pub rope: Rope<TextAggregate>,
-    pub dirty_range: Option<Span8>,
-    pub version: usize,
-}
 
-impl BackendTrait for EditorBackend {
+impl EditorBackend for DocumentState {
     fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
-        let summary = self.rope.utf8_prefix_summary(offset);
+        let summary = self.text_rope.utf8_prefix_summary(offset);
         summary.codeunits_utf16
     }
 
     fn offset16_to_offset8(&self, offset: Count16) -> Count8 {
-        let summary = self.rope.utf16_prefix_summary(offset);
+        let summary = self.text_rope.utf16_prefix_summary(offset);
         summary.bytes_utf8
     }
 
     fn loc8_to_offset8(&self, loc: Location8) -> Count8 {
-        let summary = self.rope.utf8_line_pos_prefix(loc.row, loc.col);
+        let summary = self.text_rope.utf8_line_pos_prefix(loc.row, loc.col);
         summary.bytes_utf8
     }
 
     fn offset8_to_loc8(&self, offset: Count8) -> Location8 {
-        let summary = self.rope.utf8_prefix_summary(offset);
+        let summary = self.text_rope.utf8_prefix_summary(offset);
         Location8 {
             row: summary.newlines,
             col: summary.bytes_utf8_since_newline,
@@ -258,13 +253,13 @@ impl BackendTrait for EditorBackend {
     }
 
     fn replace(&mut self, span: Span8, new_text: &str) {
-        self.rope = self.rope.replace_range(span.clone(), leaves_from_str(new_text));
+        self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
         self.version += 1;
     }
 
     fn read(&self, span: Span8) -> String {
         let mut utf8 = 0;
-        self.rope
+        self.text_rope
             .iterator(span.start)
             .take_while(|c| {
                 utf8 += c.len_utf8();
@@ -274,15 +269,15 @@ impl BackendTrait for EditorBackend {
     }
 
     fn len(&self) -> Count8 {
-        self.rope.codeunits()
+        self.text_rope.codeunits()
     }
 
     fn next_boundary(&self, offset: Count8) -> Count8 {
-        grapheme_boundary(&self.rope, offset, true)
+        grapheme_boundary(&self.text_rope, offset, true)
     }
 
     fn prev_boundary(&self, offset: Count8) -> Count8 {
-        grapheme_boundary(&self.rope, offset, false)
+        grapheme_boundary(&self.text_rope, offset, false)
     }
 
     fn autocomplete_list(&self) -> &[AutoCompleteItem] {
@@ -317,10 +312,6 @@ impl BackendTrait for EditorBackend {
     fn take_dirty_region(&mut self) -> Option<Span8> {
         self.dirty_range.take()
     }
-
-    fn add_listener(&mut self, _f: impl FnMut() + 'static) {
-        todo!()
-    }
 }
 
 
@@ -353,8 +344,8 @@ mod tests {
 
     fn assert_grapheme_boundaries(s: &str) {
         let naive = NaiveBackend(s.to_string());
-        let rope = EditorBackend {
-            rope: Rope::from_str(s),
+        let rope = DocumentState {
+            text_rope: Rope::from_str(s),
             ..Default::default()
         };
 

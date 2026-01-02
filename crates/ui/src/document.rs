@@ -3,7 +3,7 @@ use std::path::{PathBuf};
 use gpui::*;
 use server::doc_type::DocumentType;
 
-use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, UnfocusEditor, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, components::split_pane::Split, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};
+use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor}, components::split_pane::Split, document_state::DocumentState, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};
 
 
 pub fn init(cx: &mut App) {
@@ -55,7 +55,7 @@ pub struct DocumentView {
     is_presenting: bool,
 
     dirty: Entity<bool>,
-    state: Entity<()>,
+    _state: Entity<DocumentState>,
     window_state: WeakEntity<WindowState>,
 
     navbar: Entity<Navbar>,
@@ -206,7 +206,10 @@ impl DocumentView {
 
 impl DocumentView {
     pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>, window_state: WeakEntity<WindowState>, dirty: Entity<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let editor = cx.new(|cx| Editor::new(internal_path.clone(), dirty.clone(), window, cx));
+        // note that text editor is responsible for initially bootstrapping the content
+        let state = cx.new(|_| DocumentState::default());
+
+        let editor = cx.new(|cx| Editor::new(state.clone(), internal_path.clone(), dirty.clone(), window, cx));
         let viewport = cx.new(|cx| Viewport::new(cx));
         let timeline = cx.new(|cx| Timeline::new(cx));
 
@@ -220,7 +223,7 @@ impl DocumentView {
             is_presenting: false,
             dirty,
             window_state: window_state.clone(),
-            state: cx.new(|_| ()),
+            _state: state,
             navbar: cx.new(move |cx| Navbar::new(window_state, cx)),
             editor: editor.clone(),
             viewport: viewport.clone(),

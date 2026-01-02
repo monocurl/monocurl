@@ -5,6 +5,7 @@ use structs::assets::Assets;
 use crate::{actions::{Copy, Cut, EpsilonBackward, EpsilonForward, NextSlide, Paste, PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, editor::text_editor, window::MonocurlWindow};
 
 mod document;
+mod document_state;
 mod editor;
 mod home;
 mod navbar;

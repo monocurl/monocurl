@@ -5,7 +5,7 @@ use std::ops::Range;
 use crate::editor::wrapped_line::WrappedLine;
 use crate::editor::line_map::LineMap;
 use crate::theme::{TextEditorStyles};
-use crate::{editor::backing::{BackendTrait}};
+use crate::{editor::backing::{EditorBackend}};
 use gpui::*;
 use structs::text::{Location8, Span8};
 
@@ -69,7 +69,7 @@ impl Cursor {
         start_row..end_row + 1
     }
 
-    fn range(&self, backend: &impl BackendTrait) -> Span8 {
+    fn range(&self, backend: &impl EditorBackend) -> Span8 {
         let start = backend.loc8_to_offset8(self.anchor.min(self.head));
         let end = backend.loc8_to_offset8(self.anchor.max(self.head));
         start..end
@@ -80,11 +80,11 @@ impl Cursor {
     }
 }
 
-pub struct TextEditor<B: BackendTrait> {
+pub struct TextEditor<B: EditorBackend> {
     focus_handle: FocusHandle,
     scroll_handle: ScrollHandle,
 
-    pub backend: B,
+    pub state: Entity<B>,
     dirty: Entity<bool>,
 
     marked_range: Option<Span8>,
@@ -108,15 +108,15 @@ pub struct TextEditor<B: BackendTrait> {
     resize_anchor_line: Option<(usize, Pixels)>,
 }
 
-impl<B: BackendTrait> TextEditor<B> {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>, content: String, dirty: Entity<bool>) -> Self {
+impl<B: EditorBackend> TextEditor<B> {
+    pub fn new(state: Entity<B>, window: &mut Window, cx: &mut Context<Self>, content: String, dirty: Entity<bool>) -> Self {
         let text_styles = TextEditorStyles::default();
         let line_height = text_styles.line_height;
 
         let mut ret = TextEditor {
             focus_handle: cx.focus_handle(),
             scroll_handle: ScrollHandle::new(),
-            backend: B::default(),
+            state,
             dirty,
             marked_range: None,
             is_selecting: false,
@@ -142,20 +142,24 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 }
 
-impl<B: BackendTrait> TextEditor<B> {
+impl<B: EditorBackend> TextEditor<B> {
     fn replace(&mut self, utf8_range: Span8, new_text: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let del_range = {
-            let start_loc = self.backend.offset8_to_loc8(utf8_range.start);
-            let end_loc = self.backend.offset8_to_loc8(utf8_range.end);
-            start_loc.row .. end_loc.row + 1
-        };
-        self.backend.replace(utf8_range.clone(), new_text);
-        let ins_range = {
-            let start_loc = self.backend.offset8_to_loc8(utf8_range.start);
-            let end_loc = self.backend.offset8_to_loc8(utf8_range.start + new_text.len());
-            start_loc.row .. end_loc.row + 1
-        };
-        self.line_map.replace_lines(del_range, self.shape_lines(ins_range, window).into_iter());
+        let (del_range, ins_range) = self.state.update(cx, |state, _| {
+            let del_range = {
+                let start_loc = state.offset8_to_loc8(utf8_range.start);
+                let end_loc = state.offset8_to_loc8(utf8_range.end);
+                start_loc.row .. end_loc.row + 1
+            };
+            state.replace(utf8_range.clone(), new_text);
+            let ins_range = {
+                let start_loc = state.offset8_to_loc8(utf8_range.start);
+                let end_loc = state.offset8_to_loc8(utf8_range.start + new_text.len());
+                start_loc.row .. end_loc.row + 1
+            };
+
+            (del_range, ins_range)
+        });
+        self.line_map.replace_lines(del_range, self.shape_lines(ins_range, window, cx).into_iter());
         self.dirty.update(cx, |dirty, _| *dirty = true);
     }
 
@@ -176,7 +180,7 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 }
 
-impl<B: BackendTrait> TextEditor<B> {
+impl<B: EditorBackend> TextEditor<B> {
     fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
         self.cursor_blink_state = true;
         self.cursor_blink_epoch += 1;
@@ -321,23 +325,24 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 }
 
-impl<B: BackendTrait> TextEditor<B> {
+impl<B: EditorBackend> TextEditor<B> {
 
-    fn line_text(&self, line: usize) -> String {
+    fn line_text(&self, line: usize, cx: &App) -> String {
+        let state = self.state.read(cx);
         let start_loc = Location8 { row: line, col: 0 };
-        let start_offset = self.backend.loc8_to_offset8(start_loc);
+        let start_offset = state.loc8_to_offset8(start_loc);
 
         let end_loc = Location8 { row: line + 1, col: 0 };
-        let end_offset = self.backend.loc8_to_offset8(end_loc).min(self.backend.len());
+        let end_offset = state.loc8_to_offset8(end_loc).min(state.len());
 
-        let mut text = self.backend.read(start_offset..end_offset);
+        let mut text = state.read(start_offset..end_offset);
         if text.ends_with('\n') {
             text.pop();
         }
         text
     }
 
-    fn shape_lines(&self, range: Range<usize>, window: &mut Window) -> Vec<WrappedLine> {
+    fn shape_lines(&self, range: Range<usize>, window: &mut Window, cx: &App) -> Vec<WrappedLine> {
         let wrap_width =  if self.scroll_handle.bounds().size.width > self.gutter_width + self.right_gutter_width {
             self.scroll_handle.bounds().size.width - self.gutter_width - self.right_gutter_width
         } else if let Some(old_bounds) = self.last_bounds {
@@ -347,7 +352,7 @@ impl<B: BackendTrait> TextEditor<B> {
         };
 
         range.map(move |line_no| {
-            let line_text = self.line_text(line_no);
+            let line_text = self.line_text(line_no, cx);
             let run = TextRun {
                 len: line_text.len(),
                 font: self.text_styles.text_font.clone(),
@@ -368,11 +373,15 @@ impl<B: BackendTrait> TextEditor<B> {
         .collect()
     }
 
-    fn reshape_dirty_lines(&mut self, window: &mut Window) {
-        if let Some(dirty) = self.backend.take_dirty_region() {
+    fn reshape_dirty_lines(&mut self, window: &mut Window, cx: &mut App) {
+        let dirty = self.state.update(cx, |state, _cx| {
+            state.take_dirty_region()
+        });
+
+        if let Some(dirty) = dirty {
             self.line_map.replace_lines(
                 dirty.clone(),
-                self.shape_lines(dirty, window).into_iter()
+                self.shape_lines(dirty, window, cx).into_iter()
             );
         }
     }
@@ -384,7 +393,7 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 }
 
-impl<B: BackendTrait> TextEditor<B> {
+impl<B: EditorBackend> TextEditor<B> {
     fn vertical_cursor_movement(&self, delta_lines: isize) -> Location8 {
         let current_pos = self.line_map.point_for_location(self.cursor.head);
         let target_y = current_pos.y + delta_lines as f32 * self.line_height;
@@ -400,37 +409,41 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
         if !self.cursor.is_empty() {
-            let range = self.cursor.range(&self.backend);
-            self.move_to(self.backend.offset8_to_loc8(range.start), false, cx);
+            let range = self.cursor.range(state);
+            self.move_to(state.offset8_to_loc8(range.start), false, cx);
         } else {
-            let offset = self.backend.loc8_to_offset8(self.cursor.head);
-            let new_offset = self.backend.prev_boundary(offset);
-            self.move_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+            let offset = state.loc8_to_offset8(self.cursor.head);
+            let new_offset = state.prev_boundary(offset);
+            self.move_to(state.offset8_to_loc8(new_offset), false, cx);
         }
     }
 
     fn right(&mut self, _: &Right, _: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
         if !self.cursor.is_empty() {
-            let range = self.cursor.range(&self.backend);
-            self.move_to(self.backend.offset8_to_loc8(range.end), false, cx);
+            let range = self.cursor.range(state);
+            self.move_to(state.offset8_to_loc8(range.end), false, cx);
         } else {
-            let offset = self.backend.loc8_to_offset8(self.cursor.head);
-            let new_offset = self.backend.next_boundary(offset);
-            self.move_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+            let offset = state.loc8_to_offset8(self.cursor.head);
+            let new_offset = state.next_boundary(offset);
+            self.move_to(state.offset8_to_loc8(new_offset), false, cx);
         }
     }
 
     fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
-        let offset = self.backend.loc8_to_offset8(self.cursor.head);
-        let new_offset = self.backend.prev_boundary(offset);
-        self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+        let state = self.state.read(cx);
+        let offset = state.loc8_to_offset8(self.cursor.head);
+        let new_offset = state.prev_boundary(offset);
+        self.select_to(state.offset8_to_loc8(new_offset), false, cx);
     }
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
-        let offset = self.backend.loc8_to_offset8(self.cursor.head);
-        let new_offset = self.backend.next_boundary(offset);
-        self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+        let state = self.state.read(cx);
+        let offset = state.loc8_to_offset8(self.cursor.head);
+        let new_offset = state.next_boundary(offset);
+        self.select_to(state.offset8_to_loc8(new_offset), false, cx);
     }
 
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
@@ -442,8 +455,9 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
         self.cursor.anchor = Location8 { row: 0, col: 0 };
-        self.cursor.head = self.backend.offset8_to_loc8(self.backend.len());
+        self.cursor.head = state.offset8_to_loc8(state.len());
         self.discretely_scroll_to_cursor();
         cx.notify();
     }
@@ -454,23 +468,25 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
         let row = self.cursor.head.row;
-        let next_line = self.backend.loc8_to_offset8(Location8 { row: row + 1, col: 0 });
-        let line_end = next_line.saturating_sub(1).min(self.backend.len());
-        self.move_to(self.backend.offset8_to_loc8(line_end), false, cx);
+        let next_line = state.loc8_to_offset8(Location8 { row: row + 1, col: 0 });
+        let line_end = next_line.saturating_sub(1).min(state.len());
+        self.move_to(state.offset8_to_loc8(line_end), false, cx);
     }
 }
 
-impl<B: BackendTrait> TextEditor<B> {
+impl<B: EditorBackend> TextEditor<B> {
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
         if self.cursor.is_empty() {
-            let offset = self.backend.loc8_to_offset8(self.cursor.head);
+            let state = self.state.read(cx);
+            let offset = state.loc8_to_offset8(self.cursor.head);
 
-            let line_start = self.backend.loc8_to_offset8(Location8 {
+            let line_start = state.loc8_to_offset8(Location8 {
                 row: self.cursor.head.row,
                 col: 0
             });
-            let text_before = self.backend.read(line_start..offset);
+            let text_before = state.read(line_start..offset);
 
             if text_before.chars().all(|c| c == ' ') && text_before.len() >= TAB_SIZE {
                 let spaces_to_delete = if text_before.len() % TAB_SIZE == 0 {
@@ -479,10 +495,10 @@ impl<B: BackendTrait> TextEditor<B> {
                     text_before.len() % TAB_SIZE
                 };
                 let new_offset = offset.saturating_sub(spaces_to_delete);
-                self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+                self.select_to(state.offset8_to_loc8(new_offset), false, cx);
             } else {
-                let new_offset = self.backend.prev_boundary(offset);
-                self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+                let new_offset = state.prev_boundary(offset);
+                self.select_to(state.offset8_to_loc8(new_offset), false, cx);
             }
         }
         self.replace_text_in_range(None, "", window, cx);
@@ -490,18 +506,20 @@ impl<B: BackendTrait> TextEditor<B> {
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         if self.cursor.is_empty() {
-            let offset = self.backend.loc8_to_offset8(self.cursor.head);
-            let new_offset = self.backend.next_boundary(offset);
-            self.select_to(self.backend.offset8_to_loc8(new_offset), false, cx);
+            let state = self.state.read(cx);
+            let offset = state.loc8_to_offset8(self.cursor.head);
+            let new_offset = state.next_boundary(offset);
+            self.select_to(state.offset8_to_loc8(new_offset), false, cx);
         }
         self.replace_text_in_range(None, "", window, cx);
     }
 
     fn backspace_word(&mut self, _: &BackspaceWord, window: &mut Window, cx: &mut Context<Self>) {
-        let mut selection = self.cursor.range(&self.backend);
-        let word = self.backend.word(selection.start, true);
+        let state = self.state.read(cx);
+        let mut selection = self.cursor.range(state);
+        let word = state.word(selection.start, true);
         selection.start = word.start;
-        let utf16 = self.backend.span8_to_span16(&selection);
+        let utf16 = state.span8_to_span16(&selection);
         self.replace_text_in_range(Some(utf16), "", window, cx);
     }
 
@@ -517,7 +535,7 @@ impl<B: BackendTrait> TextEditor<B> {
             let end_loc = self.cursor.anchor.max(self.cursor.head);
 
             for row in start_loc.row..=end_loc.row {
-                let line_start = self.backend.loc8_to_offset8(Location8 { row, col: 0 });
+                let line_start = self.state.read(cx).loc8_to_offset8(Location8 { row, col: 0 });
                 self.replace(line_start..line_start, &" ".repeat(TAB_SIZE), window, cx);
             }
 
@@ -529,12 +547,12 @@ impl<B: BackendTrait> TextEditor<B> {
 
     fn untab(&mut self, _: &Untab, window: &mut Window, cx: &mut Context<Self>) {
         if self.cursor.is_empty() {
-            let line_start = self.backend.loc8_to_offset8(Location8 {
+            let line_start = self.state.read(cx).loc8_to_offset8(Location8 {
                 row: self.cursor.head.row,
                 col: 0
             });
-            let cursor_offset = self.backend.loc8_to_offset8(self.cursor.head);
-            let text_before = self.backend.read(line_start..cursor_offset);
+            let cursor_offset = self.state.read(cx).loc8_to_offset8(self.cursor.head);
+            let text_before = self.state.read(cx).read(line_start..cursor_offset);
 
             let spaces_to_remove = text_before.chars()
                 .rev()
@@ -545,7 +563,7 @@ impl<B: BackendTrait> TextEditor<B> {
             if spaces_to_remove > 0 {
                 let remove_start = cursor_offset.saturating_sub(spaces_to_remove);
                 self.replace(remove_start..cursor_offset, "", window, cx);
-                self.cursor = Cursor::collapsed(self.backend.offset8_to_loc8(remove_start));
+                self.cursor = Cursor::collapsed(self.state.read(cx).offset8_to_loc8(remove_start));
                 self.dirty.update(cx, |dirty, _| *dirty = true);
                 self.reset_cursor_blink(cx);
             }
@@ -554,10 +572,11 @@ impl<B: BackendTrait> TextEditor<B> {
             let end_loc = self.cursor.anchor.max(self.cursor.head);
 
             for row in (start_loc.row..=end_loc.row).rev() {
-                let line_start = self.backend.loc8_to_offset8(Location8 { row, col: 0 });
-                let line_end = self.backend.loc8_to_offset8(Location8 { row: row + 1, col: 0 })
-                    .min(self.backend.len());
-                let line_text = self.backend.read(line_start..line_end);
+                let state = self.state.read(cx);
+                let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
+                let line_end = state.loc8_to_offset8(Location8 { row: row + 1, col: 0 })
+                    .min(state.len());
+                let line_text = state.read(line_start..line_end);
 
                 let spaces_to_remove = line_text.chars()
                     .take(TAB_SIZE)
@@ -586,7 +605,7 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 }
 
-impl<B: BackendTrait> TextEditor<B> {
+impl<B: EditorBackend> TextEditor<B> {
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> Location8 {
         let Some(bounds) = self.last_bounds else {
             return Location8 { row: 0, col: 0 };
@@ -625,21 +644,23 @@ impl<B: BackendTrait> TextEditor<B> {
                 }
             }
             2 => {
-                let offset = self.backend.loc8_to_offset8(pos);
-                let word_range = self.backend.word(offset, false);
+                let state = self.state.read(cx);
+                let offset = state.loc8_to_offset8(pos);
+                let word_range = state.word(offset, false);
 
-                self.cursor.anchor = self.backend.offset8_to_loc8(word_range.start);
-                self.cursor.head = self.backend.offset8_to_loc8(word_range.end);
+                self.cursor.anchor = state.offset8_to_loc8(word_range.start);
+                self.cursor.head = state.offset8_to_loc8(word_range.end);
                 self.is_selecting = true;
                 self.reset_cursor_blink(cx);
             }
             _ => {
+                let state = self.state.read(cx);
                 let line_start = Location8 { row: pos.row, col: 0 };
-                let line_end_offset = self.backend.loc8_to_offset8(
+                let line_end_offset = state.loc8_to_offset8(
                     Location8 { row: pos.row, col: usize::MAX }
                 );
-                let line_end_offset = line_end_offset.min(self.backend.len());
-                let line_end = self.backend.offset8_to_loc8(line_end_offset);
+                let line_end_offset = line_end_offset.min(state.len());
+                let line_end = state.offset8_to_loc8(line_end_offset);
 
                 self.cursor.anchor = line_start;
                 self.cursor.head = line_end;
@@ -661,7 +682,7 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 }
 
-impl<B: BackendTrait> TextEditor<B> {
+impl<B: EditorBackend> TextEditor<B> {
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.replace_text_in_range(None, &text, window, cx);
@@ -670,18 +691,20 @@ impl<B: BackendTrait> TextEditor<B> {
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
         if !self.cursor.is_empty() {
-            let range = self.cursor.range(&self.backend);
+            let state = self.state.read(cx);
+            let range = self.cursor.range(state);
             cx.write_to_clipboard(ClipboardItem::new_string(
-                self.backend.read(range),
+                state.read(range),
             ));
         }
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.cursor.is_empty() {
-            let range = self.cursor.range(&self.backend);
+            let state = self.state.read(cx);
+            let range = self.cursor.range(state);
             cx.write_to_clipboard(ClipboardItem::new_string(
-                self.backend.read(range),
+                state.read(range),
             ));
             self.replace_text_in_range(None, "", window, cx);
         }
@@ -697,28 +720,30 @@ impl<B: BackendTrait> TextEditor<B> {
     }
 }
 
-impl<B: BackendTrait> EntityInputHandler for TextEditor<B> {
+impl<B: EditorBackend> EntityInputHandler for TextEditor<B> {
     fn text_for_range(
         &mut self,
         range_utf16: Range<usize>,
         actual_range: &mut Option<Range<usize>>,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<String> {
-        let range = self.backend.span16_to_span8(&range_utf16);
-        actual_range.replace(self.backend.span8_to_span16(&range));
-        Some(self.backend.read(range))
+        let state = self.state.read(cx);
+        let range = state.span16_to_span8(&range_utf16);
+        actual_range.replace(state.span8_to_span16(&range));
+        Some(state.read(range))
     }
 
     fn selected_text_range(
         &mut self,
         _ignore_disabled_input: bool,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        let range = self.cursor.range(&self.backend);
+        let state = self.state.read(cx);
+        let range = self.cursor.range(state);
         Some(UTF16Selection {
-            range: self.backend.span8_to_span16(&range),
+            range: state.span8_to_span16(&range),
             reversed: self.cursor.reversed(),
         })
     }
@@ -726,11 +751,11 @@ impl<B: BackendTrait> EntityInputHandler for TextEditor<B> {
     fn marked_text_range(
         &self,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<Range<usize>> {
         self.marked_range
             .as_ref()
-            .map(|range| self.backend.span8_to_span16(range))
+            .map(|range| self.state.read(cx).span8_to_span16(range))
     }
 
     fn unmark_text(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {
@@ -746,14 +771,14 @@ impl<B: BackendTrait> EntityInputHandler for TextEditor<B> {
     ) {
         let range = range_utf16
             .as_ref()
-            .map(|r| self.backend.span16_to_span8(r))
+            .map(|r| self.state.read(cx).span16_to_span8(r))
             .or(self.marked_range.clone())
-            .unwrap_or_else(|| self.cursor.range(&self.backend));
+            .unwrap_or_else(|| self.cursor.range(self.state.read(cx)));
 
         self.replace(range.clone(), new_text, window, cx);
 
         let new_offset = range.start + new_text.len();
-        self.cursor = Cursor::collapsed(self.backend.offset8_to_loc8(new_offset));
+        self.cursor = Cursor::collapsed(self.state.read(cx).offset8_to_loc8(new_offset));
         self.discretely_scroll_to_cursor();
 
         self.marked_range = None;
@@ -770,9 +795,9 @@ impl<B: BackendTrait> EntityInputHandler for TextEditor<B> {
     ) {
         let range = range_utf16
             .as_ref()
-            .map(|r| self.backend.span16_to_span8(r))
+            .map(|r| self.state.read(cx).span16_to_span8(r))
             .or(self.marked_range.clone())
-            .unwrap_or_else(|| self.cursor.range(&self.backend));
+            .unwrap_or_else(|| self.cursor.range(self.state.read(cx)));
 
         self.replace(range.clone(), new_text, w, cx);
 
@@ -783,11 +808,12 @@ impl<B: BackendTrait> EntityInputHandler for TextEditor<B> {
         }
 
         if let Some(new_range_utf16) = new_selected_range_utf16 {
-            let new_range = self.backend.span16_to_span8(&new_range_utf16);
+            let state = self.state.read(cx);
+            let new_range = state.span16_to_span8(&new_range_utf16);
             let adjusted_start = range.start + new_range.start;
             let adjusted_end = range.start + new_range.end;
-            self.cursor.anchor = self.backend.offset8_to_loc8(adjusted_start);
-            self.cursor.head = self.backend.offset8_to_loc8(adjusted_end);
+            self.cursor.anchor = state.offset8_to_loc8(adjusted_start);
+            self.cursor.head = state.offset8_to_loc8(adjusted_end);
         }
 
         cx.notify();
@@ -800,9 +826,10 @@ impl<B: BackendTrait> EntityInputHandler for TextEditor<B> {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let range = self.backend.span16_to_span8(&range_utf16);
-        let start_loc = self.backend.offset8_to_loc8(range.start);
-        let end_loc = self.backend.offset8_to_loc8(range.end);
+        let state = self.state.read(_cx);
+        let range = state.span16_to_span8(&range_utf16);
+        let start_loc = state.offset8_to_loc8(range.start);
+        let end_loc = state.offset8_to_loc8(range.end);
 
         let start = self.line_map.point_for_location(start_loc);
         let end = self.line_map.point_for_location(end_loc);
@@ -825,15 +852,16 @@ impl<B: BackendTrait> EntityInputHandler for TextEditor<B> {
         &mut self,
         point: Point<Pixels>,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<usize> {
+        let state = self.state.read(cx);
         let loc8 = self.index_for_mouse_position(point);
-        let offset8 = self.backend.loc8_to_offset8(loc8);
-        Some(self.backend.offset8_to_offset16(offset8) as usize)
+        let offset8 = state.loc8_to_offset8(loc8);
+        Some(state.offset8_to_offset16(offset8) as usize)
     }
 }
 
-struct TextElement<B: BackendTrait> {
+struct TextElement<B: EditorBackend> {
     editor: Entity<TextEditor<B>>,
 }
 
@@ -844,14 +872,14 @@ struct PrepaintState {
     active_line_bounds: Option<Bounds<Pixels>>,
 }
 
-impl<B: BackendTrait> IntoElement for TextElement<B> {
+impl<B: EditorBackend> IntoElement for TextElement<B> {
     type Element = Self;
     fn into_element(self) -> Self::Element {
         self
     }
 }
 
-impl<B: BackendTrait> TextElement<B> {
+impl<B: EditorBackend> TextElement<B> {
     fn compute_cursor_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>) -> Option<Bounds<Pixels>> {
         if !editor.cursor.is_empty() || !editor.cursor_blink_state {
             return None;
@@ -957,16 +985,18 @@ impl<B: BackendTrait> TextElement<B> {
         shaped.paint(line_origin, editor.line_height, window, cx).ok();
     }
 
-    fn handle_width_resize(&self, editor: &mut TextEditor<B>, bounds: Bounds<Pixels>) {
+    fn handle_width_resize(&self, editor: &mut TextEditor<B>, bounds: Bounds<Pixels>, cx: &mut App) {
         if editor.last_bounds.is_none_or(|b| b.size.width != bounds.size.width) {
             editor.capture_top_visible_line();
-            editor.backend.mark_region_as_dirty(0..editor.line_map.line_count());
+            editor.state.update(cx, |state, _| {
+                state.mark_region_as_dirty(0..editor.line_map.line_count());
+            });
         }
         editor.last_bounds = Some(bounds);
     }
 }
 
-impl<B: BackendTrait> Element for TextElement<B> {
+impl<B: EditorBackend> Element for TextElement<B> {
     type RequestLayoutState = ();
     type PrepaintState = PrepaintState;
 
@@ -985,8 +1015,8 @@ impl<B: BackendTrait> Element for TextElement<B> {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        self.editor.update(cx, |editor, _cx| {
-            editor.reshape_dirty_lines(window);
+        self.editor.update(cx, |editor, cx| {
+            editor.reshape_dirty_lines(window, cx);
             if editor.resize_anchor_line.is_some() {
                 editor.restore_scroll_to_anchor_line();
             }
@@ -1011,12 +1041,12 @@ impl<B: BackendTrait> Element for TextElement<B> {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        self.editor.update(cx, |editor, _cx| {
-            self.handle_width_resize(editor, bounds);
+        self.editor.update(cx, |editor, cx| {
+            self.handle_width_resize(editor, bounds, cx);
             // in case any new dirty lines due to resize, make a best effort of adapting to the new layout
             // it is possible (and likely) that now our bounds are slightly off from what they really should be, but this should not be that bad and will be
             // fixed by next frame (so should be relatively transparent to user)
-            editor.reshape_dirty_lines(window);
+            editor.reshape_dirty_lines(window, cx);
 
             let visible_lines = editor.visible_lines();
 
@@ -1093,13 +1123,13 @@ impl<B: BackendTrait> Element for TextElement<B> {
     }
 }
 
-impl<B: BackendTrait> Focusable for TextEditor<B> {
+impl<B: EditorBackend> Focusable for TextEditor<B> {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl<B: BackendTrait> Render for TextEditor<B> {
+impl<B: EditorBackend> Render for TextEditor<B> {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
