@@ -93,6 +93,8 @@ pub struct TextEditorStyles {
 
     pub selection_color: Hsla,
     pub active_line_color: Hsla,
+
+    pub scroll_color: Hsla,
 }
 
 impl Default for TextEditorStyles {
@@ -109,6 +111,7 @@ impl Default for TextEditorStyles {
             gutter_active_color: gpui::hsla(0.05, 0.0, 0.3, 1.0),
             selection_color: rgba(0x3311ff30).into(),
             active_line_color: rgba(0xffff0030).into(),
+            scroll_color: gpui::hsla(2.0, 0.0, 0.8, 0.5),
         }
     }
 }

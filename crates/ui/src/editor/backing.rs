@@ -116,13 +116,7 @@ pub trait EditorBackend: Default + 'static {
     fn mark_region_as_dirty(&mut self, span: Span8);
     fn take_dirty_region(&mut self) -> Option<Span8>;
 
-
     fn autocomplete_list(&self) -> &[AutoCompleteItem];
-
-    fn do_undo(&mut self);
-
-    fn do_redo(&mut self);
-
 }
 
 
@@ -282,14 +276,6 @@ impl EditorBackend for DocumentState {
 
     fn autocomplete_list(&self) -> &[AutoCompleteItem] {
         &[]
-    }
-
-    fn do_undo(&mut self) {
-
-    }
-
-    fn do_redo(&mut self) {
-
     }
 
     fn version(&self) -> usize {

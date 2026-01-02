@@ -140,7 +140,9 @@ impl DocumentView {
             self.user_path = Some(path.clone());
         }
 
-        self.editor.read(cx).write_to_user_path(&path, cx);
+        self.editor.update(cx, |editor, cx| {
+            editor.write_to_user_path(&path, cx);
+        });
 
         self.window_state.upgrade().inspect(|ws| {
             ws.update(cx, |state, _cx| {

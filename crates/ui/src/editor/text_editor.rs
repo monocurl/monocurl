@@ -86,6 +86,7 @@ pub struct TextEditor<B: EditorBackend> {
 
     pub state: Entity<B>,
     dirty: Entity<bool>,
+    internal_dirty: Entity<bool>,
 
     marked_range: Option<Span8>,
     is_selecting: bool,
@@ -109,7 +110,7 @@ pub struct TextEditor<B: EditorBackend> {
 }
 
 impl<B: EditorBackend> TextEditor<B> {
-    pub fn new(state: Entity<B>, window: &mut Window, cx: &mut Context<Self>, content: String, dirty: Entity<bool>) -> Self {
+    pub fn new(state: Entity<B>, window: &mut Window, cx: &mut Context<Self>, content: String, dirty: Entity<bool>, internal_dirty: Entity<bool>) -> Self {
         let text_styles = TextEditorStyles::default();
         let line_height = text_styles.line_height;
 
@@ -118,6 +119,7 @@ impl<B: EditorBackend> TextEditor<B> {
             scroll_handle: ScrollHandle::new(),
             state,
             dirty,
+            internal_dirty,
             marked_range: None,
             is_selecting: false,
             auto_scroll_epoch: 0,
@@ -161,6 +163,7 @@ impl<B: EditorBackend> TextEditor<B> {
         });
         self.line_map.replace_lines(del_range, self.shape_lines(ins_range, window, cx).into_iter());
         self.dirty.update(cx, |dirty, _| *dirty = true);
+        self.internal_dirty.update(cx, |dirty, _| *dirty = true);
     }
 
     fn capture_top_visible_line(&mut self) {
@@ -189,13 +192,12 @@ impl<B: EditorBackend> TextEditor<B> {
         let epoch = self.cursor_blink_epoch;
         cx.spawn(async move |editor: WeakEntity<TextEditor<B>>, cx: &mut AsyncApp| {
             cx.background_executor().timer(CURSOR_BLINK_DELAY).await;
-            editor
+            let _ = editor
                 .update(cx, |editor, cx| {
                     if editor.cursor_blink_epoch == epoch {
                         editor.start_cursor_blinking(cx);
                     }
-                })
-                .ok();
+                });
         })
         .detach();
     }
@@ -564,7 +566,6 @@ impl<B: EditorBackend> TextEditor<B> {
                 let remove_start = cursor_offset.saturating_sub(spaces_to_remove);
                 self.replace(remove_start..cursor_offset, "", window, cx);
                 self.cursor = Cursor::collapsed(self.state.read(cx).offset8_to_loc8(remove_start));
-                self.dirty.update(cx, |dirty, _| *dirty = true);
                 self.reset_cursor_blink(cx);
             }
         } else {
@@ -870,6 +871,7 @@ struct PrepaintState {
     cursor_bounds: Option<Bounds<Pixels>>,
     selection_bounds: Vec<Bounds<Pixels>>,
     active_line_bounds: Option<Bounds<Pixels>>,
+    scroll_wheel_bounds: Option<Bounds<Pixels>>,
 }
 
 impl<B: EditorBackend> IntoElement for TextElement<B> {
@@ -880,8 +882,8 @@ impl<B: EditorBackend> IntoElement for TextElement<B> {
 }
 
 impl<B: EditorBackend> TextElement<B> {
-    fn compute_cursor_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>) -> Option<Bounds<Pixels>> {
-        if !editor.cursor.is_empty() || !editor.cursor_blink_state {
+    fn compute_cursor_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>, window: &Window) -> Option<Bounds<Pixels>> {
+        if !editor.cursor.is_empty() || !editor.cursor_blink_state || !editor.focus_handle.is_focused(window) {
             return None;
         }
 
@@ -943,6 +945,26 @@ impl<B: EditorBackend> TextElement<B> {
                 ))
             })
             .collect()
+    }
+
+    fn compute_scroll_wheel_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>, window: &Window) -> Option<Bounds<Pixels>> {
+        let scroll_offset = editor.scroll_handle.offset();
+        let viewport_height = editor.scroll_handle.bounds().size.height;
+        let content_height = editor.line_map.total_height() + px(BOTTOM_SCROLL_PADDING);
+
+        if content_height <= viewport_height {
+            return None;
+        }
+
+        let wheel_height = (viewport_height / content_height) * viewport_height;
+        // offset scroll (realistically this should just be drawn outside of the scroll)
+        let wheel_y = -scroll_offset.y + (-scroll_offset.y / content_height) * viewport_height + bounds.top();
+        let width = editor.right_gutter_width;
+
+        Some(Bounds::new(
+            point(bounds.right() - width, wheel_y),
+            size(width, wheel_height),
+        ))
     }
 
     fn paint_gutter_line(&self, line_num: usize, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
@@ -1055,15 +1077,17 @@ impl<B: EditorBackend> Element for TextElement<B> {
                 .map(|line| (line.unwrapped_line_no, line.line.clone()))
                 .collect();
 
-            let cursor_bounds = self.compute_cursor_bounds(editor, bounds);
+            let cursor_bounds = self.compute_cursor_bounds(editor, bounds, window);
             let active_line_bounds = self.compute_active_line_bounds(editor, bounds, window);
             let selection_bounds = self.compute_selection_bounds(editor, bounds, visible_lines, window);
+            let scroll_wheel_bounds = self.compute_scroll_wheel_bounds(editor, bounds, window);
 
             PrepaintState {
                 lines,
                 cursor_bounds,
                 selection_bounds,
                 active_line_bounds,
+                scroll_wheel_bounds,
             }
         })
     }
@@ -1081,6 +1105,7 @@ impl<B: EditorBackend> Element for TextElement<B> {
         let editor = self.editor.read(cx);
         let focus_handle = editor.focus_handle.clone();
         let cursor_color = editor.text_styles.cursor_color;
+        let scroll_color = editor.text_styles.scroll_color;
 
         // handle input
         if editor.is_selecting {
@@ -1115,10 +1140,12 @@ impl<B: EditorBackend> Element for TextElement<B> {
             self.paint_gutter_line(*line_num, y, bounds, window, cx);
         }
 
-        if focus_handle.is_focused(window) {
-            if let Some(cursor_bounds) = prepaint.cursor_bounds {
-                window.paint_quad(fill(cursor_bounds, cursor_color));
-            }
+        if let Some(cursor_bounds) = prepaint.cursor_bounds {
+            window.paint_quad(fill(cursor_bounds, cursor_color));
+        }
+
+        if let Some(scroll_wheel_bounds) = prepaint.scroll_wheel_bounds {
+            window.paint_quad(fill(scroll_wheel_bounds, scroll_color));
         }
     }
 }
