@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::usize;
 use std::{time::Duration};
 use std::ops::Range;
@@ -20,6 +21,7 @@ const AUTO_SCROLL_INTERVAL: Duration = Duration::from_millis(16);
 const AUTO_SCROLL_MIN_THRESHOLD: f32 = -15.0;
 const AUTO_SCROLL_MAX_THRESHOLD: f32 = 70.0;
 const BOTTOM_SCROLL_PADDING: f32 = 400.0;
+const MAX_UNDO_GROUPS: usize = 4096;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -46,6 +48,18 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("end", End, None),
         KeyBinding::new("ctrl-secondary-space", ShowCharacterPalette, None),
     ]);
+}
+
+struct HistoryItem {
+    old: Span8,
+    replacement: String,
+}
+
+struct HistoryGroup {
+    items: Vec<HistoryItem>,
+    // before the group was applied, where was the cursor?
+    cursor_head: Location8,
+    cursor_anchor: Location8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,6 +98,12 @@ pub struct TextEditor<B: EditorBackend> {
     focus_handle: FocusHandle,
     scroll_handle: ScrollHandle,
 
+    history_disabled: bool,
+    is_undoing: bool,
+    is_redoing: bool,
+    undo_stack: VecDeque<HistoryGroup>,
+    redo_stack: VecDeque<HistoryGroup>,
+
     pub state: Entity<B>,
     dirty: Entity<bool>,
     internal_dirty: Entity<bool>,
@@ -117,18 +137,23 @@ impl<B: EditorBackend> TextEditor<B> {
         let mut ret = TextEditor {
             focus_handle: cx.focus_handle(),
             scroll_handle: ScrollHandle::new(),
+            history_disabled: false,
+            is_undoing: false,
+            is_redoing: false,
+            undo_stack: VecDeque::default(),
+            redo_stack: VecDeque::default(),
             state,
             dirty,
+
             internal_dirty,
             marked_range: None,
             is_selecting: false,
+
             auto_scroll_epoch: 0,
             auto_scroll_last_mouse_position: None,
-
             cursor: Cursor::collapsed(Location8 { row: 0, col: 0 }),
             cursor_blink_state: true,
             cursor_blink_epoch: 0,
-
             last_click_position: point(px(-1.0), px(0.0)),
             click_count: 0,
             text_styles: text_styles.clone(),
@@ -139,13 +164,120 @@ impl<B: EditorBackend> TextEditor<B> {
             last_bounds: None,
             resize_anchor_line: None,
         };
+        ret.history_disabled = true;
         ret.replace(0..0, &content, window, cx);
+        ret.history_disabled = false;
         ret
     }
 }
 
 impl<B: EditorBackend> TextEditor<B> {
+
+    fn perform_group(&mut self, group: HistoryGroup, window: &mut Window, cx: &mut Context<Self>) -> HistoryGroup {
+        let mut inverse = HistoryGroup { items: Vec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor };
+
+        for item in group.items.iter().rev() {
+            let old_text = self.state.read(cx).read(item.old.clone());
+            self.replace(item.old.clone(), &item.replacement, window, cx);
+
+            inverse.items.push(HistoryItem {
+                old: Span8 {
+                    start: item.old.start,
+                    end: item.old.start + item.replacement.len(),
+                },
+                replacement: old_text,
+            });
+        }
+
+        self.cursor = Cursor {
+            head: group.cursor_head,
+            anchor: group.cursor_anchor,
+        };
+        self.discretely_scroll_to_cursor();
+
+        inverse
+    }
+
+    fn report_undo_candidate(&mut self, old: Span8, new_text: &str, cx: &App) {
+        if self.history_disabled || self.is_redoing || self.is_undoing {
+            return;
+        }
+
+        let must_form_new_group = new_text.contains('\n');
+        if self.undo_stack.is_empty() || must_form_new_group {
+            self.undo_stack.push_back(HistoryGroup { items: Vec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor });
+
+            while self.undo_stack.len() > MAX_UNDO_GROUPS {
+                self.undo_stack.pop_front();
+            }
+        }
+
+        let replacement = self.state.read(cx).read(old.clone());
+        let range = old.start .. old.start + new_text.len();
+        let group = self.undo_stack.back_mut().unwrap();
+        if group.items.is_empty() {
+            group.cursor_head = self.cursor.head;
+            group.cursor_anchor = self.cursor.anchor;
+        }
+        group.items.push(HistoryItem { old: range, replacement: replacement.to_string() });
+
+
+        if must_form_new_group {
+            self.undo_group_boundary();
+        }
+
+        self.redo_stack.clear();
+    }
+
+    pub fn perform_undo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        while self.undo_stack.back().is_some_and(|b| b.items.is_empty()) {
+            self.undo_stack.pop_back();
+        }
+
+        let Some(group) = self.undo_stack.pop_back() else {
+            return;
+        };
+
+        self.is_undoing = true;
+        let redo = self.perform_group(group, window, cx);
+        self.is_undoing = false;
+
+        self.redo_stack.push_back(redo);
+
+        cx.notify();
+    }
+
+    pub fn perform_redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        while self.redo_stack.back().is_some_and(|b| b.items.is_empty()) {
+            self.redo_stack.pop_back();
+        }
+
+        let Some(group) = self.redo_stack.pop_back() else {
+            return;
+        };
+
+        self.is_redoing = true;
+        let undo = self.perform_group(group, window, cx);
+        self.is_redoing = false;
+
+        self.undo_stack.push_back(undo);
+
+        cx.notify();
+    }
+
+    fn undo_group_boundary(&mut self) {
+        if self.undo_stack.back().is_none_or(|g| !g.items.is_empty()) {
+            self.undo_stack.push_back(HistoryGroup { items: Vec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor });
+        }
+
+        while self.undo_stack.len() > MAX_UNDO_GROUPS {
+            self.undo_stack.pop_front();
+        }
+    }
+
     fn replace(&mut self, utf8_range: Span8, new_text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.report_undo_candidate(utf8_range.clone(), new_text, cx);
+
         let (del_range, ins_range) = self.state.update(cx, |state, _| {
             let del_range = {
                 let start_loc = state.offset8_to_loc8(utf8_range.start);
@@ -165,6 +297,9 @@ impl<B: EditorBackend> TextEditor<B> {
         self.dirty.update(cx, |dirty, _| *dirty = true);
         self.internal_dirty.update(cx, |dirty, _| *dirty = true);
     }
+}
+
+impl<B: EditorBackend> TextEditor<B> {
 
     fn capture_top_visible_line(&mut self) {
         let scroll_y = -self.scroll_handle.offset().y;
@@ -230,11 +365,15 @@ impl<B: EditorBackend> TextEditor<B> {
         .detach();
     }
 
-    fn move_to(&mut self, pos: Location8, mouse_origin: bool, cx: &mut Context<Self>) {
+    fn move_to(&mut self, pos: Location8, mouse_origin: bool, key_origin: bool, cx: &mut Context<Self>) {
         self.cursor = Cursor::collapsed(pos);
         self.reset_cursor_blink(cx);
         if !mouse_origin {
             self.discretely_scroll_to_cursor();
+        }
+
+        if key_origin || mouse_origin {
+            self.undo_group_boundary();
         }
     }
 
@@ -244,6 +383,8 @@ impl<B: EditorBackend> TextEditor<B> {
         if !mouse_origin {
             self.discretely_scroll_to_cursor();
         }
+
+        self.undo_group_boundary();
     }
 
     fn discretely_scroll_to_cursor(&mut self) {
@@ -403,22 +544,22 @@ impl<B: EditorBackend> TextEditor<B> {
     }
 
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.vertical_cursor_movement(-1), false, cx);
+        self.move_to(self.vertical_cursor_movement(-1), false, true, cx);
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.vertical_cursor_movement(1), false, cx);
+        self.move_to(self.vertical_cursor_movement(1), false, true, cx);
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
         if !self.cursor.is_empty() {
             let range = self.cursor.range(state);
-            self.move_to(state.offset8_to_loc8(range.start), false, cx);
+            self.move_to(state.offset8_to_loc8(range.start), false, true, cx);
         } else {
             let offset = state.loc8_to_offset8(self.cursor.head);
             let new_offset = state.prev_boundary(offset);
-            self.move_to(state.offset8_to_loc8(new_offset), false, cx);
+            self.move_to(state.offset8_to_loc8(new_offset), false, true, cx);
         }
     }
 
@@ -426,11 +567,11 @@ impl<B: EditorBackend> TextEditor<B> {
         let state = self.state.read(cx);
         if !self.cursor.is_empty() {
             let range = self.cursor.range(state);
-            self.move_to(state.offset8_to_loc8(range.end), false, cx);
+            self.move_to(state.offset8_to_loc8(range.end), false, true, cx);
         } else {
             let offset = state.loc8_to_offset8(self.cursor.head);
             let new_offset = state.next_boundary(offset);
-            self.move_to(state.offset8_to_loc8(new_offset), false, cx);
+            self.move_to(state.offset8_to_loc8(new_offset), false, true, cx);
         }
     }
 
@@ -466,7 +607,7 @@ impl<B: EditorBackend> TextEditor<B> {
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
         let new_pos = Location8 { row: self.cursor.head.row, col: 0 };
-        self.move_to(new_pos, false, cx);
+        self.move_to(new_pos, false, true, cx);
     }
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
@@ -474,7 +615,7 @@ impl<B: EditorBackend> TextEditor<B> {
         let row = self.cursor.head.row;
         let next_line = state.loc8_to_offset8(Location8 { row: row + 1, col: 0 });
         let line_end = next_line.saturating_sub(1).min(state.len());
-        self.move_to(state.offset8_to_loc8(line_end), false, cx);
+        self.move_to(state.offset8_to_loc8(line_end), false, true, cx);
     }
 }
 
@@ -565,7 +706,7 @@ impl<B: EditorBackend> TextEditor<B> {
             if spaces_to_remove > 0 {
                 let remove_start = cursor_offset.saturating_sub(spaces_to_remove);
                 self.replace(remove_start..cursor_offset, "", window, cx);
-                self.cursor = Cursor::collapsed(self.state.read(cx).offset8_to_loc8(remove_start));
+                self.move_to(self.state.read(cx).offset8_to_loc8(remove_start), false, true, cx);
                 self.reset_cursor_blink(cx);
             }
         } else {
@@ -641,7 +782,7 @@ impl<B: EditorBackend> TextEditor<B> {
                 if event.modifiers.shift {
                     self.select_to(pos, true, cx);
                 } else {
-                    self.move_to(pos, true, cx);
+                    self.move_to(pos, true, false, cx);
                 }
             }
             2 => {
@@ -686,7 +827,9 @@ impl<B: EditorBackend> TextEditor<B> {
 impl<B: EditorBackend> TextEditor<B> {
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            self.undo_group_boundary();
             self.replace_text_in_range(None, &text, window, cx);
+            self.undo_group_boundary();
         }
     }
 
@@ -702,12 +845,14 @@ impl<B: EditorBackend> TextEditor<B> {
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
         if !self.cursor.is_empty() {
+            self.undo_group_boundary();
             let state = self.state.read(cx);
             let range = self.cursor.range(state);
             cx.write_to_clipboard(ClipboardItem::new_string(
                 state.read(range),
             ));
             self.replace_text_in_range(None, "", window, cx);
+            self.undo_group_boundary();
         }
     }
 
@@ -779,7 +924,7 @@ impl<B: EditorBackend> EntityInputHandler for TextEditor<B> {
         self.replace(range.clone(), new_text, window, cx);
 
         let new_offset = range.start + new_text.len();
-        self.cursor = Cursor::collapsed(self.state.read(cx).offset8_to_loc8(new_offset));
+        self.move_to(self.state.read(cx).offset8_to_loc8(new_offset), false, false, cx);
         self.discretely_scroll_to_cursor();
 
         self.marked_range = None;

@@ -4,12 +4,12 @@ use gpui::*;
 
 use crate::{document_state::DocumentState, editor::{backing::EditorBackend, text_editor::TextEditor}};
 
-mod backing;
+pub mod backing;
 mod line_map;
 mod wrapped_line;
 pub mod text_editor;
 
-const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub struct Editor {
     internal_path: PathBuf,
@@ -57,6 +57,18 @@ impl Editor {
             internal_dirty,
             _drop_handle: drop_handle,
         }
+    }
+
+    pub fn undo(&mut self, window: &mut Window, cx: &mut App) {
+        self.editor.update(cx, |editor, cx| {
+            editor.perform_undo(window, cx);
+        });
+    }
+
+    pub fn redo(&mut self, window: &mut Window, cx: &mut App) {
+        self.editor.update(cx, |editor, cx| {
+            editor.perform_redo(window, cx);
+        });
     }
 
     fn write_to_path(&self, path: &std::path::Path, cx: &App) {

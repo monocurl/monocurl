@@ -135,6 +135,18 @@ impl DocumentView {
         println!("Epsilon Backward");
     }
 
+    fn undo(&mut self, _ : &Undo, w: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| {
+            editor.undo(w, cx);
+        });
+    }
+
+    fn redo(&mut self, _ : &Redo, w: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| {
+            editor.redo(w, cx);
+        });
+    }
+
     fn really_save(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         if Some(path.clone()) != self.user_path {
             self.user_path = Some(path.clone());
@@ -285,6 +297,8 @@ impl DocumentView {
             .on_action(cx.listener(Self::scene_end))
             .on_action(cx.listener(Self::epsilon_forward))
             .on_action(cx.listener(Self::epsilon_backward))
+            .on_action(cx.listener(Self::undo))
+            .on_action(cx.listener(Self::redo))
             .on_action(cx.listener(Self::save_document))
             .on_action(cx.listener(Self::save_document_custom_path))
             .on_action(cx.listener(Self::close_document))
