@@ -9,13 +9,15 @@ mod line_map;
 mod wrapped_line;
 pub mod text_editor;
 
-const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub struct Editor {
     internal_path: PathBuf,
     editor: Entity<TextEditor<DocumentState>>,
     state: Entity<DocumentState>,
     internal_dirty: Entity<bool>,
+
+    _drop_handle: Subscription,
 }
 
 impl Editor {
@@ -42,7 +44,7 @@ impl Editor {
         })
         .detach();
 
-        cx.on_drop(|editor, cx| {
+        let drop_handle = cx.on_release(|editor, cx| {
             if *editor.internal_dirty.read(cx) {
                 editor.write_to_internal_path(cx);
             }
@@ -53,6 +55,7 @@ impl Editor {
             editor: cx.new(|cx| TextEditor::new(state.clone(), window, cx, content, dirty, internal_dirty.clone())),
             state,
             internal_dirty,
+            _drop_handle: drop_handle,
         }
     }
 

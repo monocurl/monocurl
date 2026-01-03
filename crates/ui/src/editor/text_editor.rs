@@ -947,7 +947,7 @@ impl<B: EditorBackend> TextElement<B> {
             .collect()
     }
 
-    fn compute_scroll_wheel_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>, window: &Window) -> Option<Bounds<Pixels>> {
+    fn compute_scroll_wheel_bounds(&self, editor: &TextEditor<B>, bounds: Bounds<Pixels>, _window: &Window) -> Option<Bounds<Pixels>> {
         let scroll_offset = editor.scroll_handle.offset();
         let viewport_height = editor.scroll_handle.bounds().size.height;
         let content_height = editor.line_map.total_height() + px(BOTTOM_SCROLL_PADDING);

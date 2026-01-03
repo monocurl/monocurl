@@ -107,8 +107,6 @@ pub trait EditorBackend: Default + 'static {
         start..end
     }
 
-    fn version(&self) -> usize;
-
     fn diagnostics(&self) -> &[Diagnostic];
 
     // characters that have modified attributes
@@ -249,6 +247,7 @@ impl EditorBackend for DocumentState {
     fn replace(&mut self, span: Span8, new_text: &str) {
         self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
         self.version += 1;
+        self.notify_listeners(span, new_text);
     }
 
     fn read(&self, span: Span8) -> String {
@@ -276,10 +275,6 @@ impl EditorBackend for DocumentState {
 
     fn autocomplete_list(&self) -> &[AutoCompleteItem] {
         &[]
-    }
-
-    fn version(&self) -> usize {
-        todo!()
     }
 
     fn diagnostics(&self) -> &[Diagnostic] {
