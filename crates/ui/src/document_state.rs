@@ -1,13 +1,17 @@
-use structs::{rope::{RLEAggregate, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8}};
+use lexer::token::Token;
+use structs::{rope::{RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8}};
 
 use crate::editor::backing::{AutoCompleteItem, Diagnostic, EditorBackend};
+
+type LexData = Option<Token>;
+type StaticAnalysisData = i32;
 
 #[derive(Default)]
 pub struct DocumentState {
 
     pub text_rope: Rope<TextAggregate>,
-    pub lex_rope: Rope<RLEAggregate<i32>>,
-    pub static_analysis_rope: Rope<RLEAggregate<i32>>,
+    pub lex_rope: Rope<RLEAggregate<LexData>>,
+    pub static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
 
     pub dirty_range: Option<Span8>,
     pub version: usize,
@@ -27,18 +31,20 @@ impl DocumentState {
         }
     }
 
-    pub fn set_lex_rope(&mut self, for_version: usize, dirty_range: Span8) {
+    pub fn set_lex_rope(&mut self, rope: Rope<RLEAggregate<LexData>>, for_version: usize, dirty_range: Span8) {
         if for_version != self.version {
             return;
         }
         self.mark_region_as_dirty(dirty_range);
+        self.lex_rope = rope;
     }
 
-    pub fn set_static_analysis_rope(&mut self, for_version: usize, dirty_range: Span8) {
+    pub fn set_static_analysis_rope(&mut self, rope: Rope<RLEAggregate<StaticAnalysisData>>, for_version: usize, dirty_range: Span8) {
         if for_version != self.version {
             return;
         }
         self.mark_region_as_dirty(dirty_range);
+        self.static_analysis_rope = rope;
     }
 
     pub fn set_diagnostic_state(&self) {
@@ -147,7 +153,6 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
     }
 }
 
-
 impl EditorBackend for DocumentState {
     fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
         let summary = self.text_rope.utf8_prefix_summary(offset);
@@ -174,6 +179,30 @@ impl EditorBackend for DocumentState {
 
     fn replace(&mut self, span: Span8, new_text: &str) {
         self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
+        // update lex_rope and static analysis rope with best effort of extending the previous runs
+        // background threads will do the proper update asynchronously
+        let lex_replacement = if span.start == 0 {
+            LexData::default()
+        }
+        else {
+            self.lex_rope.attribute_at(span.start - 1).clone()
+        };
+        self.lex_rope = self.lex_rope.replace_range(
+            span.clone(),
+            vec![RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement } ],
+        );
+
+        let sa_replacement = if span.start == 0 {
+            StaticAnalysisData::default()
+        }
+        else {
+            *self.static_analysis_rope.attribute_at(span.start - 1)
+        };
+        self.static_analysis_rope = self.static_analysis_rope.replace_range(
+            span.clone(),
+            vec![RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement } ],
+        );
+
         self.version += 1;
         self.notify_listeners(span, new_text);
     }

@@ -427,7 +427,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 }
 
 impl<S: AggregateData, const N: usize> Rope<S, N> {
-    // finds the first leaf, such that the prefix excluding that leaf does not satisfy the predicate
+    /// finds the first leaf, such that the prefix aggregate *including* that leaf does not satisfy the (monotonically decreasing) predicate
     pub fn find_leaf(&self, mut lt: impl FnMut(&S) -> bool) -> &S::LeafData {
         let mut agg = S::from_leaf(&S::LeafData::identity());
         self.find_leaf_rec(&mut agg, &self.root, &mut lt)
@@ -599,6 +599,14 @@ impl<const N: usize> Rope<TextAggregate, N> {
         })
     }
 }
+
+impl<T> Rope<RLEAggregate<T>> where T: PartialEq + Default + Clone
+{
+    pub fn attribute_at(&self, index: usize) -> &T {
+        &self.find_leaf(|agg| agg.codeunits() <= index).attribute
+    }
+}
+
 mod iterator {
     use std::sync::Arc;
 
@@ -909,15 +917,15 @@ impl<const N: usize> Rope<TextAggregate, N> {
 
 #[derive(Clone)]
 pub struct RLEAggregate<T> {
-    bytes_utf8: usize,
-    height: usize,
+    pub bytes_utf8: usize,
+    pub height: usize,
     phantom_t: PhantomData<T>
 }
 
 #[derive(Clone)]
 pub struct RLEData<T> {
-    bytes_utf8: usize,
-    attribute: T,
+    pub bytes_utf8: usize,
+    pub attribute: T,
 }
 
 impl<T> LeafData for RLEData<T>

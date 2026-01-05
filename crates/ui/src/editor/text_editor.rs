@@ -104,7 +104,7 @@ pub struct TextEditor<B: EditorBackend> {
     undo_stack: VecDeque<HistoryGroup>,
     redo_stack: VecDeque<HistoryGroup>,
 
-    pub state: Entity<B>,
+    state: Entity<B>,
     dirty: Entity<bool>,
     internal_dirty: Entity<bool>,
 
@@ -203,8 +203,8 @@ impl<B: EditorBackend> TextEditor<B> {
             return;
         }
 
-        let must_form_new_group = new_text.contains('\n');
-        if self.undo_stack.is_empty() || must_form_new_group {
+        let must_form_isolated_group = new_text.contains('\n');
+        if self.undo_stack.is_empty() || must_form_isolated_group {
             self.undo_stack.push_back(HistoryGroup { items: Vec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor });
 
             while self.undo_stack.len() > MAX_UNDO_GROUPS {
@@ -221,8 +221,7 @@ impl<B: EditorBackend> TextEditor<B> {
         }
         group.items.push(HistoryItem { old: range, replacement: replacement.to_string() });
 
-
-        if must_form_new_group {
+        if must_form_isolated_group {
             self.undo_group_boundary();
         }
 
@@ -377,14 +376,16 @@ impl<B: EditorBackend> TextEditor<B> {
         }
     }
 
-    fn select_to(&mut self, pos: Location8, mouse_origin: bool, cx: &mut Context<Self>) {
+    fn select_to(&mut self, pos: Location8, mouse_origin: bool, key_origin: bool, cx: &mut Context<Self>) {
         self.cursor.head = pos;
         self.reset_cursor_blink(cx);
         if !mouse_origin {
             self.discretely_scroll_to_cursor();
         }
 
-        self.undo_group_boundary();
+        if key_origin || mouse_origin {
+            self.undo_group_boundary();
+        }
     }
 
     fn discretely_scroll_to_cursor(&mut self) {
@@ -425,7 +426,7 @@ impl<B: EditorBackend> TextEditor<B> {
 
                     if let Some(mouse_pos) = editor.auto_scroll_last_mouse_position {
                         let pos = editor.index_for_mouse_position(mouse_pos);
-                        editor.select_to(pos, true, cx);
+                        editor.select_to(pos, true, false, cx);
 
                         let scroll_bounds = editor.scroll_handle.bounds();
                         let viewport_top = scroll_bounds.top();
@@ -579,22 +580,22 @@ impl<B: EditorBackend> TextEditor<B> {
         let state = self.state.read(cx);
         let offset = state.loc8_to_offset8(self.cursor.head);
         let new_offset = state.prev_boundary(offset);
-        self.select_to(state.offset8_to_loc8(new_offset), false, cx);
+        self.select_to(state.offset8_to_loc8(new_offset), false, true, cx);
     }
 
     fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
         let offset = state.loc8_to_offset8(self.cursor.head);
         let new_offset = state.next_boundary(offset);
-        self.select_to(state.offset8_to_loc8(new_offset), false, cx);
+        self.select_to(state.offset8_to_loc8(new_offset), false, true, cx);
     }
 
     fn select_up(&mut self, _: &SelectUp, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_to(self.vertical_cursor_movement(-1), false, cx);
+        self.select_to(self.vertical_cursor_movement(-1), false, true, cx);
     }
 
     fn select_down(&mut self, _: &SelectDown, _: &mut Window, cx: &mut Context<Self>) {
-        self.select_to(self.vertical_cursor_movement(1), false, cx);
+        self.select_to(self.vertical_cursor_movement(1), false, true, cx);
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
@@ -638,10 +639,11 @@ impl<B: EditorBackend> TextEditor<B> {
                     text_before.len() % TAB_SIZE
                 };
                 let new_offset = offset.saturating_sub(spaces_to_delete);
-                self.select_to(state.offset8_to_loc8(new_offset), false, cx);
+                // not really a key origin because the selction will instantly collapse
+                self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
             } else {
                 let new_offset = state.prev_boundary(offset);
-                self.select_to(state.offset8_to_loc8(new_offset), false, cx);
+                self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
             }
         }
         self.replace_text_in_range(None, "", window, cx);
@@ -652,7 +654,7 @@ impl<B: EditorBackend> TextEditor<B> {
             let state = self.state.read(cx);
             let offset = state.loc8_to_offset8(self.cursor.head);
             let new_offset = state.next_boundary(offset);
-            self.select_to(state.offset8_to_loc8(new_offset), false, cx);
+            self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
         }
         self.replace_text_in_range(None, "", window, cx);
     }
@@ -742,7 +744,7 @@ impl<B: EditorBackend> TextEditor<B> {
     }
 
     fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
-        self.select_to(Location8 { row: self.cursor.head.row, col: 0 }, false, cx);
+        self.select_to(Location8 { row: self.cursor.head.row, col: 0 }, false, false, cx);
         self.replace_text_in_range(None, "", window, cx);
     }
 }
@@ -780,7 +782,7 @@ impl<B: EditorBackend> TextEditor<B> {
             1 => {
                 self.is_selecting = true;
                 if event.modifiers.shift {
-                    self.select_to(pos, true, cx);
+                    self.select_to(pos, true, false, cx);
                 } else {
                     self.move_to(pos, true, false, cx);
                 }

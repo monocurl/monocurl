@@ -5254,6 +5254,7 @@ dependencies = [
  "dirs 5.0.1",
  "env_logger",
  "gpui",
+ "lexer",
  "log",
  "open",
  "schemars",
