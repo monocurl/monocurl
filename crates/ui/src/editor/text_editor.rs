@@ -149,7 +149,7 @@ impl TextEditor {
             cx.notify();
         }).detach();
 
-        let focus_out_subscription = cx.on_focus_lost(window, |editor, w, cx| {
+        let focus_out_subscription = cx.on_focus_lost(window, |editor, _w, cx| {
             // stop blinking if we are
             editor.cursor_blink_epoch += 1;
             editor.cursor_blink_state = false;

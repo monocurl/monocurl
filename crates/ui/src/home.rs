@@ -4,7 +4,7 @@ use gpui::*;
 use server::doc_type::DocumentType;
 use structs::assets::Assets;
 
-use crate::{navbar::Navbar, state::WindowState, theme::ColorSet, util::link_button};
+use crate::{navbar::Navbar, state::window_state::WindowState, theme::ColorSet, util::link_button};
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
 

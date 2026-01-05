@@ -1,6 +1,6 @@
 use gpui::*;
 
-use crate::{document::OpenDocument, home::HomeView, state::{ActiveScreen, WindowState}, theme::FontSet};
+use crate::{document::OpenDocument, home::HomeView, state::window_state::{ActiveScreen, WindowState}, theme::FontSet};
 
 pub struct MonocurlWindow {
     state: Entity<WindowState>,

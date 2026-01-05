@@ -1,13 +1,8 @@
 use std::path::PathBuf;
 
-use gpui::*;
+use gpui::{App, AppContext, AsyncApp, Entity, IntoElement, Render, Subscription, WeakEntity, Window};
 
 use crate::{document_state::DocumentState, editor::text_editor::TextEditor};
-
-mod line_map;
-mod line_shaper;
-mod wrapped_line;
-pub mod text_editor;
 
 const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
