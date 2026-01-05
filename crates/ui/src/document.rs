@@ -1,6 +1,7 @@
-use std::path::{PathBuf};
+use std::{marker::PhantomData, path::PathBuf};
 
 use gpui::*;
+use lexer::stateful_lexer::StatefulLexer;
 use server::doc_type::DocumentType;
 
 use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor}, components::split_pane::Split, document_state::DocumentState, editor::Editor, navbar::Navbar, state::WindowState, theme::ColorSet, timeline::Timeline, viewport::Viewport};

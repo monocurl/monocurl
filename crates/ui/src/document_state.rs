@@ -1,22 +1,30 @@
 use lexer::token::Token;
-use structs::{rope::{RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8}};
+use structs::{rope::{RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
 
-use crate::editor::backing::{AutoCompleteItem, Diagnostic, EditorBackend};
+pub type LexData = Option<Token>;
+pub type StaticAnalysisData = i32;
 
-type LexData = Option<Token>;
-type StaticAnalysisData = i32;
+
+pub struct AutoCompleteItem {
+    pub head: String,
+    pub replacement: String,
+    pub cursor_position: isize,
+}
+
+pub struct Diagnostic {
+    version: usize,
+}
 
 #[derive(Default)]
 pub struct DocumentState {
+    text_rope: Rope<TextAggregate>,
+    lex_rope: Rope<RLEAggregate<LexData>>,
+    static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
 
-    pub text_rope: Rope<TextAggregate>,
-    pub lex_rope: Rope<RLEAggregate<LexData>>,
-    pub static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
+    dirty_range: Option<Span8>,
+    version: usize,
 
-    pub dirty_range: Option<Span8>,
-    pub version: usize,
-
-    pub listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize) + Send>>,
+    listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize) + Send>>,
 }
 
 impl DocumentState {
@@ -31,12 +39,20 @@ impl DocumentState {
         }
     }
 
+    pub fn lex_rope(&self) -> &Rope<RLEAggregate<LexData>> {
+        &self.lex_rope
+    }
+
     pub fn set_lex_rope(&mut self, rope: Rope<RLEAggregate<LexData>>, for_version: usize, dirty_range: Span8) {
         if for_version != self.version {
             return;
         }
         self.mark_region_as_dirty(dirty_range);
         self.lex_rope = rope;
+    }
+
+    pub fn static_analysis_rope(&self) -> &Rope<RLEAggregate<StaticAnalysisData>> {
+        &self.static_analysis_rope
     }
 
     pub fn set_static_analysis_rope(&mut self, rope: Rope<RLEAggregate<StaticAnalysisData>>, for_version: usize, dirty_range: Span8) {
@@ -153,23 +169,23 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
     }
 }
 
-impl EditorBackend for DocumentState {
-    fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
+impl DocumentState {
+    pub fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
         let summary = self.text_rope.utf8_prefix_summary(offset);
         summary.codeunits_utf16
     }
 
-    fn offset16_to_offset8(&self, offset: Count16) -> Count8 {
+    pub fn offset16_to_offset8(&self, offset: Count16) -> Count8 {
         let summary = self.text_rope.utf16_prefix_summary(offset);
         summary.bytes_utf8
     }
 
-    fn loc8_to_offset8(&self, loc: Location8) -> Count8 {
+    pub fn loc8_to_offset8(&self, loc: Location8) -> Count8 {
         let summary = self.text_rope.utf8_line_pos_prefix(loc.row, loc.col);
         summary.bytes_utf8
     }
 
-    fn offset8_to_loc8(&self, offset: Count8) -> Location8 {
+    pub fn offset8_to_loc8(&self, offset: Count8) -> Location8 {
         let summary = self.text_rope.utf8_prefix_summary(offset);
         Location8 {
             row: summary.newlines,
@@ -177,7 +193,15 @@ impl EditorBackend for DocumentState {
         }
     }
 
-    fn replace(&mut self, span: Span8, new_text: &str) {
+    pub fn span8_to_span16(&self, span8: &Span8) -> Span16 {
+        self.offset8_to_offset16(span8.start)..self.offset8_to_offset16(span8.end)
+    }
+
+    pub fn span16_to_span8(&self, span16: &Span16) -> Span8 {
+        self.offset16_to_offset8(span16.start)..self.offset16_to_offset8(span16.end)
+    }
+
+    pub fn replace(&mut self, span: Span8, new_text: &str) {
         self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
         // update lex_rope and static analysis rope with best effort of extending the previous runs
         // background threads will do the proper update asynchronously
@@ -207,7 +231,7 @@ impl EditorBackend for DocumentState {
         self.notify_listeners(span, new_text);
     }
 
-    fn read(&self, span: Span8) -> String {
+    pub fn read(&self, span: Span8) -> String {
         let mut utf8 = 0;
         self.text_rope
             .iterator(span.start)
@@ -218,27 +242,94 @@ impl EditorBackend for DocumentState {
             .collect()
     }
 
-    fn len(&self) -> Count8 {
+    pub fn len(&self) -> Count8 {
         self.text_rope.codeunits()
     }
 
-    fn next_boundary(&self, offset: Count8) -> Count8 {
+    pub fn next_boundary(&self, offset: Count8) -> Count8 {
         grapheme_boundary(&self.text_rope, offset, true)
     }
 
-    fn prev_boundary(&self, offset: Count8) -> Count8 {
+    pub fn prev_boundary(&self, offset: Count8) -> Count8 {
         grapheme_boundary(&self.text_rope, offset, false)
     }
 
-    fn autocomplete_list(&self) -> &[AutoCompleteItem] {
+    // maximal word containing position
+    // or, if this is empty due to whitespace, the previous word (along with contents up till offset)
+    pub fn word(&self, offset: Count8, only_expand_left: bool) -> Span8 {
+        let not_separator = |c: char| {
+            c.is_alphanumeric() || c == '_'
+        };
+
+        let mut start  = offset;
+        while start > 0 {
+            let prev = self.prev_boundary(start);
+            let ch = self.read(prev..start);
+            if ch.chars().all(not_separator) {
+                start = prev;
+            } else {
+                break;
+            }
+        }
+
+        let mut end = offset;
+        let len = self.len();
+        if !only_expand_left {
+            while end < len {
+                let next = self.next_boundary(end);
+                let ch = self.read(end..next);
+                if ch.chars().all(not_separator) {
+                    end = next;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if start == offset && end == offset {
+            // try to include at least one character that is not whitespace (not crossing newline)
+            let mut first_nonwhitespace = -1;
+            while start > 0 {
+                let prev = self.prev_boundary(start);
+                let ch = self.read(prev..start);
+
+                if ch == "\n" {
+                    break;
+                }
+                let is_whitespace = ch.chars().all(|c| c.is_whitespace());
+                if is_whitespace && first_nonwhitespace == -1 {
+                    start = prev;
+                }
+                else {
+                    first_nonwhitespace = first_nonwhitespace.max(start as isize);
+                    if ch.chars().all(not_separator) {
+                        start = prev;
+                    }
+                    else if start as isize == first_nonwhitespace {
+                        start = prev;
+                        break;
+                    }
+                    else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        start..end
+    }
+
+    pub fn autocomplete_list(&self) -> &[AutoCompleteItem] {
         &[]
     }
 
-    fn diagnostics(&self) -> &[Diagnostic] {
+    pub fn diagnostics(&self) -> &[Diagnostic] {
         todo!()
     }
 
-    fn mark_region_as_dirty(&mut self, span: Span8) {
+    // characters that have modified attributes
+    // and resets their dirty status to non dirty
+    pub fn mark_region_as_dirty(&mut self, span: Span8) {
         if let Some(dirty) = &mut self.dirty_range {
             dirty.start = dirty.start.min(span.start);
             dirty.end = dirty.end.max(span.end);
@@ -247,7 +338,7 @@ impl EditorBackend for DocumentState {
         }
     }
 
-    fn take_dirty_region(&mut self) -> Option<Span8> {
+    pub fn take_dirty_region(&mut self) -> Option<Span8> {
         self.dirty_range.take()
     }
 }

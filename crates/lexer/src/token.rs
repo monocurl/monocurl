@@ -86,7 +86,7 @@ impl Token {
     }
 }
 
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Copy, Clone, Debug, PartialEq)]
 pub enum TokenCategory {
     #[default]
     Unknown,

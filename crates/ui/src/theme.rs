@@ -83,7 +83,16 @@ pub struct TextEditorStyles {
     pub text_font: Font,
     pub text_size: Pixels,
     pub line_height: Pixels,
-    pub text_color: Hsla,
+
+    pub control_flow_color: Hsla,
+    pub non_control_flow_keyword_color: Hsla,
+    pub text_literal_color: Hsla,
+    pub comment_color: Hsla,
+    pub numeric_literal_color: Hsla,
+    pub identifier_color: Hsla,
+    pub operator_color: Hsla,
+    pub parenthesis_color: Hsla,
+    pub default_text_color: Hsla,
 
     pub cursor_color: Hsla,
 
@@ -104,7 +113,17 @@ impl Default for TextEditorStyles {
             text_font: gpui::font(FontSet::MONOSPACE),
             text_size: px(14.0),
             line_height: px(20.0),
-            text_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
+
+            control_flow_color: gpui::hsla(0.6, 0.7, 0.4, 1.0),
+            non_control_flow_keyword_color: gpui::hsla(0.5, 0.7, 0.4, 1.0),
+            text_literal_color: gpui::hsla(0.3, 0.7, 0.4, 1.0),
+            comment_color: gpui::hsla(0.4, 0.0, 0.5, 1.0),
+            numeric_literal_color: gpui::hsla(0.1, 0.7, 0.4, 1.0),
+            identifier_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
+            operator_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
+            parenthesis_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
+            default_text_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
+
             cursor_color: gpui::blue(),
             gutter_font: gpui::font(FontSet::MONOSPACE),
             gutter_text_color: gpui::hsla(0.0, 0.0, 0.3, 1.0),

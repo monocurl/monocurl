@@ -2,10 +2,10 @@ use std::path::PathBuf;
 
 use gpui::*;
 
-use crate::{document_state::DocumentState, editor::{backing::EditorBackend, text_editor::TextEditor}};
+use crate::{document_state::DocumentState, editor::text_editor::TextEditor};
 
-pub mod backing;
 mod line_map;
+mod line_shaper;
 mod wrapped_line;
 pub mod text_editor;
 
@@ -13,7 +13,7 @@ const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub struct Editor {
     internal_path: PathBuf,
-    editor: Entity<TextEditor<DocumentState>>,
+    editor: Entity<TextEditor>,
     state: Entity<DocumentState>,
     internal_dirty: Entity<bool>,
 
