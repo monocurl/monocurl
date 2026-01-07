@@ -52,8 +52,7 @@ where
         }
     }
 
-    fn skip_while<F>(&mut self, mut predicate: F) -> Count8
-    where F: FnMut(char) -> bool
+    fn skip_while<F>(&mut self, mut predicate: F) -> Count8 where F: FnMut(char) -> bool
     {
         let start = self.byte_count;
         while let Some(ch) = self.peek() {
@@ -66,8 +65,7 @@ where
         self.byte_count - start
     }
 
-    fn collect_while<F>(&mut self, mut predicate: F) -> String
-    where F: FnMut(char) -> bool
+    fn collect_while<F>(&mut self, mut predicate: F) -> String where F: FnMut(char) -> bool
     {
         let mut result = String::new();
         while let Some(ch) = self.peek() {
@@ -83,26 +81,24 @@ where
 
     fn lex_number(&mut self, first: char) -> (Token, Count8) {
         let start = self.byte_count - first.len_utf8();
-        let mut num_str = String::from(first);
 
         // integer part
-        num_str.push_str(&self.collect_while(|ch| ch.is_ascii_digit()));
+        self.skip_while(|ch| ch.is_ascii_digit());
 
         // decimal point
         let is_float = match (self.peek(), self.peek_next()) {
             (Some('.'), Some(ch)) if ch.is_ascii_digit() => {
                 self.advance();
-                num_str.push('.');
-                num_str.push_str(&self.collect_while(|ch| ch.is_ascii_digit()));
+                self.skip_while(|ch| ch.is_ascii_digit());
                 true
             }
             _ => false,
         };
 
         let token = if is_float {
-            Token::DoubleLiteral(num_str.parse().unwrap_or(0.0))
+            Token::DoubleLiteral
         } else {
-            Token::IntegerLiteral(num_str.parse().unwrap_or(0))
+            Token::IntegerLiteral
         };
 
         (token, self.byte_count - start)

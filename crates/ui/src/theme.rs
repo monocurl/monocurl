@@ -121,8 +121,8 @@ impl Default for TextEditorStyles {
             comment_color: gpui::hsla(0.1, 0.05, 0.5, 0.6),
             numeric_literal_color: gpui::hsla(0.08, 0.7, 0.5, 1.0),
             identifier_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
-            operator_color: gpui::hsla(0.0, 0.0, 0.2, 1.0),
-            punctuation_color: gpui::hsla(0.0, 0.0, 0.2, 1.0),
+            operator_color: gpui::hsla(0.0, 0.0, 0.4, 1.0),
+            punctuation_color: gpui::hsla(0.0, 0.0, 0.4, 1.0),
             default_text_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
 
             cursor_color: gpui::hsla(0.58, 0.9, 0.4, 1.0),

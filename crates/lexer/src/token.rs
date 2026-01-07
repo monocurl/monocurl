@@ -58,8 +58,8 @@ pub enum Token {
     Slide,
     Native,
 
-    IntegerLiteral(i64),
-    DoubleLiteral(f64),
+    IntegerLiteral,
+    DoubleLiteral,
     // this means it looks most like a string literal
     // however it may actually be ilformed
     // the parser / compiler must actually verify the form
@@ -83,7 +83,7 @@ impl Token {
             Func | Struct | Conj | Let | Var | Mesh | State | Param | Slide | Native => {
                 TokenCategory::NonControlFlowKeyword
             }
-            IntegerLiteral(_) | DoubleLiteral(_) => TokenCategory::NumericLiteral,
+            IntegerLiteral | DoubleLiteral => TokenCategory::NumericLiteral,
             StringLiteral | CharLiteral => TokenCategory::TextLiteral,
             Comment => TokenCategory::Comment,
             Identifier => TokenCategory::Identifier
