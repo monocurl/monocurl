@@ -34,6 +34,15 @@ where
         Some(ch)
     }
 
+    fn advance_if_not_nl(&mut self) -> Option<char> {
+        if let Some(ch) = self.peek() {
+            if ch != '\n' {
+                return self.advance();
+            }
+        }
+        None
+    }
+
     fn advance_if(&mut self, expected: char) -> bool {
         if self.peek() == Some(expected) {
             self.advance();
@@ -144,7 +153,7 @@ where
                 Some('%') => {
                     self.advance();
                     // skip past escape sequence
-                    self.advance();
+                    self.advance_if_not_nl();
                 }
                 Some('\n') | None => {
                     // malformed string, will be caught later on in parse stage
@@ -166,7 +175,7 @@ where
         if let Some(ch) = self.advance() {
             // consume escape sequence
             if ch == '%' {
-                self.advance();
+                self.advance_if_not_nl();
             };
         }
 
