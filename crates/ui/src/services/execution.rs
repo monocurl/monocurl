@@ -24,7 +24,6 @@ impl ExecutionService {
     }
 
     pub async fn run(mut self) {
-        log::info!("Starting Execution Service");
         while let Some(message) = self.rx.next().await {
             match message {
                 ExecutionMessage::UpdateBytecode => {
@@ -41,6 +40,5 @@ impl ExecutionService {
                 }
             }
         }
-        log::info!("Exiting Execution Service");
     }
 }

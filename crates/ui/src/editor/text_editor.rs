@@ -105,6 +105,7 @@ impl Cursor {
 pub struct TextEditor {
     focus_handle: FocusHandle,
     _focus_out_subscription: Subscription,
+    _window_focus_subscription: Subscription,
     scroll_handle: ScrollHandle,
 
     history_disabled: bool,
@@ -149,6 +150,17 @@ impl TextEditor {
             cx.notify();
         }).detach();
 
+        let window_focus_subscription = cx.observe_window_activation(window, |e, window, cx| {
+            if window.is_window_active() && e.focus_handle.is_focused(window) {
+                e.reset_cursor_blink(cx);
+            } else {
+                // stop blinking if we are
+                e.cursor_blink_epoch += 1;
+                e.cursor_blink_state = true;
+            }
+            cx.notify()
+        });
+
         let focus_out_subscription = cx.on_focus_lost(window, |editor, _w, cx| {
             // stop blinking if we are
             editor.cursor_blink_epoch += 1;
@@ -159,6 +171,7 @@ impl TextEditor {
         let mut ret = TextEditor {
             focus_handle: cx.focus_handle(),
             _focus_out_subscription: focus_out_subscription,
+            _window_focus_subscription: window_focus_subscription,
             scroll_handle: ScrollHandle::new(),
             history_disabled: false,
             is_undoing: false,
@@ -485,7 +498,7 @@ impl TextEditor {
                     }
 
                     true
-                }).ok().unwrap_or(false);
+                }).unwrap_or(false);
 
                 if !should_continue {
                     break;

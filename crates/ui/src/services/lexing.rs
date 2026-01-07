@@ -52,8 +52,6 @@ impl LexingService {
     }
 
     pub async fn run(mut self) {
-        log::info!("Starting Lexing Service");
-
         let mut lex_rope = Rope::default();
         let mut text_rope = Rope::default();
         while let Some(message) = self.rx.next().await {
@@ -88,7 +86,5 @@ impl LexingService {
                 version: current_version,
             }).await.unwrap();
         }
-
-        log::info!("Exiting Lexing Service");
     }
 }
