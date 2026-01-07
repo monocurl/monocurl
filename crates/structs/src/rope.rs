@@ -199,10 +199,9 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
     }
 
     #[must_use]
-    pub fn replace_range(&self, range: Range<usize>, new_data: impl Into<Vec<S::LeafData>>) -> Self {
+    pub fn replace_range(&self, range: Range<usize>, new_data: impl Iterator<Item = S::LeafData>) -> Self {
         let leaves = new_data
-            .into()
-            .into_iter().map(|ld| Arc::new(RopeNode::new_leaf(ld)))
+            .map(|ld| Arc::new(RopeNode::new_leaf(ld)))
             .collect();
         let replacement = Self::from_children(leaves);
 
@@ -907,39 +906,41 @@ impl AggregateData for TextAggregate {
     }
 }
 
-pub fn leaves_from_str(text: &str) -> Vec<TextData> {
-    if text.is_empty() {
-        return Vec::new();
+pub fn leaves_from_str(text: &str) -> impl Iterator<Item = TextData> + use<'_> {
+    struct Leaves<'a> {
+        text: &'a str,
+        start: usize,
     }
 
-    let mut leaves = Vec::new();
-    let mut start = 0;
+    impl<'a> Iterator for Leaves<'a> {
+        type Item = TextData;
 
-    while start < text.len() {
-        let end = (start + MAX_LEAF_SIZE).min(text.len());
+        fn next(&mut self) -> Option<Self::Item> {
+            if self.start >= self.text.len() {
+                return None;
+            }
 
-        // Find UTF-8 boundary
-        let mut adjusted_end = end;
-        while adjusted_end > start && !text.is_char_boundary(adjusted_end) {
-            adjusted_end -= 1;
+            let mut end = (self.start + MAX_LEAF_SIZE).min(self.text.len());
+
+            while end > self.start && !self.text.is_char_boundary(end) {
+                end -= 1;
+            }
+
+            debug_assert!(end != self.start, "utf8 character larger than max leaf size?");
+
+            let slice = &self.text[self.start..end];
+            self.start = end;
+
+            Some(TextData(ArrayString::from(slice).unwrap()))
         }
-
-        if adjusted_end == start {
-            // This should never happen with valid UTF-8
-            unreachable!("Invalid UTF-8 or character larger than MAX_LEAF_SIZE");
-        }
-
-        let slice = &text[start..adjusted_end];
-        leaves.push(TextData(ArrayString::from(slice).unwrap()));
-        start = adjusted_end;
     }
 
-    leaves
+    Leaves { text, start: 0 }
 }
 
 impl<const N: usize> Rope<TextAggregate, N> {
     pub fn from_str(s: &str) -> Self {
-        Self::default().replace_range(0..0, leaves_from_str(s))
+        Self::default().replace_range(0..0, leaves_from_str(s).into_iter())
     }
 }
 
@@ -1425,7 +1426,7 @@ mod replace_tests {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
         let new_data = vec![TextData(ArrayString::from("beautiful ").unwrap())];
 
-        let result = rope.replace_range(6..11, new_data);
+        let result = rope.replace_range(6..11, new_data.into_iter());
         let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello beautiful ");
@@ -1434,7 +1435,7 @@ mod replace_tests {
     #[test]
     fn test_replace_range_delete() {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
-        let result = rope.replace_range(5..11, vec![]);
+        let result = rope.replace_range(5..11, vec![].into_iter());
         let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello");
@@ -1445,7 +1446,7 @@ mod replace_tests {
         let rope = Rope::<TextAggregate, 8>::from_str("hello world");
         let new_data = vec![TextData(ArrayString::from(" beautiful").unwrap())];
 
-        let result = rope.replace_range(5..5, new_data);
+        let result = rope.replace_range(5..5, new_data.into_iter());
         let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello beautiful world");
@@ -1458,7 +1459,7 @@ mod replace_tests {
         let after_crab = crab_pos + "🦀".len();
 
         let new_data = vec![TextData(ArrayString::from("🎉").unwrap())];
-        let result = rope.replace_range(crab_pos..after_crab, new_data);
+        let result = rope.replace_range(crab_pos..after_crab, new_data.into_iter());
         let result_str: String = result.iterator(0).collect();
 
         assert_eq!(result_str, "hello 🎉 world");
@@ -1469,7 +1470,7 @@ mod replace_tests {
         let rope1 = Rope::<TextAggregate, 8>::from_str("hello world");
         let new_data = vec![TextData(ArrayString::from("REPLACED").unwrap())];
 
-        let rope2 = rope1.replace_range(6..11, new_data);
+        let rope2 = rope1.replace_range(6..11, new_data.into_iter());
 
         // Original rope should be unchanged
         let rope1_str: String = rope1.iterator(0).collect();
@@ -1493,7 +1494,7 @@ mod replace_tests {
             })
             .collect();
 
-        let result = rope.replace_range(50..150, leaves);
+        let result = rope.replace_range(50..150, leaves.into_iter());
         let result_str: String = result.iterator(0).collect();
 
         let expected = format!("{}{}{}",
@@ -1609,7 +1610,7 @@ mod replace_tests {
 
         while rope.codeunits() > 0 {
             let len = rope.codeunits();
-            rope = rope.replace_range(0..(len / 2).max(1), vec![]);
+            rope = rope.replace_range(0..(len / 2).max(1), vec![].into_iter());
             assert_invariants(&rope);
         }
 
@@ -1622,7 +1623,7 @@ mod replace_tests {
         for i in 0..50 {
             let start = (i * 10) % rope.codeunits();
             let end = (start + 5).min(rope.codeunits());
-            rope = rope.replace_range(start..end, vec![]);
+            rope = rope.replace_range(start..end, vec![].into_iter());
             assert_invariants(&rope);
         }
     }
@@ -1645,7 +1646,7 @@ mod replace_tests {
         let rope = Rope::<TextAggregate, 8>::from_str(&"x".repeat(3000));
         let h1 = rope.root.aggregate().height();
 
-        let rope2 = rope.replace_range(0..2900, vec![]);
+        let rope2 = rope.replace_range(0..2900, vec![].into_iter());
         let h2 = rope2.root.aggregate().height();
 
         assert!(h2 <= h1);

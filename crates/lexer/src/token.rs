@@ -1,11 +1,12 @@
 
+// might need to add lambdas, labels
 #[derive(Default, Clone, Debug, PartialEq)]
 pub enum Token {
     #[default]
     Illegal,
 
     Newline,
-    Whitespace(String),
+    Whitespace,
 
     Comment,
 
@@ -59,12 +60,13 @@ pub enum Token {
 
     IntegerLiteral(i64),
     DoubleLiteral(f64),
-    StringLiteralDelimetter,
-    StringLiteralChunk(String),
-    CharLiteralDelimetter,
-    CharLiteral(char),
+    // this means it looks most like a string literal
+    // however it may actually be ilformed
+    // the parser / compiler must actually verify the form
+    StringLiteral,
+    CharLiteral,
 
-    Identifier(String),
+    Identifier,
 }
 
 impl Token {
@@ -72,7 +74,7 @@ impl Token {
         use Token::*;
         match self {
             Illegal => TokenCategory::Unknown,
-            Newline | Whitespace(_) => TokenCategory::Whitespace,
+            Newline | Whitespace => TokenCategory::Whitespace,
             Plus | Minus | Multiply | Power | Divide | IntegerDivide | Assign
             | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In | Range
             | Pipe | Comma | Reference | Colon => TokenCategory::Operator,
@@ -82,10 +84,9 @@ impl Token {
                 TokenCategory::NonControlFlowKeyword
             }
             IntegerLiteral(_) | DoubleLiteral(_) => TokenCategory::NumericLiteral,
-            StringLiteralDelimetter | StringLiteralChunk(_) |
-            CharLiteralDelimetter | CharLiteral(_) => TokenCategory::TextLiteral,
+            StringLiteral | CharLiteral => TokenCategory::TextLiteral,
             Comment => TokenCategory::Comment,
-            Identifier(_) => TokenCategory::Identifier
+            Identifier => TokenCategory::Identifier
         }
     }
 }

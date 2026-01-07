@@ -109,28 +109,31 @@ pub struct TextEditorStyles {
 impl Default for TextEditorStyles {
     fn default() -> Self {
         Self {
-            bg_color: rgba(0xf0eee7ff).into(),
+            bg_color: gpui::hsla(0.1, 0.1, 0.98, 1.0),
+
             text_font: gpui::font(FontSet::MONOSPACE),
             text_size: px(14.0),
             line_height: px(20.0),
 
-            control_flow_color: gpui::hsla(0.6, 0.7, 0.4, 1.0),
-            non_control_flow_keyword_color: gpui::hsla(0.5, 0.7, 0.4, 1.0),
-            text_literal_color: gpui::hsla(0.3, 0.7, 0.4, 1.0),
-            comment_color: gpui::hsla(0.4, 0.0, 0.5, 1.0),
-            numeric_literal_color: gpui::hsla(0.1, 0.7, 0.4, 1.0),
-            identifier_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
-            operator_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
-            punctuation_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
-            default_text_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
+            control_flow_color: gpui::hsla(0.58, 0.65, 0.35, 1.0),
+            non_control_flow_keyword_color: gpui::hsla(0.0, 0.7, 0.35, 1.0),
+            text_literal_color: gpui::hsla(0.15, 0.6, 0.45, 1.0),
+            comment_color: gpui::hsla(0.1, 0.05, 0.5, 0.6),
+            numeric_literal_color: gpui::hsla(0.08, 0.7, 0.5, 1.0),
+            identifier_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
+            operator_color: gpui::hsla(0.0, 0.0, 0.2, 1.0),
+            punctuation_color: gpui::hsla(0.0, 0.0, 0.2, 1.0),
+            default_text_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
 
-            cursor_color: gpui::blue(),
+            cursor_color: gpui::hsla(0.58, 0.9, 0.4, 1.0),
+
             gutter_font: gpui::font(FontSet::MONOSPACE),
-            gutter_text_color: gpui::hsla(0.0, 0.0, 0.3, 1.0),
-            gutter_active_color: gpui::hsla(0.05, 0.0, 0.3, 1.0),
-            selection_color: rgba(0x3311ff30).into(),
-            active_line_color: rgba(0xffff0030).into(),
-            scroll_color: gpui::hsla(2.0, 0.0, 0.8, 0.5),
+            gutter_text_color: gpui::hsla(0.0, 0.0, 0.5, 1.0),
+            gutter_active_color: gpui::hsla(0.58, 0.65, 0.35, 1.0),
+
+            selection_color: gpui::hsla(0.58, 0.9, 0.9, 0.4),
+            active_line_color: gpui::hsla(0.1, 0.1, 0.85, 0.2),
+            scroll_color: gpui::hsla(0.0, 0.0, 0.3, 0.2),
         }
     }
 }

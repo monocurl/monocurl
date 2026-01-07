@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use lexer::stateful_lexer::StatefulLexer;
-
 // pub struct ImportResolver {}
 //
 
@@ -20,7 +18,7 @@ pub struct Document {
 
     dirty: bool,
 
-    lexer: StatefulLexer,
+    // lexer: StatefulLexer,
     // parser: Parser,
     // compiler: Compiler,
     // executor: Executor,

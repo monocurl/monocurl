@@ -93,8 +93,10 @@ impl ServiceManager {
     fn on_sm_message_recv(&mut self, msg: ServiceManagerMessage, cx: &mut App) {
         match msg {
             ServiceManagerMessage::UpdateLexRope { lex_rope, version } => {
-                self.textual_state.update(cx, |state, _cx| {
-                    state.set_lex_rope(lex_rope, version);
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_lex_rope(lex_rope, version) {
+                        cx.notify();
+                    }
                 });
             }
             ServiceManagerMessage::UpdateByteCode => {

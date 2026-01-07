@@ -1,12 +1,13 @@
 use futures::{StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-use structs::rope::{RLEAggregate, Rope};
+use structs::rope::{RLEAggregate, Rope, TextAggregate};
 
 use crate::{services::{ServiceManagerMessage, execution::ExecutionMessage}, state::{textual_state::{LexData}}};
 
 pub enum CompilationMessage {
     UpdateLexRope {
-        lex_rope: Rope<RLEAggregate<LexData>>
+        lex_rope: Rope<RLEAggregate<LexData>>,
+        for_text_rope: Rope<TextAggregate>
     },
     RecheckDependencies
 }

@@ -52,22 +52,24 @@ impl TextualState {
         &self.lex_rope
     }
 
-    pub fn set_lex_rope(&mut self, rope: Rope<RLEAggregate<LexData>>, for_version: usize) {
+    pub fn set_lex_rope(&mut self, rope: Rope<RLEAggregate<LexData>>, for_version: usize) -> bool {
         if for_version != self.version {
-            return;
+            return false;
         }
         self.lex_rope = rope;
+        true
     }
 
     pub fn static_analysis_rope(&self) -> &Rope<RLEAggregate<StaticAnalysisData>> {
         &self.static_analysis_rope
     }
 
-    pub fn set_static_analysis_rope(&mut self, rope: Rope<RLEAggregate<StaticAnalysisData>>, for_version: usize) {
+    pub fn set_static_analysis_rope(&mut self, rope: Rope<RLEAggregate<StaticAnalysisData>>, for_version: usize) -> bool {
         if for_version != self.version {
-            return;
+            return false;
         }
         self.static_analysis_rope = rope;
+        true
     }
 
     pub fn set_diagnostic_state(&mut self) {
@@ -213,20 +215,18 @@ impl TextualState {
     }
 
     pub fn mark_range_as_up_to_date_attributes(&mut self, start: Count8, end: Count8) {
-        let lex_content: Vec<_> = self.lex_rope
+        let lex_content = self.lex_rope
             .iterator_range(start..end)
-            .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute })
-            .collect();
+            .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute });
 
         self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
             start..end,
             lex_content,
         );
 
-        let sa_content: Vec<_> = self.static_analysis_rope
+        let sa_content = self.static_analysis_rope
             .iterator_range(start..end)
-            .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute })
-            .collect();
+            .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute });
         self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
             start..end,
             sa_content,
@@ -275,11 +275,11 @@ impl TextualState {
         };
         self.lex_rope = self.lex_rope.replace_range(
             span.clone(),
-            vec![RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement.clone() } ],
+            std::iter::once(RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement.clone() }),
         );
         self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
             span.clone(),
-            vec![RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement } ],
+            std::iter::once(RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement }),
         );
 
         let sa_replacement = if span.start == 0 {
@@ -290,11 +290,11 @@ impl TextualState {
         };
         self.static_analysis_rope = self.static_analysis_rope.replace_range(
             span.clone(),
-            vec![RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement.clone() } ],
+            std::iter::once(RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement.clone() }),
         );
         self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
             span.clone(),
-            vec![RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement } ],
+            std::iter::once(RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement }),
         );
 
         self.version += 1;

@@ -153,7 +153,7 @@ impl LineMap {
     }
 
     pub fn replace_lines(&mut self, old_range: Range<usize>, new_lines: impl Iterator<Item=WrappedLine>) {
-        let new_data: Vec<_> = new_lines.map(|line| LeafData { line, is_degenerate: false }).collect();
+        let new_data = new_lines.map(|line| LeafData { line, is_degenerate: false });
         self.rope = self.rope.replace_range(old_range, new_data);
     }
 
