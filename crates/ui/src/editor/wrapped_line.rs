@@ -563,7 +563,7 @@ impl<'a> SingleWrappedLine<'a> {
             start_x + (x - org_start_x)
         };
 
-        if line_start_index >= unwrapped_char_range.end || line_end_index <= unwrapped_char_range.start {
+        if (line_start_index >= unwrapped_char_range.end || line_end_index <= unwrapped_char_range.start) && line_start_index != line_end_index {
             return None;
         }
 

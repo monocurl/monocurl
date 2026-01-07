@@ -506,26 +506,26 @@ impl TextEditor {
         let start_offset = state.loc8_to_offset8(start_loc);
 
         let end_loc = Location8 { row: line + 1, col: 0 };
-        let mut end_offset = state.loc8_to_offset8(end_loc).min(state.len());
+        let end_offset = state.loc8_to_offset8(end_loc).min(state.len());
 
-        let mut text = state.read(start_offset..end_offset);
-        if text.ends_with('\n') {
-            end_offset -= 1;
-            text.pop();
-        }
+        let text = state.read(start_offset..end_offset);
         (start_offset, end_offset, text)
     }
 
     fn reshape_line(&self, wrap_width: Pixels, line_no: usize, window: &mut Window, cx: &mut App) -> WrappedLine {
         self.state.update(cx, |state, _| {
-            let (start, end, line_text) = self.line_range_and_text(state, line_no);
-            state.mark_range_as_up_to_date_attributes(start, end);
+            let (start, end, mut line_text) = self.line_range_and_text(state, line_no);
+            state.mark_line_as_up_to_date_attributes(start, end);
+
+            if line_text.ends_with('\n') {
+                line_text.pop();
+            }
 
             let runs: SmallVec<[TextRun; 32]> = LineShaper::new(
                 &self.text_styles,
                 state.lex_rope().iterator(start),
                 state.static_analysis_rope().iterator(start),
-                end - start
+                line_text.len()
             ).collect();
 
             WrappedLine::new(

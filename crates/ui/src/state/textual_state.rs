@@ -214,7 +214,7 @@ impl TextualState {
         self.offset16_to_offset8(span16.start)..self.offset16_to_offset8(span16.end)
     }
 
-    pub fn mark_range_as_up_to_date_attributes(&mut self, start: Count8, end: Count8) {
+    pub fn mark_line_as_up_to_date_attributes(&mut self, start: usize, end: usize) {
         let lex_content = self.lex_rope
             .iterator_range(start..end)
             .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute });
@@ -237,13 +237,14 @@ impl TextualState {
         let line_start = self.text_rope.utf8_line_pos_prefix(line_no, 0).bytes_utf8;
         let line_end = self.text_rope.utf8_line_pos_prefix(line_no + 1, 0).bytes_utf8;
 
-
         let lex_diff = {
             let lex_content = self.lex_rope.iterator_range(line_start..line_end);
             let rendered_lex_content = self.rendered_lex_rope.iterator_range(line_start..line_end);
 
             std::iter::zip(lex_content, rendered_lex_content)
-                .any(|(a, b)| a != b)
+                .any(|(a, b)| {
+                    a != b
+                })
         };
 
         if lex_diff {
