@@ -4,6 +4,7 @@ use std::{marker::PhantomData, sync::Arc};
 use std::iter::Once;
 use std::str::Chars;
 use crate::rope::internal::RopeNode;
+use crate::text::Span8;
 use crate::{rope::iterator::{RopeIterator}, text::{Count8, Count16}};
 
 // Inspired by: https://zed.dev/blog/zed-decoded-rope-sumtree
@@ -113,6 +114,33 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 
     pub fn codeunits(&self) -> usize {
         self.root.aggregate().codeunits()
+    }
+}
+
+impl<const N: usize> Rope<TextAggregate, N> {
+    pub fn iterator_range(&self, mut range: Span8) -> impl Iterator<Item=char> + use<'_, N> {
+        self.iterator(range.start)
+            .take_while(move |c| {
+                range.start += c.len_utf8();
+                range.start <= range.end
+            })
+    }
+}
+
+impl<T, const N: usize> Rope<RLEAggregate<T>, N> where T: PartialEq + Default + Clone
+{
+    pub fn iterator_range(&self, mut range: Span8) -> impl Iterator<Item=(Count8, T)> + use<'_, N, T> {
+        self.iterator(range.start)
+            .map_while(move |(c, item)| {
+                if range.start >= range.end {
+                    None
+                }
+                else {
+                    let count = c.min(range.end - range.start);
+                    range.start += count;
+                    Some((count, item))
+                }
+            })
     }
 }
 

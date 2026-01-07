@@ -1,1 +1,1 @@
-pub mod timeline_ui;
+pub mod timeline_view;

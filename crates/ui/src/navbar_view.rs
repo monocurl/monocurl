@@ -1,6 +1,6 @@
 use gpui::*;
 
-use crate::{document::OpenDocument, state::window_state::{ActiveScreen, WindowState}, theme::ColorSet, util::link_button};
+use crate::{components::buttons::link_button, document_view::OpenDocument, state::window_state::{ActiveScreen, WindowState}, theme::ColorSet};
 
 pub struct Navbar {
     window_state: WeakEntity<WindowState>,

@@ -1,12 +1,20 @@
+use crate::token::Token;
 
-pub struct Lexer {}
 
-impl Lexer {
-    // pub fn token_stream(&self) -> &Vec<Lexer> {}
+pub struct Lexer<I> {
+    chars: I,
+}
 
-    pub fn clear(&self) {}
+impl<I> Lexer<I> where I: Iterator<Item = char> {
+    pub fn new(chars: I) -> Self {
+        Self { chars }
+    }
+}
 
-    pub fn update() {}
+impl<I> Iterator for Lexer<I> where I: Iterator<Item = char> {
+    type Item = Token;
 
-    pub fn update_suffix() {}
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
+    }
 }

@@ -2723,6 +2723,9 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 [[package]]
 name = "lexer"
 version = "0.1.0"
+dependencies = [
+ "structs",
+]
 
 [[package]]
 name = "libc"
@@ -5253,6 +5256,7 @@ dependencies = [
  "anyhow",
  "dirs 5.0.1",
  "env_logger",
+ "futures",
  "gpui",
  "lexer",
  "log",
@@ -5262,6 +5266,7 @@ dependencies = [
  "serde_json",
  "server",
  "smallvec",
+ "smol",
  "structs",
  "unicode-segmentation",
  "uuid",

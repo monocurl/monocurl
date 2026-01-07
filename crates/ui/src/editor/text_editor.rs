@@ -3,7 +3,7 @@ use std::usize;
 use std::{time::Duration};
 use std::ops::Range;
 
-use crate::document_state::DocumentState;
+use crate::state::textual_state::TextualState;
 use crate::editor::line_shaper::LineShaper;
 use crate::editor::wrapped_line::WrappedLine;
 use crate::editor::line_map::LineMap;
@@ -64,7 +64,7 @@ struct HistoryItem {
 }
 
 struct HistoryGroup {
-    items: Vec<HistoryItem>,
+    items: SmallVec<[HistoryItem; 8]>,
     // before the group was applied, where was the cursor?
     cursor_head: Location8,
     cursor_anchor: Location8,
@@ -91,7 +91,7 @@ impl Cursor {
         start_row..end_row + 1
     }
 
-    fn range(&self, state: &DocumentState) -> Span8 {
+    fn range(&self, state: &TextualState) -> Span8 {
         let start = state.loc8_to_offset8(self.anchor.min(self.head));
         let end = state.loc8_to_offset8(self.anchor.max(self.head));
         start..end
@@ -113,7 +113,7 @@ pub struct TextEditor {
     undo_stack: VecDeque<HistoryGroup>,
     redo_stack: VecDeque<HistoryGroup>,
 
-    state: Entity<DocumentState>,
+    state: Entity<TextualState>,
     dirty: Entity<bool>,
     internal_dirty: Entity<bool>,
 
@@ -139,7 +139,7 @@ pub struct TextEditor {
 }
 
 impl TextEditor {
-    pub fn new(state: Entity<DocumentState>, window: &mut Window, cx: &mut Context<Self>, content: String, dirty: Entity<bool>, internal_dirty: Entity<bool>) -> Self {
+    pub fn new(state: Entity<TextualState>, window: &mut Window, cx: &mut Context<Self>, content: String, dirty: Entity<bool>, internal_dirty: Entity<bool>) -> Self {
         let text_styles = TextEditorStyles::default();
         let line_height = text_styles.line_height;
 
@@ -197,7 +197,7 @@ impl TextEditor {
 impl TextEditor {
 
     fn perform_group(&mut self, group: HistoryGroup, window: &mut Window, cx: &mut Context<Self>) -> HistoryGroup {
-        let mut inverse = HistoryGroup { items: Vec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor };
+        let mut inverse = HistoryGroup { items: SmallVec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor };
 
         for item in group.items.iter().rev() {
             let old_text = self.state.read(cx).read(item.old.clone());
@@ -229,7 +229,7 @@ impl TextEditor {
 
         let must_form_isolated_group = new_text.contains('\n');
         if self.undo_stack.is_empty() || must_form_isolated_group {
-            self.undo_stack.push_back(HistoryGroup { items: Vec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor });
+            self.undo_stack.push_back(HistoryGroup { items: SmallVec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor });
 
             while self.undo_stack.len() > MAX_UNDO_GROUPS {
                 self.undo_stack.pop_front();
@@ -266,6 +266,8 @@ impl TextEditor {
         self.is_undoing = false;
 
         self.redo_stack.push_back(redo);
+
+        self.undo_group_boundary();
     }
 
     pub fn perform_redo(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -286,7 +288,7 @@ impl TextEditor {
 
     fn undo_group_boundary(&mut self) {
         if self.undo_stack.back().is_none_or(|g| !g.items.is_empty()) {
-            self.undo_stack.push_back(HistoryGroup { items: Vec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor });
+            self.undo_stack.push_back(HistoryGroup { items: SmallVec::new(), cursor_head: self.cursor.head, cursor_anchor: self.cursor.anchor });
         }
 
         while self.undo_stack.len() > MAX_UNDO_GROUPS {
@@ -303,7 +305,7 @@ impl TextEditor {
                 let end_loc = state.offset8_to_loc8(utf8_range.end);
                 start_loc.row .. end_loc.row + 1
             };
-            state.replace(utf8_range.clone(), new_text);
+            state.replace(utf8_range.clone(), new_text, subcx);
             subcx.notify();
             let ins_range = {
                 let start_loc = state.offset8_to_loc8(utf8_range.start);
@@ -313,7 +315,7 @@ impl TextEditor {
 
             (del_range, ins_range)
         });
-        self.line_map.replace_lines(del_range, self.shape_lines(ins_range, window, cx).into_iter());
+        self.reshape_lines(del_range, ins_range, window, cx);
         self.dirty.update(cx, |dirty, _| *dirty = true);
         self.internal_dirty.update(cx, |dirty, _| *dirty = true);
     }
@@ -499,7 +501,7 @@ impl TextEditor {
 
 impl TextEditor {
 
-    fn line_range_and_text(&self, state: &DocumentState, line: usize) -> (Count8, Count8, String) {
+    fn line_range_and_text(&self, state: &TextualState, line: usize) -> (Count8, Count8, String) {
         let start_loc = Location8 { row: line, col: 0 };
         let start_offset = state.loc8_to_offset8(start_loc);
 
@@ -514,49 +516,66 @@ impl TextEditor {
         (start_offset, end_offset, text)
     }
 
-    fn shape_line(&self, wrap_width: Pixels, line_no: usize, window: &mut Window, cx: &App) -> WrappedLine {
-        let state = self.state.read(cx);
-        let (start, end, line_text) = self.line_range_and_text(state, line_no);
-        let runs: SmallVec<[TextRun; 32]> = LineShaper::new(
-            &self.text_styles,
-            state.lex_rope().iterator(start),
-            state.static_analysis_rope().iterator(start),
-            end - start
-        ).collect();
+    fn reshape_line(&self, wrap_width: Pixels, line_no: usize, window: &mut Window, cx: &mut App) -> WrappedLine {
+        self.state.update(cx, |state, _| {
+            let (start, end, line_text) = self.line_range_and_text(state, line_no);
+            state.mark_range_as_up_to_date_attributes(start, end);
 
-        WrappedLine::new(
-            &line_text,
-            self.text_styles.text_size,
-            &runs,
-            wrap_width,
-            window
-        )
+            let runs: SmallVec<[TextRun; 32]> = LineShaper::new(
+                &self.text_styles,
+                state.lex_rope().iterator(start),
+                state.static_analysis_rope().iterator(start),
+                end - start
+            ).collect();
+
+            WrappedLine::new(
+                &line_text,
+                self.text_styles.text_size,
+                &runs,
+                wrap_width,
+                window
+            )
+        })
     }
 
-    fn shape_lines(&self, range: Range<usize>, window: &mut Window, cx: &App) -> Vec<WrappedLine> {
-        let wrap_width =  if self.scroll_handle.bounds().size.width > self.gutter_width + self.right_gutter_width {
+    fn wrap_width(&self) -> Pixels {
+        if self.scroll_handle.bounds().size.width > self.gutter_width + self.right_gutter_width {
             self.scroll_handle.bounds().size.width - self.gutter_width - self.right_gutter_width
         } else if let Some(old_bounds) = self.last_bounds {
             old_bounds.size.width - self.gutter_width - self.right_gutter_width
         } else {
             Pixels::MAX
-        };
-
-        range
-            .map(move |line_no| self.shape_line(wrap_width, line_no, window, cx))
-            .collect()
+        }
     }
 
-    fn reshape_dirty_lines(&mut self, window: &mut Window, cx: &mut App) {
+    fn reshape_lines(&mut self, del_range: Range<usize>, ins_range: Range<usize>, window: &mut Window, cx: &mut App) {
+        let wrap_width = self.wrap_width();
+
+        let replacement: SmallVec<[WrappedLine; 32]> = ins_range
+            .map(|line_no| self.reshape_line(wrap_width, line_no, window, cx))
+            .collect();
+
+        self.line_map.replace_lines(del_range, replacement.into_iter());
+    }
+
+    fn reshape_lines_needing_layout(&mut self, window: &mut Window, cx: &mut App) {
         let dirty = self.state.update(cx, |state, _cx| {
-            state.take_dirty_region()
+            state.take_region_needing_relayout()
         });
 
         if let Some(dirty) = dirty {
-            self.line_map.replace_lines(
-                dirty.clone(),
-                self.shape_lines(dirty, window, cx).into_iter()
-            );
+            self.reshape_lines(dirty.clone(), dirty, window, cx);
+        }
+    }
+
+    fn reshape_visible_lines_with_stale_attributes(&mut self, window: &mut Window, cx: &mut App) {
+        for line in self.visible_lines() {
+            let needs_reshaping = self.state.read(cx).line_has_new_attributes(line);
+            if needs_reshaping {
+                let wrap_width = self.wrap_width();
+                let new_line = self.reshape_line(wrap_width, line, window, cx);
+                self.line_map.replace_lines(line..line + 1, std::iter::once(new_line));
+            }
         }
     }
 
@@ -675,8 +694,14 @@ impl TextEditor {
                 let new_offset = state.prev_boundary(offset);
                 self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
             }
+
+            self.replace_text_in_range(None, "", window, cx);
         }
-        self.replace_text_in_range(None, "", window, cx);
+        else {
+            self.undo_group_boundary();
+            self.replace_text_in_range(None, "", window, cx);
+            self.undo_group_boundary();
+        }
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
@@ -685,8 +710,13 @@ impl TextEditor {
             let offset = state.loc8_to_offset8(self.cursor.head);
             let new_offset = state.next_boundary(offset);
             self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
+            self.replace_text_in_range(None, "", window, cx);
         }
-        self.replace_text_in_range(None, "", window, cx);
+        else {
+            self.undo_group_boundary();
+            self.replace_text_in_range(None, "", window, cx);
+            self.undo_group_boundary();
+        }
     }
 
     fn backspace_word(&mut self, _: &BackspaceWord, window: &mut Window, cx: &mut Context<Self>) {
@@ -698,11 +728,20 @@ impl TextEditor {
         self.replace_text_in_range(Some(utf16), "", window, cx);
     }
 
+
+    fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.undo_group_boundary();
+        self.select_to(Location8 { row: self.cursor.head.row, col: 0 }, false, false, cx);
+        self.replace_text_in_range(None, "", window, cx);
+        self.undo_group_boundary();
+    }
+
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
         self.replace_text_in_range(None, "\n", window, cx);
     }
 
     fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
+        self.undo_group_boundary();
         if self.cursor.is_empty() {
             self.replace_text_in_range(None, &" ".repeat(TAB_SIZE), window, cx);
         } else {
@@ -718,9 +757,11 @@ impl TextEditor {
             self.cursor.head.col += TAB_SIZE;
             self.reset_cursor_blink(cx);
         }
+        self.undo_group_boundary();
     }
 
     fn untab(&mut self, _: &Untab, window: &mut Window, cx: &mut Context<Self>) {
+        self.undo_group_boundary();
         if self.cursor.is_empty() {
             let line_start = self.state.read(cx).loc8_to_offset8(Location8 {
                 row: self.cursor.head.row,
@@ -771,11 +812,7 @@ impl TextEditor {
 
             self.reset_cursor_blink(cx);
         }
-    }
-
-    fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
-        self.select_to(Location8 { row: self.cursor.head.row, col: 0 }, false, false, cx);
-        self.replace_text_in_range(None, "", window, cx);
+        self.undo_group_boundary();
     }
 }
 
@@ -1189,7 +1226,7 @@ impl TextElement {
         if editor.last_bounds.is_none_or(|b| b.size.width != bounds.size.width) {
             editor.capture_top_visible_line();
             editor.state.update(cx, |state, _| {
-                state.mark_region_as_dirty(0..editor.line_map.line_count());
+                state.mark_region_as_needing_relayout(0..editor.line_map.line_count());
             });
         }
         editor.last_bounds = Some(bounds);
@@ -1216,7 +1253,7 @@ impl Element for TextElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         self.editor.update(cx, |editor, cx| {
-            editor.reshape_dirty_lines(window, cx);
+            editor.reshape_lines_needing_layout(window, cx);
             if editor.resize_anchor_line.is_some() {
                 editor.restore_scroll_to_anchor_line();
             }
@@ -1246,7 +1283,8 @@ impl Element for TextElement {
             // in case any new dirty lines due to resize, make a best effort of adapting to the new layout
             // it is possible (and likely) that now our bounds are slightly off from what they really should be, but this should not be that bad and will be
             // fixed by next frame (so should be relatively transparent to user)
-            editor.reshape_dirty_lines(window, cx);
+            editor.reshape_lines_needing_layout(window, cx);
+            editor.reshape_visible_lines_with_stale_attributes(window, cx);
 
             let visible_lines = editor.visible_lines();
 

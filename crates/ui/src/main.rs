@@ -4,19 +4,18 @@ use gpui::*;
 use structs::assets::Assets;
 use crate::{actions::{Copy, Cut, EpsilonBackward, EpsilonForward, NextSlide, Paste, PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, editor::text_editor, window::MonocurlWindow};
 
-mod document;
-mod document_state;
+mod document_view;
 mod editor;
-mod home;
-mod navbar;
+mod home_view;
+mod navbar_view;
 mod state;
 mod theme;
 mod timeline;
-mod util;
 mod viewport;
 mod window;
 mod actions;
 mod components;
+mod services;
 
 pub struct MonocurlLauncher;
 
@@ -93,7 +92,7 @@ impl MonocurlLauncher {
     }
 
     fn setup_modules(cx: &mut App) {
-       document::init(cx);
+       document_view::init(cx);
        text_editor::init(cx);
     }
 

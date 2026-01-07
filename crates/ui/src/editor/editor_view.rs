@@ -2,21 +2,21 @@ use std::path::PathBuf;
 
 use gpui::{App, AppContext, AsyncApp, Entity, IntoElement, Render, Subscription, WeakEntity, Window};
 
-use crate::{document_state::DocumentState, editor::text_editor::TextEditor};
+use crate::{state::textual_state::TextualState, editor::text_editor::TextEditor};
 
 const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub struct Editor {
     internal_path: PathBuf,
     editor: Entity<TextEditor>,
-    state: Entity<DocumentState>,
+    state: Entity<TextualState>,
     internal_dirty: Entity<bool>,
 
     _drop_handle: Subscription,
 }
 
 impl Editor {
-    pub fn new(state: Entity<DocumentState>, internal_path: PathBuf, dirty: Entity<bool>, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(state: Entity<TextualState>, internal_path: PathBuf, dirty: Entity<bool>, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
         let content = std::fs::read_to_string(internal_path.clone()).unwrap_or_default();
         let internal_dirty = cx.new(|_| false);
 

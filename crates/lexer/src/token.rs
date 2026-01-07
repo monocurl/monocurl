@@ -1,6 +1,9 @@
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub enum Token {
+    #[default]
+    Illegal,
+
     Newline,
     Whitespace(String),
 
@@ -68,11 +71,12 @@ impl Token {
     pub fn category(&self) -> TokenCategory {
         use Token::*;
         match self {
+            Illegal => TokenCategory::Unknown,
             Newline | Whitespace(_) => TokenCategory::Whitespace,
             Plus | Minus | Multiply | Power | Divide | IntegerDivide | Assign
             | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In | Range
             | Pipe | Comma | Reference | Colon => TokenCategory::Operator,
-            LParen | RParen | LBracket | RBracket | LFlower | RFlower => TokenCategory::Parenthesis,
+            LParen | RParen | LBracket | RBracket | LFlower | RFlower => TokenCategory::Punctutation,
             Import | Break | Continue | Return | If | Else | For | While => TokenCategory::ControlFlow,
             Func | Struct | Conj | Let | Var | Mesh | State | Param | Slide | Native => {
                 TokenCategory::NonControlFlowKeyword
@@ -81,7 +85,7 @@ impl Token {
             StringLiteralDelimetter | StringLiteralChunk(_) |
             CharLiteralDelimetter | CharLiteral(_) => TokenCategory::TextLiteral,
             Comment => TokenCategory::Comment,
-            Identifier(_) => TokenCategory::Identifier,
+            Identifier(_) => TokenCategory::Identifier
         }
     }
 }
@@ -92,7 +96,8 @@ pub enum TokenCategory {
     Unknown,
     Whitespace,
     Operator,
-    Parenthesis,
+    // as in parentheses, brackets, ::, etc
+    Punctutation,
     ControlFlow,
     NonControlFlowKeyword,
     Identifier,

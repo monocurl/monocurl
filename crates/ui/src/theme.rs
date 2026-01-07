@@ -91,7 +91,7 @@ pub struct TextEditorStyles {
     pub numeric_literal_color: Hsla,
     pub identifier_color: Hsla,
     pub operator_color: Hsla,
-    pub parenthesis_color: Hsla,
+    pub punctuation_color: Hsla,
     pub default_text_color: Hsla,
 
     pub cursor_color: Hsla,
@@ -121,7 +121,7 @@ impl Default for TextEditorStyles {
             numeric_literal_color: gpui::hsla(0.1, 0.7, 0.4, 1.0),
             identifier_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
             operator_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
-            parenthesis_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
+            punctuation_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
             default_text_color: gpui::hsla(0.0, 0.0, 0.0, 1.0),
 
             cursor_color: gpui::blue(),

@@ -2,8 +2,11 @@ use gpui::TextRun;
 use lexer::token::TokenCategory;
 use structs::text::Count8;
 
-use crate::{document_state::{LexData, StaticAnalysisData}, theme::TextEditorStyles};
+use crate::{state::textual_state::{LexData, StaticAnalysisData}, theme::TextEditorStyles};
 
+// It may be assumed that the style of any text run
+// does not affect the layout. In particular, that on lex / static analysis rope changes
+// we can lazily re-shape the line once it becomes visible instead of as soon as it changes
 pub struct LineShaper<'a, LexIt, AnalysisIt>
 where
     LexIt: Iterator<Item = (Count8, LexData)>,
@@ -34,10 +37,7 @@ where
     }
 
     fn combine_chunk(&self, size: usize, lex_data: &LexData, _analysis_data: &StaticAnalysisData) -> TextRun {
-        let t_category = lex_data
-            .as_ref()
-            .map(|ld| ld.category())
-            .unwrap_or(TokenCategory::Unknown);
+        let t_category = lex_data.category();
 
         // ignore analysis data for now
         let color = match t_category {
@@ -48,7 +48,7 @@ where
             TokenCategory::NumericLiteral => self.style.numeric_literal_color,
             TokenCategory::Identifier => self.style.identifier_color,
             TokenCategory::Operator => self.style.operator_color,
-            TokenCategory::Parenthesis => self.style.parenthesis_color,
+            TokenCategory::Punctutation => self.style.punctuation_color,
             TokenCategory::ControlFlow => self.style.control_flow_color,
             TokenCategory::NonControlFlowKeyword => self.style.non_control_flow_keyword_color,
             TokenCategory::Unknown => self.style.default_text_color,

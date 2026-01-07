@@ -4,7 +4,7 @@ use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHa
 use serde::{Deserialize, Serialize};
 use server::doc_type::DocumentType;
 
-use crate::document::{DocumentView, OpenDocument};
+use crate::document_view::{DocumentView, OpenDocument};
 
 pub const CHECK_FOR_WRONGLY_IMPORTED_EXTENSION: bool = false;
 

@@ -1,7 +1,8 @@
+use gpui::App;
 use lexer::token::Token;
 use structs::{rope::{RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
 
-pub type LexData = Option<Token>;
+pub type LexData = Token;
 pub type StaticAnalysisData = i32;
 
 
@@ -15,27 +16,35 @@ pub struct Diagnostic {
     version: usize,
 }
 
+/// State that's relevant to the text editor
 #[derive(Default)]
-pub struct DocumentState {
+pub struct TextualState {
     text_rope: Rope<TextAggregate>,
-    lex_rope: Rope<RLEAggregate<LexData>>,
-    static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
 
-    dirty_range: Option<Span8>,
+    // lex rope is the actual latest lexed attributes
+    // rendered lex rope says at each char, what attributes are currently
+    // used for the shaped lines. This may be differ for off-screen lines
+    lex_rope: Rope<RLEAggregate<LexData>>,
+    rendered_lex_rope: Rope<RLEAggregate<LexData>>,
+    static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
+    rendered_static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
+
+    // we must relayout the lines corresponding to this span
+    region_needing_relayout: Option<Span8>,
     version: usize,
 
-    listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize) + Send>>,
+    listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send>>,
 }
 
-impl DocumentState {
+impl TextualState {
 
-    pub fn add_listener(&mut self, f: impl FnMut(Span8, &str, &Rope<TextAggregate>, usize) + Send + 'static) {
+    pub fn add_listener(&mut self, f: impl FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send + 'static) {
         self.listeners.push(Box::new(f));
     }
 
-    pub fn notify_listeners(&mut self, span: Span8, new_text: &str) {
+    pub fn notify_listeners(&mut self, span: Span8, new_text: &str, cx: &mut App) {
         for listener in &mut self.listeners {
-            listener(span.clone(), new_text, &self.text_rope, self.version);
+            listener(span.clone(), new_text, &self.text_rope, self.version, cx);
         }
     }
 
@@ -43,11 +52,10 @@ impl DocumentState {
         &self.lex_rope
     }
 
-    pub fn set_lex_rope(&mut self, rope: Rope<RLEAggregate<LexData>>, for_version: usize, dirty_range: Span8) {
+    pub fn set_lex_rope(&mut self, rope: Rope<RLEAggregate<LexData>>, for_version: usize) {
         if for_version != self.version {
             return;
         }
-        self.mark_region_as_dirty(dirty_range);
         self.lex_rope = rope;
     }
 
@@ -55,15 +63,18 @@ impl DocumentState {
         &self.static_analysis_rope
     }
 
-    pub fn set_static_analysis_rope(&mut self, rope: Rope<RLEAggregate<StaticAnalysisData>>, for_version: usize, dirty_range: Span8) {
+    pub fn set_static_analysis_rope(&mut self, rope: Rope<RLEAggregate<StaticAnalysisData>>, for_version: usize) {
         if for_version != self.version {
             return;
         }
-        self.mark_region_as_dirty(dirty_range);
         self.static_analysis_rope = rope;
     }
 
-    pub fn set_diagnostic_state(&self) {
+    pub fn set_diagnostic_state(&mut self) {
+
+    }
+
+    pub fn set_autocomplete_state(&mut self) {
 
     }
 }
@@ -169,7 +180,7 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
     }
 }
 
-impl DocumentState {
+impl TextualState {
     pub fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
         let summary = self.text_rope.utf8_prefix_summary(offset);
         summary.codeunits_utf16
@@ -201,10 +212,61 @@ impl DocumentState {
         self.offset16_to_offset8(span16.start)..self.offset16_to_offset8(span16.end)
     }
 
-    pub fn replace(&mut self, span: Span8, new_text: &str) {
+    pub fn mark_range_as_up_to_date_attributes(&mut self, start: Count8, end: Count8) {
+        let lex_content: Vec<_> = self.lex_rope
+            .iterator_range(start..end)
+            .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute })
+            .collect();
+
+        self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
+            start..end,
+            lex_content,
+        );
+
+        let sa_content: Vec<_> = self.static_analysis_rope
+            .iterator_range(start..end)
+            .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute })
+            .collect();
+        self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
+            start..end,
+            sa_content,
+        );
+    }
+
+    pub fn line_has_new_attributes(&self, line_no: usize) -> bool {
+        let line_start = self.text_rope.utf8_line_pos_prefix(line_no, 0).bytes_utf8;
+        let line_end = self.text_rope.utf8_line_pos_prefix(line_no + 1, 0).bytes_utf8;
+
+
+        let lex_diff = {
+            let lex_content = self.lex_rope.iterator_range(line_start..line_end);
+            let rendered_lex_content = self.rendered_lex_rope.iterator_range(line_start..line_end);
+
+            std::iter::zip(lex_content, rendered_lex_content)
+                .any(|(a, b)| a != b)
+        };
+
+        if lex_diff {
+            return true;
+        }
+
+        let sa_diff = {
+            let sa_content = self.static_analysis_rope.iterator_range(line_start..line_end);
+            let rendered_sa_content = self.rendered_static_analysis_rope.iterator_range(line_start..line_end);
+
+            std::iter::zip(sa_content, rendered_sa_content)
+                .any(|(a, b)| a != b)
+        };
+
+        return sa_diff;
+    }
+
+    pub fn replace(&mut self, span: Span8, new_text: &str, cx: &mut App) {
         self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
         // update lex_rope and static analysis rope with best effort of extending the previous runs
         // background threads will do the proper update asynchronously
+        // Note that we update rendered lex_rope and static analysis rope too, but the actual value
+        // does not really matter since they will be updated regardless when we relayout lines
         let lex_replacement = if span.start == 0 {
             LexData::default()
         }
@@ -212,6 +274,10 @@ impl DocumentState {
             self.lex_rope.attribute_at(span.start - 1).clone()
         };
         self.lex_rope = self.lex_rope.replace_range(
+            span.clone(),
+            vec![RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement.clone() } ],
+        );
+        self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
             span.clone(),
             vec![RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement } ],
         );
@@ -224,21 +290,20 @@ impl DocumentState {
         };
         self.static_analysis_rope = self.static_analysis_rope.replace_range(
             span.clone(),
+            vec![RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement.clone() } ],
+        );
+        self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
+            span.clone(),
             vec![RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement } ],
         );
 
         self.version += 1;
-        self.notify_listeners(span, new_text);
+        self.notify_listeners(span, new_text, cx);
     }
 
     pub fn read(&self, span: Span8) -> String {
-        let mut utf8 = 0;
         self.text_rope
-            .iterator(span.start)
-            .take_while(|c| {
-                utf8 += c.len_utf8();
-                utf8 <= span.len()
-            })
+            .iterator_range(span)
             .collect()
     }
 
@@ -329,17 +394,17 @@ impl DocumentState {
 
     // characters that have modified attributes
     // and resets their dirty status to non dirty
-    pub fn mark_region_as_dirty(&mut self, span: Span8) {
-        if let Some(dirty) = &mut self.dirty_range {
+    pub fn mark_region_as_needing_relayout(&mut self, span: Span8) {
+        if let Some(dirty) = &mut self.region_needing_relayout {
             dirty.start = dirty.start.min(span.start);
             dirty.end = dirty.end.max(span.end);
         } else {
-            self.dirty_range = Some(span);
+            self.region_needing_relayout = Some(span);
         }
     }
 
-    pub fn take_dirty_region(&mut self) -> Option<Span8> {
-        self.dirty_range.take()
+    pub fn take_region_needing_relayout(&mut self) -> Option<Span8> {
+        self.region_needing_relayout.take()
     }
 }
 
@@ -372,7 +437,7 @@ mod tests {
 
     fn assert_grapheme_boundaries(s: &str) {
         let naive = NaiveBackend(s.to_string());
-        let rope = DocumentState {
+        let rope = TextualState {
             text_rope: Rope::from_str(s),
             ..Default::default()
         };
