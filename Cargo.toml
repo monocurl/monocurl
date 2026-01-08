@@ -11,11 +11,9 @@ members = [
     "crates/lexer",
     "crates/parser",
     "crates/renderer",
-    "crates/server",
     "crates/stdlib",
     "crates/structs",
     "crates/ui",
-    "crates/monocurl",
 ]
 
 [workspace.package]
