@@ -3,7 +3,7 @@ use lexer::token::TokenCategory;
 use smallvec::SmallVec;
 use structs::text::Count8;
 
-use crate::{state::{diagnostics::{Diagnostic, DiagnosticType}, textual_state::{LexData, StaticAnalysisData}}, theme::TextEditorStyles};
+use crate::{state::{diagnostics::{Diagnostic}, textual_state::{LexData, StaticAnalysisData}}, theme::TextEditorStyles};
 
 // It may be assumed that the style of any text run
 // does not affect the layout. In particular, that on lex / static analysis rope changes
@@ -60,8 +60,7 @@ where
 
         // ignore analysis data for now
         let color = match t_category {
-            // doesn't really matter for this one
-            TokenCategory::Whitespace => gpui::white(),
+            TokenCategory::Whitespace => self.style.default_text_color,
             TokenCategory::Comment => self.style.comment_color,
             TokenCategory::TextLiteral => self.style.text_literal_color,
             TokenCategory::NumericLiteral => self.style.numeric_literal_color,
@@ -77,11 +76,7 @@ where
             .iter()
             .next()
             .map(|d| {
-                let color = match d.dtype {
-                    DiagnosticType::CompileTimeWarning => self.style.compile_time_warning_color,
-                    DiagnosticType::CompileTimeError => self.style.compile_time_error_color,
-                    DiagnosticType::RuntimeError  => self.style.runtime_error_color,
-                };
+                let color = d.color(self.style);
                 UnderlineStyle { thickness: px(1.0), color: Some(color), wavy: true }
             });
 

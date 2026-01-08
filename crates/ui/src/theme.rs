@@ -108,6 +108,7 @@ pub struct TextEditorStyles {
     pub active_line_color: Hsla,
 
     pub scroll_color: Hsla,
+    pub scroll_background_color: Hsla,
 }
 
 impl Default for TextEditorStyles {
@@ -129,9 +130,9 @@ impl Default for TextEditorStyles {
             punctuation_color: gpui::hsla(0.0, 0.0, 0.4, 1.0),
             default_text_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
 
-            runtime_error_color: gpui::hsla(0.0, 0.9, 0.5, 1.0),
-            compile_time_error_color: gpui::hsla(0.0, 0.0, 0.8, 1.0),
-            compile_time_warning_color: gpui::hsla(0.1, 0.9, 0.8, 1.0),
+            runtime_error_color: gpui::hsla(0.8, 0.9, 0.5, 1.0),
+            compile_time_error_color: gpui::hsla(0.0, 0.9, 0.5, 1.0),
+            compile_time_warning_color: gpui::hsla(0.15, 0.9, 0.5, 1.0),
 
             cursor_color: gpui::hsla(0.58, 0.9, 0.4, 1.0),
 
@@ -141,7 +142,9 @@ impl Default for TextEditorStyles {
 
             selection_color: gpui::hsla(0.58, 0.9, 0.9, 0.4),
             active_line_color: gpui::hsla(0.1, 0.1, 0.85, 0.2),
+
             scroll_color: gpui::hsla(0.0, 0.0, 0.3, 0.2),
+            scroll_background_color: gpui::hsla(0.0, 0.0, 0.8, 0.2),
         }
     }
 }

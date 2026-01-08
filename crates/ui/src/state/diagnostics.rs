@@ -1,5 +1,8 @@
+use gpui::Hsla;
 use smallvec::SmallVec;
 use structs::text::{Count8, Span8};
+
+use crate::theme::TextEditorStyles;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticType {
@@ -23,6 +26,14 @@ impl Diagnostic {
 
     pub fn is_runtime(&self) -> bool {
         matches!(self.dtype, DiagnosticType::RuntimeError)
+    }
+
+    pub fn color(&self, style: &TextEditorStyles) -> Hsla {
+        match self.dtype {
+            DiagnosticType::CompileTimeWarning => style.compile_time_warning_color,
+            DiagnosticType::CompileTimeError => style.compile_time_error_color,
+            DiagnosticType::RuntimeError  => style.runtime_error_color,
+        }
     }
 }
 

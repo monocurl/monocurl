@@ -1084,12 +1084,18 @@ struct TextElement {
     editor: Entity<TextEditor>,
 }
 
+struct ScrollBarState {
+    wheel_bounds: Bounds<Pixels>,
+    background_bounds: Bounds<Pixels>,
+    diagnostic_bounds: Vec<(Bounds<Pixels>, Hsla)>,
+}
+
 struct PrepaintState {
     lines: Vec<(usize, WrappedLine)>,
     cursor_bounds: Option<Bounds<Pixels>>,
     selection_bounds: Vec<Bounds<Pixels>>,
     active_line_bounds: Option<Bounds<Pixels>>,
-    scroll_wheel_bounds: Option<Bounds<Pixels>>,
+    scroll_wheel_state: Option<ScrollBarState>,
 }
 
 impl IntoElement for TextElement {
@@ -1165,7 +1171,7 @@ impl TextElement {
             .collect()
     }
 
-    fn compute_scroll_wheel_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, _window: &Window) -> Option<Bounds<Pixels>> {
+    fn compute_scroll_bar_state(&self, editor: &TextEditor, bounds: Bounds<Pixels>, _window: &Window, cx: &App) -> Option<ScrollBarState> {
         let scroll_offset = editor.scroll_handle.offset();
         let viewport_height = editor.scroll_handle.bounds().size.height;
         let content_height = editor.line_map.total_height() + px(BOTTOM_SCROLL_PADDING);
@@ -1179,10 +1185,40 @@ impl TextElement {
         let wheel_y = -scroll_offset.y + (-scroll_offset.y / content_height) * viewport_height + bounds.top();
         let width = editor.right_gutter_width;
 
-        Some(Bounds::new(
+        let wheel_bounds = Bounds::new(
             point(bounds.right() - width, wheel_y),
             size(width, wheel_height),
-        ))
+        );
+
+        let background_bounds = Bounds::new(
+            point(bounds.right() - width, -scroll_offset.y + bounds.top()),
+            size(width, viewport_height),
+        );
+
+        let state = editor.state.read(cx);
+        let diagnostic_bounds = state
+            .diagnostics().diagnostics_list()
+            .iter()
+            .map(|d| {
+                let color = d.color(&editor.text_styles);
+                let start = d.span.start;
+                let line = state.offset8_to_loc8(start).row as usize;
+                let y_start = editor.line_map.y_range(line..line + 1).start;
+                let width = editor.right_gutter_width;
+                let bounds = Bounds::new(
+                    point(bounds.right() - width, bounds.top() - scroll_offset.y + (y_start / content_height) * viewport_height),
+                    size(width, px(3.0)),
+                );
+
+                (bounds, color)
+            })
+            .collect();
+
+        Some(ScrollBarState {
+            wheel_bounds,
+            background_bounds,
+            diagnostic_bounds,
+        })
     }
 
     fn paint_gutter_line(&self, line_num: usize, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
@@ -1223,6 +1259,14 @@ impl TextElement {
     fn paint_text_line(&self, editor: &TextEditor, shaped: &WrappedLine, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &App) {
         let line_origin = point(bounds.left() + editor.gutter_width, bounds.top() + y);
         shaped.paint(line_origin, editor.line_height, window, cx).ok();
+    }
+
+    fn paint_scroll_bar(&self, state: &ScrollBarState, scroll_color: Hsla, scroll_background_color: Hsla, _bounds: Bounds<Pixels>, window: &mut Window) {
+        window.paint_quad(fill(state.background_bounds, scroll_background_color));
+        for (diagnostic_bound, color) in &state.diagnostic_bounds {
+            window.paint_quad(fill(*diagnostic_bound, *color));
+        }
+        window.paint_quad(fill(state.wheel_bounds, scroll_color));
     }
 
     fn handle_width_resize(&self, editor: &mut TextEditor, bounds: Bounds<Pixels>, cx: &mut App) {
@@ -1299,14 +1343,14 @@ impl Element for TextElement {
             let cursor_bounds = self.compute_cursor_bounds(editor, bounds, window);
             let active_line_bounds = self.compute_active_line_bounds(editor, bounds, window);
             let selection_bounds = self.compute_selection_bounds(editor, bounds, visible_lines, window);
-            let scroll_wheel_bounds = self.compute_scroll_wheel_bounds(editor, bounds, window);
+            let scroll_wheel_bounds = self.compute_scroll_bar_state(editor, bounds, window, cx);
 
             PrepaintState {
                 lines,
                 cursor_bounds,
                 selection_bounds,
                 active_line_bounds,
-                scroll_wheel_bounds,
+                scroll_wheel_state: scroll_wheel_bounds,
             }
         })
     }
@@ -1325,6 +1369,7 @@ impl Element for TextElement {
         let focus_handle = editor.focus_handle.clone();
         let cursor_color = editor.text_styles.cursor_color;
         let scroll_color = editor.text_styles.scroll_color;
+        let scroll_background_color = editor.text_styles.scroll_background_color;
 
         // handle input
         if editor.is_selecting {
@@ -1363,8 +1408,8 @@ impl Element for TextElement {
             window.paint_quad(fill(cursor_bounds, cursor_color));
         }
 
-        if let Some(scroll_wheel_bounds) = prepaint.scroll_wheel_bounds {
-            window.paint_quad(fill(scroll_wheel_bounds, scroll_color));
+        if let Some(state) = &prepaint.scroll_wheel_state{
+            self.paint_scroll_bar(state, scroll_color, scroll_background_color, bounds, window);
         }
     }
 }
