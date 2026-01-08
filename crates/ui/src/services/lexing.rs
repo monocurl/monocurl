@@ -43,7 +43,7 @@ impl LexingService {
         let new_utf8_end = new_rope.utf8_line_pos_prefix(new_line_end, 0).bytes_utf8;
 
         let relex = Lexer::new(new_rope.iterator_range(utf8_start..new_utf8_end))
-            .map(|(attribute, bytes_utf8)| RLEData { bytes_utf8, attribute });
+            .map(|(attribute, bytes_utf8)| RLEData { codeunits: bytes_utf8, attribute });
 
         lex.replace_range(
             utf8_start..old_utf8_end,
@@ -77,8 +77,8 @@ impl LexingService {
             // dispatch updates
             self.compilation_tx.send(CompilationMessage::UpdateLexRope {
                 lex_rope: lex_rope.clone(),
-                for_text_rope: text_rope.clone()
-
+                for_text_rope: text_rope.clone(),
+                version: current_version,
             }).await.unwrap();
 
             self.sm_tx.send(ServiceManagerMessage::UpdateLexRope {

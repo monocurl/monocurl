@@ -3,7 +3,7 @@ use gpui::{App, AppContext, Context, Entity};
 use structs::{rope::{RLEAggregate, Rope, TextAggregate}, text::Span8};
 use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
-use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{execution_state::ExecutionState, textual_state::{LexData, TextualState}}};
+use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{LexData, TextualState}}};
 
 mod lexing;
 mod compilation;
@@ -22,6 +22,14 @@ pub struct ServiceManager {
 pub enum ServiceManagerMessage {
     UpdateLexRope {
         lex_rope: Rope<RLEAggregate<LexData>>,
+        version: usize,
+    },
+    UpdateCompileDiagnostics {
+        diagnostics: Vec<Diagnostic>,
+        version: usize,
+    },
+    UpdateRuntimeDiagnostics {
+        diagnostics: Vec<Diagnostic>,
         version: usize,
     },
     UpdateByteCode,
@@ -95,6 +103,20 @@ impl ServiceManager {
             ServiceManagerMessage::UpdateLexRope { lex_rope, version } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_lex_rope(lex_rope, version) {
+                        cx.notify();
+                    }
+                });
+            },
+            ServiceManagerMessage::UpdateCompileDiagnostics { diagnostics, version } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_compile_diagnostics(diagnostics, version) {
+                        cx.notify();
+                    }
+                });
+            },
+            ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics, version } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_runtime_diagnostics(diagnostics, version) {
                         cx.notify();
                     }
                 });

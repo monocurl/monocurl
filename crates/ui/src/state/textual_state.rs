@@ -1,20 +1,29 @@
+use std::ops::Range;
+
 use gpui::App;
 use lexer::token::Token;
 use structs::{rope::{RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
+
+use crate::state::diagnostics::{Diagnostic, DiagnosticContainer};
 
 pub type LexData = Token;
 pub type StaticAnalysisData = i32;
 
 
+#[derive(Clone, PartialEq, Eq)]
 pub struct AutoCompleteItem {
     pub head: String,
     pub replacement: String,
     pub cursor_position: isize,
 }
 
-pub struct Diagnostic {
-    version: usize,
+#[derive(Default)]
+pub struct AutoCompleteState {
+    // empty indicates no autocomplete active
+    pub items: Vec<AutoCompleteItem>,
+    pub selected_index: usize,
 }
+
 
 /// State that's relevant to the text editor
 #[derive(Default)]
@@ -30,7 +39,12 @@ pub struct TextualState {
     rendered_static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
 
     // we must relayout the lines corresponding to this span
-    region_needing_relayout: Option<Span8>,
+    region_needing_relayout: Option<Range<usize>>,
+
+    autocomplete: AutoCompleteState,
+    diagnostics: DiagnosticContainer,
+    dirty_diagnostic_lines: Rope<RLEAggregate<bool>>,
+
     version: usize,
 
     listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send>>,
@@ -72,12 +86,62 @@ impl TextualState {
         true
     }
 
-    pub fn set_diagnostic_state(&mut self) {
+    fn set_dirty_flags_on_diagnostics_change(
+        &mut self,
+        new_diags: &Vec<Diagnostic>,
+        filter: impl Fn(&Diagnostic) -> bool + Copy,
+    ) -> bool {
+        debug_assert!(new_diags.iter().all(filter));
 
+        for diag in self.diagnostics.diagnostics_list()
+            .iter()
+            .chain(new_diags.iter())
+            .filter(|d| filter(d))
+        {
+            let start_loc = self.offset8_to_loc8(diag.span.start);
+            let end_loc = self.offset8_to_loc8(diag.span.end);
+
+            self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
+                start_loc.row..end_loc.row + 1,
+                std::iter::once(RLEData {
+                    codeunits: end_loc.row - start_loc.row + 1,
+                    attribute: true,
+                }),
+            );
+        }
+
+        true
     }
 
-    pub fn set_autocomplete_state(&mut self) {
+    pub fn set_compile_diagnostics(&mut self, diagnostics: Vec<Diagnostic>, for_version: usize) -> bool {
+        if for_version != self.version {
+            return false;
+        }
 
+        self.set_dirty_flags_on_diagnostics_change(&diagnostics, |d| d.is_compile_time());
+        self.diagnostics.set_compile_time_diagnostics(diagnostics.into_iter());
+        true
+    }
+
+    pub fn set_runtime_diagnostics(&mut self, diagnostics: Vec<Diagnostic>, for_version: usize) -> bool {
+        if for_version != self.version {
+            return false;
+        }
+
+        self.set_dirty_flags_on_diagnostics_change(&diagnostics, |d| d.is_runtime());
+        self.diagnostics.set_runtime_diagnostics(diagnostics.into_iter());
+        true
+    }
+
+    pub fn set_autocomplete_state(&mut self, items: Vec<AutoCompleteItem>, for_version: usize) -> bool {
+        if for_version != self.version || self.autocomplete.items == items {
+            return false;
+        }
+        self.autocomplete = AutoCompleteState {
+            items,
+            selected_index: 0,
+        };
+        true
     }
 }
 
@@ -217,7 +281,7 @@ impl TextualState {
     pub fn mark_line_as_up_to_date_attributes(&mut self, start: usize, end: usize) {
         let lex_content = self.lex_rope
             .iterator_range(start..end)
-            .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute });
+            .map(|(bytes_utf8, attribute)| RLEData { codeunits: bytes_utf8, attribute });
 
         self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
             start..end,
@@ -226,7 +290,7 @@ impl TextualState {
 
         let sa_content = self.static_analysis_rope
             .iterator_range(start..end)
-            .map(|(bytes_utf8, attribute)| RLEData { bytes_utf8, attribute });
+            .map(|(bytes_utf8, attribute)| RLEData { codeunits: bytes_utf8, attribute });
         self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
             start..end,
             sa_content,
@@ -234,6 +298,10 @@ impl TextualState {
     }
 
     pub fn line_has_new_attributes(&self, line_no: usize) -> bool {
+        if *self.dirty_diagnostic_lines.attribute_at(line_no) {
+            return true;
+        }
+
         let line_start = self.text_rope.utf8_line_pos_prefix(line_no, 0).bytes_utf8;
         let line_end = self.text_rope.utf8_line_pos_prefix(line_no + 1, 0).bytes_utf8;
 
@@ -262,8 +330,26 @@ impl TextualState {
         return sa_diff;
     }
 
-    pub fn replace(&mut self, span: Span8, new_text: &str, cx: &mut App) {
+    // returns the line range before and after that are affected
+    pub fn replace(&mut self, span: Span8, new_text: &str, cx: &mut App) -> (Range<usize>, Range<usize>) {
+        let del_range = {
+            let start_loc = self.offset8_to_loc8(span.start);
+            let end_loc = self.offset8_to_loc8(span.end);
+            start_loc.row .. end_loc.row + 1
+        };
         self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
+        let ins_range = {
+            let start_loc = del_range.start;
+            let end_loc = self.offset8_to_loc8(span.start + new_text.len());
+            start_loc .. end_loc.row + 1
+        };
+
+        self.diagnostics.apply_replacement(span.clone(), new_text.len());
+        self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
+            span.clone(),
+            std::iter::once(RLEData { codeunits: ins_range.len(), attribute: false }),
+        );
+
         // update lex_rope and static analysis rope with best effort of extending the previous runs
         // background threads will do the proper update asynchronously
         // Note that we update rendered lex_rope and static analysis rope too, but the actual value
@@ -276,11 +362,11 @@ impl TextualState {
         };
         self.lex_rope = self.lex_rope.replace_range(
             span.clone(),
-            std::iter::once(RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement.clone() }),
+            std::iter::once(RLEData { codeunits: new_text.len(), attribute: lex_replacement.clone() }),
         );
         self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
             span.clone(),
-            std::iter::once(RLEData { bytes_utf8: new_text.len(), attribute: lex_replacement }),
+            std::iter::once(RLEData { codeunits: new_text.len(), attribute: lex_replacement }),
         );
 
         let sa_replacement = if span.start == 0 {
@@ -291,15 +377,17 @@ impl TextualState {
         };
         self.static_analysis_rope = self.static_analysis_rope.replace_range(
             span.clone(),
-            std::iter::once(RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement.clone() }),
+            std::iter::once(RLEData { codeunits: new_text.len(), attribute: sa_replacement.clone() }),
         );
         self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
             span.clone(),
-            std::iter::once(RLEData { bytes_utf8: new_text.len(), attribute: sa_replacement }),
+            std::iter::once(RLEData { codeunits: new_text.len(), attribute: sa_replacement }),
         );
 
         self.version += 1;
         self.notify_listeners(span, new_text, cx);
+
+        (del_range, ins_range)
     }
 
     pub fn read(&self, span: Span8) -> String {
@@ -385,17 +473,24 @@ impl TextualState {
         start..end
     }
 
-    pub fn autocomplete_list(&self) -> &[AutoCompleteItem] {
-        &[]
+    pub fn autocomplete_state(&self) -> &AutoCompleteState {
+        &self.autocomplete
     }
 
-    pub fn diagnostics(&self) -> &[Diagnostic] {
-        todo!()
+    // You can access diagnostics
+    pub fn diagnostics(&self) -> &DiagnosticContainer {
+        &self.diagnostics
     }
 
-    // characters that have modified attributes
+    pub fn prepare_diagnostics_iterator(&mut self) {
+        self.diagnostics.prepare_iterator();
+    }
+
+    // line that have modified attributes
     // and resets their dirty status to non dirty
-    pub fn mark_region_as_needing_relayout(&mut self, span: Span8) {
+    // only used for width changes (and probably would need work for anything more since we would
+    // have to modify the range upon insertions / deletions)
+    pub fn mark_lines_needing_relayout(&mut self, span: Range<usize>) {
         if let Some(dirty) = &mut self.region_needing_relayout {
             dirty.start = dirty.start.min(span.start);
             dirty.end = dirty.end.max(span.end);
@@ -404,7 +499,7 @@ impl TextualState {
         }
     }
 
-    pub fn take_region_needing_relayout(&mut self) -> Option<Span8> {
+    pub fn take_lines_needing_relayout(&mut self) -> Option<Range<usize>> {
         self.region_needing_relayout.take()
     }
 }

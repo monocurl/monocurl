@@ -946,14 +946,14 @@ impl<const N: usize> Rope<TextAggregate, N> {
 
 #[derive(Clone)]
 pub struct RLEAggregate<T> {
-    pub bytes_utf8: usize,
+    pub codeunits: usize,
     pub height: usize,
     phantom_t: PhantomData<T>
 }
 
 #[derive(Clone)]
 pub struct RLEData<T> {
-    pub bytes_utf8: usize,
+    pub codeunits: usize,
     pub attribute: T,
 }
 
@@ -965,28 +965,28 @@ where
 
     fn identity() -> Self {
         RLEData {
-            bytes_utf8: 0,
+            codeunits: 0,
             attribute: T::default(),
         }
     }
 
     fn subrange(&self, range: Range<usize>) -> Self {
         RLEData {
-            bytes_utf8: range.len(),
+            codeunits: range.len(),
             attribute: self.attribute.clone(),
         }
     }
 
     fn try_append(&mut self, from: Self) -> Option<Self> {
         if self.attribute == from.attribute {
-            self.bytes_utf8 += from.bytes_utf8;
+            self.codeunits += from.codeunits;
             None
         }
-        else if self.bytes_utf8 == 0 {
+        else if self.codeunits == 0 {
             *self = from.clone();
             None
         }
-        else if from.bytes_utf8 == 0 {
+        else if from.codeunits == 0 {
             None
         }
         else {
@@ -995,12 +995,12 @@ where
     }
 
     fn iterator(&self, at: Count8, to: Count8) -> Self::Iterator<'_> {
-        debug_assert!(at <= to && to <= self.bytes_utf8);
+        debug_assert!(at <= to && to <= self.codeunits);
         std::iter::once((to - at, self.attribute.clone()))
     }
 
     fn codeunits(&self) -> Count8 {
-        self.bytes_utf8
+        self.codeunits
     }
 }
 
@@ -1012,25 +1012,25 @@ impl<T> AggregateData for RLEAggregate<T>
     fn from_leaf(data: &Self::LeafData) -> Self {
         let bytes_utf8 = data.codeunits();
         RLEAggregate {
-            bytes_utf8,
+            codeunits: bytes_utf8,
             height: 0,
             phantom_t: PhantomData,
         }
     }
 
     fn merge(children: impl DoubleEndedIterator<Item=Self> + Clone) -> Self {
-        let bytes_utf8 = children.clone().map(|c| c.bytes_utf8).sum();
+        let bytes_utf8 = children.clone().map(|c| c.codeunits).sum();
         let height = children.clone().map(|c| c.height).max().unwrap_or(0) + 1;
 
         RLEAggregate {
-            bytes_utf8,
+            codeunits: bytes_utf8,
             height,
             phantom_t: PhantomData,
         }
     }
 
     fn codeunits(&self) -> Count8 {
-        self.bytes_utf8
+        self.codeunits
     }
 
     fn height(&self) -> u32 {
@@ -1318,30 +1318,30 @@ mod tests {
     #[test]
     fn test_rle_try_append_same_attribute() {
         let mut rle1 = RLEData {
-            bytes_utf8: 10,
+            codeunits: 10,
             attribute: 5,
         };
         let rle2 = RLEData {
-            bytes_utf8: 5,
+            codeunits: 5,
             attribute: 5,
         };
         let remaining = rle1.try_append(rle2);
-        assert_eq!(rle1.bytes_utf8, 15);
+        assert_eq!(rle1.codeunits, 15);
         assert!(remaining.is_none());
     }
 
     #[test]
     fn test_rle_try_append_different_attribute() {
         let mut rle1 = RLEData {
-            bytes_utf8: 10,
+            codeunits: 10,
             attribute: 5,
         };
         let rle2 = RLEData {
-            bytes_utf8: 5,
+            codeunits: 5,
             attribute: 7,
         };
         let remaining = rle1.try_append(rle2);
-        assert_eq!(rle1.bytes_utf8, 10); // Unchanged
+        assert_eq!(rle1.codeunits, 10); // Unchanged
         assert!(remaining.is_some());
         assert_eq!(remaining.unwrap().attribute, 7);
     }
@@ -1349,14 +1349,14 @@ mod tests {
     #[test]
     fn test_rle_split() {
         let rle = RLEData {
-            bytes_utf8: 20,
+            codeunits: 20,
             attribute: 42,
         };
         let left = rle.subrange(0..12);
         let right = rle.subrange(12..20);
-        assert_eq!(left.bytes_utf8, 12);
+        assert_eq!(left.codeunits, 12);
         assert_eq!(left.attribute, 42);
-        assert_eq!(right.bytes_utf8, 8);
+        assert_eq!(right.codeunits, 8);
         assert_eq!(right.attribute, 42);
     }
 

@@ -313,20 +313,9 @@ impl TextEditor {
         self.report_undo_candidate(utf8_range.clone(), new_text, cx);
 
         let (del_range, ins_range) = self.state.update(cx, |state, subcx| {
-            let del_range = {
-                let start_loc = state.offset8_to_loc8(utf8_range.start);
-                let end_loc = state.offset8_to_loc8(utf8_range.end);
-                start_loc.row .. end_loc.row + 1
-            };
-            state.replace(utf8_range.clone(), new_text, subcx);
+            let ret = state.replace(utf8_range.clone(), new_text, subcx);
             subcx.notify();
-            let ins_range = {
-                let start_loc = state.offset8_to_loc8(utf8_range.start);
-                let end_loc = state.offset8_to_loc8(utf8_range.start + new_text.len());
-                start_loc.row .. end_loc.row + 1
-            };
-
-            (del_range, ins_range)
+            ret
         });
         self.reshape_lines(del_range, ins_range, window, cx);
         self.dirty.update(cx, |dirty, _| *dirty = true);
@@ -525,7 +514,7 @@ impl TextEditor {
         (start_offset, end_offset, text)
     }
 
-    fn reshape_line(&self, wrap_width: Pixels, line_no: usize, window: &mut Window, cx: &mut App) -> WrappedLine {
+    fn reshape_line(&mut self, wrap_width: Pixels, line_no: usize, window: &mut Window, cx: &mut App) -> WrappedLine {
         self.state.update(cx, |state, _| {
             let (start, end, mut line_text) = self.line_range_and_text(state, line_no);
             state.mark_line_as_up_to_date_attributes(start, end);
@@ -534,10 +523,12 @@ impl TextEditor {
                 line_text.pop();
             }
 
+            state.prepare_diagnostics_iterator();
             let runs: SmallVec<[TextRun; 32]> = LineShaper::new(
                 &self.text_styles,
                 state.lex_rope().iterator(start),
                 state.static_analysis_rope().iterator(start),
+                state.diagnostics().iterator(start),
                 line_text.len()
             ).collect();
 
@@ -573,7 +564,7 @@ impl TextEditor {
 
     fn reshape_lines_needing_layout(&mut self, window: &mut Window, cx: &mut App) {
         let dirty = self.state.update(cx, |state, _cx| {
-            state.take_region_needing_relayout()
+            state.take_lines_needing_relayout()
         });
 
         if let Some(dirty) = dirty {
@@ -738,7 +729,9 @@ impl TextEditor {
         let word = state.word(selection.start, true);
         selection.start = word.start;
         let utf16 = state.span8_to_span16(&selection);
+        self.undo_group_boundary();
         self.replace_text_in_range(Some(utf16), "", window, cx);
+        self.undo_group_boundary();
     }
 
 
@@ -1239,7 +1232,7 @@ impl TextElement {
         if editor.last_bounds.is_none_or(|b| b.size.width != bounds.size.width) {
             editor.capture_top_visible_line();
             editor.state.update(cx, |state, _| {
-                state.mark_region_as_needing_relayout(0..editor.line_map.line_count());
+                state.mark_lines_needing_relayout(0..editor.line_map.line_count());
             });
         }
         editor.last_bounds = Some(bounds);
