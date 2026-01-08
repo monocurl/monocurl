@@ -9,7 +9,6 @@ use crate::state::diagnostics::{Diagnostic, DiagnosticContainer};
 pub type LexData = Token;
 pub type StaticAnalysisData = i32;
 
-
 #[derive(Clone, PartialEq, Eq)]
 pub struct AutoCompleteItem {
     pub head: String,
@@ -23,7 +22,6 @@ pub struct AutoCompleteState {
     pub items: Vec<AutoCompleteItem>,
     pub selected_index: usize,
 }
-
 
 /// State that's relevant to the text editor
 #[derive(Default)]
@@ -50,8 +48,8 @@ pub struct TextualState {
     listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send>>,
 }
 
-impl TextualState {
 
+impl TextualState {
     pub fn add_listener(&mut self, f: impl FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send + 'static) {
         self.listeners.push(Box::new(f));
     }
@@ -62,6 +60,186 @@ impl TextualState {
         }
     }
 
+    // returns the line range before and after that are affected
+    pub fn replace(&mut self, span: Span8, new_text: &str, cx: &mut App) -> (Range<usize>, Range<usize>) {
+        let del_range = {
+            let start_loc = self.offset8_to_loc8(span.start);
+            let end_loc = self.offset8_to_loc8(span.end);
+            start_loc.row .. end_loc.row + 1
+        };
+        self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
+        let ins_range = {
+            let start_loc = del_range.start;
+            let end_loc = self.offset8_to_loc8(span.start + new_text.len());
+            start_loc .. end_loc.row + 1
+        };
+
+        self.diagnostics.apply_replacement(span.clone(), new_text.len());
+        self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
+            span.clone(),
+            std::iter::once(RLEData { codeunits: ins_range.len(), attribute: false }),
+        );
+
+        // update lex_rope and static analysis rope with best effort of extending the previous runs
+        // background threads will do the proper update asynchronously
+        // Note that we update rendered lex_rope and static analysis rope too, but the actual value
+        // does not really matter since they will be updated regardless when we relayout lines
+        let lex_replacement = if span.start == 0 {
+            LexData::default()
+        }
+        else {
+            self.lex_rope.attribute_at(span.start - 1).clone()
+        };
+        self.lex_rope = self.lex_rope.replace_range(
+            span.clone(),
+            std::iter::once(RLEData { codeunits: new_text.len(), attribute: lex_replacement.clone() }),
+        );
+        self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
+            span.clone(),
+            std::iter::once(RLEData { codeunits: new_text.len(), attribute: lex_replacement }),
+        );
+
+        let sa_replacement = if span.start == 0 {
+            StaticAnalysisData::default()
+        }
+        else {
+            *self.static_analysis_rope.attribute_at(span.start - 1)
+        };
+        self.static_analysis_rope = self.static_analysis_rope.replace_range(
+            span.clone(),
+            std::iter::once(RLEData { codeunits: new_text.len(), attribute: sa_replacement.clone() }),
+        );
+        self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
+            span.clone(),
+            std::iter::once(RLEData { codeunits: new_text.len(), attribute: sa_replacement }),
+        );
+
+        self.version += 1;
+        self.notify_listeners(span, new_text, cx);
+
+        (del_range, ins_range)
+    }
+
+    pub fn read(&self, span: Span8) -> String {
+        self.text_rope
+            .iterator_range(span)
+            .collect()
+    }
+
+    pub fn len(&self) -> Count8 {
+        self.text_rope.codeunits()
+    }
+}
+
+impl TextualState {
+    pub fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
+        let summary = self.text_rope.utf8_prefix_summary(offset);
+        summary.codeunits_utf16
+    }
+
+    pub fn offset16_to_offset8(&self, offset: Count16) -> Count8 {
+        let summary = self.text_rope.utf16_prefix_summary(offset);
+        summary.bytes_utf8
+    }
+
+    pub fn loc8_to_offset8(&self, loc: Location8) -> Count8 {
+        let summary = self.text_rope.utf8_line_pos_prefix(loc.row, loc.col);
+        summary.bytes_utf8
+    }
+
+    pub fn offset8_to_loc8(&self, offset: Count8) -> Location8 {
+        let summary = self.text_rope.utf8_prefix_summary(offset);
+        Location8 {
+            row: summary.newlines,
+            col: summary.bytes_utf8_since_newline,
+        }
+    }
+
+    pub fn span8_to_span16(&self, span8: &Span8) -> Span16 {
+        self.offset8_to_offset16(span8.start)..self.offset8_to_offset16(span8.end)
+    }
+
+    pub fn span16_to_span8(&self, span16: &Span16) -> Span8 {
+        self.offset16_to_offset8(span16.start)..self.offset16_to_offset8(span16.end)
+    }
+}
+
+impl TextualState {
+    pub fn next_boundary(&self, offset: Count8) -> Count8 {
+        grapheme_boundary(&self.text_rope, offset, true)
+    }
+
+    pub fn prev_boundary(&self, offset: Count8) -> Count8 {
+        grapheme_boundary(&self.text_rope, offset, false)
+    }
+
+    // maximal word containing position
+    // or, if this is empty due to whitespace, the previous word (along with contents up till offset)
+    pub fn word(&self, offset: Count8, only_expand_left: bool) -> Span8 {
+        let not_separator = |c: char| {
+            c.is_alphanumeric() || c == '_'
+        };
+
+        let mut start  = offset;
+        while start > 0 {
+            let prev = self.prev_boundary(start);
+            let ch = self.read(prev..start);
+            if ch.chars().all(not_separator) {
+                start = prev;
+            } else {
+                break;
+            }
+        }
+
+        let mut end = offset;
+        let len = self.len();
+        if !only_expand_left {
+            while end < len {
+                let next = self.next_boundary(end);
+                let ch = self.read(end..next);
+                if ch.chars().all(not_separator) {
+                    end = next;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        if start == offset && end == offset {
+            // try to include at least one character that is not whitespace (not crossing newline)
+            let mut first_nonwhitespace = -1;
+            while start > 0 {
+                let prev = self.prev_boundary(start);
+                let ch = self.read(prev..start);
+
+                if ch == "\n" {
+                    break;
+                }
+                let is_whitespace = ch.chars().all(|c| c.is_whitespace());
+                if is_whitespace && first_nonwhitespace == -1 {
+                    start = prev;
+                }
+                else {
+                    first_nonwhitespace = first_nonwhitespace.max(start as isize);
+                    if ch.chars().all(not_separator) {
+                        start = prev;
+                    }
+                    else if start as isize == first_nonwhitespace {
+                        start = prev;
+                        break;
+                    }
+                    else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        start..end
+    }
+}
+
+impl TextualState {
     pub fn lex_rope(&self) -> &Rope<RLEAggregate<LexData>> {
         &self.lex_rope
     }
@@ -86,6 +264,77 @@ impl TextualState {
         true
     }
 
+    pub fn mark_line_as_up_to_date_attributes(&mut self, start: usize, end: usize) {
+        let lex_content = self.lex_rope
+            .iterator_range(start..end)
+            .map(|(bytes_utf8, attribute)| RLEData { codeunits: bytes_utf8, attribute });
+
+        self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
+            start..end,
+            lex_content,
+        );
+
+        let sa_content = self.static_analysis_rope
+            .iterator_range(start..end)
+            .map(|(bytes_utf8, attribute)| RLEData { codeunits: bytes_utf8, attribute });
+        self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
+            start..end,
+            sa_content,
+        );
+    }
+
+    pub fn line_has_new_attributes(&self, line_no: usize) -> bool {
+        if *self.dirty_diagnostic_lines.attribute_at(line_no) {
+            return true;
+        }
+
+        let line_start = self.text_rope.utf8_line_pos_prefix(line_no, 0).bytes_utf8;
+        let line_end = self.text_rope.utf8_line_pos_prefix(line_no + 1, 0).bytes_utf8;
+
+        let lex_diff = {
+            let lex_content = self.lex_rope.iterator_range(line_start..line_end);
+            let rendered_lex_content = self.rendered_lex_rope.iterator_range(line_start..line_end);
+
+            std::iter::zip(lex_content, rendered_lex_content)
+                .any(|(a, b)| {
+                    a != b
+                })
+        };
+
+        if lex_diff {
+            return true;
+        }
+
+        let sa_diff = {
+            let sa_content = self.static_analysis_rope.iterator_range(line_start..line_end);
+            let rendered_sa_content = self.rendered_static_analysis_rope.iterator_range(line_start..line_end);
+
+            std::iter::zip(sa_content, rendered_sa_content)
+                .any(|(a, b)| a != b)
+        };
+
+        return sa_diff;
+    }
+
+    // line that have modified attributes
+    // and resets their dirty status to non dirty
+    // only used for width changes (and probably would need work for anything more since we would
+    // have to modify the range upon insertions / deletions)
+    pub fn mark_lines_needing_relayout(&mut self, span: Range<usize>) {
+        if let Some(dirty) = &mut self.region_needing_relayout {
+            dirty.start = dirty.start.min(span.start);
+            dirty.end = dirty.end.max(span.end);
+        } else {
+            self.region_needing_relayout = Some(span);
+        }
+    }
+
+    pub fn take_lines_needing_relayout(&mut self) -> Option<Range<usize>> {
+        self.region_needing_relayout.take()
+    }
+}
+
+impl TextualState {
     fn set_dirty_flags_on_diagnostics_change(
         &mut self,
         new_diags: &Vec<Diagnostic>,
@@ -131,6 +380,20 @@ impl TextualState {
         self.set_dirty_flags_on_diagnostics_change(&diagnostics, |d| d.is_runtime());
         self.diagnostics.set_runtime_diagnostics(diagnostics.into_iter());
         true
+    }
+
+    pub fn diagnostics(&self) -> &DiagnosticContainer {
+        &self.diagnostics
+    }
+
+    pub fn prepare_diagnostics_iterator(&mut self) {
+        self.diagnostics.prepare_iterator();
+    }
+}
+
+impl TextualState {
+    pub fn autocomplete_state(&self) -> &AutoCompleteState {
+        &self.autocomplete
     }
 
     pub fn set_autocomplete_state(&mut self, items: Vec<AutoCompleteItem>, for_version: usize) -> bool {
@@ -246,264 +509,6 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
     }
 }
 
-impl TextualState {
-    pub fn offset8_to_offset16(&self, offset: Count8) -> Count16 {
-        let summary = self.text_rope.utf8_prefix_summary(offset);
-        summary.codeunits_utf16
-    }
-
-    pub fn offset16_to_offset8(&self, offset: Count16) -> Count8 {
-        let summary = self.text_rope.utf16_prefix_summary(offset);
-        summary.bytes_utf8
-    }
-
-    pub fn loc8_to_offset8(&self, loc: Location8) -> Count8 {
-        let summary = self.text_rope.utf8_line_pos_prefix(loc.row, loc.col);
-        summary.bytes_utf8
-    }
-
-    pub fn offset8_to_loc8(&self, offset: Count8) -> Location8 {
-        let summary = self.text_rope.utf8_prefix_summary(offset);
-        Location8 {
-            row: summary.newlines,
-            col: summary.bytes_utf8_since_newline,
-        }
-    }
-
-    pub fn span8_to_span16(&self, span8: &Span8) -> Span16 {
-        self.offset8_to_offset16(span8.start)..self.offset8_to_offset16(span8.end)
-    }
-
-    pub fn span16_to_span8(&self, span16: &Span16) -> Span8 {
-        self.offset16_to_offset8(span16.start)..self.offset16_to_offset8(span16.end)
-    }
-
-    pub fn mark_line_as_up_to_date_attributes(&mut self, start: usize, end: usize) {
-        let lex_content = self.lex_rope
-            .iterator_range(start..end)
-            .map(|(bytes_utf8, attribute)| RLEData { codeunits: bytes_utf8, attribute });
-
-        self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
-            start..end,
-            lex_content,
-        );
-
-        let sa_content = self.static_analysis_rope
-            .iterator_range(start..end)
-            .map(|(bytes_utf8, attribute)| RLEData { codeunits: bytes_utf8, attribute });
-        self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
-            start..end,
-            sa_content,
-        );
-    }
-
-    pub fn line_has_new_attributes(&self, line_no: usize) -> bool {
-        if *self.dirty_diagnostic_lines.attribute_at(line_no) {
-            return true;
-        }
-
-        let line_start = self.text_rope.utf8_line_pos_prefix(line_no, 0).bytes_utf8;
-        let line_end = self.text_rope.utf8_line_pos_prefix(line_no + 1, 0).bytes_utf8;
-
-        let lex_diff = {
-            let lex_content = self.lex_rope.iterator_range(line_start..line_end);
-            let rendered_lex_content = self.rendered_lex_rope.iterator_range(line_start..line_end);
-
-            std::iter::zip(lex_content, rendered_lex_content)
-                .any(|(a, b)| {
-                    a != b
-                })
-        };
-
-        if lex_diff {
-            return true;
-        }
-
-        let sa_diff = {
-            let sa_content = self.static_analysis_rope.iterator_range(line_start..line_end);
-            let rendered_sa_content = self.rendered_static_analysis_rope.iterator_range(line_start..line_end);
-
-            std::iter::zip(sa_content, rendered_sa_content)
-                .any(|(a, b)| a != b)
-        };
-
-        return sa_diff;
-    }
-
-    // returns the line range before and after that are affected
-    pub fn replace(&mut self, span: Span8, new_text: &str, cx: &mut App) -> (Range<usize>, Range<usize>) {
-        let del_range = {
-            let start_loc = self.offset8_to_loc8(span.start);
-            let end_loc = self.offset8_to_loc8(span.end);
-            start_loc.row .. end_loc.row + 1
-        };
-        self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
-        let ins_range = {
-            let start_loc = del_range.start;
-            let end_loc = self.offset8_to_loc8(span.start + new_text.len());
-            start_loc .. end_loc.row + 1
-        };
-
-        self.diagnostics.apply_replacement(span.clone(), new_text.len());
-        self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
-            span.clone(),
-            std::iter::once(RLEData { codeunits: ins_range.len(), attribute: false }),
-        );
-
-        // update lex_rope and static analysis rope with best effort of extending the previous runs
-        // background threads will do the proper update asynchronously
-        // Note that we update rendered lex_rope and static analysis rope too, but the actual value
-        // does not really matter since they will be updated regardless when we relayout lines
-        let lex_replacement = if span.start == 0 {
-            LexData::default()
-        }
-        else {
-            self.lex_rope.attribute_at(span.start - 1).clone()
-        };
-        self.lex_rope = self.lex_rope.replace_range(
-            span.clone(),
-            std::iter::once(RLEData { codeunits: new_text.len(), attribute: lex_replacement.clone() }),
-        );
-        self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
-            span.clone(),
-            std::iter::once(RLEData { codeunits: new_text.len(), attribute: lex_replacement }),
-        );
-
-        let sa_replacement = if span.start == 0 {
-            StaticAnalysisData::default()
-        }
-        else {
-            *self.static_analysis_rope.attribute_at(span.start - 1)
-        };
-        self.static_analysis_rope = self.static_analysis_rope.replace_range(
-            span.clone(),
-            std::iter::once(RLEData { codeunits: new_text.len(), attribute: sa_replacement.clone() }),
-        );
-        self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
-            span.clone(),
-            std::iter::once(RLEData { codeunits: new_text.len(), attribute: sa_replacement }),
-        );
-
-        self.version += 1;
-        self.notify_listeners(span, new_text, cx);
-
-        (del_range, ins_range)
-    }
-
-    pub fn read(&self, span: Span8) -> String {
-        self.text_rope
-            .iterator_range(span)
-            .collect()
-    }
-
-    pub fn len(&self) -> Count8 {
-        self.text_rope.codeunits()
-    }
-
-    pub fn next_boundary(&self, offset: Count8) -> Count8 {
-        grapheme_boundary(&self.text_rope, offset, true)
-    }
-
-    pub fn prev_boundary(&self, offset: Count8) -> Count8 {
-        grapheme_boundary(&self.text_rope, offset, false)
-    }
-
-    // maximal word containing position
-    // or, if this is empty due to whitespace, the previous word (along with contents up till offset)
-    pub fn word(&self, offset: Count8, only_expand_left: bool) -> Span8 {
-        let not_separator = |c: char| {
-            c.is_alphanumeric() || c == '_'
-        };
-
-        let mut start  = offset;
-        while start > 0 {
-            let prev = self.prev_boundary(start);
-            let ch = self.read(prev..start);
-            if ch.chars().all(not_separator) {
-                start = prev;
-            } else {
-                break;
-            }
-        }
-
-        let mut end = offset;
-        let len = self.len();
-        if !only_expand_left {
-            while end < len {
-                let next = self.next_boundary(end);
-                let ch = self.read(end..next);
-                if ch.chars().all(not_separator) {
-                    end = next;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        if start == offset && end == offset {
-            // try to include at least one character that is not whitespace (not crossing newline)
-            let mut first_nonwhitespace = -1;
-            while start > 0 {
-                let prev = self.prev_boundary(start);
-                let ch = self.read(prev..start);
-
-                if ch == "\n" {
-                    break;
-                }
-                let is_whitespace = ch.chars().all(|c| c.is_whitespace());
-                if is_whitespace && first_nonwhitespace == -1 {
-                    start = prev;
-                }
-                else {
-                    first_nonwhitespace = first_nonwhitespace.max(start as isize);
-                    if ch.chars().all(not_separator) {
-                        start = prev;
-                    }
-                    else if start as isize == first_nonwhitespace {
-                        start = prev;
-                        break;
-                    }
-                    else {
-                        break;
-                    }
-                }
-            }
-        }
-
-        start..end
-    }
-
-    pub fn autocomplete_state(&self) -> &AutoCompleteState {
-        &self.autocomplete
-    }
-
-    // You can access diagnostics
-    pub fn diagnostics(&self) -> &DiagnosticContainer {
-        &self.diagnostics
-    }
-
-    pub fn prepare_diagnostics_iterator(&mut self) {
-        self.diagnostics.prepare_iterator();
-    }
-
-    // line that have modified attributes
-    // and resets their dirty status to non dirty
-    // only used for width changes (and probably would need work for anything more since we would
-    // have to modify the range upon insertions / deletions)
-    pub fn mark_lines_needing_relayout(&mut self, span: Range<usize>) {
-        if let Some(dirty) = &mut self.region_needing_relayout {
-            dirty.start = dirty.start.min(span.start);
-            dirty.end = dirty.end.max(span.end);
-        } else {
-            self.region_needing_relayout = Some(span);
-        }
-    }
-
-    pub fn take_lines_needing_relayout(&mut self) -> Option<Range<usize>> {
-        self.region_needing_relayout.take()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -513,7 +518,6 @@ mod tests {
     pub struct NaiveBackend(pub String);
 
     impl NaiveBackend {
-
         fn next_boundary(&self, offset: Count8) -> Count8 {
             self.0
                 .grapheme_indices(true)
@@ -528,7 +532,6 @@ mod tests {
                 .find_map(|(idx, _)| (idx < offset).then_some(idx))
                 .unwrap_or(0)
         }
-
     }
 
     fn assert_grapheme_boundaries(s: &str) {

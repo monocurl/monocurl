@@ -78,9 +78,9 @@ where
             .next()
             .map(|d| {
                 let color = match d.dtype {
-                    DiagnosticType::CompileTimeWarning => gpui::yellow(),
-                    DiagnosticType::CompileTimeError => gpui::red(),
-                    DiagnosticType::RuntimeError { .. } => gpui::blue(),
+                    DiagnosticType::CompileTimeWarning => self.style.compile_time_warning_color,
+                    DiagnosticType::CompileTimeError => self.style.compile_time_error_color,
+                    DiagnosticType::RuntimeError  => self.style.runtime_error_color,
                 };
                 UnderlineStyle { thickness: px(1.0), color: Some(color), wavy: true }
             });

@@ -324,25 +324,6 @@ impl TextEditor {
 }
 
 impl TextEditor {
-
-    fn capture_top_visible_line(&mut self) {
-        let scroll_y = -self.scroll_handle.offset().y;
-        let top_most = self.visible_lines().start;
-        let y_range = self.line_map.y_range(top_most..top_most + 1);
-        self.resize_anchor_line = Some((top_most, scroll_y - y_range.start));
-    }
-
-    fn restore_scroll_to_anchor_line(&mut self) {
-        if let Some((anchor_line, offset)) = self.resize_anchor_line.take() {
-            let target_y = self.line_map.y_range(anchor_line..anchor_line + 1).start +
-                offset;
-            let scroll_offset = self.scroll_handle.offset();
-            self.scroll_handle.set_offset(point(scroll_offset.x, -target_y));
-        }
-    }
-}
-
-impl TextEditor {
     fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
         self.cursor_blink_state = true;
         self.cursor_blink_epoch += 1;
@@ -410,6 +391,24 @@ impl TextEditor {
 
         if key_origin || mouse_origin {
             self.undo_group_boundary();
+        }
+    }
+}
+
+impl TextEditor {
+    fn capture_top_visible_line(&mut self) {
+        let scroll_y = -self.scroll_handle.offset().y;
+        let top_most = self.visible_lines().start;
+        let y_range = self.line_map.y_range(top_most..top_most + 1);
+        self.resize_anchor_line = Some((top_most, scroll_y - y_range.start));
+    }
+
+    fn restore_scroll_to_anchor_line(&mut self) {
+        if let Some((anchor_line, offset)) = self.resize_anchor_line.take() {
+            let target_y = self.line_map.y_range(anchor_line..anchor_line + 1).start +
+                offset;
+            let scroll_offset = self.scroll_handle.offset();
+            self.scroll_handle.set_offset(point(scroll_offset.x, -target_y));
         }
     }
 
@@ -734,7 +733,6 @@ impl TextEditor {
         self.undo_group_boundary();
     }
 
-
     fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
         self.undo_group_boundary();
         self.select_to(Location8 { row: self.cursor.head.row, col: 0 }, false, false, cx);
@@ -830,7 +828,6 @@ impl TextEditor {
 
         self.line_map.location_for_point(position - point(self.gutter_width, bounds.top()))
     }
-
 
     fn on_mouse_down(
         &mut self,

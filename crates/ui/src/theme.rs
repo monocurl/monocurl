@@ -94,6 +94,10 @@ pub struct TextEditorStyles {
     pub punctuation_color: Hsla,
     pub default_text_color: Hsla,
 
+    pub runtime_error_color: Hsla,
+    pub compile_time_error_color: Hsla,
+    pub compile_time_warning_color: Hsla,
+
     pub cursor_color: Hsla,
 
     pub gutter_font: Font,
@@ -124,6 +128,10 @@ impl Default for TextEditorStyles {
             operator_color: gpui::hsla(0.0, 0.0, 0.4, 1.0),
             punctuation_color: gpui::hsla(0.0, 0.0, 0.4, 1.0),
             default_text_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
+
+            runtime_error_color: gpui::hsla(0.0, 0.9, 0.5, 1.0),
+            compile_time_error_color: gpui::hsla(0.0, 0.0, 0.8, 1.0),
+            compile_time_warning_color: gpui::hsla(0.1, 0.9, 0.8, 1.0),
 
             cursor_color: gpui::hsla(0.58, 0.9, 0.4, 1.0),
 
