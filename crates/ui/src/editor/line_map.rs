@@ -165,20 +165,21 @@ impl LineMap {
         start.0..(end.0 + 1).min(self.line_count())
     }
 
-    pub fn location_for_point(&self, point: Point<Pixels>) -> Location8 {
+    // in error case, it gives the closest one
+    pub fn location_for_point(&self, point: Point<Pixels>) -> Result<Location8, Location8> {
         if point.y >= self.total_height() {
             let last_line_no = self.rope.subrange_aggregate(0..usize::MAX).prewrapped_line_count;
             let last_line_len = self.line_len(last_line_no.saturating_sub(1));
-            return Location8 {
+            return Err(Location8 {
                 row: last_line_no.saturating_sub(1),
                 col: last_line_len
-            };
+            });
         }
         else if point.y < gpui::px(0.0) {
-            return Location8 {
+            return Err(Location8 {
                 row: 0,
                 col: 0
-            };
+            });
         }
 
         let (prewrapped_line_no, wrapped_line_no) = self.lines_ending_before_y(point.y);
@@ -189,15 +190,10 @@ impl LineMap {
             point.y - wrapped_line_no as f32 * self.line_height
         );
 
-        let effective_column = match leaf.line.closest_index(local_position, self.line_height) {
-            Ok(x) => x,
-            Err(x) => x
-        };
 
-        Location8 {
-            row: prewrapped_line_no,
-            col: effective_column
-        }
+        leaf.line.closest_index(local_position, self.line_height)
+            .map(|col| Location8 { row: prewrapped_line_no, col })
+            .map_err(|col| Location8 { row: prewrapped_line_no, col })
     }
 
     pub fn line_count(&self) -> usize {

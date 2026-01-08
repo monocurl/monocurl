@@ -16,6 +16,7 @@ use crate::actions::*;
 
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const CURSOR_BLINK_DELAY: Duration = Duration::from_millis(500);
+const HOVER_MIN_DURATION: Duration = Duration::from_millis(500);
 const MULTI_CLICK_TOLERANCE: Pixels = px(2.0);
 const TAB_SIZE: usize = 4;
 const SCROLL_MARGIN: f32 = 4.0;
@@ -122,9 +123,11 @@ pub struct TextEditor {
     is_selecting: bool,
     auto_scroll_epoch: usize,
     auto_scroll_last_mouse_position: Option<Point<Pixels>>,
+    hover_last_mouse_position: Option<Point<Pixels>>,
     cursor: Cursor,
     cursor_blink_state: bool,
     cursor_blink_epoch: usize,
+    hover_task: Option<Task<()>>,
 
     last_click_position: Point<Pixels>,
     click_count: usize,
@@ -187,9 +190,11 @@ impl TextEditor {
             is_selecting: false,
             auto_scroll_epoch: 0,
             auto_scroll_last_mouse_position: None,
+            hover_last_mouse_position: None,
             cursor: Cursor::collapsed(Location8 { row: 0, col: 0 }),
             cursor_blink_state: true,
             cursor_blink_epoch: 0,
+            hover_task: None,
             last_click_position: point(px(-1.0), px(0.0)),
             click_count: 0,
             text_styles: text_styles.clone(),
@@ -320,6 +325,39 @@ impl TextEditor {
         self.reshape_lines(del_range, ins_range, window, cx);
         self.dirty.update(cx, |dirty, _| *dirty = true);
         self.internal_dirty.update(cx, |dirty, _| *dirty = true);
+    }
+}
+
+impl TextEditor {
+    fn reset_hover_task(&mut self, cx: &mut Context<Self>) {
+        if self.is_selecting {
+            return;
+        }
+
+        let start_pos = self.scroll_handle.offset().y;
+        // also drops old one
+        self.hover_task = Some(cx.spawn(async move |editor, app| {
+            app.background_executor().timer(HOVER_MIN_DURATION).await;
+            let Some(editor) = editor.upgrade() else {
+                return;
+            };
+            let Ok((end_pos, mouse_down)) = app.read_entity(&editor, |e, _| (e.scroll_handle.offset().y, e.is_selecting)) else {
+                return;
+            };
+            // scroll moved
+            if end_pos != start_pos || mouse_down {
+                return;
+            }
+            // show hover if directly on a position
+            let Some(pos) = app.read_entity(&editor, |e, _| {
+                e.hover_last_mouse_position
+                    .and_then(|mouse| e.index_for_mouse_position(mouse))
+            }).ok().flatten() else {
+                return;
+            };
+
+            println!("Hover At {:?}", pos);
+        }));
     }
 }
 
@@ -456,7 +494,7 @@ impl TextEditor {
                             return true;
                         }
 
-                        let pos = editor.index_for_mouse_position(mouse_pos);
+                        let pos = editor.closest_index_for_mouse_position(mouse_pos);
                         editor.select_to(pos, true, false, cx);
 
                         let scroll_bounds = editor.scroll_handle.bounds();
@@ -593,7 +631,10 @@ impl TextEditor {
     fn vertical_cursor_movement(&self, delta_lines: isize) -> Location8 {
         let current_pos = self.line_map.point_for_location(self.cursor.head);
         let target_y = current_pos.y + delta_lines as f32 * self.line_height;
-        self.line_map.location_for_point(point(current_pos.x, target_y))
+        match self.line_map.location_for_point(point(current_pos.x, target_y)) {
+            Ok(loc) => loc,
+            Err(loc) => loc,
+        }
     }
 
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
@@ -821,12 +862,23 @@ impl TextEditor {
 }
 
 impl TextEditor {
-    fn index_for_mouse_position(&self, position: Point<Pixels>) -> Location8 {
+    fn index_for_mouse_position(&self, position: Point<Pixels>) -> Option<Location8> {
+        let Some(bounds) = self.last_bounds else {
+            return None;
+        };
+
+        self.line_map.location_for_point(position - point(self.gutter_width, bounds.top())).ok()
+    }
+
+    fn closest_index_for_mouse_position(&self, position: Point<Pixels>) -> Location8 {
         let Some(bounds) = self.last_bounds else {
             return Location8 { row: 0, col: 0 };
         };
 
-        self.line_map.location_for_point(position - point(self.gutter_width, bounds.top()))
+        match self.line_map.location_for_point(position - point(self.gutter_width, bounds.top())) {
+            Ok(loc) => loc,
+            Err(loc) => loc
+        }
     }
 
     fn on_mouse_down(
@@ -846,9 +898,10 @@ impl TextEditor {
         self.is_selecting = true;
         self.last_click_position = event.position;
         self.auto_scroll_last_mouse_position = Some(event.position);
+        self.hover_last_mouse_position = Some(event.position);
         self.start_responding_to_mouse_movements(cx);
 
-        let pos = self.index_for_mouse_position(event.position);
+        let pos = self.closest_index_for_mouse_position(event.position);
         match self.click_count {
             1 => {
                 self.is_selecting = true;
@@ -885,15 +938,18 @@ impl TextEditor {
         }
     }
 
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_selecting = false;
         self.stop_responding_to_mouse_movements();
         self.auto_scroll_last_mouse_position = None;
+        self.hover_last_mouse_position = Some(event.position);
     }
 
-    fn on_mouse_move(&mut self, _event: &MouseMoveEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_mouse_move(&mut self, _event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
         // mouse position tracking is mainly done in the listener registered in the paint
         // since we don't get mouse move events if the mouse is outside the view in this method
+        self.reset_hover_task(cx);
+        self.hover_last_mouse_position = Some(_event.position);
     }
 }
 
@@ -1074,7 +1130,7 @@ impl EntityInputHandler for TextEditor {
         cx: &mut Context<Self>,
     ) -> Option<usize> {
         let state = self.state.read(cx);
-        let loc8 = self.index_for_mouse_position(point);
+        let loc8 = self.closest_index_for_mouse_position(point);
         let offset8 = state.loc8_to_offset8(loc8);
         Some(state.offset8_to_offset16(offset8) as usize)
     }

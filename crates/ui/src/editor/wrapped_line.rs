@@ -137,9 +137,13 @@ impl WrappedLine {
         }
 
         let adjusted_x = position.x + x_offset;
-        Ok(self.unwrapped_layout.closest_index_for_x(adjusted_x)
-            // clamp to indices in this line
-            .clamp(wrap_start_index, wrap_end_index))
+        let raw = self.unwrapped_layout.closest_index_for_x(adjusted_x);
+        let clamped = raw.clamp(wrap_start_index, wrap_end_index);
+        if raw < wrap_start_index || raw > wrap_end_index || adjusted_x > self.unwrapped_layout.width {
+            Err(clamped)
+        } else {
+            Ok(raw)
+        }
     }
 
     pub fn location_for_index(&self, index: Count8, line_height: Pixels) -> (usize, Count8, Point<Pixels>) {

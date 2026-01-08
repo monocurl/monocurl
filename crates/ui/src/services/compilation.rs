@@ -39,9 +39,7 @@ impl CompilationService {
                     let mut diagnostics = vec![];
 
                     let mut pos = 0;
-                    let mut token_count = 0;
                     for (len, token) in lex_rope.iterator(0) {
-                        token_count += 1;
                         match token {
                             Token::StringLiteral => {
                                 let string: String = for_text_rope.iterator_range(pos..pos+len).collect();
