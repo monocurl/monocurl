@@ -4,11 +4,11 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+ui_cli_shared.workspace = true
 lexer.workspace = true
 structs.workspace = true
 
 anyhow.workspace = true
-server.workspace = true
 smallvec.workspace = true
 log.workspace = true
 env_logger.workspace = true

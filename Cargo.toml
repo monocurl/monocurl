@@ -5,6 +5,7 @@ members = [
     "crates/autocomplete",
     "crates/cli",
     "crates/compiler",
+    "crates/ui_cli_shared",
     "crates/executor",
     "crates/exporter",
     "crates/geo",
@@ -41,14 +42,13 @@ gpui = { path = "../gpui/crates/gpui" }
 autocomplete = { path = "crates/autocomplete" }
 cli = { path = "crates/cli" }
 compiler = { path = "crates/compiler" }
+ui_cli_shared = { path = "crates/ui_cli_shared" }
 executor = { path = "crates/executor" }
 exporter = { path = "crates/exporter" }
 geo = { path = "crates/geo" }
 lexer = { path = "crates/lexer" }
 parser = { path = "crates/parser" }
 renderer = { path = "crates/renderer" }
-server = { path = "crates/server" }
 stdlib = { path = "crates/stdlib" }
 structs = { path = "crates/structs" }
 ui = { path = "crates/ui" }
-monocurl = { path = "crates/monocurl" }

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use gpui::*;
-use server::doc_type::DocumentType;
+use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor}, components::split_pane::Split, editor::editor_view::Editor, navbar_view::Navbar, services::{ServiceManager}, state::{document_state::DocumentState, window_state::WindowState}, theme::ColorSet, timeline::timeline_view::Timeline, viewport::viewport_view::Viewport};
 

@@ -1,7 +1,7 @@
 use std::{ops::Range, path::PathBuf};
 
 use gpui::*;
-use server::doc_type::DocumentType;
+use ui_cli_shared::doc_type::DocumentType;
 use structs::assets::Assets;
 
 use crate::{components::buttons::link_button, navbar_view::Navbar, state::window_state::WindowState, theme::ColorSet};

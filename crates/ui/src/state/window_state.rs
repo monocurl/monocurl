@@ -2,7 +2,7 @@ use std::path::{PathBuf};
 
 use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle, Window};
 use serde::{Deserialize, Serialize};
-use server::doc_type::DocumentType;
+use ui_cli_shared::doc_type::DocumentType;
 
 use crate::document_view::{DocumentView, OpenDocument};
 

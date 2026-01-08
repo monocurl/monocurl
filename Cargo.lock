@@ -2995,15 +2995,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e53debba6bda7a793e5f99b8dacf19e626084f525f7829104ba9898f367d85ff"
 
 [[package]]
-name = "monocurl"
-version = "0.1.0"
-dependencies = [
- "gpui",
- "ui",
- "unicode-segmentation",
-]
-
-[[package]]
 name = "moxcms"
 version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4422,14 +4413,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "server"
-version = "0.1.0"
-dependencies = [
- "lexer",
- "schemars",
-]
-
-[[package]]
 name = "sha1_smol"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5271,12 +5254,19 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "server",
  "smallvec",
  "smol",
  "structs",
+ "ui_cli_shared",
  "unicode-segmentation",
  "uuid",
+]
+
+[[package]]
+name = "ui_cli_shared"
+version = "0.1.0"
+dependencies = [
+ "schemars",
 ]
 
 [[package]]

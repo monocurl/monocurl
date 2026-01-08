@@ -1,4 +1,4 @@
-use gpui::{Font, Hsla, Pixels, Rgba, px, rgba};
+use gpui::{Font, Hsla, Pixels, Rgba, px};
 
 pub struct ColorSet;
 
