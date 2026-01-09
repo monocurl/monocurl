@@ -1,9 +1,9 @@
 use gpui::{
-    AnyElement, App, Bounds, BoxShadow, Context, Element, ElementId, Entity, FontWeight, GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, Style, Styled, Window, div, point, px, relative, rgb, size
+    AnyElement, App, Bounds, BoxShadow, Element, ElementId, Entity, GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, Style, Styled, Window, div, point, px, relative, rgb, size
 };
 use crate::{
     editor::text_editor::TextEditor,
-    state::diagnostics::{Diagnostic, DiagnosticType}, theme::TextEditorStyles
+    state::diagnostics::{Diagnostic}, theme::TextEditorStyles
 };
 
 pub struct PopoverElement {
@@ -19,12 +19,6 @@ pub struct RequestLayoutState {
     child: Option<(AnyElement, Point<Pixels>, LayoutId)>,
 }
 
-pub struct PrepaintState {
-    diagnostic: Option<DiagnosticPopoverState>,
-    autocomplete: Option<()>,
-}
-
-/// Placement configuration for the popover
 #[derive(Debug, Clone, Copy)]
 struct PopoverPlacement {
     origin: Point<Pixels>,
@@ -93,7 +87,6 @@ impl PopoverElement {
         }
     }
 
-    /// Build the popover UI element
     fn build_popover(
         diagnostic: &Diagnostic,
     ) -> AnyElement {
@@ -145,7 +138,7 @@ impl IntoElement for PopoverElement {
 
 impl Element for PopoverElement {
     type RequestLayoutState = RequestLayoutState;
-    type PrepaintState = PrepaintState;
+    type PrepaintState = ();
 
     fn id(&self) -> Option<ElementId> {
         None
@@ -204,11 +197,7 @@ impl Element for PopoverElement {
             child.prepaint_as_root(placement.origin, bounds.size.into(), window, cx);
         }
 
-        let diagnostic = self.hovered_diagnostic(cx);
-        PrepaintState {
-            diagnostic,
-            autocomplete: None,
-        }
+        ()
     }
 
     fn paint(

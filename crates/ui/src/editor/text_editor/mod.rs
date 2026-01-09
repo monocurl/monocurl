@@ -126,11 +126,11 @@ pub struct TextEditor {
 
     marked_range: Option<Span8>,
     is_selecting: bool,
-    auto_scroll_epoch: usize,
+    auto_scroll_task: Option<Task<()>>,
     auto_scroll_last_mouse_position: Option<Point<Pixels>>,
     cursor: Cursor,
     cursor_blink_state: bool,
-    cursor_blink_epoch: usize,
+    cursor_blink_task: Option<Task<()>>,
 
     last_in_frame_mouse_position: Option<Point<Pixels>>,
     last_hover_start: Option<(Point<Pixels>, usize, Pixels)>,
@@ -166,15 +166,14 @@ impl TextEditor {
                 e.reset_cursor_blink(cx);
             } else {
                 // stop blinking if we are
-                e.cursor_blink_epoch += 1;
+                e.cursor_blink_task = None;
                 e.cursor_blink_state = true;
             }
             cx.notify()
         });
 
         let focus_out_subscription = cx.on_focus_lost(window, |editor, _w, cx| {
-            // stop blinking if we are
-            editor.cursor_blink_epoch += 1;
+            editor.cursor_blink_task = None;
             editor.cursor_blink_state = false;
             cx.notify()
         });
@@ -196,11 +195,11 @@ impl TextEditor {
             marked_range: None,
 
             is_selecting: false,
-            auto_scroll_epoch: 0,
+            auto_scroll_task: None,
             auto_scroll_last_mouse_position: None,
             cursor: Cursor::collapsed(Location8 { row: 0, col: 0 }),
             cursor_blink_state: true,
-            cursor_blink_epoch: 0,
+            cursor_blink_task: None,
 
             last_in_frame_mouse_position: None,
 
@@ -399,36 +398,16 @@ impl TextEditor {
 impl TextEditor {
     fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
         self.cursor_blink_state = true;
-        self.cursor_blink_epoch += 1;
         cx.notify();
 
-        let epoch = self.cursor_blink_epoch;
-        cx.spawn(async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
+        let task = cx.spawn(async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
             cx.background_executor().timer(CURSOR_BLINK_DELAY).await;
-            let _ = editor
-                .update(cx, |editor, cx| {
-                    if editor.cursor_blink_epoch == epoch {
-                        editor.start_cursor_blinking(cx);
-                    }
-                });
-        })
-        .detach();
-    }
-
-    fn start_cursor_blinking(&mut self, cx: &mut Context<Self>) {
-        let epoch = self.cursor_blink_epoch;
-
-        cx.spawn(async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
             loop {
                 let should_continue = editor
                     .update(cx, |editor, cx| {
-                        if editor.cursor_blink_epoch == epoch {
-                            editor.cursor_blink_state = !editor.cursor_blink_state;
-                            cx.notify();
-                            true
-                        } else {
-                            false
-                        }
+                        editor.cursor_blink_state = !editor.cursor_blink_state;
+                        cx.notify();
+                        true
                     })
                     .ok()
                     .unwrap_or(false);
@@ -439,8 +418,9 @@ impl TextEditor {
 
                 cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
             }
-        })
-        .detach();
+        });
+        // cancels any previous tasks as well
+        self.cursor_blink_task = Some(task);
     }
 
     fn move_to(&mut self, pos: Location8, mouse_origin: bool, key_origin: bool, cx: &mut Context<Self>) {
@@ -509,15 +489,12 @@ impl TextEditor {
     }
 
     fn start_responding_to_mouse_movements(&mut self, cx: &mut Context<Self>) {
-        self.auto_scroll_epoch += 1;
-        let epoch = self.auto_scroll_epoch;
-
-        cx.spawn(async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
+        let task = cx.spawn(async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
             loop {
                 cx.background_executor().timer(AUTO_SCROLL_INTERVAL).await;
 
                 let should_continue = editor.update(cx, |editor, cx| {
-                    if !editor.is_selecting || editor.auto_scroll_epoch != epoch {
+                    if !editor.is_selecting {
                         return false;
                     }
 
@@ -565,11 +542,12 @@ impl TextEditor {
                     break;
                 }
             }
-        }).detach();
+        });
+        self.auto_scroll_task = Some(task);
     }
 
     fn stop_responding_to_mouse_movements(&mut self) {
-        self.auto_scroll_epoch += 1;
+        self.auto_scroll_task = None;
     }
 }
 
