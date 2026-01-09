@@ -349,6 +349,14 @@ impl TextEditor {
         self.hover_item = None;
     }
 
+    fn character_mouse_is_on_top_of(&self, cx: &App) -> Option<Count8> {
+        let mouse = self.last_in_frame_mouse_position?;
+        let mut pos = self.index_for_mouse_position(mouse)?;
+        pos.col = pos.col.saturating_sub(1);
+        let state = self.state.read(cx);
+        Some(state.loc8_to_offset8(pos))
+    }
+
     // returns if state changed
     // if no hover should be present, stop it
     // if moved since last hover, start a timer for a new one
@@ -378,11 +386,8 @@ impl TextEditor {
 
         if let Some(ref hover) = self.hover_item {
             // only change if we move out of the hover item, or if version has changed
-            let position_changed = self.index_for_mouse_position(mouse)
-                .is_none_or(|pos| {
-                    let offset8 = self.state.read(cx).loc8_to_offset8(pos);
-                    !hover.span.contains(&offset8)
-                });
+            let position_changed = self.character_mouse_is_on_top_of(cx)
+                .is_none_or(|pos| !hover.span.contains(&pos));
             let version_changed = version != self.state.read(cx).version();
             if position_changed || version_changed {
                 return spawn_task(self, cx);
@@ -410,15 +415,11 @@ impl TextEditor {
                 return;
             };
             // show hover if directly on a position
-            let Some(pos) = app.read_entity(&editor, |e, _| {
-                e.last_in_frame_mouse_position
-                    .and_then(|mouse| e.index_for_mouse_position(mouse))
-            }).ok().flatten() else {
+            let Some(offset8) = app.read_entity(&editor, |e, cx| e.character_mouse_is_on_top_of(cx)).ok().flatten() else {
                 return;
             };
 
             app.update_entity(&editor, |editor, cx| {
-                let offset8 = editor.state.read(cx).loc8_to_offset8(pos);
                 let diagnostic = editor.state.read(cx).diagnostics().diagnostic_for_point(offset8).cloned();
                 editor.hover_item = diagnostic;
                 cx.notify();

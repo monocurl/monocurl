@@ -69,7 +69,7 @@ impl DiagnosticContainer {
             .enumerate()
             .flat_map(|(i, diag)| vec![
                 Event::Start(diag.span.start, i),
-                Event::End(diag.span.end + 1, i),
+                Event::End(diag.span.end, i),
             ])
             .collect::<Vec<_>>();
 
@@ -127,7 +127,7 @@ impl DiagnosticContainer {
     }
 
     pub fn diagnostic_for_point(&self, point: Count8) -> Option<&Diagnostic> {
-        self.diagnostics.iter().find(|d| d.span.start <= point && point <= d.span.end)
+        self.diagnostics.iter().find(|d| d.span.start <= point && point < d.span.end)
     }
 
     pub fn diagnostics_list(&self) -> &[Diagnostic] {
