@@ -610,10 +610,10 @@ impl TextEditor {
     }
 
     fn reshape_visible_lines_with_stale_attributes(&mut self, window: &mut Window, cx: &mut App) {
+        let wrap_width = self.wrap_width();
         for line in self.visible_lines() {
             let needs_reshaping = self.state.read(cx).line_has_new_attributes(line);
             if needs_reshaping {
-                let wrap_width = self.wrap_width();
                 let new_line = self.reshape_line(wrap_width, line, window, cx);
                 self.line_map.replace_lines(line..line + 1, std::iter::once(new_line));
             }
@@ -807,56 +807,34 @@ impl TextEditor {
 
     fn untab(&mut self, _: &Untab, window: &mut Window, cx: &mut Context<Self>) {
         self.undo_group_boundary();
-        if self.cursor.is_empty() {
-            let line_start = self.state.read(cx).loc8_to_offset8(Location8 {
-                row: self.cursor.head.row,
-                col: 0
-            });
-            let cursor_offset = self.state.read(cx).loc8_to_offset8(self.cursor.head);
-            let text_before = self.state.read(cx).read(line_start..cursor_offset);
+        let start_loc = self.cursor.anchor.min(self.cursor.head);
+        let end_loc = self.cursor.anchor.max(self.cursor.head);
 
-            let spaces_to_remove = text_before.chars()
-                .rev()
+        for row in (start_loc.row..=end_loc.row).rev() {
+            let state = self.state.read(cx);
+            let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
+            let line_end = state.loc8_to_offset8(Location8 { row: row + 1, col: 0 })
+                .min(state.len());
+            let line_text = state.read(line_start..line_end);
+
+            let spaces_to_remove = line_text.chars()
                 .take(TAB_SIZE)
                 .take_while(|&c| c == ' ')
                 .count();
 
             if spaces_to_remove > 0 {
-                let remove_start = cursor_offset.saturating_sub(spaces_to_remove);
-                self.replace(remove_start..cursor_offset, "", window, cx);
-                self.move_to(self.state.read(cx).offset8_to_loc8(remove_start), false, true, cx);
-                self.reset_cursor_blink(cx);
-            }
-        } else {
-            let start_loc = self.cursor.anchor.min(self.cursor.head);
-            let end_loc = self.cursor.anchor.max(self.cursor.head);
+                self.replace(line_start..line_start + spaces_to_remove, "", window, cx);
 
-            for row in (start_loc.row..=end_loc.row).rev() {
-                let state = self.state.read(cx);
-                let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
-                let line_end = state.loc8_to_offset8(Location8 { row: row + 1, col: 0 })
-                    .min(state.len());
-                let line_text = state.read(line_start..line_end);
-
-                let spaces_to_remove = line_text.chars()
-                    .take(TAB_SIZE)
-                    .take_while(|&c| c == ' ')
-                    .count();
-
-                if spaces_to_remove > 0 {
-                    self.replace(line_start..line_start + spaces_to_remove, "", window, cx);
-
-                    if row == self.cursor.anchor.row {
-                        self.cursor.anchor.col = self.cursor.anchor.col.saturating_sub(spaces_to_remove);
-                    }
-                    if row == self.cursor.head.row {
-                        self.cursor.head.col = self.cursor.head.col.saturating_sub(spaces_to_remove);
-                    }
+                if row == self.cursor.anchor.row {
+                    self.cursor.anchor.col = self.cursor.anchor.col.saturating_sub(spaces_to_remove);
+                }
+                if row == self.cursor.head.row {
+                    self.cursor.head.col = self.cursor.head.col.saturating_sub(spaces_to_remove);
                 }
             }
-
-            self.reset_cursor_blink(cx);
         }
+
+        self.reset_cursor_blink(cx);
         self.undo_group_boundary();
     }
 }
