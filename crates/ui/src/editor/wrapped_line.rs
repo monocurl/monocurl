@@ -56,7 +56,7 @@ impl WrappedLine {
 
                 let (start_boundary, start_x) = word_start;
                 // try to wrap at start of word it fits
-                let (wrap_boundary, wrap_x) = if next_x - start_x <= wrap_width {
+                let (wrap_boundary, wrap_x) = if next_x - start_x + *indent <= wrap_width {
                     // wrap at start of word
                     (start_boundary, start_x)
                 } else {
