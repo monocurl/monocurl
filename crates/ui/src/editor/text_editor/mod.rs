@@ -19,7 +19,7 @@ use crate::actions::*;
 
 const CURSOR_BLINK_INTERVAL: Duration = Duration::from_millis(500);
 const CURSOR_BLINK_DELAY: Duration = Duration::from_millis(500);
-const HOVER_MIN_DURATION: Duration = Duration::from_millis(500);
+const HOVER_MIN_DURATION: Duration = Duration::from_millis(250);
 const MULTI_CLICK_TOLERANCE: Pixels = px(2.0);
 const TAB_SIZE: usize = 4;
 const SCROLL_MARGIN: f32 = 4.0;
@@ -366,7 +366,7 @@ impl TextEditor {
             true
         };
 
-        if self.is_selecting || !self.cursor.is_empty() {
+        if self.is_selecting {
             return reset(self);
         }
 
