@@ -51,7 +51,7 @@ impl CompilationService {
                                             end: pos + len,
                                         },
                                         title: "Unterminated String Literal".to_string(),
-                                        message: "".to_string()
+                                        message: "message".to_string()
                                     });
                                 }
                             },

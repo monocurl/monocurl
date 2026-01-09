@@ -11,7 +11,7 @@ pub enum DiagnosticType {
     RuntimeError,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub dtype: DiagnosticType,
     pub span: Span8,

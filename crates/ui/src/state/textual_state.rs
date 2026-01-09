@@ -126,6 +126,10 @@ impl TextualState {
             .collect()
     }
 
+    pub fn version(&self) -> usize {
+        self.version
+    }
+
     pub fn len(&self) -> Count8 {
         self.text_rope.codeunits()
     }

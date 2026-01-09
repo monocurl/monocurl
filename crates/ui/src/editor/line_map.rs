@@ -190,8 +190,6 @@ impl LineMap {
             point.y - wrapped_line_no as f32 * self.line_height
         );
 
-        let debug = leaf.line.closest_index(local_position, self.line_height);
-        println!("Local Position {:?} Answer {:?}", local_position, debug);
         leaf.line.closest_index(local_position, self.line_height)
             .map(|col| Location8 { row: prewrapped_line_no, col })
             .map_err(|col| Location8 { row: prewrapped_line_no, col })
