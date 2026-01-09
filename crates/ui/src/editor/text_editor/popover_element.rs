@@ -1,5 +1,5 @@
 use gpui::{
-    AnyElement, App, Bounds, BoxShadow, Element, ElementId, Entity, GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, Style, Styled, Window, div, point, px, relative, rgb, size
+    AnyElement, App, Bounds, BoxShadow, Element, ElementId, Entity, GlobalElementId, Hsla, InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, Style, Styled, Window, div, point, px, relative, rgb, size
 };
 use crate::{
     editor::text_editor::TextEditor,
@@ -26,15 +26,11 @@ struct PopoverPlacement {
 
 impl PopoverElement {
     fn hovered_diagnostic(&mut self, cx: &mut App) -> Option<DiagnosticPopoverState> {
-        let editor = self.editor.read(cx);
-        let Some(loc) = editor.hover_confirmed_position else {
-            return None;
-        };
+        let editor =  self.editor.read(cx);
+
         editor
-            .state
-            .read(cx)
-            .diagnostics()
-            .diagnostic_for_point(loc)
+            .hover_item
+            .as_ref()
             .map(|d| {
                 let state = editor.state.read(cx);
                 let location8 = state.offset8_to_loc8(d.span.start);
@@ -61,20 +57,22 @@ impl PopoverElement {
         target_position: Point<Pixels>,
         container_bounds: Bounds<Pixels>,
     ) -> PopoverPlacement {
-        let margin = px(4.0);
-        let below_y = target_position.y + line_height + margin;
-        let above_y = target_position.y - popover_size.height - margin;
+        let below_y = target_position.y + line_height;
+        let above_y = target_position.y - popover_size.height;
 
-        let mut x = target_position.x;
-        x = x.max(container_bounds.left() + margin);
-        x = x.min(container_bounds.right() - popover_size.width - margin);
+        let margin = px(8.0);
+        let x = target_position.x
+            .clamp(
+                container_bounds.left() + margin,
+                container_bounds.right() - popover_size.width - margin,
+            );
 
         let space_below = container_bounds.bottom() - (target_position.y + line_height + margin);
-        let space_above = target_position.y - margin - container_bounds.top();
+        let space_above = target_position.y - container_bounds.top();
 
-        let y = if space_below >= popover_size.height + margin {
+        let y = if space_below >= popover_size.height {
             below_y
-        } else if space_above >= popover_size.height + margin {
+        } else if space_above >= popover_size.height {
             above_y
         } else if space_below > space_above {
             below_y
@@ -87,16 +85,19 @@ impl PopoverElement {
         }
     }
 
-    fn build_popover(
+    fn build_diagnostic_popover(
         diagnostic: &Diagnostic,
     ) -> AnyElement {
         let color = diagnostic.color(&TextEditorStyles::default());
         let padding = px(8.0);
+        let margin = px(4.0);
         let max_w = px(400.0);
 
         div()
             .flex()
             .max_w(max_w)
+            .pb(margin)
+            .pt(margin)
             .child(
                 div()
                     .p(padding)
@@ -125,6 +126,11 @@ impl PopoverElement {
                             .child(diagnostic.message.clone())
                     )
             )
+            .on_mouse_move(|_, window, app| {
+                // if mouse moved onto here, we don't want to hide the popover
+                window.prevent_default();
+                app.stop_propagation();
+            })
             .into_any_element()
     }
 }
@@ -161,7 +167,7 @@ impl Element for PopoverElement {
 
         if let Some(ref diag_state) = diagnostic_state {
 
-            let mut popover_content = Self::build_popover(&diag_state.diagnostic);
+            let mut popover_content = Self::build_diagnostic_popover(&diag_state.diagnostic);
             let content_layout_id = popover_content.request_layout(window, cx);
 
             child = Some((popover_content, diag_state.pos_in_container, content_layout_id));

@@ -4,6 +4,7 @@ use std::{time::Duration};
 use std::ops::Range;
 
 use crate::editor::text_editor::popover_element::PopoverElement;
+use crate::state::diagnostics::Diagnostic;
 use crate::state::textual_state::TextualState;
 use crate::editor::line_shaper::LineShaper;
 use crate::editor::wrapped_line::WrappedLine;
@@ -135,7 +136,7 @@ pub struct TextEditor {
     last_in_frame_mouse_position: Option<Point<Pixels>>,
     last_hover_start: Option<(Point<Pixels>, usize, Pixels)>,
     hover_task: Option<Task<()>>,
-    hover_confirmed_position: Option<Count8>,
+    hover_item: Option<Diagnostic>,
 
     last_click_position: Point<Pixels>,
     click_count: usize,
@@ -166,13 +167,15 @@ impl TextEditor {
                 e.reset_cursor_blink(cx);
             } else {
                 // stop blinking if we are
+                e.stop_hover();
                 e.cursor_blink_task = None;
                 e.cursor_blink_state = true;
             }
             cx.notify()
         });
 
-        let focus_out_subscription = cx.on_focus_lost(window, |editor, _w, cx| {
+        let focus_out_subscription = cx.on_focus_lost(window, |editor, _window, cx| {
+            editor.reset_hover_task_if_necessary(cx);
             editor.cursor_blink_task = None;
             editor.cursor_blink_state = false;
             cx.notify()
@@ -205,7 +208,7 @@ impl TextEditor {
 
             last_hover_start: None,
             hover_task: None,
-            hover_confirmed_position: None,
+            hover_item: None,
 
             last_click_position: point(px(-1.0), px(0.0)),
             click_count: 0,
@@ -340,13 +343,27 @@ impl TextEditor {
 }
 
 impl TextEditor {
+    fn stop_hover(&mut self) {
+        self.hover_task = None;
+        self.last_hover_start = None;
+        self.hover_item = None;
+    }
+
+    // returns if state changed
+    // if no hover should be present, stop it
+    // if moved since last hover, start a timer for a new one
+    // if not moved, do nothing
     fn reset_hover_task_if_necessary(&mut self, cx: &mut Context<Self>) -> bool {
         let reset = |this: &mut Self| -> bool {
-            let ret = this.hover_confirmed_position.is_some();
-            this.hover_task = None;
-            this.last_hover_start = None;
-            this.hover_confirmed_position = None;
+            let ret = this.hover_item.is_some();
+            this.stop_hover();
             ret
+        };
+        let spawn_task = |this: &mut Self, cx: &mut Context<Self>| {
+            reset(this);
+            this.last_hover_start = None;
+            this.reset_hover_task(cx);
+            true
         };
 
         if self.is_selecting || !self.cursor.is_empty() {
@@ -356,19 +373,33 @@ impl TextEditor {
         let Some(mouse) = self.last_in_frame_mouse_position else {
             return reset(self);
         };
-
         let scroll = self.scroll_handle.offset().y;
         let version = self.state.read(cx).version();
-        if self.last_hover_start.is_none() || (mouse, version, scroll) != self.last_hover_start.unwrap() {
-            reset(self);
-            self.last_hover_start = Some((mouse, version, scroll));
-            self.reset_hover_task(cx);
 
-            true
+        if let Some(ref hover) = self.hover_item {
+            // only change if we move out of the hover item, or if version has changed
+            let position_changed = self.index_for_mouse_position(mouse)
+                .is_none_or(|pos| {
+                    let offset8 = self.state.read(cx).loc8_to_offset8(pos);
+                    !hover.span.contains(&offset8)
+                });
+            let version_changed = version != self.state.read(cx).version();
+            if position_changed || version_changed {
+                return spawn_task(self, cx);
+            }
+            else {
+                return false;
+            }
         }
         else {
-            false
+            if self.last_hover_start.is_none() || (mouse, version, scroll) != self.last_hover_start.unwrap() {
+                return spawn_task(self, cx);
+            }
+            else {
+                false
+            }
         }
+
     }
 
     fn reset_hover_task(&mut self, cx: &mut Context<Self>) {
@@ -388,7 +419,8 @@ impl TextEditor {
 
             app.update_entity(&editor, |editor, cx| {
                 let offset8 = editor.state.read(cx).loc8_to_offset8(pos);
-                editor.hover_confirmed_position = Some(offset8);
+                let diagnostic = editor.state.read(cx).diagnostics().diagnostic_for_point(offset8).cloned();
+                editor.hover_item = diagnostic;
                 cx.notify();
             }).ok();
         }));
