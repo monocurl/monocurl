@@ -126,6 +126,10 @@ impl DiagnosticContainer {
         self.range_map_dirty = true;
     }
 
+    pub fn diagnostic_for_point(&self, point: Count8) -> Option<&Diagnostic> {
+        self.diagnostics.iter().find(|d| d.span.start <= point && point <= d.span.end)
+    }
+
     pub fn diagnostics_list(&self) -> &[Diagnostic] {
         &self.diagnostics
     }

@@ -124,17 +124,19 @@ impl WrappedLine {
             let (next_wrap_boundary, _) = self.wrap_boundaries[next_wrap_boundary_ix];
             let run = &self.unwrapped_layout.runs[next_wrap_boundary.run_ix];
             let glyph = &run.glyphs[next_wrap_boundary.glyph_ix];
-            glyph.index
+            glyph.index - 1
         } else {
             self.unwrapped_layout.len
         };
 
-        let mut x_offset = px(0.0);
-        for (boundary, indent) in &self.wrap_boundaries[..wrapped_line_ix] {
-            x_offset += self.unwrapped_layout.runs[boundary.run_ix]
+        let x_offset = if wrapped_line_ix == 0 {
+            px(0.0)
+        } else {
+            let (boundary, indent) = &self.wrap_boundaries[wrapped_line_ix - 1];
+            self.unwrapped_layout.runs[boundary.run_ix]
                 .glyphs[boundary.glyph_ix]
-                .position.x - *indent;
-        }
+                .position.x - *indent
+        };
 
         let adjusted_x = position.x + x_offset;
         let raw = self.unwrapped_layout.closest_index_for_x(adjusted_x);
