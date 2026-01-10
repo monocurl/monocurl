@@ -3,7 +3,7 @@ use std::ops::Range;
 pub type Count8 = usize;
 pub type Count16 = usize;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Location8 {
     pub row: usize,
     pub col: Count8,

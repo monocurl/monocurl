@@ -31,24 +31,24 @@ impl IntoElement for TextElement {
 }
 
 impl TextElement {
-    fn compute_cursor_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, window: &Window) -> Option<Bounds<Pixels>> {
-        if !editor.cursor.is_empty() || !editor.cursor_blink_state || !editor.focus_handle.is_focused(window) {
+    fn compute_cursor_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, window: &Window, cx: &App) -> Option<Bounds<Pixels>> {
+        if !editor.cursor(cx).is_empty() || !editor.cursor_blink_state || !editor.focus_handle.is_focused(window) {
             return None;
         }
 
-        let Point { x, y } = editor.line_map.point_for_location(editor.cursor.head);
+        let Point { x, y } = editor.line_map.point_for_location(editor.cursor(cx).head);
         Some(Bounds::new(
             point(bounds.left() + editor.gutter_width + x, bounds.top() + y),
             size(px(1.5), editor.line_height),
         ))
     }
 
-    fn compute_active_line_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, window: &Window) -> Option<Bounds<Pixels>> {
-        if !editor.cursor.is_empty() || !editor.focus_handle.is_focused(window) {
+    fn compute_active_line_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, window: &Window, cx: &App) -> Option<Bounds<Pixels>> {
+        if !editor.cursor(cx).is_empty() || !editor.focus_handle.is_focused(window) {
             return None;
         }
 
-        let line_num = editor.cursor.head.row as usize;
+        let line_num = editor.cursor(cx).head.row as usize;
         let y_range = editor.line_map.y_range(line_num..line_num + 1);
         Some(Bounds::new(
             point(bounds.left(), bounds.top() + y_range.start),
@@ -56,13 +56,14 @@ impl TextElement {
         ))
     }
 
-    fn compute_selection_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, visible_lines: Range<usize>, window: &Window) -> Vec<Bounds<Pixels>> {
-        if editor.cursor.is_empty() || !editor.focus_handle.is_focused(window) {
+    fn compute_selection_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, visible_lines: Range<usize>, window: &Window, cx: &App) -> Vec<Bounds<Pixels>> {
+        if editor.cursor(cx).is_empty() || !editor.focus_handle.is_focused(window) {
             return Vec::new();
         }
 
-        let start_loc = editor.cursor.anchor.min(editor.cursor.head);
-        let end_loc = editor.cursor.anchor.max(editor.cursor.head);
+        let cursor = editor.cursor(cx);
+        let start_loc = cursor.anchor.min(cursor.head);
+        let end_loc = cursor.anchor.max(cursor.head);
 
         let visible_selection = visible_lines.start.max(start_loc.row) ..
             visible_lines.end.min(end_loc.row + 1);
@@ -148,7 +149,7 @@ impl TextElement {
 
     fn paint_gutter_line(&self, line_num: usize, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let editor = self.editor.read(cx);
-        let line_range = editor.cursor.line_range();
+        let line_range = editor.cursor(cx).line_range();
         let line_selected = line_range.contains(&line_num);
         let gutter_color = if line_selected {
             editor.text_styles.gutter_active_color
@@ -269,9 +270,9 @@ impl Element for TextElement {
                 })
                 .collect();
 
-            let cursor_bounds = self.compute_cursor_bounds(editor, bounds, window);
-            let active_line_bounds = self.compute_active_line_bounds(editor, bounds, window);
-            let selection_bounds = self.compute_selection_bounds(editor, bounds, visible_lines, window);
+            let cursor_bounds = self.compute_cursor_bounds(editor, bounds, window, cx);
+            let active_line_bounds = self.compute_active_line_bounds(editor, bounds, window, cx);
+            let selection_bounds = self.compute_selection_bounds(editor, bounds, visible_lines, window, cx);
             let scroll_wheel_bounds = self.compute_scroll_bar_state(editor, bounds, window, cx);
 
             PrepaintState {

@@ -23,9 +23,38 @@ pub struct AutoCompleteState {
     pub selected_index: usize,
 }
 
-/// State that's relevant to the text editor
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
+pub struct Cursor {
+    pub anchor: Location8,
+    pub head: Location8,
+}
+
+impl Cursor {
+    pub fn collapsed(pos: Location8) -> Self {
+        Self { anchor: pos, head: pos }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.anchor == self.head
+    }
+
+    pub fn line_range(&self) -> Range<usize> {
+        let start_row = self.anchor.min(self.head).row as usize;
+        let end_row = self.anchor.max(self.head).row as usize;
+        start_row..end_row + 1
+    }
+
+    pub fn reversed(&self) -> bool {
+        self.head < self.anchor
+    }
+}
+
+
+/// State that's relevant to the text editor + modified by compilation / lexing services
 #[derive(Default)]
 pub struct TextualState {
+    cursor: Cursor,
+
     text_rope: Rope<TextAggregate>,
 
     // lex rope is the actual latest lexed attributes
@@ -165,6 +194,36 @@ impl TextualState {
 
     pub fn span16_to_span8(&self, span16: &Span16) -> Span8 {
         self.offset16_to_offset8(span16.start)..self.offset16_to_offset8(span16.end)
+    }
+}
+
+impl TextualState {
+    pub fn cursor(&self) -> Cursor {
+        self.cursor
+    }
+
+    pub fn cursor_range(&self) -> Span8 {
+        let start = self.loc8_to_offset8(self.cursor.anchor.min(self.cursor.head));
+        let end = self.loc8_to_offset8(self.cursor.anchor.max(self.cursor.head));
+        start..end
+    }
+
+    pub fn set_cursor_head(&mut self, head: Location8) {
+        self.set_cursor(Cursor {
+            anchor: self.cursor.anchor,
+            head,
+        });
+    }
+
+    pub fn set_cursor_anchor(&mut self, anchor: Location8) {
+        self.set_cursor(Cursor {
+            anchor,
+            head: self.cursor.head,
+        });
+    }
+
+    pub fn set_cursor(&mut self, cursor: Cursor) {
+        self.cursor = cursor;
     }
 }
 
