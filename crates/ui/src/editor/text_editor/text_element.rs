@@ -317,11 +317,6 @@ impl Element for TextElement {
                 }
             });
         }
-        self.editor.update(cx, |editor, cx| {
-            if editor.reset_hover_task_if_necessary(cx) {
-                cx.notify();
-            }
-        });
         window.handle_input(
             &focus_handle,
             ElementInputHandler::new(bounds, self.editor.clone()),

@@ -333,6 +333,21 @@ impl TextEditor {
 
         if del.is_empty() && new_text.len() == 1 {
             let ch = new_text.chars().next().unwrap();
+            let handle_closing = || {
+                let state = self.state.read(cx);
+                if del.start == state.len() {
+                    return None;
+                }
+                let next = state.read(del.start..del.start + 1);
+                if next.chars().next().unwrap() == ch {
+                    // already exists
+                    return Some(String::new());
+                }
+                else {
+                    return None;
+                }
+            };
+
             match ch {
                 '(' | '{' | '[' | '"' | '\'' => {
                     let state = self.state.read(cx);
@@ -340,6 +355,9 @@ impl TextEditor {
                     let start_of_line = state.loc8_to_offset8(Location8 { row: line.row, col: 0 });
                     let line_content = self.state.read(cx).read(start_of_line..del.start);
                     if in_literal(&line_content) {
+                        if ch == '"' || ch == '\'' {
+                            return handle_closing();
+                        }
                         return None;
                     }
                     return Some(format!("{}{}", ch, match ch {
@@ -352,18 +370,7 @@ impl TextEditor {
                     }));
                 },
                 ')' | '}' | ']' => {
-                    let state = self.state.read(cx);
-                    if del.start == state.len() {
-                        return None;
-                    }
-                    let next = state.read(del.start..del.start + 1);
-                    if next.chars().next().unwrap() == ch {
-                        // already exists
-                        return Some(String::new());
-                    }
-                    else {
-                        return None;
-                    }
+                    return handle_closing();
                 },
                 _ => return None,
             }
