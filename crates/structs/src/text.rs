@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::ops::{Add, Range};
 
 pub type Count8 = usize;
 pub type Count16 = usize;
@@ -7,6 +7,17 @@ pub type Count16 = usize;
 pub struct Location8 {
     pub row: usize,
     pub col: Count8,
+}
+
+impl Add for Location8 {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self {
+            row: self.row + other.row,
+            col: self.col + other.col,
+        }
+    }
 }
 
 impl Ord for Location8 {

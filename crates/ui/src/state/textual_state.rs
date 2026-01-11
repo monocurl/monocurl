@@ -1,26 +1,211 @@
-use std::ops::Range;
+use std::{cell::RefCell, isize, ops::Range, rc::Rc};
 
-use gpui::App;
+use gpui::{App, Context, Entity, ScrollHandle, Window};
 use lexer::token::Token;
+use open::that;
+use smallvec::SmallVec;
 use structs::{rope::{RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
 
-use crate::state::diagnostics::{Diagnostic, DiagnosticContainer};
+use crate::{editor::text_editor::TextEditor, state::diagnostics::{Diagnostic, DiagnosticContainer}};
 
 pub type LexData = Token;
 pub type StaticAnalysisData = i32;
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AutoCompleteItem {
     pub head: String,
     pub replacement: String,
-    pub cursor_position: isize,
+    pub cursor_anchor_delta: Location8,
+    pub cursor_head_delta: Location8,
+}
+
+impl AutoCompleteItem {
+    pub fn apply(&self, replacement_size: Count8, to: &mut TextEditor, state: Entity<TextualState>, window: &mut Window, cx: &mut App) {
+        let cursor = {
+            let state = state.read(cx);
+            state.loc8_to_offset8(state.cursor().anchor)
+        };
+        let base = cursor - replacement_size;
+        let range_utf8 = base..cursor;
+        let new_text = &self.replacement;
+        to.replace(range_utf8, new_text, window, cx);
+        state.update(cx, |state, cx| {
+            let base_loc8 = state.offset8_to_loc8(base);
+            let cursor = Cursor {
+                anchor: base_loc8 + self.cursor_anchor_delta,
+                head: base_loc8 + self.cursor_head_delta,
+            };
+            state.set_cursor(cursor, cx);
+        });
+    }
 }
 
 #[derive(Default)]
 pub struct AutoCompleteState {
-    // empty indicates no autocomplete active
+    // expected items at this position
     pub items: Vec<AutoCompleteItem>,
+    // index, and the the indices within head to be highlighted
+    pub filtered_items: Vec<(usize, SmallVec<[usize; 8]>)>,
+
+    // where we expect the cursor to be, if it is not here, then the autocomplete is disabled
+    cursor_at: Location8,
+    // the alphanumeric word that cursor lies after (possibly empty)
+    pub cursor_token: String,
     pub selected_index: usize,
+    pub forcefully_disabled: bool,
+    pub scroll_handle: ScrollHandle,
+}
+
+impl AutoCompleteState {
+    fn alphanumeric(&self, ch: char) -> bool {
+        ch.is_alphanumeric() || ch == '_' || ch == ':'
+    }
+
+    fn refilter(&mut self, can_only_shrink: bool) {
+        let base_indices: Vec<_> = if can_only_shrink {
+            self.filtered_items
+                .iter()
+                .map(|(i, _)| *i)
+                .collect()
+        } else {
+            (0..self.items.len()).collect()
+        };
+
+        self.filtered_items = base_indices.into_iter()
+            .filter_map(|i| {
+                let item = &self.items[i];
+                // only allow if cursor_token is a subsequence of item.head
+                let mut ct_iter = self.cursor_token.chars();
+                let mut hd_iter = item.head.chars().enumerate();
+                let mut subsequence = true;
+                let mut indices = SmallVec::new();
+                while let Some(ct_ch) = ct_iter.next() {
+                    let mut found = false;
+                    while let Some((idx, hd_ch)) = hd_iter.next() {
+                        if ct_ch.to_ascii_lowercase() == hd_ch.to_ascii_lowercase() {
+                            found = true;
+                            indices.push(idx);
+                            break;
+                        }
+                    }
+                    if !found {
+                        subsequence = false;
+                        break;
+                    }
+                }
+                if subsequence {
+                    Some((i, indices))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // heuristic for ordering items
+        self.filtered_items.sort_by_key(|(idx, indices)| {
+            (indices.iter().map(|x| *x * *x).sum::<usize>(), self.items[*idx].head.len())
+        });
+
+        self.scroll_handle.scroll_to_item(0);
+        self.selected_index = self.filtered_items.get(0)
+            .map(|(i, _)| *i)
+            .unwrap_or(0);
+    }
+
+    pub fn transition(&mut self, old: Span8, new: &str, state: &TextualState) {
+        if new.is_empty() && old.len() == 1 {
+            if self.cursor_token.len() == 1 {
+                self.disable();
+            }
+            else if !self.forcefully_disabled {
+                // assume backspace
+                self.cursor_token.pop();
+                self.cursor_at.col = self.cursor_at.col.saturating_sub(old.len());
+                self.refilter(false);
+            }
+        }
+        else if new.len() == 1 && old.is_empty() && self.alphanumeric(new.chars().next().unwrap()) {
+            if self.forcefully_disabled {
+                // compute new state and enable
+                self.forcefully_disabled = false;
+                self.cursor_at = state.cursor().head;
+                self.cursor_at.col += new.len();
+                let chars_rev: String = state.text_rope
+                    .rev_iterator(state.loc8_to_offset8(self.cursor_at))
+                    .take_while(|c| self.alphanumeric(*c))
+                    .collect();
+                self.cursor_token = chars_rev.chars().rev().collect();
+                self.refilter(false);
+            }
+            else {
+                self.cursor_at.col += new.len();
+                self.cursor_token.push_str(new);
+                self.refilter(true);
+            }
+        }
+        else {
+            self.disable();
+        }
+    }
+
+    pub fn apply_selected(this: &Rc<RefCell<Self>>, editor: &mut TextEditor, state: Entity<TextualState>, window: &mut Window, cx: &mut Context<TextEditor>) {
+        let index = this.borrow().selected_index;
+        Self::apply_index(this, index, editor, state, window, cx);
+    }
+
+    pub fn apply_index(this: &Rc<RefCell<Self>>, index: usize, editor: &mut TextEditor, state: Entity<TextualState>, window: &mut Window, cx: &mut Context<TextEditor>) {
+        let (replacement_size, item) = {
+            let this = this.borrow();
+            let item = this.items[index].clone();
+            let replacement_size = this.cursor_token.len();
+            (replacement_size, item)
+        };
+        item.apply(replacement_size, editor, state, window, cx);
+        editor.reset_cursor_blink(cx);
+        this.borrow_mut().disable();
+    }
+
+    pub fn cursor_moved_to(&mut self, new_cursor: &Cursor) {
+        if new_cursor.is_empty() && new_cursor.head != self.cursor_at {
+            self.disable();
+        }
+    }
+
+    pub fn set_items(&mut self, items: Vec<AutoCompleteItem>) {
+        self.items = items;
+        self.refilter(false);
+    }
+
+    pub fn disable(&mut self) {
+        self.cursor_token = "".to_string();
+        self.selected_index = 0;
+        self.forcefully_disabled = true;
+    }
+
+    pub fn move_index(&mut self, delta: isize) {
+        let current_index_of_index = self.filtered_items.iter().position(|(i, _)| *i == self.selected_index)
+            .unwrap_or(0);
+        let new_index = (current_index_of_index as isize + delta).clamp(0, ( self.filtered_items.len() as isize - 1).max(0)) as usize;
+        if new_index < self.filtered_items.len() {
+            self.selected_index = self.filtered_items[new_index].0;
+            self.scroll_handle.scroll_to_item(new_index);
+        }
+        else {
+            self.selected_index = 0;
+        }
+    }
+
+    pub fn recheck_should_display(&mut self, cursor: Cursor) -> bool {
+        let check = Cursor {
+            anchor: self.cursor_at,
+            head: self.cursor_at,
+        };
+        if cursor != check {
+            self.disable();
+            return false;
+        }
+
+        !self.forcefully_disabled && !self.filtered_items.is_empty()
+    }
 }
 
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
@@ -68,23 +253,34 @@ pub struct TextualState {
     // we must relayout the lines corresponding to this span
     region_needing_relayout: Option<Range<usize>>,
 
-    autocomplete: AutoCompleteState,
+    autocomplete: Rc<RefCell<AutoCompleteState>>,
     diagnostics: DiagnosticContainer,
     dirty_diagnostic_lines: Rope<RLEAggregate<bool>>,
 
     version: usize,
 
-    listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send>>,
+    text_listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send>>,
+    cursor_listeners: Vec<Box<dyn FnMut(&Cursor, &mut App) + Send>>,
 }
 
 
 impl TextualState {
-    pub fn add_listener(&mut self, f: impl FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send + 'static) {
-        self.listeners.push(Box::new(f));
+    pub fn add_cursor_listener(&mut self, f: impl FnMut(&Cursor, &mut App) + Send + 'static) {
+        self.cursor_listeners.push(Box::new(f));
     }
 
-    pub fn notify_listeners(&mut self, span: Span8, new_text: &str, cx: &mut App) {
-        for listener in &mut self.listeners {
+    pub fn add_text_listener(&mut self, f: impl FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send + 'static) {
+        self.text_listeners.push(Box::new(f));
+    }
+
+    fn notify_cursor_listeners(&mut self, cx: &mut App) {
+        for listener in &mut self.cursor_listeners {
+            listener(&self.cursor, cx);
+        }
+    }
+
+    fn notify_text_listeners(&mut self, span: Span8, new_text: &str, cx: &mut App) {
+        for listener in &mut self.text_listeners {
             listener(span.clone(), new_text, &self.text_rope, self.version, cx);
         }
     }
@@ -102,6 +298,8 @@ impl TextualState {
             let end_loc = self.offset8_to_loc8(span.start + new_text.len());
             start_loc .. end_loc.row + 1
         };
+
+        self.autocomplete.borrow_mut().transition(span.clone(), new_text, self);
 
         self.diagnostics.apply_replacement(span.clone(), new_text.len());
         self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
@@ -144,7 +342,7 @@ impl TextualState {
         );
 
         self.version += 1;
-        self.notify_listeners(span, new_text, cx);
+        self.notify_text_listeners(span, new_text, cx);
 
         (del_range, ins_range)
     }
@@ -208,22 +406,17 @@ impl TextualState {
         start..end
     }
 
-    pub fn set_cursor_head(&mut self, head: Location8) {
+    pub fn set_cursor_head(&mut self, head: Location8, cx: &mut App) {
         self.set_cursor(Cursor {
             anchor: self.cursor.anchor,
             head,
-        });
+        }, cx);
     }
 
-    pub fn set_cursor_anchor(&mut self, anchor: Location8) {
-        self.set_cursor(Cursor {
-            anchor,
-            head: self.cursor.head,
-        });
-    }
-
-    pub fn set_cursor(&mut self, cursor: Cursor) {
+    pub fn set_cursor(&mut self, cursor: Cursor, cx: &mut App) {
         self.cursor = cursor;
+        self.autocomplete_state().borrow_mut().cursor_moved_to(&self.cursor);
+        self.notify_cursor_listeners(cx);
     }
 }
 
@@ -455,18 +648,16 @@ impl TextualState {
 }
 
 impl TextualState {
-    pub fn autocomplete_state(&self) -> &AutoCompleteState {
-        &self.autocomplete
+    pub fn autocomplete_state(&self) -> Rc<RefCell<AutoCompleteState>> {
+        self.autocomplete.clone()
     }
 
-    pub fn set_autocomplete_state(&mut self, items: Vec<AutoCompleteItem>, for_version: usize) -> bool {
-        if for_version != self.version || self.autocomplete.items == items {
+    pub fn set_autocomplete_state(&mut self, items: Vec<AutoCompleteItem>, for_version: usize, for_cursor: Cursor) -> bool {
+        if for_version != self.version || self.cursor() != for_cursor || self.autocomplete.borrow().items == items {
             return false;
         }
-        self.autocomplete = AutoCompleteState {
-            items,
-            selected_index: 0,
-        };
+        let mut ac_state = self.autocomplete.borrow_mut();
+        ac_state.set_items(items);
         true
     }
 }

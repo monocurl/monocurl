@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{ops::Range};
 
 use gpui::{App, Bounds, DispatchPhase, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Hsla, IntoElement, LayoutId, MouseMoveEvent, Pixels, Point, Style, TextRun, Window, fill, point, px, relative, size};
 

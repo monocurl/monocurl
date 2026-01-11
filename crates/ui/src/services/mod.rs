@@ -3,7 +3,7 @@ use gpui::{App, AppContext, Context, Entity};
 use structs::{rope::{RLEAggregate, Rope, TextAggregate}, text::Span8};
 use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
-use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{LexData, TextualState}}};
+use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, TextualState}}};
 
 mod lexing;
 mod compilation;
@@ -32,6 +32,11 @@ pub enum ServiceManagerMessage {
         diagnostics: Vec<Diagnostic>,
         version: usize,
     },
+    UpdateAutocompleteSuggestions {
+        suggestions: Vec<AutoCompleteItem>,
+        cursor: Cursor,
+        version: usize,
+    },
     UpdateByteCode,
     ExecutionStateUpdated,
 }
@@ -49,9 +54,15 @@ impl ServiceManager {
 
         let weak_service_manager = cx.weak_entity();
         textual_state.update(cx, |state, _| {
-            state.add_listener(move |span, new, rope, version, app| {
+            let wsm = weak_service_manager.clone();
+            state.add_text_listener(move |span, new, rope, version, app| {
                 weak_service_manager.update(app, |service_manager, _| {
                     service_manager.on_text_rope_updated(span, new, rope.clone(), version);
+                }).unwrap();
+            });
+            state.add_cursor_listener(move |cursor, app| {
+                wsm.update(app, |service_manager, _| {
+                    service_manager.on_text_cursor_updated(*cursor);
                 }).unwrap();
             });
         });
@@ -98,6 +109,12 @@ impl ServiceManager {
         })).unwrap();
     }
 
+    fn on_text_cursor_updated(&mut self, cursor: Cursor) {
+        smol::block_on(self.compilation_tx.send(CompilationMessage::UpdateCursor {
+            cursor,
+        })).unwrap();
+    }
+
     fn on_sm_message_recv(&mut self, msg: ServiceManagerMessage, cx: &mut App) {
         match msg {
             ServiceManagerMessage::UpdateLexRope { lex_rope, version } => {
@@ -117,6 +134,13 @@ impl ServiceManager {
             ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics, version } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_runtime_diagnostics(diagnostics, version) {
+                        cx.notify();
+                    }
+                });
+            }
+            ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor, version } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_autocomplete_state(suggestions, version, cursor) {
                         cx.notify();
                     }
                 });

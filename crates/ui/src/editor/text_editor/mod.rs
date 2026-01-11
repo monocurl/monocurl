@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use crate::editor::text_editor::popover_element::PopoverElement;
 use crate::state::diagnostics::Diagnostic;
-use crate::state::textual_state::{Cursor, TextualState};
+use crate::state::textual_state::{AutoCompleteState, Cursor, TextualState};
 use crate::editor::line_shaper::LineShaper;
 use crate::editor::wrapped_line::WrappedLine;
 use crate::editor::line_map::LineMap;
@@ -102,7 +102,8 @@ pub struct TextEditor {
     last_in_frame_mouse_position: Option<Point<Pixels>>,
     last_hover_start: Option<(Point<Pixels>, usize, Pixels)>,
     hover_task: Option<Task<()>>,
-    hover_item: Option<Diagnostic>,
+    // version, diagnostic
+    hover_item: Option<(usize, Diagnostic)>,
 
     last_click_position: Point<Pixels>,
     click_count: usize,
@@ -289,7 +290,7 @@ impl TextEditor {
         }
     }
 
-    fn replace(&mut self, utf8_range: Span8, new_text: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn replace(&mut self, utf8_range: Span8, new_text: &str, window: &mut Window, cx: &mut App) {
         self.report_undo_candidate(utf8_range.clone(), new_text, cx);
 
         let (del_range, ins_range) = self.state.update(cx, |state, subcx| {
@@ -343,9 +344,8 @@ impl TextEditor {
             return reset(self);
         };
         let scroll = self.scroll_handle.offset().y;
-        let version = self.state.read(cx).version();
 
-        if let Some(ref hover) = self.hover_item {
+        if let Some((version, ref hover)) = self.hover_item {
             // only change if we move out of the hover item, or if version has changed
             let position_changed = self.character_mouse_is_on_top_of(cx)
                 .is_none_or(|pos| !hover.span.contains(&pos));
@@ -358,6 +358,7 @@ impl TextEditor {
             }
         }
         else {
+            let version = self.state.read(cx).version();
             if self.last_hover_start.is_none() || (mouse, version, scroll) != self.last_hover_start.unwrap() {
                 return spawn_task(self, cx);
             }
@@ -382,7 +383,7 @@ impl TextEditor {
 
             app.update_entity(&editor, |editor, cx| {
                 let diagnostic = editor.state.read(cx).diagnostics().diagnostic_for_point(offset8).cloned();
-                editor.hover_item = diagnostic;
+                editor.hover_item = diagnostic.map(|d| (editor.state.read(cx).version(), d));
                 cx.notify();
             }).ok();
         }));
@@ -395,12 +396,12 @@ impl TextEditor {
     }
 
     fn set_cursor(&self, cursor: Cursor, cx: &mut Context<Self>) {
-        self.state.update(cx, |state, _| {
-            state.set_cursor(cursor);
+        self.state.update(cx, |state, cx| {
+            state.set_cursor(cursor, cx);
         });
     }
 
-    fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
+    pub fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
         self.cursor_blink_state = true;
         cx.notify();
 
@@ -440,7 +441,7 @@ impl TextEditor {
     }
 
     fn select_to(&mut self, pos: Location8, mouse_origin: bool, key_origin: bool, cx: &mut Context<Self>) {
-        self.state.update(cx, |state, _| state.set_cursor_head(pos));
+        self.state.update(cx, |state, cx| state.set_cursor_head(pos, cx));
         self.reset_cursor_blink(cx);
         if !mouse_origin {
             self.discretely_scroll_to_cursor(cx);
@@ -657,12 +658,33 @@ impl TextEditor {
         }
     }
 
+    fn do_autocomplete_action(&mut self, cx: &mut Context<Self>) -> bool {
+        let state = self.state.read(cx);
+        state.autocomplete_state().borrow_mut().recheck_should_display(state.cursor())
+    }
+
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.vertical_cursor_movement(-1, cx), false, true, cx);
+        if self.do_autocomplete_action(cx) {
+            self.state.read(cx).autocomplete_state()
+                .borrow_mut()
+                .move_index(-1);
+            cx.notify();
+        }
+        else {
+            self.move_to(self.vertical_cursor_movement(-1, cx), false, true, cx);
+        }
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
-        self.move_to(self.vertical_cursor_movement(1, cx), false, true, cx);
+        if self.do_autocomplete_action(cx) {
+            self.state.read(cx).autocomplete_state()
+                .borrow_mut()
+                .move_index(1);
+            cx.notify();
+        }
+        else {
+            self.move_to(self.vertical_cursor_movement(1, cx), false, true, cx);
+        }
     }
 
     fn left(&mut self, _: &Left, _: &mut Window, cx: &mut Context<Self>) {
@@ -804,35 +826,47 @@ impl TextEditor {
     }
 
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
-        self.replace_text_in_range(None, "\n", window, cx);
+        if self.do_autocomplete_action(cx) {
+            let ac = self.state.read(cx).autocomplete_state();
+            AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
+        }
+        else {
+            self.replace_text_in_range(None, "\n", window, cx);
+        }
     }
 
     fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
-        self.undo_group_boundary(cx);
-        if self.cursor(cx).is_empty() {
-            self.replace_text_in_range(None, &" ".repeat(TAB_SIZE), window, cx);
-        } else {
-            let start_loc = self.cursor(cx).anchor.min(self.cursor(cx).head);
-            let end_loc = self.cursor(cx).anchor.max(self.cursor(cx).head);
-
-            for row in start_loc.row..=end_loc.row {
-                let line_start = self.state.read(cx).loc8_to_offset8(Location8 { row, col: 0 });
-                self.replace(line_start..line_start, &" ".repeat(TAB_SIZE), window, cx);
-            }
-
-            self.set_cursor(Cursor {
-                anchor: Location8 {
-                    row: self.cursor(cx).anchor.row,
-                    col: self.cursor(cx).anchor.col + TAB_SIZE,
-                },
-                head: Location8 {
-                    row: self.cursor(cx).head.row,
-                    col: self.cursor(cx).head.col + TAB_SIZE,
-                },
-            }, cx);
-            self.reset_cursor_blink(cx);
+        if self.do_autocomplete_action(cx) {
+            let ac = self.state.read(cx).autocomplete_state();
+            AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
         }
-        self.undo_group_boundary(cx);
+        else {
+            self.undo_group_boundary(cx);
+            if self.cursor(cx).is_empty() {
+                self.replace_text_in_range(None, &" ".repeat(TAB_SIZE), window, cx);
+            } else {
+                let start_loc = self.cursor(cx).anchor.min(self.cursor(cx).head);
+                let end_loc = self.cursor(cx).anchor.max(self.cursor(cx).head);
+
+                for row in start_loc.row..=end_loc.row {
+                    let line_start = self.state.read(cx).loc8_to_offset8(Location8 { row, col: 0 });
+                    self.replace(line_start..line_start, &" ".repeat(TAB_SIZE), window, cx);
+                }
+
+                self.set_cursor(Cursor {
+                    anchor: Location8 {
+                        row: self.cursor(cx).anchor.row,
+                        col: self.cursor(cx).anchor.col + TAB_SIZE,
+                    },
+                    head: Location8 {
+                        row: self.cursor(cx).head.row,
+                        col: self.cursor(cx).head.col + TAB_SIZE,
+                    },
+                }, cx);
+                self.reset_cursor_blink(cx);
+            }
+            self.undo_group_boundary(cx);
+        }
     }
 
     fn untab(&mut self, _: &Untab, window: &mut Window, cx: &mut Context<Self>) {
@@ -954,6 +988,7 @@ impl TextEditor {
         if self.reset_hover_task_if_necessary(cx) {
             cx.notify();
         }
+        self.state.read(cx).autocomplete_state().borrow_mut().disable();
     }
 
     fn on_mouse_up(&mut self, _event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
