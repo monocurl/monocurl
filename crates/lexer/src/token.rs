@@ -66,6 +66,7 @@ pub enum Token {
     StringLiteral,
     CharLiteral,
 
+    ArgumentLabel,
     Identifier,
 }
 
@@ -86,7 +87,8 @@ impl Token {
             IntegerLiteral | DoubleLiteral => TokenCategory::NumericLiteral,
             StringLiteral | CharLiteral => TokenCategory::TextLiteral,
             Comment => TokenCategory::Comment,
-            Identifier => TokenCategory::Identifier
+            Identifier => TokenCategory::IdentifierDeclaration,
+            ArgumentLabel => TokenCategory::IdentifierReference,
         }
     }
 }
@@ -101,7 +103,8 @@ pub enum TokenCategory {
     Punctutation,
     ControlFlow,
     NonControlFlowKeyword,
-    Identifier,
+    IdentifierReference,
+    IdentifierDeclaration,
     NumericLiteral,
     TextLiteral,
     Comment,

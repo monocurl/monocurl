@@ -108,6 +108,9 @@ where
         let start = self.byte_count - first.len_utf8();
         let mut ident = String::from(first);
         ident.push_str(&self.collect_while(|ch| ch.is_alphanumeric() || ch == '_'));
+        if self.advance_if(':') {
+            return (Token::ArgumentLabel, self.byte_count - start);
+        }
 
         let token = match ident.as_str() {
             "import" => Token::Import,

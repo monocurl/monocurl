@@ -17,6 +17,7 @@ impl WrappedLine {
         debug_assert!(!text.contains('\n'));
 
         let is_word_boundary = |ch: char| !ch.is_alphanumeric();
+        let is_big_word_boundary = |ch: char| ch.is_whitespace();
 
         let mut wrap_boundaries = SmallVec::new();
         // if first non whitespace is on first line, use that, otherwise use 0.0
@@ -24,6 +25,10 @@ impl WrappedLine {
         let mut current_x_offset = px(0.0);
 
         let mut word_start = (WrapBoundary {
+            run_ix: 0,
+            glyph_ix: 0,
+        }, px(0.0));
+        let mut big_word_start = (WrapBoundary {
             run_ix: 0,
             glyph_ix: 0,
         }, px(0.0));
@@ -48,23 +53,34 @@ impl WrappedLine {
             if is_word_boundary(prev_ch) {
                 word_start = (boundary, x);
             }
+            if is_big_word_boundary(prev_ch) {
+                big_word_start = (boundary, x);
+            }
 
             let next_x = glyphs.peek().map_or(unwrapped_layout.width, |x| x.2);
 
             if next_x + current_x_offset > wrap_width {
                 let indent = hanging_indentation.get_or_insert(px(0.0));
 
+                // first try to wrap at big word boundary
+                let (big_start_boundary, big_start_x) = big_word_start;
+
                 let (start_boundary, start_x) = word_start;
                 // try to wrap at start of word it fits
-                let (wrap_boundary, wrap_x) = if next_x - start_x + *indent <= wrap_width {
-                    // wrap at start of word
-                    (start_boundary, start_x)
-                } else {
-                    // wrap at current position
-                    (boundary, x)
-                };
+                let (wrap_boundary, wrap_x) =
+                    if next_x - big_start_x + *indent <= wrap_width {
+                        // wrap at big word boundary
+                        (big_start_boundary, big_start_x)
+                    } else if next_x - start_x + *indent <= wrap_width {
+                        // wrap at start of word
+                        (start_boundary, start_x)
+                    } else {
+                        // wrap at current position
+                        (boundary, x)
+                    };
 
-                word_start = (wrap_boundary, wrap_x);
+                word_start = word_start.max((wrap_boundary, wrap_x));
+                big_word_start = big_word_start.max((wrap_boundary, wrap_x));
 
                 wrap_boundaries.push((wrap_boundary, *indent));
                 current_x_offset = -wrap_x + *indent;

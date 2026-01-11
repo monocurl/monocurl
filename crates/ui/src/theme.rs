@@ -89,7 +89,8 @@ pub struct TextEditorStyles {
     pub text_literal_color: Hsla,
     pub comment_color: Hsla,
     pub numeric_literal_color: Hsla,
-    pub identifier_color: Hsla,
+    pub identifier_reference_color: Hsla,
+    pub identifier_declaration_color: Hsla,
     pub operator_color: Hsla,
     pub punctuation_color: Hsla,
     pub default_text_color: Hsla,
@@ -114,37 +115,31 @@ pub struct TextEditorStyles {
 impl Default for TextEditorStyles {
     fn default() -> Self {
         Self {
-            bg_color: gpui::hsla(0.1, 0.1, 0.98, 1.0),
-
+            bg_color: gpui::hsla(0.61, 0.23, 0.95, 1.0),
             text_font: gpui::font(FontSet::MONOSPACE),
             text_size: px(14.0),
             line_height: px(20.0),
-
-            control_flow_color: gpui::hsla(0.58, 0.65, 0.35, 1.0),
-            non_control_flow_keyword_color: gpui::hsla(0.0, 0.7, 0.35, 1.0),
-            text_literal_color: gpui::hsla(0.15, 0.6, 0.45, 1.0),
-            comment_color: gpui::hsla(0.1, 0.05, 0.5, 0.6),
-            numeric_literal_color: gpui::hsla(0.08, 0.7, 0.5, 1.0),
-            identifier_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
-            operator_color: gpui::hsla(0.0, 0.0, 0.4, 1.0),
-            punctuation_color: gpui::hsla(0.0, 0.0, 0.4, 1.0),
-            default_text_color: gpui::hsla(0.0, 0.0, 0.1, 1.0),
-
-            runtime_error_color: gpui::hsla(0.8, 0.9, 0.5, 1.0),
-            compile_time_error_color: gpui::hsla(0.0, 0.9, 0.5, 1.0),
-            compile_time_warning_color: gpui::hsla(0.15, 0.9, 0.5, 1.0),
-
-            cursor_color: gpui::hsla(0.58, 0.9, 0.4, 1.0),
-
+            control_flow_color: gpui::hsla(0.76, 0.59, 0.57, 1.0),
+            non_control_flow_keyword_color: gpui::hsla(0.76, 0.59, 0.52, 1.0),
+            comment_color: gpui::hsla(0.61, 0.13, 0.49, 0.65),
+            text_literal_color: gpui::hsla(0.36, 0.29, 0.44, 1.0),
+            numeric_literal_color: gpui::hsla(0.07, 0.99, 0.52, 1.0),
+            identifier_declaration_color: gpui::hsla(0.61, 0.16, 0.23, 1.0),
+            identifier_reference_color: gpui::hsla(0.61, 0.91, 0.54, 1.0),
+            operator_color: gpui::hsla(0.54, 0.59, 0.53, 1.0),
+            punctuation_color: gpui::hsla(0.61, 0.13, 0.40, 1.0),
+            default_text_color: gpui::hsla(0.61, 0.16, 0.23, 1.0),
+            runtime_error_color: gpui::hsla(0.01, 0.76, 0.56, 1.0),
+            compile_time_error_color: gpui::hsla(0.01, 0.76, 0.56, 1.0),
+            compile_time_warning_color: gpui::hsla(0.13, 0.91, 0.62, 1.0),
+            cursor_color: gpui::hsla(0.03, 0.59, 0.65, 1.0),
             gutter_font: gpui::font(FontSet::MONOSPACE),
-            gutter_text_color: gpui::hsla(0.0, 0.0, 0.5, 1.0),
-            gutter_active_color: gpui::hsla(0.58, 0.65, 0.35, 1.0),
-
-            selection_color: gpui::hsla(0.58, 0.9, 0.9, 0.4),
-            active_line_color: gpui::hsla(0.1, 0.1, 0.85, 0.2),
-
-            scroll_color: gpui::hsla(0.0, 0.0, 0.3, 0.2),
-            scroll_background_color: gpui::hsla(0.0, 0.0, 0.8, 0.2),
+            gutter_text_color: gpui::hsla(0.61, 0.13, 0.49, 1.0),
+            gutter_active_color: gpui::hsla(0.0, 0.59, 0.54, 1.0),
+            selection_color: gpui::hsla(0.05, 0.44, 0.80, 0.3),
+            active_line_color: gpui::hsla(0.61, 0.18, 0.89, 0.40),
+            scroll_color: gpui::hsla(0.61, 0.13, 0.40, 0.30),
+            scroll_background_color: gpui::hsla(0.61, 0.11, 0.86, 0.20),
         }
     }
 }
