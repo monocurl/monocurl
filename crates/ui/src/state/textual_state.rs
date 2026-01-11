@@ -2,7 +2,6 @@ use std::{cell::RefCell, isize, ops::Range, rc::Rc};
 
 use gpui::{App, Context, Entity, ScrollHandle, Window};
 use lexer::token::Token;
-use open::that;
 use smallvec::SmallVec;
 use structs::{rope::{RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
 
@@ -11,12 +10,22 @@ use crate::{editor::text_editor::TextEditor, state::diagnostics::{Diagnostic, Di
 pub type LexData = Token;
 pub type StaticAnalysisData = i32;
 
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AutoCompleteCategory {
+    Keyword,
+    Function,
+    Variable,
+    Snippet,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AutoCompleteItem {
     pub head: String,
     pub replacement: String,
     pub cursor_anchor_delta: Location8,
     pub cursor_head_delta: Location8,
+    pub category: AutoCompleteCategory,
 }
 
 impl AutoCompleteItem {
