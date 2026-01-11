@@ -108,8 +108,8 @@ impl Element for Split {
         let handle_bounds = make_bounds(split_pos - px(HANDLE_SIZE / 2.0), px(HANDLE_SIZE));
         let divider_bounds = make_bounds(split_pos, px(DIVIDER_SIZE));
 
-        self.first.prepaint_as_root(first_bounds.origin, first_bounds.size.into(), window, cx);
         self.second.prepaint_as_root(second_bounds.origin, second_bounds.size.into(), window, cx);
+        self.first.prepaint_as_root(first_bounds.origin, first_bounds.size.into(), window, cx);
 
         SplitLayout {
             container_bounds: bounds,
@@ -131,10 +131,10 @@ impl Element for Split {
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.first.paint(window, cx);
-        self.second.paint(window, cx);
-
         paint_split_handle(layout, window, cx);
+
+        self.second.paint(window, cx);
+        self.first.paint(window, cx);
     }
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {

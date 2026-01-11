@@ -13,7 +13,7 @@ use crate::editor::text_editor::text_element::TextElement;
 use crate::theme::{TextEditorStyles};
 use gpui::*;
 use smallvec::SmallVec;
-use structs::text::{Count8, Location8, Span8};
+use structs::text::{Count8, Location8, Span8, Span16};
 
 use crate::actions::*;
 
@@ -301,6 +301,103 @@ impl TextEditor {
         self.reshape_lines(del_range, ins_range, window, cx);
         self.dirty.update(cx, |dirty, _| *dirty = true);
         self.internal_dirty.update(cx, |dirty, _| *dirty = true);
+    }
+
+    // 0. if not inserting a single parenthesis, do normal
+    // 1. if in string, do normal
+    // 2. if inserting closing parenthesis and next character is not closing, do normal
+    // 3. if inserting closing parenthesis and next character is closing, skip insertion
+    // 4. if inserting opening parenthesis, insert matching closing parenthesis after
+    fn match_parenthesis(&self, del: Span16, new_text: &str, cx: &App) -> Option<String> {
+        fn in_literal(s: &str) -> bool {
+            let escape = '%';
+            let mut in_string = false;
+            let mut in_char = false;
+            let mut prev_was_escape = false;
+            for ch in s.chars() {
+                if ch == escape {
+                    prev_was_escape = true;
+                    continue;
+                }
+
+                if ch == '"' && !in_char && !prev_was_escape  {
+                    in_string = !in_string;
+                }
+                if ch == '\'' && !in_string && !prev_was_escape {
+                    in_char = !in_char;
+                }
+                prev_was_escape = false;
+            }
+            in_string || in_char
+        }
+
+        if del.is_empty() && new_text.len() == 1 {
+            let ch = new_text.chars().next().unwrap();
+            match ch {
+                '(' | '{' | '[' | '"' | '\'' => {
+                    let state = self.state.read(cx);
+                    let line = state.offset8_to_loc8(del.start);
+                    let start_of_line = state.loc8_to_offset8(Location8 { row: line.row, col: 0 });
+                    let line_content = self.state.read(cx).read(start_of_line..del.start);
+                    if in_literal(&line_content) {
+                        return None;
+                    }
+                    return Some(format!("{}{}", ch, match ch {
+                        '(' => ')',
+                        '{' => '}',
+                        '[' => ']',
+                        '"' => '"',
+                        '\'' => '\'',
+                        _ => unreachable!(),
+                    }));
+                },
+                ')' | '}' | ']' => {
+                    let state = self.state.read(cx);
+                    if del.start == state.len() {
+                        return None;
+                    }
+                    let next = state.read(del.start..del.start + 1);
+                    if next.chars().next().unwrap() == ch {
+                        // already exists
+                        return Some(String::new());
+                    }
+                    else {
+                        return None;
+                    }
+                },
+                _ => return None,
+            }
+        }
+        None
+    }
+
+    pub fn replace_text_in_utf16_range(
+        &mut self,
+        range_utf16: Option<Span16>,
+        new_text: &str,
+        raw_keystroke: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let range = range_utf16
+            .as_ref()
+            .map(|r| self.state.read(cx).span16_to_span8(r))
+            .or(self.marked_range.clone())
+            .unwrap_or_else(|| self.state.read(cx).cursor_range());
+
+        if raw_keystroke && let Some(matched) = self.match_parenthesis(range.clone(), new_text, cx) {
+            self.replace(range.clone(), &matched, window, cx);
+        }
+        else {
+            self.replace(range.clone(), new_text, window, cx);
+        }
+
+        let new_offset = range.start + new_text.len();
+        self.move_to(self.state.read(cx).offset8_to_loc8(new_offset), false, false, cx);
+        self.discretely_scroll_to_cursor(cx);
+
+        self.marked_range = None;
+        self.reset_cursor_blink(cx);
     }
 }
 
@@ -783,11 +880,11 @@ impl TextEditor {
                 self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
             }
 
-            self.replace_text_in_range(None, "", window, cx);
+            self.replace_text_in_utf16_range(None, "", false, window, cx);
         }
         else {
             self.undo_group_boundary(cx);
-            self.replace_text_in_range(None, "", window, cx);
+            self.replace_text_in_utf16_range(None, "", false, window, cx);
             self.undo_group_boundary(cx);
         }
     }
@@ -798,11 +895,11 @@ impl TextEditor {
             let offset = state.loc8_to_offset8(self.cursor(cx).head);
             let new_offset = state.next_boundary(offset);
             self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
-            self.replace_text_in_range(None, "", window, cx);
+            self.replace_text_in_utf16_range(None, "", false, window, cx);
         }
         else {
             self.undo_group_boundary(cx);
-            self.replace_text_in_range(None, "", window, cx);
+            self.replace_text_in_utf16_range(None, "", false, window, cx);
             self.undo_group_boundary(cx);
         }
     }
@@ -814,14 +911,14 @@ impl TextEditor {
         selection.start = word.start;
         let utf16 = state.span8_to_span16(&selection);
         self.undo_group_boundary(cx);
-        self.replace_text_in_range(Some(utf16), "", window, cx);
+        self.replace_text_in_utf16_range(Some(utf16), "", false, window, cx);
         self.undo_group_boundary(cx);
     }
 
     fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
         self.undo_group_boundary(cx);
         self.select_to(Location8 { row: self.cursor(cx).head.row, col: 0 }, false, false, cx);
-        self.replace_text_in_range(None, "", window, cx);
+        self.replace_text_in_utf16_range(None, "", false, window, cx);
         self.undo_group_boundary(cx);
     }
 
@@ -831,7 +928,46 @@ impl TextEditor {
             AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
         }
         else {
-            self.replace_text_in_range(None, "\n", window, cx);
+            if self.cursor(cx).is_empty() {
+                // try to preserve indentation if possible
+                let state = self.state.read(cx);
+                let offset = state.loc8_to_offset8(self.cursor(cx).head);
+                let line_start = state.loc8_to_offset8(Location8 {
+                    row: self.cursor(cx).head.row,
+                    col: 0
+                });
+                let line_end = state.loc8_to_offset8(Location8 {
+                    row: self.cursor(cx).head.row,
+                    col: usize::MAX
+                });
+                let text_before = state.read(line_start..offset);
+                let text_after = state.read(offset..line_end);
+                let leading_spaces = text_before.chars().take_while(|c| *c == ' ').count();
+                let indent = " ".repeat(leading_spaces);
+                if text_before.ends_with("{") && text_after.trim_start().starts_with("}") {
+                    // special case: if we are between braces, insert a newline with indentation,
+                    // then another newline with decreased indentation
+                    let inner_indent = " ".repeat(leading_spaces + TAB_SIZE);
+
+                    self.replace_text_in_utf16_range(
+                        None,
+                        &format!("\n{}{}\n{}", inner_indent, "", indent),
+                        true,
+                        window,
+                        cx,
+                    );
+                    // move cursor to inner line
+                    let new_cursor_loc = Location8 {
+                        row: self.cursor(cx).head.row - 1,
+                        col: inner_indent.len(),
+                    };
+                    self.set_cursor(Cursor::collapsed(new_cursor_loc), cx);
+                } else {
+                    self.replace_text_in_utf16_range(None, &format!("\n{}", indent), true, window, cx);
+                }
+            } else {
+                self.replace_text_in_utf16_range(None, "\n",  true, window, cx);
+            }
         }
     }
 
@@ -843,7 +979,7 @@ impl TextEditor {
         else {
             self.undo_group_boundary(cx);
             if self.cursor(cx).is_empty() {
-                self.replace_text_in_range(None, &" ".repeat(TAB_SIZE), window, cx);
+                self.replace_text_in_utf16_range(None, &" ".repeat(TAB_SIZE), false, window, cx);
             } else {
                 let start_loc = self.cursor(cx).anchor.min(self.cursor(cx).head);
                 let end_loc = self.cursor(cx).anchor.max(self.cursor(cx).head);
@@ -1005,13 +1141,19 @@ impl TextEditor {
             cx.notify();
         }
     }
+
+    fn on_scroll_wheel(&mut self, event: &ScrollWheelEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.reset_hover_task_if_necessary(cx) {
+            cx.notify();
+        }
+    }
 }
 
 impl TextEditor {
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.undo_group_boundary(cx);
-            self.replace_text_in_range(None, &text, window, cx);
+            self.replace_text_in_utf16_range(None, &text, false, window, cx);
             self.undo_group_boundary(cx);
         }
     }
@@ -1034,7 +1176,7 @@ impl TextEditor {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 state.read(range),
             ));
-            self.replace_text_in_range(None, "", window, cx);
+            self.replace_text_in_utf16_range(None, "", false, window, cx);
             self.undo_group_boundary(cx);
         }
     }
@@ -1098,20 +1240,7 @@ impl EntityInputHandler for TextEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let range = range_utf16
-            .as_ref()
-            .map(|r| self.state.read(cx).span16_to_span8(r))
-            .or(self.marked_range.clone())
-            .unwrap_or_else(|| self.state.read(cx).cursor_range());
-
-        self.replace(range.clone(), new_text, window, cx);
-
-        let new_offset = range.start + new_text.len();
-        self.move_to(self.state.read(cx).offset8_to_loc8(new_offset), false, false, cx);
-        self.discretely_scroll_to_cursor(cx);
-
-        self.marked_range = None;
-        self.reset_cursor_blink(cx);
+        self.replace_text_in_utf16_range(range_utf16, new_text, true, window, cx);
     }
 
     fn replace_and_mark_text_in_range(
@@ -1240,6 +1369,7 @@ impl Render for TextEditor {
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_move(cx.listener(Self::on_mouse_move))
+                    .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
                     .child( TextElement { editor: cx.entity() } )
             )
             .child (

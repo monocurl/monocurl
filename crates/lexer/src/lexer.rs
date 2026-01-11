@@ -165,18 +165,27 @@ where
     }
 
     fn lex_char(&mut self) -> (Token, Count8) {
-        let start = self.byte_count - 1; // -1 for the opening '
-
-        // consume character
-        if let Some(ch) = self.advance() {
-            // consume escape sequence
-            if ch == '%' {
-                self.advance_if_not_nl();
-            };
+        let start = self.byte_count - 1;
+        // note that chars can only be one character, but that will be caught later on
+        loop {
+            match self.peek() {
+                Some('\'') => {
+                    self.advance(); // consume closing '
+                    break;
+                }
+                Some('%') => {
+                    self.advance();
+                    // skip past escape sequence
+                    self.advance_if_not_nl();
+                }
+                Some('\n') | None => {
+                    break;
+                }
+                Some(_) => {
+                    self.advance();
+                }
+            }
         }
-
-        // expect closing '
-        self.advance_if('\'');
 
         (Token::CharLiteral, self.byte_count - start)
     }
