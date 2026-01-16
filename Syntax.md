@@ -5,7 +5,9 @@ import std.util
 import std.anim
 
 let var = 10
-let arr = {1, 2, 3, 4, 5}
+let arr = [1, 2, 3, 4, 5]
+let dict = [:]
+let dict2 = ["hello":1, "world":2]
 let expr = 3 * 5 + 2
 # brace and line major
 for i in arr {
@@ -159,12 +161,12 @@ play wait(1)
 ## Play / Animation Declaration
 ```
 parallel animations (only thing left?)
-let x = |args| anim {
+let x = |&reference_var, args| anim {
   # regular anim where you can play
   play ...
 }
 
-play x
+play x(reference_var, 12)
 # equivalent to below
 play {x}
 play {x, y}
@@ -172,7 +174,7 @@ play {x, y}
 
 parallel animations may cause contention,
 in general we ask that the two animations be fully independent and ultimately commute.
-When an animation (such as lerp, write, trans) is acting over a variable, it must lock it. Two animations both trying to lock a variable will result in an error. Two animations writing to the same variable is not recommended since it may cause non commutativity, but is technically not an error.
+If parallel animations cannot mutably write to the same variable, there is no conflict whatsoever guaranteed. We can just lerp all the variables that this animation "owns". If two parallel animations write to the same variable, it will be marked as an error. If two animations need to animate different parts of the same variable, we can simply contour separate / whatever and transfer to temporary meshes, and transfer back once done
 
 ## Slides
 All this means is a pause / cache point. Stuff before the first slide is special and no play statements are allowed
