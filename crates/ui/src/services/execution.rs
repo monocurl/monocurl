@@ -1,16 +1,16 @@
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use crate::{services::ServiceManagerMessage};
 
 pub enum ExecutionMessage {
     UpdateBytecode,
+    UpdateParameter,
     TogglePlay,
     SeekTo,
-    UpdateParameter,
 }
 
 pub struct ExecutionService {
-    rx: UnboundedReceiver<ExecutionMessage>,
+    rx: Option<UnboundedReceiver<ExecutionMessage>>,
 
     sm_tx: UnboundedSender<ServiceManagerMessage>,
 }
@@ -18,26 +18,46 @@ pub struct ExecutionService {
 impl ExecutionService {
     pub fn new(rx: UnboundedReceiver<ExecutionMessage>, sm_tx: UnboundedSender<ServiceManagerMessage>) -> Self {
         Self {
-            rx,
+            rx: Some(rx),
             sm_tx
         }
     }
 
+    async fn handle_message(&self, message: ExecutionMessage) {
+        match message {
+            ExecutionMessage::UpdateBytecode => {
+                // handle bytecode update. Must avoid await points so this is done atomically
+            }
+            ExecutionMessage::TogglePlay => {
+                // handle play/pause toggle
+            }
+            ExecutionMessage::SeekTo => {
+                // handle seek
+            }
+            ExecutionMessage::UpdateParameter => {
+                // handle parameter update
+            }
+        }
+    }
+
     pub async fn run(mut self) {
-        while let Some(message) = self.rx.next().await {
-            match message {
-                ExecutionMessage::UpdateBytecode => {
-                    // handle bytecode update
-                }
-                ExecutionMessage::TogglePlay => {
-                    // handle play/pause toggle
-                }
-                ExecutionMessage::SeekTo => {
-                    // handle seek
-                }
-                ExecutionMessage::UpdateParameter => {
-                    // handle parameter update
-                }
+        let mut last_item = None;
+        let mut rx = self.rx.take().unwrap();
+        loop {
+            if last_item.is_none() {
+                last_item = rx.next().await;
+            }
+
+            // handle the last message, but stop if a new message arrives
+            futures::select! {
+                message = rx.next().fuse() => {
+                    if let Some(msg) = message {
+                        last_item = Some(msg);
+                    } else {
+                        break;
+                    }
+                },
+                _ = self.handle_message(last_item.take().unwrap()).fuse() => {},
             }
         }
     }

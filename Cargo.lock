@@ -1605,6 +1605,9 @@ dependencies = [
 [[package]]
 name = "executor"
 version = "0.1.0"
+dependencies = [
+ "compiler",
+]
 
 [[package]]
 name = "exporter"
@@ -5244,13 +5247,17 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "compiler",
  "dirs 5.0.1",
  "env_logger",
+ "executor",
+ "exporter",
  "futures",
  "gpui",
  "lexer",
  "log",
  "open",
+ "parser",
  "schemars",
  "serde",
  "serde_json",

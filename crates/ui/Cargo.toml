@@ -6,6 +6,10 @@ edition.workspace = true
 [dependencies]
 ui_cli_shared.workspace = true
 lexer.workspace = true
+compiler.workspace = true
+parser.workspace = true
+executor.workspace = true
+exporter.workspace = true
 structs.workspace = true
 
 anyhow.workspace = true

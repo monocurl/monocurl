@@ -21,3 +21,30 @@ pub enum Instruction {
 
     NativeCall { index: u16 },
 }
+
+pub struct SectionFlags {
+    priviliged: bool,
+    is_library: bool,
+}
+
+// either a slide or an imported module
+pub struct SectionBytecode {
+    flags: SectionFlags,
+    direct_instructions: Vec<Instruction>,
+    literal_pool: Vec<u8>,
+}
+
+pub struct Bytecode {
+    sections: Vec<SectionBytecode>,
+}
+
+impl Bytecode {
+    pub fn new(sections: Vec<SectionBytecode>) -> Self {
+        Self { sections }
+    }
+
+    // returns the index of the suffix that is invalidated now
+    pub fn update(&mut self, sections: Vec<SectionBytecode>) -> usize {
+        0
+    }
+}
