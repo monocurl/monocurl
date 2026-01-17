@@ -1,5 +1,4 @@
 use structs::iterutil::KLookahead;
-
 use crate::token::Token;
 
 pub type Count8 = usize;
@@ -115,20 +114,21 @@ where
         let token = match ident.as_str() {
             "import" => Token::Import,
             "break" => Token::Break,
+            "block" => Token::Block,
             "continue" => Token::Continue,
             "return" => Token::Return,
             "if" => Token::If,
             "else" => Token::Else,
             "for" => Token::For,
             "while" => Token::While,
-            "func" => Token::Func,
-            "struct" => Token::Struct,
-            "conj" => Token::Conj,
+            "operator" => Token::Operator,
             "let" => Token::Let,
             "var" => Token::Var,
             "mesh" => Token::Mesh,
             "state" => Token::State,
             "param" => Token::Param,
+            "anim" => Token::Anim,
+            "play" => Token::Play,
             "slide" => Token::Slide,
             "native" => Token::Native,
             "and" => Token::And,
@@ -258,13 +258,7 @@ where
                     Token::Gt
                 }
             }
-            '.' => {
-                if self.advance_if('.') {
-                    Token::Range
-                } else {
-                    Token::Illegal
-                }
-            }
+            '.' => Token::Dot,
             '|' => Token::Pipe,
             ',' => Token::Comma,
             '&' => Token::Reference,
@@ -275,6 +269,7 @@ where
             '{' => Token::LFlower,
             '}' => Token::RFlower,
             ':' => Token::Colon,
+            ';' => Token::Semicolon,
             '"' => return Some(self.lex_string()),
             '\'' => return Some(self.lex_char()),
             _ if ch.is_ascii_digit() => return Some(self.lex_number(ch)),

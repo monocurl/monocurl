@@ -14,9 +14,6 @@ pub type StaticAnalysisData = i32;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AutoCompleteCategory {
     Keyword,
-    Function,
-    Variable,
-    Snippet,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

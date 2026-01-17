@@ -179,7 +179,9 @@ If parallel animations cannot mutably write to the same variable, there is no co
 ## Slides
 All this means is a pause / cache point. Stuff before the first slide is special and no play statements are allowed
 ```monocurl
-[slide]
+# previous animations
+slide
+# current slide animations
 ```
 
 ## Import

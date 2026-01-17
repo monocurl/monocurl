@@ -27,8 +27,8 @@ pub enum Token {
     Not,
     Or,
     In,
-    Range,
     Pipe,
+    Dot,
     Comma,
     Reference,
     LParen,
@@ -38,6 +38,8 @@ pub enum Token {
     LFlower,
     RFlower,
     Colon,
+    Semicolon,
+    Block,
 
     Import,
     Break,
@@ -47,14 +49,14 @@ pub enum Token {
     Else,
     For,
     While,
-    Func,
-    Struct,
-    Conj,
+    Operator,
     Let,
     Var,
     Mesh,
     State,
     Param,
+    Anim,
+    Play,
     Slide,
     Native,
 
@@ -77,11 +79,11 @@ impl Token {
             Illegal => TokenCategory::Unknown,
             Newline | Whitespace => TokenCategory::Whitespace,
             Plus | Minus | Multiply | Power | Divide | IntegerDivide | Assign
-            | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In | Range
-            | Pipe | Comma | Reference | Colon => TokenCategory::Operator,
+            | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In
+            | Pipe | Comma | Dot | Reference | Colon | Semicolon => TokenCategory::Operator,
             LParen | RParen | LBracket | RBracket | LFlower | RFlower => TokenCategory::Punctutation,
-            Import | Break | Continue | Return | If | Else | For | While => TokenCategory::ControlFlow,
-            Func | Struct | Conj | Let | Var | Mesh | State | Param | Slide | Native => {
+            Block | Operator | Anim | Play | Break | Continue | Return | If | Else | For | While => TokenCategory::ControlFlow,
+            Import | Let | Var | Mesh | State | Param | Slide | Native => {
                 TokenCategory::NonControlFlowKeyword
             }
             IntegerLiteral | DoubleLiteral => TokenCategory::NumericLiteral,

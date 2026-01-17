@@ -150,7 +150,7 @@ impl TextElement {
     fn paint_gutter_line(&self, line_num: usize, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let editor = self.editor.read(cx);
         let line_range = editor.cursor(cx).line_range();
-        let line_selected = line_range.contains(&line_num);
+        let line_selected = line_range.contains(&line_num) && editor.focus_handle.is_focused(window);
         let gutter_color = if line_selected {
             editor.text_styles.gutter_active_color
         } else {

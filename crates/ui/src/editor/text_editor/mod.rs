@@ -951,21 +951,27 @@ impl TextEditor {
                 let text_after = state.read(offset..line_end);
                 let leading_spaces = text_before.chars().take_while(|c| *c == ' ').count();
                 let indent = " ".repeat(leading_spaces);
-                if text_before.ends_with("{") && text_after.trim_start().starts_with("}") {
+                if text_before.ends_with("{") && (text_after.is_empty() || text_after.starts_with("}")) {
                     // special case: if we are between braces, insert a newline with indentation,
                     // then another newline with decreased indentation
                     let inner_indent = " ".repeat(leading_spaces + TAB_SIZE);
 
+                    let org_loc = self.cursor(cx).head;
                     self.replace_text_in_utf16_range(
                         None,
-                        &format!("\n{}{}\n{}", inner_indent, "", indent),
+                       & if text_after.starts_with("}") {
+                            format!("\n{}\n{}", inner_indent, indent)
+                        }
+                        else {
+                            format!("\n{}", inner_indent)
+                        },
                         true,
                         window,
                         cx,
                     );
                     // move cursor to inner line
                     let new_cursor_loc = Location8 {
-                        row: self.cursor(cx).head.row - 1,
+                        row: org_loc.row + 1,
                         col: inner_indent.len(),
                     };
                     self.set_cursor(Cursor::collapsed(new_cursor_loc), cx);
@@ -1149,7 +1155,7 @@ impl TextEditor {
         }
     }
 
-    fn on_scroll_wheel(&mut self, event: &ScrollWheelEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_scroll_wheel(&mut self, _event: &ScrollWheelEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if self.reset_hover_task_if_necessary(cx) {
             cx.notify();
         }

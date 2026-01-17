@@ -69,7 +69,7 @@ where
             TokenCategory::Operator => self.style.operator_color,
             TokenCategory::Punctutation => self.style.punctuation_color,
             TokenCategory::ControlFlow => self.style.control_flow_color,
-            TokenCategory::NonControlFlowKeyword => self.style.non_control_flow_keyword_color,
+            TokenCategory::NonControlFlowKeyword => self.style.non_control_flow_color,
             TokenCategory::Unknown => self.style.default_text_color,
         };
 

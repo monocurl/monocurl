@@ -45,7 +45,10 @@ impl ExecutionService {
         let mut rx = self.rx.take().unwrap();
         loop {
             if last_item.is_none() {
-                last_item = rx.next().await;
+                match rx.next().await {
+                    Some(item) => last_item = Some(item),
+                    None => break,
+                }
             }
 
             // handle the last message, but stop if a new message arrives
