@@ -32,6 +32,7 @@ pub struct SectionBytecode {
     flags: SectionFlags,
     direct_instructions: Vec<Instruction>,
     literal_pool: Vec<u8>,
+    source_annotations: Option<()>,
 }
 
 pub struct Bytecode {

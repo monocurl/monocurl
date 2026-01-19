@@ -130,7 +130,7 @@ where
             "anim" => Token::Anim,
             "play" => Token::Play,
             "slide" => Token::Slide,
-            "native" => Token::Native,
+            "__monocurl__native__" => Token::Native,
             "and" => Token::And,
             "or" => Token::Or,
             "not" => Token::Not,
@@ -215,14 +215,17 @@ where
                 Token::Comment
             }
             '+' => Token::Plus,
-            '-' => Token::Minus,
-            '*' => {
-                if self.advance_if('*') {
-                    Token::Power
-                } else {
-                    Token::Multiply
+            '-' => {
+                if self.advance_if('>') {
+                    Token::KeyValueMap
+                }
+                else {
+                    Token::Minus
                 }
             }
+            '^' => Token::Power,
+            '$' => Token::StatefulReference,
+            '*' => Token::Multiply,
             '/' => {
                 if self.advance_if('/') {
                     Token::IntegerDivide
@@ -241,7 +244,7 @@ where
                 if self.advance_if('=') {
                     Token::Ne
                 } else {
-                    Token::Not
+                    Token::Illegal
                 }
             }
             '<' => {
@@ -258,7 +261,15 @@ where
                     Token::Gt
                 }
             }
-            '.' => Token::Dot,
+            '.' => {
+                if self.advance_if('=') {
+                    Token::DotAssign
+                } else if self.advance_if('.') {
+                    Token::Append
+                } else {
+                    Token::Dot
+                }
+            }
             '|' => Token::Pipe,
             ',' => Token::Comma,
             '&' => Token::Reference,
@@ -268,7 +279,6 @@ where
             ']' => Token::RBracket,
             '{' => Token::LFlower,
             '}' => Token::RFlower,
-            ':' => Token::Colon,
             ';' => Token::Semicolon,
             '"' => return Some(self.lex_string()),
             '\'' => return Some(self.lex_char()),

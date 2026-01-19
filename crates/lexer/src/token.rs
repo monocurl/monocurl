@@ -10,13 +10,16 @@ pub enum Token {
 
     Comment,
 
+    StatefulReference,
     Plus,
     Minus,
     Multiply,
     Power,
     Divide,
     IntegerDivide,
+    KeyValueMap,
     Assign,
+    DotAssign,
     Eq,
     Ne,
     Lt,
@@ -29,6 +32,7 @@ pub enum Token {
     In,
     Pipe,
     Dot,
+    Append,
     Comma,
     Reference,
     LParen,
@@ -37,7 +41,6 @@ pub enum Token {
     RBracket,
     LFlower,
     RFlower,
-    Colon,
     Semicolon,
     Block,
 
@@ -78,9 +81,9 @@ impl Token {
         match self {
             Illegal => TokenCategory::Unknown,
             Newline | Whitespace => TokenCategory::Whitespace,
-            Plus | Minus | Multiply | Power | Divide | IntegerDivide | Assign
-            | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In
-            | Pipe | Comma | Dot | Reference | Colon | Semicolon => TokenCategory::Operator,
+            StatefulReference | Plus | Minus | Multiply | Power | Divide | IntegerDivide | Assign
+            | KeyValueMap | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In
+            | Pipe | Comma | Dot | DotAssign | Append | Reference | Semicolon => TokenCategory::Operator,
             LParen | RParen | LBracket | RBracket | LFlower | RFlower => TokenCategory::Punctutation,
             Block | Operator | Anim | Play | Break | Continue | Return | If | Else | For | While => TokenCategory::ControlFlow,
             Import | Let | Var | Mesh | State | Param | Slide | Native => {
@@ -89,8 +92,8 @@ impl Token {
             IntegerLiteral | DoubleLiteral => TokenCategory::NumericLiteral,
             StringLiteral | CharLiteral => TokenCategory::TextLiteral,
             Comment => TokenCategory::Comment,
-            Identifier => TokenCategory::IdentifierDeclaration,
-            ArgumentLabel => TokenCategory::IdentifierReference,
+            Identifier => TokenCategory::Identifier,
+            ArgumentLabel => TokenCategory::ArgumentLabel,
         }
     }
 }
@@ -105,8 +108,8 @@ pub enum TokenCategory {
     Punctutation,
     ControlFlow,
     NonControlFlowKeyword,
-    IdentifierReference,
-    IdentifierDeclaration,
+    ArgumentLabel,
+    Identifier,
     NumericLiteral,
     TextLiteral,
     Comment,
