@@ -105,6 +105,10 @@ pub struct TextEditor {
     // version, diagnostic
     hover_item: Option<(usize, Diagnostic)>,
 
+    parameter_hint_suppression_task: Option<Task<()>>,
+    parameter_hint_suppressed: bool,
+    parameter_hint_allowed_base: Location8,
+
     last_click_position: Point<Pixels>,
     click_count: usize,
 
@@ -175,6 +179,10 @@ impl TextEditor {
             last_hover_start: None,
             hover_task: None,
             hover_item: None,
+
+            parameter_hint_suppression_task: None,
+            parameter_hint_suppressed: false,
+            parameter_hint_allowed_base: Location8::default(),
 
             last_click_position: point(px(-1.0), px(0.0)),
             click_count: 0,
@@ -1386,7 +1394,7 @@ impl Render for TextEditor {
                     .child( TextElement { editor: cx.entity() } )
             )
             .child (
-                PopoverElement { editor: cx.entity() }
+                PopoverElement::new(cx.entity())
             )
     }
 }

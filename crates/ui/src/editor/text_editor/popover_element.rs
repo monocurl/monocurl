@@ -1,39 +1,50 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use gpui::{
-    AnyElement, App, Bounds, BoxShadow, Element, ElementId, Entity, FontWeight, GlobalElementId, Hsla, InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, StatefulInteractiveElement, Style, Styled, Window, div, point, prelude::FluentBuilder, px, relative, rgb, size
+    AnyElement, App, AppContext, AsyncApp, Bounds, BoxShadow, Element, ElementId, Entity, FontWeight, GlobalElementId, Hsla, InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, StatefulInteractiveElement, Style, Styled, Window, black, div, point, prelude::FluentBuilder, px, relative, rgb, size
 };
 use smallvec::SmallVec;
 use structs::text::Location8;
 use crate::{
-    text_editor::TextEditor, state::{diagnostics::Diagnostic, textual_state::AutoCompleteState}, theme::TextEditorStyles
+    state::{diagnostics::Diagnostic, textual_state::{AutoCompleteState, ParameterPositionState}}, text_editor::TextEditor, theme::TextEditorStyles
 };
+
+const PARAMETER_SUPRESSION_DUE_TO_CURSOR: Duration = Duration::from_millis(500);
+const PARAMETER_SUPPRESSION_DUE_TO_AUTOCOMPLETE: Duration = Duration::from_millis(1500);
 
 pub struct PopoverElement {
     pub editor: Entity<TextEditor>,
 }
 
-struct DiagnosticPopoverState {
-    diagnostic: Diagnostic,
-    pos_in_container: Point<Pixels>,
-}
-
-struct AutoCompletePopoverState {
-    autocomplete_state: Rc<RefCell<AutoCompleteState>>,
-    pos_in_container: Point<Pixels>,
-}
-
-struct ChildElementState(AnyElement, Point<Pixels>, LayoutId);
-pub struct RequestLayoutState {
-    children: SmallVec<[ChildElementState; 2]>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct PopoverPlacement {
-    origin: Point<Pixels>,
-}
-
 impl PopoverElement {
+    pub fn new(editor: Entity<TextEditor>) -> Self {
+        Self {
+            editor,
+        }
+    }
+
+    fn is_parameter_hint_suppressed(&self, editor: &TextEditor) -> bool {
+        editor.parameter_hint_suppressed
+    }
+
+    fn suppress_parameter_hint(&self, duration: Duration, cx: &mut App) {
+        let weak_entity = self.editor.downgrade();
+
+        let task = cx.spawn(async move |cx: &mut AsyncApp| {
+            cx.background_executor().timer(duration).await;
+            let Some(entity) = weak_entity.upgrade() else {
+                return;
+            };
+            cx.update_entity(&entity, |entity, _cx| {
+                entity.parameter_hint_suppressed = false;
+            }).ok();
+        });
+        self.editor.update(cx, |editor, _| {
+            editor.parameter_hint_suppressed = true;
+            editor.parameter_hint_suppression_task = Some(task);
+        });
+    }
+
     fn pos_of_loc(&mut self, editor: &TextEditor, location8: Location8) -> Point<Pixels> {
         let text_area_pos = editor.line_map.point_for_location(location8);
         let editor_pos = editor.text_area_to_editor_pos(text_area_pos);
@@ -67,13 +78,40 @@ impl PopoverElement {
 
     fn autocomplete_state(&mut self, window: &Window, cx: &mut App) -> Option<AutoCompletePopoverState> {
         let editor = self.editor.read(cx);
-        let pos = self.pos_of_loc(editor, editor.cursor(cx).anchor);
         let state = editor.state.read(cx);
-        if !state.autocomplete_state().borrow_mut().recheck_should_display(state.cursor()) || !editor.focus_handle.is_focused(window) {
+        let ac_state = state.autocomplete_state();
+        if !ac_state.borrow_mut().recheck_should_display(state.cursor()) || !editor.focus_handle.is_focused(window) {
             return None;
         }
+        let pos = self.pos_of_loc(editor, ac_state.borrow().word_start());
         Some(AutoCompletePopoverState {
             autocomplete_state: state.autocomplete_state(),
+            pos_in_container: pos,
+        })
+    }
+
+    fn parameter_hint_state(&mut self, window: &Window, cx: &mut App) -> Option<ParameterHintPopoverState> {
+        let editor = self.editor.read(cx);
+        if self.is_parameter_hint_suppressed(editor) {
+            return None;
+        }
+
+        let state = editor.state.read(cx);
+        let ph_state = state.parameter_position_state();
+        if !ph_state.borrow_mut().recheck_should_display(state.cursor()) || !editor.focus_handle.is_focused(window) {
+            return None;
+        }
+        let ph_state = ph_state.borrow();
+        let hint = ph_state.hint.as_ref().unwrap();
+        if hint.function_start != editor.parameter_hint_allowed_base {
+            // reset timer
+            self.editor.update(cx, |editor, _| editor.parameter_hint_allowed_base = hint.function_start);
+            self.suppress_parameter_hint(PARAMETER_SUPRESSION_DUE_TO_CURSOR, cx);
+            return None
+        }
+        let pos = self.pos_of_loc(editor, hint.function_start);
+        Some(ParameterHintPopoverState {
+            parameter_hint_state: state.parameter_position_state(),
             pos_in_container: pos,
         })
     }
@@ -85,6 +123,7 @@ impl PopoverElement {
         target_position: Point<Pixels>,
         container_bounds: Bounds<Pixels>,
         other_popovers: &Vec<Bounds<Pixels>>,
+        prefer_up: bool,
     ) -> Option<PopoverPlacement> {
 
         let below_y = target_position.y + line_height;
@@ -108,18 +147,33 @@ impl PopoverElement {
             });
 
         let above_fits = space_above >= popover_size.height
-            && container_bounds.contains(&point(x, above_y))
+            && container_bounds.contains(&point(x, target_position.y))
             && !other_popovers.iter().any(|other| {
                 let my_bounds = Bounds::new(point(x, above_y), popover_size);
                 my_bounds.intersects(other)
             });
 
-        let y = if below_fits {
-            below_y
-        } else if above_fits {
-            above_y
-        } else {
-            return None;
+        let y = if prefer_up && above_fits {
+            if above_fits {
+                above_y
+            }
+            else if below_fits {
+                below_y
+            }
+            else {
+                return None
+            }
+        }
+        else {
+            if below_fits {
+                below_y
+            }
+            else if above_fits {
+                above_y
+            }
+            else {
+                return None
+            }
         };
 
         Some(PopoverPlacement {
@@ -187,9 +241,9 @@ impl PopoverElement {
         } else {
             rgb(0x333333)
         };
-        let highlight_color = rgb(0xdd3377);
+        let highlight_color = rgb(0x2c5a70);
 
-        let mut segments: Vec<(String, bool)> = Vec::new();
+        let mut segments = Vec::new();
         let mut current_segment = String::new();
         let mut current_is_highlighted = false;
         text.char_indices()
@@ -212,19 +266,22 @@ impl PopoverElement {
             segments.push((current_segment, current_is_highlighted));
         }
 
-        let mut container = div()
+        let container = div()
             .flex()
             .items_center()
-            .text_size(px(14.));
-
-        for (segment_text, is_highlighted) in segments {
-            let segment = div()
-                .text_color(if is_highlighted { highlight_color } else { base_color })
-                .when(is_highlighted, |this| this.font_weight(FontWeight::BOLD))
-                .child(segment_text);
-
-            container = container.child(segment);
-        }
+            .text_size(px(14.))
+            .children(
+                segments.into_iter()
+                    .map(|(segment_text, is_highlighted)| {
+                        div()
+                            .text_color(if is_highlighted { highlight_color } else { base_color })
+                            .when(is_highlighted, |this|
+                                this.font_weight(FontWeight::BOLD)
+                                    .underline()
+                            )
+                            .child(segment_text)
+                    })
+            );
 
         container.into_any_element()
     }
@@ -288,7 +345,7 @@ impl PopoverElement {
                                             .py(item_padding_y)
                                             .rounded_sm()
                                             .when(is_selected, |this| {
-                                                this.bg(rgb(0xCDCDDF))
+                                                this.bg(rgb(0xDDDDDF))
                                             })
                                             .when(!is_selected, |this| {
                                                 this.bg(rgb(0xe6e9ee))
@@ -320,6 +377,124 @@ impl PopoverElement {
             )
             .into_any_element()
     }
+
+    fn build_parameter_hint_popover(
+        &self,
+        parameter_hint_state: &Rc<RefCell<ParameterPositionState>>,
+    ) -> AnyElement {
+        let item_padding_x = px(12.0);
+        let item_padding_y = px(6.0);
+        let min_w = px(150.0);
+        let max_w = px(500.0);
+
+        let state = parameter_hint_state.borrow();
+        let hint = state.hint.as_ref().unwrap();
+
+        div()
+            .flex()
+            .absolute()
+            .bg(rgb(0xe6e9ee))
+            .rounded_md()
+            .border_1()
+            .border_color(rgb(0xd0d3d8))
+            .min_w(min_w)
+            .max_w(max_w)
+            .shadow(vec![BoxShadow {
+                offset: Point { x: px(0.), y: px(0.) },
+                blur_radius: px(1.),
+                spread_radius: px(1.),
+                color: Hsla { h: 0., s: 0., l: 0., a: 0.10 },
+            }])
+            .child(
+                div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .px(item_padding_x)
+                    .py(item_padding_y)
+                    .text_sm()
+                    .child(
+                        div()
+                            .text_color(black())
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(hint.name.clone())
+                    )
+                    .child(
+                        div()
+                            .text_color(black())
+                            .child("(")
+                    )
+                    .children(
+                        hint.args
+                            .iter()
+                            .enumerate()
+                            .flat_map(|(i, arg)| {
+                                let is_active = i == hint.active_index;
+                                let mut elements = vec![
+                                    div()
+                                        .when(is_active, |this| {
+                                            this.text_color(rgb(0x2c5aa0))
+                                                .font_weight(gpui::FontWeight::BOLD)
+                                                .underline()
+                                        })
+                                        .when(!is_active, |this| {
+                                            this.text_color(rgb(0x666666))
+                                        })
+                                        .child(arg.clone())
+                                        .into_any_element(),
+                                ];
+
+                                if i < hint.args.len() - 1 {
+                                    elements.push(
+                                        div()
+                                            .text_color(black())
+                                            .child(", ")
+                                            .into_any_element()
+                                    );
+                                }
+
+                                elements
+                            })
+                    )
+                    .child(
+                        div()
+                            .text_color(black())
+                            .child(")")
+                    )
+            )
+            .into_any_element()
+    }
+}
+
+struct DiagnosticPopoverState {
+    diagnostic: Diagnostic,
+    pos_in_container: Point<Pixels>,
+}
+
+struct AutoCompletePopoverState {
+    autocomplete_state: Rc<RefCell<AutoCompleteState>>,
+    pos_in_container: Point<Pixels>,
+}
+
+struct ParameterHintPopoverState {
+    parameter_hint_state: Rc<RefCell<ParameterPositionState>>,
+    pos_in_container: Point<Pixels>
+}
+
+struct ChildElementState {
+    popover_content: AnyElement,
+    pos_in_container: Point<Pixels>,
+    prefer_up: bool,
+    content_layout_id: LayoutId
+}
+
+pub struct RequestLayoutState {
+    children: SmallVec<[ChildElementState; 2]>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PopoverPlacement {
+    origin: Point<Pixels>,
 }
 
 impl IntoElement for PopoverElement {
@@ -351,14 +526,21 @@ impl Element for PopoverElement {
         let diagnostic_state = self.hovered_diagnostic(cx);
 
         let mut children: SmallVec<_> = SmallVec::new();
-
-
         if let Some(ref ac_state) = self.autocomplete_state(window, cx) {
             let mut popover_content = self.build_autocomplete_popover(&ac_state.autocomplete_state);
             let content_layout_id = popover_content.request_layout(window, cx);
             let pos_in_container = ac_state.pos_in_container;
 
-            children.push(ChildElementState(popover_content, pos_in_container, content_layout_id));
+            self.suppress_parameter_hint(PARAMETER_SUPPRESSION_DUE_TO_AUTOCOMPLETE, cx);
+            children.push(ChildElementState { popover_content, pos_in_container, prefer_up: false, content_layout_id });
+        }
+
+        if let Some(ref parameter_hint) = self.parameter_hint_state(window, cx) {
+            let mut popover_content = self.build_parameter_hint_popover(&parameter_hint.parameter_hint_state);
+            let content_layout_id = popover_content.request_layout(window, cx);
+            let pos_in_container = parameter_hint.pos_in_container;
+
+            children.push(ChildElementState { popover_content, pos_in_container, prefer_up: false, content_layout_id });
         }
 
         if let Some(ref diag_state) = diagnostic_state {
@@ -366,7 +548,7 @@ impl Element for PopoverElement {
             let mut popover_content = self.build_diagnostic_popover(&diag_state.diagnostic);
             let content_layout_id = popover_content.request_layout(window, cx);
 
-            children.push(ChildElementState(popover_content, diag_state.pos_in_container, content_layout_id));
+            children.push(ChildElementState { popover_content, pos_in_container: diag_state.pos_in_container, prefer_up: false, content_layout_id });
         }
 
         let mut style = Style::default();
@@ -374,7 +556,7 @@ impl Element for PopoverElement {
         style.size.height = relative(1.).into();
         style.position = Position::Absolute;
 
-        let child_layout_id: Vec<_> = children.iter().map(|c: &ChildElementState| c.2).collect();
+        let child_layout_id: Vec<_> = children.iter().map(|c: &ChildElementState| c.content_layout_id).collect();
 
         (window.request_layout(style, child_layout_id, cx), RequestLayoutState { children })
     }
@@ -394,15 +576,15 @@ impl Element for PopoverElement {
         );
 
         let mut current_popovers = vec![];
-        request_layout.children.retain_mut(|ChildElementState(child, target_position, layout_id)| {
+        request_layout.children.retain_mut(|ChildElementState { popover_content, pos_in_container: target_position, prefer_up, content_layout_id } | {
             let line_height = self.editor.read(cx).line_height;
-            let popover_size = window.layout_bounds(*layout_id).size;
+            let popover_size = window.layout_bounds(*content_layout_id).size;
             let screen_pos = *target_position + point(px(0.), bounds.top());
-            if let Some(placement) = self.place(line_height, popover_size, screen_pos, content_bounds, &current_popovers) {
+            if let Some(placement) = self.place(line_height, popover_size, screen_pos, content_bounds, &current_popovers, *prefer_up) {
                 // ensure no two popovers overlap
                 let my_bounds = Bounds::new(placement.origin, popover_size);
                 current_popovers.push(my_bounds);
-                child.prepaint_as_root(placement.origin, bounds.size.into(), window, cx);
+                popover_content.prepaint_as_root(placement.origin, bounds.size.into(), window, cx);
                 true
             }
             else {
@@ -423,8 +605,8 @@ impl Element for PopoverElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        for ChildElementState(child, _, _) in &mut request_layout.children {
-            child.paint(window, cx);
+        for ChildElementState { popover_content, .. } in &mut request_layout.children {
+            popover_content.paint(window, cx);
         }
     }
 }

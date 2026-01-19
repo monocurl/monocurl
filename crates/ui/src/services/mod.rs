@@ -3,7 +3,7 @@ use gpui::{App, AppContext, Context, Entity};
 use structs::{rope::{RLEAggregate, Rope, TextAggregate}, text::Span8};
 use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
-use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, TextualState}}};
+use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, TextualState}}};
 
 mod lexing;
 mod compilation;
@@ -34,6 +34,11 @@ pub enum ServiceManagerMessage {
     },
     UpdateAutocompleteSuggestions {
         suggestions: Vec<AutoCompleteItem>,
+        cursor: Cursor,
+        version: usize,
+    },
+    UpdateParameterHintPosition {
+        hint: Option<ParameterPositionHint>,
         cursor: Cursor,
         version: usize,
     },
@@ -141,6 +146,13 @@ impl ServiceManager {
             ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor, version } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_autocomplete_state(suggestions, version, cursor) {
+                        cx.notify();
+                    }
+                });
+            }
+            ServiceManagerMessage::UpdateParameterHintPosition { hint, cursor, version } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_parameter_position_state(hint, version, cursor) {
                         cx.notify();
                     }
                 });

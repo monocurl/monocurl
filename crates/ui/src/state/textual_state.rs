@@ -76,7 +76,6 @@ impl AutoCompleteState {
         } else {
             (0..self.items.len()).collect()
         };
-
         self.filtered_items = base_indices.into_iter()
             .filter_map(|i| {
                 let item = &self.items[i];
@@ -115,6 +114,10 @@ impl AutoCompleteState {
         self.selected_index = self.filtered_items.get(0)
             .map(|(i, _)| *i)
             .unwrap_or(0);
+    }
+
+    pub fn word_start(&self) -> Location8 {
+        Location8 { row: self.cursor_at.row, col: self.cursor_at.col - self.cursor_token.len() }
     }
 
     pub fn transition(&mut self, old: Span8, new: &str, state: &TextualState) {
@@ -214,6 +217,36 @@ impl AutoCompleteState {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParameterPositionHint {
+    pub name: String,
+    pub args: Vec<String>,
+    pub active_index: usize,
+    pub function_start: Location8
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ParameterPositionState {
+    pub hint: Option<ParameterPositionHint>,
+    pub cursor_at: Location8,
+}
+
+impl ParameterPositionState {
+    pub fn set_hint(&mut self, hint: Option<ParameterPositionHint>, cursor_at: Cursor) {
+        self.hint = hint;
+        self.cursor_at = cursor_at.head;
+    }
+
+    pub fn recheck_should_display(&mut self, cursor: Cursor) -> bool {
+        if cursor.head != cursor.anchor {
+            self.hint = None;
+            return false
+        }
+
+        self.hint.as_ref().is_some_and(|h| !h.args.is_empty())
+    }
+}
+
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
 pub struct Cursor {
     pub anchor: Location8,
@@ -260,6 +293,7 @@ pub struct TextualState {
     region_needing_relayout: Option<Range<usize>>,
 
     autocomplete: Rc<RefCell<AutoCompleteState>>,
+    parameter_position: Rc<RefCell<ParameterPositionState>>,
     diagnostics: DiagnosticContainer,
     dirty_diagnostic_lines: Rope<RLEAggregate<bool>>,
 
@@ -665,6 +699,21 @@ impl TextualState {
         let mut ac_state = self.autocomplete.borrow_mut();
         ac_state.set_items(items);
         true
+    }
+
+    pub fn parameter_position_state(&self) -> Rc<RefCell<ParameterPositionState>> {
+        self.parameter_position.clone()
+    }
+
+    pub fn set_parameter_position_state(&mut self, state: Option<ParameterPositionHint>, for_version: usize, for_cursor: Cursor) -> bool {
+        if for_version != self.version || self.cursor() != for_cursor  {
+            return false;
+        }
+        let mut param_state = self.parameter_position.borrow_mut();
+        // update latest cursor, but no need to notify
+        let ret = state != param_state.hint || for_cursor.head != param_state.cursor_at;
+        param_state.set_hint(state, for_cursor);
+        ret
     }
 }
 
