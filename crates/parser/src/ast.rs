@@ -151,7 +151,8 @@ pub struct NativeInvocation {
 pub struct IdentifierDeclaration(pub String);
 
 pub enum IdentifierReference {
-    Normal(String),
+    Value(String),
+    Reference(String),
     Stateful(String),
     Dereference(String)
 }
