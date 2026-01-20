@@ -99,13 +99,14 @@ impl PopoverElement {
         let state = editor.state.read(cx);
         let ph_state = state.parameter_position_state();
         if !ph_state.borrow_mut().recheck_should_display(state.cursor()) || !editor.focus_handle.is_focused(window) {
+            self.editor.update(cx, |editor, _| editor.parameter_hint_allowed_base = None);
             return None;
         }
         let ph_state = ph_state.borrow();
         let hint = ph_state.hint.as_ref().unwrap();
-        if hint.function_start != editor.parameter_hint_allowed_base {
+        if Some(hint.function_start) != editor.parameter_hint_allowed_base {
             // reset timer
-            self.editor.update(cx, |editor, _| editor.parameter_hint_allowed_base = hint.function_start);
+            self.editor.update(cx, |editor, _| editor.parameter_hint_allowed_base = Some(hint.function_start));
             self.suppress_parameter_hint(PARAMETER_SUPRESSION_DUE_TO_CURSOR, cx);
             return None
         }

@@ -94,6 +94,18 @@ where
             _ => false,
         };
 
+        // handle extensions
+        match (self.peek(), self.peek_next()) {
+            (Some('d'), Some('g')) => {
+                self.advance();
+                self.advance();
+            }
+            (Some('i') | Some('d') | Some('u') | Some('f') | Some('b') | Some('l') | Some('r'), _) => {
+                self.advance();
+            }
+            _ => {}
+        }
+
         let token = if is_float {
             Token::DoubleLiteral
         } else {
