@@ -6,6 +6,8 @@ pub type Count8 = usize;
 pub struct Lexer<I> where I: Iterator<Item = char> {
     chars: KLookahead<I, 2>,
     byte_count: Count8,
+    // in import lines, "escape" all keywords
+    in_import_line: bool,
 }
 
 impl<I> Lexer<I>
@@ -16,6 +18,7 @@ where
         Self {
             chars: KLookahead::new(chars),
             byte_count: 0,
+            in_import_line: false,
         }
     }
 
@@ -124,6 +127,7 @@ where
         }
 
         let token = match ident.as_str() {
+            _ if self.in_import_line => Token::Identifier,
             "import" => Token::Import,
             "break" => Token::Break,
             "block" => Token::Block,
@@ -149,6 +153,10 @@ where
             "in" => Token::In,
             _ => Token::Identifier,
         };
+
+        if token == Token::Import {
+            self.in_import_line = true;
+        }
 
         (token, self.byte_count - start)
     }
@@ -217,7 +225,10 @@ where
         let start = self.byte_count - ch.len_utf8();
 
         let token = match ch {
-            '\n' => Token::Newline,
+            '\n' => {
+                self.in_import_line = false;
+                Token::Newline
+            }
             ' ' | '\t' | '\r' => {
                 self.skip_while(|c| matches!(c, ' ' | '\t' | '\r'));
                 Token::Whitespace
@@ -291,7 +302,10 @@ where
             ']' => Token::RBracket,
             '{' => Token::LFlower,
             '}' => Token::RFlower,
-            ';' => Token::Semicolon,
+            ';' => {
+                self.in_import_line = false;
+                Token::Semicolon
+            }
             '"' => return Some(self.lex_string()),
             '\'' => return Some(self.lex_char()),
             _ if ch.is_ascii_digit() => return Some(self.lex_number(ch)),
