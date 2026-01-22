@@ -3,7 +3,7 @@ use std::{cell::RefCell, isize, ops::Range, rc::Rc};
 use gpui::{App, Context, Entity, ScrollHandle, Window};
 use lexer::token::Token;
 use smallvec::SmallVec;
-use structs::{rope::{RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
+use structs::{rope::{Attribute, RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
 
 use crate::{editor::text_editor::TextEditor, state::diagnostics::{Diagnostic, DiagnosticContainer}};
 
@@ -273,6 +273,12 @@ impl Cursor {
     }
 }
 
+#[derive(Default)]
+pub struct TransactionSummary {
+    pub text_changes: Vec<(Span8, String, Rope<TextAggregate>, usize)>,
+    pub new_cursor: Cursor,
+    pub final_version: usize,
+}
 
 /// State that's relevant to the text editor + modified by compilation / lexing services
 #[derive(Default)]
@@ -284,8 +290,8 @@ pub struct TextualState {
     // lex rope is the actual latest lexed attributes
     // rendered lex rope says at each char, what attributes are currently
     // used for the shaped lines. This may be differ for off-screen lines
-    lex_rope: Rope<RLEAggregate<LexData>>,
-    rendered_lex_rope: Rope<RLEAggregate<LexData>>,
+    lex_rope: Rope<Attribute<LexData>>,
+    rendered_lex_rope: Rope<Attribute<LexData>>,
     static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
     rendered_static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
 
@@ -299,34 +305,40 @@ pub struct TextualState {
 
     version: usize,
 
-    text_listeners: Vec<Box<dyn FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send>>,
-    cursor_listeners: Vec<Box<dyn FnMut(&Cursor, &mut App) + Send>>,
+    nested_transaction_count: usize,
+    current_transaction: TransactionSummary,
+    transaction_listeners: Vec<Box<dyn FnMut(&TransactionSummary, &mut App) + Send>>
 }
 
 
 impl TextualState {
-    pub fn add_cursor_listener(&mut self, f: impl FnMut(&Cursor, &mut App) + Send + 'static) {
-        self.cursor_listeners.push(Box::new(f));
+    pub fn add_transaction_listener(&mut self,  f: impl FnMut(&TransactionSummary, &mut App) + Send + 'static) {
+        self.transaction_listeners.push(Box::new(f));
     }
 
-    pub fn add_text_listener(&mut self, f: impl FnMut(Span8, &str, &Rope<TextAggregate>, usize, &mut App) + Send + 'static) {
-        self.text_listeners.push(Box::new(f));
+    pub fn start_transaction(&mut self) {
+        self.nested_transaction_count += 1;
     }
 
-    fn notify_cursor_listeners(&mut self, cx: &mut App) {
-        for listener in &mut self.cursor_listeners {
-            listener(&self.cursor, cx);
+    pub fn end_transaction(&mut self, cx: &mut App) {
+        self.nested_transaction_count -= 1;
+        if self.nested_transaction_count == 0 {
+            self.current_transaction.final_version = self.version();
+            self.notify_listeners(cx);
+            self.current_transaction.text_changes.clear();
+            self.current_transaction.new_cursor = self.cursor;
         }
     }
 
-    fn notify_text_listeners(&mut self, span: Span8, new_text: &str, cx: &mut App) {
-        for listener in &mut self.text_listeners {
-            listener(span.clone(), new_text, &self.text_rope, self.version, cx);
+    fn notify_listeners(&mut self, cx: &mut App) {
+        for listener in &mut self.transaction_listeners {
+            listener(&self.current_transaction, cx);
         }
     }
 
     // returns the line range before and after that are affected
-    pub fn replace(&mut self, span: Span8, new_text: &str, cx: &mut App) -> (Range<usize>, Range<usize>) {
+    pub fn replace(&mut self, span: Span8, new_text: &str, _cx: &mut App) -> (Range<usize>, Range<usize>) {
+        debug_assert!(self.nested_transaction_count > 0);
         let del_range = {
             let start_loc = self.offset8_to_loc8(span.start);
             let end_loc = self.offset8_to_loc8(span.end);
@@ -382,7 +394,7 @@ impl TextualState {
         );
 
         self.version += 1;
-        self.notify_text_listeners(span, new_text, cx);
+        self.current_transaction.text_changes.push((span, new_text.into(), self.text_rope.clone(), self.version()));
 
         (del_range, ins_range)
     }
@@ -447,16 +459,17 @@ impl TextualState {
     }
 
     pub fn set_cursor_head(&mut self, head: Location8, cx: &mut App) {
+        debug_assert!(self.nested_transaction_count > 0);
         self.set_cursor(Cursor {
             anchor: self.cursor.anchor,
             head,
         }, cx);
     }
 
-    pub fn set_cursor(&mut self, cursor: Cursor, cx: &mut App) {
+    pub fn set_cursor(&mut self, cursor: Cursor, _cx: &mut App) {
+        debug_assert!(self.nested_transaction_count > 0);
         self.cursor = cursor;
         self.autocomplete_state().borrow_mut().cursor_moved_to(&self.cursor);
-        self.notify_cursor_listeners(cx);
     }
 }
 
@@ -536,11 +549,11 @@ impl TextualState {
 }
 
 impl TextualState {
-    pub fn lex_rope(&self) -> &Rope<RLEAggregate<LexData>> {
+    pub fn lex_rope(&self) -> &Rope<Attribute<LexData>> {
         &self.lex_rope
     }
 
-    pub fn set_lex_rope(&mut self, rope: Rope<RLEAggregate<LexData>>, for_version: usize) -> bool {
+    pub fn set_lex_rope(&mut self, rope: Rope<Attribute<LexData>>, for_version: usize) -> bool {
         if for_version != self.version {
             return false;
         }

@@ -194,9 +194,13 @@ impl TextEditor {
             last_bounds: None,
             resize_anchor_line: None,
         };
-        ret.history_disabled = true;
-        ret.replace(0..0, &content, window, cx);
-        ret.history_disabled = false;
+        {
+            ret.history_disabled = true;
+            ret.state.update(cx, |state, _| state.start_transaction());
+            ret.replace(0..0, &content, window, cx);
+            ret.state.update(cx, |state, cx| state.end_transaction(cx));
+            ret.history_disabled = false;
+        }
         ret
     }
 }
@@ -394,6 +398,7 @@ impl TextEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.state.update(cx, |state, _| state.start_transaction());
         let range = range_utf16
             .as_ref()
             .map(|r| self.state.read(cx).span16_to_span8(r))
@@ -413,6 +418,7 @@ impl TextEditor {
 
         self.marked_range = None;
         self.reset_cursor_blink(cx);
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 }
 
@@ -509,7 +515,9 @@ impl TextEditor {
 
     fn set_cursor(&self, cursor: Cursor, cx: &mut Context<Self>) {
         self.state.update(cx, |state, cx| {
+            state.start_transaction();
             state.set_cursor(cursor, cx);
+            state.end_transaction(cx);
         });
     }
 
@@ -553,7 +561,11 @@ impl TextEditor {
     }
 
     fn select_to(&mut self, pos: Location8, mouse_origin: bool, key_origin: bool, cx: &mut Context<Self>) {
-        self.state.update(cx, |state, cx| state.set_cursor_head(pos, cx));
+        self.state.update(cx, |state, cx| {
+            state.start_transaction();
+            state.set_cursor_head(pos, cx);
+            state.end_transaction(cx);
+        });
         self.reset_cursor_blink(cx);
         if !mouse_origin {
             self.discretely_scroll_to_cursor(cx);
@@ -871,6 +883,7 @@ impl TextEditor {
 
 impl TextEditor {
     fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _| state.start_transaction());
         if self.cursor(cx).is_empty() {
             let state = self.state.read(cx);
             let offset = state.loc8_to_offset8(self.cursor(cx).head);
@@ -902,9 +915,11 @@ impl TextEditor {
             self.replace_text_in_utf16_range(None, "", false, window, cx);
             self.undo_group_boundary(cx);
         }
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
     fn delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _| state.start_transaction());
         if self.cursor(cx).is_empty() {
             let state = self.state.read(cx);
             let offset = state.loc8_to_offset8(self.cursor(cx).head);
@@ -917,9 +932,11 @@ impl TextEditor {
             self.replace_text_in_utf16_range(None, "", false, window, cx);
             self.undo_group_boundary(cx);
         }
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
     fn backspace_word(&mut self, _: &BackspaceWord, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _| state.start_transaction());
         let state = self.state.read(cx);
         let mut selection = state.cursor_range();
         let word = state.word(selection.start, true);
@@ -928,16 +945,20 @@ impl TextEditor {
         self.undo_group_boundary(cx);
         self.replace_text_in_utf16_range(Some(utf16), "", false, window, cx);
         self.undo_group_boundary(cx);
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
     fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _| state.start_transaction());
         self.undo_group_boundary(cx);
         self.select_to(Location8 { row: self.cursor(cx).head.row, col: 0 }, false, false, cx);
         self.replace_text_in_utf16_range(None, "", false, window, cx);
         self.undo_group_boundary(cx);
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
     fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _| state.start_transaction());
         if self.do_autocomplete_action(cx) {
             let ac = self.state.read(cx).autocomplete_state();
             AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
@@ -990,9 +1011,11 @@ impl TextEditor {
                 self.replace_text_in_utf16_range(None, "\n",  true, window, cx);
             }
         }
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
     fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _| state.start_transaction());
         if self.do_autocomplete_action(cx) {
             let ac = self.state.read(cx).autocomplete_state();
             AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
@@ -1024,9 +1047,11 @@ impl TextEditor {
             }
             self.undo_group_boundary(cx);
         }
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
     fn untab(&mut self, _: &Untab, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _| state.start_transaction());
         self.undo_group_boundary(cx);
 
         let mut cursor = self.cursor(cx);
@@ -1060,6 +1085,7 @@ impl TextEditor {
         self.set_cursor(cursor, cx);
         self.reset_cursor_blink(cx);
         self.undo_group_boundary(cx);
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 }
 

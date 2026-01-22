@@ -127,9 +127,9 @@ impl<const N: usize> Rope<TextAggregate, N> {
     }
 }
 
-impl<T, const N: usize> Rope<RLEAggregate<T>, N> where T: PartialEq + Default + Clone
+impl<T, const ALLOW_MERGING: bool, const N: usize> Rope<RLEAggregate<T, ALLOW_MERGING>, N> where T: PartialEq + Default + Clone
 {
-    pub fn iterator_range(&self, mut range: Span8) -> impl Iterator<Item=(Count8, T)> + use<'_, N, T> {
+    pub fn iterator_range(&self, mut range: Span8) -> impl Iterator<Item=(Count8, T)> + use<'_, N, ALLOW_MERGING, T> {
         self.iterator(range.start)
             .map_while(move |(c, item)| {
                 if range.start >= range.end {
@@ -627,7 +627,7 @@ impl<const N: usize> Rope<TextAggregate, N> {
     }
 }
 
-impl<T> Rope<RLEAggregate<T>> where T: PartialEq + Default + Clone
+impl<T, const ALLOW_MERGING: bool> Rope<RLEAggregate<T, ALLOW_MERGING>> where T: PartialEq + Default + Clone
 {
     pub fn attribute_at(&self, index: usize) -> &T {
         &self.find_leaf(|agg| agg.codeunits() <= index).attribute
@@ -945,23 +945,25 @@ impl<const N: usize> Rope<TextAggregate, N> {
 }
 
 #[derive(Clone)]
-pub struct RLEAggregate<T> {
+pub struct RLEAggregate<T, const ALLOW_MERGING: bool = true> {
     pub codeunits: usize,
     pub height: usize,
     phantom_t: PhantomData<T>
 }
 
+pub type Attribute<T> = RLEAggregate<T, false>;
+
 #[derive(Clone)]
-pub struct RLEData<T> {
+pub struct RLEData<T, const ALLOW_MERGING: bool = true> {
     pub codeunits: usize,
     pub attribute: T,
 }
 
-impl<T> LeafData for RLEData<T>
+impl<T, const ALLOW_MERGING: bool> LeafData for RLEData<T, ALLOW_MERGING>
 where
     T: PartialEq + Default + Clone
 {
-    type Iterator<'a> = Once<(Count8, T)> where T: 'a;
+    type Iterator<'a> = <Option<(Count8, T)> as IntoIterator>::IntoIter where T: 'a;
 
     fn identity() -> Self {
         RLEData {
@@ -978,25 +980,40 @@ where
     }
 
     fn try_append(&mut self, from: Self) -> Option<Self> {
-        if self.attribute == from.attribute {
-            self.codeunits += from.codeunits;
-            None
-        }
-        else if self.codeunits == 0 {
-            *self = from.clone();
-            None
-        }
-        else if from.codeunits == 0 {
-            None
+        if ALLOW_MERGING {
+            if self.attribute == from.attribute {
+                self.codeunits += from.codeunits;
+                None
+            }
+            else if self.codeunits == 0 {
+                *self = from.clone();
+                None
+            }
+            else if from.codeunits == 0 {
+                None
+            }
+            else {
+                Some(from)
+            }
         }
         else {
-            Some(from)
+            if self.codeunits == 0 {
+                *self = from.clone();
+                None
+            }
+            else if from.codeunits == 0 {
+                None
+            }
+            else {
+                Some(from)
+            }
         }
     }
 
     fn iterator(&self, at: Count8, to: Count8) -> Self::Iterator<'_> {
         debug_assert!(at <= to && to <= self.codeunits);
-        std::iter::once((to - at, self.attribute.clone()))
+        let base = (to > at).then_some((to - at, self.attribute.clone()));
+        base.into_iter()
     }
 
     fn codeunits(&self) -> Count8 {
@@ -1004,10 +1021,10 @@ where
     }
 }
 
-impl<T> AggregateData for RLEAggregate<T>
+impl<T, const ALLOW_MERGING: bool> AggregateData for RLEAggregate<T, ALLOW_MERGING>
     where T: PartialEq + Default + Clone
 {
-    type LeafData = RLEData<T>;
+    type LeafData = RLEData<T, ALLOW_MERGING>;
 
     fn from_leaf(data: &Self::LeafData) -> Self {
         let bytes_utf8 = data.codeunits();
@@ -1317,7 +1334,7 @@ mod tests {
 
     #[test]
     fn test_rle_try_append_same_attribute() {
-        let mut rle1 = RLEData {
+        let mut rle1: RLEData<_, true> = RLEData {
             codeunits: 10,
             attribute: 5,
         };
@@ -1332,7 +1349,7 @@ mod tests {
 
     #[test]
     fn test_rle_try_append_different_attribute() {
-        let mut rle1 = RLEData {
+        let mut rle1: RLEData<_, true> = RLEData {
             codeunits: 10,
             attribute: 5,
         };
@@ -1348,7 +1365,7 @@ mod tests {
 
     #[test]
     fn test_rle_split() {
-        let rle = RLEData {
+        let rle: RLEData<_, true> = RLEData {
             codeunits: 20,
             attribute: 42,
         };
@@ -1375,7 +1392,6 @@ mod tests {
 #[cfg(test)]
 mod replace_tests {
     use super::*;
-
 
     fn assert_invariants<S: AggregateData, const N: usize>(rope: &Rope<S, N>) {
         rope.clone().check_invariants();

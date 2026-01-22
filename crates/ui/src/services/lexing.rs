@@ -2,8 +2,8 @@
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::lexer::Lexer;
-use structs::{rope::{RLEAggregate, Rope, TextAggregate}, text::{Count8, Span8}};
-use structs::rope::RLEData;
+use structs::{rope::{Rope, TextAggregate}, text::{Count8, Span8}};
+use structs::rope::{Attribute, RLEData};
 use crate::{services::{ServiceManagerMessage, compilation::CompilationMessage}, state::textual_state::{LexData}};
 
 pub enum LexingMessage {
@@ -33,7 +33,7 @@ impl LexingService {
         }
     }
 
-    fn process_message(&mut self, lex: Rope<RLEAggregate<LexData>>, old: Span8, new: usize, old_rope: Rope<TextAggregate>, new_rope: Rope<TextAggregate>) -> Rope<RLEAggregate<LexData>> {
+    fn process_message(&mut self, lex: Rope<Attribute<LexData>>, old: Span8, new: usize, old_rope: Rope<TextAggregate>, new_rope: Rope<TextAggregate>) -> Rope<Attribute<LexData>> {
         // since newline is a universal separator, we only need to relex the associated lines
         let line_start = new_rope.utf8_prefix_summary(old.start).newlines;
         let old_line_end = old_rope.utf8_prefix_summary(old.end).newlines + 1;

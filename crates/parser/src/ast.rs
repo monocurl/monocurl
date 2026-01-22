@@ -1,7 +1,7 @@
 use structs::text::Span8;
 
-pub struct SpanTagged<T>(pub T, pub Span8);
-pub struct BoxSpanTagged<T>(pub Box<T>, pub Span8);
+pub type SpanTagged<T> = (Span8, T);
+pub type BoxSpanTagged<T> = (Span8, Box<T>);
 
 pub enum SectionType {
     StandardLibrary,
@@ -24,7 +24,6 @@ pub enum Statement {
     For(For),
     If(If),
     Declaration(Declaration),
-    Assignment(Assignment),
     Expression(Expression),
     Play(Play),
 }
@@ -40,7 +39,7 @@ pub enum Expression {
     UnaryPreOperator(UnaryPreOperator),
     IdentifierReference(IdentifierReference),
     Subscript(Subscript),
-    Attribute(Attribute),
+    Property(Property),
     LambdaInvocation(LambdaInvocation),
     NativeInvocation(NativeInvocation),
 }
@@ -60,18 +59,19 @@ pub enum Literal {
     Int(i64),
     Double(f64),
     Directional(DirectionalLiteral),
-    Complex(f64),
+    Imaginary(f64),
     Vector(Vec<SpanTagged<Expression>>),
     Map(Vec<(SpanTagged<Expression>, SpanTagged<Expression>)>)
 }
 
 pub struct LambdaDefinition {
-    pub arg_names: Vec<IdentifierDeclaration>,
-    pub body: LambdaBody
+    // identifier and default value
+    pub args: Vec<(SpanTagged<IdentifierDeclaration>, Option<SpanTagged<Expression>>)>,
+    pub body: SpanTagged<LambdaBody>
 }
 
 pub enum LambdaBody {
-    Inline(BoxSpanTagged<Expression>),
+    Inline(Box<Expression>),
     Block(Vec<SpanTagged<Statement>>),
 }
 
@@ -86,6 +86,8 @@ pub struct Block {
 pub struct Anim {
     pub body: Vec<SpanTagged<Statement>>
 }
+
+pub type OperatorPriority = usize;
 
 pub enum BinaryOperatorType {
     Append,
@@ -104,6 +106,25 @@ pub enum BinaryOperatorType {
     Gt,
     Ge,
     In,
+    Assign,
+    DotAssign,
+}
+
+impl BinaryOperatorType {
+    pub fn priority(&self) -> OperatorPriority {
+        match self {
+            BinaryOperatorType::Add => 1,
+            _ => 2
+        }
+    }
+
+    /// 1 = right associative, 0 = left associative
+    pub fn associativity(&self) -> OperatorPriority {
+        match self {
+            BinaryOperatorType::Append => 1,
+            _ => 0
+        }
+    }
 }
 
 pub struct BinaryOperator {
@@ -117,15 +138,18 @@ pub enum UnaryOperatorType {
     Not
 }
 
+impl UnaryOperatorType {
+    pub fn priority(&self) -> OperatorPriority {
+        match self {
+            UnaryOperatorType::Negative => 10,
+            UnaryOperatorType::Not => 10
+        }
+    }
+}
+
 pub struct UnaryPreOperator {
     pub op_type: UnaryOperatorType,
     pub operand: BoxSpanTagged<Expression>,
-}
-
-pub struct OperatorInvocation {
-    pub operator: SpanTagged<IdentifierReference>,
-    pub arguments: Vec<SpanTagged<Expression>>,
-    pub operand: BoxSpanTagged<Expression>
 }
 
 pub struct Subscript {
@@ -133,14 +157,20 @@ pub struct Subscript {
     pub index: BoxSpanTagged<Expression>
 }
 
-pub struct Attribute {
+pub struct Property {
     pub base: BoxSpanTagged<Expression>,
     pub attribute: SpanTagged<IdentifierReference>
 }
 
 pub struct LambdaInvocation {
     pub lambda: BoxSpanTagged<Expression>,
-    pub arguments: Vec<SpanTagged<Expression>>,
+    pub arguments: SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>,
+}
+
+pub struct OperatorInvocation {
+    pub operator: BoxSpanTagged<Expression>,
+    pub arguments: SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>,
+    pub operand: BoxSpanTagged<Expression>,
 }
 
 pub struct NativeInvocation {
@@ -155,17 +185,6 @@ pub enum IdentifierReference {
     Reference(String),
     Stateful(String),
     Dereference(String)
-}
-
-pub enum AssignmentType {
-    Normal,
-    DotAssignment
-}
-
-pub struct Assignment {
-    pub lhs: SpanTagged<Expression>,
-    pub assignment_type: AssignmentType,
-    pub rhs: SpanTagged<Expression>
 }
 
 pub enum VariableType {
@@ -188,19 +207,19 @@ pub struct Return {
 
 pub struct While {
     pub condition: SpanTagged<Expression>,
-    pub body: Vec<SpanTagged<Statement>>
+    pub body: SpanTagged<Vec<SpanTagged<Statement>>>
 }
 
 pub struct For {
     pub var_name: SpanTagged<IdentifierDeclaration>,
     pub container: SpanTagged<Expression>,
-    pub body: Vec<SpanTagged<Statement>>
+    pub body: SpanTagged<Vec<SpanTagged<Statement>>>
 }
 
 pub struct If {
     pub condition: SpanTagged<Expression>,
-    pub if_block: Vec<SpanTagged<Statement>>,
-    pub else_block: Vec<SpanTagged<Statement>>,
+    pub if_block: SpanTagged<Vec<SpanTagged<Statement>>>,
+    pub else_block: Option<SpanTagged<Vec<SpanTagged<Statement>>>>,
 }
 
 pub struct Play {

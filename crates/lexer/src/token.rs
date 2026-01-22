@@ -1,6 +1,6 @@
 
 // might need to add lambdas, labels
-#[derive(Default, Clone, Debug, PartialEq)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Token {
     #[default]
     Illegal,
@@ -94,6 +94,72 @@ impl Token {
             Comment => TokenCategory::Comment,
             Identifier => TokenCategory::Identifier,
             ArgumentLabel => TokenCategory::ArgumentLabel,
+        }
+    }
+
+    pub fn description(&self) -> &'static str {
+        match self {
+            Token::Illegal => "<illegal>",
+            Token::Newline => "<end of line>",
+            Token::Whitespace => "<whitespace>",
+            Token::Comment => "<comment>",
+            Token::StatefulReference => "$",
+            Token::Plus => "+",
+            Token::Minus => "-",
+            Token::Multiply => "*",
+            Token::Power => "^",
+            Token::Divide => "/",
+            Token::IntegerDivide => "//",
+            Token::KeyValueMap => "->",
+            Token::Assign => "=",
+            Token::DotAssign => ".=",
+            Token::Eq => "==",
+            Token::Ne => "!=",
+            Token::Lt => "<",
+            Token::Le => "<=",
+            Token::Gt => ">",
+            Token::Ge => ">=",
+            Token::And => "and",
+            Token::Not => "not",
+            Token::Or => "or",
+            Token::In => "in",
+            Token::Pipe => "|",
+            Token::Dot => ".",
+            Token::Append => "..",
+            Token::Comma => ",",
+            Token::Reference => "&",
+            Token::LParen => "(",
+            Token::RParen => ")",
+            Token::LBracket => "[",
+            Token::RBracket => "]",
+            Token::LFlower => "{",
+            Token::RFlower => "}",
+            Token::Semicolon => ";",
+            Token::Block => "block",
+            Token::Import => "import",
+            Token::Break => "break",
+            Token::Continue => "continue",
+            Token::Return => "return",
+            Token::If => "if",
+            Token::Else => "else",
+            Token::For => "for",
+            Token::While => "while",
+            Token::Operator => "operator",
+            Token::Let => "let",
+            Token::Var => "var",
+            Token::Mesh => "mesh",
+            Token::State => "state",
+            Token::Param => "param",
+            Token::Anim => "anim",
+            Token::Play => "play",
+            Token::Slide => "slide",
+            Token::Native => "__monocurl_native__",
+            Token::IntegerLiteral => "<integer>",
+            Token::DoubleLiteral => "<double>",
+            Token::StringLiteral => "<string>",
+            Token::CharLiteral => "<char>",
+            Token::ArgumentLabel => "<argument label>",
+            Token::Identifier => "<identifier>",
         }
     }
 }

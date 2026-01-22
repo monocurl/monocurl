@@ -1,7 +1,7 @@
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::token::Token;
-use structs::rope::{RLEAggregate, Rope, TextAggregate};
+use structs::rope::{Attribute, Rope, TextAggregate};
 use structs::text::{Location8, Span8};
 
 use crate::state::diagnostics::{Diagnostic, DiagnosticType};
@@ -10,12 +10,13 @@ use crate::{services::{ServiceManagerMessage, execution::ExecutionMessage}, stat
 
 pub enum CompilationMessage {
     UpdateLexRope {
-        lex_rope: Rope<RLEAggregate<LexData>>,
+        lex_rope: Rope<Attribute<LexData>>,
         for_text_rope: Rope<TextAggregate>,
         version: usize,
     },
     UpdateCursor {
-        cursor: Cursor
+        cursor: Cursor,
+        version: usize,
     },
     RecheckDependencies
 }
@@ -123,7 +124,7 @@ impl CompilationService {
                     self.sm_tx.send(ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor: latest_cursor, version }).await.unwrap();
                     // let _ = self.execution_tx.send(ExecutionMessage::UpdateBytecode).await;
                 },
-                CompilationMessage::UpdateCursor { cursor: c } => {
+                CompilationMessage::UpdateCursor { cursor: c, version: _} => {
                     latest_cursor = c;
 
                     let hint =  {

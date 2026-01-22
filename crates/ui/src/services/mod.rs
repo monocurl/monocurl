@@ -1,9 +1,9 @@
 
 use gpui::{App, AppContext, Context, Entity};
-use structs::{rope::{RLEAggregate, Rope, TextAggregate}, text::Span8};
 use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
-use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, TextualState}}};
+use structs::rope::{Attribute, Rope};
+use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, TextualState, TransactionSummary}}};
 
 mod lexing;
 mod compilation;
@@ -21,7 +21,7 @@ pub struct ServiceManager {
 
 pub enum ServiceManagerMessage {
     UpdateLexRope {
-        lex_rope: Rope<RLEAggregate<LexData>>,
+        lex_rope: Rope<Attribute<LexData>>,
         version: usize,
     },
     UpdateCompileDiagnostics {
@@ -59,15 +59,9 @@ impl ServiceManager {
 
         let weak_service_manager = cx.weak_entity();
         textual_state.update(cx, |state, _| {
-            let wsm = weak_service_manager.clone();
-            state.add_text_listener(move |span, new, rope, version, app| {
-                weak_service_manager.update(app, |service_manager, _| {
-                    service_manager.on_text_rope_updated(span, new, rope.clone(), version);
-                }).unwrap();
-            });
-            state.add_cursor_listener(move |cursor, app| {
-                wsm.update(app, |service_manager, _| {
-                    service_manager.on_text_cursor_updated(*cursor);
+            state.add_transaction_listener(move |transaction, cx| {
+                weak_service_manager.update(cx, |service_manager, cx| {
+                    service_manager.on_transaction(transaction, cx);
                 }).unwrap();
             });
         });
@@ -105,19 +99,27 @@ impl ServiceManager {
         }
     }
 
-    fn on_text_rope_updated(&mut self, old: Span8, new_text: &str, new_rope: Rope<TextAggregate>, version: usize) {
-        smol::block_on(self.lexing_tx.send(LexingMessage::UpdateRope {
-            old,
-            new: new_text.len(),
-            new_rope,
-            version,
-        })).unwrap();
-    }
+    fn on_transaction(&mut self, transaction: &TransactionSummary, _cx: &mut App) {
+        smol::block_on(async {
+            // because cursor is sent first, it must be the case that
+            // compilation thread will receive cursor messages before any rope updates
+            self.compilation_tx.send(
+                CompilationMessage::UpdateCursor {
+                    cursor: transaction.new_cursor,
+                    version: transaction.final_version
+                }
+            ).await.unwrap();
 
-    fn on_text_cursor_updated(&mut self, cursor: Cursor) {
-        smol::block_on(self.compilation_tx.send(CompilationMessage::UpdateCursor {
-            cursor,
-        })).unwrap();
+            self.lexing_tx.send_all(&mut futures::stream::iter(
+                transaction.text_changes.iter()
+                    .map(|(old, new_text, new_rope, version)| Ok(LexingMessage::UpdateRope {
+                        old: old.clone(),
+                        new: new_text.len(),
+                        new_rope: new_rope.clone(),
+                        version: *version
+                    }))
+            )).await.unwrap();
+        })
     }
 
     fn on_sm_message_recv(&mut self, msg: ServiceManagerMessage, cx: &mut App) {
