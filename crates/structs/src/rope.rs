@@ -1,7 +1,6 @@
 use arrayvec::{ArrayString, ArrayVec};
 use std::ops::Range;
 use std::{marker::PhantomData, sync::Arc};
-use std::iter::Once;
 use std::str::Chars;
 use crate::rope::internal::RopeNode;
 use crate::text::Span8;

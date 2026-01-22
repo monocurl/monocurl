@@ -1,12 +1,11 @@
-use std::{cell::{Cell, RefCell}, collections::{HashMap, HashSet}, ops::Range, path::PathBuf, usize};
+use std::{collections::{HashMap, HashSet}, ops::Range, path::PathBuf, usize};
 
 use lexer::token::Token;
-use structs::{rope::{Attribute, Rope, TextAggregate}, text::{Count8, Span8}};
+use structs::{rope::{Rope, TextAggregate}, text::{Count8, Span8}};
 
-use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parser::predicate::{BinaryOperator, Exact, InLambdaOrBlockPredicate, InLoopPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperator, VariableDeclaration}};
+use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
 
 type Result<T> = std::result::Result<T, ()>;
-const CHAR_ESCAPE: &'static str = "\n%\"'\t";
 
 macro_rules! try_all {
     (@branches $self:expr, $token:expr, $span:expr, [], [$($collected:tt)*]) => {
@@ -55,7 +54,7 @@ macro_rules! try_all {
     (@execute_head $self:expr, $token:expr, $span:expr, [$(($state_pred:expr, $var:ident, $token_pred:expr, $body:expr),)*]) => {{
         if let Some(token) = $token {
             // if it contains the cursor, emit all the possibilities
-            if $span.contains(&$self.cursor_position) {
+            if $self.cursor_position.is_some() && $span.contains(&$self.cursor_position.unwrap()) {
                 $(
                     let state_ok = if let Some(pred) = $state_pred {
                         pred.ok(&$self.state)
@@ -120,6 +119,9 @@ macro_rules! try_all {
         ));
         if !token_expectations.is_empty() {
             error_msg.push_str("expected ");
+            // dedup
+            let mut seen = HashSet::new();
+            token_expectations.retain(|x| seen.insert(*x));
             for (i, expectation) in token_expectations.iter().enumerate() {
                 if i > 0 {
                     if i == token_expectations.len() - 1 {
@@ -130,7 +132,6 @@ macro_rules! try_all {
                 }
                 error_msg.push_str(expectation);
             }
-            error_msg.push('\n');
         }
         for hint in failed_state_hints {
             error_msg.push_str(&format!(
@@ -232,8 +233,30 @@ mod predicate {
         }
     }
 
-    pub(super) struct Exact(pub Token);
-    impl TokenPredicate for Exact {
+    pub(super) struct ExactPredDesc(pub Token, pub &'static str);
+    impl TokenPredicate for ExactPredDesc {
+        type Output = Token;
+
+        fn convert(&self, token: Token) -> Option<Self::Output> {
+            if token == self.0 {
+                Some(token)
+            }
+            else {
+                None
+            }
+        }
+
+        fn description(&self) -> &'static str {
+            self.1
+        }
+
+        fn emit_possibilities(&self, dump: &mut ParseArtifacts) {
+            dump.cursor_possibilities.insert(self.0);
+        }
+    }
+
+    pub(super) struct ExactPred(pub Token);
+    impl TokenPredicate for ExactPred {
         type Output = Token;
 
         fn convert(&self, token: Token) -> Option<Self::Output> {
@@ -254,8 +277,8 @@ mod predicate {
         }
     }
 
-    pub(super) struct UnaryOperator;
-    impl TokenPredicate for UnaryOperator {
+    pub(super) struct UnaryOperatorPred;
+    impl TokenPredicate for UnaryOperatorPred {
         type Output = UnaryOperatorType;
 
         fn convert(&self, token: Token) -> Option<Self::Output> {
@@ -276,8 +299,8 @@ mod predicate {
         }
     }
 
-    pub(super) struct BinaryOperator;
-    impl TokenPredicate for BinaryOperator {
+    pub(super) struct BinaryOperatorPred;
+    impl TokenPredicate for BinaryOperatorPred {
         type Output = BinaryOperatorType;
 
         fn convert(&self, token: Token) -> Option<Self::Output> {
@@ -328,8 +351,8 @@ mod predicate {
         }
     }
 
-    pub(super) struct VariableDeclaration;
-    impl TokenPredicate for VariableDeclaration {
+    pub(super) struct VariableDeclarationPred;
+    impl TokenPredicate for VariableDeclarationPred {
         type Output = VariableType;
 
         fn convert(&self, token: Token) -> Option<Self::Output> {
@@ -377,6 +400,28 @@ struct State {
 }
 
 impl State {
+    fn new(section_type: SectionType, token_count: usize) -> Self {
+        let top = match section_type {
+            SectionType::Slide => ContextFrame {
+                operating_range: 0..token_count,
+                in_playable_block: true,
+                in_lambda_or_block: false,
+                in_loop: false,
+            },
+            _ => ContextFrame {
+                operating_range: 0..token_count,
+                in_playable_block: false,
+                in_lambda_or_block: false,
+                in_loop: false
+            }
+        };
+
+        State {
+            frames: vec![top],
+            section_type,
+        }
+    }
+
     fn top(&self) -> &ContextFrame {
         self.frames.last().unwrap()
     }
@@ -402,17 +447,52 @@ impl State {
 }
 
 struct Precomputation {
-    slide_boundaries: Vec<Span8>,
     bracket_partners: HashMap<usize, usize>
 }
 
 impl Precomputation {
-    fn bracket_internal_range(&self, bracket_index: usize) -> Result<Range<usize>> {
+    fn new(tokens: &[(Token, Span8)]) -> Self {
+        let mut bracket_partners = HashMap::new();
+        let mut stack = Vec::new();
+
+        for (i, (token, _)) in tokens.iter().enumerate() {
+            match token {
+                Token::LFlower | Token::LParen | Token::LBracket => {
+                    stack.push((token, i));
+                },
+                Token::RFlower | Token::RParen | Token::RBracket => {
+                    while let Some((open_token, open_index)) = stack.pop() {
+                        let is_match = match (open_token, token) {
+                            (Token::LFlower, Token::RFlower) => true,
+                            (Token::LParen, Token::RParen) => true,
+                            (Token::LBracket, Token::RBracket) => true,
+                            _ => false
+                        };
+                        bracket_partners.insert(open_index, i);
+                        if is_match {
+                            break;
+                        }
+                    }
+                },
+                _ => {}
+            }
+        }
+
+        while let Some((_unmatched, open_index)) = stack.pop() {
+            bracket_partners.insert(open_index, tokens.len());
+        }
+
+        Precomputation {
+            bracket_partners
+        }
+    }
+
+    fn bracket_internal_range(&self, bracket_index: usize) -> Range<usize> {
         if let Some(end) = self.bracket_partners.get(&bracket_index) {
-            Ok(bracket_index + 1 .. *end)
+            bracket_index + 1 .. *end
         }
         else {
-            Err(())
+            bracket_index + 1 .. bracket_index + 1
         }
     }
 }
@@ -428,7 +508,7 @@ pub struct Diagnostic {
 pub struct SectionParser {
     precomputation: Precomputation,
     state: State,
-    cursor_position: Count8,
+    cursor_position: Option<Count8>,
 
     text_rope: Rope<TextAggregate>,
     tokens: Vec<(Token, Span8)>,
@@ -439,6 +519,7 @@ pub struct SectionParser {
 
 pub struct Parser;
 
+#[derive(Default)]
 pub struct ParseArtifacts {
     pub diagnostics: Vec<Diagnostic>,
     pub cursor_possibilities: HashSet<Token>
@@ -485,16 +566,12 @@ impl SectionParser {
             Diagnostic { is_error: true, span, title: "Parse Error".to_string(), message: error_message }
         )
     }
-
-    fn emit_cursor_possibility(&mut self, token: Token) {
-        self.artifacts.cursor_possibilities.insert(token);
-    }
 }
 
 impl SectionParser {
     fn read_token(&mut self, token: Token) -> Result<Span8> {
         try_all!(self, {
-            Exact(token) => {
+            ExactPred(token) => {
                 self.advance_token()
             },
         })
@@ -502,7 +579,7 @@ impl SectionParser {
 
     fn read_if_token(&mut self, token: Token) -> Option<Span8> {
         try_all!(self, {
-            Exact(token) => {
+            ExactPred(token) => {
                 self.advance_token()
             },
             else {
@@ -521,11 +598,11 @@ impl SectionParser {
 }
 
 impl SectionParser {
-    pub fn parse_section(&mut self, section_type: SectionType) -> Result<Section> {
+    pub fn parse_section(&mut self) -> Result<Section> {
         let body = self.parse_statement_list()?;
         Ok(Section {
             body,
-            section_type,
+            section_type: self.state.section_type,
         })
     }
 
@@ -544,10 +621,10 @@ impl SectionParser {
                 // ensure no hanging content
                 if self.peek_token().is_some() {
                     try_all!(self, {
-                        Exact(Token::Newline) => {
+                        ExactPred(Token::Newline) => {
                             self.advance_token();
                         },
-                        Exact(Token::Semicolon) => {
+                        ExactPred(Token::Semicolon) => {
                             self.advance_token();
                         },
                     })?;
@@ -567,39 +644,39 @@ impl SectionParser {
 
     pub fn parse_statement(&mut self) -> Result<SpanTagged<Statement>> {
         try_all!(self, {
-            vtype = VariableDeclaration => {
+            vtype = VariableDeclarationPred => {
                 let (span, statement) = self.parse_declaration(vtype)?;
                 (span, Statement::Declaration(statement))
             },
-            Exact(Token::For) => {
+            ExactPred(Token::For) => {
                 let (span, statement) = self.parse_for()?;
                 (span, Statement::For(statement))
             },
-            Exact(Token::While) => {
+            ExactPred(Token::While) => {
                 let (span, statement) = self.parse_while()?;
                 (span, Statement::While(statement))
             },
-            Exact(Token::If) => {
+            ExactPred(Token::If) => {
                 let (span, statement) = self.parse_if()?;
                 (span, Statement::If(statement))
             },
-            if PlayablePredicate, Exact(Token::Play) => {
+            if PlayablePredicate, ExactPred(Token::Play) => {
                 let (span, statement) = self.parse_play()?;
                 (span, Statement::Play(statement))
             },
-            if InLoopPredicate, Exact(Token::Break) => {
+            if InLoopPredicate, ExactPred(Token::Break) => {
                 let span = self.advance_token();
                 (span, Statement::Break)
             },
-            if InLoopPredicate, Exact(Token::Continue) => {
+            if InLoopPredicate, ExactPred(Token::Continue) => {
                 let span = self.advance_token();
                 (span, Statement::Continue)
             },
-            if InLambdaOrBlockPredicate, Exact(Token::Return) => {
+            if InLambdaOrBlockPredicate, ExactPred(Token::Return) => {
                 let (span, statement) = self.parse_return()?;
                 (span, Statement::Return(statement))
             },
-            if InLambdaOrBlockPredicate, Exact(Token::Dot) => {
+            if InLambdaOrBlockPredicate, ExactPred(Token::Dot) => {
                 let base_span = self.advance_token();
                 let (span, expr) = self.parse_expr()?;
                 let desugared_expression = Statement::Expression(
@@ -668,22 +745,24 @@ impl SectionParser {
         let condition = self.parse_expr()?;
         self.read_token(Token::RParen)?;
         let body = self.parse_body(|_| {})?;
+        self.advance_newlines();
         if self.read_if_token(Token::Else).is_some() {
             // parse else block
-            let else_block = if self.read_if_token(Token::If).is_some() {
-                // nested if
-                let (span, statement) = self.parse_if()?;
-                (span.clone(), vec![(span, Statement::If(statement))])
-            }
-            else {
-                // pure else block
-                self.parse_body(|_| {})?
-            };
+            let else_block = try_all!(self, {
+                ExactPred(Token::If) => {
+                    // else if
+                    let (span, statement) = self.parse_if()?;
+                    (span.clone(), vec![(span, Statement::If(statement))])
+                },
+                else {
+                    self.parse_body(|_| {})
+                }
+            })?;
 
             Ok((base_span.start .. else_block.0.end, If {
                 condition,
                 if_block: body,
-                else_block: None
+                else_block: Some(else_block)
             }))
         }
         else {
@@ -738,8 +817,8 @@ impl SectionParser {
     }
 
     fn parse_body(&mut self, frame_builder: impl FnOnce(&mut ContextFrame)) -> Result<SpanTagged<Vec<SpanTagged<Statement>>>> {
+        let body_range = self.precomputation.bracket_internal_range(self.token_index);
         let base_span = self.read_token(Token::LFlower)?;
-        let body_range = self.precomputation.bracket_internal_range(self.token_index)?;
 
         self.state.push_frame(|frame| {
             frame.operating_range = body_range;
@@ -765,9 +844,10 @@ impl SectionParser {
         loop {
             let mut finished = false;
             try_all!(self, {
-                op = BinaryOperator => {
+                op = BinaryOperatorPred => {
                     if (op.priority(), op.associativity()) >= (priority, 1) {
                         // combine right
+                        self.advance_token();
                         self.advance_newlines();
                         let right = self.parse_expr_priority(op.priority())?;
                         let old_expr = expr.take().unwrap();
@@ -805,58 +885,65 @@ impl SectionParser {
         // parse base expression
         let expr = try_all!(self, {
             /* unary operators */
-            op = UnaryOperator => {
+            op = UnaryOperatorPred => {
                 self.parse_unary_preoperator(op)?
             },
             /* entire sub expression */
-            Exact(Token::LParen) => {
+            ExactPred(Token::LParen) => {
                 self.parse_parenthesis_sub_expression()?
             },
             /* identifier */
-            Exact(Token::Identifier) => {
+            ExactPred(Token::Identifier) => {
                 let span = self.advance_token();
                 let str: String = self.text_rope.iterator_range(span.clone()).collect();
                 (span, Expression::IdentifierReference(IdentifierReference::Value(str)))
             },
-            Exact(Token::Reference) => {
+            ExactPredDesc(Token::Reference, "<identifier>") => {
                 let base_span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier()?;
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
             },
-            Exact(Token::StatefulReference) => {
+            ExactPredDesc(Token::StatefulReference, "<identifier>") => {
                 let base_span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier()?;
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
             },
-            Exact(Token::Multiply) => {
+            ExactPredDesc(Token::Multiply, "<identifier>") => {
                 let base_span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier()?;
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
             },
             /* operator definition */
-            Exact(Token::Operator) => {
+            ExactPred(Token::Operator) => {
                 let base_span = self.advance_token();
                 let target = self.parse_unary()?;
                 (base_span.start..target.0.end, Expression::OperationDefinition(OperatorDefinition { lambda: (target.0, Box::new(target.1)) }))
             },
             /* lambda definition */
-            Exact(Token::Pipe) => {
+            ExactPredDesc(Token::Pipe, "<lambda>") => {
                 self.parse_lambda()?
             },
+            /* blocks */
+            ExactPred(Token::Block) => {
+                self.parse_block()?
+            },
+            ExactPred(Token::Anim) => {
+                self.parse_anim()?
+            },
             /* literals */
-            Exact(Token::IntegerLiteral) => {
+            ExactPred(Token::IntegerLiteral) => {
                 self.parse_int_literal()?
             },
-            Exact(Token::DoubleLiteral) => {
+            ExactPred(Token::DoubleLiteral) => {
                 self.parse_double_literal()?
             },
-            Exact(Token::StringLiteral) => {
+            ExactPred(Token::StringLiteral) => {
                 self.parse_string_literal()?
             },
-            Exact(Token::CharLiteral) => {
+            ExactPred(Token::CharLiteral) => {
                 self.parse_char_literal()?
             },
-            Exact(Token::LBracket) => {
+            ExactPredDesc(Token::LBracket, "<container>") => {
                 self.parse_map_or_vector_literal()?
             },
         })?;
@@ -873,9 +960,8 @@ impl SectionParser {
             let mut take_expr = || expr.take().unwrap();
             let boxify = |raw: SpanTagged<Expression>| (raw.0, Box::new(raw.1));
             let next = try_all!(self, {
-                Exact(Token::LParen) => {
+                ExactPredDesc(Token::LParen, "<function invocation>") => {
                     // lambda invocation
-                    self.advance_token();
                     let arguments = self.parse_invocation(Token::LParen, Token::RParen)?;
                     let old = boxify(take_expr());
                     (old.0.start..arguments.0.end, Expression::LambdaInvocation(LambdaInvocation {
@@ -883,9 +969,8 @@ impl SectionParser {
                         arguments: arguments
                     }))
                 },
-                Exact(Token::LFlower) => {
+                ExactPredDesc(Token::LFlower, "<operator invocation>") => {
                     // operator invocation
-                    self.advance_token();
                     let arguments = self.parse_invocation(Token::LFlower, Token::RFlower)?;
                     let old = boxify(take_expr());
                     let operand = self.parse_unary()?;
@@ -896,7 +981,7 @@ impl SectionParser {
                         operand: boxify(operand)
                     }))
                 },
-                Exact(Token::LBracket) => {
+                ExactPredDesc(Token::LBracket, "<subscript>") => {
                     // subscript
                     self.advance_token();
                     let index = self.parse_expr()?;
@@ -907,7 +992,7 @@ impl SectionParser {
                         index: boxify(index)
                     }))
                 },
-                Exact(Token::Dot) => {
+                ExactPredDesc(Token::Dot, "<property access>") => {
                     self.advance_token();
                     let attribute = self.read_pure_identifier()?;
                     let old = boxify(take_expr());
@@ -936,7 +1021,7 @@ impl SectionParser {
     -> Result<SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>>
     {
         self.debug_assert_token_eq(start);
-        let range = self.precomputation.bracket_internal_range(self.token_index)?;
+        let range = self.precomputation.bracket_internal_range(self.token_index);
         let base_span = self.advance_token();
 
         self.state.push_frame(|frame| frame.operating_range = range);
@@ -957,7 +1042,7 @@ impl SectionParser {
                 self.advance_newlines();
                 let label = self.peek_token()
                     .and_then(|tok| {
-                        if matches!(tok.0, Token::Identifier) {
+                        if !matches!(tok.0, Token::ArgumentLabel) {
                             return None;
                         }
                         let text: String = self.text_rope.iterator_range(tok.1.clone()).collect();
@@ -1010,8 +1095,8 @@ impl SectionParser {
 
     fn parse_parenthesis_sub_expression(&mut self) -> Result<SpanTagged<Expression>> {
         self.debug_assert_token_eq(Token::LParen);
+        let inner_range = self.precomputation.bracket_internal_range(self.token_index);
         let base_span = self.advance_token();
-        let inner_range = self.precomputation.bracket_internal_range(self.token_index)?;
 
         self.state.push_frame(|frame| {
             frame.operating_range = inner_range;
@@ -1025,7 +1110,7 @@ impl SectionParser {
         Ok((base_span.start .. terminal_span.end, result.1))
     }
 
-    fn parse_anim(&mut self) -> Result<SpanTagged<Anim>> {
+    fn parse_anim(&mut self) -> Result<SpanTagged<Expression>> {
         self.debug_assert_token_eq(Token::Anim);
         let base_span = self.advance_token();
 
@@ -1034,9 +1119,9 @@ impl SectionParser {
             frame.in_lambda_or_block = false;
         })?;
 
-        Ok((base_span.start .. body.0.end, Anim {
+        Ok((base_span.start .. body.0.end, Expression::Anim(Anim {
             body: body.1
-        }))
+        })))
     }
 
     fn parse_lambda(&mut self) -> Result<SpanTagged<Expression>> {
@@ -1045,15 +1130,16 @@ impl SectionParser {
         let mut args = Vec::new();
         // parse arguments (and default values)
         if self.read_if_token(Token::Pipe).is_none() {
-            let is_first = true;
+            let mut is_first = true;
             loop {
                 if !is_first {
                     let mut done = false;
                     try_all!(self, {
-                        Exact(Token::Pipe) => {
+                        ExactPred(Token::Pipe) => {
+                            self.advance_token();
                             done = true;
                         },
-                        Exact(Token::Comma) => {
+                        ExactPred(Token::Comma) => {
                             self.advance_token();
                         },
                     })?;
@@ -1061,6 +1147,7 @@ impl SectionParser {
                         break;
                     }
                 }
+                is_first = false;
 
                 let name = self.parse_identifier_declaration()?;
                 if self.read_if_token(Token::Assign).is_some() {
@@ -1074,7 +1161,7 @@ impl SectionParser {
         }
 
         let body = try_all!(self, {
-            Exact(Token::LFlower) => {
+            ExactPred(Token::LFlower) => {
                 let body = self.parse_body(|frame| {
                     frame.in_loop = false;
                     frame.in_playable_block = false;
@@ -1094,7 +1181,7 @@ impl SectionParser {
         })))
     }
 
-    fn parse_block(&mut self) -> Result<SpanTagged<Block>> {
+    fn parse_block(&mut self) -> Result<SpanTagged<Expression>> {
         self.debug_assert_token_eq(Token::Block);
         let base_span = self.advance_token();
 
@@ -1104,9 +1191,9 @@ impl SectionParser {
             frame.in_lambda_or_block = true;
         })?;
 
-        Ok((base_span.start .. body.0.end, Block {
+        Ok((base_span.start .. body.0.end, Expression::Block(Block {
             body: body.1
-        }))
+        })))
     }
 }
 
@@ -1125,6 +1212,19 @@ impl SectionParser {
         Ok((span, Expression::Literal(literal)))
     }
 
+    fn escape_char_literal(c: char) -> Option<char> {
+        match c {
+            'n' => Some('\n'),
+            't' => Some('\t'),
+            'r' => Some('\r'),
+            '%' => Some('%'),
+            '"' => Some('"'),
+            '\'' => Some('\''),
+            '\\' => Some('\\'),
+            _ => None
+        }
+    }
+
     fn parse_string_literal(&mut self) -> Result<SpanTagged<Expression>> {
         self.parse_basic_literal(Token::StringLiteral, |string| {
             let mut build = String::new();
@@ -1136,8 +1236,8 @@ impl SectionParser {
             while let Some(curr) = it.next() {
                 if curr == '%' {
                     let next = it.next();
-                    if next.is_some_and(|c| CHAR_ESCAPE.find(c).is_some()) {
-                        build.push(next.unwrap());
+                    if let Some(map) = next.and_then(Self::escape_char_literal) {
+                        build.push(map);
                     }
                     else {
                         return Err("Illegal escape character")
@@ -1171,12 +1271,8 @@ impl SectionParser {
             let ch = match it.next() {
                 Some('%') => {
                     let next = it.next();
-                    if let Some(c) = next {
-                        if CHAR_ESCAPE.find(c).is_some() {
-                            c
-                        } else {
-                            return Err("Illegal escape character")
-                        }
+                    if let Some(map) = next.and_then(Self::escape_char_literal) {
+                        return Ok(Literal::Char(map))
                     } else {
                         return Err("Malformed escape character")
                     }
@@ -1303,8 +1399,10 @@ impl SectionParser {
             self.advance_newlines();
             let mut is_finished = false;
             try_all!(self, {
-                Exact(Token::Comma) => {},
-                Exact(Token::RBracket) => {
+                ExactPred(Token::Comma) => {
+                    self.advance_token();
+                },
+                ExactPred(Token::RBracket) => {
                     last_span = self.advance_token();
                     is_finished = true;
                 },
@@ -1313,6 +1411,7 @@ impl SectionParser {
                 break
             }
         }
+
         if !vector_entries.is_empty() {
             Ok((base_span.start..last_span.end, Expression::Literal(Literal::Vector(vector_entries))))
         }
@@ -1322,37 +1421,1112 @@ impl SectionParser {
     }
 }
 
-impl Parser {
-    fn gather_sections(&mut self) {
+impl SectionParser {
+    pub fn new(tokens: Vec<(Token, Span8)>, text: Rope<TextAggregate>, section_type: SectionType, cursor_position: Option<Count8>) -> Self {
+        SectionParser {
+            precomputation: Precomputation::new(&tokens),
+            state: State::new(section_type, tokens.len()),
+            text_rope: text,
+            tokens,
+            token_index: 0,
+            cursor_position,
+            artifacts: ParseArtifacts::default()
+        }
+    }
+}
 
+// impl Parser {
+//     fn gather_sections(&mut self) {
+
+//     }
+
+//     fn new(external_context: &ExternalContext, lex_rope: Rope<Attribute<Token>>, text_rope: TextAggregate) -> Self {
+//         // precompute on the section
+
+//         let mut utf8 = 0;
+//         let token_list: Vec<_> = lex_rope.iterator(0)
+//             .map(|(len, token)| {
+//                 let span = utf8 .. utf8 + len;
+//                 utf8 += len;
+//                 (token, span)
+//             })
+//             .filter(|(tok, _)| tok != &Token::Whitespace && tok != &Token::Comment)
+//             .collect();
+
+//         SectionParser {
+//             precomputation: todo!(),
+//             state: todo!(),
+//             text_rope: todo!(),
+//             tokens: todo!(),
+//             token_index: todo!(),
+//             cursor_position: todo!(),
+//             artifacts: todo!(),
+//         }
+//     }
+
+//     pub fn parse(external_context: &'a ExternalContext, lex_rope: Rope<Attribute<Token>>, text_rope: Rope<TextAggregate>) -> Result<Vec<Section>, Vec<Diagnostic>> {
+//         // 1. crawl imports to gather sections
+//         Err(vec![])
+//     }
+// }
+
+
+#[cfg(test)]
+mod test {
+    use lexer::{lexer::Lexer, token::Token};
+    use structs::{rope::Rope, text::Span8};
+
+    use super::Result;
+    use crate::{ast::*, parser::SectionParser};
+
+    fn lex(content: &str) -> Vec<(Token, Span8)> {
+        Lexer::token_stream(content.chars())
+            .iter().filter(|(tok, _)| tok != &Token::Whitespace && tok != &Token::Comment)
+            .cloned()
+            .collect()
     }
 
-    fn new(external_context: &ExternalContext, lex_rope: Rope<Attribute<Token>>, text_rope: TextAggregate) -> Self {
-        // precompute on the section
+    fn parse_expr_test(content: &str) -> Result<SpanTagged<Expression>> {
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let ret = parser.parse_expr();
+        if ret.is_err() {
+            dbg!(&parser.artifacts.diagnostics);
+        }
+        ret
+    }
 
-        let mut utf8 = 0;
-        let token_list: Vec<_> = lex_rope.iterator(0)
-            .map(|(len, token)| {
-                let span = utf8 .. utf8 + len;
-                utf8 += len;
-                (token, span)
-            })
-            .filter(|(tok, _)| tok != &Token::Whitespace && tok != &Token::Comment)
-            .collect();
+    fn parse_stmt_test(content: &str) -> Result<SpanTagged<Statement>> {
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let ret = parser.parse_statement();
+        if ret.is_err() {
+            dbg!(&parser.artifacts.diagnostics);
+        }
+        ret
+    }
 
-        SectionParser {
-            precomputation: todo!(),
-            state: todo!(),
-            text_rope: todo!(),
-            tokens: todo!(),
-            token_index: todo!(),
-            cursor_position: todo!(),
-            artifacts: todo!(),
+    // Literal tests
+    #[test]
+    fn test_integer_literal() {
+        let result = parse_expr_test("42").unwrap();
+        let expected = Expression::Literal(Literal::Int(42));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_double_literal() {
+        let result = parse_expr_test("3.14").unwrap();
+        if let Expression::Literal(Literal::Double(val)) = result.1 {
+            assert!((val - 3.14).abs() < 0.0001);
+        } else {
+            panic!("Expected double literal");
         }
     }
 
-    pub fn parse(external_context: &'a ExternalContext, lex_rope: Rope<Attribute<Token>>, text_rope: Rope<TextAggregate>) -> Result<Vec<Section>, Vec<Diagnostic>> {
-        // 1. crawl imports to gather sections
-        Err(vec![])
+    #[test]
+    fn test_string_literal() {
+        let result = parse_expr_test(r#""hello world""#).unwrap();
+        let expected = Expression::Literal(Literal::String("hello world".to_string()));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_string_with_escapes() {
+        let result = parse_expr_test(r#""hello%nworld%t%"test%'""#).unwrap();
+        let expected = Expression::Literal(Literal::String("hello\nworld\t\"test'".to_string()));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_char_literal() {
+        let result = parse_expr_test("'x'").unwrap();
+        let expected = Expression::Literal(Literal::Char('x'));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_char_with_escape() {
+        let result = parse_expr_test("'%n'").unwrap();
+        let expected = Expression::Literal(Literal::Char('\n'));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_directional_literal_left() {
+        let result = parse_expr_test("5l").unwrap();
+        let expected = Expression::Literal(Literal::Directional(DirectionalLiteral::Left(5.0)));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_directional_literal_up() {
+        let result = parse_expr_test("3.5u").unwrap();
+        let expected = Expression::Literal(Literal::Directional(DirectionalLiteral::Up(3.5)));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_imaginary_literal() {
+        let result = parse_expr_test("2i").unwrap();
+        let expected = Expression::Literal(Literal::Imaginary(2.0));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_degrees_literal() {
+        let result = parse_expr_test("90dg").unwrap();
+        if let Expression::Literal(Literal::Double(val)) = result.1 {
+            assert!((val - std::f64::consts::PI / 2.0).abs() < 0.0001);
+        } else {
+            panic!("Expected double literal");
+        }
+    }
+
+    #[test]
+    fn test_empty_vector() {
+        let result = parse_expr_test("[]").unwrap();
+        let expected = Expression::Literal(Literal::Vector(vec![]));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_vector_literal() {
+        let result = parse_expr_test("[1, 2, 3]").unwrap();
+        let expected = Expression::Literal(Literal::Vector(vec![
+            (1..2, Expression::Literal(Literal::Int(1))),
+            (4..5, Expression::Literal(Literal::Int(2))),
+            (7..8, Expression::Literal(Literal::Int(3))),
+        ]));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_empty_map() {
+        let result = parse_expr_test("[->]").unwrap();
+        let expected = Expression::Literal(Literal::Map(vec![]));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_map_literal() {
+        let result = parse_expr_test("[1 -> 2, 3 -> 4]").unwrap();
+        let expected = Expression::Literal(Literal::Map(vec![
+            (
+                (1..2, Expression::Literal(Literal::Int(1))),
+                (6..7, Expression::Literal(Literal::Int(2)))
+            ),
+            (
+                (9..10, Expression::Literal(Literal::Int(3))),
+                (14..15, Expression::Literal(Literal::Int(4)))
+            ),
+        ]));
+        assert_eq!(result.1, expected);
+    }
+
+    // Identifier tests
+    #[test]
+    fn test_identifier() {
+        let result = parse_expr_test("foo").unwrap();
+        let expected = Expression::IdentifierReference(IdentifierReference::Value("foo".to_string()));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_reference() {
+        let result = parse_expr_test("&bar").unwrap();
+        let expected = Expression::IdentifierReference(IdentifierReference::Reference("bar".to_string()));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_stateful_reference() {
+        let result = parse_expr_test("$state_var").unwrap();
+        let expected = Expression::IdentifierReference(IdentifierReference::Reference("state_var".to_string()));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_dereference() {
+        let result = parse_expr_test("*ptr").unwrap();
+        let expected = Expression::IdentifierReference(IdentifierReference::Reference("ptr".to_string()));
+        assert_eq!(result.1, expected);
+    }
+
+    // Binary operator tests
+    #[test]
+    fn test_addition() {
+        let result = parse_expr_test("1 + 2").unwrap();
+        let expected = Expression::BinaryOperator(BinaryOperator {
+            lhs: (0..1, Box::new(Expression::Literal(Literal::Int(1)))),
+            op_type: BinaryOperatorType::Add,
+            rhs: (4..5, Box::new(Expression::Literal(Literal::Int(2)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_append_operator() {
+        let result = parse_expr_test("[1, 2] .. 3").unwrap();
+        let expected = Expression::BinaryOperator(BinaryOperator {
+            lhs: (0..6, Box::new(Expression::Literal(Literal::Vector(vec![
+                (1..2, Expression::Literal(Literal::Int(1))),
+                (4..5, Expression::Literal(Literal::Int(2))),
+            ])))),
+            op_type: BinaryOperatorType::Append,
+            rhs: (10..11, Box::new(Expression::Literal(Literal::Int(3)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_comparison() {
+        let result = parse_expr_test("x < y").unwrap();
+        let expected = Expression::BinaryOperator(BinaryOperator {
+            lhs: (0..1, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+            op_type: BinaryOperatorType::Lt,
+            rhs: (4..5, Box::new(Expression::IdentifierReference(IdentifierReference::Value("y".to_string())))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_operator_precedence() {
+        let result = parse_expr_test("1 + 2 * 3").unwrap();
+        let expected = Expression::BinaryOperator(
+            BinaryOperator {
+                lhs: (0..1, Box::new(Expression::Literal(Literal::Int(1)))),
+                op_type: BinaryOperatorType::Add,
+                rhs: (4..9, Box::new(Expression::BinaryOperator(
+                    BinaryOperator {
+                        lhs: (4..5, Box::new(Expression::Literal(Literal::Int(2)))),
+                        op_type: BinaryOperatorType::Multiply,
+                        rhs: (8..9, Box::new(Expression::Literal(Literal::Int(3)))),
+                    }
+                )))
+            }
+        );
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_left_associativity_append() {
+        let result = parse_expr_test("a .. b .. c").unwrap();
+        // BinaryOperator(BinaryOperator { lhs: (0..6, BinaryOperator(BinaryOperator { lhs: (0..1, IdentifierReference(Value("a"))), op_type: Append, rhs: (5..6, IdentifierReference(Value("b"))) })), op_type: Append, rhs: (10..11, IdentifierReference(Value("c"))) })
+        let expected = Expression::BinaryOperator(
+            BinaryOperator {
+                lhs: (0..6, Box::new(Expression::BinaryOperator(
+                    BinaryOperator {
+                        lhs: (0..1, Box::new(Expression::IdentifierReference(IdentifierReference::Value("a".to_string())))),
+                        op_type: BinaryOperatorType::Append,
+                        rhs: (5..6, Box::new(Expression::IdentifierReference(IdentifierReference::Value("b".to_string())))),
+                    }
+                ))),
+                op_type: BinaryOperatorType::Append,
+                rhs: (10..11, Box::new(Expression::IdentifierReference(IdentifierReference::Value("c".to_string())))),
+            }
+        );
+        assert_eq!(result.1, expected);
+    }
+
+    // Unary operator tests
+    #[test]
+    fn test_negation() {
+        let result = parse_expr_test("-5").unwrap();
+        let expected = Expression::UnaryPreOperator(UnaryPreOperator {
+            op_type: UnaryOperatorType::Negative,
+            operand: (1..2, Box::new(Expression::Literal(Literal::Int(5)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_not() {
+        let result = parse_expr_test("not x").unwrap();
+        let expected = Expression::UnaryPreOperator(UnaryPreOperator {
+            op_type: UnaryOperatorType::Not,
+            operand: (4..5, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_double_negation() {
+        let result = parse_expr_test("--5").unwrap();
+        let expected = Expression::UnaryPreOperator(UnaryPreOperator {
+            op_type: UnaryOperatorType::Negative,
+            operand: (1..3, Box::new(Expression::UnaryPreOperator(UnaryPreOperator {
+                op_type: UnaryOperatorType::Negative,
+                operand: (2..3, Box::new(Expression::Literal(Literal::Int(5)))),
+            }))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Lambda tests
+    #[test]
+    fn test_simple_lambda() {
+        let result = parse_expr_test("|x| x + 1").unwrap();
+        let expected = Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![
+                ((1..2, IdentifierDeclaration("x".to_string())), None)
+            ],
+            body: (4..9, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
+                lhs: (4..5, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                op_type: BinaryOperatorType::Add,
+                rhs: (8..9, Box::new(Expression::Literal(Literal::Int(1)))),
+            })))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_lambda_with_multiple_args() {
+        let result = parse_expr_test("|x, y| x + y").unwrap();
+        let expected = Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![
+                ((1..2, IdentifierDeclaration("x".to_string())), None),
+                ((4..5, IdentifierDeclaration("y".to_string())), None),
+            ],
+            body: (7..12, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
+                lhs: (7..8, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                op_type: BinaryOperatorType::Add,
+                rhs: (11..12, Box::new(Expression::IdentifierReference(IdentifierReference::Value("y".to_string())))),
+            })))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_lambda_with_default_arg() {
+        let result = parse_expr_test("|x, y = 5| x + y").unwrap();
+        let expected = Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![
+                ((1..2, IdentifierDeclaration("x".to_string())), None),
+                ((4..5, IdentifierDeclaration("y".to_string())), Some((8..9, Expression::Literal(Literal::Int(5))))),
+            ],
+            body: (11..16, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
+                lhs: (11..12, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                op_type: BinaryOperatorType::Add,
+                rhs: (15..16, Box::new(Expression::IdentifierReference(IdentifierReference::Value("y".to_string())))),
+            })))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_lambda_block_body() {
+        let result = parse_expr_test("|x| { return x + 1 }").unwrap();
+        let expected = Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![((1..2, IdentifierDeclaration("x".to_string())), None)],
+            body: (4..20, LambdaBody::Block(vec![
+                (6..18, Statement::Return(Return {
+                    value: (13..18, Expression::BinaryOperator(BinaryOperator {
+                        lhs: (13..14, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                        op_type: BinaryOperatorType::Add,
+                        rhs: (17..18, Box::new(Expression::Literal(Literal::Int(1)))),
+                    })),
+                }))
+            ])),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_empty_lambda() {
+        let result = parse_expr_test("|| 42").unwrap();
+        let expected = Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![],
+            body: (3..5, LambdaBody::Inline(Box::new(Expression::Literal(Literal::Int(42))))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Function invocation tests
+    #[test]
+    fn test_function_call_no_args() {
+        let result = parse_expr_test("foo()").unwrap();
+        let expected = Expression::LambdaInvocation(LambdaInvocation {
+            lambda: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("foo".to_string())))),
+            arguments: (3..5, vec![]),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_function_call_with_args() {
+        let result = parse_expr_test("add(1, 2)").unwrap();
+        let expected = Expression::LambdaInvocation(LambdaInvocation {
+            lambda: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("add".to_string())))),
+            arguments: (3..9, vec![
+                (None, (4..5, Expression::Literal(Literal::Int(1)))),
+                (None, (7..8, Expression::Literal(Literal::Int(2)))),
+            ]),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_function_call_with_labeled_args() {
+        let result = parse_expr_test("foo(x: 1, y: 2)").unwrap();
+        let expected = Expression::LambdaInvocation(LambdaInvocation {
+            lambda: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("foo".to_string())))),
+            arguments: (3..15, vec![
+                (Some((4..6, IdentifierDeclaration("x".to_string()))), (7..8, Expression::Literal(Literal::Int(1)))),
+                (Some((10..12, IdentifierDeclaration("y".to_string()))), (13..14, Expression::Literal(Literal::Int(2)))),
+            ]),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Operator invocation tests
+    #[test]
+    fn test_operator_invocation() {
+        let result = parse_expr_test("op{x, y} z").unwrap();
+        let expected = Expression::OperatorInvocation(OperatorInvocation {
+            operator: (0..2, Box::new(Expression::IdentifierReference(IdentifierReference::Value("op".to_string())))),
+            arguments: (2..8, vec![
+                (None, (3..4, Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                (None, (6..7, Expression::IdentifierReference(IdentifierReference::Value("y".to_string())))),
+            ]),
+            operand: (9..10, Box::new(Expression::IdentifierReference(IdentifierReference::Value("z".to_string())))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_operator_invocation_complex() {
+        let result = parse_expr_test("derivative{n: 2} (x * x)").unwrap();
+        let expected = Expression::OperatorInvocation(OperatorInvocation {
+            operator: (0..10, Box::new(Expression::IdentifierReference(IdentifierReference::Value("derivative".to_string())))),
+            arguments: (10..16, vec![
+                (Some((11..13, IdentifierDeclaration("n".to_string()))), (14..15, Expression::Literal(Literal::Int(2)))),
+            ]),
+            operand: (17..24, Box::new(Expression::BinaryOperator(BinaryOperator {
+                lhs: (18..19, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                op_type: BinaryOperatorType::Multiply,
+                rhs: (22..23, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+            }))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Property access tests
+    #[test]
+    fn test_property_access() {
+        let result = parse_expr_test("obj.field").unwrap();
+        let expected = Expression::Property(Property {
+            base: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("obj".to_string())))),
+            attribute: (4..9, IdentifierReference::Value("field".to_string())),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_chained_property_access() {
+        let result = parse_expr_test("obj.a.b.c").unwrap();
+        let expected = Expression::Property(Property {
+            base: (0..7, Box::new(Expression::Property(Property {
+                base: (0..5, Box::new(Expression::Property(Property {
+                    base: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("obj".to_string())))),
+                    attribute: (4..5, IdentifierReference::Value("a".to_string())),
+                }))),
+                attribute: (6..7, IdentifierReference::Value("b".to_string())),
+            }))),
+            attribute: (8..9, IdentifierReference::Value("c".to_string())),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Subscript tests
+    #[test]
+    fn test_subscript() {
+        let result = parse_expr_test("arr[0]").unwrap();
+        let expected = Expression::Subscript(Subscript {
+            base: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("arr".to_string())))),
+            index: (4..5, Box::new(Expression::Literal(Literal::Int(0)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_chained_subscript() {
+        let result = parse_expr_test("matrix[i][j]").unwrap();
+        let expected = Expression::Subscript(Subscript {
+            base: (0..9, Box::new(Expression::Subscript(Subscript {
+                base: (0..6, Box::new(Expression::IdentifierReference(IdentifierReference::Value("matrix".to_string())))),
+                index: (7..8, Box::new(Expression::IdentifierReference(IdentifierReference::Value("i".to_string())))),
+            }))),
+            index: (10..11, Box::new(Expression::IdentifierReference(IdentifierReference::Value("j".to_string())))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Parentheses tests
+    #[test]
+    fn test_parentheses() {
+        let result = parse_expr_test("(1 + 2) * 3").unwrap();
+        let expected = Expression::BinaryOperator(BinaryOperator {
+            lhs: (0..7, Box::new(Expression::BinaryOperator(BinaryOperator {
+                lhs: (1..2, Box::new(Expression::Literal(Literal::Int(1)))),
+                op_type: BinaryOperatorType::Add,
+                rhs: (5..6, Box::new(Expression::Literal(Literal::Int(2)))),
+            }))),
+            op_type: BinaryOperatorType::Multiply,
+            rhs: (10..11, Box::new(Expression::Literal(Literal::Int(3)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Statement tests
+    #[test]
+    fn test_let_declaration() {
+        let result = parse_stmt_test("let x = 5").unwrap();
+        let expected = Statement::Declaration(Declaration {
+            var_type: VariableType::Let,
+            identifier: (4..5, IdentifierDeclaration("x".to_string())),
+            value: (8..9, Expression::Literal(Literal::Int(5))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_var_declaration() {
+        let result = parse_stmt_test("var y = 10").unwrap();
+        let expected = Statement::Declaration(Declaration {
+            var_type: VariableType::Var,
+            identifier: (4..5, IdentifierDeclaration("y".to_string())),
+            value: (8..10, Expression::Literal(Literal::Int(10))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_while_loop() {
+        let result = parse_stmt_test("while (x < 10) { x = x + 1 }").unwrap();
+        let expected = Statement::While(While {
+            condition: (7..13, Expression::BinaryOperator(BinaryOperator {
+                lhs: (7..8, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                op_type: BinaryOperatorType::Lt,
+                rhs: (11..13, Box::new(Expression::Literal(Literal::Int(10)))),
+            })),
+            body: (15..28, vec![
+                (17..26, Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                    lhs: (17..18, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                    op_type: BinaryOperatorType::Assign,
+                    rhs: (21..26, Box::new(Expression::BinaryOperator(BinaryOperator {
+                        lhs: (21..22, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                        op_type: BinaryOperatorType::Add,
+                        rhs: (25..26, Box::new(Expression::Literal(Literal::Int(1)))),
+                    }))),
+                })))
+            ]),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_for_loop() {
+        let result = parse_stmt_test("for (i in [1, 2, 3]) { print(i) }").unwrap();
+        let expected = Statement::For(For {
+            var_name: (5..6, IdentifierDeclaration("i".to_string())),
+            container: (10..19, Expression::Literal(Literal::Vector(vec![
+                (11..12, Expression::Literal(Literal::Int(1))),
+                (14..15, Expression::Literal(Literal::Int(2))),
+                (17..18, Expression::Literal(Literal::Int(3))),
+            ]))),
+            body: (21..33, vec![
+                (23..31, Statement::Expression(Expression::LambdaInvocation(LambdaInvocation {
+                    lambda: (23..28, Box::new(Expression::IdentifierReference(IdentifierReference::Value("print".to_string())))),
+                    arguments: (28..31, vec![
+                        (None, (29..30, Expression::IdentifierReference(IdentifierReference::Value("i".to_string()))))
+                    ]),
+                })))
+            ]),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_if_statement() {
+        let result = parse_stmt_test("if (x > 0) { y = 1 }").unwrap();
+        let expected = Statement::If(If {
+            condition: (4..9, Expression::BinaryOperator(BinaryOperator {
+                lhs: (4..5, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                op_type: BinaryOperatorType::Gt,
+                rhs: (8..9, Box::new(Expression::Literal(Literal::Int(0)))),
+            })),
+            if_block: (11..20, vec![
+                (13..18, Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                    lhs: (13..14, Box::new(Expression::IdentifierReference(IdentifierReference::Value("y".to_string())))),
+                    op_type: BinaryOperatorType::Assign,
+                    rhs: (17..18, Box::new(Expression::Literal(Literal::Int(1)))),
+                })))
+            ]),
+            else_block: None,
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_if_else_statement() {
+        let result = parse_stmt_test("if (x > 0) { y = 1 } else { y = -1 }").unwrap();
+        if let Statement::If(if_stmt) = &result.1 {
+            assert!(if_stmt.else_block.is_some());
+            if let Some((_, else_stmts)) = &if_stmt.else_block {
+                assert_eq!(else_stmts.len(), 1);
+            }
+        } else {
+            panic!("Expected if statement");
+        }
+    }
+
+    #[test]
+    fn test_if_else_if() {
+        let result = parse_stmt_test("if (x > 0) { y = 1 } else if (x < 0) { y = -1 }").unwrap();
+        if let Statement::If(if_stmt) = &result.1 {
+            assert!(if_stmt.else_block.is_some());
+            if let Some((_, else_stmts)) = &if_stmt.else_block {
+                assert_eq!(else_stmts.len(), 1);
+                assert!(matches!(else_stmts[0].1, Statement::If(_)));
+            }
+        } else {
+            panic!("Expected if statement");
+        }
+    }
+
+    #[test]
+    fn test_return_statement() {
+        let result = parse_expr_test("|| { return 42 }").unwrap();
+        let expected = Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![],
+            body: (3..16, LambdaBody::Block(vec![(5..14, Statement::Return(Return {
+                value: (12..14, Expression::Literal(Literal::Int(42))),
+            }))]))
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_break_statement() {
+        let result = parse_stmt_test("while (1) { break }").unwrap();
+        if let Statement::While(w) = result.1 {
+            assert_eq!(w.
+                body.1.len(), 1);
+            assert!(matches!(w.body.1[0].1, Statement::Break));
+        } else {
+            panic!("Expected while statement");
+        }
+    }
+
+    #[test]
+    fn test_continue_statement() {
+        let result = parse_stmt_test("for (i in items) { continue }").unwrap();
+        if let Statement::For(f) = result.1 {
+            assert_eq!(f.body.1.len(), 1);
+            assert!(matches!(f.body.1[0].1, Statement::Continue));
+        } else {
+            panic!("Expected for statement");
+        }
+    }
+
+    #[test]
+    fn test_dot_assign_statement() {
+        let result = parse_expr_test("block {. x + 1}").unwrap();
+        let expected = Expression::Block(Block {
+            body: vec![
+                (7..14, Statement::Expression(Expression::BinaryOperator(
+                    BinaryOperator {
+                        lhs: (7..8, Box::new(Expression::IdentifierReference(IdentifierReference::Value("_".into())))),
+                        op_type: BinaryOperatorType::DotAssign,
+                        rhs: (9..14, Box::new(Expression::BinaryOperator(
+                            BinaryOperator {
+                                lhs: (9..10, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".into())))),
+                                op_type: BinaryOperatorType::Add,
+                                rhs: (13..14, Box::new(Expression::Literal(Literal::Int(1)))),
+                            }
+                        )))
+                    }
+                )))
+            ]
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Complex expression tests
+    #[test]
+    fn test_complex_nested_expression() {
+        let result = parse_expr_test("(a + b) * (c - d)").unwrap();
+        let expected = Expression::BinaryOperator(BinaryOperator {
+            lhs: (0..7, Box::new(Expression::BinaryOperator(BinaryOperator {
+                lhs: (1..2, Box::new(Expression::IdentifierReference(IdentifierReference::Value("a".to_string())))),
+                op_type: BinaryOperatorType::Add,
+                rhs: (5..6, Box::new(Expression::IdentifierReference(IdentifierReference::Value("b".to_string())))),
+            }))),
+            op_type: BinaryOperatorType::Multiply,
+            rhs: (10..17, Box::new(Expression::BinaryOperator(BinaryOperator {
+                lhs: (11..12, Box::new(Expression::IdentifierReference(IdentifierReference::Value("c".to_string())))),
+                op_type: BinaryOperatorType::Subtract,
+                rhs: (15..16, Box::new(Expression::IdentifierReference(IdentifierReference::Value("d".to_string())))),
+            }))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_lambda_invocation_chain() {
+        let result = parse_expr_test("f(x)(y)(z)").unwrap();
+        let expected = Expression::LambdaInvocation(LambdaInvocation {
+            lambda: (0..7, Box::new(Expression::LambdaInvocation(LambdaInvocation {
+                lambda: (0..4, Box::new(Expression::LambdaInvocation(LambdaInvocation {
+                    lambda: (0..1, Box::new(Expression::IdentifierReference(IdentifierReference::Value("f".to_string())))),
+                    arguments: (1..4, vec![
+                        (None, (2..3, Expression::IdentifierReference(IdentifierReference::Value("x".to_string()))))
+                    ]),
+                }))),
+                arguments: (4..7, vec![
+                    (None, (5..6, Expression::IdentifierReference(IdentifierReference::Value("y".to_string()))))
+                ]),
+            }))),
+            arguments: (7..10, vec![
+                (None, (8..9, Expression::IdentifierReference(IdentifierReference::Value("z".to_string()))))
+            ]),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_mixed_postfix_operations() {
+        let result = parse_expr_test("obj.method()[0].field").unwrap();
+        let expected = Expression::Property(Property {
+            base: (0..15, Box::new(Expression::Subscript(Subscript {
+                base: (0..12, Box::new(Expression::LambdaInvocation(LambdaInvocation {
+                    lambda: (0..10, Box::new(Expression::Property(Property {
+                        base: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("obj".to_string())))),
+                        attribute: (4..10, IdentifierReference::Value("method".to_string())),
+                    }))),
+                    arguments: (10..12, vec![]),
+                }))),
+                index: (13..14, Box::new(Expression::Literal(Literal::Int(0)))),
+            }))),
+            attribute: (16..21, IdentifierReference::Value("field".to_string())),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Operator definition test
+    #[test]
+    fn test_operator_definition() {
+        let result = parse_expr_test("operator |x, y| x + y").unwrap();
+        let expected = Expression::OperationDefinition(OperatorDefinition {
+            lambda: (9..21, Box::new(Expression::LambdaDefinition(LambdaDefinition {
+                args: vec![
+                    ((10..11, IdentifierDeclaration("x".to_string())), None),
+                    ((13..14, IdentifierDeclaration("y".to_string())), None),
+                ],
+                body: (16..21, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
+                    lhs: (16..17, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                    op_type: BinaryOperatorType::Add,
+                    rhs: (20..21, Box::new(Expression::IdentifierReference(IdentifierReference::Value("y".to_string())))),
+                })))),
+            }))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Block and Anim tests
+    #[test]
+    fn test_block_expression() {
+        let result = parse_expr_test("block { let x = 5\n x * 2 }").unwrap();
+        let expected = Expression::Block(Block {
+            body: vec![
+                (8..17, Statement::Declaration(Declaration {
+                    var_type: VariableType::Let,
+                    identifier: (12..13, IdentifierDeclaration("x".to_string())),
+                    value: (16..17, Expression::Literal(Literal::Int(5))),
+                })),
+                (19..24, Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                    lhs: (19..20, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                    op_type: BinaryOperatorType::Multiply,
+                    rhs: (23..24, Box::new(Expression::Literal(Literal::Int(2)))),
+                }))),
+            ],
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_anim_expression() {
+        let result = parse_expr_test("anim { play circle }").unwrap();
+        let expected = Expression::Anim(Anim {
+            body: vec![
+                (7..18, Statement::Play(Play {
+                    animations: (12..18, Expression::IdentifierReference(IdentifierReference::Value("circle".to_string()))),
+                }))
+            ],
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Multiline tests
+    #[test]
+    fn test_multiline_statement_list() {
+        let content = "let x = 1\nlet y = 2\nlet z = 3";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let result = parser.parse_statement_list().unwrap();
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_semicolon_separated_statements() {
+        let content = "let x = 1; let y = 2; let z = 3";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let result = parser.parse_statement_list().unwrap();
+        assert_eq!(result.len(), 3);
+    }
+
+    // Edge cases
+    #[test]
+    fn test_nested_vectors() {
+        let result = parse_expr_test("[[1, 2], [3, 4]]").unwrap();
+        let expected = Expression::Literal(Literal::Vector(vec![
+            (1..7, Expression::Literal(Literal::Vector(vec![
+                (2..3, Expression::Literal(Literal::Int(1))),
+                (5..6, Expression::Literal(Literal::Int(2))),
+            ]))),
+            (9..15, Expression::Literal(Literal::Vector(vec![
+                (10..11, Expression::Literal(Literal::Int(3))),
+                (13..14, Expression::Literal(Literal::Int(4))),
+            ]))),
+        ]));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_map_with_complex_values() {
+        let result = parse_expr_test("[1 -> [1, 2], 2 -> [3, 4]]").unwrap();
+        let expected = Expression::Literal(Literal::Map(vec![
+            (
+                (1..2, Expression::Literal(Literal::Int(1))),
+                (6..12, Expression::Literal(Literal::Vector(vec![
+                    (7..8, Expression::Literal(Literal::Int(1))),
+                    (10..11, Expression::Literal(Literal::Int(2))),
+                ])))
+            ),
+            (
+                (14..15, Expression::Literal(Literal::Int(2))),
+                (19..25, Expression::Literal(Literal::Vector(vec![
+                    (20..21, Expression::Literal(Literal::Int(3))),
+                    (23..24, Expression::Literal(Literal::Int(4))),
+                ])))
+            ),
+        ]));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_newlines_in_expression() {
+        let result = parse_expr_test("1 +\n2 +\n3").unwrap();
+        let expected = Expression::BinaryOperator(BinaryOperator {
+            lhs: (0..5, Box::new(Expression::BinaryOperator(BinaryOperator {
+                lhs: (0..1, Box::new(Expression::Literal(Literal::Int(1)))),
+                op_type: BinaryOperatorType::Add,
+                rhs: (4..5, Box::new(Expression::Literal(Literal::Int(2)))),
+            }))),
+            op_type: BinaryOperatorType::Add,
+            rhs: (8..9, Box::new(Expression::Literal(Literal::Int(3)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Complex integration tests
+    #[test]
+    fn test_complex_lambda_with_nested_blocks() {
+        let result = parse_expr_test("|n| anim { for (i in [1, 2, 3]) { play circle } }").unwrap();
+        let expected = Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![((1..2, IdentifierDeclaration("n".to_string())), None)],
+            body: (4..49, LambdaBody::Inline(Box::new(Expression::Anim(Anim {
+                body: vec![
+                    (11..47, Statement::For(For {
+                        var_name: (16..17, IdentifierDeclaration("i".to_string())),
+                        container: (21..30, Expression::Literal(Literal::Vector(vec![
+                            (22..23, Expression::Literal(Literal::Int(1))),
+                            (25..26, Expression::Literal(Literal::Int(2))),
+                            (28..29, Expression::Literal(Literal::Int(3))),
+                        ]))),
+                        body: (32..47, vec![
+                            (34..45, Statement::Play(Play {
+                                animations: (39..45, Expression::IdentifierReference(IdentifierReference::Value("circle".to_string()))),
+                            }))
+                        ]),
+                    }))
+                ],
+            })))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_operator_invocation_with_lambda() {
+        let result = parse_expr_test("map{|x| x * 2} [1, 2, 3]").unwrap();
+        let expected = Expression::OperatorInvocation(OperatorInvocation {
+            operator: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("map".to_string())))),
+            arguments: (3..14, vec![
+                (None, (4..13, Expression::LambdaDefinition(LambdaDefinition {
+                    args: vec![((5..6, IdentifierDeclaration("x".to_string())), None)],
+                    body: (8..13, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
+                        lhs: (8..9, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                        op_type: BinaryOperatorType::Multiply,
+                        rhs: (12..13, Box::new(Expression::Literal(Literal::Int(2)))),
+                    })))),
+                })))
+            ]),
+            operand: (15..24, Box::new(Expression::Literal(Literal::Vector(vec![
+                (16..17, Expression::Literal(Literal::Int(1))),
+                (19..20, Expression::Literal(Literal::Int(2))),
+                (22..23, Expression::Literal(Literal::Int(3))),
+            ])))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_complex_property_chain_with_calls() {
+        let result = parse_expr_test("obj.data.process(x).result[0]").unwrap();
+        let expected = Expression::Subscript(Subscript {
+            base: (0..26, Box::new(Expression::Property(Property {
+                base: (0..19, Box::new(Expression::LambdaInvocation(LambdaInvocation {
+                    lambda: (0..16, Box::new(Expression::Property(Property {
+                        base: (0..8, Box::new(Expression::Property(Property {
+                            base: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("obj".to_string())))),
+                            attribute: (4..8, IdentifierReference::Value("data".to_string())),
+                        }))),
+                        attribute: (9..16, IdentifierReference::Value("process".to_string())),
+                    }))),
+                    arguments: (16..19, vec![
+                        (None, (17..18, Expression::IdentifierReference(IdentifierReference::Value("x".to_string()))))
+                    ]),
+                }))),
+                attribute: (20..26, IdentifierReference::Value("result".to_string())),
+            }))),
+            index: (27..28, Box::new(Expression::Literal(Literal::Int(0)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_nested_operator_invocations() {
+        let result = parse_expr_test("fold{|a, b| a + b, 0} map{|x| x * 2} data").unwrap();
+        let expected = Expression::OperatorInvocation(OperatorInvocation {
+            operator: (0..4, Box::new(Expression::IdentifierReference(IdentifierReference::Value("fold".to_string())))),
+            arguments: (4..21, vec![
+                (None, (5..17, Expression::LambdaDefinition(LambdaDefinition {
+                    args: vec![
+                        ((6..7, IdentifierDeclaration("a".to_string())), None),
+                        ((9..10, IdentifierDeclaration("b".to_string())), None),
+                    ],
+                    body: (12..17, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
+                        lhs: (12..13, Box::new(Expression::IdentifierReference(IdentifierReference::Value("a".to_string())))),
+                        op_type: BinaryOperatorType::Add,
+                        rhs: (16..17, Box::new(Expression::IdentifierReference(IdentifierReference::Value("b".to_string())))),
+                    })))),
+                }))),
+                (None, (19..20, Expression::Literal(Literal::Int(0)))),
+            ]),
+            operand: (22..41, Box::new(Expression::OperatorInvocation(OperatorInvocation {
+                operator: (22..25, Box::new(Expression::IdentifierReference(IdentifierReference::Value("map".to_string())))),
+                arguments: (25..36, vec![
+                    (None, (26..35, Expression::LambdaDefinition(LambdaDefinition {
+                        args: vec![((27..28, IdentifierDeclaration("x".to_string())), None)],
+                        body: (30..35, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
+                            lhs: (30..31, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
+                            op_type: BinaryOperatorType::Multiply,
+                            rhs: (34..35, Box::new(Expression::Literal(Literal::Int(2)))),
+                        })))),
+                    })))
+                ]),
+                operand: (37..41, Box::new(Expression::IdentifierReference(IdentifierReference::Value("data".to_string())))),
+            }))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    // Error cases
+    #[test]
+    fn test_error_unmatched_paren() {
+        let result = parse_expr_test("(1 + 2");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_empty_char_literal() {
+        let result = parse_expr_test("''");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_invalid_escape() {
+        let result = parse_expr_test(r#""hello%z""#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_missing_operand() {
+        let result = parse_expr_test("1 +");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_invalid_identifier_start_with_number() {
+        let result = parse_stmt_test("let 123x = 5");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_break_outside_loop() {
+        let content = "break";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
+        let result = parser.parse_statement();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_return_outside_function() {
+        let content = "return 5";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
+        let result = parser.parse_statement();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_play_outside_anim() {
+        let content = "play animation";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
+        let result = parser.parse_statement();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_ambiguous_vector_map() {
+        let result = parse_expr_test("[1, 2 -> 3]");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_error_missing_lambda_argument() {
+        let result = parse_expr_test("|x,| x + 1");
+        assert!(result.is_err());
     }
 }

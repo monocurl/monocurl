@@ -3,6 +3,7 @@ use structs::text::Span8;
 pub type SpanTagged<T> = (Span8, T);
 pub type BoxSpanTagged<T> = (Span8, Box<T>);
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum SectionType {
     StandardLibrary,
     UserLibrary,
@@ -11,11 +12,13 @@ pub enum SectionType {
 }
 
 // a singular slide / init phase / import module
+#[derive(Debug, Clone, PartialEq)]
 pub struct Section {
     pub body: Vec<SpanTagged<Statement>>,
     pub section_type: SectionType
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     Break,
     Continue,
@@ -28,6 +31,7 @@ pub enum Statement {
     Play(Play),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     Literal(Literal),
     LambdaDefinition(LambdaDefinition),
@@ -44,6 +48,7 @@ pub enum Expression {
     NativeInvocation(NativeInvocation),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum DirectionalLiteral {
     Up(f64),
     Down(f64),
@@ -53,6 +58,7 @@ pub enum DirectionalLiteral {
     Backward(f64)
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     String(String),
     Char(char),
@@ -64,31 +70,37 @@ pub enum Literal {
     Map(Vec<(SpanTagged<Expression>, SpanTagged<Expression>)>)
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LambdaDefinition {
     // identifier and default value
     pub args: Vec<(SpanTagged<IdentifierDeclaration>, Option<SpanTagged<Expression>>)>,
     pub body: SpanTagged<LambdaBody>
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum LambdaBody {
     Inline(Box<Expression>),
     Block(Vec<SpanTagged<Statement>>),
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct OperatorDefinition {
     pub lambda: BoxSpanTagged<Expression>
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block {
     pub body: Vec<SpanTagged<Statement>>
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Anim {
     pub body: Vec<SpanTagged<Statement>>
 }
 
 pub type OperatorPriority = usize;
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum BinaryOperatorType {
     Append,
     And,
@@ -111,28 +123,56 @@ pub enum BinaryOperatorType {
 }
 
 impl BinaryOperatorType {
+    /// higher priorty -> binds tighter
     pub fn priority(&self) -> OperatorPriority {
         match self {
-            BinaryOperatorType::Add => 1,
-            _ => 2
+            BinaryOperatorType::Assign
+            | BinaryOperatorType::DotAssign => 1,
+
+            BinaryOperatorType::Append => 2,
+
+            BinaryOperatorType::Or => 3,
+            BinaryOperatorType::And => 4,
+
+            BinaryOperatorType::Eq
+            | BinaryOperatorType::Ne
+            | BinaryOperatorType::Lt
+            | BinaryOperatorType::Le
+            | BinaryOperatorType::Gt
+            | BinaryOperatorType::Ge
+            | BinaryOperatorType::In => 5,
+
+            BinaryOperatorType::Add
+            | BinaryOperatorType::Subtract => 6,
+
+            BinaryOperatorType::Multiply
+            | BinaryOperatorType::Divide
+            | BinaryOperatorType::IntegerDivide => 7,
+
+            BinaryOperatorType::Power => 9,
         }
     }
 
     /// 1 = right associative, 0 = left associative
     pub fn associativity(&self) -> OperatorPriority {
         match self {
-            BinaryOperatorType::Append => 1,
-            _ => 0
+            BinaryOperatorType::Assign
+            | BinaryOperatorType::DotAssign
+            | BinaryOperatorType::Power => 1,
+
+            _ => 0,
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct BinaryOperator {
     pub lhs: BoxSpanTagged<Expression>,
     pub op_type: BinaryOperatorType,
     pub rhs: BoxSpanTagged<Expression>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOperatorType {
     Negative,
     Not
@@ -141,45 +181,53 @@ pub enum UnaryOperatorType {
 impl UnaryOperatorType {
     pub fn priority(&self) -> OperatorPriority {
         match self {
-            UnaryOperatorType::Negative => 10,
-            UnaryOperatorType::Not => 10
+            UnaryOperatorType::Negative => 8,
+            UnaryOperatorType::Not => 8
         }
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct UnaryPreOperator {
     pub op_type: UnaryOperatorType,
     pub operand: BoxSpanTagged<Expression>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Subscript {
     pub base: BoxSpanTagged<Expression>,
     pub index: BoxSpanTagged<Expression>
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Property {
     pub base: BoxSpanTagged<Expression>,
     pub attribute: SpanTagged<IdentifierReference>
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LambdaInvocation {
     pub lambda: BoxSpanTagged<Expression>,
     pub arguments: SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct OperatorInvocation {
     pub operator: BoxSpanTagged<Expression>,
     pub arguments: SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>,
     pub operand: BoxSpanTagged<Expression>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct NativeInvocation {
     pub function: SpanTagged<IdentifierReference>,
     pub arguments: Vec<SpanTagged<Expression>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct IdentifierDeclaration(pub String);
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum IdentifierReference {
     Value(String),
     Reference(String),
@@ -187,6 +235,7 @@ pub enum IdentifierReference {
     Dereference(String)
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum VariableType {
     Let,
     Var,
@@ -195,33 +244,39 @@ pub enum VariableType {
     Param
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub var_type: VariableType,
     pub identifier: SpanTagged<IdentifierDeclaration>,
     pub value: SpanTagged<Expression>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Return {
     pub value: SpanTagged<Expression>
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct While {
     pub condition: SpanTagged<Expression>,
     pub body: SpanTagged<Vec<SpanTagged<Statement>>>
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct For {
     pub var_name: SpanTagged<IdentifierDeclaration>,
     pub container: SpanTagged<Expression>,
     pub body: SpanTagged<Vec<SpanTagged<Statement>>>
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct If {
     pub condition: SpanTagged<Expression>,
     pub if_block: SpanTagged<Vec<SpanTagged<Statement>>>,
     pub else_block: Option<SpanTagged<Vec<SpanTagged<Statement>>>>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct Play {
     pub animations: SpanTagged<Expression>
 }

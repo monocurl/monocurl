@@ -1,4 +1,4 @@
-use structs::iterutil::KLookahead;
+use structs::{iterutil::KLookahead, text::Span8};
 use crate::token::Token;
 
 pub type Count8 = usize;
@@ -15,6 +15,17 @@ impl<I> Lexer<I>
 where
     I: Iterator<Item = char>
 {
+    pub fn token_stream(chars: I) -> Vec<(Token, Span8)> {
+        let mut utf8 = 0;
+        Lexer::new(chars)
+            .map(|(token, count)| {
+                let start = utf8;
+                utf8 += count;
+                (token, start..utf8)
+            })
+            .collect()
+    }
+
     pub fn new(chars: I) -> Self {
         Self {
             chars: KLookahead::new(chars),
