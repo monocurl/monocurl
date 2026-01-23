@@ -92,6 +92,8 @@ pub struct TextEditor {
     dirty: Entity<bool>,
     internal_dirty: Entity<bool>,
 
+    last_op_matched_character: Option<Count8>,
+
     marked_range: Option<Span8>,
     is_selecting: bool,
     auto_scroll_task: Option<Task<()>>,
@@ -166,24 +168,25 @@ impl TextEditor {
 
             dirty,
             internal_dirty,
-            marked_range: None,
+            last_op_matched_character: None,
 
+            marked_range: None,
             is_selecting: false,
             auto_scroll_task: None,
             auto_scroll_last_mouse_position: None,
             cursor_blink_state: true,
+
             cursor_blink_task: None,
 
             last_in_frame_mouse_position: None,
-
             last_hover_start: None,
             hover_task: None,
-            hover_item: None,
 
+            hover_item: None,
             parameter_hint_suppression_task: None,
             parameter_hint_suppressed: false,
-            parameter_hint_allowed_base: None,
 
+            parameter_hint_allowed_base: None,
             last_click_position: point(px(-1.0), px(0.0)),
             click_count: 0,
             text_styles: text_styles.clone(),
@@ -207,6 +210,7 @@ impl TextEditor {
 
 impl TextEditor {
     fn perform_group(&mut self, group: HistoryGroup, window: &mut Window, cx: &mut Context<Self>) -> HistoryGroup {
+        self.state.update(cx, |state, _| state.start_transaction());
         let mut inverse = HistoryGroup { items: SmallVec::new(), cursor: self.cursor(cx) };
 
         for item in group.items.iter().rev() {
@@ -222,9 +226,12 @@ impl TextEditor {
             });
         }
 
+
         self.set_cursor(group.cursor, cx);
         self.discretely_scroll_to_cursor(cx);
         self.reset_cursor_blink(cx);
+
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
 
         inverse
     }
@@ -320,7 +327,7 @@ impl TextEditor {
     // 2. if inserting closing parenthesis and next character is not closing, do normal
     // 3. if inserting closing parenthesis and next character is closing, skip insertion
     // 4. if inserting opening parenthesis, insert matching closing parenthesis after
-    fn match_parenthesis(&self, del: Span16, new_text: &str, cx: &App) -> Option<String> {
+    fn match_parenthesis(&mut self, del: Span16, new_text: &str, cx: &App) -> Option<(Span8, String)> {
         fn in_literal(s: &str) -> bool {
             let escape = '%';
             let mut in_string = false;
@@ -342,6 +349,9 @@ impl TextEditor {
             }
             in_string || in_char
         }
+        fn in_lambda_definition(s: &str) -> bool {
+            s.chars().filter(|&c| c == '|').count() % 2 == 1
+        }
 
         if del.is_empty() && new_text.len() == 1 {
             let ch = new_text.chars().next().unwrap();
@@ -353,7 +363,7 @@ impl TextEditor {
                 let next = state.read(del.start..del.start + 1);
                 if next.chars().next().unwrap() == ch {
                     // already exists
-                    return Some(String::new());
+                    return Some((del.clone(), String::new()));
                 }
                 else {
                     return None;
@@ -361,7 +371,7 @@ impl TextEditor {
             };
 
             match ch {
-                '(' | '{' | '[' | '"' | '\'' => {
+                '(' | '{' | '[' | '"' | '\'' | '|' => {
                     let state = self.state.read(cx);
                     let line = state.offset8_to_loc8(del.start);
                     let start_of_line = state.loc8_to_offset8(Location8 { row: line.row, col: 0 });
@@ -372,20 +382,47 @@ impl TextEditor {
                         }
                         return None;
                     }
-                    return Some(format!("{}{}", ch, match ch {
+                    else if ch == '|'  && in_lambda_definition(&line_content) {
+                        return handle_closing();
+                    }
+                    return Some((del, format!("{}{}", ch, match ch {
                         '(' => ')',
                         '{' => '}',
                         '[' => ']',
                         '"' => '"',
                         '\'' => '\'',
+                        '|' => '|',
                         _ => unreachable!(),
-                    }));
+                    })));
                 },
                 ')' | '}' | ']' => {
                     return handle_closing();
                 },
                 _ => return None,
             }
+        }
+        else if del.len() == 1 && new_text.len() == 0 {
+            // does this undo the last matched insertion?
+            if Some(del.end) == self.last_op_matched_character {
+                let state = self.state.read(cx);
+                if del.end < state.len() {
+                    let prev = state.read(del.end.saturating_sub(1)..del.end);
+                    let next = state.read(del.end..del.end+ 1);
+                    let matching = match prev.chars().next() {
+                        Some('(') => ')',
+                        Some('{') => '}',
+                        Some('[') => ']',
+                        Some('"') => '"',
+                        Some('\'') => '\'',
+                        Some('|') => '|',
+                        _ => return None,
+                    };
+                    if next.chars().next() == Some(matching) {
+                        return Some((Span8 { start: del.start, end: del.end + 1 }, String::new()));
+                    }
+                }
+            }
+            return None
         }
         None
     }
@@ -405,16 +442,24 @@ impl TextEditor {
             .or(self.marked_range.clone())
             .unwrap_or_else(|| self.state.read(cx).cursor_range());
 
-        if raw_keystroke && let Some(matched) = self.match_parenthesis(range.clone(), new_text, cx) {
-            self.replace(range.clone(), &matched, window, cx);
+        if raw_keystroke && let Some((range, matched)) = self.match_parenthesis(range.clone(), new_text, cx) {
+            if matched.len() == 2 {
+                self.last_op_matched_character = Some(range.start + 1);
+            } else {
+                self.last_op_matched_character = None;
+            }
+            self.replace(range, &matched, window, cx);
         }
         else {
+            self.last_op_matched_character = None;
             self.replace(range.clone(), new_text, window, cx);
         }
 
         let new_offset = range.start + new_text.len();
         self.move_to(self.state.read(cx).offset8_to_loc8(new_offset), false, false, cx);
         self.discretely_scroll_to_cursor(cx);
+
+        self.stop_hover();
 
         self.marked_range = None;
         self.reset_cursor_blink(cx);
@@ -908,11 +953,11 @@ impl TextEditor {
                 self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
             }
 
-            self.replace_text_in_utf16_range(None, "", false, window, cx);
+            self.replace_text_in_utf16_range(None, "", true, window, cx);
         }
         else {
             self.undo_group_boundary(cx);
-            self.replace_text_in_utf16_range(None, "", false, window, cx);
+            self.replace_text_in_utf16_range(None, "", true, window, cx);
             self.undo_group_boundary(cx);
         }
         self.state.update(cx, |state, cx| state.end_transaction(cx));

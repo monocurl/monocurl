@@ -6,3 +6,5 @@ edition = "2021"
 [dependencies]
 structs.workspace = true
 lexer.workspace = true
+
+smallvec.workspace = true

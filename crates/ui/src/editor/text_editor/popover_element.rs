@@ -189,7 +189,7 @@ impl PopoverElement {
         let color = diagnostic.color(&TextEditorStyles::default());
         let padding = px(8.0);
         let margin = px(4.0);
-        let max_w = px(400.0);
+        let max_w = px(600.0);
 
         div()
             .flex()
@@ -202,6 +202,7 @@ impl PopoverElement {
                     .p(padding)
                     .flex()
                     .flex_col()
+                    .max_w(max_w)
                     .bg(rgb(0xe6e9ee))
                     .rounded_md()
                     .border_1()

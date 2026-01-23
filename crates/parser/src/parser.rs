@@ -1,60 +1,89 @@
 use std::{collections::{HashMap, HashSet}, ops::Range, path::PathBuf, usize};
 
 use lexer::token::Token;
+use smallvec::SmallVec;
 use structs::{rope::{Rope, TextAggregate}, text::{Count8, Span8}};
 
-use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
+use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
 
 type Result<T> = std::result::Result<T, ()>;
 
 macro_rules! try_all {
-    (@branches $self:expr, $token:expr, $span:expr, [], [$($collected:tt)*]) => {
-        try_all!(@execute $self, $token, $span, [$($collected)*])
+    (@branches $self:expr, $token:expr, $span:expr, [], [$($collected:tt)*], $expected_override:expr) => {
+        try_all!(@execute $self, $token, $span, [$($collected)*], $expected_override)
     };
 
     (@branches $self:expr, $token:expr, $span:expr,
-        [else $else_body: expr],
-        [$($collected:tt)*]) => {{
-        try_all!(@execute_head $self, $token, $span, [$($collected)*]);
-        // execute else body
+        [else $else_body:expr],
+        [$($collected:tt)*],
+        $expected_override:expr) => {{
+        try_all!(@execute_head $self, $token, $span, $expected_override, [$($collected)*]);
         return $else_body
     }};
+
     // state predicate and identifier
     (@branches $self:expr, $token:expr, $span:expr,
      [if $state_pred:expr, $var:ident = $token_pred:expr => $body:expr, $($rest:tt)*],
-     [$($collected:tt)*]) => {
-        try_all!(@branches $self, $token, $span, [$($rest)*],
-                 [$($collected)* (Some($state_pred), $var, $token_pred, $body),])
+     [$($collected:tt)*],
+     $expected_override:expr) => {
+        try_all!(
+            @branches $self, $token, $span,
+            [$($rest)*],
+            [$($collected)* (Some($state_pred), $var, $token_pred, $body),],
+            $expected_override
+        )
     };
 
     // state predicate, no identifier
     (@branches $self:expr, $token:expr, $span:expr,
      [if $state_pred:expr, $token_pred:expr => $body:expr, $($rest:tt)*],
-     [$($collected:tt)*]) => {
-        try_all!(@branches $self, $token, $span, [$($rest)*],
-                 [$($collected)* (Some($state_pred), _ignore, $token_pred, $body),])
+     [$($collected:tt)*],
+     $expected_override:expr) => {
+        try_all!(
+            @branches $self, $token, $span,
+            [$($rest)*],
+            [$($collected)* (Some($state_pred), _ignore, $token_pred, $body),],
+            $expected_override
+        )
     };
 
     // no state predicate, with identifier
     (@branches $self:expr, $token:expr, $span:expr,
      [$var:ident = $token_pred:expr => $body:expr, $($rest:tt)*],
-     [$($collected:tt)*]) => {
-        try_all!(@branches $self, $token, $span, [$($rest)*],
-                 [$($collected)* (Option::<NullPredicate>::None, $var, $token_pred, $body),])
+     [$($collected:tt)*],
+     $expected_override:expr) => {
+        try_all!(
+            @branches $self, $token, $span,
+            [$($rest)*],
+            [$($collected)* (Option::<NullPredicate>::None, $var, $token_pred, $body),],
+            $expected_override
+        )
     };
 
     // no state predicate, no identifier
     (@branches $self:expr, $token:expr, $span:expr,
      [$token_pred:expr => $body:expr, $($rest:tt)*],
-     [$($collected:tt)*]) => {
-        try_all!(@branches $self, $token, $span, [$($rest)*],
-                 [$($collected)* (Option::<NullPredicate>::None, _ignore, $token_pred, $body),])
+     [$($collected:tt)*],
+     $expected_override:expr) => {
+        try_all!(
+            @branches $self, $token, $span,
+            [$($rest)*],
+            [$($collected)* (Option::<NullPredicate>::None, _ignore, $token_pred, $body),],
+            $expected_override
+        )
     };
 
-    (@execute_head $self:expr, $token:expr, $span:expr, [$(($state_pred:expr, $var:ident, $token_pred:expr, $body:expr),)*]) => {{
+    (@execute_head
+     $self:expr,
+     $token:expr,
+     $span:expr,
+     $expected_override:expr,
+     [$(($state_pred:expr, $var:ident, $token_pred:expr, $body:expr),)*]
+    ) => {{
         if let Some(token) = $token {
-            // if it contains the cursor, emit all the possibilities
-            if $self.cursor_position.is_some() && $span.contains(&$self.cursor_position.unwrap()) {
+            if $self.cursor_position.is_some()
+                && $span.contains(&$self.cursor_position.unwrap())
+            {
                 $(
                     let state_ok = if let Some(pred) = $state_pred {
                         pred.ok(&$self.state)
@@ -77,104 +106,83 @@ macro_rules! try_all {
 
                 if state_ok {
                     if let Some($var) = $token_pred.convert(token.clone()) {
+                        #[allow(unreachable_code)]
                         return Ok($body);
                     }
+                    // did not match, add to expectations list
+                    if $expected_override.is_none() {
+                        $self.next_token_expectations.push($token_pred.description());
+                    }
                 }
+                else if $token_pred.convert(token.clone()).is_some() {
+                    // valid match, but not in this context
+                    $self.next_token_hints.push($state_pred.unwrap().fail_description());
+                }
+
             )*
+
+            // fail
+            if let Some(expected) = $expected_override {
+                $self.next_token_expectations.push(expected);
+            }
         }
     }};
 
-    (@execute $self:expr, $token:expr, $span:expr, [$(($state_pred:expr, $var:ident, $token_pred:expr, $body:expr),)*]) => {{
-        // first pass, try to match any branch
-        try_all!(@execute_head $self, $token, $span, [$(($state_pred, $var, $token_pred, $body),)*]);
+    (@execute
+     $self:expr,
+     $token:expr,
+     $span:expr,
+     [$(($state_pred:expr, $var:ident, $token_pred:expr, $body:expr),)*],
+     $expected_override:expr
+    ) => {{
+        try_all!(
+            @execute_head
+            $self,
+            $token,
+            $span.clone(),
+            $expected_override,
+            [$(($state_pred, $var, $token_pred, $body),)*]
+        );
 
-        // second pass - all branches failed, build error message
-        let mut token_expectations: Vec<&'static str> = Vec::new();
-        let mut failed_state_hints: Vec<&'static str> = Vec::new();
-        $(
-            let state_ok = if let Some(pred) = $state_pred {
-                let ok = pred.ok(&$self.state);
-                if !ok {
-                    // if it only failed due to abnormal state, give that as a hint
-                    if let Some(token) = $token {
-                        if $token_pred.convert(token.clone()).is_some() {
-                            failed_state_hints.push(pred.fail_description());
-                        }
-                    }
-                }
-                ok
-            } else {
-                true
-            };
-            if state_ok {
-                // state was ok but token didn't match
-                token_expectations.push($token_pred.description());
-            }
-        )*
-        let mut error_msg = String::new();
-        let token_desc = $self.peek_token_description();
-        error_msg.push_str(&format!(
-            "\"{}\" is illegal in the current context;\n",
-            token_desc
-        ));
-        if !token_expectations.is_empty() {
-            error_msg.push_str("expected ");
-            // dedup
-            let mut seen = HashSet::new();
-            token_expectations.retain(|x| seen.insert(*x));
-            for (i, expectation) in token_expectations.iter().enumerate() {
-                if i > 0 {
-                    if i == token_expectations.len() - 1 {
-                        error_msg.push_str(", or ");
-                    } else {
-                        error_msg.push_str(", ");
-                    }
-                }
-                error_msg.push_str(expectation);
-            }
-        }
-        for hint in failed_state_hints {
-            error_msg.push_str(&format!(
-                "hint: may be illegal since {}\n",
-                hint
-            ));
-        }
-        $self.emit_error(error_msg, $span);
+        $self.emit_default_error($span);
         Err(())
     }};
 
-    // match token with or without binding to identifier
-    (@match_token Some($var:ident), $token:expr, $token_pred:expr, $body:expr) => {
-
-    };
-    (@match_token None, $token:expr, $token_pred:expr, $body:expr) => {
-        if let Some(_) = $token_pred.convert($token.clone()) {
-            return Ok($body);
-        }
-    };
-
-    // entry point
-    ($self:expr, { $($branches:tt)+ }) => {{
+    ($self:expr, expected = $expected:expr, { $($branches:tt)+ }) => {{
         (|| {
-                let (token, _span) = {
+            let (token, _span) = {
                 if let Some((token, span)) = $self.peek_token() {
                     (Some(*token), span.clone())
-                }
-                else {
-                    let codeunits = $self.text_rope.codeunits();
-                    let span = codeunits.saturating_sub(1)..codeunits;
+                } else {
+                    let end = $self.tokens.get($self.state.top().operating_range.end)
+                        .map(|(_, span)| span.end)
+                        .unwrap_or_else(|| $self.text_rope.codeunits());
+                    let span = end.saturating_sub(1)..end;
                     (None, span)
                 }
             };
-            try_all!(@branches $self, token, _span, [$($branches)*], [])
+            try_all!(
+                @branches
+                $self,
+                token,
+                _span,
+                [$($branches)*],
+                [],
+                $expected
+            )
         })()
     }};
+
+    ($self:expr, { $($branches:tt)+ }) => {{
+        try_all!($self, expected = Option::<&str>::None, { $($branches)+ })
+    }};
 }
+
 
 mod predicate {
     use lexer::token::Token;
 
-    use crate::{ast::{BinaryOperatorType, UnaryOperatorType, VariableType}, parser::{ParseArtifacts, State}};
+    use crate::{ast::{BinaryOperatorType, SectionType, UnaryOperatorType, VariableType}, parser::{ParseArtifacts, SectionParser, State}};
 
     pub(super) trait StatePredicate {
         fn ok(&self, state: &State) -> bool;
@@ -230,6 +238,17 @@ mod predicate {
 
         fn fail_description(&self) -> &'static str {
             "we are not in a lambda or block body"
+        }
+    }
+
+    pub(super) struct InStdLibPredicate;
+    impl StatePredicate for InStdLibPredicate {
+        fn ok(&self, state: &State) -> bool {
+            state.section_type == SectionType::StandardLibrary
+        }
+
+        fn fail_description(&self) -> &'static str {
+            "this keyword is reserved for the Monocurl compiler"
         }
     }
 
@@ -514,6 +533,10 @@ pub struct SectionParser {
     tokens: Vec<(Token, Span8)>,
     token_index: usize,
 
+    // expectation strings of next token for error messages
+    next_token_expectations: SmallVec<[&'static str; 8]>,
+    next_token_hints: SmallVec<[&'static str; 1]>,
+
     artifacts: ParseArtifacts
 }
 
@@ -523,6 +546,12 @@ pub struct Parser;
 pub struct ParseArtifacts {
     pub diagnostics: Vec<Diagnostic>,
     pub cursor_possibilities: HashSet<Token>
+}
+
+impl SectionParser {
+    pub fn artifacts(self) -> ParseArtifacts {
+        self.artifacts
+    }
 }
 
 impl SectionParser {
@@ -540,8 +569,16 @@ impl SectionParser {
         let Some((_, span)) = self.tokens.get(self.token_index) else {
             return "<end of file>".to_string()
         };
-
-        self.text_rope.iterator_range(span.clone()).collect()
+        self.text_rope
+            .iterator_range(span.clone())
+            .fold(String::new(), |mut acc, c| {
+                if c == '\n' {
+                    acc.push_str("<end of line>");
+                } else {
+                    acc.push(c);
+                }
+                acc
+            })
     }
 
     fn peek_token(&self) -> Option<&(Token, Span8)> {
@@ -554,6 +591,8 @@ impl SectionParser {
 
     fn advance_token(&mut self) -> Span8 {
         debug_assert!(self.state.operating_range().contains(&self.token_index));
+        self.next_token_expectations.clear();
+        self.next_token_hints.clear();
         let span = self.tokens[self.token_index].1.clone();
         self.token_index += 1;
         span
@@ -561,9 +600,47 @@ impl SectionParser {
 }
 
 impl SectionParser {
-    fn emit_error(&mut self, error_message: String, span: Span8) {
+    fn emit_default_error(&mut self, span: Span8) {
+        let token_desc = self.peek_token_description();
+        let title = format!("Illegal token: '{}'", token_desc);
+        let mut error_message = String::new();
+
+        if !self.next_token_hints.is_empty() {
+            for hint in &self.next_token_hints {
+                error_message.push_str(&format!(
+                    "hint: may be illegal since {}\n",
+                    hint
+                ));
+            }
+            error_message.push('\n');
+        }
+
+        let mut seen = HashSet::new();
+        self.next_token_expectations.retain(|x| seen.insert(*x));
+        error_message.push_str("expected ");
+        for (i, expectation) in self.next_token_expectations.iter().enumerate() {
+            if i > 0 {
+                if i == self.next_token_expectations.len() - 1 {
+                    error_message.push_str(", or ");
+                } else {
+                    error_message.push_str(", ");
+                }
+            }
+            error_message.push_str(expectation);
+        }
+
+        self.emit_error(title, error_message, span);
+    }
+
+    fn emit_error(&mut self, title: String, error_message: String, span: Span8) {
+        // if on a newline, do it one before
+        let mut modified_span = span;
+        while modified_span.start > 0 && self.text_rope.iterator(modified_span.start).next().is_none_or(|c| c == '\n') {
+            modified_span.start = modified_span.start.saturating_sub(1);
+        }
+
         self.artifacts.diagnostics.push(
-            Diagnostic { is_error: true, span, title: "Parse Error".to_string(), message: error_message }
+            Diagnostic { is_error: true, span: modified_span, title, message: error_message }
         )
     }
 }
@@ -609,13 +686,17 @@ impl SectionParser {
     pub fn parse_statement_list(&mut self) -> Result<Vec<SpanTagged<Statement>>> {
         let mut statements = Vec::new();
         let mut err = None;
-        while self.peek_token().is_some() {
-            let mut read = || -> Result<SpanTagged<Statement>> {
-                // skip newlines and semicolons
-                while matches!(self.peek_token(), Some((Token::Newline, _)) | Some((Token::Semicolon, _))) {
-                    self.advance_token();
-                }
+        loop {
+            // skip newlines and semicolons
+            while matches!(self.peek_token(), Some((Token::Newline, _)) | Some((Token::Semicolon, _))) {
+                self.advance_token();
+            }
 
+            if self.peek_token().is_none() {
+                break;
+            }
+
+            let mut read = || -> Result<SpanTagged<Statement>> {
                 let ret = self.parse_statement()?;
 
                 // ensure no hanging content
@@ -627,6 +708,10 @@ impl SectionParser {
                         ExactPred(Token::Semicolon) => {
                             self.advance_token();
                         },
+                        _op = BinaryOperatorPred => {
+                            // solely to emit error that you can add binary operator instead
+                            unreachable!()
+                        },
                     })?;
                 }
 
@@ -635,7 +720,12 @@ impl SectionParser {
 
             match read() {
                 Ok(statement) => statements.push(statement),
-                Err(e) => err = Some(e)
+                Err(e) => {
+                    while self.peek_token().is_some() && !matches!(self.peek_token().unwrap(), (Token::Newline, _) | (Token::Semicolon, _)) {
+                        self.advance_token();
+                    }
+                    err = Some(e)
+                }
             };
         }
 
@@ -809,7 +899,7 @@ impl SectionParser {
         let span = self.read_token(Token::Identifier)?;
         let identifier: String = self.text_rope.iterator_range(span.clone()).collect();
         if !identifier.chars().all(|c| c.is_alphanumeric() || c == '_') || identifier.chars().next().is_none_or(|c| c.is_numeric()) {
-            self.emit_error(format!("\"{}\" is not a valid identifier name", identifier), span.clone());
+            self.emit_error("Illegal Identifier".into(), format!("\"{}\" is not a valid identifier name", identifier), span.clone());
             return Err(());
         }
 
@@ -848,7 +938,6 @@ impl SectionParser {
                     if (op.priority(), op.associativity()) >= (priority, 1) {
                         // combine right
                         self.advance_token();
-                        self.advance_newlines();
                         let right = self.parse_expr_priority(op.priority())?;
                         let old_expr = expr.take().unwrap();
                         expr = Some((old_expr.0.start .. right.0.end, Expression::BinaryOperator(BinaryOperator {
@@ -883,7 +972,7 @@ impl SectionParser {
 
     fn parse_unary(&mut self) -> Result<SpanTagged<Expression>> {
         // parse base expression
-        let expr = try_all!(self, {
+        let expr = try_all!(self, expected = Some("<unary expression>"), {
             /* unary operators */
             op = UnaryOperatorPred => {
                 self.parse_unary_preoperator(op)?
@@ -898,17 +987,17 @@ impl SectionParser {
                 let str: String = self.text_rope.iterator_range(span.clone()).collect();
                 (span, Expression::IdentifierReference(IdentifierReference::Value(str)))
             },
-            ExactPredDesc(Token::Reference, "<identifier>") => {
+            ExactPred(Token::Reference) => {
                 let base_span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier()?;
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
             },
-            ExactPredDesc(Token::StatefulReference, "<identifier>") => {
+            ExactPred(Token::StatefulReference) => {
                 let base_span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier()?;
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
             },
-            ExactPredDesc(Token::Multiply, "<identifier>") => {
+            ExactPred(Token::Multiply) => {
                 let base_span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier()?;
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
@@ -920,7 +1009,7 @@ impl SectionParser {
                 (base_span.start..target.0.end, Expression::OperationDefinition(OperatorDefinition { lambda: (target.0, Box::new(target.1)) }))
             },
             /* lambda definition */
-            ExactPredDesc(Token::Pipe, "<lambda>") => {
+            ExactPred(Token::Pipe) => {
                 self.parse_lambda()?
             },
             /* blocks */
@@ -943,8 +1032,22 @@ impl SectionParser {
             ExactPred(Token::CharLiteral) => {
                 self.parse_char_literal()?
             },
-            ExactPredDesc(Token::LBracket, "<container>") => {
+            ExactPred(Token::LBracket) => {
                 self.parse_map_or_vector_literal()?
+            },
+            /* monocurl internal */
+            if InStdLibPredicate, ExactPred(Token::Native) => {
+                let span = self.advance_token();
+                let (full_span, str) = self.read_pure_identifier()?;
+                let args = self.parse_invocation(Token::LParen, Token::RParen)?;
+                let arguments = (args.0, args.1
+                    .into_iter()
+                    .map(|(_label, expr)| expr)
+                    .collect());
+                (span.start..arguments.0.end, Expression::NativeInvocation(NativeInvocation {
+                    function: (full_span, IdentifierReference::Value(str)),
+                    arguments: arguments.1,
+                }))
             },
         })?;
 
@@ -959,8 +1062,8 @@ impl SectionParser {
 
             let mut take_expr = || expr.take().unwrap();
             let boxify = |raw: SpanTagged<Expression>| (raw.0, Box::new(raw.1));
-            let next = try_all!(self, {
-                ExactPredDesc(Token::LParen, "<function invocation>") => {
+            let next = try_all!(self, expected = Some("<postfix operator>"), {
+                ExactPredDesc(Token::LParen, "<function call>") => {
                     // lambda invocation
                     let arguments = self.parse_invocation(Token::LParen, Token::RParen)?;
                     let old = boxify(take_expr());
@@ -1205,7 +1308,7 @@ impl SectionParser {
         let literal = match f(&content) {
             Ok(literal) => literal,
             Err(message) => {
-                self.emit_error(message.into(), span);
+                self.emit_error("Illegal Literal".into(), message.into(), span);
                 return Err(())
             }
         };
@@ -1382,7 +1485,7 @@ impl SectionParser {
             let entry = self.parse_expr()?;
             if let Some(span) = self.read_if_token(Token::KeyValueMap) {
                 if !vector_entries.is_empty() {
-                    self.emit_error("Ambiguous literal; cannot resolve ambiguity between list and map".into(), base_span.start..span.end);
+                    self.emit_error("Ambiguous Literal".into(), "cannot decide if literal is list or map".into(), base_span.start..span.end);
                     return Err(());
                 }
                 let value = self.parse_expr()?;
@@ -1390,7 +1493,7 @@ impl SectionParser {
             }
             else {
                 if !map_entries.is_empty() {
-                    self.emit_error("Ambiguous literal; cannot resolve ambiguity between list and map".into(), base_span.start..entry.0.end);
+                    self.emit_error("Ambiguous Literal".into(), "cannot decide if literal is list or map".into(), base_span.start..entry.0.end);
                     return Err(());
                 }
                 vector_entries.push(entry)
@@ -1426,11 +1529,13 @@ impl SectionParser {
         SectionParser {
             precomputation: Precomputation::new(&tokens),
             state: State::new(section_type, tokens.len()),
+            cursor_position,
             text_rope: text,
             tokens,
             token_index: 0,
-            cursor_position,
-            artifacts: ParseArtifacts::default()
+            next_token_expectations: SmallVec::new(),
+            next_token_hints: SmallVec::new(),
+            artifacts: ParseArtifacts::default(),
         }
     }
 }

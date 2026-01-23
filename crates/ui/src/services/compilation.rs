@@ -1,6 +1,7 @@
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::token::Token;
+use parser::parser::{Parser, SectionParser};
 use structs::rope::{Attribute, Rope, TextAggregate};
 use structs::text::{Location8, Span8};
 
@@ -48,45 +49,46 @@ impl CompilationService {
                     latest_version = version;
 
                     // reparse + recompile
-                    let mut diagnostics = vec![];
-
-                    let mut pos = 0;
-                    for (len, token) in lex_rope.iterator(0) {
-                        let string: String = for_text_rope.iterator_range(pos..pos+len).collect();
-                        match token {
-                            Token::StringLiteral => {
-                                if !string.ends_with('"') || string.len() < 2 {
-                                    diagnostics.push(Diagnostic {
-                                        dtype: DiagnosticType::CompileTimeError,
-                                        span: Span8 {
-                                            start: pos,
-                                            end: pos + len,
-                                        },
-                                        title: "Unterminated String Literal".to_string(),
-                                        message: "message".to_string()
-                                    });
-                                }
-                            },
-                            Token::CharLiteral => {
-                                if !string.ends_with('\'') || string.len() < 3 {
-                                    diagnostics.push(Diagnostic {
-                                        dtype: DiagnosticType::CompileTimeError,
-                                        span: Span8 {
-                                            start: pos,
-                                            end: pos + len,
-                                        },
-                                        title: "Unterminated Char Literal".to_string(),
-                                        message: "message".to_string()
-                                    });
-                                }
-                            },
-                            _ => {}
+                    let mut utf8 = 0;
+                    let tokens = lex_rope.iterator(0)
+                        .map(|(len, tok)| {
+                            let start = utf8;
+                            utf8 += len;
+                            (tok, Span8 {
+                                start,
+                                end: utf8,
+                            })
+                        })
+                        .filter(|(tok, _)| tok != &Token::Whitespace && tok != &Token::Comment)
+                        .collect();
+                    let mut p = SectionParser::new(
+                        tokens,
+                        for_text_rope.clone(),
+                        parser::ast::SectionType::Slide,
+                        if latest_cursor.is_empty() {
+                            // Some(for_text_rope.utf8_line_pos_prefix(l.row, l.col).bytes_utf8)
+                            None
                         }
-                        pos += len;
-                    }
+                        else {
+                            None
+                        }
+                    );
+                    p.parse_section();
+                    let artifacts = p.artifacts();
+                    let diags = artifacts.diagnostics;
 
                     self.sm_tx.send(ServiceManagerMessage::UpdateCompileDiagnostics {
-                        diagnostics,
+                        diagnostics: diags.into_iter()
+                            .map(|d| Diagnostic {
+                                message: d.message.clone(),
+                                span: d.span,
+                                dtype: if d.is_error {
+                                    DiagnosticType::CompileTimeError
+                                } else {
+                                    DiagnosticType::CompileTimeWarning
+                                },
+                                title: d.title
+                            }).collect(),
                         version,
                     }).await.unwrap();
                     let item = |s: &str| AutoCompleteItem {
