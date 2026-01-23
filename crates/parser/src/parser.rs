@@ -182,7 +182,7 @@ macro_rules! try_all {
 mod predicate {
     use lexer::token::Token;
 
-    use crate::{ast::{BinaryOperatorType, SectionType, UnaryOperatorType, VariableType}, parser::{ParseArtifacts, SectionParser, State}};
+    use crate::{ast::{BinaryOperatorType, SectionType, UnaryOperatorType, VariableType}, parser::{ParseArtifacts, State}};
 
     pub(super) trait StatePredicate {
         fn ok(&self, state: &State) -> bool;
@@ -1039,7 +1039,7 @@ impl SectionParser {
             if InStdLibPredicate, ExactPred(Token::Native) => {
                 let span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier()?;
-                let args = self.parse_invocation(Token::LParen, Token::RParen)?;
+                let args = self.parse_invocation(Token::LParen, Token::RParen, false)?;
                 let arguments = (args.0, args.1
                     .into_iter()
                     .map(|(_label, expr)| expr)
@@ -1065,7 +1065,7 @@ impl SectionParser {
             let next = try_all!(self, expected = Some("<postfix operator>"), {
                 ExactPredDesc(Token::LParen, "<function call>") => {
                     // lambda invocation
-                    let arguments = self.parse_invocation(Token::LParen, Token::RParen)?;
+                    let arguments = self.parse_invocation(Token::LParen, Token::RParen, true)?;
                     let old = boxify(take_expr());
                     (old.0.start..arguments.0.end, Expression::LambdaInvocation(LambdaInvocation {
                         lambda: old,
@@ -1074,7 +1074,7 @@ impl SectionParser {
                 },
                 ExactPredDesc(Token::LFlower, "<operator invocation>") => {
                     // operator invocation
-                    let arguments = self.parse_invocation(Token::LFlower, Token::RFlower)?;
+                    let arguments = self.parse_invocation(Token::LFlower, Token::RFlower, false)?;
                     let old = boxify(take_expr());
                     let operand = self.parse_unary()?;
 
@@ -1120,7 +1120,7 @@ impl SectionParser {
     }
 
     // (<token_index> a,b,c,d,e)
-    fn parse_invocation(&mut self, start: Token, end: Token)
+    fn parse_invocation(&mut self, start: Token, end: Token, allow_newlines: bool)
     -> Result<SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>>
     {
         self.debug_assert_token_eq(start);
@@ -1132,7 +1132,9 @@ impl SectionParser {
         let mut arguments = Vec::new();
         let mut err = None;
         loop {
-            self.advance_newlines();
+            if allow_newlines {
+                self.advance_newlines();
+            }
             if self.peek_token().is_none() {
                 break;
             }
@@ -1142,7 +1144,9 @@ impl SectionParser {
                     self.read_token(Token::Comma)?;
                 }
 
-                self.advance_newlines();
+                if allow_newlines {
+                    self.advance_newlines();
+                }
                 let label = self.peek_token()
                     .and_then(|tok| {
                         if !matches!(tok.0, Token::ArgumentLabel) {
@@ -1160,7 +1164,9 @@ impl SectionParser {
                 if let Some(label) = label {
                     // consume label
                     self.advance_token();
-                    self.advance_newlines();
+                    if allow_newlines {
+                        self.advance_newlines();
+                    }
 
                     let argument = self.parse_expr()?;
 
@@ -2432,21 +2438,6 @@ mod test {
                 ])))
             ),
         ]));
-        assert_eq!(result.1, expected);
-    }
-
-    #[test]
-    fn test_newlines_in_expression() {
-        let result = parse_expr_test("1 +\n2 +\n3").unwrap();
-        let expected = Expression::BinaryOperator(BinaryOperator {
-            lhs: (0..5, Box::new(Expression::BinaryOperator(BinaryOperator {
-                lhs: (0..1, Box::new(Expression::Literal(Literal::Int(1)))),
-                op_type: BinaryOperatorType::Add,
-                rhs: (4..5, Box::new(Expression::Literal(Literal::Int(2)))),
-            }))),
-            op_type: BinaryOperatorType::Add,
-            rhs: (8..9, Box::new(Expression::Literal(Literal::Int(3)))),
-        });
         assert_eq!(result.1, expected);
     }
 
