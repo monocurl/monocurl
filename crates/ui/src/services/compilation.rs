@@ -3,8 +3,9 @@ use std::path::PathBuf;
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::token::Token;
+use parser::ast::{BinaryOperator, Declaration, Expression, If, LambdaInvocation, OperatorInvocation, Section, Statement, UnaryPreOperator};
 use parser::parser::{Parser, SectionParser};
-use structs::rope::{Attribute, Rope, TextAggregate};
+use structs::rope::{Attribute, RLEData, Rope, TextAggregate};
 use structs::text::{Location8, Span8};
 
 use crate::state::diagnostics::{Diagnostic, DiagnosticType};
@@ -81,7 +82,7 @@ impl CompilationService {
                             None
                         }
                     );
-                    p.parse_section();
+                    let q = p.parse_section();
                     let artifacts = p.artifacts();
                     let cursor_poss = artifacts.cursor_possibilities;
                     let diags = artifacts.diagnostics;
@@ -108,14 +109,78 @@ impl CompilationService {
                         category: AutoCompleteCategory::Keyword
                     };
 
-                    println!("Sending {:?} autocomplete suggestions",
-                        cursor_poss.iter()
-                            .map(|token| token.description())
-                            .collect::<Vec<_>>()
-                    );
                     let suggestions = cursor_poss.iter()
                         .map(|token| item(token.description()))
                         .collect();
+
+                    let mut should_italicize_rope = Rope::default();
+                    should_italicize_rope = should_italicize_rope.replace_range(0..0,
+                        [RLEData { codeunits: latest_text_rope.codeunits(), attribute: false }].into_iter()
+                    );
+
+                    {
+                        fn ast_walk3(q: Expression, mut r: Rope<Attribute<bool>>) -> Rope<Attribute<bool>> {
+                            match q {
+                                // Expression::OperatorInvocation(OperatorInvocation {
+                                //     operator: _,
+                                //     arguments,
+                                //     operand,
+                                // }) => {
+                                //     for (span, arg) in arguments.1.iter() {
+                                //         if let Some((span, _label)) = span {
+                                //             r = r.replace_range(span.clone(), [RLEData { codeunits: span.len(), attribute: true }].into_iter());
+                                //         }
+                                //     }
+
+                                //     return ast_walk3(*operand.1, r)
+                                // },
+                                Expression::LambdaInvocation(LambdaInvocation {
+                                    lambda: operator,
+                                    arguments: _,
+                                }) => {
+                                    return r.replace_range(operator.0.clone(), [RLEData { codeunits: operator.0.len(), attribute: true }].into_iter())
+                                },
+                                Expression::BinaryOperator(BinaryOperator {
+                                    lhs,
+                                    op_type: _,
+                                    rhs,
+                                }) => {
+                                    r = ast_walk3(*lhs.1, r);
+                                    return ast_walk3(*rhs.1, r);
+                                },
+                                Expression::UnaryPreOperator(UnaryPreOperator {
+                                    op_type: _,
+                                    operand,
+                                }) => {
+                                    return ast_walk3(*operand.1, r);
+                                }
+                                _ => return r
+                            }
+                        }
+
+                        fn ast_walk2(q: Declaration, r: Rope<Attribute<bool>>) -> Rope<Attribute<bool>> {
+                            return ast_walk3(q.value.1, r);
+                        }
+
+                        fn ast_walk1(q: Statement, r: Rope<Attribute<bool>>) -> Rope<Attribute<bool>> {
+                            match q {
+                                Statement::Expression(e) => return ast_walk3(e, r),
+                                Statement::Declaration(d) => return ast_walk2(d, r),
+                                _ => return r
+                            }
+                        }
+                        fn ast_walk(q: Section, mut r: Rope<Attribute<bool>>) -> Rope<Attribute<bool>> {
+                            for (_, child) in q.body {
+                                r = ast_walk1(child, r);
+                            }
+                            return r
+                        }
+
+                        if let Ok(result) = q {
+                            should_italicize_rope = ast_walk(result, should_italicize_rope);
+                            self.sm_tx.send(ServiceManagerMessage::UpdateStaticAnalysisRope { analysis_rope: should_italicize_rope, version }).await.unwrap();
+                        }
+                    }
 
 
                     self.sm_tx.send(ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor: latest_cursor, version }).await.unwrap();

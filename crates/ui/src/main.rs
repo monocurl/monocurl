@@ -23,9 +23,14 @@ impl MonocurlLauncher {
 
     fn setup_fonts(cx: &mut App) {
         cx.text_system()
-            .add_fonts(vec![Cow::Owned(
-                std::fs::read(Assets::font("IBMPlexMono-Regular.ttf")).unwrap(),
-            )])
+            .add_fonts(vec![
+                Cow::Owned(
+                    std::fs::read(Assets::font("IBMPlexMono-Regular.ttf")).unwrap()
+                ),
+                Cow::Owned(
+                    std::fs::read(Assets::font("IBMPlexMono-Italic.ttf")).unwrap()
+                )
+            ])
             .unwrap();
 
         cx.text_system()

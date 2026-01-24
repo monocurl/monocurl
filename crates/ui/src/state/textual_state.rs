@@ -8,7 +8,7 @@ use structs::{rope::{Attribute, RLEAggregate, RLEData, Rope, TextAggregate, leav
 use crate::{editor::text_editor::TextEditor, state::diagnostics::{Diagnostic, DiagnosticContainer}};
 
 pub type LexData = Token;
-pub type StaticAnalysisData = i32;
+pub type StaticAnalysisData = bool;
 
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -292,8 +292,8 @@ pub struct TextualState {
     // used for the shaped lines. This may be differ for off-screen lines
     lex_rope: Rope<Attribute<LexData>>,
     rendered_lex_rope: Rope<Attribute<LexData>>,
-    static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
-    rendered_static_analysis_rope: Rope<RLEAggregate<StaticAnalysisData>>,
+    static_analysis_rope: Rope<Attribute<StaticAnalysisData>>,
+    rendered_static_analysis_rope: Rope<Attribute<StaticAnalysisData>>,
 
     // we must relayout the lines corresponding to this span
     region_needing_relayout: Option<Range<usize>>,
@@ -561,11 +561,11 @@ impl TextualState {
         true
     }
 
-    pub fn static_analysis_rope(&self) -> &Rope<RLEAggregate<StaticAnalysisData>> {
+    pub fn static_analysis_rope(&self) -> &Rope<Attribute<StaticAnalysisData>> {
         &self.static_analysis_rope
     }
 
-    pub fn set_static_analysis_rope(&mut self, rope: Rope<RLEAggregate<StaticAnalysisData>>, for_version: usize) -> bool {
+    pub fn set_static_analysis_rope(&mut self, rope: Rope<Attribute<StaticAnalysisData>>, for_version: usize) -> bool {
         if for_version != self.version {
             return false;
         }

@@ -53,7 +53,7 @@ where
         &self,
         size: usize,
         lex_data: &LexData,
-        _analysis_data: &StaticAnalysisData,
+        analysis_data: &StaticAnalysisData,
         diagnostics: &SmallVec<[&'a Diagnostic; 1]>
     ) -> TextRun {
         let t_category = lex_data.category();
@@ -81,9 +81,15 @@ where
                 UnderlineStyle { thickness: px(1.0), color: Some(color), wavy: true }
             });
 
+        let italicize = *analysis_data;
+
         TextRun {
             len: size,
-            font: self.style.text_font.clone(),
+            font: if italicize {
+                self.style.italic_text_font.clone()
+            } else {
+                self.style.text_font.clone()
+            },
             color,
             background_color: None,
             underline: underline,

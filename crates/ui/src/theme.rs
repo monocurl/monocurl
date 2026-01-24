@@ -72,7 +72,7 @@ impl ColorSet {
 pub struct FontSet;
 
 impl FontSet {
-    pub const MONOSPACE: &'static str = "IBMPlex Mono";
+    pub const MONOSPACE: &'static str = "IBM Plex Mono";
     pub const UI: &'static str = "Lilex";
 }
 
@@ -81,6 +81,7 @@ pub struct TextEditorStyles {
     pub bg_color: Hsla,
 
     pub text_font: Font,
+    pub italic_text_font: Font,
     pub text_size: Pixels,
     pub line_height: Pixels,
 
@@ -117,6 +118,8 @@ impl Default for TextEditorStyles {
         Self {
             bg_color: gpui::hsla(0.61, 0.23, 0.95, 1.0),
             text_font: gpui::font(FontSet::MONOSPACE),
+            italic_text_font: gpui::font(FontSet::MONOSPACE).italic(),
+
             text_size: px(14.0),
             line_height: px(20.0),
             control_flow_color: gpui::hsla(0.76, 0.59, 0.52, 1.0),

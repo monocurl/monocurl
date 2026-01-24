@@ -3,7 +3,7 @@ use gpui::{App, AppContext, Context, Entity};
 use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
 use structs::rope::{Attribute, Rope};
-use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, TextualState, TransactionSummary}}};
+use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, StaticAnalysisData, TextualState, TransactionSummary}}};
 
 mod lexing;
 mod compilation;
@@ -22,6 +22,10 @@ pub struct ServiceManager {
 pub enum ServiceManagerMessage {
     UpdateLexRope {
         lex_rope: Rope<Attribute<LexData>>,
+        version: usize,
+    },
+    UpdateStaticAnalysisRope {
+        analysis_rope: Rope<Attribute<StaticAnalysisData>>,
         version: usize,
     },
     UpdateCompileDiagnostics {
@@ -127,6 +131,13 @@ impl ServiceManager {
             ServiceManagerMessage::UpdateLexRope { lex_rope, version } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_lex_rope(lex_rope, version) {
+                        cx.notify();
+                    }
+                });
+            },
+            ServiceManagerMessage::UpdateStaticAnalysisRope { analysis_rope, version } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_static_analysis_rope(analysis_rope, version) {
                         cx.notify();
                     }
                 });
