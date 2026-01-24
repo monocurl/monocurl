@@ -324,9 +324,9 @@ impl TextualState {
         self.nested_transaction_count -= 1;
         if self.nested_transaction_count == 0 {
             self.current_transaction.final_version = self.version();
+            self.current_transaction.new_cursor = self.cursor;
             self.notify_listeners(cx);
             self.current_transaction.text_changes.clear();
-            self.current_transaction.new_cursor = self.cursor;
         }
     }
 

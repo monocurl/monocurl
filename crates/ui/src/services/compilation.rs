@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::token::Token;
@@ -19,7 +21,9 @@ pub enum CompilationMessage {
         cursor: Cursor,
         version: usize,
     },
-    RecheckDependencies
+    RecheckDependencies {
+        open_documents: Vec<(PathBuf, Rope<TextAggregate>)>
+    }
 }
 
 pub struct CompilationService {
@@ -41,6 +45,9 @@ impl CompilationService {
         let mut latest_cursor = Cursor::default();
         let mut latest_text_rope = Rope::default();
         let mut latest_version = 0;
+
+        let mut open_files: Vec<Rope<TextAggregate>> = vec![];
+
         while let Some(message) = self.rx.next().await {
             // we should do a select! here for best performance
             match message {
@@ -66,8 +73,9 @@ impl CompilationService {
                         for_text_rope.clone(),
                         parser::ast::SectionType::Slide,
                         if latest_cursor.is_empty() {
-                            // Some(for_text_rope.utf8_line_pos_prefix(l.row, l.col).bytes_utf8)
-                            None
+                            let l = latest_cursor.head;
+                            Some(for_text_rope.utf8_line_pos_prefix(l.row, l.col).bytes_utf8)
+                            // None
                         }
                         else {
                             None
@@ -75,6 +83,7 @@ impl CompilationService {
                     );
                     p.parse_section();
                     let artifacts = p.artifacts();
+                    let cursor_poss = artifacts.cursor_possibilities;
                     let diags = artifacts.diagnostics;
 
                     self.sm_tx.send(ServiceManagerMessage::UpdateCompileDiagnostics {
@@ -99,30 +108,16 @@ impl CompilationService {
                         category: AutoCompleteCategory::Keyword
                     };
 
-                    let suggestions = vec![
-                        item("import"),
-                        item("break"),
-                        item("block"),
-                        item("continue"),
-                        item("return"),
-                        item("if"),
-                        item("else"),
-                        item("for"),
-                        item("while"),
-                        item("operator"),
-                        item("let"),
-                        item("var"),
-                        item("mesh"),
-                        item("state"),
-                        item("param"),
-                        item("anim"),
-                        item("play"),
-                        item("slide"),
-                        item("native"),
-                        item("and"),
-                        item("or"),
-                        item("not")
-                    ];
+                    println!("Sending {:?} autocomplete suggestions",
+                        cursor_poss.iter()
+                            .map(|token| token.description())
+                            .collect::<Vec<_>>()
+                    );
+                    let suggestions = cursor_poss.iter()
+                        .map(|token| item(token.description()))
+                        .collect();
+
+
                     self.sm_tx.send(ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor: latest_cursor, version }).await.unwrap();
                     // let _ = self.execution_tx.send(ExecutionMessage::UpdateBytecode).await;
                 },
@@ -197,7 +192,7 @@ impl CompilationService {
                         version: latest_version
                     }).await.unwrap();
                 }
-                CompilationMessage::RecheckDependencies => {
+                CompilationMessage::RecheckDependencies { .. } => {
                     // recompile if any new dependencies
                 }
             }

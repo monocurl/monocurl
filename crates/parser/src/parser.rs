@@ -82,7 +82,7 @@ macro_rules! try_all {
     ) => {{
         if let Some(token) = $token {
             if $self.cursor_position.is_some()
-                && $span.contains(&$self.cursor_position.unwrap())
+                && $span.contains(&$self.cursor_position.unwrap().saturating_sub(1))
             {
                 $(
                     let state_ok = if let Some(pred) = $state_pred {
@@ -552,6 +552,10 @@ impl SectionParser {
     pub fn artifacts(self) -> ParseArtifacts {
         self.artifacts
     }
+
+    pub fn autocomplete_possibilities(&self) -> &HashSet<Token> {
+        &self.artifacts.cursor_possibilities
+    }
 }
 
 impl SectionParser {
@@ -567,7 +571,7 @@ impl SectionParser {
 
     fn peek_token_description(&self) -> String {
         let Some((_, span)) = self.tokens.get(self.token_index) else {
-            return "<end of file>".to_string()
+            return "<end of section>".to_string()
         };
         self.text_rope
             .iterator_range(span.clone())
