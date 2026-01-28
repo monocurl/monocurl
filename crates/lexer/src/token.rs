@@ -64,12 +64,11 @@ pub enum Token {
     Native,
 
     IntegerLiteral,
-    DoubleLiteral,
+    FloatLiteral,
     // this means it looks most like a string literal
     // however it may actually be ilformed
     // the parser / compiler must actually verify the form
     StringLiteral,
-    CharLiteral,
 
     ArgumentLabel,
     Identifier,
@@ -89,8 +88,8 @@ impl Token {
             Import | Let | Var | Mesh | State | Param | Slide | Native => {
                 TokenCategory::NonControlFlowKeyword
             }
-            IntegerLiteral | DoubleLiteral => TokenCategory::NumericLiteral,
-            StringLiteral | CharLiteral => TokenCategory::TextLiteral,
+            IntegerLiteral | FloatLiteral => TokenCategory::NumericLiteral,
+            StringLiteral => TokenCategory::TextLiteral,
             Comment => TokenCategory::Comment,
             Identifier => TokenCategory::Identifier,
             ArgumentLabel => TokenCategory::ArgumentLabel,
@@ -155,9 +154,8 @@ impl Token {
             Token::Slide => "'slide'",
             Token::Native => "'__monocurl__native__'",
             Token::IntegerLiteral => "<integer>",
-            Token::DoubleLiteral => "<double>",
+            Token::FloatLiteral => "<float>",
             Token::StringLiteral => "<string>",
-            Token::CharLiteral => "<char>",
             Token::ArgumentLabel => "<argument label>",
             Token::Identifier => "<identifier>",
         }

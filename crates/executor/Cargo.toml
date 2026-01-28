@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-compiler.workspace = true
+bytecode.workspace = true
+geo.workspace = true
+
+smallvec.workspace = true

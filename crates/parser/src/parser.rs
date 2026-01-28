@@ -6,6 +6,7 @@ use structs::{rope::{Rope, TextAggregate}, text::{Count8, Span8}};
 
 use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
 
+// Only gives error if unable to produce anything at all
 type Result<T> = std::result::Result<T, ()>;
 
 macro_rules! try_all {
@@ -679,17 +680,24 @@ impl SectionParser {
 }
 
 impl SectionParser {
-    pub fn parse_section(&mut self) -> Result<Section> {
-        let body = self.parse_statement_list()?;
-        Ok(Section {
+    pub fn parse_section(&mut self) -> std::result::Result<Section, Section> {
+        let body = self.parse_statement_list();
+        let section = Section {
             body,
             section_type: self.state.section_type,
-        })
+            imported_section_indices: vec![]
+        };
+        if self.artifacts.diagnostics.is_empty() {
+            Ok(section)
+        }
+        else {
+            Err(section)
+        }
     }
 
-    pub fn parse_statement_list(&mut self) -> Result<Vec<SpanTagged<Statement>>> {
+    // best effort parse
+    pub fn parse_statement_list(&mut self) -> Vec<SpanTagged<Statement>> {
         let mut statements = Vec::new();
-        let mut err = None;
         loop {
             // skip newlines and semicolons
             while matches!(self.peek_token(), Some((Token::Newline, _)) | Some((Token::Semicolon, _))) {
@@ -724,16 +732,16 @@ impl SectionParser {
 
             match read() {
                 Ok(statement) => statements.push(statement),
-                Err(e) => {
+                Err(_e) => {
+                    // gracefully handle errors
                     while self.peek_token().is_some() && !matches!(self.peek_token().unwrap(), (Token::Newline, _) | (Token::Semicolon, _)) {
                         self.advance_token();
                     }
-                    err = Some(e)
                 }
             };
         }
 
-        err.map_or(Ok(statements), Err)
+        statements
     }
 
     pub fn parse_statement(&mut self) -> Result<SpanTagged<Statement>> {
@@ -797,9 +805,11 @@ impl SectionParser {
     fn parse_while(&mut self) -> Result<SpanTagged<While>> {
         self.debug_assert_token_eq(Token::While);
         let base_span = self.advance_token();
-        self.read_token(Token::LParen)?;
-        let condition = self.parse_expr()?;
-        self.read_token(Token::RParen)?;
+        self.read_token(Token::LParen).ok();
+        let condition = self.parse_expr()
+            .unwrap_or_default();
+
+        self.read_token(Token::RParen).ok();
 
         let (terminal, body) = self.parse_body(|frame| {
             frame.in_loop = true;
@@ -814,12 +824,13 @@ impl SectionParser {
     fn parse_for(&mut self) -> Result<SpanTagged<For>> {
         self.debug_assert_token_eq(Token::For);
         let base_span = self.advance_token();
-        self.read_token(Token::LParen)?;
+
+        self.read_token(Token::LParen).ok();
         let identifier = self.parse_identifier_declaration()?;
-        self.read_token(Token::In)?;
+        self.read_token(Token::In).ok();
 
         let container = self.parse_expr()?;
-        self.read_token(Token::RParen)?;
+        self.read_token(Token::RParen).ok();
 
         let (terminal, body) = self.parse_body(|frame| {
             frame.in_loop = true;
@@ -835,9 +846,10 @@ impl SectionParser {
     fn parse_if(&mut self) -> Result<SpanTagged<If>> {
         self.debug_assert_token_eq(Token::If);
         let base_span = self.advance_token();
-        self.read_token(Token::LParen)?;
-        let condition = self.parse_expr()?;
-        self.read_token(Token::RParen)?;
+        self.read_token(Token::LParen).ok();
+        let condition = self.parse_expr().unwrap_or_default();
+        self.read_token(Token::RParen).ok();
+
         let body = self.parse_body(|_| {})?;
         self.advance_newlines();
         if self.read_if_token(Token::Else).is_some() {
@@ -920,7 +932,6 @@ impl SectionParser {
         });
         let result = self.parse_statement_list();
         self.state.pop_frame();
-        let result = result?;
 
         let terminal = self.read_token(Token::RFlower)?;
         Ok((base_span.start .. terminal.end, result))
@@ -1027,14 +1038,11 @@ impl SectionParser {
             ExactPred(Token::IntegerLiteral) => {
                 self.parse_int_literal()?
             },
-            ExactPred(Token::DoubleLiteral) => {
-                self.parse_double_literal()?
+            ExactPred(Token::FloatLiteral) => {
+                self.parse_float_literal()?
             },
             ExactPred(Token::StringLiteral) => {
                 self.parse_string_literal()?
-            },
-            ExactPred(Token::CharLiteral) => {
-                self.parse_char_literal()?
             },
             ExactPred(Token::LBracket) => {
                 self.parse_map_or_vector_literal()?
@@ -1374,43 +1382,6 @@ impl SectionParser {
         })
     }
 
-    fn parse_char_literal(&mut self) -> Result<SpanTagged<Expression>> {
-        self.parse_basic_literal(Token::CharLiteral, |string| {
-            let mut it = string.chars();
-            if it.next() != Some('\'') {
-                return Err("Malformed char literal")
-            }
-
-            let ch = match it.next() {
-                Some('%') => {
-                    let next = it.next();
-                    if let Some(map) = next.and_then(Self::escape_char_literal) {
-                        return Ok(Literal::Char(map))
-                    } else {
-                        return Err("Malformed escape character")
-                    }
-                }
-                Some('\'') => {
-                    return Err("Empty char literal")
-                }
-                Some(c) => c,
-                None => {
-                    return Err("Malformed char literal")
-                }
-            };
-
-            if it.next() != Some('\'') {
-                return Err("Malformed char literal")
-            }
-
-            if it.next().is_some() {
-                return Err("Malformed char literal")
-            }
-
-            Ok(Literal::Char(ch))
-        })
-    }
-
     fn parse_int_literal(&mut self) -> Result<SpanTagged<Expression>> {
         self.parse_basic_literal(Token::IntegerLiteral, |string| {
             Self::parse_numeric_with_suffix(string, |s| {
@@ -1421,12 +1392,12 @@ impl SectionParser {
         })
     }
 
-    fn parse_double_literal(&mut self) -> Result<SpanTagged<Expression>> {
-        self.parse_basic_literal(Token::DoubleLiteral, |string| {
+    fn parse_float_literal(&mut self) -> Result<SpanTagged<Expression>> {
+        self.parse_basic_literal(Token::FloatLiteral, |string| {
             Self::parse_numeric_with_suffix(string, |s| {
-                s.parse::<f64>().map_err(|_| "Invalid double literal")
+                s.parse::<f64>().map_err(|_| "Invalid float literal")
             },|s| {
-                Ok(Literal::Double(s.parse::<f64>().map_err(|_| "Invalid double literal")?))
+                Ok(Literal::Float(s.parse::<f64>().map_err(|_| "Invalid float literal")?))
             })
         })
     }
@@ -1468,7 +1439,7 @@ impl SectionParser {
         if let Some(stripped) = string.strip_suffix("dg") {
             let value = parse_value(stripped)?;
             let radians = value * std::f64::consts::PI / 180.0;
-            return Ok(Literal::Double(radians));
+            return Ok(Literal::Float(radians));
         }
 
         standard_parse_value(string)
@@ -1632,12 +1603,12 @@ mod test {
     }
 
     #[test]
-    fn test_double_literal() {
+    fn test_float_literal() {
         let result = parse_expr_test("3.14").unwrap();
-        if let Expression::Literal(Literal::Double(val)) = result.1 {
+        if let Expression::Literal(Literal::Float(val)) = result.1 {
             assert!((val - 3.14).abs() < 0.0001);
         } else {
-            panic!("Expected double literal");
+            panic!("Expected float literal");
         }
     }
 
@@ -1652,20 +1623,6 @@ mod test {
     fn test_string_with_escapes() {
         let result = parse_expr_test(r#""hello%nworld%t%"test%'""#).unwrap();
         let expected = Expression::Literal(Literal::String("hello\nworld\t\"test'".to_string()));
-        assert_eq!(result.1, expected);
-    }
-
-    #[test]
-    fn test_char_literal() {
-        let result = parse_expr_test("'x'").unwrap();
-        let expected = Expression::Literal(Literal::Char('x'));
-        assert_eq!(result.1, expected);
-    }
-
-    #[test]
-    fn test_char_with_escape() {
-        let result = parse_expr_test("'%n'").unwrap();
-        let expected = Expression::Literal(Literal::Char('\n'));
         assert_eq!(result.1, expected);
     }
 
@@ -1693,10 +1650,10 @@ mod test {
     #[test]
     fn test_degrees_literal() {
         let result = parse_expr_test("90dg").unwrap();
-        if let Expression::Literal(Literal::Double(val)) = result.1 {
+        if let Expression::Literal(Literal::Float(val)) = result.1 {
             assert!((val - std::f64::consts::PI / 2.0).abs() < 0.0001);
         } else {
-            panic!("Expected double literal");
+            panic!("Expected float literal");
         }
     }
 
@@ -1868,7 +1825,7 @@ mod test {
     }
 
     #[test]
-    fn test_double_negation() {
+    fn test_float_negation() {
         let result = parse_expr_test("--5").unwrap();
         let expected = Expression::UnaryPreOperator(UnaryPreOperator {
             op_type: UnaryOperatorType::Negative,
@@ -2392,7 +2349,7 @@ mod test {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
-        let result = parser.parse_statement_list().unwrap();
+        let result = parser.parse_statement_list();
         assert_eq!(result.len(), 3);
     }
 
@@ -2402,7 +2359,7 @@ mod test {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
-        let result = parser.parse_statement_list().unwrap();
+        let result = parser.parse_statement_list();
         assert_eq!(result.len(), 3);
     }
 

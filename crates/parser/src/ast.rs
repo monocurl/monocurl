@@ -15,6 +15,7 @@ pub enum SectionType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Section {
     pub body: Vec<SpanTagged<Statement>>,
+    pub imported_section_indices: Vec<usize>,
     pub section_type: SectionType
 }
 
@@ -48,6 +49,12 @@ pub enum Expression {
     NativeInvocation(NativeInvocation),
 }
 
+impl Default for Expression {
+    fn default() -> Self {
+        Expression::Literal(Literal::Int(0))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum DirectionalLiteral {
     Up(f64),
@@ -61,9 +68,8 @@ pub enum DirectionalLiteral {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     String(String),
-    Char(char),
     Int(i64),
-    Double(f64),
+    Float(f64),
     Directional(DirectionalLiteral),
     Imaginary(f64),
     Vector(Vec<SpanTagged<Expression>>),

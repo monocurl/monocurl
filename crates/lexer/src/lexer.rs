@@ -122,7 +122,7 @@ where
         }
 
         let token = if is_float {
-            Token::DoubleLiteral
+            Token::FloatLiteral
         } else {
             Token::IntegerLiteral
         };
@@ -197,32 +197,6 @@ where
         }
 
         (Token::StringLiteral, self.byte_count - start)
-    }
-
-    fn lex_char(&mut self) -> (Token, Count8) {
-        let start = self.byte_count - 1;
-        // note that chars can only be one character, but that will be caught later on
-        loop {
-            match self.peek() {
-                Some('\'') => {
-                    self.advance(); // consume closing '
-                    break;
-                }
-                Some('%') => {
-                    self.advance();
-                    // skip past escape sequence
-                    self.advance_if_not_nl();
-                }
-                Some('\n') | None => {
-                    break;
-                }
-                Some(_) => {
-                    self.advance();
-                }
-            }
-        }
-
-        (Token::CharLiteral, self.byte_count - start)
     }
 }
 
@@ -319,7 +293,6 @@ where
                 Token::Semicolon
             }
             '"' => return Some(self.lex_string()),
-            '\'' => return Some(self.lex_char()),
             _ if ch.is_ascii_digit() => return Some(self.lex_number(ch)),
             _ if ch.is_alphabetic() || ch == '_' => return Some(self.lex_identifier_or_keyword(ch)),
             _ => Token::Illegal,

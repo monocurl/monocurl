@@ -3,6 +3,7 @@ resolver = "2"
 
 members = [
     "crates/autocomplete",
+    "crates/bytecode",
     "crates/cli",
     "crates/compiler",
     "crates/ui_cli_shared",
@@ -40,9 +41,9 @@ smol = "2.0.2"
 gpui = { path = "../gpui/crates/gpui" }
 
 autocomplete = { path = "crates/autocomplete" }
+bytecode = { path = "crates/bytecode" }
 cli = { path = "crates/cli" }
 compiler = { path = "crates/compiler" }
-ui_cli_shared = { path = "crates/ui_cli_shared" }
 executor = { path = "crates/executor" }
 exporter = { path = "crates/exporter" }
 geo = { path = "crates/geo" }
@@ -52,3 +53,4 @@ renderer = { path = "crates/renderer" }
 stdlib = { path = "crates/stdlib" }
 structs = { path = "crates/structs" }
 ui = { path = "crates/ui" }
+ui_cli_shared = { path = "crates/ui_cli_shared" }

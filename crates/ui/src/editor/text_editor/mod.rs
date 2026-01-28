@@ -342,9 +342,6 @@ impl TextEditor {
                 if ch == '"' && !in_char && !prev_was_escape  {
                     in_string = !in_string;
                 }
-                if ch == '\'' && !in_string && !prev_was_escape {
-                    in_char = !in_char;
-                }
                 prev_was_escape = false;
             }
             in_string || in_char
@@ -371,7 +368,7 @@ impl TextEditor {
             };
 
             match ch {
-                '(' | '{' | '[' | '"' | '\'' | '|' => {
+                '(' | '{' | '[' | '"' | '|' => {
                     let state = self.state.read(cx);
                     let line = state.offset8_to_loc8(del.start);
                     let start_of_line = state.loc8_to_offset8(Location8 { row: line.row, col: 0 });
@@ -390,7 +387,6 @@ impl TextEditor {
                         '{' => '}',
                         '[' => ']',
                         '"' => '"',
-                        '\'' => '\'',
                         '|' => '|',
                         _ => unreachable!(),
                     })));
@@ -413,7 +409,6 @@ impl TextEditor {
                         Some('{') => '}',
                         Some('[') => ']',
                         Some('"') => '"',
-                        Some('\'') => '\'',
                         Some('|') => '|',
                         _ => return None,
                     };
@@ -671,7 +666,7 @@ impl TextEditor {
                     }
 
                     if let Some(mouse_pos) = editor.auto_scroll_last_mouse_position {
-                        // if no motion, don't falsely select to this point since it could just be a double click
+                        // if no motion, don't falsely select to this point since it could just be a Float click
                         let delta = mouse_pos - editor.last_click_position;
                         let dist = point_dist(delta);
                         if dist < MULTI_CLICK_TOLERANCE {

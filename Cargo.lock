@@ -690,6 +690,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43"
 
 [[package]]
+name = "bytecode"
+version = "0.1.0"
+dependencies = [
+ "structs",
+]
+
+[[package]]
 name = "bytemuck"
 version = "1.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1606,7 +1613,9 @@ dependencies = [
 name = "executor"
 version = "0.1.0"
 dependencies = [
- "compiler",
+ "bytecode",
+ "geo",
+ "smallvec",
 ]
 
 [[package]]
