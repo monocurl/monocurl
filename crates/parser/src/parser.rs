@@ -4,7 +4,7 @@ use lexer::token::Token;
 use smallvec::SmallVec;
 use structs::{rope::{Rope, TextAggregate}, text::{Count8, Span8}};
 
-use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
+use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
 
 // Only gives error if unable to produce anything at all
 type Result<T> = std::result::Result<T, ()>;
@@ -1270,14 +1270,19 @@ impl SectionParser {
                 }
                 is_first = false;
 
+                let reference = self.read_if_token(Token::Reference).is_some();
                 let name = self.parse_identifier_declaration()?;
-                if self.read_if_token(Token::Assign).is_some() {
-                    let value = self.parse_expr()?;
-                    args.push((name, Some(value)));
+                let default_value = if self.read_if_token(Token::Assign).is_some() {
+                    Some(self.parse_expr()?)
                 }
                 else {
-                    args.push((name, None));
-                }
+                    None
+                };
+                args.push(LambdaArg {
+                    identifier: name,
+                    default_value,
+                    must_be_reference: reference
+                });
             }
         }
 
@@ -1843,7 +1848,7 @@ mod test {
         let result = parse_expr_test("|x| x + 1").unwrap();
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![
-                ((1..2, IdentifierDeclaration("x".to_string())), None)
+                LambdaArg { identifier: (1..2, IdentifierDeclaration("x".to_string())), default_value: None, must_be_reference: false }
             ],
             body: (4..9, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
                 lhs: (4..5, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
@@ -1859,8 +1864,8 @@ mod test {
         let result = parse_expr_test("|x, y| x + y").unwrap();
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![
-                ((1..2, IdentifierDeclaration("x".to_string())), None),
-                ((4..5, IdentifierDeclaration("y".to_string())), None),
+                LambdaArg { identifier: (1..2, IdentifierDeclaration("x".to_string())), default_value: None, must_be_reference: false },
+                LambdaArg { identifier: (4..5, IdentifierDeclaration("y".to_string())), default_value: None, must_be_reference: false },
             ],
             body: (7..12, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
                 lhs: (7..8, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
@@ -1876,8 +1881,8 @@ mod test {
         let result = parse_expr_test("|x, y = 5| x + y").unwrap();
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![
-                ((1..2, IdentifierDeclaration("x".to_string())), None),
-                ((4..5, IdentifierDeclaration("y".to_string())), Some((8..9, Expression::Literal(Literal::Int(5))))),
+                LambdaArg { identifier: (1..2, IdentifierDeclaration("x".to_string())), default_value: None, must_be_reference: false },
+                LambdaArg { identifier: (4..5, IdentifierDeclaration("y".to_string())), default_value: Some((8..9, Expression::Literal(Literal::Int(5)))), must_be_reference: false },
             ],
             body: (11..16, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
                 lhs: (11..12, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
@@ -1892,7 +1897,9 @@ mod test {
     fn test_lambda_block_body() {
         let result = parse_expr_test("|x| { return x + 1 }").unwrap();
         let expected = Expression::LambdaDefinition(LambdaDefinition {
-            args: vec![((1..2, IdentifierDeclaration("x".to_string())), None)],
+            args: vec![
+                LambdaArg { identifier: (1..2, IdentifierDeclaration("x".to_string())), default_value: None, must_be_reference: false }
+            ],
             body: (4..20, LambdaBody::Block(vec![
                 (6..18, Statement::Return(Return {
                     value: (13..18, Expression::BinaryOperator(BinaryOperator {
@@ -2295,8 +2302,16 @@ mod test {
         let expected = Expression::OperationDefinition(OperatorDefinition {
             lambda: (9..21, Box::new(Expression::LambdaDefinition(LambdaDefinition {
                 args: vec![
-                    ((10..11, IdentifierDeclaration("x".to_string())), None),
-                    ((13..14, IdentifierDeclaration("y".to_string())), None),
+                    LambdaArg {
+                        identifier:  (10..11, IdentifierDeclaration("x".to_string())),
+                        default_value: None,
+                        must_be_reference: false,
+                    },
+                    LambdaArg {
+                        identifier:  (13..14, IdentifierDeclaration("y".to_string())),
+                        default_value: None,
+                        must_be_reference: false,
+                    },
                 ],
                 body: (16..21, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
                     lhs: (16..17, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
@@ -2407,7 +2422,9 @@ mod test {
     fn test_complex_lambda_with_nested_blocks() {
         let result = parse_expr_test("|n| anim { for (i in [1, 2, 3]) { play circle } }").unwrap();
         let expected = Expression::LambdaDefinition(LambdaDefinition {
-            args: vec![((1..2, IdentifierDeclaration("n".to_string())), None)],
+            args: vec![
+                LambdaArg { identifier: (1..2, IdentifierDeclaration("n".to_string())), default_value: None, must_be_reference: false }
+            ],
             body: (4..49, LambdaBody::Inline(Box::new(Expression::Anim(Anim {
                 body: vec![
                     (11..47, Statement::For(For {
@@ -2436,7 +2453,13 @@ mod test {
             operator: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("map".to_string())))),
             arguments: (3..14, vec![
                 (None, (4..13, Expression::LambdaDefinition(LambdaDefinition {
-                    args: vec![((5..6, IdentifierDeclaration("x".to_string())), None)],
+                    args: vec![
+                        LambdaArg {
+                            identifier:  (5..6, IdentifierDeclaration("x".to_string())),
+                            default_value: None,
+                            must_be_reference: false,
+                        },
+                    ],
                     body: (8..13, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
                         lhs: (8..9, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
                         op_type: BinaryOperatorType::Multiply,
@@ -2485,8 +2508,16 @@ mod test {
             arguments: (4..21, vec![
                 (None, (5..17, Expression::LambdaDefinition(LambdaDefinition {
                     args: vec![
-                        ((6..7, IdentifierDeclaration("a".to_string())), None),
-                        ((9..10, IdentifierDeclaration("b".to_string())), None),
+                        LambdaArg {
+                            identifier:  (6..7, IdentifierDeclaration("a".to_string())),
+                            default_value: None,
+                            must_be_reference: false,
+                        },
+                        LambdaArg {
+                            identifier:  (9..10, IdentifierDeclaration("b".to_string())),
+                            default_value: None,
+                            must_be_reference: false,
+                        },
                     ],
                     body: (12..17, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
                         lhs: (12..13, Box::new(Expression::IdentifierReference(IdentifierReference::Value("a".to_string())))),
@@ -2500,7 +2531,13 @@ mod test {
                 operator: (22..25, Box::new(Expression::IdentifierReference(IdentifierReference::Value("map".to_string())))),
                 arguments: (25..36, vec![
                     (None, (26..35, Expression::LambdaDefinition(LambdaDefinition {
-                        args: vec![((27..28, IdentifierDeclaration("x".to_string())), None)],
+                        args: vec![
+                            LambdaArg {
+                                identifier:  (27..28, IdentifierDeclaration("x".to_string())),
+                                default_value: None,
+                                must_be_reference: false,
+                            },
+                        ],
                         body: (30..35, LambdaBody::Inline(Box::new(Expression::BinaryOperator(BinaryOperator {
                             lhs: (30..31, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
                             op_type: BinaryOperatorType::Multiply,

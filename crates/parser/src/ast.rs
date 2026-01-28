@@ -77,9 +77,16 @@ pub enum Literal {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LambdaArg {
+    pub identifier: SpanTagged<IdentifierDeclaration>,
+    pub default_value: Option<SpanTagged<Expression>>,
+    pub must_be_reference: bool
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LambdaDefinition {
     // identifier and default value
-    pub args: Vec<(SpanTagged<IdentifierDeclaration>, Option<SpanTagged<Expression>>)>,
+    pub args: Vec<LambdaArg>,
     pub body: SpanTagged<LambdaBody>
 }
 

@@ -331,7 +331,6 @@ impl TextEditor {
         fn in_literal(s: &str) -> bool {
             let escape = '%';
             let mut in_string = false;
-            let mut in_char = false;
             let mut prev_was_escape = false;
             for ch in s.chars() {
                 if ch == escape {
@@ -339,12 +338,12 @@ impl TextEditor {
                     continue;
                 }
 
-                if ch == '"' && !in_char && !prev_was_escape  {
+                if ch == '"' && !prev_was_escape  {
                     in_string = !in_string;
                 }
                 prev_was_escape = false;
             }
-            in_string || in_char
+            in_string
         }
         fn in_lambda_definition(s: &str) -> bool {
             s.chars().filter(|&c| c == '|').count() % 2 == 1
