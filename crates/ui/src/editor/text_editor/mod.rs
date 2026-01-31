@@ -1237,8 +1237,40 @@ impl TextEditor {
 
 impl TextEditor {
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+        if let Some(mut text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.undo_group_boundary(cx);
+            text = text.replace("\t", &" ".repeat(TAB_SIZE));
+            if text.chars().any(|c| c == '\n') {
+                // change indentation for pasted multiline text
+                // pretty dumb but whatever
+                let state = self.state.read(cx);
+                let cursor_loc = self.cursor(cx).head.min(self.cursor(cx).anchor);
+                let line_start_offset = state.loc8_to_offset8(Location8 { row: cursor_loc.row, col: 0 });
+                let line_start_text = state.read(line_start_offset..state.loc8_to_offset8(cursor_loc));
+                let mut leading_spaces = line_start_text.chars().take_while(|c| *c == ' ').count();
+
+                let mut new_text = String::new();
+                for line in text.split('\n') {
+                    let real_pad = if new_text.is_empty() {
+                        0
+                    }
+                    else {
+                        new_text.push('\n');
+                        if line.trim_start().starts_with('}') {
+                            leading_spaces = leading_spaces.saturating_sub(TAB_SIZE);
+                        }
+                        leading_spaces
+                    };
+
+                    let my_space_count = line.chars().take_while(|ch| *ch == ' ').count();
+                    new_text.push_str(&(" ".repeat(real_pad) + &line[my_space_count..]));
+                    if line.trim_end().ends_with('{') {
+                        leading_spaces += TAB_SIZE;
+                    }
+                }
+
+                text = new_text;
+            }
             self.replace_text_in_utf16_range(None, &text, false, window, cx);
             self.undo_group_boundary(cx);
         }

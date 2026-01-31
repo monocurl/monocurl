@@ -973,6 +973,10 @@ dependencies = [
 [[package]]
 name = "compiler"
 version = "0.1.0"
+dependencies = [
+ "bytecode",
+ "parser",
+]
 
 [[package]]
 name = "compression-codecs"
