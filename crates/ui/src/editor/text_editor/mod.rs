@@ -36,9 +36,13 @@ mod popover_element;
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("backspace", Backspace, None),
+        KeyBinding::new("shift-backspace", Backspace, None),
         KeyBinding::new("alt-backspace", BackspaceWord, None),
+        KeyBinding::new("shift-alt-backspace", BackspaceWord, None),
         KeyBinding::new("secondary-backspace", BackspaceLine, None),
-        KeyBinding::new("delete shift-delete", Delete, None),
+        KeyBinding::new("shift-secondary-backspace", BackspaceLine, None),
+        KeyBinding::new("delete", Delete, None),
+        KeyBinding::new("shift-delete", Delete, None),
         KeyBinding::new("up", Up, None),
         KeyBinding::new("down", Down, None),
         KeyBinding::new("left", Left, None),
