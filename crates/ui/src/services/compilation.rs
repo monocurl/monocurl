@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::token::Token;
-use parser::ast::{BinaryOperator, Declaration, Expression, If, LambdaInvocation, OperatorInvocation, Section, Statement, UnaryPreOperator};
-use parser::parser::{Parser, SectionParser};
+use parser::ast::{BinaryOperator, Declaration, Expression, LambdaInvocation, OperatorInvocation, Section, Statement, UnaryPreOperator};
+use parser::parser::{SectionParser};
 use structs::rope::{Attribute, RLEData, Rope, TextAggregate};
 use structs::text::{Location8, Span8};
 
@@ -92,11 +92,7 @@ impl CompilationService {
                             .map(|d| Diagnostic {
                                 message: d.message.clone(),
                                 span: d.span,
-                                dtype: if d.is_error {
-                                    DiagnosticType::CompileTimeError
-                                } else {
-                                    DiagnosticType::CompileTimeWarning
-                                },
+                                dtype: DiagnosticType::CompileTimeError,
                                 title: d.title
                             }).collect(),
                         version,
@@ -153,6 +149,9 @@ impl CompilationService {
                                     operand,
                                 }) => {
                                     return ast_walk3(*operand.1, r);
+                                },
+                                Expression::OperatorInvocation(OperatorInvocation { operator, arguments, operand }) => {
+                                    return ast_walk3(*operand.1, r)
                                 }
                                 _ => return r
                             }

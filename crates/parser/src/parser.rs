@@ -510,14 +510,13 @@ impl Precomputation {
             bracket_index + 1 .. *end
         }
         else {
-            bracket_index + 1 .. bracket_index + 1
+            bracket_index .. bracket_index
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
-    pub is_error: bool,
     pub span: Span8,
     pub title: String,
     pub message: String,
@@ -643,7 +642,7 @@ impl SectionParser {
         }
 
         self.artifacts.error_diagnostics.push(
-            Diagnostic { is_error: true, span: modified_span, title, message: error_message }
+            Diagnostic { span: modified_span, title, message: error_message }
         )
     }
 }
