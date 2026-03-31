@@ -1,8 +1,9 @@
 *.p12
 .DS_Store
 target
-quarve_target
 *.swp
+
+CLAUDE.md
 
 # idea
 **/.idea/workspace.xml **/.idea/tasks.xml

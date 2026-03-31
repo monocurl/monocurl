@@ -85,7 +85,7 @@ impl CompilationService {
                     let q = p.parse_section();
                     let artifacts = p.artifacts();
                     let cursor_poss = artifacts.cursor_possibilities;
-                    let diags = artifacts.diagnostics;
+                    let diags = artifacts.error_diagnostics;
 
                     self.sm_tx.send(ServiceManagerMessage::UpdateCompileDiagnostics {
                         diagnostics: diags.into_iter()

@@ -6,9 +6,6 @@ use structs::{rope::{Rope, TextAggregate}, text::{Count8, Span8}};
 
 use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
 
-// Only gives error if unable to produce anything at all
-type Result<T> = std::result::Result<T, ()>;
-
 macro_rules! try_all {
     (@branches $self:expr, $token:expr, $span:expr, [], [$($collected:tt)*], $expected_override:expr) => {
         try_all!(@execute $self, $token, $span, [$($collected)*], $expected_override)
@@ -334,14 +331,15 @@ mod predicate {
                 Token::Divide => Some(BinaryOperatorType::Divide),
                 Token::IntegerDivide => Some(BinaryOperatorType::IntegerDivide),
                 Token::Power => Some(BinaryOperatorType::Power),
-                Token::Eq => Some(BinaryOperatorType::Power),
+                Token::Eq => Some(BinaryOperatorType::Eq),
                 Token::Ne => Some(BinaryOperatorType::Ne),
                 Token::Lt => Some(BinaryOperatorType::Lt),
                 Token::Le => Some(BinaryOperatorType::Le),
                 Token::Gt => Some(BinaryOperatorType::Gt),
-                Token::Ge => Some(BinaryOperatorType::In),
+                Token::Ge => Some(BinaryOperatorType::Ge),
                 Token::Assign => Some(BinaryOperatorType::Assign),
                 Token::DotAssign => Some(BinaryOperatorType::DotAssign),
+                Token::In => Some(BinaryOperatorType::In),
                 _ => None
             }
         }
@@ -545,7 +543,7 @@ pub struct Parser;
 
 #[derive(Default)]
 pub struct ParseArtifacts {
-    pub diagnostics: Vec<Diagnostic>,
+    pub error_diagnostics: Vec<Diagnostic>,
     pub cursor_possibilities: HashSet<Token>
 }
 
@@ -644,19 +642,24 @@ impl SectionParser {
             modified_span.start = modified_span.start.saturating_sub(1);
         }
 
-        self.artifacts.diagnostics.push(
+        self.artifacts.error_diagnostics.push(
             Diagnostic { is_error: true, span: modified_span, title, message: error_message }
         )
     }
 }
 
 impl SectionParser {
-    fn read_token(&mut self, token: Token) -> Result<Span8> {
+    fn read_token(&mut self, token: Token) -> Result<Span8, ()> {
         try_all!(self, {
             ExactPred(token) => {
                 self.advance_token()
             },
         })
+    }
+
+    fn read_token_best_effort(&mut self, token: Token) -> Span8 {
+        self.read_token(token)
+            .unwrap_or(self.token_index..self.token_index)
     }
 
     fn read_if_token(&mut self, token: Token) -> Option<Span8> {
@@ -687,7 +690,7 @@ impl SectionParser {
             section_type: self.state.section_type,
             imported_section_indices: vec![]
         };
-        if self.artifacts.diagnostics.is_empty() {
+        if self.artifacts.error_diagnostics.is_empty() {
             Ok(section)
         }
         else {
@@ -708,7 +711,7 @@ impl SectionParser {
                 break;
             }
 
-            let mut read = || -> Result<SpanTagged<Statement>> {
+            let mut read = || -> Result<SpanTagged<Statement>, ()> {
                 let ret = self.parse_statement()?;
 
                 // ensure no hanging content
@@ -744,26 +747,26 @@ impl SectionParser {
         statements
     }
 
-    pub fn parse_statement(&mut self) -> Result<SpanTagged<Statement>> {
+    pub fn parse_statement(&mut self) -> Result<SpanTagged<Statement>, ()> {
         try_all!(self, {
             vtype = VariableDeclarationPred => {
-                let (span, statement) = self.parse_declaration(vtype)?;
+                let (span, statement) = self.parse_declaration(vtype);
                 (span, Statement::Declaration(statement))
             },
             ExactPred(Token::For) => {
-                let (span, statement) = self.parse_for()?;
+                let (span, statement) = self.parse_for();
                 (span, Statement::For(statement))
             },
             ExactPred(Token::While) => {
-                let (span, statement) = self.parse_while()?;
+                let (span, statement) = self.parse_while();
                 (span, Statement::While(statement))
             },
             ExactPred(Token::If) => {
-                let (span, statement) = self.parse_if()?;
+                let (span, statement) = self.parse_if();
                 (span, Statement::If(statement))
             },
             if PlayablePredicate, ExactPred(Token::Play) => {
-                let (span, statement) = self.parse_play()?;
+                let (span, statement) = self.parse_play();
                 (span, Statement::Play(statement))
             },
             if InLoopPredicate, ExactPred(Token::Break) => {
@@ -775,12 +778,12 @@ impl SectionParser {
                 (span, Statement::Continue)
             },
             if InLambdaOrBlockPredicate, ExactPred(Token::Return) => {
-                let (span, statement) = self.parse_return()?;
+                let (span, statement) = self.parse_return();
                 (span, Statement::Return(statement))
             },
             if InLambdaOrBlockPredicate, ExactPred(Token::Dot) => {
                 let base_span = self.advance_token();
-                let (span, expr) = self.parse_expr()?;
+                let (span, expr) = self.parse_expr_best_effort();
                 let desugared_expression = Statement::Expression(
                     Expression::BinaryOperator(
                         BinaryOperator {
@@ -796,135 +799,139 @@ impl SectionParser {
             },
             else {
                 // otherwise must be expression, do not advance
-                let (span, statement) = self.parse_expr()?;
+                let (span, statement) = self.parse_expr_best_effort();
                 Ok((span, Statement::Expression(statement)))
             }
         })
     }
 
-    fn parse_while(&mut self) -> Result<SpanTagged<While>> {
+    fn parse_while(&mut self) -> SpanTagged<While> {
         self.debug_assert_token_eq(Token::While);
         let base_span = self.advance_token();
         self.read_token(Token::LParen).ok();
-        let condition = self.parse_expr()
-            .unwrap_or_default();
+        let condition = self.parse_expr_best_effort();
 
         self.read_token(Token::RParen).ok();
 
         let (terminal, body) = self.parse_body(|frame| {
             frame.in_loop = true;
-        })?;
+        });
 
-        Ok((base_span.start .. terminal.end, While {
+        (base_span.start .. terminal.end, While {
             condition,
             body: (terminal, body),
-        }))
+        })
     }
 
-    fn parse_for(&mut self) -> Result<SpanTagged<For>> {
+    fn parse_for(&mut self) -> SpanTagged<For> {
         self.debug_assert_token_eq(Token::For);
         let base_span = self.advance_token();
 
-        self.read_token(Token::LParen).ok();
-        let identifier = self.parse_identifier_declaration()?;
-        self.read_token(Token::In).ok();
+        self.read_token_best_effort(Token::LParen);
+        let identifier = self.parse_identifier_declaration();
+        self.read_token_best_effort(Token::In);
 
-        let container = self.parse_expr()?;
-        self.read_token(Token::RParen).ok();
+        let container = self.parse_expr_best_effort();
+        self.read_token_best_effort(Token::RParen);
 
         let (terminal, body) = self.parse_body(|frame| {
             frame.in_loop = true;
-        })?;
+        });
 
-        Ok((base_span.start .. terminal.end, For {
+        (base_span.start .. terminal.end, For {
             var_name: identifier,
             body: (terminal, body),
             container,
-        }))
+        })
     }
 
-    fn parse_if(&mut self) -> Result<SpanTagged<If>> {
+    fn parse_if(&mut self) -> SpanTagged<If> {
         self.debug_assert_token_eq(Token::If);
         let base_span = self.advance_token();
         self.read_token(Token::LParen).ok();
-        let condition = self.parse_expr().unwrap_or_default();
+        let condition = self.parse_expr_best_effort();
         self.read_token(Token::RParen).ok();
 
-        let body = self.parse_body(|_| {})?;
+        let body = self.parse_body(|_| {});
         self.advance_newlines();
         if self.read_if_token(Token::Else).is_some() {
             // parse else block
             let else_block = try_all!(self, {
                 ExactPred(Token::If) => {
                     // else if
-                    let (span, statement) = self.parse_if()?;
+                    let (span, statement) = self.parse_if();
                     (span.clone(), vec![(span, Statement::If(statement))])
                 },
                 else {
-                    self.parse_body(|_| {})
+                    Result::<_, ()>::Ok(self.parse_body(|_| {}))
                 }
-            })?;
+            }).unwrap();
 
-            Ok((base_span.start .. else_block.0.end, If {
+            (base_span.start .. else_block.0.end, If {
                 condition,
                 if_block: body,
                 else_block: Some(else_block)
-            }))
+            })
         }
         else {
-            Ok((base_span.start .. body.0.end, If {
+            (base_span.start .. body.0.end, If {
                 condition,
                 if_block: body,
                 else_block: None
-            }))
+            })
         }
     }
 
-    fn parse_play(&mut self) -> Result<SpanTagged<Play>> {
+    fn parse_play(&mut self) -> SpanTagged<Play> {
         self.debug_assert_token_eq(Token::Play);
         let base_span = self.advance_token();
-        let animations = self.parse_expr()?;
-        Ok((base_span.start .. animations.0.end, Play {
+        let animations = self.parse_expr_best_effort();
+        (base_span.start .. animations.0.end, Play {
             animations
-        }))
+        })
     }
 
-    fn parse_declaration(&mut self, var_type: VariableType) -> Result<SpanTagged<Declaration>> {
+    fn parse_declaration(&mut self, var_type: VariableType) -> SpanTagged<Declaration> {
         let base_span = self.advance_token();
-        let identifier = self.parse_identifier_declaration()?;
-        self.read_token(Token::Assign)?;
-        let value = self.parse_expr()?;
+        let identifier = self.parse_identifier_declaration();
+        self.read_token(Token::Assign).ok();
+        let value = self.parse_expr_best_effort();
 
-        Ok((base_span.start..value.0.end, Declaration {
+        (base_span.start..value.0.end, Declaration {
             var_type,
             identifier,
             value
-        }))
+        })
     }
 
-    fn parse_return(&mut self) -> Result<SpanTagged<Return>> {
+    fn parse_return(&mut self) -> SpanTagged<Return> {
         self.debug_assert_token_eq(Token::Return);
         let base_span = self.advance_token();
-        let value = self.parse_expr()?;
-        Ok((base_span.start .. value.0.end, Return {
+        let value = self.parse_expr_best_effort();
+        (base_span.start .. value.0.end, Return {
             value,
-        }))
+        })
     }
 
-    fn parse_identifier_declaration(&mut self) -> Result<SpanTagged<IdentifierDeclaration>> {
-        let span = self.read_token(Token::Identifier)?;
+    // best effort
+    fn parse_identifier_declaration(&mut self) -> SpanTagged<IdentifierDeclaration> {
+        let span = self.read_token_best_effort(Token::Identifier);
         let identifier: String = self.text_rope.iterator_range(span.clone()).collect();
         if !identifier.chars().all(|c| c.is_alphanumeric() || c == '_') || identifier.chars().next().is_none_or(|c| c.is_numeric()) {
             self.emit_error("Illegal Identifier".into(), format!("\"{}\" is not a valid identifier name", identifier), span.clone());
-            return Err(());
         }
 
-        Ok((span, IdentifierDeclaration(identifier)))
+        (span, IdentifierDeclaration(identifier))
     }
 
-    fn parse_body(&mut self, frame_builder: impl FnOnce(&mut ContextFrame)) -> Result<SpanTagged<Vec<SpanTagged<Statement>>>> {
+    fn parse_body(&mut self, frame_builder: impl FnOnce(&mut ContextFrame)) -> SpanTagged<Vec<SpanTagged<Statement>>> {
+        // continue until we have a lflower
+        while self.peek_token().is_some_and(|tok| tok.0 != Token::LFlower) {
+            self.advance_token();
+        }
+
         let body_range = self.precomputation.bracket_internal_range(self.token_index);
-        let base_span = self.read_token(Token::LFlower)?;
+        let base_span = self.read_token_best_effort(Token::LFlower);
 
         self.state.push_frame(|frame| {
             frame.operating_range = body_range;
@@ -933,19 +940,20 @@ impl SectionParser {
         let result = self.parse_statement_list();
         self.state.pop_frame();
 
-        let terminal = self.read_token(Token::RFlower)?;
-        Ok((base_span.start .. terminal.end, result))
+        let terminal = self.read_token_best_effort(Token::RFlower);
+
+        (base_span.start .. terminal.end, result)
     }
 
-    fn parse_expr(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_expr_best_effort(&mut self) -> SpanTagged<Expression> {
         self.parse_expr_priority(0)
     }
 }
 
 // expression parsing
 impl SectionParser {
-    fn parse_expr_priority(&mut self, priority: usize) -> Result<SpanTagged<Expression>> {
-        let mut expr = Some(self.parse_unary()?);
+    fn parse_expr_priority(&mut self, priority: usize) -> SpanTagged<Expression> {
+        let mut expr = Some(self.parse_unary());
         loop {
             let mut finished = false;
             try_all!(self, {
@@ -953,7 +961,7 @@ impl SectionParser {
                     if (op.priority(), op.associativity()) >= (priority, 1) {
                         // combine right
                         self.advance_token();
-                        let right = self.parse_expr_priority(op.priority())?;
+                        let right = self.parse_expr_priority(op.priority());
                         let old_expr = expr.take().unwrap();
                         expr = Some((old_expr.0.start .. right.0.end, Expression::BinaryOperator(BinaryOperator {
                             lhs: (old_expr.0.clone(), Box::new(old_expr.1)),
@@ -967,25 +975,25 @@ impl SectionParser {
                 },
                 else {
                     finished = true;
-                    Ok(())
+                    Result::<(), ()>::Ok(())
                 }
-            })?;
+            }).unwrap();
 
             if finished {
                 break
             }
         }
 
-        Ok(expr.unwrap())
+        expr.unwrap()
     }
 
-    fn read_pure_identifier(&mut self) -> Result<SpanTagged<String>> {
-        let span = self.read_token(Token::Identifier)?;
+    fn read_pure_identifier(&mut self) -> SpanTagged<String> {
+        let span = self.read_token_best_effort(Token::Identifier);
         let str: String = self.text_rope.iterator_range(span.clone()).collect();
-        return Ok((span, str));
+        return (span, str);
     }
 
-    fn parse_unary(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_unary(&mut self) -> SpanTagged<Expression> {
         // parse base expression
         let expr = try_all!(self, expected = Some("<unary expression>"), {
             /* unary operators */
@@ -994,7 +1002,7 @@ impl SectionParser {
             },
             /* entire sub expression */
             ExactPred(Token::LParen) => {
-                self.parse_parenthesis_sub_expression()?
+                self.parse_parenthesis_sub_expression()
             },
             /* identifier */
             ExactPred(Token::Identifier) => {
@@ -1004,54 +1012,54 @@ impl SectionParser {
             },
             ExactPred(Token::Reference) => {
                 let base_span = self.advance_token();
-                let (full_span, str) = self.read_pure_identifier()?;
+                let (full_span, str) = self.read_pure_identifier();
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
             },
             ExactPred(Token::StatefulReference) => {
                 let base_span = self.advance_token();
-                let (full_span, str) = self.read_pure_identifier()?;
+                let (full_span, str) = self.read_pure_identifier();
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
             },
             ExactPred(Token::Multiply) => {
                 let base_span = self.advance_token();
-                let (full_span, str) = self.read_pure_identifier()?;
+                let (full_span, str) = self.read_pure_identifier();
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
             },
             /* operator definition */
             ExactPred(Token::Operator) => {
                 let base_span = self.advance_token();
-                let target = self.parse_unary()?;
+                let target = self.parse_unary();
                 (base_span.start..target.0.end, Expression::OperationDefinition(OperatorDefinition { lambda: (target.0, Box::new(target.1)) }))
             },
             /* lambda definition */
             ExactPred(Token::Pipe) => {
-                self.parse_lambda()?
+                self.parse_lambda()
             },
             /* blocks */
             ExactPred(Token::Block) => {
-                self.parse_block()?
+                self.parse_block()
             },
             ExactPred(Token::Anim) => {
-                self.parse_anim()?
+                self.parse_anim()
             },
             /* literals */
             ExactPred(Token::IntegerLiteral) => {
-                self.parse_int_literal()?
+                self.parse_int_literal()
             },
             ExactPred(Token::FloatLiteral) => {
-                self.parse_float_literal()?
+                self.parse_float_literal()
             },
             ExactPred(Token::StringLiteral) => {
-                self.parse_string_literal()?
+                self.parse_string_literal()
             },
             ExactPred(Token::LBracket) => {
-                self.parse_map_or_vector_literal()?
+                self.parse_map_or_vector_literal()
             },
             /* monocurl internal */
             if InStdLibPredicate, ExactPred(Token::Native) => {
                 let span = self.advance_token();
-                let (full_span, str) = self.read_pure_identifier()?;
-                let args = self.parse_invocation(Token::LParen, Token::RParen, false)?;
+                let (full_span, str) = self.read_pure_identifier();
+                let args = self.parse_invocation(Token::LParen, Token::RParen, false);
                 let arguments = (args.0, args.1
                     .into_iter()
                     .map(|(_label, expr)| expr)
@@ -1061,12 +1069,15 @@ impl SectionParser {
                     arguments: arguments.1,
                 }))
             },
-        })?;
+        });
 
-        Ok(self.apply_postfixes(expr)?)
+        match expr {
+            Ok(expr) => self.apply_postfixes(expr),
+            Err(_) => (self.token_index..self.token_index, Expression::default())
+        }
     }
 
-    fn apply_postfixes(&mut self, base: SpanTagged<Expression>) -> Result<SpanTagged<Expression>> {
+    fn apply_postfixes(&mut self, base: SpanTagged<Expression>) -> SpanTagged<Expression> {
         let mut expr = Some(base);
 
         loop {
@@ -1074,10 +1085,10 @@ impl SectionParser {
 
             let mut take_expr = || expr.take().unwrap();
             let boxify = |raw: SpanTagged<Expression>| (raw.0, Box::new(raw.1));
-            let next = try_all!(self, expected = Some("<postfix operator>"), {
+            let next = match try_all!(self, expected = Some("<postfix operator>"), {
                 ExactPredDesc(Token::LParen, "<function call>") => {
                     // lambda invocation
-                    let arguments = self.parse_invocation(Token::LParen, Token::RParen, true)?;
+                    let arguments = self.parse_invocation(Token::LParen, Token::RParen, true);
                     let old = boxify(take_expr());
                     (old.0.start..arguments.0.end, Expression::LambdaInvocation(LambdaInvocation {
                         lambda: old,
@@ -1086,9 +1097,9 @@ impl SectionParser {
                 },
                 ExactPredDesc(Token::LFlower, "<operator invocation>") => {
                     // operator invocation
-                    let arguments = self.parse_invocation(Token::LFlower, Token::RFlower, false)?;
+                    let arguments = self.parse_invocation(Token::LFlower, Token::RFlower, false);
                     let old = boxify(take_expr());
-                    let operand = self.parse_unary()?;
+                    let operand = self.parse_unary();
 
                     (old.0.start..operand.0.end, Expression::OperatorInvocation(OperatorInvocation {
                         operator: old,
@@ -1099,8 +1110,8 @@ impl SectionParser {
                 ExactPredDesc(Token::LBracket, "<subscript>") => {
                     // subscript
                     self.advance_token();
-                    let index = self.parse_expr()?;
-                    let end_span = self.read_token(Token::RBracket)?;
+                    let index = self.parse_expr_best_effort();
+                    let end_span = self.read_token_best_effort(Token::RBracket);
                     let old = boxify(take_expr());
                     (old.0.start..end_span.end, Expression::Subscript(Subscript {
                         base: old,
@@ -1109,7 +1120,7 @@ impl SectionParser {
                 },
                 ExactPredDesc(Token::Dot, "<property access>") => {
                     self.advance_token();
-                    let attribute = self.read_pure_identifier()?;
+                    let attribute = self.read_pure_identifier();
                     let old = boxify(take_expr());
                     (old.0.start..attribute.0.end, Expression::Property(Property {
                         base: old,
@@ -1118,12 +1129,18 @@ impl SectionParser {
                 },
                 else {
                     is_finished = true;
-                    Ok(take_expr())
+                    Result::<_, ()>::Ok(take_expr())
                 }
-            })?;
+            }) {
+                Ok(next) => next,
+                Err(_) => {
+                    // return whatever we have
+                    return take_expr();
+                }
+            };
 
             if is_finished {
-                return Ok(next);
+                return next;
             }
             else {
                 expr = Some(next);
@@ -1133,7 +1150,7 @@ impl SectionParser {
 
     // (<token_index> a,b,c,d,e)
     fn parse_invocation(&mut self, start: Token, end: Token, allow_newlines: bool)
-    -> Result<SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>>
+    -> SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>
     {
         self.debug_assert_token_eq(start);
         let range = self.precomputation.bracket_internal_range(self.token_index);
@@ -1142,7 +1159,6 @@ impl SectionParser {
         self.state.push_frame(|frame| frame.operating_range = range);
 
         let mut arguments = Vec::new();
-        let mut err = None;
         loop {
             if allow_newlines {
                 self.advance_newlines();
@@ -1151,9 +1167,10 @@ impl SectionParser {
                 break;
             }
 
+            let prev_error_count = self.artifacts.error_diagnostics.len();
             let mut read = || {
                 if arguments.len() > 0 {
-                    self.read_token(Token::Comma)?;
+                    self.read_token_best_effort(Token::Comma);
                 }
 
                 if allow_newlines {
@@ -1180,41 +1197,42 @@ impl SectionParser {
                         self.advance_newlines();
                     }
 
-                    let argument = self.parse_expr()?;
+                    let argument = self.parse_expr_best_effort();
 
-                    Ok((Some(label), argument))
+                    (Some(label), argument)
                 }
                 else {
-                    let argument = self.parse_expr()?;
-                    Ok((None, argument))
+                    let argument = self.parse_expr_best_effort();
+                    (None, argument)
                 }
             };
 
-            match read() {
-                Ok(argument) => arguments.push(argument),
-                Err(e) => {
-                    err = Some(e);
-                    break;
-                }
+            let argument = read();
+            if self.artifacts.error_diagnostics.len() > prev_error_count {
+                // if we emitted an error, stop parsing more arguments
+                break;
+            }
+            else {
+                arguments.push(argument);
             }
         }
         self.state.pop_frame();
 
-        let end_span = self.read_token(end)?;
+        let end_span = self.read_token_best_effort(end);
 
-        err.map_or(Ok((base_span.start .. end_span.end, arguments)), Err)
+        (base_span.start .. end_span.end, arguments)
     }
 
-    fn parse_unary_preoperator(&mut self, op: UnaryOperatorType) -> Result<SpanTagged<Expression>> {
+    fn parse_unary_preoperator(&mut self, op: UnaryOperatorType) -> Result<SpanTagged<Expression>, ()> {
         let base_span = self.advance_token();
-        let (next_span, next) = self.parse_expr_priority(op.priority())?;
+        let (next_span, next) = self.parse_expr_priority(op.priority());
         Ok((base_span.start..next_span.end, Expression::UnaryPreOperator(UnaryPreOperator {
             op_type: op,
             operand: (next_span, Box::new(next))
         })))
     }
 
-    fn parse_parenthesis_sub_expression(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_parenthesis_sub_expression(&mut self) -> SpanTagged<Expression> {
         self.debug_assert_token_eq(Token::LParen);
         let inner_range = self.precomputation.bracket_internal_range(self.token_index);
         let base_span = self.advance_token();
@@ -1222,30 +1240,29 @@ impl SectionParser {
         self.state.push_frame(|frame| {
             frame.operating_range = inner_range;
         });
-        let result = self.parse_expr();
+        let result = self.parse_expr_best_effort();
         self.state.pop_frame();
-        let result = result?;
 
-        let terminal_span = self.read_token(Token::RParen)?;
+        let terminal_span = self.read_token_best_effort(Token::RParen);
 
-        Ok((base_span.start .. terminal_span.end, result.1))
+        (base_span.start .. terminal_span.end, result.1)
     }
 
-    fn parse_anim(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_anim(&mut self) -> SpanTagged<Expression> {
         self.debug_assert_token_eq(Token::Anim);
         let base_span = self.advance_token();
 
         let body = self.parse_body(|frame| {
             frame.in_playable_block = true;
             frame.in_lambda_or_block = false;
-        })?;
+        });
 
-        Ok((base_span.start .. body.0.end, Expression::Anim(Anim {
+        (base_span.start .. body.0.end, Expression::Anim(Anim {
             body: body.1
-        })))
+        }))
     }
 
-    fn parse_lambda(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_lambda(&mut self) -> SpanTagged<Expression> {
         self.debug_assert_token_eq(Token::Pipe);
         let base_span = self.advance_token();
         let mut args = Vec::new();
@@ -1254,16 +1271,16 @@ impl SectionParser {
             let mut is_first = true;
             loop {
                 if !is_first {
-                    let mut done = false;
+                    let mut done = true;
                     try_all!(self, {
                         ExactPred(Token::Pipe) => {
                             self.advance_token();
-                            done = true;
                         },
                         ExactPred(Token::Comma) => {
                             self.advance_token();
+                            done = false;
                         },
-                    })?;
+                    }).ok();
                     if done {
                         break;
                     }
@@ -1271,9 +1288,9 @@ impl SectionParser {
                 is_first = false;
 
                 let reference = self.read_if_token(Token::Reference).is_some();
-                let name = self.parse_identifier_declaration()?;
+                let name = self.parse_identifier_declaration();
                 let default_value = if self.read_if_token(Token::Assign).is_some() {
-                    Some(self.parse_expr()?)
+                    Some(self.parse_expr_best_effort())
                 }
                 else {
                     None
@@ -1292,22 +1309,22 @@ impl SectionParser {
                     frame.in_loop = false;
                     frame.in_playable_block = false;
                     frame.in_lambda_or_block = true;
-                })?;
+                });
                 (body.0, LambdaBody::Block(body.1))
             },
             else {
-                let expr = self.parse_expr()?;
-                Ok((expr.0, LambdaBody::Inline(Box::new(expr.1))))
+                let expr = self.parse_expr_best_effort();
+                Result::<_, ()>::Ok((expr.0, LambdaBody::Inline(Box::new(expr.1))))
             }
-        })?;
+        }).unwrap();
 
-        Ok((base_span.start..body.0.end, Expression::LambdaDefinition(LambdaDefinition {
+        (base_span.start..body.0.end, Expression::LambdaDefinition(LambdaDefinition {
             args,
             body,
-        })))
+        }))
     }
 
-    fn parse_block(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_block(&mut self) -> SpanTagged<Expression> {
         self.debug_assert_token_eq(Token::Block);
         let base_span = self.advance_token();
 
@@ -1315,27 +1332,27 @@ impl SectionParser {
             frame.in_loop = false;
             frame.in_playable_block = false;
             frame.in_lambda_or_block = true;
-        })?;
+        });
 
-        Ok((base_span.start .. body.0.end, Expression::Block(Block {
+        (base_span.start .. body.0.end, Expression::Block(Block {
             body: body.1
-        })))
+        }))
     }
 }
 
 impl SectionParser {
-    fn parse_basic_literal(&mut self, tok: Token, f: impl FnOnce(&str) -> std::result::Result<Literal, &'static str>) -> Result<SpanTagged<Expression>> {
+    fn parse_basic_literal(&mut self, tok: Token, f: impl FnOnce(&str) -> std::result::Result<Literal, &'static str>, default: Literal) -> SpanTagged<Expression> {
         self.debug_assert_token_eq(tok);
         let span = self.advance_token();
         let content: String = self.text_rope.iterator_range(span.clone()).collect();
         let literal = match f(&content) {
             Ok(literal) => literal,
             Err(message) => {
-                self.emit_error("Illegal Literal".into(), message.into(), span);
-                return Err(())
+                self.emit_error("Illegal Literal".into(), message.into(), span.clone());
+                return (span, Expression::Literal(default));
             }
         };
-        Ok((span, Expression::Literal(literal)))
+        (span, Expression::Literal(literal))
     }
 
     fn escape_char_literal(c: char) -> Option<char> {
@@ -1351,7 +1368,7 @@ impl SectionParser {
         }
     }
 
-    fn parse_string_literal(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_string_literal(&mut self) -> SpanTagged<Expression> {
         self.parse_basic_literal(Token::StringLiteral, |string| {
             let mut build = String::new();
             let mut it = string.chars();
@@ -1384,27 +1401,27 @@ impl SectionParser {
             }
 
             return Err("Malformed string literal");
-        })
+        }, Literal::String(String::new()))
     }
 
-    fn parse_int_literal(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_int_literal(&mut self) -> SpanTagged<Expression> {
         self.parse_basic_literal(Token::IntegerLiteral, |string| {
             Self::parse_numeric_with_suffix(string, |s| {
                 s.parse::<i64>().map(|v| v as f64).map_err(|_| "Invalid integer literal")
             },|s| {
                 Ok(Literal::Int(s.parse::<i64>().map_err(|_| "Invalid integer literal")?))
             })
-        })
+        }, Literal::Int(0))
     }
 
-    fn parse_float_literal(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_float_literal(&mut self) -> SpanTagged<Expression> {
         self.parse_basic_literal(Token::FloatLiteral, |string| {
             Self::parse_numeric_with_suffix(string, |s| {
                 s.parse::<f64>().map_err(|_| "Invalid float literal")
             },|s| {
                 Ok(Literal::Float(s.parse::<f64>().map_err(|_| "Invalid float literal")?))
             })
-        })
+        }, Literal::Float(0.0))
     }
 
     fn parse_numeric_with_suffix(
@@ -1450,44 +1467,45 @@ impl SectionParser {
         standard_parse_value(string)
     }
 
-    fn parse_map_or_vector_literal(&mut self) -> Result<SpanTagged<Expression>> {
+    fn parse_map_or_vector_literal(&mut self) -> SpanTagged<Expression> {
         self.debug_assert_token_eq(Token::LBracket);
         let base_span = self.advance_token();
         // empty
         self.advance_newlines();
         if self.read_if_token(Token::KeyValueMap).is_some() {
             self.advance_newlines();
-            let end_span = self.read_token(Token::RBracket)?;
-            return Ok((base_span.start..end_span.end, Expression::Literal(Literal::Map(vec![]))))
+            let end_span = self.read_token_best_effort(Token::RBracket);
+            return (base_span.start..end_span.end, Expression::Literal(Literal::Map(vec![])))
         }
         else if let Some(end_span) = self.read_if_token(Token::RBracket) {
-            return Ok((base_span.start..end_span.end, Expression::Literal(Literal::Vector(vec![]))))
+            return (base_span.start..end_span.end, Expression::Literal(Literal::Vector(vec![])))
         }
 
         let mut vector_entries = Vec::new();
         let mut map_entries = Vec::new();
         let mut last_span = base_span.clone();
+        let mut emitted_error = false;
         loop {
-            let entry = self.parse_expr()?;
+            let entry = self.parse_expr_best_effort();
             if let Some(span) = self.read_if_token(Token::KeyValueMap) {
-                if !vector_entries.is_empty() {
+                if !vector_entries.is_empty() && !emitted_error {
                     self.emit_error("Ambiguous Literal".into(), "cannot decide if literal is list or map".into(), base_span.start..span.end);
-                    return Err(());
+                    emitted_error = true;
                 }
-                let value = self.parse_expr()?;
+                let value = self.parse_expr_best_effort();
                 map_entries.push((entry, value));
             }
             else {
-                if !map_entries.is_empty() {
+                if !map_entries.is_empty() && !emitted_error {
                     self.emit_error("Ambiguous Literal".into(), "cannot decide if literal is list or map".into(), base_span.start..entry.0.end);
-                    return Err(());
+                    emitted_error = true;
                 }
                 vector_entries.push(entry)
             }
 
             self.advance_newlines();
             let mut is_finished = false;
-            try_all!(self, {
+            let fail = try_all!(self, {
                 ExactPred(Token::Comma) => {
                     self.advance_token();
                 },
@@ -1495,17 +1513,17 @@ impl SectionParser {
                     last_span = self.advance_token();
                     is_finished = true;
                 },
-            })?;
-            if is_finished {
+            }).is_err();
+            if is_finished || fail {
                 break
             }
         }
 
         if !vector_entries.is_empty() {
-            Ok((base_span.start..last_span.end, Expression::Literal(Literal::Vector(vector_entries))))
+            (base_span.start..last_span.end, Expression::Literal(Literal::Vector(vector_entries)))
         }
         else {
-            Ok((base_span.start..last_span.end, Expression::Literal(Literal::Map(map_entries))))
+            (base_span.start..last_span.end, Expression::Literal(Literal::Map(map_entries)))
         }
     }
 }
@@ -1567,7 +1585,6 @@ mod test {
     use lexer::{lexer::Lexer, token::Token};
     use structs::{rope::Rope, text::Span8};
 
-    use super::Result;
     use crate::{ast::*, parser::SectionParser};
 
     fn lex(content: &str) -> Vec<(Token, Span8)> {
@@ -1577,24 +1594,32 @@ mod test {
             .collect()
     }
 
-    fn parse_expr_test(content: &str) -> Result<SpanTagged<Expression>> {
+    fn parse_expr_test(content: &str) -> SpanTagged<Expression> {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
-        let ret = parser.parse_expr();
-        if ret.is_err() {
-            dbg!(&parser.artifacts.diagnostics);
+        let ret = parser.parse_expr_best_effort();
+        if !parser.artifacts.error_diagnostics.is_empty() {
+            dbg!(&parser.artifacts.error_diagnostics);
         }
         ret
     }
 
-    fn parse_stmt_test(content: &str) -> Result<SpanTagged<Statement>> {
+    fn error_expr_test(content: &str) {
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        parser.parse_expr_best_effort();
+        assert!(!parser.artifacts.error_diagnostics.is_empty())
+    }
+
+    fn parse_stmt_test(content: &str) -> Result<SpanTagged<Statement>, ()> {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
         let ret = parser.parse_statement();
         if ret.is_err() {
-            dbg!(&parser.artifacts.diagnostics);
+            dbg!(&parser.artifacts.error_diagnostics);
         }
         ret
     }
@@ -1602,14 +1627,14 @@ mod test {
     // Literal tests
     #[test]
     fn test_integer_literal() {
-        let result = parse_expr_test("42").unwrap();
+        let result = parse_expr_test("42");
         let expected = Expression::Literal(Literal::Int(42));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_float_literal() {
-        let result = parse_expr_test("3.14").unwrap();
+        let result = parse_expr_test("3.14");
         if let Expression::Literal(Literal::Float(val)) = result.1 {
             assert!((val - 3.14).abs() < 0.0001);
         } else {
@@ -1619,42 +1644,42 @@ mod test {
 
     #[test]
     fn test_string_literal() {
-        let result = parse_expr_test(r#""hello world""#).unwrap();
+        let result = parse_expr_test(r#""hello world""#);
         let expected = Expression::Literal(Literal::String("hello world".to_string()));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_string_with_escapes() {
-        let result = parse_expr_test(r#""hello%nworld%t%"test%'""#).unwrap();
+        let result = parse_expr_test(r#""hello%nworld%t%"test%'""#);
         let expected = Expression::Literal(Literal::String("hello\nworld\t\"test'".to_string()));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_directional_literal_left() {
-        let result = parse_expr_test("5l").unwrap();
+        let result = parse_expr_test("5l");
         let expected = Expression::Literal(Literal::Directional(DirectionalLiteral::Left(5.0)));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_directional_literal_up() {
-        let result = parse_expr_test("3.5u").unwrap();
+        let result = parse_expr_test("3.5u");
         let expected = Expression::Literal(Literal::Directional(DirectionalLiteral::Up(3.5)));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_imaginary_literal() {
-        let result = parse_expr_test("2i").unwrap();
+        let result = parse_expr_test("2i");
         let expected = Expression::Literal(Literal::Imaginary(2.0));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_degrees_literal() {
-        let result = parse_expr_test("90dg").unwrap();
+        let result = parse_expr_test("90dg");
         if let Expression::Literal(Literal::Float(val)) = result.1 {
             assert!((val - std::f64::consts::PI / 2.0).abs() < 0.0001);
         } else {
@@ -1664,14 +1689,14 @@ mod test {
 
     #[test]
     fn test_empty_vector() {
-        let result = parse_expr_test("[]").unwrap();
+        let result = parse_expr_test("[]");
         let expected = Expression::Literal(Literal::Vector(vec![]));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_vector_literal() {
-        let result = parse_expr_test("[1, 2, 3]").unwrap();
+        let result = parse_expr_test("[1, 2, 3]");
         let expected = Expression::Literal(Literal::Vector(vec![
             (1..2, Expression::Literal(Literal::Int(1))),
             (4..5, Expression::Literal(Literal::Int(2))),
@@ -1682,14 +1707,14 @@ mod test {
 
     #[test]
     fn test_empty_map() {
-        let result = parse_expr_test("[->]").unwrap();
+        let result = parse_expr_test("[->]");
         let expected = Expression::Literal(Literal::Map(vec![]));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_map_literal() {
-        let result = parse_expr_test("[1 -> 2, 3 -> 4]").unwrap();
+        let result = parse_expr_test("[1 -> 2, 3 -> 4]");
         let expected = Expression::Literal(Literal::Map(vec![
             (
                 (1..2, Expression::Literal(Literal::Int(1))),
@@ -1706,28 +1731,28 @@ mod test {
     // Identifier tests
     #[test]
     fn test_identifier() {
-        let result = parse_expr_test("foo").unwrap();
+        let result = parse_expr_test("foo");
         let expected = Expression::IdentifierReference(IdentifierReference::Value("foo".to_string()));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_reference() {
-        let result = parse_expr_test("&bar").unwrap();
+        let result = parse_expr_test("&bar");
         let expected = Expression::IdentifierReference(IdentifierReference::Reference("bar".to_string()));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_stateful_reference() {
-        let result = parse_expr_test("$state_var").unwrap();
+        let result = parse_expr_test("$state_var");
         let expected = Expression::IdentifierReference(IdentifierReference::Reference("state_var".to_string()));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_dereference() {
-        let result = parse_expr_test("*ptr").unwrap();
+        let result = parse_expr_test("*ptr");
         let expected = Expression::IdentifierReference(IdentifierReference::Reference("ptr".to_string()));
         assert_eq!(result.1, expected);
     }
@@ -1735,7 +1760,7 @@ mod test {
     // Binary operator tests
     #[test]
     fn test_addition() {
-        let result = parse_expr_test("1 + 2").unwrap();
+        let result = parse_expr_test("1 + 2");
         let expected = Expression::BinaryOperator(BinaryOperator {
             lhs: (0..1, Box::new(Expression::Literal(Literal::Int(1)))),
             op_type: BinaryOperatorType::Add,
@@ -1746,7 +1771,7 @@ mod test {
 
     #[test]
     fn test_append_operator() {
-        let result = parse_expr_test("[1, 2] .. 3").unwrap();
+        let result = parse_expr_test("[1, 2] .. 3");
         let expected = Expression::BinaryOperator(BinaryOperator {
             lhs: (0..6, Box::new(Expression::Literal(Literal::Vector(vec![
                 (1..2, Expression::Literal(Literal::Int(1))),
@@ -1760,7 +1785,7 @@ mod test {
 
     #[test]
     fn test_comparison() {
-        let result = parse_expr_test("x < y").unwrap();
+        let result = parse_expr_test("x < y");
         let expected = Expression::BinaryOperator(BinaryOperator {
             lhs: (0..1, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
             op_type: BinaryOperatorType::Lt,
@@ -1771,7 +1796,7 @@ mod test {
 
     #[test]
     fn test_operator_precedence() {
-        let result = parse_expr_test("1 + 2 * 3").unwrap();
+        let result = parse_expr_test("1 + 2 * 3");
         let expected = Expression::BinaryOperator(
             BinaryOperator {
                 lhs: (0..1, Box::new(Expression::Literal(Literal::Int(1)))),
@@ -1790,8 +1815,7 @@ mod test {
 
     #[test]
     fn test_left_associativity_append() {
-        let result = parse_expr_test("a .. b .. c").unwrap();
-        // BinaryOperator(BinaryOperator { lhs: (0..6, BinaryOperator(BinaryOperator { lhs: (0..1, IdentifierReference(Value("a"))), op_type: Append, rhs: (5..6, IdentifierReference(Value("b"))) })), op_type: Append, rhs: (10..11, IdentifierReference(Value("c"))) })
+        let result = parse_expr_test("a .. b .. c");
         let expected = Expression::BinaryOperator(
             BinaryOperator {
                 lhs: (0..6, Box::new(Expression::BinaryOperator(
@@ -1811,7 +1835,7 @@ mod test {
     // Unary operator tests
     #[test]
     fn test_negation() {
-        let result = parse_expr_test("-5").unwrap();
+        let result = parse_expr_test("-5");
         let expected = Expression::UnaryPreOperator(UnaryPreOperator {
             op_type: UnaryOperatorType::Negative,
             operand: (1..2, Box::new(Expression::Literal(Literal::Int(5)))),
@@ -1821,7 +1845,7 @@ mod test {
 
     #[test]
     fn test_not() {
-        let result = parse_expr_test("not x").unwrap();
+        let result = parse_expr_test("not x");
         let expected = Expression::UnaryPreOperator(UnaryPreOperator {
             op_type: UnaryOperatorType::Not,
             operand: (4..5, Box::new(Expression::IdentifierReference(IdentifierReference::Value("x".to_string())))),
@@ -1830,8 +1854,8 @@ mod test {
     }
 
     #[test]
-    fn test_float_negation() {
-        let result = parse_expr_test("--5").unwrap();
+    fn test_double_negation() {
+        let result = parse_expr_test("--5");
         let expected = Expression::UnaryPreOperator(UnaryPreOperator {
             op_type: UnaryOperatorType::Negative,
             operand: (1..3, Box::new(Expression::UnaryPreOperator(UnaryPreOperator {
@@ -1845,7 +1869,7 @@ mod test {
     // Lambda tests
     #[test]
     fn test_simple_lambda() {
-        let result = parse_expr_test("|x| x + 1").unwrap();
+        let result = parse_expr_test("|x| x + 1");
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![
                 LambdaArg { identifier: (1..2, IdentifierDeclaration("x".to_string())), default_value: None, must_be_reference: false }
@@ -1861,7 +1885,7 @@ mod test {
 
     #[test]
     fn test_lambda_with_multiple_args() {
-        let result = parse_expr_test("|x, y| x + y").unwrap();
+        let result = parse_expr_test("|x, y| x + y");
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![
                 LambdaArg { identifier: (1..2, IdentifierDeclaration("x".to_string())), default_value: None, must_be_reference: false },
@@ -1878,7 +1902,7 @@ mod test {
 
     #[test]
     fn test_lambda_with_default_arg() {
-        let result = parse_expr_test("|x, y = 5| x + y").unwrap();
+        let result = parse_expr_test("|x, y = 5| x + y");
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![
                 LambdaArg { identifier: (1..2, IdentifierDeclaration("x".to_string())), default_value: None, must_be_reference: false },
@@ -1895,7 +1919,7 @@ mod test {
 
     #[test]
     fn test_lambda_block_body() {
-        let result = parse_expr_test("|x| { return x + 1 }").unwrap();
+        let result = parse_expr_test("|x| { return x + 1 }");
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![
                 LambdaArg { identifier: (1..2, IdentifierDeclaration("x".to_string())), default_value: None, must_be_reference: false }
@@ -1915,7 +1939,7 @@ mod test {
 
     #[test]
     fn test_empty_lambda() {
-        let result = parse_expr_test("|| 42").unwrap();
+        let result = parse_expr_test("|| 42");
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![],
             body: (3..5, LambdaBody::Inline(Box::new(Expression::Literal(Literal::Int(42))))),
@@ -1926,7 +1950,7 @@ mod test {
     // Function invocation tests
     #[test]
     fn test_function_call_no_args() {
-        let result = parse_expr_test("foo()").unwrap();
+        let result = parse_expr_test("foo()");
         let expected = Expression::LambdaInvocation(LambdaInvocation {
             lambda: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("foo".to_string())))),
             arguments: (3..5, vec![]),
@@ -1936,7 +1960,7 @@ mod test {
 
     #[test]
     fn test_function_call_with_args() {
-        let result = parse_expr_test("add(1, 2)").unwrap();
+        let result = parse_expr_test("add(1, 2)");
         let expected = Expression::LambdaInvocation(LambdaInvocation {
             lambda: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("add".to_string())))),
             arguments: (3..9, vec![
@@ -1949,7 +1973,7 @@ mod test {
 
     #[test]
     fn test_function_call_with_labeled_args() {
-        let result = parse_expr_test("foo(x: 1, y: 2)").unwrap();
+        let result = parse_expr_test("foo(x: 1, y: 2)");
         let expected = Expression::LambdaInvocation(LambdaInvocation {
             lambda: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("foo".to_string())))),
             arguments: (3..15, vec![
@@ -1963,7 +1987,7 @@ mod test {
     // Operator invocation tests
     #[test]
     fn test_operator_invocation() {
-        let result = parse_expr_test("op{x, y} z").unwrap();
+        let result = parse_expr_test("op{x, y} z");
         let expected = Expression::OperatorInvocation(OperatorInvocation {
             operator: (0..2, Box::new(Expression::IdentifierReference(IdentifierReference::Value("op".to_string())))),
             arguments: (2..8, vec![
@@ -1977,7 +2001,7 @@ mod test {
 
     #[test]
     fn test_operator_invocation_complex() {
-        let result = parse_expr_test("derivative{n: 2} (x * x)").unwrap();
+        let result = parse_expr_test("derivative{n: 2} (x * x)");
         let expected = Expression::OperatorInvocation(OperatorInvocation {
             operator: (0..10, Box::new(Expression::IdentifierReference(IdentifierReference::Value("derivative".to_string())))),
             arguments: (10..16, vec![
@@ -1995,7 +2019,7 @@ mod test {
     // Property access tests
     #[test]
     fn test_property_access() {
-        let result = parse_expr_test("obj.field").unwrap();
+        let result = parse_expr_test("obj.field");
         let expected = Expression::Property(Property {
             base: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("obj".to_string())))),
             attribute: (4..9, IdentifierReference::Value("field".to_string())),
@@ -2005,7 +2029,7 @@ mod test {
 
     #[test]
     fn test_chained_property_access() {
-        let result = parse_expr_test("obj.a.b.c").unwrap();
+        let result = parse_expr_test("obj.a.b.c");
         let expected = Expression::Property(Property {
             base: (0..7, Box::new(Expression::Property(Property {
                 base: (0..5, Box::new(Expression::Property(Property {
@@ -2022,7 +2046,7 @@ mod test {
     // Subscript tests
     #[test]
     fn test_subscript() {
-        let result = parse_expr_test("arr[0]").unwrap();
+        let result = parse_expr_test("arr[0]");
         let expected = Expression::Subscript(Subscript {
             base: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("arr".to_string())))),
             index: (4..5, Box::new(Expression::Literal(Literal::Int(0)))),
@@ -2032,7 +2056,7 @@ mod test {
 
     #[test]
     fn test_chained_subscript() {
-        let result = parse_expr_test("matrix[i][j]").unwrap();
+        let result = parse_expr_test("matrix[i][j]");
         let expected = Expression::Subscript(Subscript {
             base: (0..9, Box::new(Expression::Subscript(Subscript {
                 base: (0..6, Box::new(Expression::IdentifierReference(IdentifierReference::Value("matrix".to_string())))),
@@ -2046,7 +2070,7 @@ mod test {
     // Parentheses tests
     #[test]
     fn test_parentheses() {
-        let result = parse_expr_test("(1 + 2) * 3").unwrap();
+        let result = parse_expr_test("(1 + 2) * 3");
         let expected = Expression::BinaryOperator(BinaryOperator {
             lhs: (0..7, Box::new(Expression::BinaryOperator(BinaryOperator {
                 lhs: (1..2, Box::new(Expression::Literal(Literal::Int(1)))),
@@ -2178,7 +2202,7 @@ mod test {
 
     #[test]
     fn test_return_statement() {
-        let result = parse_expr_test("|| { return 42 }").unwrap();
+        let result = parse_expr_test("|| { return 42 }");
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![],
             body: (3..16, LambdaBody::Block(vec![(5..14, Statement::Return(Return {
@@ -2213,7 +2237,7 @@ mod test {
 
     #[test]
     fn test_dot_assign_statement() {
-        let result = parse_expr_test("block {. x + 1}").unwrap();
+        let result = parse_expr_test("block {. x + 1}");
         let expected = Expression::Block(Block {
             body: vec![
                 (7..14, Statement::Expression(Expression::BinaryOperator(
@@ -2237,7 +2261,7 @@ mod test {
     // Complex expression tests
     #[test]
     fn test_complex_nested_expression() {
-        let result = parse_expr_test("(a + b) * (c - d)").unwrap();
+        let result = parse_expr_test("(a + b) * (c - d)");
         let expected = Expression::BinaryOperator(BinaryOperator {
             lhs: (0..7, Box::new(Expression::BinaryOperator(BinaryOperator {
                 lhs: (1..2, Box::new(Expression::IdentifierReference(IdentifierReference::Value("a".to_string())))),
@@ -2256,7 +2280,7 @@ mod test {
 
     #[test]
     fn test_lambda_invocation_chain() {
-        let result = parse_expr_test("f(x)(y)(z)").unwrap();
+        let result = parse_expr_test("f(x)(y)(z)");
         let expected = Expression::LambdaInvocation(LambdaInvocation {
             lambda: (0..7, Box::new(Expression::LambdaInvocation(LambdaInvocation {
                 lambda: (0..4, Box::new(Expression::LambdaInvocation(LambdaInvocation {
@@ -2278,7 +2302,7 @@ mod test {
 
     #[test]
     fn test_mixed_postfix_operations() {
-        let result = parse_expr_test("obj.method()[0].field").unwrap();
+        let result = parse_expr_test("obj.method()[0].field");
         let expected = Expression::Property(Property {
             base: (0..15, Box::new(Expression::Subscript(Subscript {
                 base: (0..12, Box::new(Expression::LambdaInvocation(LambdaInvocation {
@@ -2298,7 +2322,7 @@ mod test {
     // Operator definition test
     #[test]
     fn test_operator_definition() {
-        let result = parse_expr_test("operator |x, y| x + y").unwrap();
+        let result = parse_expr_test("operator |x, y| x + y");
         let expected = Expression::OperationDefinition(OperatorDefinition {
             lambda: (9..21, Box::new(Expression::LambdaDefinition(LambdaDefinition {
                 args: vec![
@@ -2326,7 +2350,7 @@ mod test {
     // Block and Anim tests
     #[test]
     fn test_block_expression() {
-        let result = parse_expr_test("block { let x = 5\n x * 2 }").unwrap();
+        let result = parse_expr_test("block { let x = 5\n x * 2 }");
         let expected = Expression::Block(Block {
             body: vec![
                 (8..17, Statement::Declaration(Declaration {
@@ -2346,7 +2370,7 @@ mod test {
 
     #[test]
     fn test_anim_expression() {
-        let result = parse_expr_test("anim { play circle }").unwrap();
+        let result = parse_expr_test("anim { play circle }");
         let expected = Expression::Anim(Anim {
             body: vec![
                 (7..18, Statement::Play(Play {
@@ -2381,7 +2405,7 @@ mod test {
     // Edge cases
     #[test]
     fn test_nested_vectors() {
-        let result = parse_expr_test("[[1, 2], [3, 4]]").unwrap();
+        let result = parse_expr_test("[[1, 2], [3, 4]]");
         let expected = Expression::Literal(Literal::Vector(vec![
             (1..7, Expression::Literal(Literal::Vector(vec![
                 (2..3, Expression::Literal(Literal::Int(1))),
@@ -2397,7 +2421,7 @@ mod test {
 
     #[test]
     fn test_map_with_complex_values() {
-        let result = parse_expr_test("[1 -> [1, 2], 2 -> [3, 4]]").unwrap();
+        let result = parse_expr_test("[1 -> [1, 2], 2 -> [3, 4]]");
         let expected = Expression::Literal(Literal::Map(vec![
             (
                 (1..2, Expression::Literal(Literal::Int(1))),
@@ -2420,7 +2444,7 @@ mod test {
     // Complex integration tests
     #[test]
     fn test_complex_lambda_with_nested_blocks() {
-        let result = parse_expr_test("|n| anim { for (i in [1, 2, 3]) { play circle } }").unwrap();
+        let result = parse_expr_test("|n| anim { for (i in [1, 2, 3]) { play circle } }");
         let expected = Expression::LambdaDefinition(LambdaDefinition {
             args: vec![
                 LambdaArg { identifier: (1..2, IdentifierDeclaration("n".to_string())), default_value: None, must_be_reference: false }
@@ -2448,7 +2472,7 @@ mod test {
 
     #[test]
     fn test_operator_invocation_with_lambda() {
-        let result = parse_expr_test("map{|x| x * 2} [1, 2, 3]").unwrap();
+        let result = parse_expr_test("map{|x| x * 2} [1, 2, 3]");
         let expected = Expression::OperatorInvocation(OperatorInvocation {
             operator: (0..3, Box::new(Expression::IdentifierReference(IdentifierReference::Value("map".to_string())))),
             arguments: (3..14, vec![
@@ -2478,7 +2502,7 @@ mod test {
 
     #[test]
     fn test_complex_property_chain_with_calls() {
-        let result = parse_expr_test("obj.data.process(x).result[0]").unwrap();
+        let result = parse_expr_test("obj.data.process(x).result[0]");
         let expected = Expression::Subscript(Subscript {
             base: (0..26, Box::new(Expression::Property(Property {
                 base: (0..19, Box::new(Expression::LambdaInvocation(LambdaInvocation {
@@ -2502,7 +2526,7 @@ mod test {
 
     #[test]
     fn test_nested_operator_invocations() {
-        let result = parse_expr_test("fold{|a, b| a + b, 0} map{|x| x * 2} data").unwrap();
+        let result = parse_expr_test("fold{|a, b| a + b, 0} map{|x| x * 2} data");
         let expected = Expression::OperatorInvocation(OperatorInvocation {
             operator: (0..4, Box::new(Expression::IdentifierReference(IdentifierReference::Value("fold".to_string())))),
             arguments: (4..21, vec![
@@ -2554,32 +2578,27 @@ mod test {
     // Error cases
     #[test]
     fn test_error_unmatched_paren() {
-        let result = parse_expr_test("(1 + 2");
-        assert!(result.is_err());
+        error_expr_test("(1 + 2");
     }
 
     #[test]
     fn test_error_empty_char_literal() {
-        let result = parse_expr_test("''");
-        assert!(result.is_err());
+        error_expr_test("''");
     }
 
     #[test]
     fn test_error_invalid_escape() {
-        let result = parse_expr_test(r#""hello%z""#);
-        assert!(result.is_err());
+        error_expr_test(r#""hello%z""#);
     }
 
     #[test]
     fn test_error_missing_operand() {
-        let result = parse_expr_test("1 +");
-        assert!(result.is_err());
+        error_expr_test("1 +");
     }
 
     #[test]
     fn test_error_invalid_identifier_start_with_number() {
-        let result = parse_stmt_test("let 123x = 5");
-        assert!(result.is_err());
+        error_expr_test("let 123x = 5");
     }
 
     #[test]
@@ -2588,8 +2607,8 @@ mod test {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
-        let result = parser.parse_statement();
-        assert!(result.is_err());
+        let _ = parser.parse_statement();
+        assert!(!parser.artifacts.error_diagnostics.is_empty());
     }
 
     #[test]
@@ -2598,8 +2617,8 @@ mod test {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
-        let result = parser.parse_statement();
-        assert!(result.is_err());
+        let _ = parser.parse_statement();
+        assert!(!parser.artifacts.error_diagnostics.is_empty());
     }
 
     #[test]
@@ -2608,19 +2627,22 @@ mod test {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
-        let result = parser.parse_statement();
-        assert!(result.is_err());
+        let _ = parser.parse_statement();
+        assert!(!parser.artifacts.error_diagnostics.is_empty());
     }
 
     #[test]
     fn test_error_ambiguous_vector_map() {
-        let result = parse_expr_test("[1, 2 -> 3]");
-        assert!(result.is_err());
+        error_expr_test("[1, 2 -> 3]");
     }
 
     #[test]
     fn test_error_missing_lambda_argument() {
-        let result = parse_expr_test("|x,| x + 1");
-        assert!(result.is_err());
+        error_expr_test("|x,| x + 1");
+    }
+
+    #[test]
+    fn test_error_weird_lambda_argument() {
+        error_expr_test("|x g, y| x + 1");
     }
 }

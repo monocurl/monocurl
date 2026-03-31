@@ -310,7 +310,6 @@ pub struct TextualState {
     transaction_listeners: Vec<Box<dyn FnMut(&TransactionSummary, &mut App) + Send>>
 }
 
-
 impl TextualState {
     pub fn add_transaction_listener(&mut self,  f: impl FnMut(&TransactionSummary, &mut App) + Send + 'static) {
         self.transaction_listeners.push(Box::new(f));
