@@ -599,6 +599,11 @@ impl SectionParser {
         self.token_index += 1;
         span
     }
+
+    fn nil_range(&self) -> Span8 {
+        let last = if self.token_index == 0 { 0 } else { self.tokens[self.token_index - 1].1.end };
+        return last..last;
+    }
 }
 
 impl SectionParser {
@@ -658,7 +663,7 @@ impl SectionParser {
 
     fn read_token_best_effort(&mut self, token: Token) -> Span8 {
         self.read_token(token)
-            .unwrap_or(self.token_index..self.token_index)
+            .unwrap_or(self.nil_range())
     }
 
     fn read_if_token(&mut self, token: Token) -> Option<Span8> {
@@ -1072,7 +1077,7 @@ impl SectionParser {
 
         match expr {
             Ok(expr) => self.apply_postfixes(expr),
-            Err(_) => (self.token_index..self.token_index, Expression::default())
+            Err(_) => (self.nil_range(), Expression::default())
         }
     }
 
