@@ -1,0 +1,46 @@
+- autocomplete: may be deleted and combined into compiler code, but this potentially contains utilities for actually inferring autocomplete from AST / compiler output
+- bytecode: contains the enum of the Monocurl VM bytecode
+- cli: binary crate that contains the gluing logic for the monocurl cli
+- compiler: converts AST into bytecode, performs static analysis
+- executor: takes bytecode and scene state and executes it
+- exporter: coordinates process of exporting a scene into a video
+- geo: helper routines for execution (a lot of lib monocurl will reference these routines).
+- lexer: lexing utilites, contains token definition
+  - src/lexer.rs: actually lexes a stream of characters
+  - src/token.rs: contains an enum of all of the tokens and helper functions related to them
+- parser: transforms lexed source file into an AST
+  - src/ast.rs: contains structs related to all of the types of ast nodes
+  - src/parser.rs: contains the code to actually parse a lexed stream into an AST, ideally error resistant/tolerant
+- renderer: given a state snapshot, actually renders it via platform specific shaders
+- stdlib: actual lib monocurl routine implementations
+- structs: helper structs and utilities.
+  - src/assets.rs: contains code for location where assets (say fonts) are located
+  - src/iterutil.rs: contains code for KLookahead iterator from a base iterator
+  - src/rope.rs: a general purpose rope mostly used by the UI for an efficient text editor
+  - src/text.rs: small helper structs for abstracting locations in utf8 or utf16
+- ui: contains all ui related code (everything is gpui)
+  - src/components/buttons.rs: contains a button styled like a link
+  - src/components/split_pane.rs: gpui element that implements vertical and horizontal split pane
+  - src/editor: code related to the text editor. 
+    - text_editor/mod.rs: contains most of the code related to the actual text editor, which include input handling, trait implementation, action handling, delegating to line reshpaing. Rendering is delegated to other files though.
+    - text_editor/popover_element.rs: this is the element that shows a popover when you hover over a diagnostics (such as a warning).
+    - text_editor/text_element: this contains the rendering logic for the actual text editor (including scroll bar and everything on the base layer).
+    - wrapped_line.rs: The text editor is implemented to always soft wrap, so this contains the code for rendering a single logical line onto the screen as possibly many lines, with styling. It also allows for e.g. querying the on screen position given a character location.
+    - line_shaper.rs: given the lexing data, static analysis data, and diagnostics associated with a single logical line, it applies styling and splits that into the text runs where within each run all characters are styled the same. This effectively creates the data necessary for a wrapped line.
+    - line_map.rs: given a bunch of wrapped lines representing the content, it computes the height each line takes up as well as the y position of any logical line number. This allows for various different coordinate system conversions.
+  - src/services/{mod.rs,lexing.rs,compilation.rs,execution.rs}: background services that run off the main thread. While the user makes changes or seeks to a different spot in the timeline, these services asynchronously update the state of the application. mod.rs contains ServiceManager which proxies the messages between services and the ui state
+  - src/state: code related to global, document, text editor, and similar state
+    - diagnostics.rs: errors, warnings, suggestions that are present in the text editor
+    - document_state.rs: for a given document, this is just the textual state and the execution state 
+    - execution_state.rs: (which is anything that is needed for actual execution, such as the current timestamp, the bytecode, parameters).
+    - textual_state.rs: this is not only the current text of the document, but also any part of the state of the text editor that might be queryable / editable by other entities in the system (like the current diagnostics, autocomplete). Some other state is owned fully by the text editor instead, in the editor directory. The line is a bit blurry 
+    - window_state.rs: global application state, consisting of the active document, which tabs are open, etc
+  - src/timeline: a module related to timeline rendering
+  - src/viewport: a module related to viewport rendering
+  - src/document_view.rs: code related to rendering the document view (in either presentation mode or not). Sets up keyboard shortcuts. Owns the state of the document, handles save actions but proxies most other actions. Layouts the timeline, viewport, and editor based on presentation mode. The actual code for rendering those components is present in separate files.
+  - src/home_view.rs: code related to the actual home element (list of projects, creating and deleting)
+  - src/main.rs: init code that sets up menus, calls init sections of other modules, launches the app
+  - src/navbar_view.rs: navbar element for switching tabs
+  - src/theme.rs: a collection of constants related to UI and colors
+  - src/window.rs: root GPUI element that owns the global state and muxes between the home and editor views 
+- ui_cli_shared: a collection of structs and utilities that are necessary for the user facing interface, but not really execution

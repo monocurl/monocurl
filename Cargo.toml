@@ -37,6 +37,7 @@ schemars = "1.0.4"
 uuid = "1.18.1"
 futures = "0.3.31"
 smol = "2.0.2"
+itertools = "0.14.0"
 
 gpui = { path = "../gpui/crates/gpui" }
 

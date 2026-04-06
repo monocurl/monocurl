@@ -12,6 +12,12 @@ impl Assets {
         base
     }
 
+    pub fn std_lib() -> PathBuf {
+        let mut base = Self::base_path();
+        base.push("std");
+        base
+    }
+
     pub fn image(name: impl AsRef<Path>) -> PathBuf {
         let mut base = Self::base_path();
         base.push("img");

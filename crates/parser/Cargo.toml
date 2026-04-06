@@ -1,10 +1,11 @@
 [package]
 name = "parser"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 structs.workspace = true
 lexer.workspace = true
 
 smallvec.workspace = true
+itertools.workspace = true

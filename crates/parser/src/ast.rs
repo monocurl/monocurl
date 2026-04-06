@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use structs::text::Span8;
 
 pub type SpanTagged<T> = (Span8, T);
@@ -11,11 +13,17 @@ pub enum SectionType {
     Slide
 }
 
+pub struct SectionBundle {
+    pub file_path: PathBuf,
+    pub file_index: usize,
+    pub imported_files: Vec<usize>,
+    pub sections: Vec<Section>
+}
+
 // a singular slide / init phase / import module
 #[derive(Debug, Clone, PartialEq)]
 pub struct Section {
     pub body: Vec<SpanTagged<Statement>>,
-    pub imported_section_indices: Vec<usize>,
     pub section_type: SectionType
 }
 

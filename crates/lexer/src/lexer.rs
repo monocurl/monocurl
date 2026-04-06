@@ -1,7 +1,5 @@
-use structs::{iterutil::KLookahead, text::Span8};
+use structs::{iterutil::KLookahead, text::{Count8, Span8}};
 use crate::token::Token;
-
-pub type Count8 = usize;
 
 // upholds the contract that '\n' is a universal separator
 pub struct Lexer<I> where I: Iterator<Item = char> {
