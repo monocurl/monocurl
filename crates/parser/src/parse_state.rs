@@ -2,6 +2,7 @@ use std::{collections::HashMap, ops::Range, path::{Path, PathBuf}, sync::Arc};
 
 use lexer::{lexer::Lexer, token::Token};
 use structs::{assets::Assets, rope::{RLEAggregate, Rope, TextAggregate}};
+use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{ast::SectionBundle, flatten_lex_stream, flatten_rope, parser::ParseArtifacts};
 
@@ -10,8 +11,9 @@ pub enum Error {
 }
 
 // context mainly related about finding additional imports
+#[derive(Default)]
 pub struct ParseState {
-    pub open_tab_ropes: HashMap<PathBuf, (Rope<RLEAggregate<Token>>, Rope<TextAggregate>)>,
+    pub open_tab_ropes: HashMap<PathBuf, (Rope<RLEAggregate<Token, false>>, Rope<TextAggregate>)>,
     pub cached_parses: HashMap<PathBuf, (Arc<SectionBundle>, ParseArtifacts)>,
 }
 
@@ -31,11 +33,12 @@ impl ParseState {
         self.cached_parses.insert(path, (bundle, artifacts));
     }
 
-    pub fn file_content(&self, working_directory: &Path, relative_path: &Path) -> Option<ContentResult> {
+    pub(crate) fn file_content(&self, working_directory: &Path, relative_path: &Path) -> Option<ContentResult> {
         let paths = [working_directory.to_path_buf(), Assets::std_lib()];
         for mut p in paths {
             let is_stdlib = p == Assets::std_lib();
             p.push(relative_path);
+            p.set_extension(DocumentType::Library.extension());
 
             if let Some((lex_rope, text_rope)) = self.open_tab_ropes.get(&p) {
                 return Some(ContentResult {

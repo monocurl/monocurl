@@ -411,11 +411,12 @@ struct ContextFrame {
 
 struct State {
     frames: Vec<ContextFrame>,
-    section_type: SectionType
+    section_type: SectionType,
+    root_import_span: Option<Span8>,
 }
 
 impl State {
-    fn new(section_type: SectionType, token_count: usize) -> Self {
+    fn new(section_type: SectionType, root_import_span: Option<Span8>, token_count: usize) -> Self {
         let top = match section_type {
             SectionType::Slide => ContextFrame {
                 operating_range: 0..token_count,
@@ -434,6 +435,7 @@ impl State {
         State {
             frames: vec![top],
             section_type,
+            root_import_span,
         }
     }
 
@@ -648,9 +650,17 @@ impl SectionParser {
             modified_span.start = modified_span.start.saturating_sub(1);
         }
 
-        self.artifacts.error_diagnostics.push(
-            Diagnostic { span: modified_span, title, message: error_message }
-        )
+        if let Some(root_span) = self.state.root_import_span.clone() {
+            // basically by only having "root span", querying the text rope
+            self.artifacts.error_diagnostics.push(
+                Diagnostic { span: root_span, title: "Nested Error".to_string(), message: title + " " + &error_message }
+            )
+        }
+        else {
+            self.artifacts.error_diagnostics.push(
+                Diagnostic { span: modified_span, title, message: error_message }
+            )
+        }
     }
 }
 
@@ -1534,10 +1544,10 @@ impl SectionParser {
 }
 
 impl SectionParser {
-    pub fn new(tokens: Vec<(Token, Span8)>, text: Rope<TextAggregate>, section_type: SectionType, cursor_position: Option<Count8>) -> Self {
+    pub fn new(tokens: Vec<(Token, Span8)>, text: Rope<TextAggregate>, section_type: SectionType, root_import_span: Option<Span8>, cursor_position: Option<Count8>) -> Self {
         SectionParser {
             precomputation: Precomputation::new(&tokens),
-            state: State::new(section_type, tokens.len()),
+            state: State::new(section_type, root_import_span, tokens.len()),
             cursor_position,
             text_rope: text,
             tokens,
@@ -1559,10 +1569,9 @@ struct PreparsedFile {
     imports: Vec<PathBuf>,
     path: PathBuf,
     text_rope: Rope<TextAggregate>,
-    // range is wrt to root at this point
+    root_import_span: Option<Span8>,
     tokens: Vec<(Token, Span8)>,
     is_stdlib: bool,
-    is_root: bool,
 }
 
 impl Parser {
@@ -1617,15 +1626,16 @@ impl Parser {
                 token_index += 1;
             }
 
+            let full_span = import_span.start..end;
             let Some(imported_file) = external_context.file_content(file.path.parent().unwrap_or(&PathBuf::new()), &import_rel_path) else {
-                self.errors.push(Self::import_err(import_span.clone(), &format!("Cannot find module \"{}\"", import_rel_path.display())));
+                self.errors.push(Self::import_err(full_span.clone(), &format!("Cannot find module \"{}\"", import_rel_path.display())));
                 return Err(());
             };
             imports.push(imported_file.path.clone());
-            self.dfs(root_span.clone().or(Some(import_span.start..end)), external_context, imported_file)?;
+            self.dfs(root_span.clone().or(Some(full_span.clone())), external_context, imported_file)?;
 
             if token_index < file.tokens.len() && !matches!(file.tokens[token_index].0, Token::Newline | Token::Semicolon) {
-                self.errors.push(Self::import_err(import_span, "Expected <end of line> or semicolon"));
+                self.errors.push(Self::import_err(full_span, "Expected <end of line> or semicolon"));
                 return Err(());
             }
         }
@@ -1634,22 +1644,19 @@ impl Parser {
         self.preparsed_files.push(PreparsedFile {
             imports,
             path: file.path,
+            text_rope: file.text_rope,
+            root_import_span: root_span,
             tokens: file.tokens
                 .into_iter()
                 .skip(token_index)
-                .map(|(tok, span)| {
-                    if let Some(ref rs) = root_span { (tok, rs.clone()) } else { (tok, span) }
-                })
                 .collect(),
-            text_rope: file.text_rope,
             is_stdlib: file.is_stdlib,
-            is_root: root_span.is_none(),
         });
         Ok(())
     }
 
-    fn parse_section(tokens: Vec<(Token, Span8)>, text_rope: Rope<TextAggregate>, section_type: SectionType, cursor: Option<Count8>) -> Result<(Section, ParseArtifacts), ParseArtifacts> {
-        let mut parser = SectionParser::new(tokens, text_rope, section_type, cursor);
+    fn parse_section(tokens: Vec<(Token, Span8)>, text_rope: Rope<TextAggregate>, section_type: SectionType, cursor: Option<Count8>, root_import_span: Option<Span8>) -> Result<(Section, ParseArtifacts), ParseArtifacts> {
+        let mut parser = SectionParser::new(tokens, text_rope, section_type, root_import_span, cursor);
         match parser.parse_section() {
             Ok(section) => Ok((section, parser.artifacts)),
             Err(_) => Err(parser.artifacts)
@@ -1663,7 +1670,7 @@ impl Parser {
             currently_parsed.get(path).map(|x| x.file_index).unwrap_or_default()
         ).collect();
 
-        if f.is_root {
+        if f.root_import_span.is_none() {
             // split file by "slide" token
             let sections = f.tokens.into_iter().fold(vec![vec![]], |mut acc, token| {
                 if token.0 == Token::Slide {
@@ -1678,7 +1685,7 @@ impl Parser {
             let mut parsed_sections = vec![];
             for (i, section) in sections.into_iter().enumerate() {
                 let stype = if i == 0 { SectionType::Init } else { SectionType::Slide };
-                match Self::parse_section(section, f.text_rope.clone(), stype, cursor.clone()) {
+                match Self::parse_section(section, f.text_rope.clone(), stype, cursor.clone(), f.root_import_span.clone()) {
                     Ok((section, sub_artifacts)) => {
                         parsed_sections.push(section);
                         artifacts.extend(sub_artifacts);
@@ -1703,7 +1710,7 @@ impl Parser {
         }
         else {
             let stype = if f.is_stdlib { SectionType::StandardLibrary } else { SectionType::UserLibrary };
-            let (section, artifacts) = Self::parse_section(f.tokens, f.text_rope, stype, None)?;
+            let (section, artifacts) = Self::parse_section(f.tokens, f.text_rope, stype, None, f.root_import_span)?;
 
             Ok((Arc::new(SectionBundle {
                 file_path: f.path,
@@ -1714,7 +1721,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(external_context: &mut ParseState, path: PathBuf, lex_rope: Rope<RLEAggregate<Token>>, text_rope: Rope<TextAggregate>, cursor: Option<Count8>) -> Result<(Vec<Arc<SectionBundle>>, ParseArtifacts), ParseArtifacts> {
+    pub fn parse(external_context: &mut ParseState, path: PathBuf, lex_rope: Rope<RLEAggregate<Token, false>>, text_rope: Rope<TextAggregate>, cursor: Option<Count8>) -> Result<(Vec<Arc<SectionBundle>>, ParseArtifacts), ParseArtifacts> {
         let mut p = Parser {
             preparsed_files: vec![],
             import_stack: vec![],
@@ -1736,14 +1743,14 @@ impl Parser {
         let mut bundles = HashMap::new();
         let mut artifacts = ParseArtifacts::default();
         for file in p.preparsed_files {
-            if !file.is_root && let Some(result) = external_context.cache_get(&file.path) {
+            if file.root_import_span.is_none() && let Some(result) = external_context.cache_get(&file.path) {
                 bundles.insert(file.path, result.0);
                 artifacts.extend(result.1);
                 continue;
             }
 
             let key = file.path.clone();
-            let is_root = file.is_root;
+            let is_root = file.root_import_span.is_none();
             let sub = Self::parse_file(&bundles, file, cursor.clone());
             match sub {
                 Ok((bundle, sub_artifacts)) => {
@@ -1788,7 +1795,7 @@ mod test {
     fn parse_expr_test(content: &str) -> SpanTagged<Expression> {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
-        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let ret = parser.parse_expr_best_effort();
         if !parser.artifacts.error_diagnostics.is_empty() {
             dbg!(&parser.artifacts.error_diagnostics);
@@ -1799,7 +1806,7 @@ mod test {
     fn error_expr_test(content: &str) {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
-        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         parser.parse_expr_best_effort();
         assert!(!parser.artifacts.error_diagnostics.is_empty())
     }
@@ -1807,7 +1814,7 @@ mod test {
     fn parse_stmt_test(content: &str) -> Result<SpanTagged<Statement>, ()> {
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
-        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let ret = parser.parse_statement();
         if ret.is_err() {
             dbg!(&parser.artifacts.error_diagnostics);
@@ -2578,7 +2585,7 @@ mod test {
         let content = "let x = 1\nlet y = 2\nlet z = 3";
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
-        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_statement_list();
         assert_eq!(result.len(), 3);
     }
@@ -2588,7 +2595,7 @@ mod test {
         let content = "let x = 1; let y = 2; let z = 3";
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
-        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_statement_list();
         assert_eq!(result.len(), 3);
     }
@@ -2797,7 +2804,7 @@ mod test {
         let content = "break";
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
-        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None, None);
         let _ = parser.parse_statement();
         assert!(!parser.artifacts.error_diagnostics.is_empty());
     }
@@ -2807,7 +2814,7 @@ mod test {
         let content = "return 5";
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
-        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None, None);
         let _ = parser.parse_statement();
         assert!(!parser.artifacts.error_diagnostics.is_empty());
     }
@@ -2817,7 +2824,7 @@ mod test {
         let content = "play animation";
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
-        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None, None);
         let _ = parser.parse_statement();
         assert!(!parser.artifacts.error_diagnostics.is_empty());
     }

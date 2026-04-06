@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 structs.workspace = true
 lexer.workspace = true
+ui_cli_shared.workspace = true
 
 smallvec.workspace = true
 itertools.workspace = true

@@ -18,7 +18,7 @@ fn flatten_lex_stream(i: impl Iterator<Item=(Token, Count8)>) -> impl Iterator<I
         .filter(|(tok, _)| tok != &Token::Whitespace && tok != &Token::Comment)
 }
 
-fn flatten_rope(r: &Rope<RLEAggregate<Token>>) -> Vec<(Token, Range<usize>)> {
+fn flatten_rope(r: &Rope<RLEAggregate<Token, false>>) -> Vec<(Token, Range<usize>)> {
     flatten_lex_stream(
         r.iterator(0)
             .map(|(x, y)| (y, x))

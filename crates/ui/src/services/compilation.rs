@@ -4,7 +4,8 @@ use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::token::Token;
 use parser::ast::{BinaryOperator, Declaration, Expression, LambdaInvocation, OperatorInvocation, Section, Statement, UnaryPreOperator};
-use parser::parser::{SectionParser};
+use parser::parse_state::ParseState;
+use parser::parser::{Parser, SectionParser};
 use structs::rope::{Attribute, RLEData, Rope, TextAggregate};
 use structs::text::{Location8, Span8};
 
@@ -48,6 +49,7 @@ impl CompilationService {
         let mut latest_version = 0;
 
         let mut open_files: Vec<Rope<TextAggregate>> = vec![];
+        let mut parse_state = ParseState::default();
 
         while let Some(message) = self.rx.next().await {
             // we should do a select! here for best performance
@@ -56,34 +58,20 @@ impl CompilationService {
                     latest_text_rope = for_text_rope.clone();
                     latest_version = version;
 
+                    let cursor_pos = if latest_cursor.is_empty() {
+                        let l = latest_cursor.head;
+                        Some(for_text_rope.utf8_line_pos_prefix(l.row, l.col).bytes_utf8)
+                    }
+                    else {
+                        None
+                    };
+
+                    let parse = Parser::parse(&mut parse_state, PathBuf::new(), lex_rope, for_text_rope, cursor_pos);
                     // reparse + recompile
-                    let mut utf8 = 0;
-                    let tokens = lex_rope.iterator(0)
-                        .map(|(len, tok)| {
-                            let start = utf8;
-                            utf8 += len;
-                            (tok, Span8 {
-                                start,
-                                end: utf8,
-                            })
-                        })
-                        .filter(|(tok, _)| tok != &Token::Whitespace && tok != &Token::Comment)
-                        .collect();
-                    let mut p = SectionParser::new(
-                        tokens,
-                        for_text_rope.clone(),
-                        parser::ast::SectionType::Slide,
-                        if latest_cursor.is_empty() {
-                            let l = latest_cursor.head;
-                            Some(for_text_rope.utf8_line_pos_prefix(l.row, l.col).bytes_utf8)
-                            // None
-                        }
-                        else {
-                            None
-                        }
-                    );
-                    let q = p.parse_section();
-                    let artifacts = p.artifacts();
+                    let artifacts = match parse.clone() {
+                        Ok((_, artifacts)) => artifacts,
+                        Err(artifacts) => artifacts
+                    };
                     let cursor_poss = artifacts.cursor_possibilities;
                     let diags = artifacts.error_diagnostics;
 
@@ -175,8 +163,10 @@ impl CompilationService {
                             return r
                         }
 
-                        if let Ok(result) = q {
-                            should_italicize_rope = ast_walk(result, should_italicize_rope);
+                        if let Ok(result) = parse {
+                            let last = result.0.into_iter().last().unwrap();
+                            let last_last = last.sections.clone().into_iter().last().unwrap();
+                            should_italicize_rope = ast_walk(last_last, should_italicize_rope);
                             self.sm_tx.send(ServiceManagerMessage::UpdateStaticAnalysisRope { analysis_rope: should_italicize_rope, version }).await.unwrap();
                         }
                     }

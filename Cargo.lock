@@ -3470,6 +3470,7 @@ dependencies = [
  "lexer",
  "smallvec",
  "structs",
+ "ui_cli_shared",
 ]
 
 [[package]]

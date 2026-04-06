@@ -13,6 +13,12 @@ pub enum SectionType {
     Slide
 }
 
+impl SectionType {
+    pub fn non_root(&self) -> bool {
+        matches!(self, SectionType::UserLibrary | SectionType::Slide)
+    }
+}
+
 pub struct SectionBundle {
     pub file_path: PathBuf,
     pub file_index: usize,
