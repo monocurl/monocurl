@@ -1,66 +1,87 @@
-type Float2 = [f32; 2];
-type Float3 = [f32; 3];
-type Float4 = [f3]
+use crate::simd::{Float2, Float3, Float4};
 
 #[derive(Debug, Clone, Copy)]
-struct Dot {
-    anti: usize,
+pub struct Dot {
+    pub pos: Float3,
+    pub norm: Float3,
+    pub col: Float4,
+
+    pub inv: i32,
+    pub anti: i32,
+    pub is_dom_sib: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct LinVertex {}
-
-#[derive(Debug, Clone, Copy)]
-struct Lin {
-    a: LinVertex,
-    b: LinVertex,
-
-    prev: i32,
-    next: i32,
-    anti_norm: i32,
+pub struct LinVertex {
+    pub pos: Float3,
+    pub col: Float4
 }
 
 #[derive(Debug, Clone, Copy)]
-struct TriVertex {
-    pos: [f64; 3],
-    col: [f64; 4],
-    uv: [f64; 2],
+pub struct Lin {
+    pub a: LinVertex,
+    pub b: LinVertex,
+
+    pub norm: Float3,
+
+    pub prev: i32,
+    pub next: i32,
+    pub inv: i32,
+    pub anti: i32,
+    pub is_dom_sib: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Tri {
-    a: TriVertex,
-    b: TriVertex,
-    c: TriVertex,
+pub struct TriVertex {
+    pub pos: Float3,
+    pub col: Float4,
+    pub uv: Float2,
+}
 
-    ab: i32,
-    bc: i32,
-    ca: i32,
+#[derive(Debug, Clone, Copy)]
+pub struct Tri {
+    pub a: TriVertex,
+    pub b: TriVertex,
+    pub c: TriVertex,
 
-    anti: i32,
+    pub ab: i32,
+    pub bc: i32,
+    pub ca: i32,
+
+    pub anti: i32,
+    pub is_dom_sib: bool,
 }
 
 #[derive(Debug, Clone)]
-struct Uniforms {
-    alpha: f64,
-    img: Option<String>
+pub struct Uniforms {
+    pub alpha: f64,
+    pub img: Option<String>
 }
 
 #[derive(Debug, Clone)]
 pub struct Mesh {
-    dots: Vec<Dot>,
-    lins: Vec<Lin>,
-    tris: Vec<Tri>,
+    pub dots: Vec<Dot>,
+    pub lins: Vec<Lin>,
+    pub tris: Vec<Tri>,
 
-    uniform: Uniforms,
+    pub uniform: Uniforms,
 
-    tag: Vec<isize>,
+    pub tag: Vec<isize>,
 }
 
 impl Mesh {
-    pub fn rank() -> usize {
-        return 0;
+    pub fn rank(&self) -> usize {
+        if !self.tris.is_empty() {
+            3
+        }
+        else if !self.lins.is_empty() {
+            2
+        }
+        else if !self.dots.is_empty() {
+            1
+        }
+        else {
+            0
+        }
     }
 }
-
-impl Mesh {}
