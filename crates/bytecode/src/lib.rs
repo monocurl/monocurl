@@ -23,8 +23,6 @@ pub enum Instruction {
     PushParam { },
     PushState { },
     PushMesh { },
-    SetVar { stack_delta: u32 },
-    SetLeader { stack_delta: u32 },
 
     // u16::max indicates null label
     BufferLabelOrAttribute { string_index: u16 },
@@ -45,9 +43,7 @@ pub enum Instruction {
     Not,
 
     Subscript { mutable: bool },
-    SetSubscript,
     Attribute { mutable: bool },
-    SetAttribute,
 
     /* Binary operations */
     Add,

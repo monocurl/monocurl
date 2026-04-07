@@ -4,17 +4,7 @@ use bytecode::Bytecode;
 
 use crate::{state::ExecutionState, time::Timestamp};
 
-#[derive(Clone)]
-pub struct AllocTracker(Arc<()>);
-impl AllocTracker {
-    pub fn count(&self) -> usize {
-        Arc::strong_count(&self.0)
-    }
-}
-
 pub struct Executor {
-    alloc_tracker: AllocTracker,
-
     state: ExecutionState,
     cache: Vec<ExecutionState>,
     bytecode: Bytecode,

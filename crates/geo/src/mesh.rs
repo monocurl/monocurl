@@ -1,3 +1,7 @@
+type Float2 = [f32; 2];
+type Float3 = [f32; 3];
+type Float4 = [f3]
+
 #[derive(Debug, Clone, Copy)]
 struct Dot {
     anti: usize,

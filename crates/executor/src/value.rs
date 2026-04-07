@@ -33,6 +33,12 @@ pub enum Value {
 
     InvokedOperator(InvokedOperator),
     InvokedFunction(InvokedFunction),
+
+    // indexes into virtual heap
+    Lvalue(usize),
+    Mesh(usize),
+    State(usize),
+    Param(usize),
 }
 
 pub type RcValue = Rc<(AllocTracker, Cell<Value>)>;

@@ -1,10 +1,6 @@
 use bytecode::{Bytecode, SectionBytecode};
 use parser::{ast::{
-    Anim, Block, BinaryOperator, BinaryOperatorType, BoxSpanTagged, Declaration,
-    DirectionalLiteral, Expression, For, If, IdentifierDeclaration, IdentifierReference,
-    LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition,
-    OperatorInvocation, Play, Property, Return, Section, SpanTagged, Statement, Subscript,
-    UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType, While,
+    Anim, BinaryOperator, BinaryOperatorType, Block, BoxSpanTagged, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionBundle, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType, While
 }, parser::SectionParser};
 
 pub enum CompileError {
@@ -30,267 +26,271 @@ struct Compiler {
 }
 
 impl Compiler {
-    fn compile_full(&self, ast: Vec<Section>) -> Result<Bytecode> {
+    fn full(&self, ast: &SectionBundle) -> Result<Bytecode> {
+        todo!()
+    }
+
+    fn section_bundle(&self, ast: &SectionBundle) {
+
+    }
+}
+
+impl Compiler {
+    fn section(&self, section: &Section) -> SectionBytecode {
         todo!()
     }
 }
 
 impl Compiler {
-    fn compile_section(&self, section: Section) -> SectionBytecode {
-        todo!()
-    }
-}
-
-impl Compiler {
-    fn compile_statement(&self, stmt: Statement) {
+    fn statement(&self, stmt: &Statement) {
         match stmt {
-            Statement::Break => self.compile_break(),
-            Statement::Continue => self.compile_continue(),
-            Statement::Return(r) => self.compile_return(r),
-            Statement::While(w) => self.compile_while(w),
-            Statement::For(f) => self.compile_for(f),
-            Statement::If(i) => self.compile_if(i),
-            Statement::Declaration(d) => self.compile_declaration(d),
-            Statement::Expression(e) => self.compile_expression(e),
+            Statement::Break => self.break_(),
+            Statement::Continue => self.continue_(),
+            Statement::Return(r) => self.return_(r),
+            Statement::While(w) => self.while_(w),
+            Statement::For(f) => self.for_(f),
+            Statement::If(i) => self.if_(i),
+            Statement::Declaration(d) => self.declaration(d),
+            Statement::Expression(e) => self.expression(e),
             Statement::Play(p) => self.play(p),
         }
     }
 
-    fn compile_break(&self) {
+    fn break_(&self) {
         todo!()
     }
 
-    fn compile_continue(&self) {
+    fn continue_(&self) {
         todo!()
     }
 
-    fn compile_return(&self, r: Return) {
+    fn return_(&self, r: &Return) {
         todo!()
     }
 
-    fn compile_while(&self, w: While) {
+    fn while_(&self, w: &While) {
         todo!()
     }
 
-    fn compile_for(&self, f: For) {
+    fn for_(&self, f: &For) {
         todo!()
     }
 
-    fn compile_if(&self, i: If) {
+    fn if_(&self, i: &If) {
         todo!()
     }
 
-    fn compile_declaration(&self, d: Declaration) {
-        match d.var_type {
-            AstVariableType::Let => self.compile_let(d.identifier, d.value),
-            AstVariableType::Var => self.compile_var(d.identifier, d.value),
-            AstVariableType::Mesh => self.compile_mesh(d.identifier, d.value),
-            AstVariableType::State => self.compile_state(d.identifier, d.value),
-            AstVariableType::Param => self.compile_param(d.identifier, d.value),
+    fn declaration(&self, d: &Declaration) {
+        match &d.var_type {
+            AstVariableType::Let => self.let_(&d.identifier, &d.value),
+            AstVariableType::Var => self.var(&d.identifier, &d.value),
+            AstVariableType::Mesh => self.mesh(&d.identifier, &d.value),
+            AstVariableType::State => self.state(&d.identifier, &d.value),
+            AstVariableType::Param => self.param(&d.identifier, &d.value),
         }
     }
 
-    fn compile_let(&self, ident: SpanTagged<IdentifierDeclaration>, value: SpanTagged<Expression>) {
+    fn let_(&self, ident: &SpanTagged<IdentifierDeclaration>, value: &SpanTagged<Expression>) {
         todo!()
     }
 
-    fn compile_var(&self, ident: SpanTagged<IdentifierDeclaration>, value: SpanTagged<Expression>) {
+    fn var(&self, ident: &SpanTagged<IdentifierDeclaration>, value: &SpanTagged<Expression>) {
         todo!()
     }
 
-    fn compile_mesh(&self, ident: SpanTagged<IdentifierDeclaration>, value: SpanTagged<Expression>) {
+    fn mesh(&self, ident: &SpanTagged<IdentifierDeclaration>, value: &SpanTagged<Expression>) {
         todo!()
     }
 
-    fn compile_state(&self, ident: SpanTagged<IdentifierDeclaration>, value: SpanTagged<Expression>) {
+    fn state(&self, ident: &SpanTagged<IdentifierDeclaration>, value: &SpanTagged<Expression>) {
         todo!()
     }
 
-    fn compile_param(&self, ident: SpanTagged<IdentifierDeclaration>, value: SpanTagged<Expression>) {
+    fn param(&self, ident: &SpanTagged<IdentifierDeclaration>, value: &SpanTagged<Expression>) {
         todo!()
     }
 
-    fn play(&self, p: Play) {
+    fn play(&self, p: &Play) {
         todo!()
     }
 }
 
 impl Compiler {
-    fn compile_expression(&self, expr: Expression) {
+    fn expression(&self, expr: &Expression) {
         match expr {
-            Expression::Literal(l) => self.compile_literal(l),
-            Expression::LambdaDefinition(l) => self.compile_lambda_definition(l),
-            Expression::OperationDefinition(o) => self.compile_operator_definition(o),
-            Expression::Block(b) => self.compile_block(b),
-            Expression::Anim(a) => self.compile_anim(a),
-            Expression::BinaryOperator(b) => self.compile_binary_operator(b),
-            Expression::OperatorInvocation(o) => self.compile_operator_invocation(o),
-            Expression::UnaryPreOperator(u) => self.compile_unary_pre_operator(u),
-            Expression::IdentifierReference(i) => self.compile_identifier_reference(i),
-            Expression::Subscript(s) => self.compile_subscript(s),
-            Expression::Property(p) => self.compile_property(p),
-            Expression::LambdaInvocation(l) => self.compile_lambda_invocation(l),
-            Expression::NativeInvocation(n) => self.compile_native_invocation(n),
+            Expression::Literal(l) => self.literal(l),
+            Expression::LambdaDefinition(l) => self.lambda_definition(l),
+            Expression::OperationDefinition(o) => self.operator_definition(o),
+            Expression::Block(b) => self.block(b),
+            Expression::Anim(a) => self.anim(a),
+            Expression::BinaryOperator(b) => self.binary_operator(b),
+            Expression::OperatorInvocation(o) => self.operator_invocation(o),
+            Expression::UnaryPreOperator(u) => self.unary_pre_operator(u),
+            Expression::IdentifierReference(i) => self.identifier_reference(i),
+            Expression::Subscript(s) => self.subscript(s),
+            Expression::Property(p) => self.property(p),
+            Expression::LambdaInvocation(l) => self.lambda_invocation(l),
+            Expression::NativeInvocation(n) => self.native_invocation(n),
         }
     }
 
-    fn compile_literal(&self, l: Literal) {
+    fn literal(&self, l: &Literal) {
         match l {
-            Literal::String(s) => self.compile_string_literal(s),
-            Literal::Int(i) => self.compile_int_literal(i),
-            Literal::Float(f) => self.compile_float_literal(f),
-            Literal::Directional(d) => self.compile_directional_literal(d),
-            Literal::Imaginary(f) => self.compile_imaginary_literal(f),
-            Literal::Vector(v) => self.compile_vector_literal(v),
-            Literal::Map(m) => self.compile_map_literal(m),
+            Literal::String(s) => self.string_literal(s),
+            Literal::Int(i) => self.int_literal(*i),
+            Literal::Float(f) => self.float_literal(*f),
+            Literal::Directional(d) => self.directional_literal(d),
+            Literal::Imaginary(f) => self.imaginary_literal(*f),
+            Literal::Vector(v) => self.vector_literal(v),
+            Literal::Map(m) => self.map_literal(m),
         }
     }
 
-    fn compile_string_literal(&self, s: String) {
+    fn string_literal(&self, s: &str) {
         todo!()
     }
 
-    fn compile_int_literal(&self, i: i64) {
+    fn int_literal(&self, i: i64) {
         todo!()
     }
 
-    fn compile_float_literal(&self, f: f64) {
+    fn float_literal(&self, f: f64) {
         todo!()
     }
 
-    fn compile_directional_literal(&self, d: DirectionalLiteral) {
+    fn directional_literal(&self, d: &DirectionalLiteral) {
         match d {
-            DirectionalLiteral::Up(f) => self.compile_up(f),
-            DirectionalLiteral::Down(f) => self.compile_down(f),
-            DirectionalLiteral::Left(f) => self.compile_left(f),
-            DirectionalLiteral::Right(f) => self.compile_right(f),
-            DirectionalLiteral::Forward(f) => self.compile_forward(f),
-            DirectionalLiteral::Backward(f) => self.compile_backward(f),
+            DirectionalLiteral::Up(f) => self.up(*f),
+            DirectionalLiteral::Down(f) => self.down(*f),
+            DirectionalLiteral::Left(f) => self.left(*f),
+            DirectionalLiteral::Right(f) => self.right(*f),
+            DirectionalLiteral::Forward(f) => self.forward(*f),
+            DirectionalLiteral::Backward(f) => self.backward(*f),
         }
     }
 
-    fn compile_up(&self, magnitude: f64) {
+    fn up(&self, magnitude: f64) {
         todo!()
     }
 
-    fn compile_down(&self, magnitude: f64) {
+    fn down(&self, magnitude: f64) {
         todo!()
     }
 
-    fn compile_left(&self, magnitude: f64) {
+    fn left(&self, magnitude: f64) {
         todo!()
     }
 
-    fn compile_right(&self, magnitude: f64) {
+    fn right(&self, magnitude: f64) {
         todo!()
     }
 
-    fn compile_forward(&self, magnitude: f64) {
+    fn forward(&self, magnitude: f64) {
         todo!()
     }
 
-    fn compile_backward(&self, magnitude: f64) {
+    fn backward(&self, magnitude: f64) {
         todo!()
     }
 
-    fn compile_imaginary_literal(&self, f: f64) {
+    fn imaginary_literal(&self, f: f64) {
         todo!()
     }
 
-    fn compile_vector_literal(&self, v: Vec<SpanTagged<Expression>>) {
+    fn vector_literal(&self, v: &[SpanTagged<Expression>]) {
         todo!()
     }
 
-    fn compile_map_literal(&self, m: Vec<(SpanTagged<Expression>, SpanTagged<Expression>)>) {
+    fn map_literal(&self, m: &[(SpanTagged<Expression>, SpanTagged<Expression>)]) {
         todo!()
     }
 
-    fn compile_lambda_definition(&self, l: LambdaDefinition) {
+    fn lambda_definition(&self, l: &LambdaDefinition) {
         todo!()
     }
 
-    fn compile_operator_definition(&self, o: OperatorDefinition) {
+    fn operator_definition(&self, o: &OperatorDefinition) {
         todo!()
     }
 
-    fn compile_block(&self, b: Block) {
+    fn block(&self, b: &Block) {
         todo!()
     }
 
-    fn compile_anim(&self, a: Anim) {
+    fn anim(&self, a: &Anim) {
         todo!()
     }
 
-    fn compile_binary_operator(&self, b: BinaryOperator) {
-        let lhs = b.lhs;
-        let rhs = b.rhs;
+    fn binary_operator(&self, b: &BinaryOperator) {
+        let lhs = &b.lhs;
+        let rhs = &b.rhs;
     }
 
-    fn compile_assign(&self, lhs: BoxSpanTagged<Expression>, rhs: BoxSpanTagged<Expression>) {
+    fn assign(&self, lhs: &BoxSpanTagged<Expression>, rhs: &BoxSpanTagged<Expression>) {
         todo!()
     }
 
-    fn compile_dot_assign(&self, lhs: BoxSpanTagged<Expression>, rhs: BoxSpanTagged<Expression>) {
+    fn dot_assign(&self, lhs: &BoxSpanTagged<Expression>, rhs: &BoxSpanTagged<Expression>) {
         todo!()
     }
 
-    fn compile_operator_invocation(&self, o: OperatorInvocation) {
+    fn operator_invocation(&self, o: &OperatorInvocation) {
         todo!()
     }
 
-    fn compile_unary_pre_operator(&self, u: UnaryPreOperator) {
-        match u.op_type {
-            UnaryOperatorType::Negative => self.compile_negate(u.operand),
-            UnaryOperatorType::Not => self.compile_not(u.operand),
+    fn unary_pre_operator(&self, u: &UnaryPreOperator) {
+        match &u.op_type {
+            UnaryOperatorType::Negative => self.negate(&u.operand),
+            UnaryOperatorType::Not => self.not(&u.operand),
         }
     }
 
-    fn compile_negate(&self, operand: BoxSpanTagged<Expression>) {
+    fn negate(&self, operand: &BoxSpanTagged<Expression>) {
         todo!()
     }
 
-    fn compile_not(&self, operand: BoxSpanTagged<Expression>) {
+    fn not(&self, operand: &BoxSpanTagged<Expression>) {
         todo!()
     }
 
-    fn compile_identifier_reference(&self, i: IdentifierReference) {
+    fn identifier_reference(&self, i: &IdentifierReference) {
         match i {
-            IdentifierReference::Value(name) => self.compile_value_reference(name),
-            IdentifierReference::Reference(name) => self.compile_reference(name),
-            IdentifierReference::Stateful(name) => self.compile_stateful_reference(name),
-            IdentifierReference::Dereference(name) => self.compile_dereference(name),
+            IdentifierReference::Value(name) => self.value_reference(name),
+            IdentifierReference::Reference(name) => self.reference(name),
+            IdentifierReference::Stateful(name) => self.stateful_reference(name),
+            IdentifierReference::Dereference(name) => self.dereference(name),
         }
     }
 
-    fn compile_value_reference(&self, name: String) {
+    fn value_reference(&self, name: &str) {
         todo!()
     }
 
-    fn compile_reference(&self, name: String) {
+    fn reference(&self, name: &str) {
         todo!()
     }
 
-    fn compile_stateful_reference(&self, name: String) {
+    fn stateful_reference(&self, name: &str) {
         todo!()
     }
 
-    fn compile_dereference(&self, name: String) {
+    fn dereference(&self, name: &str) {
         todo!()
     }
 
-    fn compile_subscript(&self, s: Subscript) {
+    fn subscript(&self, s: &Subscript) {
         todo!()
     }
 
-    fn compile_property(&self, p: Property) {
+    fn property(&self, p: &Property) {
         todo!()
     }
 
-    fn compile_lambda_invocation(&self, l: LambdaInvocation) {
+    fn lambda_invocation(&self, l: &LambdaInvocation) {
         todo!()
     }
 
-    fn compile_native_invocation(&self, n: NativeInvocation) {
+    fn native_invocation(&self, n: &NativeInvocation) {
         todo!()
     }
 }
