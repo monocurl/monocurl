@@ -2,7 +2,7 @@ use std::{collections::BTreeMap};
 
 use bytecode::{SectionBytecode};
 
-use crate::value::RcValue;
+use crate::{value::RcValue, vheap::{VHeap, VHeapPtr}};
 
 pub struct Timestamp {
     slide: usize,
@@ -12,7 +12,7 @@ pub struct Timestamp {
 pub struct ExecutionStack {
     // for determining what to lerp
     stack_id: usize,
-    var_stack: Vec<u8>,
+    var_stack: Vec<VHeapPtr>,
     ip_stack: Vec<(u16, u32)>,
     // index into string labels
     label_buffer: Vec<usize>,
@@ -31,6 +31,8 @@ struct BakedPrimitiveAnim {
 
 pub struct ExecutionState {
     pub timestamp: Timestamp,
+
+    vheap: VHeap,
 
     stack_counter: usize,
     execution_stacks: Vec<Option<ExecutionStack>>,

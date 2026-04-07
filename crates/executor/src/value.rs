@@ -34,11 +34,7 @@ pub enum Value {
     InvokedOperator(InvokedOperator),
     InvokedFunction(InvokedFunction),
 
-    // indexes into virtual heap
-    Lvalue(VHeapPtr, VHeapPtr),
-    Mesh(VHeapPtr, VHeapPtr),
-    State(VHeapPtr, VHeapPtr),
-    Param(VHeapPtr, VHeapPtr),
+    Lvalue(VHeapPtr),
 }
 
 pub type RcValue = Rc<Cell<Value>>;
