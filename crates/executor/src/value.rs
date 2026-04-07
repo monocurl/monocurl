@@ -1,17 +1,17 @@
 use std::{cell::{Cell}, rc::Rc};
 
-use crate::{executor::AllocTracker, value::{anim_block::AnimBlock, container::{List, Map}, invoked_function::InvokedFunction, invoked_operator::InvokedOperator, lambda::{Lambda, Operator}, leader::Leader, primitive::{FloatPrimitive, IntPrimitive, StringPrimitve}, primitive_anim::PrimitiveAnim, primitive_mesh::PrimitiveMesh, stateful::Stateful}};
+use crate::{value::{anim_block::AnimBlock, container::{List, Map}, invoked_function::InvokedFunction, invoked_operator::InvokedOperator, lambda::{Lambda, Operator}, leader::Leader, primitive::{FloatPrimitive, IntPrimitive, StringPrimitve}, primitive_anim::PrimitiveAnim, primitive_mesh::PrimitiveMesh, stateful::Stateful}, vheap::VHeapPtr};
 
-mod invoked_operator;
-mod invoked_function;
-mod primitive_anim;
-mod primitive_mesh;
-mod lambda;
-mod primitive;
-mod container;
-mod anim_block;
-mod stateful;
-mod leader;
+pub mod invoked_operator;
+pub mod invoked_function;
+pub mod primitive_anim;
+pub mod primitive_mesh;
+pub mod lambda;
+pub mod primitive;
+pub mod container;
+pub mod anim_block;
+pub mod stateful;
+pub mod leader;
 
 pub enum Value {
     Float(FloatPrimitive),
@@ -35,13 +35,13 @@ pub enum Value {
     InvokedFunction(InvokedFunction),
 
     // indexes into virtual heap
-    Lvalue(usize),
-    Mesh(usize),
-    State(usize),
-    Param(usize),
+    Lvalue(VHeapPtr, VHeapPtr),
+    Mesh(VHeapPtr, VHeapPtr),
+    State(VHeapPtr, VHeapPtr),
+    Param(VHeapPtr, VHeapPtr),
 }
 
-pub type RcValue = Rc<(AllocTracker, Cell<Value>)>;
+pub type RcValue = Rc<Cell<Value>>;
 pub type InstructionPointer = (u16, u32); // (section, instruction index)
 
 pub trait ValueTrait {

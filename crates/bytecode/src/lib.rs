@@ -65,27 +65,27 @@ pub enum Instruction {
 }
 
 pub struct InstructionAnnotation {
-    source_loc: Span8,
+    pub source_loc: Span8,
 }
 
 pub struct SectionFlags {
-    priviliged: bool,
-    is_library: bool,
+    pub is_stdlib: bool,
+    pub is_library: bool,
 }
 
 // either a slide or an imported module
 pub struct SectionBytecode {
-    flags: SectionFlags,
-    direct_instructions: Vec<Instruction>,
-    int_pool: Vec<i64>,
-    float_pool: Vec<f64>,
-    string_pool: Vec<String>,
-    source_annotations: Option<()>,
+    pub flags: SectionFlags,
+    pub instructions: Vec<Instruction>,
+    pub annotations: Vec<InstructionAnnotation>,
+    pub int_pool: Vec<i64>,
+    pub float_pool: Vec<f64>,
+    pub string_pool: Vec<String>,
 }
 
 pub struct Bytecode {
-    sections: Vec<SectionBytecode>,
-    bytecode_version: (usize, usize, usize),
+    pub sections: Vec<SectionBytecode>,
+    pub bytecode_version: (usize, usize, usize),
 }
 
 impl Bytecode {

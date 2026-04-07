@@ -68,20 +68,3 @@ pub struct Mesh {
 
     pub tag: Vec<isize>,
 }
-
-impl Mesh {
-    pub fn rank(&self) -> usize {
-        if !self.tris.is_empty() {
-            3
-        }
-        else if !self.lins.is_empty() {
-            2
-        }
-        else if !self.dots.is_empty() {
-            1
-        }
-        else {
-            0
-        }
-    }
-}

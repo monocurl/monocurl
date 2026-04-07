@@ -4,8 +4,6 @@ pub struct ExecutionState {
     slide: usize,
     time: f64,
 
-    bytecode: Vec<u8>,
-
     background_color: (u8, u8, u8),
     camera_position: (f32, f32, f32),
     mesh_state: Vec<u8>,

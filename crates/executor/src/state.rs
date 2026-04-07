@@ -14,7 +14,9 @@ pub struct ExecutionStack {
     stack_id: usize,
     var_stack: Vec<u8>,
     ip_stack: Vec<(u16, u32)>,
+    // index into string labels
     label_buffer: Vec<usize>,
+    conditional_flag: bool,
 
     active_child_count: usize,
     parent_stack_idx: Option<usize>,
