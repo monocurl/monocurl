@@ -15,19 +15,19 @@ pub struct AnimPrototype {
 #[derive(Debug, PartialEq)]
 pub enum Instruction {
     /* push constants */
-    PushInt { index: u16 },
-    PushFloat { index: u16 },
+    PushInt { index: u32 },
+    PushFloat { index: u32 },
     // pushes complex(0, float_pool[index])
-    PushImaginary { index: u16 },
+    PushImaginary { index: u32 },
     PushChar { char: char },
-    PushString { index: u16 },
+    PushString { index: u32 },
     PushEmptyMap,
     PushEmptyVector,
 
     // register TOS as a leader; name_index into the string pool for debugging
-    PushParam { name_index: u16 },
-    PushState { name_index: u16 },
-    PushMesh { name_index: u16 },
+    PushParam { name_index: u32 },
+    PushState { name_index: u32 },
+    PushMesh { name_index: u32 },
 
     PushCopy { stack_delta: i32 },
     PushLvalue { stack_delta: i32 },
@@ -41,7 +41,7 @@ pub enum Instruction {
     PushStateful { stack_delta: i32 },
 
     // u16::MAX indicates unlabeled
-    BufferLabelOrAttribute { string_index: u16 },
+    BufferLabelOrAttribute { string_index: u32 },
 
     // pops capture_count lvalues + prototype.default_arg_count values, pushes lambda
     MakeLambda { capture_count: u16, prototype_index: u32 },
@@ -50,8 +50,8 @@ pub enum Instruction {
     // pops a lambda, pushes an operator wrapping it
     MakeOperator,
 
-    OperatorInvoke { stateful: bool, labeled: bool, num_args: u8 },
-    LambdaInvoke { stateful: bool, labeled: bool, num_args: u8 },
+    OperatorInvoke { stateful: bool, labeled: bool, num_args: u32 },
+    LambdaInvoke { stateful: bool, labeled: bool, num_args: u32 },
     Jump { section: u16, to: u32 },
     // pops TOS; jumps when truthy
     ConditionalJump { section: u16, to: u32 },
@@ -67,7 +67,7 @@ pub enum Instruction {
     Not,
 
     Subscript { mutable: bool },
-    Attribute { mutable: bool, string_index: u16 },
+    Attribute { mutable: bool, string_index: u32 },
 
     /* binary (pop 2, push 1) */
     Add,
@@ -89,6 +89,8 @@ pub enum Instruction {
 
     EndOfExecutionHead,
 }
+const _: () = assert!(std::mem::size_of::<Instruction>() == 8);
+
 
 pub struct InstructionAnnotation {
     pub source_loc: Span8,

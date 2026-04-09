@@ -450,45 +450,36 @@ impl Compiler {
 
     // -- constant pool helpers --
 
-    fn intern_int(&mut self, val: i64, span: &Span8) -> u16 {
+    fn intern_int(&mut self, val: i64) -> u32 {
         if let Some(idx) = self.current_section.int_pool.iter().position(|&x| x == val) {
-            return idx as u16;
+            return idx as u32;
         }
         let idx = self.current_section.int_pool.len();
-        if idx >= u16::MAX as usize {
-            self.error(span.clone(), "int pool overflow");
-        }
         self.current_section.int_pool.push(val);
-        idx as u16
+        idx as u32
     }
 
-    fn intern_float(&mut self, val: f64, span: &Span8) -> u16 {
+    fn intern_float(&mut self, val: f64) -> u32 {
         if let Some(idx) = self
             .current_section
             .float_pool
             .iter()
             .position(|x| x.to_bits() == val.to_bits())
         {
-            return idx as u16;
+            return idx as u32;
         }
         let idx = self.current_section.float_pool.len();
-        if idx >= u16::MAX as usize {
-            self.error(span.clone(), "float pool overflow");
-        }
         self.current_section.float_pool.push(val);
-        idx as u16
+        idx as u32
     }
 
-    fn intern_string(&mut self, val: &str, span: &Span8) -> u16 {
+    fn intern_string(&mut self, val: &str) -> u32 {
         if let Some(idx) = self.current_section.string_pool.iter().position(|x| x == val) {
-            return idx as u16;
+            return idx as u32;
         }
         let idx = self.current_section.string_pool.len();
-        if idx >= u16::MAX as usize {
-            self.error(span.clone(), "string pool overflow");
-        }
         self.current_section.string_pool.push(val.to_string());
-        idx as u16
+        idx as u32
     }
 
     fn error(&mut self, span: Span8, msg: impl Into<String>) {
@@ -531,15 +522,15 @@ impl Compiler {
         };
         match vt {
             VariableType::Mesh => {
-                let ni = self.intern_string(&d.identifier.1.0, span);
+                let ni = self.intern_string(&d.identifier.1.0);
                 self.emit(Instruction::PushMesh { name_index: ni }, span.clone());
             }
             VariableType::State => {
-                let ni = self.intern_string(&d.identifier.1.0, span);
+                let ni = self.intern_string(&d.identifier.1.0);
                 self.emit(Instruction::PushState { name_index: ni }, span.clone());
             }
             VariableType::Param => {
-                let ni = self.intern_string(&d.identifier.1.0, span);
+                let ni = self.intern_string(&d.identifier.1.0);
                 self.emit(Instruction::PushParam { name_index: ni }, span.clone());
             }
             _ => {}
@@ -593,7 +584,7 @@ impl Compiler {
         // anonymous names (null byte) can't collide with user identifiers
         self.define_symbol("\x00iter", VariableType::Let);
 
-        let zero = self.intern_int(0, span);
+        let zero = self.intern_int(0);
         self.emit_push(Instruction::PushInt { index: zero }, span.clone());
         let idx_pos = self.stack_depth() - 1;
         self.define_symbol("\x00idx", VariableType::Var);
@@ -608,7 +599,7 @@ impl Compiler {
         self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
 
         // TODO native function lookup
-        let len_idx = self.intern_string("len", span) as u32;
+        let len_idx = self.intern_string("vector_len") as u32;
         // NativeInvoke pops 1 arg, pushes 1 result — emit_push already counted the slot
         self.emit(Instruction::NativeInvoke { index: len_idx }, span.clone());
 
@@ -656,7 +647,7 @@ impl Compiler {
         self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
         let d = self.stack_delta(idx_pos);
         self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
-        let one = self.intern_int(1, span);
+        let one = self.intern_int(1);
         self.emit_push(Instruction::PushInt { index: one }, span.clone());
         self.emit(Instruction::Add, span.clone());
         self.dec_stack(1);
@@ -799,7 +790,7 @@ impl Compiler {
         let name = ident_ref_name(ir);
         let Some(sym) = self.lookup(name).cloned() else {
             self.error(span.clone(), format!("undefined variable '{}'", name));
-            let idx = self.intern_int(0, span);
+            let idx = self.intern_int(0);
             self.emit_push(Instruction::PushInt { index: idx }, span.clone());
             return;
         };
@@ -842,19 +833,19 @@ impl Compiler {
     fn compile_literal(&mut self, mutable: bool, l: &Literal, span: &Span8) {
         match l {
             Literal::Int(val) => {
-                let idx = self.intern_int(*val, span);
+                let idx = self.intern_int(*val);
                 self.emit_push(Instruction::PushInt { index: idx }, span.clone());
             }
             Literal::Float(val) => {
-                let idx = self.intern_float(*val, span);
+                let idx = self.intern_float(*val);
                 self.emit_push(Instruction::PushFloat { index: idx }, span.clone());
             }
             Literal::Imaginary(val) => {
-                let idx = self.intern_float(*val, span);
+                let idx = self.intern_float(*val);
                 self.emit_push(Instruction::PushImaginary { index: idx }, span.clone());
             }
             Literal::String(s) => {
-                let idx = self.intern_string(s, span);
+                let idx = self.intern_string(s);
                 self.emit_push(Instruction::PushString { index: idx }, span.clone());
             }
             Literal::Directional(d) => self.compile_directional(d, span),
@@ -874,7 +865,7 @@ impl Compiler {
         };
         self.emit_push(Instruction::PushEmptyVector, span.clone());
         for component in [x, y, z] {
-            let idx = self.intern_float(component, span);
+            let idx = self.intern_float(component);
             self.emit_push(Instruction::PushFloat { index: idx }, span.clone());
             self.emit(Instruction::Append, span.clone());
             self.dec_stack(1); // append: pop 2 push 1
@@ -970,7 +961,7 @@ impl Compiler {
         );
         self.dec_stack(1);
 
-        let false_idx = self.intern_int(0, span);
+        let false_idx = self.intern_int(0);
         self.emit_push(Instruction::PushInt { index: false_idx }, span.clone());
         let jump_end = self.instruction_pointer();
         self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
@@ -997,7 +988,7 @@ impl Compiler {
         self.dec_stack(1);
 
         self.patch_jump(jump_true as usize, self.instruction_pointer());
-        let true_idx = self.intern_int(1, span);
+        let true_idx = self.intern_int(1);
         self.emit_push(Instruction::PushInt { index: true_idx }, span.clone());
         self.patch_jump(jump_end as usize, self.instruction_pointer());
     }
@@ -1023,7 +1014,7 @@ impl Compiler {
     fn compile_property(&mut self, mutable: bool, p: &Property) {
         self.compile_expr(mutable, &p.base.1, &p.base.0);
         let attr = ident_ref_name(&p.attribute.1);
-        let si = self.intern_string(attr, &p.attribute.0);
+        let si = self.intern_string(attr);
         self.emit(Instruction::Attribute { mutable, string_index: si }, p.attribute.0.clone());
     }
 }
@@ -1033,7 +1024,7 @@ impl Compiler {
         let labeled = l.arguments.1.iter().any(|(lbl, _)| lbl.is_some());
         let stateful = is_stateful(&l.lambda.1)
             || l.arguments.1.iter().any(|(_, a)| is_stateful(&a.1));
-        let num_args = l.arguments.1.len() as u8;
+        let num_args = l.arguments.1.len() as u32;
 
         for (_, arg) in &l.arguments.1 {
             self.compile_expr(false, &arg.1, &arg.0);
@@ -1043,8 +1034,8 @@ impl Compiler {
         if labeled {
             for (lbl, _) in &l.arguments.1 {
                 let si = match lbl {
-                    Some((_, IdentifierDeclaration(name))) => self.intern_string(name, span),
-                    None => u16::MAX,
+                    Some((_, IdentifierDeclaration(name))) => self.intern_string(name),
+                    None => u32::MAX,
                 };
                 self.emit(Instruction::BufferLabelOrAttribute { string_index: si }, span.clone());
             }
@@ -1058,7 +1049,7 @@ impl Compiler {
         let stateful = is_stateful(&o.operator.1)
             || is_stateful(&o.operand.1)
             || o.arguments.1.iter().any(|(_, a)| is_stateful(&a.1));
-        let num_args = o.arguments.1.len() as u8;
+        let num_args = o.arguments.1.len() as u32;
 
         self.compile_expr(false, &o.operand.1, &o.operand.0);
         for (_, arg) in &o.arguments.1 {
@@ -1069,8 +1060,8 @@ impl Compiler {
         if labeled {
             for (lbl, _) in &o.arguments.1 {
                 let si = match lbl {
-                    Some((_, IdentifierDeclaration(name))) => self.intern_string(name, span),
-                    None => u16::MAX,
+                    Some((_, IdentifierDeclaration(name))) => self.intern_string(name,),
+                    None => u32::MAX,
                 };
                 self.emit(Instruction::BufferLabelOrAttribute { string_index: si }, span.clone());
             }
@@ -1085,7 +1076,7 @@ impl Compiler {
             self.compile_expr(false, &arg.1, &arg.0);
         }
         // TODO: replace with a proper native function registry
-        let index = self.intern_string(name, span) as u32;
+        let index = self.intern_string(name) as u32;
         self.emit(Instruction::NativeInvoke { index }, span.clone());
         self.dec_stack(n.arguments.len());
         self.inc_stack();
@@ -1685,7 +1676,6 @@ mod test {
     // with 42 in the int pool.
     #[test]
     fn test_bytecode_single_let_int() {
-        use bytecode::LambdaPrototype;
         let result = compile_stmts(vec![s(Statement::Declaration(Declaration {
             var_type: VariableType::Let,
             identifier: s(IdentifierDeclaration("x".into())),
@@ -1762,7 +1752,6 @@ mod test {
     // and that the prototype table is populated correctly.
     #[test]
     fn test_bytecode_simple_lambda() {
-        use bytecode::LambdaPrototype;
         let result = compile_stmts(vec![s(Statement::Declaration(Declaration {
             var_type: VariableType::Let,
             identifier: s(IdentifierDeclaration("f".into())),
