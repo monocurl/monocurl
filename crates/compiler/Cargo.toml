@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 parser.workspace = true
 bytecode.workspace = true
+structs.workspace = true

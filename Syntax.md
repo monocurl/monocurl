@@ -69,8 +69,8 @@ In addition to being able to interpolate from structs of the same type, you can 
 ```monocurl
 # can omit parentheses for single argument operators
 # right associative
-let y = sticky {expr}
-let z = sticky stroke(RED) {expr}
+let y = sticky (expr)
+let z = sticky stroke{RED} (expr)
 
 # declaring operators (a special type of function)
 # must specify the identity embed and the act function
@@ -79,7 +79,7 @@ let shift = operator |operator, delta| {
   let internal = |d| {
     __native_shift(operator, d)
   }
-  [internal([0,0,0]), internal(delta)]
+  [internal(shift: [0,0,0]), internal(shift: delta)]
 };
 
 # in terms of of other operators

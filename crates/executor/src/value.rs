@@ -1,6 +1,6 @@
 use std::{cell::{Cell}, rc::Rc};
 
-use crate::{value::{anim_block::AnimBlock, container::{List, Map}, invoked_function::InvokedFunction, invoked_operator::InvokedOperator, lambda::{Lambda, Operator}, leader::Leader, primitive::{FloatPrimitive, IntPrimitive, StringPrimitve}, primitive_anim::PrimitiveAnim, primitive_mesh::PrimitiveMesh, stateful::Stateful}, vheap::VHeapPtr};
+use crate::{value::{anim_block::AnimBlock, complex::ComplexPrimitive, container::{List, Map}, invoked_function::InvokedFunction, invoked_operator::InvokedOperator, lambda::{Lambda, Operator}, leader::Leader, primitive::{FloatPrimitive, IntPrimitive, StringPrimitve}, primitive_anim::PrimitiveAnim, primitive_mesh::PrimitiveMesh, stateful::Stateful}, vheap::VHeapPtr};
 
 pub mod invoked_operator;
 pub mod invoked_function;
@@ -8,6 +8,7 @@ pub mod primitive_anim;
 pub mod primitive_mesh;
 pub mod lambda;
 pub mod primitive;
+pub mod complex;
 pub mod container;
 pub mod anim_block;
 pub mod stateful;
@@ -16,6 +17,7 @@ pub mod leader;
 pub enum Value {
     Float(FloatPrimitive),
     Integer(IntPrimitive),
+    Complex(ComplexPrimitive),
     String(StringPrimitve),
 
     PrimitiveMesh(PrimitiveMesh),
