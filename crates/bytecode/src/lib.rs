@@ -12,6 +12,7 @@ pub struct AnimPrototype {
     pub ip: u32,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum Instruction {
     /* push constants */
     PushInt { index: u16 },

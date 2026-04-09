@@ -292,6 +292,7 @@ impl Compiler {
             .map(|p| {
                 for sym in self.bundle_exports[*p].values() {
                     base_symbols.insert(sym.name.clone(), Symbol {
+                        // make it constant for future symbols
                         var_type: VariableType::Let,
                         ..sym.clone()
                     });
@@ -1183,7 +1184,6 @@ impl Compiler {
     }
 
     fn compile_block(&mut self, b: &Block, span: &Span8) {
-        // immediately-invoked inline lambda with implicit `_` accumulator
         let captures = self.compute_block_captures(&b.body);
 
         let jump_idx = self.instruction_pointer();
@@ -1222,7 +1222,6 @@ impl Compiler {
         self.dec_stack(captures.len());
         self.inc_stack();
 
-        // immediately invoke (0 args)
         self.emit(
             Instruction::LambdaInvoke { stateful: false, labeled: false, num_args: 0 },
             span.clone(),
@@ -1678,6 +1677,122 @@ mod test {
             has_error(&result, "required arguments must come before default arguments"),
             "expected default-arg suffix error from parser-produced AST"
         );
+    }
+
+    // -- bytecode sequence tests --
+
+    // `let x = 42` should produce exactly PushInt + EndOfExecutionHead
+    // with 42 in the int pool.
+    #[test]
+    fn test_bytecode_single_let_int() {
+        use bytecode::LambdaPrototype;
+        let result = compile_stmts(vec![s(Statement::Declaration(Declaration {
+            var_type: VariableType::Let,
+            identifier: s(IdentifierDeclaration("x".into())),
+            value: s(Expression::Literal(Literal::Int(42))),
+        }))]);
+        no_errors(&result);
+        let sec = &result.bytecode.sections[0];
+        assert_eq!(
+            sec.instructions,
+            vec![Instruction::PushInt { index: 0 }, Instruction::EndOfExecutionHead],
+        );
+        assert_eq!(sec.int_pool, vec![42i64]);
+        assert!(sec.lambda_prototypes.is_empty());
+    }
+
+    // `var x = 0\nx = 1` — covers PushLvalue, Assign, and Pop for expression statements.
+    #[test]
+    fn test_bytecode_var_assign() {
+        let result = compile_stmts(vec![
+            s(Statement::Declaration(Declaration {
+                var_type: VariableType::Var,
+                identifier: s(IdentifierDeclaration("x".into())),
+                value: s(Expression::Literal(Literal::Int(0))),
+            })),
+            s(Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                op_type: BinaryOperatorType::Assign,
+                lhs: sb(Expression::IdentifierReference(IdentifierReference::Value("x".into()))),
+                rhs: sb(Expression::Literal(Literal::Int(1))),
+            }))),
+        ]);
+        no_errors(&result);
+        let sec = &result.bytecode.sections[0];
+        assert_eq!(
+            sec.instructions,
+            vec![
+                Instruction::PushInt { index: 0 },          // var x = 0
+                Instruction::PushLvalue { stack_delta: -1 }, // lvalue of x (at pos 0, depth 1)
+                Instruction::PushInt { index: 1 },           // rhs = 1
+                Instruction::Assign,
+                Instruction::Pop { count: 1 },               // discard assign result
+                Instruction::EndOfExecutionHead,
+            ],
+        );
+        assert_eq!(sec.int_pool, vec![0i64, 1i64]);
+    }
+
+    // `let z = 1 and 0` — verifies short-circuit ConditionalJump structure.
+    #[test]
+    fn test_bytecode_and_short_circuit() {
+        let result = compile_stmts(vec![s(Statement::Declaration(Declaration {
+            var_type: VariableType::Let,
+            identifier: s(IdentifierDeclaration("z".into())),
+            value: s(Expression::BinaryOperator(BinaryOperator {
+                op_type: BinaryOperatorType::And,
+                lhs: sb(Expression::Literal(Literal::Int(1))),
+                rhs: sb(Expression::Literal(Literal::Int(0))),
+            })),
+        }))]);
+        no_errors(&result);
+        let sec = &result.bytecode.sections[0];
+        // [0] PushInt(1)  [1] ConditionalJump→4  [2] PushInt(0)  [3] Jump→5
+        // [4] PushInt(0)  [5] EndOfExecutionHead
+        assert_eq!(sec.instructions[0], Instruction::PushInt { index: 0 }); // lhs = 1
+        assert!(matches!(sec.instructions[1], Instruction::ConditionalJump { to: 4, .. }));
+        assert_eq!(sec.instructions[2], Instruction::PushInt { index: 1 }); // false literal
+        assert!(matches!(sec.instructions[3], Instruction::Jump { to: 5, .. }));
+        assert_eq!(sec.instructions[4], Instruction::PushInt { index: 1 }); // rhs = 0 (same pool slot)
+        assert_eq!(sec.instructions[5], Instruction::EndOfExecutionHead);
+        assert_eq!(sec.int_pool[0], 1i64);
+        assert_eq!(sec.int_pool[1], 0i64);
+    }
+
+    // `let f = |a| a` — verifies lambda body is Jump-over + body + MakeLambda
+    // and that the prototype table is populated correctly.
+    #[test]
+    fn test_bytecode_simple_lambda() {
+        use bytecode::LambdaPrototype;
+        let result = compile_stmts(vec![s(Statement::Declaration(Declaration {
+            var_type: VariableType::Let,
+            identifier: s(IdentifierDeclaration("f".into())),
+            value: s(Expression::LambdaDefinition(LambdaDefinition {
+                args: vec![LambdaArg {
+                    identifier: s(IdentifierDeclaration("a".into())),
+                    default_value: None,
+                    must_be_reference: false,
+                }],
+                body: s(LambdaBody::Inline(Box::new(Expression::IdentifierReference(
+                    IdentifierReference::Value("a".into()),
+                )))),
+            })),
+        }))]);
+        no_errors(&result);
+        let sec = &result.bytecode.sections[0];
+        // [0] Jump{to:3}  [1] PushCopy{-1}  [2] Return{-1}  [3] MakeLambda{proto:0,cap:0}
+        // [4] EndOfExecutionHead
+        assert!(matches!(sec.instructions[0], Instruction::Jump { to: 3, .. }));
+        assert_eq!(sec.instructions[1], Instruction::PushCopy { stack_delta: -1 });
+        assert_eq!(sec.instructions[2], Instruction::Return { stack_delta: -1 });
+        assert_eq!(
+            sec.instructions[3],
+            Instruction::MakeLambda { prototype_index: 0, capture_count: 0 },
+        );
+        assert_eq!(sec.instructions[4], Instruction::EndOfExecutionHead);
+        assert_eq!(sec.lambda_prototypes.len(), 1);
+        assert_eq!(sec.lambda_prototypes[0].required_args, 1);
+        assert_eq!(sec.lambda_prototypes[0].default_arg_count, 0);
+        assert_eq!(sec.lambda_prototypes[0].ip, 1);
     }
 
 }
