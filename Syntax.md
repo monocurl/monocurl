@@ -151,10 +151,10 @@ play Lerp
 ## Mesh
 mostly same as is, except declared with mesh keyword instead of tree
 ```monocurl 
-mesh x = {}
+mesh x = []
 play Set()
 mesh y = Circle(0, 1)
-play {slow(0.5) Set()}
+play [slow{0.5} Set()]
 play wait(1)
 ```
 
@@ -168,8 +168,8 @@ let x = |&reference_var, args| anim {
 
 play x(reference_var, 12)
 # equivalent to below
-play {x}
-play {x, y}
+play [x]
+play [x, y]
 ```
 
 parallel animations may cause contention,

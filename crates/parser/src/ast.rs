@@ -257,7 +257,6 @@ pub struct IdentifierDeclaration(pub String);
 #[derive(Debug, Clone, PartialEq)]
 pub enum IdentifierReference {
     Value(String),
-    Reference(String),
     Stateful(String),
     Dereference(String)
 }

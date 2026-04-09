@@ -30,6 +30,7 @@ pub struct CompileResult {
 enum VariableType {
     Let,
     Var,
+    Reference,
     State,
     Param,
     Mesh,
@@ -40,12 +41,13 @@ struct Symbol {
     name: String,
     stack_position: usize,
     var_type: VariableType,
+    captured: bool,
 }
 
 #[derive(Clone)]
 struct Scope {
     base_stack_depth: usize,
-    symbols: Vec<Symbol>,
+    symbols: HashMap<String, Symbol>,
 }
 
 struct LoopContext {
@@ -62,10 +64,6 @@ struct CompilerFrame {
     stack_depth: usize,
     loop_contexts: Vec<LoopContext>,
 }
-
-// ---------------------------------------------------------------------------
-// free variable analysis
-// ---------------------------------------------------------------------------
 
 struct FreeVarCollector {
     defined: HashSet<String>,
@@ -196,7 +194,6 @@ impl FreeVarCollector {
 fn ident_ref_name(ir: &IdentifierReference) -> &str {
     match ir {
         IdentifierReference::Value(n)
-        | IdentifierReference::Reference(n)
         | IdentifierReference::Stateful(n)
         | IdentifierReference::Dereference(n) => n,
     }
@@ -206,8 +203,8 @@ fn ident_ref_name(ir: &IdentifierReference) -> &str {
 fn is_stateful(expr: &Expression) -> bool {
     match expr {
         Expression::IdentifierReference(IdentifierReference::Stateful(_)) => true,
-        Expression::IdentifierReference(IdentifierReference::Dereference(_)) => false,
-        Expression::IdentifierReference(_) | Expression::Literal(_) => false,
+        Expression::IdentifierReference(_) => false,
+        Expression::Literal(_) => false,
         Expression::BinaryOperator(b) => is_stateful(&b.lhs.1) || is_stateful(&b.rhs.1),
         Expression::UnaryPreOperator(u) => is_stateful(&u.operand.1),
         Expression::Subscript(s) => is_stateful(&s.base.1) || is_stateful(&s.index.1),
@@ -248,9 +245,7 @@ struct Compiler {
     sections: Vec<SectionBytecode>,
     current_section: SectionBytecode,
     errors: Vec<CompileError>,
-    // per-bundle (indexed by position in the bundles slice): exported symbols
-    bundle_exports: Vec<Vec<Symbol>>,
-    // per-bundle: stack depth after all persistent declarations
+    bundle_exports: Vec<HashMap<String, Symbol>>,
     bundle_stack_end: Vec<usize>,
 }
 
@@ -262,14 +257,14 @@ impl Compiler {
     fn new(bundle_count: usize) -> Self {
         Self {
             frames: vec![CompilerFrame {
-                scopes: vec![Scope { base_stack_depth: 0, symbols: Vec::new() }],
+                scopes: vec![Scope { base_stack_depth: 0, symbols: HashMap::new() }],
                 stack_depth: 0,
                 loop_contexts: Vec::new(),
             }],
             sections: Vec::new(),
             current_section: default_section(),
             errors: Vec::new(),
-            bundle_exports: vec![Vec::new(); bundle_count],
+            bundle_exports: vec![HashMap::new(); bundle_count],
             bundle_stack_end: vec![0; bundle_count],
         }
     }
@@ -289,23 +284,23 @@ pub fn compile(bundles: &[Rc<SectionBundle>]) -> CompileResult {
 
 impl Compiler {
     fn compile_bundle(&mut self, bundle: &SectionBundle) {
-        // collect symbols and starting depth from imported bundles.
-        // imported_files are processed in order; later entries shadow earlier ones
-        // (lookup searches symbols in reverse, so last-added wins).
-        let mut base_symbols: Vec<Symbol> = Vec::new();
+        // imported symbols are treated as `let` — cross-bundle mutation is not allowed
+        let mut base_symbols: HashMap<String, Symbol> = HashMap::new();
         let base_depth = bundle
             .imported_files
             .iter()
             .map(|p| {
-                for sym in &self.bundle_exports[*p] {
-                    base_symbols.push(sym.clone());
+                for sym in self.bundle_exports[*p].values() {
+                    base_symbols.insert(sym.name.clone(), Symbol {
+                        var_type: VariableType::Let,
+                        ..sym.clone()
+                    });
                 }
                 self.bundle_stack_end[*p]
             })
             .max()
             .unwrap_or(0);
 
-        // reset frame with import scope
         self.frame_mut().scopes = vec![Scope { base_stack_depth: 0, symbols: base_symbols }];
         self.frame_mut().stack_depth = base_depth;
 
@@ -313,12 +308,11 @@ impl Compiler {
             self.compile_section(section);
         }
 
-        // record this bundle's exports for future importers
         self.bundle_exports[bundle.file_index] = self
             .frame()
             .scopes
             .iter()
-            .flat_map(|s| s.symbols.iter().cloned())
+            .flat_map(|s| s.symbols.iter().map(|(k, v)| (k.clone(), v.clone())))
             .collect();
         self.bundle_stack_end[bundle.file_index] = self.stack_depth();
     }
@@ -332,7 +326,7 @@ impl Compiler {
             is_stdlib: section.section_type == SectionType::StandardLibrary,
             is_library: matches!(
                 section.section_type,
-                SectionType::UserLibrary | SectionType::StandardLibrary
+                SectionType::UserLibrary
             ),
         });
         // symbols declared here land in the current top scope (no push/pop)
@@ -408,7 +402,7 @@ impl Compiler {
 
     fn push_scope(&mut self) {
         let base = self.stack_depth();
-        self.frame_mut().scopes.push(Scope { base_stack_depth: base, symbols: Vec::new() });
+        self.frame_mut().scopes.push(Scope { base_stack_depth: base, symbols: HashMap::new() });
     }
 
     fn pop_scope(&mut self, span: Span8) {
@@ -417,31 +411,25 @@ impl Compiler {
         self.emit_pops(to_pop, span);
     }
 
-    // register TOS as a named symbol
     fn define_symbol(&mut self, name: &str, var_type: VariableType) {
         let position = self.stack_depth() - 1;
-        self.frame_mut().scopes.last_mut().unwrap().symbols.push(Symbol {
-            name: name.to_string(),
-            stack_position: position,
-            var_type,
-        });
+        self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
+            name.to_string(),
+            Symbol { name: name.to_string(), stack_position: position, var_type, captured: false },
+        );
     }
 
-    // register a symbol at an explicit position (captures / args)
-    fn register_symbol(&mut self, name: &str, var_type: VariableType, position: usize) {
-        self.frame_mut().scopes.last_mut().unwrap().symbols.push(Symbol {
-            name: name.to_string(),
-            stack_position: position,
-            var_type,
-        });
+    fn register_symbol(&mut self, name: &str, var_type: VariableType, position: usize, captured: bool) {
+        self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
+            name.to_string(),
+            Symbol { name: name.to_string(), stack_position: position, var_type, captured },
+        );
     }
 
     fn lookup(&self, name: &str) -> Option<&Symbol> {
         for scope in self.frame().scopes.iter().rev() {
-            for sym in scope.symbols.iter().rev() {
-                if sym.name == name {
-                    return Some(sym);
-                }
+            if let Some(sym) = scope.symbols.get(name) {
+                return Some(sym);
             }
         }
         None
@@ -449,7 +437,7 @@ impl Compiler {
 
     fn push_frame(&mut self) {
         self.frames.push(CompilerFrame {
-            scopes: vec![Scope { base_stack_depth: 0, symbols: Vec::new() }],
+            scopes: vec![Scope { base_stack_depth: 0, symbols: HashMap::new() }],
             stack_depth: 0,
             loop_contexts: Vec::new(),
         });
@@ -817,27 +805,19 @@ impl Compiler {
         let delta = self.stack_delta(sym.stack_position);
 
         match ir {
-            IdentifierReference::Value(_) if mutable => {
-                if sym.var_type == VariableType::Let {
+            IdentifierReference::Value(_) => {
+                if mutable && sym.var_type == VariableType::Let {
                     self.error(span.clone(), format!("cannot mutate let '{}'", name));
                 }
+
                 let instr = match sym.var_type {
+                    // try to do lvalue even if non mutable, since it might actually be mutable in the case that we're passing to a reference parameter
                     VariableType::Mesh => Instruction::PushMeshLvalue { stack_delta: delta },
                     VariableType::State => Instruction::PushStateLvalue { stack_delta: delta },
                     VariableType::Param => Instruction::PushParamLvalue { stack_delta: delta },
-                    _ => Instruction::PushLvalue { stack_delta: delta },
-                };
-                self.emit_push(instr, span.clone());
-            }
-            IdentifierReference::Value(_) => {
-                self.emit_push(Instruction::PushCopy { stack_delta: delta }, span.clone());
-            }
-            IdentifierReference::Reference(_) => {
-                let instr = match sym.var_type {
-                    VariableType::Mesh => Instruction::PushMeshLvalue { stack_delta: delta },
-                    VariableType::State => Instruction::PushStateLvalue { stack_delta: delta },
-                    VariableType::Param => Instruction::PushParamLvalue { stack_delta: delta },
-                    _ => Instruction::PushLvalue { stack_delta: delta },
+                    VariableType::Var => Instruction::PushLvalue { stack_delta: delta },
+                    // these two are explicitly copy only, irrespective of context. Let and mutable will result in an error
+                    VariableType::Reference | VariableType::Let => Instruction::PushCopy { stack_delta: delta }
                 };
                 self.emit_push(instr, span.clone());
             }
@@ -1115,6 +1095,25 @@ impl Compiler {
     fn compile_lambda(&mut self, l: &LambdaDefinition, span: &Span8) {
         let captures = self.compute_lambda_captures(l);
 
+        for cap in &captures {
+            if cap.var_type != VariableType::Let {
+                self.error(
+                    span.clone(),
+                    "to make capture semantics clear, lambdas can only reference \"let\" variables",
+                );
+            }
+        }
+
+        let mut saw_default = false;
+        for arg in &l.args {
+            if arg.default_value.is_some() {
+                saw_default = true;
+            } else if saw_default {
+                self.error(span.clone(), "required arguments must come before default arguments");
+                break;
+            }
+        }
+
         let jump_idx = self.instruction_pointer();
         self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
 
@@ -1122,27 +1121,20 @@ impl Compiler {
         self.push_frame();
 
         for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), i);
+            self.register_symbol(&cap.name, cap.var_type.clone(), i, true);
         }
         let cap_count = captures.len();
 
         let mut required_args: u8 = 0;
-        let mut ref_prefix: u8 = 0;
-        let mut counting_refs = true;
         let mut default_count: u8 = 0;
 
         for (i, arg) in l.args.iter().enumerate() {
-            let vt = if arg.must_be_reference { VariableType::Var } else { VariableType::Let };
-            self.register_symbol(&arg.identifier.1.0, vt, cap_count + i);
+            let vt = if arg.must_be_reference { VariableType::Reference } else { VariableType::Let };
+            self.register_symbol(&arg.identifier.1.0, vt, cap_count + i, false);
             if arg.default_value.is_some() {
                 default_count += 1;
             } else {
                 required_args += 1;
-            }
-            if counting_refs && arg.must_be_reference {
-                ref_prefix += 1;
-            } else {
-                counting_refs = false;
             }
         }
         self.frame_mut().stack_depth = cap_count + l.args.len();
@@ -1176,7 +1168,6 @@ impl Compiler {
             section: self.section_index(),
             ip: body_ip,
             required_args,
-            reference_arg_prefix: ref_prefix,
             default_arg_count: default_count,
         });
 
@@ -1201,7 +1192,8 @@ impl Compiler {
         let body_ip = self.instruction_pointer();
         self.push_frame();
         for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), i);
+            // captured vars are read-only inside a block regardless of their outer type
+            self.register_symbol(&cap.name, VariableType::Let, i, true);
         }
         self.frame_mut().stack_depth = captures.len();
         self.compile_block_body(&b.body, span);
@@ -1219,7 +1211,6 @@ impl Compiler {
             section: self.section_index(),
             ip: body_ip,
             required_args: 0,
-            reference_arg_prefix: 0,
             default_arg_count: 0,
         });
 
@@ -1241,13 +1232,22 @@ impl Compiler {
     fn compile_anim(&mut self, a: &Anim, span: &Span8) {
         let captures = self.compute_block_captures(&a.body);
 
+        for cap in &captures {
+            if cap.var_type != VariableType::Let {
+                self.error(
+                    span.clone(),
+                    "to make capture semantics clear, lambdas can only reference \"let\" variables",
+                );
+            }
+        }
+
         let jump_idx = self.instruction_pointer();
         self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
 
         let body_ip = self.instruction_pointer();
         self.push_frame();
         for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), i);
+            self.register_symbol(&cap.name, cap.var_type.clone(), i, true);
         }
         self.frame_mut().stack_depth = captures.len();
 
@@ -1312,4 +1312,372 @@ impl Compiler {
         let free = free_vars_stmts(stmts, HashSet::from(["_".to_string()]));
         self.resolve_captures(&free)
     }
+}
+
+#[cfg(test)]
+mod test {
+    use std::path::PathBuf;
+    use std::rc::Rc;
+
+    use bytecode::Instruction;
+    use lexer::lexer::Lexer;
+    use lexer::token::Token;
+    use parser::ast::{
+        BinaryOperator, BinaryOperatorType, Declaration, Expression, IdentifierDeclaration,
+        IdentifierReference, LambdaArg, LambdaBody, LambdaDefinition, Literal, Section, SectionBundle,
+        SectionType, Statement, VariableType,
+    };
+    use structs::rope::Rope;
+    use structs::text::Span8;
+
+    use crate::{compile, CompileResult};
+
+    fn empty_span() -> Span8 {
+        0..0
+    }
+
+    fn s<T>(v: T) -> (Span8, T) {
+        (empty_span(), v)
+    }
+
+    fn sb<T>(v: T) -> (Span8, Box<T>) {
+        (empty_span(), Box::new(v))
+    }
+
+    fn make_bundle(stmts: Vec<(Span8, Statement)>, section_type: SectionType) -> Rc<SectionBundle> {
+        Rc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section { body: stmts, section_type }],
+        })
+    }
+
+    fn compile_stmts(stmts: Vec<(Span8, Statement)>) -> CompileResult {
+        compile(&[make_bundle(stmts, SectionType::Slide)])
+    }
+
+    fn lex(src: &str) -> Vec<(Token, Span8)> {
+        Lexer::token_stream(src.chars())
+            .into_iter()
+            .filter(|(t, _)| t != &Token::Whitespace && t != &Token::Comment)
+            .collect()
+    }
+
+    fn parse_stmts(src: &str) -> Vec<(Span8, Statement)> {
+        use parser::parser::SectionParser;
+
+        let tokens = lex(src);
+        let text_rope = Rope::from_str(src);
+        let mut parser = SectionParser::new(tokens, text_rope, SectionType::Slide, None, None);
+        parser.parse_statement_list()
+    }
+
+    fn compile_src(src: &str) -> CompileResult {
+        compile_stmts(parse_stmts(src))
+    }
+
+    fn has_error(result: &CompileResult, fragment: &str) -> bool {
+        result.errors.iter().any(|e| e.message.contains(fragment))
+    }
+
+    fn no_errors(result: &CompileResult) {
+        if !result.errors.is_empty() {
+            let msgs: Vec<_> = result.errors.iter().map(|e| e.message.as_str()).collect();
+            panic!("expected no errors, got: {:?}", msgs);
+        }
+    }
+
+    // -- pure compiler (AST) tests --
+
+    #[test]
+    fn test_let_int_decl() {
+        let stmts = vec![s(Statement::Declaration(Declaration {
+            var_type: VariableType::Let,
+            identifier: s(IdentifierDeclaration("x".into())),
+            value: s(Expression::Literal(Literal::Int(42))),
+        }))];
+        let result = compile_stmts(stmts);
+        no_errors(&result);
+        let section = &result.bytecode.sections[0];
+        assert!(section.instructions.iter().any(|i| matches!(i, Instruction::PushInt { .. })));
+    }
+
+    #[test]
+    fn test_let_mutation_error() {
+        // let x = 1; x = 2  — should error
+        let stmts = vec![
+            s(Statement::Declaration(Declaration {
+                var_type: VariableType::Let,
+                identifier: s(IdentifierDeclaration("x".into())),
+                value: s(Expression::Literal(Literal::Int(1))),
+            })),
+            s(Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                op_type: BinaryOperatorType::Assign,
+                lhs: sb(Expression::IdentifierReference(IdentifierReference::Value("x".into()))),
+                rhs: sb(Expression::Literal(Literal::Int(2))),
+            }))),
+        ];
+        let result = compile_stmts(stmts);
+        assert!(has_error(&result, "cannot mutate let"), "expected let mutation error");
+    }
+
+    #[test]
+    fn test_undefined_variable_error() {
+        let stmts = vec![s(Statement::Expression(Expression::IdentifierReference(
+            IdentifierReference::Value("notdefined".into()),
+        )))];
+        let result = compile_stmts(stmts);
+        assert!(has_error(&result, "undefined variable"), "expected undefined variable error");
+    }
+
+    #[test]
+    fn test_break_outside_loop_error() {
+        let result = compile_stmts(vec![s(Statement::Break)]);
+        assert!(has_error(&result, "break outside loop"));
+    }
+
+    #[test]
+    fn test_continue_outside_loop_error() {
+        let result = compile_stmts(vec![s(Statement::Continue)]);
+        assert!(has_error(&result, "continue outside loop"));
+    }
+
+    #[test]
+    fn test_lambda_capture_non_let_error() {
+        // var x = 1; let f = |-> x  — lambda captures non-let var
+        let stmts = vec![
+            s(Statement::Declaration(Declaration {
+                var_type: VariableType::Var,
+                identifier: s(IdentifierDeclaration("x".into())),
+                value: s(Expression::Literal(Literal::Int(1))),
+            })),
+            s(Statement::Declaration(Declaration {
+                var_type: VariableType::Let,
+                identifier: s(IdentifierDeclaration("f".into())),
+                value: s(Expression::LambdaDefinition(LambdaDefinition {
+                    args: vec![],
+                    body: s(LambdaBody::Inline(Box::new(Expression::IdentifierReference(
+                        IdentifierReference::Value("x".into()),
+                    )))),
+                })),
+            })),
+        ];
+        let result = compile_stmts(stmts);
+        assert!(has_error(&result, "lambdas can only reference"), "expected capture-must-be-let error");
+    }
+
+    #[test]
+    fn test_lambda_capture_let_ok() {
+        // let x = 1; let f = |-> x  — should be fine
+        let stmts = vec![
+            s(Statement::Declaration(Declaration {
+                var_type: VariableType::Let,
+                identifier: s(IdentifierDeclaration("x".into())),
+                value: s(Expression::Literal(Literal::Int(1))),
+            })),
+            s(Statement::Declaration(Declaration {
+                var_type: VariableType::Let,
+                identifier: s(IdentifierDeclaration("f".into())),
+                value: s(Expression::LambdaDefinition(LambdaDefinition {
+                    args: vec![],
+                    body: s(LambdaBody::Inline(Box::new(Expression::IdentifierReference(
+                        IdentifierReference::Value("x".into()),
+                    )))),
+                })),
+            })),
+        ];
+        no_errors(&compile_stmts(stmts));
+    }
+
+    #[test]
+    fn test_default_args_must_be_suffix() {
+        // |a = 1, b| b  — required arg after default arg → error
+        let stmts = vec![s(Statement::Expression(Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![
+                LambdaArg {
+                    identifier: s(IdentifierDeclaration("a".into())),
+                    default_value: Some(s(Expression::Literal(Literal::Int(1)))),
+                    must_be_reference: false,
+                },
+                LambdaArg {
+                    identifier: s(IdentifierDeclaration("b".into())),
+                    default_value: None,
+                    must_be_reference: false,
+                },
+            ],
+            body: s(LambdaBody::Inline(Box::new(Expression::IdentifierReference(
+                IdentifierReference::Value("b".into()),
+            )))),
+        })))];
+        let result = compile_stmts(stmts);
+        assert!(
+            has_error(&result, "required arguments must come before default arguments"),
+            "expected default-arg suffix error"
+        );
+    }
+
+    #[test]
+    fn test_default_args_valid_suffix() {
+        // |a, b = 1| a  — correct ordering, no error
+        let stmts = vec![s(Statement::Expression(Expression::LambdaDefinition(LambdaDefinition {
+            args: vec![
+                LambdaArg {
+                    identifier: s(IdentifierDeclaration("a".into())),
+                    default_value: None,
+                    must_be_reference: false,
+                },
+                LambdaArg {
+                    identifier: s(IdentifierDeclaration("b".into())),
+                    default_value: Some(s(Expression::Literal(Literal::Int(1)))),
+                    must_be_reference: false,
+                },
+            ],
+            body: s(LambdaBody::Inline(Box::new(Expression::IdentifierReference(
+                IdentifierReference::Value("a".into()),
+            )))),
+        })))];
+        no_errors(&compile_stmts(stmts));
+    }
+
+    // -- cross-bundle import tests --
+
+    #[test]
+    fn test_cross_bundle_symbol_visible() {
+        // bundle 0 defines `x`; bundle 1 imports it and reads it — no error
+        let bundle0 = Rc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section {
+                body: vec![s(Statement::Declaration(Declaration {
+                    var_type: VariableType::Let,
+                    identifier: s(IdentifierDeclaration("x".into())),
+                    value: s(Expression::Literal(Literal::Int(7))),
+                }))],
+                section_type: SectionType::UserLibrary,
+            }],
+        });
+        let bundle1 = Rc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 1,
+            imported_files: vec![0],
+            sections: vec![Section {
+                body: vec![s(Statement::Expression(Expression::IdentifierReference(
+                    IdentifierReference::Value("x".into()),
+                )))],
+                section_type: SectionType::Slide,
+            }],
+        });
+        no_errors(&compile(&[bundle0, bundle1]));
+    }
+
+    #[test]
+    fn test_cross_bundle_symbol_is_let() {
+        // bundle 0 defines `var x`; bundle 1 imports it and tries to assign — error
+        let bundle0 = Rc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section {
+                body: vec![s(Statement::Declaration(Declaration {
+                    var_type: VariableType::Var,
+                    identifier: s(IdentifierDeclaration("x".into())),
+                    value: s(Expression::Literal(Literal::Int(0))),
+                }))],
+                section_type: SectionType::UserLibrary,
+            }],
+        });
+        let bundle1 = Rc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 1,
+            imported_files: vec![0],
+            sections: vec![Section {
+                body: vec![s(Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                    op_type: BinaryOperatorType::Assign,
+                    lhs: sb(Expression::IdentifierReference(IdentifierReference::Value("x".into()))),
+                    rhs: sb(Expression::Literal(Literal::Int(1))),
+                })))],
+                section_type: SectionType::Slide,
+            }],
+        });
+        let result = compile(&[bundle0, bundle1]);
+        assert!(has_error(&result, "cannot mutate let"), "imported var should become let");
+    }
+
+    #[test]
+    fn test_integration_arithmetic() {
+        no_errors(&compile_src("let x = 1 + 2 * 3"));
+    }
+
+    #[test]
+    fn test_integration_while_loop() {
+        no_errors(&compile_src("var i = 0\nwhile i < 10 {\n    i = i + 1\n}"));
+    }
+
+    #[test]
+    fn test_integration_for_loop() {
+        // vector literal uses [] in Monocurl
+        no_errors(&compile_src("let xs = [1, 2, 3]\nfor x in xs {\n}"));
+    }
+
+    #[test]
+    fn test_integration_if_else() {
+        no_errors(&compile_src("let x = 1\nif x == 1 {\n} else {\n}"));
+    }
+
+    #[test]
+    fn test_integration_lambda_definition_and_call() {
+        no_errors(&compile_src("let f = |a, b| a + b\nlet y = f(1, 2)"));
+    }
+
+    #[test]
+    fn test_integration_short_circuit_and() {
+        // compile a && — the result is computed but we just check no errors and
+        // that a ConditionalJump was emitted somewhere in the main section
+        // Monocurl uses keyword `and` not `&&`
+        let result = compile_src("let z = 1 and 0");
+        no_errors(&result);
+        let has_cj = result
+            .bytecode
+            .sections
+            .iter()
+            .any(|sec| sec.instructions.iter().any(|i| matches!(i, Instruction::ConditionalJump { .. })));
+        assert!(has_cj, "expected ConditionalJump in bytecode for 'and'");
+    }
+
+    #[test]
+    fn test_integration_short_circuit_or() {
+        // Monocurl uses keyword `or` not `||`
+        let result = compile_src("let z = 0 or 1");
+        no_errors(&result);
+        let has_cj = result
+            .bytecode
+            .sections
+            .iter()
+            .any(|sec| sec.instructions.iter().any(|i| matches!(i, Instruction::ConditionalJump { .. })));
+        assert!(has_cj, "expected ConditionalJump in bytecode for 'or'");
+    }
+
+    #[test]
+    fn test_integration_nested_vector() {
+        // [] for vectors in Monocurl
+        no_errors(&compile_src("let v = [1, [2, 3], 4]"));
+    }
+
+    #[test]
+    fn test_integration_map_literal() {
+        // [:] map syntax in Monocurl
+        no_errors(&compile_src(r#"let m = ["a": 1, "b": 2]"#));
+    }
+
+    #[test]
+    fn test_integration_default_arg_ordering_error() {
+        let result = compile_src("let f = |a = 1, b| b");
+        assert!(
+            has_error(&result, "required arguments must come before default arguments"),
+            "expected default-arg suffix error from parser-produced AST"
+        );
+    }
+
 }

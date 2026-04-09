@@ -4,7 +4,6 @@ pub struct LambdaPrototype {
     pub section: u16,
     pub ip: u32,
     pub required_args: u8,
-    pub reference_arg_prefix: u8,
     pub default_arg_count: u8,
 }
 

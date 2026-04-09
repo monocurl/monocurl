@@ -1025,20 +1025,15 @@ impl SectionParser {
                 let str: String = self.text_rope.iterator_range(span.clone()).collect();
                 (span, Expression::IdentifierReference(IdentifierReference::Value(str)))
             },
-            ExactPred(Token::Reference) => {
-                let base_span = self.advance_token();
-                let (full_span, str) = self.read_pure_identifier();
-                (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
-            },
             ExactPred(Token::StatefulReference) => {
                 let base_span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier();
-                (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
+                (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Stateful(str)))
             },
             ExactPred(Token::Multiply) => {
                 let base_span = self.advance_token();
                 let (full_span, str) = self.read_pure_identifier();
-                (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Reference(str)))
+                (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::Dereference(str)))
             },
             /* operator definition */
             ExactPred(Token::Operator) => {
@@ -1934,24 +1929,18 @@ mod test {
         assert_eq!(result.1, expected);
     }
 
-    #[test]
-    fn test_reference() {
-        let result = parse_expr_test("&bar");
-        let expected = Expression::IdentifierReference(IdentifierReference::Reference("bar".to_string()));
-        assert_eq!(result.1, expected);
-    }
 
     #[test]
     fn test_stateful_reference() {
         let result = parse_expr_test("$state_var");
-        let expected = Expression::IdentifierReference(IdentifierReference::Reference("state_var".to_string()));
+        let expected = Expression::IdentifierReference(IdentifierReference::Stateful("state_var".to_string()));
         assert_eq!(result.1, expected);
     }
 
     #[test]
     fn test_dereference() {
         let result = parse_expr_test("*ptr");
-        let expected = Expression::IdentifierReference(IdentifierReference::Reference("ptr".to_string()));
+        let expected = Expression::IdentifierReference(IdentifierReference::Dereference("ptr".to_string()));
         assert_eq!(result.1, expected);
     }
 
