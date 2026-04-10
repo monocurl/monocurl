@@ -548,6 +548,10 @@ impl TextualState {
 }
 
 impl TextualState {
+    pub fn text_rope(&self) -> &Rope<TextAggregate> {
+        &self.text_rope
+    }
+
     pub fn lex_rope(&self) -> &Rope<Attribute<LexData>> {
         &self.lex_rope
     }

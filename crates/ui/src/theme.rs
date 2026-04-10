@@ -116,7 +116,7 @@ pub struct TextEditorStyles {
 impl Default for TextEditorStyles {
     fn default() -> Self {
         Self {
-            bg_color: gpui::hsla(0.61, 0.23, 0.95, 1.0),
+            bg_color: gpui::hsla(0.61, 0.23, 0.9, 1.0),
             text_font: gpui::font(FontSet::MONOSPACE),
             italic_text_font: gpui::font(FontSet::MONOSPACE).italic(),
 

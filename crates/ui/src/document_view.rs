@@ -1,9 +1,10 @@
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use gpui::*;
+use structs::rope::{Attribute, Rope, TextAggregate};
 use ui_cli_shared::doc_type::DocumentType;
 
-use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor}, components::split_pane::Split, editor::editor_view::Editor, navbar_view::Navbar, services::{ServiceManager}, state::{document_state::DocumentState, window_state::WindowState}, theme::ColorSet, timeline::timeline_view::Timeline, viewport::viewport_view::Viewport};
+use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor}, components::split_pane::Split, editor::editor_view::Editor, navbar_view::Navbar, services::ServiceManager, state::{document_state::DocumentState, textual_state::LexData, window_state::{ActiveScreen, WindowState}}, theme::ColorSet, timeline::timeline_view::Timeline, viewport::viewport_view::Viewport};
 
 
 pub fn init(cx: &mut App) {
@@ -55,8 +56,8 @@ pub struct DocumentView {
     is_presenting: bool,
 
     dirty: Entity<bool>,
-    _state: DocumentState,
-    _services: Entity<ServiceManager>,
+    state: DocumentState,
+    services: Entity<ServiceManager>,
     window_state: WeakEntity<WindowState>,
 
     navbar: Entity<Navbar>,
@@ -158,8 +159,9 @@ impl DocumentView {
         });
 
         self.window_state.upgrade().inspect(|ws| {
-            ws.update(cx, |state, _cx| {
+            ws.update(cx, |state, cx| {
                 state.set_user_path(&self.internal_path, path.clone());
+                self.on_imports_may_have_changed(state, cx);
             })
         });
 
@@ -220,7 +222,33 @@ impl DocumentView {
 }
 
 impl DocumentView {
-    pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>, window_state: WeakEntity<WindowState>, dirty: Entity<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn get_live_ropes(&self, window_state: &WindowState, cx: &App) -> HashMap<PathBuf, (Rope<Attribute<LexData>>, Rope<TextAggregate>)> {
+        let mut ret = HashMap::new();
+        for doc in window_state.open_documents() {
+            if &doc.internal_path != &self.internal_path && let Some(ref physical) = doc.user_path {
+                let state = doc.view.read(cx).state.textual_state.read(cx);
+                let text_rope = state.text_rope().clone();
+                let lex_rope = state.lex_rope().clone();
+                ret.insert(physical.clone(), (lex_rope, text_rope));
+            }
+        }
+        return ret;
+    }
+}
+
+impl DocumentView {
+    // initialize once window_state can be read
+    // basically, the listener for active screen will not be called for the first screen
+    // so this gets around that
+    pub fn on_imports_may_have_changed(&self, window_state: &WindowState, cx: &mut App) {
+        let live_ropes = self.get_live_ropes(window_state, cx);
+
+        self.services.update(cx, |services, _| {
+            services.invalidate_dependencies(self.user_path.clone(), live_ropes);
+        });
+    }
+
+    pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>,  window_state: WeakEntity<WindowState>, dirty: Entity<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // note that text editor is responsible for initially bootstrapping the content
         let state = DocumentState::new(cx);
         // connects everything together
@@ -230,9 +258,24 @@ impl DocumentView {
         let viewport = cx.new(|cx| Viewport::new(cx));
         let timeline = cx.new(|cx| Timeline::new(cx));
 
+        // whenever we switch over to here, we recompute the live dependencies cache
+        let virtual_path = internal_path.clone();
+        let services_clone = services.clone();
+        let window_state_up = window_state.upgrade().unwrap();
+        cx.observe(&window_state_up, move |dv, ws, cx| {
+            ws.update(cx, |window_state, cx| {
+                if let ActiveScreen::Document(doc) = &window_state.screen {
+                    if doc.internal_path == virtual_path {
+                        dv.on_imports_may_have_changed(window_state, cx);
+                    }
+                }
+            });
+        }).detach();
+
         dirty.update(cx, |dirty, _| {
             *dirty = dirty_file(&internal_path, &user_path);
         });
+
         Self {
             internal_path,
             user_path,
@@ -240,8 +283,8 @@ impl DocumentView {
             is_presenting: false,
             dirty,
             window_state: window_state.clone(),
-            _state: state,
-            _services: services,
+            state: state,
+            services: services,
             navbar: cx.new(move |cx| Navbar::new(window_state, cx)),
             editor: editor.clone(),
             viewport: viewport.clone(),

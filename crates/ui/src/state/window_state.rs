@@ -1,7 +1,8 @@
-use std::path::{PathBuf};
+use std::{path::PathBuf, time::Duration};
 
 use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle, Window};
 use serde::{Deserialize, Serialize};
+use smol::Timer;
 use ui_cli_shared::doc_type::DocumentType;
 
 use crate::document_view::{DocumentView, OpenDocument};
@@ -105,13 +106,37 @@ impl WindowState {
             };
 
             let recently_opened = state.recently_opened;
-
-            Some(WindowState {
+            let ret = WindowState {
                 screen,
                 recently_opened,
                 open_documents,
                 navbar_scroll: ScrollHandle::new(),
-            })
+            };
+
+            // mark initial open document if applicable
+            // this is hacky, but basically wait a second or so
+            // to let the lexer of the others catch up
+            // TODO: might just be better to relex each time a tab is changed?
+            cx.spawn(async move |weak, cx| {
+                Timer::after(Duration::from_millis(100)).await;
+                let Some(strong) = weak.upgrade() else {
+                    return;
+                };
+                cx.update_entity(&strong, |state, cx| {
+                    if let ActiveScreen::Document(doc) = &state.screen {
+                        for open in &state.open_documents {
+                            if open.internal_path == doc.internal_path {
+                                open.view.update(cx, |view, cx| {
+                                    view.on_imports_may_have_changed(&state, cx);
+                                });
+                                break;
+                            }
+                        }
+                    }
+                }).ok();
+            }).detach();
+
+            Some(ret)
         }
         else {
             None

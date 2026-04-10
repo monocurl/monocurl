@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use bytecode::{
     AnimPrototype, Bytecode, Instruction, InstructionAnnotation, LambdaPrototype, SectionBytecode,
@@ -20,9 +20,16 @@ pub struct CompileError {
     pub message: String,
 }
 
+// pub struct KnownLambda {
+//     pub name: String,
+//     pub free_vars: Vec<String>,
+//     pub prototype_index: u32,
+// }
+
 pub struct CompileResult {
     pub bytecode: Bytecode,
     pub errors: Vec<CompileError>,
+    // pub known_lambdas:
 }
 
 
@@ -41,7 +48,6 @@ struct Symbol {
     name: String,
     stack_position: usize,
     var_type: VariableType,
-    captured: bool,
 }
 
 #[derive(Clone)]
@@ -247,6 +253,8 @@ struct Compiler {
     errors: Vec<CompileError>,
     bundle_exports: Vec<HashMap<String, Symbol>>,
     bundle_stack_end: Vec<usize>,
+
+    root_import_span: Option<Span8>,
 }
 
 fn default_section() -> SectionBytecode {
@@ -266,6 +274,7 @@ impl Compiler {
             errors: Vec::new(),
             bundle_exports: vec![HashMap::new(); bundle_count],
             bundle_stack_end: vec![0; bundle_count],
+            root_import_span: None,
         }
     }
 
@@ -274,7 +283,7 @@ impl Compiler {
     }
 }
 
-pub fn compile(bundles: &[Rc<SectionBundle>]) -> CompileResult {
+pub fn compile(bundles: &[Arc<SectionBundle>]) -> CompileResult {
     let mut c = Compiler::new(bundles.len());
     for bundle in bundles {
         c.compile_bundle(bundle);
@@ -284,6 +293,8 @@ pub fn compile(bundles: &[Rc<SectionBundle>]) -> CompileResult {
 
 impl Compiler {
     fn compile_bundle(&mut self, bundle: &SectionBundle) {
+        self.root_import_span = bundle.root_import_span.clone();
+
         // imported symbols are treated as `let` — cross-bundle mutation is not allowed
         let mut base_symbols: HashMap<String, Symbol> = HashMap::new();
         let base_depth = bundle
@@ -416,14 +427,14 @@ impl Compiler {
         let position = self.stack_depth() - 1;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
-            Symbol { name: name.to_string(), stack_position: position, var_type, captured: false },
+            Symbol { name: name.to_string(), stack_position: position, var_type },
         );
     }
 
-    fn register_symbol(&mut self, name: &str, var_type: VariableType, position: usize, captured: bool) {
+    fn register_symbol(&mut self, name: &str, var_type: VariableType, position: usize) {
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
-            Symbol { name: name.to_string(), stack_position: position, var_type, captured },
+            Symbol { name: name.to_string(), stack_position: position, var_type },
         );
     }
 
@@ -483,7 +494,8 @@ impl Compiler {
     }
 
     fn error(&mut self, span: Span8, msg: impl Into<String>) {
-        self.errors.push(CompileError { span, message: msg.into() });
+        let real_span = self.root_import_span.clone().unwrap_or(span);
+        self.errors.push(CompileError { span: real_span, message: msg.into() });
     }
 }
 
@@ -804,12 +816,9 @@ impl Compiler {
 
                 let instr = match sym.var_type {
                     // try to do lvalue even if non mutable, since it might actually be mutable in the case that we're passing to a reference parameter
-                    VariableType::Mesh => Instruction::PushMeshLvalue { stack_delta: delta },
-                    VariableType::State => Instruction::PushStateLvalue { stack_delta: delta },
-                    VariableType::Param => Instruction::PushParamLvalue { stack_delta: delta },
-                    VariableType::Var => Instruction::PushLvalue { stack_delta: delta },
                     // these two are explicitly copy only, irrespective of context. Let and mutable will result in an error
-                    VariableType::Reference | VariableType::Let => Instruction::PushCopy { stack_delta: delta }
+                    VariableType::Reference | VariableType::Let => Instruction::PushCopy { stack_delta: delta },
+                    _ => Instruction::PushLvalue { stack_delta: delta },
                 };
                 self.emit_push(instr, span.clone());
             }
@@ -1091,7 +1100,7 @@ impl Compiler {
             if cap.var_type != VariableType::Let {
                 self.error(
                     span.clone(),
-                    "to make capture semantics clear, lambdas can only reference \"let\" variables",
+                    "to make capture semantics clear, lambdas can only reference \"let\" variables, but \"".to_string() + &cap.name + "\" is not a \"let\" variable",
                 );
             }
         }
@@ -1113,7 +1122,7 @@ impl Compiler {
         self.push_frame();
 
         for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), i, true);
+            self.register_symbol(&cap.name, cap.var_type.clone(), i);
         }
         let cap_count = captures.len();
 
@@ -1122,7 +1131,7 @@ impl Compiler {
 
         for (i, arg) in l.args.iter().enumerate() {
             let vt = if arg.must_be_reference { VariableType::Reference } else { VariableType::Let };
-            self.register_symbol(&arg.identifier.1.0, vt, cap_count + i, false);
+            self.register_symbol(&arg.identifier.1.0, vt, cap_count + i);
             if arg.default_value.is_some() {
                 default_count += 1;
             } else {
@@ -1184,7 +1193,7 @@ impl Compiler {
         self.push_frame();
         for (i, cap) in captures.iter().enumerate() {
             // captured vars are read-only inside a block regardless of their outer type
-            self.register_symbol(&cap.name, VariableType::Let, i, true);
+            self.register_symbol(&cap.name, VariableType::Let, i);
         }
         self.frame_mut().stack_depth = captures.len();
         self.compile_block_body(&b.body, span);
@@ -1237,7 +1246,7 @@ impl Compiler {
         let body_ip = self.instruction_pointer();
         self.push_frame();
         for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), i, true);
+            self.register_symbol(&cap.name, cap.var_type.clone(), i);
         }
         self.frame_mut().stack_depth = captures.len();
 
@@ -1306,8 +1315,7 @@ impl Compiler {
 
 #[cfg(test)]
 mod test {
-    use std::path::PathBuf;
-    use std::rc::Rc;
+    use std::{path::PathBuf, sync::Arc};
 
     use bytecode::Instruction;
     use lexer::lexer::Lexer;
@@ -1334,8 +1342,8 @@ mod test {
         (empty_span(), Box::new(v))
     }
 
-    fn make_bundle(stmts: Vec<(Span8, Statement)>, section_type: SectionType) -> Rc<SectionBundle> {
-        Rc::new(SectionBundle {
+    fn make_bundle(stmts: Vec<(Span8, Statement)>, section_type: SectionType) -> Arc<SectionBundle> {
+        Arc::new(SectionBundle {
             file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
@@ -1535,7 +1543,7 @@ mod test {
     #[test]
     fn test_cross_bundle_symbol_visible() {
         // bundle 0 defines `x`; bundle 1 imports it and reads it — no error
-        let bundle0 = Rc::new(SectionBundle {
+        let bundle0 = Arc::new(SectionBundle {
             file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
@@ -1548,7 +1556,7 @@ mod test {
                 section_type: SectionType::UserLibrary,
             }],
         });
-        let bundle1 = Rc::new(SectionBundle {
+        let bundle1 = Arc::new(SectionBundle {
             file_path: PathBuf::new(),
             file_index: 1,
             imported_files: vec![0],
@@ -1565,7 +1573,7 @@ mod test {
     #[test]
     fn test_cross_bundle_symbol_is_let() {
         // bundle 0 defines `var x`; bundle 1 imports it and tries to assign — error
-        let bundle0 = Rc::new(SectionBundle {
+        let bundle0 = Arc::new(SectionBundle {
             file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
@@ -1578,7 +1586,7 @@ mod test {
                 section_type: SectionType::UserLibrary,
             }],
         });
-        let bundle1 = Rc::new(SectionBundle {
+        let bundle1 = Arc::new(SectionBundle {
             file_path: PathBuf::new(),
             file_index: 1,
             imported_files: vec![0],

@@ -72,6 +72,7 @@ impl DocumentList {
                             cx.stop_propagation();
                             window.prevent_default();
                             wstate.close_tab(&ip, cx, window);
+                            cx.notify();
                         })
                     }))
             )
@@ -82,6 +83,7 @@ impl DocumentList {
                 let ip = ip.clone();
                 state.update(cx, move |wstate, cx| {
                     wstate.navigate_to(up.clone(), ip.clone(), statec, w, cx);
+                    cx.notify();
                 })
             }))
             .cursor_pointer()
@@ -157,8 +159,9 @@ impl Render for Navbar {
                             .child(
                                 link_button("Home",  cx.listener(|this, _, _, cx| {
                                     let state = this.window_state.upgrade().unwrap();
-                                    state.update(cx, |state, _| {
+                                    state.update(cx, |state, cx| {
                                         state.navigate_to_home();
+                                        cx.notify();
                                     })
                                 }))
                             )

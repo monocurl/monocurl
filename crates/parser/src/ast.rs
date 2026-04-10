@@ -20,10 +20,11 @@ impl SectionType {
 }
 
 pub struct SectionBundle {
-    pub file_path: PathBuf,
+    pub file_path: Option<PathBuf>,
     pub file_index: usize,
     pub imported_files: Vec<usize>,
-    pub sections: Vec<Section>
+    pub sections: Vec<Section>,
+    pub root_import_span: Option<Span8>,
 }
 
 // a singular slide / init phase / import module

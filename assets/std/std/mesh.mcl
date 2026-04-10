@@ -1,1 +1,2 @@
-good + bad bad2
+let len = |vector| __monocurl__native__ vector_len(4)
+let bad = 2 + 4

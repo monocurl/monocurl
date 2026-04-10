@@ -2,9 +2,9 @@ use std::{collections::{HashMap, HashSet}, ops::Range, path::{PathBuf}, sync::Ar
 
 use lexer::{token::Token};
 use smallvec::SmallVec;
-use structs::{rope::{RLEAggregate, Rope, TextAggregate}, text::{Count8, Span8}};
+use structs::{rope::{Attribute, RLEAggregate, Rope, TextAggregate}, text::{Count8, Span8}};
 
-use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parse_state::{ContentResult, ParseState}, flatten_rope, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
+use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parse_state::{FileResult, ParseState}, flatten_rope, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
 
 
 macro_rules! try_all {
@@ -181,10 +181,10 @@ macro_rules! try_all {
 mod predicate {
     use lexer::token::Token;
 
-    use crate::{ast::{BinaryOperatorType, SectionType, UnaryOperatorType, VariableType}, parser::{ParseArtifacts, State}};
+    use crate::{ast::{BinaryOperatorType, SectionType, UnaryOperatorType, VariableType}, parser::{ParseArtifacts, ShortTermState}};
 
     pub(super) trait StatePredicate {
-        fn ok(&self, state: &State) -> bool;
+        fn ok(&self, state: &ShortTermState) -> bool;
         fn fail_description(&self) -> &'static str;
     }
 
@@ -198,7 +198,7 @@ mod predicate {
 
     pub(super) struct NullPredicate;
     impl StatePredicate for NullPredicate {
-        fn ok(&self, _state: &State) -> bool {
+        fn ok(&self, _state: &ShortTermState) -> bool {
             true
         }
 
@@ -209,7 +209,7 @@ mod predicate {
 
     pub(super) struct InLoopPredicate;
     impl StatePredicate for InLoopPredicate {
-        fn ok(&self, state: &State) -> bool {
+        fn ok(&self, state: &ShortTermState) -> bool {
             state.top().in_loop
         }
 
@@ -220,7 +220,7 @@ mod predicate {
 
     pub(super) struct PlayablePredicate;
     impl StatePredicate for PlayablePredicate {
-        fn ok(&self, state: &State) -> bool {
+        fn ok(&self, state: &ShortTermState) -> bool {
             state.top().in_playable_block
         }
 
@@ -231,7 +231,7 @@ mod predicate {
 
     pub(super) struct InLambdaOrBlockPredicate;
     impl StatePredicate for InLambdaOrBlockPredicate {
-        fn ok(&self, state: &State) -> bool {
+        fn ok(&self, state: &ShortTermState) -> bool {
             state.top().in_lambda_or_block
         }
 
@@ -242,7 +242,7 @@ mod predicate {
 
     pub(super) struct InStdLibPredicate;
     impl StatePredicate for InStdLibPredicate {
-        fn ok(&self, state: &State) -> bool {
+        fn ok(&self, state: &ShortTermState) -> bool {
             state.section_type == SectionType::StandardLibrary
         }
 
@@ -409,13 +409,13 @@ struct ContextFrame {
     in_loop: bool,
 }
 
-struct State {
+struct ShortTermState {
     frames: Vec<ContextFrame>,
     section_type: SectionType,
     root_import_span: Option<Span8>,
 }
 
-impl State {
+impl ShortTermState {
     fn new(section_type: SectionType, root_import_span: Option<Span8>, token_count: usize) -> Self {
         let top = match section_type {
             SectionType::Slide => ContextFrame {
@@ -432,7 +432,7 @@ impl State {
             }
         };
 
-        State {
+        ShortTermState {
             frames: vec![top],
             section_type,
             root_import_span,
@@ -523,7 +523,7 @@ pub struct Diagnostic {
 
 pub struct SectionParser {
     precomputation: Precomputation,
-    state: State,
+    state: ShortTermState,
     cursor_position: Option<Count8>,
 
     text_rope: Rope<TextAggregate>,
@@ -699,17 +699,11 @@ impl SectionParser {
 }
 
 impl SectionParser {
-    pub fn parse_section(&mut self) -> std::result::Result<Section, Section> {
+    pub fn parse_section(&mut self) -> Section {
         let body = self.parse_statement_list();
-        let section = Section {
+        Section {
             body,
             section_type: self.state.section_type,
-        };
-        if self.artifacts.error_diagnostics.is_empty() {
-            Ok(section)
-        }
-        else {
-            Err(section)
         }
     }
 
@@ -1542,7 +1536,7 @@ impl SectionParser {
     pub fn new(tokens: Vec<(Token, Span8)>, text: Rope<TextAggregate>, section_type: SectionType, root_import_span: Option<Span8>, cursor_position: Option<Count8>) -> Self {
         SectionParser {
             precomputation: Precomputation::new(&tokens),
-            state: State::new(section_type, root_import_span, tokens.len()),
+            state: ShortTermState::new(section_type, root_import_span, tokens.len()),
             cursor_position,
             text_rope: text,
             tokens,
@@ -1557,12 +1551,12 @@ impl SectionParser {
 pub struct Parser {
     errors: Vec<Diagnostic>,
     preparsed_files: Vec<PreparsedFile>,
-    import_stack: Vec<PathBuf>,
+    import_stack: Vec<Option<PathBuf>>,
 }
 
 struct PreparsedFile {
     imports: Vec<PathBuf>,
-    path: PathBuf,
+    path: Option<PathBuf>,
     text_rope: Rope<TextAggregate>,
     root_import_span: Option<Span8>,
     tokens: Vec<(Token, Span8)>,
@@ -1574,7 +1568,7 @@ impl Parser {
         Diagnostic { span, title: "Import Error".to_string(), message: message.to_string() }
     }
 
-    fn dfs(&mut self, root_span: Option<Span8>, external_context: &ParseState, file: ContentResult) -> Result<(), ()> {
+    fn dfs(&mut self, root_span: Option<Span8>, external_context: &ParseState, file: FileResult) -> Result<(), ()> {
         if self.preparsed_files.iter().any(|old| old.path == file.path) {
             return Ok(()); // diamond import is fine
         }
@@ -1622,11 +1616,11 @@ impl Parser {
             }
 
             let full_span = import_span.start..end;
-            let Some(imported_file) = external_context.file_content(file.path.parent().unwrap_or(&PathBuf::new()), &import_rel_path) else {
+            let Some(imported_file) = external_context.file_content(file.path.as_ref().and_then(|f| f.parent()), &import_rel_path) else {
                 self.errors.push(Self::import_err(full_span.clone(), &format!("Cannot find module \"{}\"", import_rel_path.display())));
                 return Err(());
             };
-            imports.push(imported_file.path.clone());
+            imports.push(imported_file.path.clone().unwrap());
             self.dfs(root_span.clone().or(Some(full_span.clone())), external_context, imported_file)?;
 
             if token_index < file.tokens.len() && !matches!(file.tokens[token_index].0, Token::Newline | Token::Semicolon) {
@@ -1650,15 +1644,13 @@ impl Parser {
         Ok(())
     }
 
-    fn parse_section(tokens: Vec<(Token, Span8)>, text_rope: Rope<TextAggregate>, section_type: SectionType, cursor: Option<Count8>, root_import_span: Option<Span8>) -> Result<(Section, ParseArtifacts), ParseArtifacts> {
+    fn parse_section(tokens: Vec<(Token, Span8)>, text_rope: Rope<TextAggregate>, section_type: SectionType, cursor: Option<Count8>, root_import_span: Option<Span8>) -> (Section, ParseArtifacts) {
         let mut parser = SectionParser::new(tokens, text_rope, section_type, root_import_span, cursor);
-        match parser.parse_section() {
-            Ok(section) => Ok((section, parser.artifacts)),
-            Err(_) => Err(parser.artifacts)
-        }
+        let section = parser.parse_section();
+        (section, parser.artifacts)
     }
 
-    fn parse_file(currently_parsed: &HashMap<PathBuf, Arc<SectionBundle>>, f: PreparsedFile, cursor: Option<Count8>) -> Result<(Arc<SectionBundle>, ParseArtifacts), ParseArtifacts> {
+    fn parse_file(currently_parsed: &HashMap<PathBuf, Arc<SectionBundle>>, f: PreparsedFile, cursor: Option<Count8>) -> (Arc<SectionBundle>, ParseArtifacts) {
         let file_index = currently_parsed.len();
         let imported_files = f.imports.iter().map(|path|
             // can be null in the case that the library failed to parse so it wasn't inserted properly
@@ -1680,56 +1672,47 @@ impl Parser {
             let mut parsed_sections = vec![];
             for (i, section) in sections.into_iter().enumerate() {
                 let stype = if i == 0 { SectionType::Init } else { SectionType::Slide };
-                match Self::parse_section(section, f.text_rope.clone(), stype, cursor.clone(), f.root_import_span.clone()) {
-                    Ok((section, sub_artifacts)) => {
-                        parsed_sections.push(section);
-                        artifacts.extend(sub_artifacts);
-                    },
-                    Err(sub_artifacts) => {
-                        artifacts.extend(sub_artifacts);
-                    }
-                }
+                let (section, sub_artifacts) = Self::parse_section(section, f.text_rope.clone(), stype, cursor.clone(), f.root_import_span.clone());
+                parsed_sections.push(section);
+                artifacts.extend(sub_artifacts);
             }
 
-            if !artifacts.error_diagnostics.is_empty() {
-                Err(artifacts)
-            }
-            else {
-                Ok((Arc::new(SectionBundle {
-                    file_path: f.path,
-                    file_index,
-                    imported_files,
-                    sections: parsed_sections,
-                }), artifacts))
-            }
+            let ret = Arc::new(SectionBundle {
+                file_path: f.path.clone(),
+                file_index,
+                imported_files,
+                sections: parsed_sections,
+                root_import_span: f.root_import_span
+            });
+            (ret, artifacts)
         }
         else {
             let stype = if f.is_stdlib { SectionType::StandardLibrary } else { SectionType::UserLibrary };
-            let (section, artifacts) = Self::parse_section(f.tokens, f.text_rope, stype, None, f.root_import_span)?;
-
-            Ok((Arc::new(SectionBundle {
+            let (section, artifacts) = Self::parse_section(f.tokens, f.text_rope, stype, None, f.root_import_span.clone());
+            (Arc::new(SectionBundle {
                 file_path: f.path,
                 file_index,
                 imported_files,
                 sections: vec![section],
-            }), artifacts))
+                root_import_span: f.root_import_span
+            }), artifacts)
         }
     }
 
-    pub fn parse(external_context: &mut ParseState, path: PathBuf, lex_rope: Rope<RLEAggregate<Token, false>>, text_rope: Rope<TextAggregate>, cursor: Option<Count8>) -> Result<(Vec<Arc<SectionBundle>>, ParseArtifacts), ParseArtifacts> {
+    pub fn parse(external_context: &mut ParseState, lex_rope: Rope<Attribute<Token>>, text_rope: Rope<TextAggregate>, cursor: Option<Count8>) -> (Vec<Arc<SectionBundle>>, ParseArtifacts) {
         let mut p = Parser {
             preparsed_files: vec![],
             import_stack: vec![],
             errors: vec![],
         };
 
-        let Ok(()) = p.dfs(None, external_context, ContentResult {
-            path,
+        let Ok(()) = p.dfs(None, external_context, FileResult {
+            path: external_context.root_file_user_path.clone(),
             tokens: flatten_rope(&lex_rope),
             text_rope: Rope::from(text_rope),
             is_stdlib: false,
         }) else {
-            return Err(ParseArtifacts {
+            return (vec![], ParseArtifacts {
                 error_diagnostics: p.errors,
                 cursor_possibilities: HashSet::default(),
             });
@@ -1738,37 +1721,29 @@ impl Parser {
         let mut bundles = HashMap::new();
         let mut artifacts = ParseArtifacts::default();
         for file in p.preparsed_files {
-            if file.root_import_span.is_none() && let Some(result) = external_context.cache_get(&file.path) {
-                bundles.insert(file.path, result.0);
+            if file.root_import_span.is_some() && let Some(result) = external_context.cache_get(&file.path) {
+                bundles.insert(file.path.unwrap(), result.0);
                 artifacts.extend(result.1);
                 continue;
             }
 
             let key = file.path.clone();
             let is_root = file.root_import_span.is_none();
-            let sub = Self::parse_file(&bundles, file, cursor.clone());
-            match sub {
-                Ok((bundle, sub_artifacts)) => {
-                    if !is_root {
-                        external_context.set_cache(key.clone(), bundle.clone(), sub_artifacts.clone());
-                    }
-                    bundles.insert(key, bundle);
-                    artifacts.extend(sub_artifacts);
-                },
-                Err(sub_artifacts) => {
-                    artifacts.extend(sub_artifacts);
-                }
+            let (bundle, sub_artifacts) = Self::parse_file(&bundles, file, cursor.clone());
+            if !is_root && let Some(key) = key.clone() {
+                external_context.set_cache(key, bundle.clone(), sub_artifacts.clone());
             }
+
+            if let Some(key) = key {
+                bundles.insert(key, bundle);
+            }
+            artifacts.extend(sub_artifacts);
         }
 
-        if !artifacts.error_diagnostics.is_empty() {
-            Err(artifacts)
-        }
-        else {
-            let mut sorted_bundles: Vec<_> = bundles.values().cloned().collect();
-            sorted_bundles.sort_by_key(|x| x.file_index);
-            Ok((sorted_bundles, artifacts))
-        }
+        let mut sorted_bundles: Vec<_> = bundles.values().cloned().collect();
+        sorted_bundles.sort_by_key(|x| x.file_index);
+
+        (sorted_bundles, artifacts)
     }
 }
 

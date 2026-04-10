@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use lexer::{token::Token};
-use structs::{rope::{RLEAggregate, Rope}, text::Count8};
+use structs::{rope::{Attribute, Rope}, text::Count8};
 
 pub mod ast;
 pub mod parser;
@@ -18,7 +18,7 @@ fn flatten_lex_stream(i: impl Iterator<Item=(Token, Count8)>) -> impl Iterator<I
         .filter(|(tok, _)| tok != &Token::Whitespace && tok != &Token::Comment)
 }
 
-fn flatten_rope(r: &Rope<RLEAggregate<Token, false>>) -> Vec<(Token, Range<usize>)> {
+fn flatten_rope(r: &Rope<Attribute<Token>>) -> Vec<(Token, Range<usize>)> {
     flatten_lex_stream(
         r.iterator(0)
             .map(|(x, y)| (y, x))

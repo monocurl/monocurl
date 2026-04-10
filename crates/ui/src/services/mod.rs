@@ -1,9 +1,12 @@
 
+use std::{collections::HashMap, path::PathBuf};
+
 use gpui::{App, AppContext, Context, Entity};
 use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
-use structs::rope::{Attribute, Rope};
-use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, StaticAnalysisData, TextualState, TransactionSummary}}};
+use lexer::token::Token;
+use structs::rope::{Attribute, Rope, TextAggregate};
+use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, StaticAnalysisData, TextualState, TransactionSummary}, window_state::WindowState}};
 
 mod lexing;
 mod compilation;
@@ -177,5 +180,16 @@ impl ServiceManager {
                 // currently no-op
             }
         }
+    }
+
+    pub fn invalidate_dependencies(&mut self, physical_path: Option<PathBuf>, live_ropes: HashMap<PathBuf, (Rope<Attribute<Token>>, Rope<TextAggregate>)>) {
+        smol::block_on(async {
+            self.compilation_tx.send(
+                CompilationMessage::RecheckDependencies {
+                    physical_path,
+                    open_documents: live_ropes
+                }
+            ).await.unwrap();
+        })
     }
 }

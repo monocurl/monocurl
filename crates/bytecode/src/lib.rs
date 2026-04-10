@@ -31,13 +31,8 @@ pub enum Instruction {
 
     PushCopy { stack_delta: i32 },
     PushLvalue { stack_delta: i32 },
-    PushMeshLvalue { stack_delta: i32 },
-    PushStateLvalue { stack_delta: i32 },
-    PushParamLvalue { stack_delta: i32 },
 
-    // *x: current (leader) value
     PushDereference { stack_delta: i32 },
-    // $x: live follower value — TODO: distinguish from PushDereference once VM is ready
     PushStateful { stack_delta: i32 },
 
     // u16::MAX indicates unlabeled
