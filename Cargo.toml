@@ -2,7 +2,6 @@
 resolver = "2"
 
 members = [
-    "crates/autocomplete",
     "crates/bytecode",
     "crates/cli",
     "crates/compiler",

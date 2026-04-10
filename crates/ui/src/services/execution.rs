@@ -1,9 +1,12 @@
+use bytecode::Bytecode;
 use futures::{FutureExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use crate::{services::ServiceManagerMessage};
 
 pub enum ExecutionMessage {
-    UpdateBytecode,
+    UpdateBytecode {
+        bytecode: Bytecode
+    },
     UpdateParameter,
     TogglePlay,
     SeekTo,
@@ -25,7 +28,7 @@ impl ExecutionService {
 
     async fn handle_message(&self, message: ExecutionMessage) {
         match message {
-            ExecutionMessage::UpdateBytecode => {
+            ExecutionMessage::UpdateBytecode { .. } => {
                 // handle bytecode update. Must avoid await points so this is done atomically
             }
             ExecutionMessage::TogglePlay => {

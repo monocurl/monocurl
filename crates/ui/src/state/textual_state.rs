@@ -222,7 +222,8 @@ pub struct ParameterPositionHint {
     pub name: String,
     pub args: Vec<String>,
     pub active_index: usize,
-    pub function_start: Location8
+    pub function_start: Location8,
+    pub is_operator: bool
 }
 
 #[derive(Clone, Debug, Default)]

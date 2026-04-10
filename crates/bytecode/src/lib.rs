@@ -123,6 +123,7 @@ impl SectionBytecode {
     }
 }
 
+#[derive(Default)]
 pub struct Bytecode {
     pub sections: Vec<SectionBytecode>,
 }

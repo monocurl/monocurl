@@ -41,8 +41,10 @@ impl ParseImportContext {
         }
     }
 
-    pub fn set_cache(&mut self, path: PathBuf, bundle: Arc<SectionBundle>, artifacts: ParseArtifacts) {
-        self.cached_parses.insert(path, (bundle, artifacts));
+    pub fn set_cache(&mut self, path: PathBuf, bundle: &SectionBundle, artifacts: ParseArtifacts) {
+        let mut raw = bundle.clone();
+        raw.was_cached = true;
+        self.cached_parses.insert(path, (Arc::new(raw), artifacts));
     }
 
     pub(crate) fn file_content(&self, working_directory: Option<&Path>, relative_path: &Path) -> Option<FileResult> {

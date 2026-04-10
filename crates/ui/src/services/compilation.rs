@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::ptr::replace;
 
-use compiler::{CompileResult, CursorIdentifierType, compile};
+use compiler::compiler::{CompileResult, CursorIdentifierType, SymbolFunctionInfo, compile};
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::token::Token;
 use parser::import_context::ParseImportContext;
 use parser::parser::{ParseArtifacts, Parser};
 use structs::rope::{Attribute, Rope, TextAggregate};
-use structs::text::{Location8};
+use structs::text::{Count8, Location8, Span8};
 
 use crate::state::diagnostics::{Diagnostic, DiagnosticType};
 use crate::state::textual_state::{AutoCompleteCategory, AutoCompleteItem, Cursor, ParameterPositionHint};
@@ -44,6 +43,108 @@ impl CompilationService {
             execution_tx,
             sm_tx,
         }
+    }
+
+    fn cursor_pos(&self, cursor: Cursor, text_rope: &Rope<TextAggregate>) -> Option<Count8> {
+        if cursor.is_empty() {
+            let l = cursor.head;
+            Some(text_rope.utf8_line_pos_prefix(l.row, l.col).bytes_utf8)
+        }
+        else {
+            None
+        }
+    }
+
+    async fn emit_parameter_hint(&mut self, latest_cursor: Cursor, last_compile_result: &CompileResult, latest_text_rope: Rope<TextAggregate>, lex_rope: Rope<Attribute<LexData>>, latest_version: usize) {
+        let find_active_index = |argument_spans: &[Span8], cursor_pos: Count8, true_arg_count: usize| -> usize {
+            // actual index
+            let base = {
+                let last_starting_before = argument_spans
+                    .iter()
+                    .rposition(|span| span.start <= cursor_pos);
+
+                let first_ending_after = argument_spans
+                    .iter()
+                    .position(|span| span.end >= cursor_pos);
+
+                // if any range contains it, then clearly its that one
+                // otherwise, look for comma separating the two
+                match (last_starting_before, first_ending_after) {
+                    (Some(u), Some(v)) => {
+                        if u == v {
+                            u
+                        }
+                        else {
+                            debug_assert!(v == u + 1);
+                            let mut pos = argument_spans[u].end;
+                            let mut comma_pos = argument_spans[v].start;
+                            for (chunk, tok) in lex_rope.iterator(pos) {
+                                if pos >= argument_spans[v].start {
+                                    break;
+                                }
+                                if tok == Token::Comma {
+                                    comma_pos = pos;
+                                }
+                                pos += chunk;
+                            }
+                            if cursor_pos <= comma_pos {
+                                u
+                            }
+                            else {
+                                v
+                            }
+                        }
+                    },
+                    (Some(u), None) => u,
+                    (None, Some(v)) => v,
+                    (None, None) => 0
+                }
+            };
+
+            base.min(true_arg_count - 1)
+        };
+
+        let hint = self.cursor_pos(latest_cursor, &latest_text_rope)
+            .and_then(|cursor|
+                last_compile_result.root_references
+                    .iter()
+                    .find(|reference|
+                        reference.invocation_spans.as_ref().is_some_and(|inv| {
+                            inv.0.contains(&cursor)
+                        })
+                    )
+                    .and_then(|reference| {
+                        let sym = &reference.symbol;
+                        match &sym.function_info {
+                            SymbolFunctionInfo::Lambda { args } | SymbolFunctionInfo::Operator { args } => {
+                                let func_start_loc = latest_text_rope.utf8_prefix_summary(reference.span.start);
+
+                                let args = if args.is_empty() { vec!["".to_string()] } else { args.clone()};
+
+                                let invoked_args = reference.invocation_spans.as_ref().unwrap();
+                                let active_index = find_active_index(&invoked_args.1, cursor, args.len());
+
+                                Some(ParameterPositionHint {
+                                    name: sym.name.clone(),
+                                    args,
+                                    active_index,
+                                    function_start: Location8 {
+                                        row: func_start_loc.newlines,
+                                        col: func_start_loc.bytes_utf8_since_newline
+                                    },
+                                    is_operator: matches!(sym.function_info, SymbolFunctionInfo::Operator { .. })
+                                })
+                            },
+                            SymbolFunctionInfo::None => None
+                        }
+                    })
+            );
+
+        self.sm_tx.send(ServiceManagerMessage::UpdateParameterHintPosition {
+            hint,
+            cursor: latest_cursor,
+            version: latest_version
+        }).await.unwrap();
     }
 
     async fn emit_autocomplete(&mut self, parse: &ParseArtifacts, compile: &CompileResult, latest_cursor: Cursor, version: usize) {
@@ -112,20 +213,16 @@ impl CompilationService {
         }).await.unwrap();
     }
 
-    async fn recompile(&mut self, parse_state: &mut ParseImportContext, latest_cursor: Cursor, text_rope: Rope<TextAggregate>, lex_rope: Rope<Attribute<LexData>>,  version: usize) {
-        let cursor_pos = if latest_cursor.is_empty() {
-            let l = latest_cursor.head;
-            Some(text_rope.utf8_line_pos_prefix(l.row, l.col).bytes_utf8)
-        }
-        else {
-            None
-        };
+    #[must_use]
+    async fn recompile(&mut self, parse_state: &mut ParseImportContext, latest_cursor: Cursor, text_rope: Rope<TextAggregate>, lex_rope: Rope<Attribute<LexData>>,  version: usize) -> CompileResult {
+        let cursor_pos = self.cursor_pos(latest_cursor, &text_rope);
 
-        let (parsed_bundles, parse_artifacts) = Parser::parse(parse_state, lex_rope, text_rope.clone(), cursor_pos);
+        let (parsed_bundles, parse_artifacts) = Parser::parse(parse_state, lex_rope.clone(), text_rope.clone(), cursor_pos);
         let compile_result = compile(cursor_pos, &parsed_bundles);
 
         self.emit_autocomplete(&parse_artifacts, &compile_result, latest_cursor, version).await;
         self.emit_diagnostics(&parse_artifacts, &compile_result, version).await;
+        self.emit_parameter_hint(latest_cursor, &compile_result, text_rope, lex_rope, version).await;
 
         let okay_bytecode = parse_artifacts.error_diagnostics.is_empty() && compile_result.errors.is_empty();
         if okay_bytecode {
@@ -134,6 +231,8 @@ impl CompilationService {
             //     version,
             // }).await.unwrap();
         }
+
+        return compile_result;
     }
 
     pub async fn run(mut self) {
@@ -144,6 +243,8 @@ impl CompilationService {
 
         let mut parse_state = ParseImportContext::default();
 
+        let mut last_compile_result = CompileResult::default();
+
         while let Some(message) = self.rx.next().await {
             // we should do a select! here for best performance
             match message {
@@ -152,78 +253,12 @@ impl CompilationService {
                     latest_lex_rope = lex_rope.clone();
                     latest_version = version;
 
-                    self.recompile(&mut parse_state, latest_cursor, latest_text_rope.clone(), lex_rope, version).await;
+                    last_compile_result = self.recompile(&mut parse_state, latest_cursor, latest_text_rope.clone(), lex_rope, version).await;
                 },
                 CompilationMessage::UpdateCursor { cursor: c, _version: _} => {
                     latest_cursor = c;
 
-                    let hint =  {
-                        let content: String = latest_text_rope.iterator(0).collect();
-                        let cursor_byte_index = latest_text_rope.utf8_line_pos_prefix(latest_cursor.head.row, latest_cursor.head.col).bytes_utf8;
-
-                        // Find the opening parenthesis before cursor
-                        let before_cursor = &content[..cursor_byte_index];
-
-                        if let Some(open_paren_pos) = before_cursor.rfind('(') {
-                            // Check if there's a closing paren before the next opening paren
-                            let after_open = &before_cursor[open_paren_pos + 1..];
-                            if after_open.contains(')') {
-                                None // We're not in an active function call
-                            } else {
-                                // Find function name before the opening paren
-                                let before_open = &before_cursor[..open_paren_pos];
-                                let func_name_start = before_open.rfind(|c: char| !c.is_alphanumeric() && c != '_')
-                                    .map(|pos| pos + 1)
-                                    .unwrap_or(0);
-                                let func_name = before_open[func_name_start..].trim();
-
-                                if func_name.is_empty() {
-                                    None
-                                } else {
-                                    // Count commas to determine active parameter index
-                                    let active_index = after_open.chars().filter(|&c| c == ',').count();
-
-                                    // Try to find the closing paren to extract all args
-                                    let after_cursor = &content[cursor_byte_index..];
-                                    let close_paren_pos = after_cursor.find(')');
-
-                                    let args = if let Some(close_pos) = close_paren_pos {
-                                        // Extract the full argument list
-                                        let full_args = &content[open_paren_pos + 1..cursor_byte_index + close_pos];
-                                        full_args.split(',')
-                                            .map(|s| s.trim().to_string())
-                                            .filter(|s| !s.is_empty())
-                                            .collect::<Vec<_>>()
-                                    } else {
-                                        // No closing paren yet, create placeholder args based on commas
-                                        (0..=active_index).map(|i| format!("arg{}", i)).collect()
-                                    };
-
-                                    // Calculate function start position
-                                    let func_start_byte = open_paren_pos - func_name.len();
-                                    let func_start_loc = latest_text_rope.utf8_prefix_summary(func_start_byte);
-
-                                    Some(ParameterPositionHint {
-                                        name: func_name.to_string(),
-                                        args: if args.is_empty() { vec!["...".to_string()] } else { args.clone() },
-                                        active_index: active_index.min(args.len().saturating_sub(1)),
-                                        function_start: Location8 {
-                                            row: func_start_loc.newlines,
-                                            col: func_start_loc.bytes_utf8_since_newline,
-                                        }
-                                    })
-                                }
-                            }
-                        } else {
-                            None
-                        }
-                    };
-
-                    self.sm_tx.send(ServiceManagerMessage::UpdateParameterHintPosition {
-                        hint,
-                        cursor: latest_cursor,
-                        version: latest_version
-                    }).await.unwrap();
+                    self.emit_parameter_hint(latest_cursor, &last_compile_result, latest_text_rope.clone(), latest_lex_rope.clone(), latest_version).await;
                 }
                 CompilationMessage::RecheckDependencies { physical_path, open_documents  } => {
                     parse_state = ParseImportContext {
@@ -232,7 +267,7 @@ impl CompilationService {
                         cached_parses: Default::default()
                     };
 
-                    self.recompile(&mut parse_state, latest_cursor, latest_text_rope.clone(), latest_lex_rope.clone(), latest_version).await;
+                    last_compile_result = self.recompile(&mut parse_state, latest_cursor, latest_text_rope.clone(), latest_lex_rope.clone(), latest_version).await;
                 }
             }
         }

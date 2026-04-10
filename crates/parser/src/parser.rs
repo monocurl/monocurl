@@ -1173,7 +1173,6 @@ impl SectionParser {
                 break;
             }
 
-            let prev_error_count = self.artifacts.error_diagnostics.len();
             let mut read = || {
                 if arguments.len() > 0 {
                     self.read_token_best_effort(Token::Comma);
@@ -1213,14 +1212,7 @@ impl SectionParser {
                 }
             };
 
-            let argument = read();
-            if self.artifacts.error_diagnostics.len() > prev_error_count {
-                // if we emitted an error, stop parsing more arguments
-                break;
-            }
-            else {
-                arguments.push(argument);
-            }
+            arguments.push(read());
         }
         self.state.pop_frame();
 
@@ -1684,7 +1676,8 @@ impl Parser {
                 file_index,
                 imported_files,
                 sections: parsed_sections,
-                root_import_span: f.root_import_span
+                root_import_span: f.root_import_span,
+                was_cached: false,
             });
             (ret, artifacts)
         }
@@ -1696,7 +1689,8 @@ impl Parser {
                 file_index,
                 imported_files,
                 sections: vec![section],
-                root_import_span: f.root_import_span
+                root_import_span: f.root_import_span,
+                was_cached: false,
             }), artifacts)
         }
     }
@@ -1733,7 +1727,7 @@ impl Parser {
             let is_root = file.root_import_span.is_none();
             let (bundle, sub_artifacts) = Self::parse_file(&bundles, file, cursor.clone());
             if !is_root && let Some(key) = key.clone() {
-                external_context.set_cache(key, bundle.clone(), sub_artifacts.clone());
+                external_context.set_cache(key, &bundle, sub_artifacts.clone());
             }
 
             if let Some(key) = key {

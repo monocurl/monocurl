@@ -19,8 +19,12 @@ impl SectionType {
     }
 }
 
+#[derive(Clone)]
 pub struct SectionBundle {
     pub file_path: Option<PathBuf>,
+    // same as previous parsing for the file path
+    // must never be true for the root module
+    pub was_cached: bool,
     pub file_index: usize,
     pub imported_files: Vec<usize>,
     pub sections: Vec<Section>,
@@ -233,16 +237,18 @@ pub struct Property {
     pub attribute: SpanTagged<IdentifierReference>
 }
 
+pub type InvocationArguments =  SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LambdaInvocation {
     pub lambda: BoxSpanTagged<Expression>,
-    pub arguments: SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>,
+    pub arguments: InvocationArguments,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperatorInvocation {
     pub operator: BoxSpanTagged<Expression>,
-    pub arguments: SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>,
+    pub arguments: InvocationArguments,
     pub operand: BoxSpanTagged<Expression>,
 }
 

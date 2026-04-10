@@ -425,7 +425,7 @@ impl PopoverElement {
                     .child(
                         div()
                             .text_color(black())
-                            .child("(")
+                            .child(if hint.is_operator { "{" } else { "(" })
                     )
                     .children(
                         hint.args
@@ -462,7 +462,7 @@ impl PopoverElement {
                     .child(
                         div()
                             .text_color(black())
-                            .child(")")
+                            .child(if hint.is_operator { "}" } else { ")" })
                     )
             )
             .into_any_element()

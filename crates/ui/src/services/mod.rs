@@ -6,7 +6,7 @@ use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
 use lexer::token::Token;
 use structs::rope::{Attribute, Rope, TextAggregate};
-use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, StaticAnalysisData, TextualState, TransactionSummary}, window_state::WindowState}};
+use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, StaticAnalysisData, TextualState, TransactionSummary}}};
 
 mod lexing;
 mod compilation;
@@ -16,7 +16,6 @@ pub struct ServiceManager {
     textual_state: Entity<TextualState>,
     execution_state: Entity<ExecutionState>,
 
-    sm_tx: UnboundedSender<ServiceManagerMessage>,
     lexing_tx: UnboundedSender<LexingMessage>,
     compilation_tx: UnboundedSender<CompilationMessage>,
     execution_tx: UnboundedSender<ExecutionMessage>,
@@ -82,6 +81,10 @@ impl ServiceManager {
                     .and_then(|sm| {
                         cx.update_entity(&sm, |sm, cx| {
                             sm.on_sm_message_recv(message, cx);
+
+                            while let Ok(Some(sub_message)) = sm_rx.try_next() {
+                                sm.on_sm_message_recv(sub_message, cx);
+                            }
                         }).ok()
                     })
                 else {
@@ -101,8 +104,7 @@ impl ServiceManager {
 
             lexing_tx,
             compilation_tx,
-            execution_tx,
-            sm_tx,
+            execution_tx
         }
     }
 

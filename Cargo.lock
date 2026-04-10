@@ -472,10 +472,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
-name = "autocomplete"
-version = "0.1.0"
-
-[[package]]
 name = "av1-grain"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5295,6 +5291,7 @@ name = "ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytecode",
  "compiler",
  "dirs 5.0.1",
  "env_logger",

@@ -6,11 +6,7 @@ use bytecode::{
     SectionFlags,
 };
 use parser::ast::{
-    Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression,
-    For, IdentifierDeclaration, IdentifierReference, If, LambdaBody, LambdaDefinition,
-    LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play,
-    Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript,
-    UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType, While,
+    Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, InvocationArguments, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType, While
 };
 use stdlib::registry::registry;
 use structs::text::{Count8, Span8};
@@ -20,12 +16,6 @@ pub struct CompileError {
     pub span: Span8,
     pub message: String,
 }
-
-// pub struct KnownLambda {
-//     pub name: String,
-//     pub free_vars: Vec<String>,
-//     pub prototype_index: u32,
-// }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CursorIdentifierType {
@@ -38,37 +28,33 @@ pub enum CursorIdentifierType {
     State
 }
 
+// autocomplete suggetion effectively
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CursorIdentifier {
     pub name: String,
     pub identifier_type: CursorIdentifierType,
-    pub stack_position: usize,
-    pub frame_depth: usize,
+    stack_position: usize,
+    frame_depth: usize,
 }
 
-pub enum FunctionalReferenceType {
-    Lambda,
-    Operator,
-}
-
-pub struct FunctionalReferences {
+pub struct Reference {
+    pub symbol: Arc<Symbol>,
     pub span: Span8,
-    pub name: String,
-    pub args: Vec<(Span8, Expression)>,
-    pub reference_type: FunctionalReferenceType,
+    // if this is a functional reference, the spans of all arguments and each individual one
+    pub invocation_spans: Option<(Span8, Vec<Span8>)>
 }
 
+#[derive(Default)]
 pub struct CompileResult {
     pub bytecode: Bytecode,
     pub errors: Vec<CompileError>,
-    // pub known_lambdas:
-    //
+    // it is guaranteed these will be emitted in deepest first order
+    pub root_references: Vec<Reference>,
     pub possible_cursor_identifiers: Vec<CursorIdentifier>,
 }
 
-
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum VariableType {
+pub enum VariableType {
     Let,
     Var,
     Reference,
@@ -78,7 +64,7 @@ enum VariableType {
 }
 
 #[derive(Clone, Debug)]
-enum SymbolFunctionInfo {
+pub enum SymbolFunctionInfo {
     None,
     Lambda { args: Vec<String> },
     Operator { args: Vec<String> },
@@ -101,17 +87,19 @@ impl SymbolFunctionInfo {
 }
 
 #[derive(Clone, Debug)]
-struct Symbol {
-    name: String,
+pub struct Symbol {
+    pub name: String,
     stack_position: usize,
-    var_type: VariableType,
-    function_info: SymbolFunctionInfo,
+    // how the symbol looks like to the current bundle
+    // may appear as let, even though declared as var
+    pub var_type: VariableType,
+    pub function_info: SymbolFunctionInfo,
 }
 
 #[derive(Clone)]
 struct Scope {
     base_stack_depth: usize,
-    symbols: HashMap<String, Symbol>,
+    symbols: HashMap<String, Arc<Symbol>>,
 }
 
 struct LoopContext {
@@ -308,12 +296,13 @@ fn free_vars_expr(expr: &Expression, pre: HashSet<String>) -> Vec<String> {
 struct Compiler {
     frames: Vec<CompilerFrame>,
     sections: Vec<SectionBytecode>,
-    current_section: SectionBytecode,
     errors: Vec<CompileError>,
-    bundle_exports: Vec<HashMap<String, Symbol>>,
-    bundle_stack_end: Vec<usize>,
+    root_references: Vec<Reference>,
+    bundle_exports: Vec<HashMap<String, Arc<Symbol>>>,
 
-    root_import_span: Option<Span8>,
+    // of the current bundle
+    bundle_root_import_span: Option<Span8>,
+    current_section: SectionBytecode,
 
     cursor_pos: Option<Count8>,
 
@@ -337,11 +326,11 @@ impl Compiler {
             current_section: default_section(),
             errors: Vec::new(),
             bundle_exports: vec![HashMap::new(); bundle_count],
-            bundle_stack_end: vec![0; bundle_count],
-            root_import_span: None,
+            bundle_root_import_span: None,
             cursor_pos,
             cursor_identifier_set: HashSet::new(),
-            possible_cursor_identifiers: Vec::new()
+            possible_cursor_identifiers: Vec::new(),
+            root_references: Vec::new()
         }
     }
 
@@ -351,12 +340,13 @@ impl Compiler {
         possible_cursor_identifiers.sort_by_key(|id| (id.frame_depth, id.stack_position));
         possible_cursor_identifiers.reverse();
 
-        CompileResult { bytecode: Bytecode::new(self.sections), errors: self.errors, possible_cursor_identifiers }
+        CompileResult { bytecode: Bytecode::new(self.sections), errors: self.errors, possible_cursor_identifiers, root_references: self.root_references }
     }
 }
 
 pub fn compile(cursor_pos: Option<Count8>, bundles: &[Arc<SectionBundle>]) -> CompileResult {
     let mut c = Compiler::new(cursor_pos, bundles.len());
+    c.compile_prelude();
     for bundle in bundles {
         c.compile_bundle(bundle);
     }
@@ -364,29 +354,34 @@ pub fn compile(cursor_pos: Option<Count8>, bundles: &[Arc<SectionBundle>]) -> Co
 }
 
 impl Compiler {
+    fn compile_prelude(&mut self) {
+        // define global scene variables
+        for var in ["initial_camera", "initial_background"] {
+            self.emit_push(Instruction::NativeInvoke { index: registry().index_of(var) as u32 }, 0..0);
+            let name_index = self.intern_string(var);
+            self.emit(Instruction::PushState { name_index }, 0..0);
+            self.define_symbol(var, VariableType::State, SymbolFunctionInfo::None);
+        }
+    }
+
     fn compile_bundle(&mut self, bundle: &SectionBundle) {
-        self.root_import_span = bundle.root_import_span.clone();
+        self.bundle_root_import_span = bundle.root_import_span.clone();
 
-        // imported symbols are treated as `let` — cross-bundle mutation is not allowed
-        let mut base_symbols: HashMap<String, Symbol> = HashMap::new();
-        let base_depth = bundle
-            .imported_files
-            .iter()
-            .map(|p| {
-                for sym in self.bundle_exports[*p].values() {
-                    base_symbols.insert(sym.name.clone(), Symbol {
-                        // make it constant for future symbols
-                        var_type: VariableType::Let,
-                        ..sym.clone()
-                    });
-                }
-                self.bundle_stack_end[*p]
-            })
-            .max()
-            .unwrap_or(0);
+        let mut base_symbols = HashMap::new();
+        for p in &bundle.imported_files {
+            for sym in self.bundle_exports[*p].values() {
+                base_symbols.insert(sym.name.clone(), Arc::new(Symbol {
+                    // make it constant for future sections
+                    var_type: VariableType::Let,
+                    ..sym.as_ref().clone()
+                }));
+            }
+        }
 
+        // we are just hiding the non imported symbols, but the imported symbols take place
+        // in the same order as before (by keeping their stack position)
+        // the overall stack depth is also the same as of the previous section, irrespective of whether or not it was imported
         self.frame_mut().scopes = vec![Scope { base_stack_depth: 0, symbols: base_symbols }];
-        self.frame_mut().stack_depth = base_depth;
 
         for section in &bundle.sections {
             self.compile_section(section);
@@ -398,7 +393,6 @@ impl Compiler {
             .iter()
             .flat_map(|s| s.symbols.iter().map(|(k, v)| (k.clone(), v.clone())))
             .collect();
-        self.bundle_stack_end[bundle.file_index] = self.stack_depth();
     }
 
     fn compile_section(&mut self, section: &Section) {
@@ -499,21 +493,36 @@ impl Compiler {
         let position = self.stack_depth() - 1;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
-            Symbol { name: name.to_string(), stack_position: position, var_type, function_info },
+            Arc::new(Symbol { name: name.to_string(), stack_position: position, var_type, function_info }),
         );
     }
 
     fn register_symbol(&mut self, name: &str, var_type: VariableType, function_info: SymbolFunctionInfo, position: usize) {
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
-            Symbol { name: name.to_string(), stack_position: position, var_type, function_info },
+            Arc::new(Symbol { name: name.to_string(), stack_position: position, var_type, function_info }),
         );
     }
 
-    fn lookup(&self, name: &str) -> Option<&Symbol> {
+    fn lookup(&mut self, name: &str, source_span: Option<Span8>, invocation: Option<&InvocationArguments>) -> Option<Arc<Symbol>> {
         for scope in self.frame().scopes.iter().rev() {
             if let Some(sym) = scope.symbols.get(name) {
-                return Some(sym);
+                let clone = sym.clone();
+
+                if let Some(source_span) = source_span && self.bundle_root_import_span.is_none() {
+                    // we are in root, so this constitutes a root reference
+                    self.root_references.push(Reference {
+                        span: source_span,
+                        symbol: clone.clone(),
+                        invocation_spans: invocation
+                            .map(|inv| (
+                                inv.0.clone(),
+                                inv.1.iter().map(|(_, arg)| arg.0.clone()).collect()
+                            ))
+                    });
+                }
+
+                return Some(clone);
             }
         }
         None
@@ -566,7 +575,7 @@ impl Compiler {
     }
 
     fn error(&mut self, span: Span8, msg: impl Into<String>) {
-        let real_span = self.root_import_span.clone().unwrap_or(span);
+        let real_span = self.bundle_root_import_span.clone().unwrap_or(span);
         self.errors.push(CompileError { span: real_span, message: msg.into() });
     }
 }
@@ -643,7 +652,7 @@ impl Compiler {
             },
             Statement::Expression(e) => {
                 self.infer_possible_cursor_identifiers(span.clone());
-                self.compile_expr(false, e, span);
+                self.compile_expr(false, None, e, span);
                 self.emit_pops(1, span.clone());
             }
             Statement::Play(p) => {
@@ -654,7 +663,7 @@ impl Compiler {
     }
 
     fn compile_declaration(&mut self, d: &Declaration, span: &Span8) {
-        self.compile_expr(false, &d.value.1, &d.value.0);
+        self.compile_expr(false, None, &d.value.1, &d.value.0);
         let vt = match d.var_type {
             AstVariableType::Let => VariableType::Let,
             AstVariableType::Var => VariableType::Var,
@@ -684,7 +693,7 @@ impl Compiler {
 
     fn compile_while(&mut self, w: &While, span: &Span8) {
         let loop_start = self.instruction_pointer();
-        self.compile_expr(false, &w.condition.1, &w.condition.0);
+        self.compile_expr(false, None, &w.condition.1, &w.condition.0);
         self.emit(Instruction::Not, w.condition.0.clone());
         let exit_jump = self.instruction_pointer();
         // to be patched
@@ -723,7 +732,7 @@ impl Compiler {
         // desugars for v in container  ->  while idx < len(container)
         self.push_scope();
 
-        self.compile_expr(false, &f.container.1, &f.container.0);
+        self.compile_expr(false, None, &f.container.1, &f.container.0);
         let iter_pos = self.stack_depth() - 1;
         // anonymous names (null byte) can't collide with user identifiers
         self.emit(Instruction::PushVar {  }, span.clone());
@@ -817,7 +826,7 @@ impl Compiler {
     }
 
     fn compile_if(&mut self, i: &If, span: &Span8) {
-        self.compile_expr(false, &i.condition.1, &i.condition.0);
+        self.compile_expr(false, None, &i.condition.1, &i.condition.0);
         self.emit(Instruction::Not, i.condition.0.clone());
         let skip_if = self.instruction_pointer();
         self.emit(
@@ -847,7 +856,7 @@ impl Compiler {
     }
 
     fn compile_return(&mut self, r: &Return, span: &Span8) {
-        self.compile_expr(false, &r.value.1, &r.value.0);
+        self.compile_expr(false, None, &r.value.1, &r.value.0);
         let below = self.stack_depth() as i32 - 1;
         self.emit(Instruction::Return { stack_delta: -below }, span.clone());
     }
@@ -894,14 +903,14 @@ impl Compiler {
     }
 
     fn compile_play(&mut self, p: &Play, span: &Span8) {
-        self.compile_expr(false, &p.animations.1, &p.animations.0);
+        self.compile_expr(false, None, &p.animations.1, &p.animations.0);
         self.emit(Instruction::Play, span.clone());
         self.dec_stack(1);
     }
 }
 
 impl Compiler {
-    fn compile_expr(&mut self, definitely_mutable: bool, expr: &Expression, span: &Span8) {
+    fn compile_expr(&mut self, definitely_mutable: bool, post_invocation: Option<&InvocationArguments>, expr: &Expression, span: &Span8) {
         if definitely_mutable
             && !matches!(
                 expr,
@@ -914,7 +923,7 @@ impl Compiler {
             self.error(span.clone(), "expression is not assignable");
         }
         match expr {
-            Expression::IdentifierReference(i) => self.compile_ident_ref(definitely_mutable, i, span),
+            Expression::IdentifierReference(i) => self.compile_ident_ref(definitely_mutable, post_invocation, i, span),
             Expression::Subscript(s) => self.compile_subscript(definitely_mutable, s),
             Expression::Property(p) => self.compile_property(definitely_mutable, p),
             Expression::Literal(l) => self.compile_literal(definitely_mutable, l, span),
@@ -932,9 +941,9 @@ impl Compiler {
 }
 
 impl Compiler {
-    fn compile_ident_ref(&mut self, mutable: bool, ir: &IdentifierReference, span: &Span8) {
+    fn compile_ident_ref(&mut self, mutable: bool, post_invocation: Option<&InvocationArguments>, ir: &IdentifierReference, span: &Span8) {
         let name = ident_ref_name(ir);
-        let Some(sym) = self.lookup(name).cloned() else {
+        let Some(sym) = self.lookup(name, Some(span.clone()), post_invocation) else {
             self.error(span.clone(), format!("undefined variable '{}'", name));
             let idx = self.intern_int(0);
             self.emit_push(Instruction::PushInt { index: idx }, span.clone());
@@ -1032,7 +1041,7 @@ impl Compiler {
     fn compile_vector(&mut self, mutable: bool, elems: &[SpanTagged<Expression>], span: &Span8) {
         self.emit_push(Instruction::PushEmptyVector, span.clone());
         for elem in elems {
-            self.compile_expr(mutable, &elem.1, &elem.0);
+            self.compile_expr(mutable, None, &elem.1, &elem.0);
             self.emit(Instruction::Append, span.clone());
             self.dec_stack(1);
         }
@@ -1048,10 +1057,10 @@ impl Compiler {
         for (key, val) in entries {
             let d = self.stack_delta(map_pos);
             self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
-            self.compile_expr(false, &key.1, &key.0);
+            self.compile_expr(false, None, &key.1, &key.0);
             self.emit(Instruction::Subscript { mutable: true }, span.clone());
             self.dec_stack(1);
-            self.compile_expr(false, &val.1, &val.0);
+            self.compile_expr(false, None, &val.1, &val.0);
             self.emit(Instruction::Assign, span.clone());
             self.dec_stack(1);
             self.emit_pops(1, span.clone()); // discard assign result
@@ -1071,8 +1080,8 @@ impl Compiler {
     }
 
     fn compile_simple_binary(&mut self, b: &BinaryOperator, span: &Span8) {
-        self.compile_expr(false, &b.lhs.1, &b.lhs.0);
-        self.compile_expr(false, &b.rhs.1, &b.rhs.0);
+        self.compile_expr(false, None, &b.lhs.1, &b.lhs.0);
+        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
         let instr = match b.op_type {
             BinaryOperatorType::Add => Instruction::Add,
             BinaryOperatorType::Subtract => Instruction::Sub,
@@ -1095,22 +1104,22 @@ impl Compiler {
     }
 
     fn compile_assign(&mut self, b: &BinaryOperator, span: &Span8) {
-        self.compile_expr(true, &b.lhs.1, &b.lhs.0);
-        self.compile_expr(false, &b.rhs.1, &b.rhs.0);
+        self.compile_expr(true, None, &b.lhs.1, &b.lhs.0);
+        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
         self.emit(Instruction::Assign, span.clone());
         self.dec_stack(1);
     }
 
     fn compile_dot_assign(&mut self, b: &BinaryOperator, span: &Span8) {
-        self.compile_expr(true, &b.lhs.1, &b.lhs.0);
-        self.compile_expr(false, &b.rhs.1, &b.rhs.0);
+        self.compile_expr(true, None, &b.lhs.1, &b.lhs.0);
+        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
         self.emit(Instruction::AppendAssign, span.clone());
         self.dec_stack(1);
     }
 
     // `a && b`: short-circuit; result is 0 if a is falsy, else b
     fn compile_and(&mut self, b: &BinaryOperator, span: &Span8) {
-        self.compile_expr(false, &b.lhs.1, &b.lhs.0);
+        self.compile_expr(false, None, &b.lhs.1, &b.lhs.0);
         let jump_rhs = self.instruction_pointer();
         self.emit(
             Instruction::ConditionalJump { section: self.section_index(), to: 0 },
@@ -1125,13 +1134,13 @@ impl Compiler {
         self.dec_stack(1); // undo push for tracking; merge point restores
 
         self.patch_jump(jump_rhs as usize, self.instruction_pointer());
-        self.compile_expr(false, &b.rhs.1, &b.rhs.0);
+        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
         self.patch_jump(jump_end as usize, self.instruction_pointer());
     }
 
     // `a || b`: short-circuit; result is 1 if a is truthy, else b
     fn compile_or(&mut self, b: &BinaryOperator, span: &Span8) {
-        self.compile_expr(false, &b.lhs.1, &b.lhs.0);
+        self.compile_expr(false, None,&b.lhs.1, &b.lhs.0);
         let jump_true = self.instruction_pointer();
         self.emit(
             Instruction::ConditionalJump { section: self.section_index(), to: 0 },
@@ -1139,7 +1148,7 @@ impl Compiler {
         );
         self.dec_stack(1);
 
-        self.compile_expr(false, &b.rhs.1, &b.rhs.0);
+        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
         let jump_end = self.instruction_pointer();
         self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
         self.dec_stack(1);
@@ -1153,7 +1162,7 @@ impl Compiler {
 
 impl Compiler {
     fn compile_unary(&mut self, u: &UnaryPreOperator) {
-        self.compile_expr(false, &u.operand.1, &u.operand.0);
+        self.compile_expr(false, None, &u.operand.1, &u.operand.0);
         let instr = match u.op_type {
             UnaryOperatorType::Negative => Instruction::Negate,
             UnaryOperatorType::Not => Instruction::Not,
@@ -1162,14 +1171,14 @@ impl Compiler {
     }
 
     fn compile_subscript(&mut self, mutable: bool, s: &Subscript) {
-        self.compile_expr(mutable, &s.base.1, &s.base.0);
-        self.compile_expr(false, &s.index.1, &s.index.0);
+        self.compile_expr(mutable, None, &s.base.1, &s.base.0);
+        self.compile_expr(false, None, &s.index.1, &s.index.0);
         self.emit(Instruction::Subscript { mutable }, s.base.0.clone());
         self.dec_stack(1);
     }
 
     fn compile_property(&mut self, mutable: bool, p: &Property) {
-        self.compile_expr(mutable, &p.base.1, &p.base.0);
+        self.compile_expr(mutable, None, &p.base.1, &p.base.0);
         let attr = ident_ref_name(&p.attribute.1);
         let si = self.intern_string(attr);
         self.emit(Instruction::Attribute { mutable, string_index: si }, p.attribute.0.clone());
@@ -1183,10 +1192,12 @@ impl Compiler {
             || l.arguments.1.iter().any(|(_, a)| is_stateful(&a.1));
         let num_args = l.arguments.1.len() as u32;
 
+        // doing arguments first is useful for stack
+        // but it also guarantees deepest first ordering for references
         for (_, arg) in &l.arguments.1 {
-            self.compile_expr(false, &arg.1, &arg.0);
+            self.compile_expr(false, None, &arg.1, &arg.0);
         }
-        self.compile_expr(false, &l.lambda.1, &l.lambda.0);
+        self.compile_expr(false, Some(&l.arguments), &l.lambda.1, &l.lambda.0);
 
         if labeled {
             for (lbl, _) in &l.arguments.1 {
@@ -1208,11 +1219,11 @@ impl Compiler {
             || o.arguments.1.iter().any(|(_, a)| is_stateful(&a.1));
         let num_args = o.arguments.1.len() as u32;
 
-        self.compile_expr(false, &o.operand.1, &o.operand.0);
+        self.compile_expr(false,  None, &o.operand.1, &o.operand.0);
         for (_, arg) in &o.arguments.1 {
-            self.compile_expr(false, &arg.1, &arg.0);
+            self.compile_expr(false, None, &arg.1, &arg.0);
         }
-        self.compile_expr(false, &o.operator.1, &o.operator.0);
+        self.compile_expr(false, Some(&o.arguments), &o.operator.1, &o.operator.0);
 
         if labeled {
             for (lbl, _) in &o.arguments.1 {
@@ -1230,7 +1241,7 @@ impl Compiler {
     fn compile_native_invoke(&mut self, n: &NativeInvocation, span: &Span8) {
         let name = ident_ref_name(&n.function.1);
         for arg in &n.arguments {
-            self.compile_expr(false, &arg.1, &arg.0);
+            self.compile_expr(false, None, &arg.1, &arg.0);
         }
         let index = registry().index_of(&name) as u32;
         self.emit(Instruction::NativeInvoke { index }, span.clone());
@@ -1289,7 +1300,7 @@ impl Compiler {
 
         match &l.body.1 {
             LambdaBody::Inline(expr) => {
-                self.compile_expr(false, expr, &l.body.0);
+                self.compile_expr(false, None, expr, &l.body.0);
                 let below = self.stack_depth() as i32 - 1;
                 self.emit(Instruction::Return { stack_delta: -below }, l.body.0.clone());
             }
@@ -1307,7 +1318,7 @@ impl Compiler {
         }
         for arg in &l.args {
             if let Some(ref default) = arg.default_value {
-                self.compile_expr(false, &default.1, &default.0);
+                self.compile_expr(false, None, &default.1, &default.0);
             }
         }
 
@@ -1326,7 +1337,7 @@ impl Compiler {
     }
 
     fn compile_operator_def(&mut self, o: &OperatorDefinition, span: &Span8) {
-        self.compile_expr(false, &o.lambda.1, &o.lambda.0);
+        self.compile_expr(false, None, &o.lambda.1, &o.lambda.0);
         self.emit(Instruction::MakeOperator, span.clone());
     }
 
@@ -1431,18 +1442,18 @@ impl Compiler {
         self.emit(Instruction::PushVar {  }, span.clone());
         self.define_symbol("_", VariableType::Var, SymbolFunctionInfo::None);
         self.compile_statements(stmts);
-        let underscore_pos = self.lookup("_").unwrap().stack_position;
+        let underscore_pos = self.lookup("_", None, None).unwrap().stack_position;
         let d = self.stack_delta(underscore_pos);
         self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
         let below = self.stack_depth() as i32 - 1;
         self.emit(Instruction::Return { stack_delta: -below }, span.clone());
     }
 
-    fn resolve_captures(&self, free: &[String]) -> Vec<Symbol> {
-        free.iter().filter_map(|name| self.lookup(name).cloned()).collect()
+    fn resolve_captures(&mut self, free: &[String]) -> Vec<Arc<Symbol>> {
+        free.iter().filter_map(|name| self.lookup(name, None, None)).collect()
     }
 
-    fn compute_lambda_captures(&self, l: &LambdaDefinition) -> Vec<Symbol> {
+    fn compute_lambda_captures(&mut self, l: &LambdaDefinition) -> Vec<Arc<Symbol>> {
         let mut pre: HashSet<String> =
             l.args.iter().map(|a| a.identifier.1.0.clone()).collect();
         if matches!(l.body.1, LambdaBody::Block(_)) {
@@ -1455,7 +1466,7 @@ impl Compiler {
         self.resolve_captures(&free)
     }
 
-    fn compute_block_captures(&self, stmts: &[SpanTagged<Statement>]) -> Vec<Symbol> {
+    fn compute_block_captures(&mut self, stmts: &[SpanTagged<Statement>]) -> Vec<Arc<Symbol>> {
         let free = free_vars_stmts(stmts, HashSet::from(["_".to_string()]));
         self.resolve_captures(&free)
     }
@@ -1476,7 +1487,7 @@ mod test {
     use structs::rope::Rope;
     use structs::text::Span8;
 
-    use crate::{compile, CompileResult};
+    use super::{compile, CompileResult};
 
     fn empty_span() -> Span8 {
         0..0
@@ -1497,6 +1508,7 @@ mod test {
             imported_files: vec![],
             sections: vec![Section { body: stmts, section_type }],
             root_import_span: None,
+            was_cached: false,
         })
     }
 
@@ -1705,6 +1717,7 @@ mod test {
                 section_type: SectionType::UserLibrary,
             }],
             root_import_span: None,
+            was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
             file_path: Some(PathBuf::new()),
@@ -1717,6 +1730,7 @@ mod test {
                 section_type: SectionType::Slide,
             }],
             root_import_span: None,
+            was_cached: false,
         });
         no_errors(&compile(None, &[bundle0, bundle1]));
     }
@@ -1736,7 +1750,8 @@ mod test {
                 }))],
                 section_type: SectionType::UserLibrary,
             }],
-            root_import_span: None
+            root_import_span: None,
+            was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
             file_path: Some(PathBuf::new()),
@@ -1751,6 +1766,7 @@ mod test {
                 section_type: SectionType::Slide,
             }],
             root_import_span: None,
+            was_cached: false
         });
         let result = compile(None, &[bundle0, bundle1]);
         assert!(has_error(&result, "cannot mutate let"), "imported var should become let");

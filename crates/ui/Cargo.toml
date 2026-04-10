@@ -11,6 +11,7 @@ parser.workspace = true
 executor.workspace = true
 exporter.workspace = true
 structs.workspace = true
+bytecode.workspace = true
 
 anyhow.workspace = true
 smallvec.workspace = true
