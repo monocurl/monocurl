@@ -1,3 +1,3 @@
 mod compiler;
 
-pub use compiler::{compile, CompileError, CompileResult};
+pub use compiler::{compile, CompileError, CompileResult, CursorIdentifierType};

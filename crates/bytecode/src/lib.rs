@@ -28,6 +28,7 @@ pub enum Instruction {
     PushParam { name_index: u32 },
     PushState { name_index: u32 },
     PushMesh { name_index: u32 },
+    PushVar { },
 
     PushCopy { stack_delta: i32 },
     PushLvalue { stack_delta: i32 },

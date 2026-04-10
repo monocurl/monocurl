@@ -27,7 +27,7 @@ pub struct CompileError {
 // }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum CursorIdentiferType {
+pub enum CursorIdentifierType {
     Lambda,
     Operator,
     Let,
@@ -40,7 +40,9 @@ pub enum CursorIdentiferType {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CursorIdentifier {
     pub name: String,
-    pub identifier_type: CursorIdentiferType,
+    pub identifier_type: CursorIdentifierType,
+    pub stack_position: usize,
+    pub frame_depth: usize,
 }
 
 pub enum FunctionalReferenceType {
@@ -60,8 +62,7 @@ pub struct CompileResult {
     pub errors: Vec<CompileError>,
     // pub known_lambdas:
     //
-    pub
-    pub possible_cursor_identifiers: HashSet<CursorIdentiferType>,
+    pub possible_cursor_identifiers: Vec<CursorIdentifier>,
 }
 
 
@@ -76,10 +77,34 @@ enum VariableType {
 }
 
 #[derive(Clone, Debug)]
+enum SymbolFunctionInfo {
+    None,
+    Lambda { args: Vec<String> },
+    Operator { args: Vec<String> },
+}
+
+impl SymbolFunctionInfo {
+    fn from(value: &Expression) -> Self {
+        match value {
+            Expression::LambdaDefinition(l) => SymbolFunctionInfo::Lambda { args: l.args.iter().map(|a| a.identifier.1.0.clone()).collect() },
+            Expression::OperationDefinition(o) => SymbolFunctionInfo::Operator {
+                args: match &*o.lambda.1 {
+                    Expression::LambdaDefinition(l) => l.args.iter().map(|a| a.identifier.1.0.clone()).collect(),
+                    // difficult to infer in this case
+                    _ => Vec::new()
+                },
+            },
+            _ => SymbolFunctionInfo::None
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct Symbol {
     name: String,
     stack_position: usize,
     var_type: VariableType,
+    function_info: SymbolFunctionInfo,
 }
 
 #[derive(Clone)]
@@ -290,7 +315,9 @@ struct Compiler {
     root_import_span: Option<Span8>,
 
     cursor_pos: Option<Count8>,
-    possible_cursor_identifiers: HashSet<String>,
+
+    cursor_identifier_set: HashSet<String>,
+    possible_cursor_identifiers: Vec<CursorIdentifier>,
 }
 
 fn default_section() -> SectionBytecode {
@@ -312,12 +339,18 @@ impl Compiler {
             bundle_stack_end: vec![0; bundle_count],
             root_import_span: None,
             cursor_pos,
-            possible_cursor_identifiers: HashSet::new(),
+            cursor_identifier_set: HashSet::new(),
+            possible_cursor_identifiers: Vec::new()
         }
     }
 
     fn finish(self) -> CompileResult {
-        CompileResult { bytecode: Bytecode::new(self.sections), errors: self.errors, possible_cursor_identifiers: self.possible_cursor_identifiers }
+        // reorder identifiers
+        let mut possible_cursor_identifiers = self.possible_cursor_identifiers;
+        possible_cursor_identifiers.sort_by_key(|id| (id.frame_depth, id.stack_position));
+        possible_cursor_identifiers.reverse();
+
+        CompileResult { bytecode: Bytecode::new(self.sections), errors: self.errors, possible_cursor_identifiers }
     }
 }
 
@@ -461,18 +494,18 @@ impl Compiler {
         self.emit_pops(to_pop, span);
     }
 
-    fn define_symbol(&mut self, name: &str, var_type: VariableType) {
+    fn define_symbol(&mut self, name: &str, var_type: VariableType, function_info: SymbolFunctionInfo) {
         let position = self.stack_depth() - 1;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
-            Symbol { name: name.to_string(), stack_position: position, var_type },
+            Symbol { name: name.to_string(), stack_position: position, var_type, function_info },
         );
     }
 
-    fn register_symbol(&mut self, name: &str, var_type: VariableType, position: usize) {
+    fn register_symbol(&mut self, name: &str, var_type: VariableType, function_info: SymbolFunctionInfo, position: usize) {
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
-            Symbol { name: name.to_string(), stack_position: position, var_type },
+            Symbol { name: name.to_string(), stack_position: position, var_type, function_info },
         );
     }
 
@@ -544,10 +577,32 @@ impl Compiler {
             return;
         }
 
-        for frame in &self.frames {
-            for scope in frame.scopes.iter() {
+
+        for (frame_depth, frame) in self.frames.iter().enumerate().rev() {
+            for scope in frame.scopes.iter().rev() {
                 for sym in scope.symbols.values() {
-                    self.possible_cursor_identifiers.insert(sym.name.clone());
+                    if self.cursor_identifier_set.insert(sym.name.clone()) {
+                        self.possible_cursor_identifiers.push(CursorIdentifier {
+                            name: sym.name.clone(),
+                            identifier_type: match sym.function_info {
+                                SymbolFunctionInfo::Lambda { .. } => CursorIdentifierType::Lambda,
+                                SymbolFunctionInfo::Operator { .. } => CursorIdentifierType::Operator,
+                                SymbolFunctionInfo::None => {
+                                    // fall back to variable type if not a function
+                                    match sym.var_type {
+                                        VariableType::Let => CursorIdentifierType::Let,
+                                        VariableType::Var => CursorIdentifierType::Var,
+                                        VariableType::Mesh => CursorIdentifierType::Mesh,
+                                        VariableType::State => CursorIdentifierType::State,
+                                        VariableType::Param => CursorIdentifierType::Param,
+                                        VariableType::Reference => CursorIdentifierType::Var
+                                    }
+                                }
+                            },
+                            stack_position: sym.stack_position,
+                            frame_depth,
+                        })
+                    }
                 }
             }
         }
@@ -619,9 +674,11 @@ impl Compiler {
                 let ni = self.intern_string(&d.identifier.1.0);
                 self.emit(Instruction::PushParam { name_index: ni }, span.clone());
             }
-            _ => {}
+            VariableType::Let | VariableType::Var | VariableType::Reference => {
+                self.emit(Instruction::PushVar {}, span.clone());
+            }
         }
-        self.define_symbol(&d.identifier.1.0, vt);
+        self.define_symbol(&d.identifier.1.0, vt, SymbolFunctionInfo::from(&d.value.1));
     }
 
     fn compile_while(&mut self, w: &While, span: &Span8) {
@@ -668,12 +725,14 @@ impl Compiler {
         self.compile_expr(false, &f.container.1, &f.container.0);
         let iter_pos = self.stack_depth() - 1;
         // anonymous names (null byte) can't collide with user identifiers
-        self.define_symbol("\x00iter", VariableType::Let);
+        self.emit(Instruction::PushVar {  }, span.clone());
+        self.define_symbol("\x00iter", VariableType::Let, SymbolFunctionInfo::None);
 
         let zero = self.intern_int(0);
         self.emit_push(Instruction::PushInt { index: zero }, span.clone());
         let idx_pos = self.stack_depth() - 1;
-        self.define_symbol("\x00idx", VariableType::Var);
+        self.emit(Instruction::PushVar {  }, span.clone());
+        self.define_symbol("\x00idx", VariableType::Var, SymbolFunctionInfo::None);
 
         let condition_ip = self.instruction_pointer();
         let loop_stack = self.stack_depth();
@@ -715,7 +774,8 @@ impl Compiler {
         self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
         self.emit(Instruction::Subscript { mutable: false }, span.clone());
         self.dec_stack(1);
-        self.define_symbol(&f.var_name.1.0, VariableType::Let);
+        self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
+        self.emit(Instruction::PushVar {  }, span.clone());
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone()); // depth = loop_stack
@@ -885,7 +945,7 @@ impl Compiler {
         match ir {
             IdentifierReference::Reference(_) => {
                 if sym.var_type == VariableType::Let {
-                    self.error(span.clone(), format!("cannot mutate '{}'", name));
+                    self.error(span.clone(), format!("cannot mutably reference '{}', consider declaring it as a 'var'", name));
                 }
                 let inst = match sym.var_type {
                     // references should be copied to preserve the source reference
@@ -896,7 +956,7 @@ impl Compiler {
             },
             IdentifierReference::Value(_) if mutable => {
                 if sym.var_type == VariableType::Let {
-                    self.error(span.clone(), format!("cannot mutate '{}'", name));
+                    self.error(span.clone(), format!("cannot mutate '{}', consider declaring it as a 'var'", name));
                 }
                 let inst = match sym.var_type {
                     VariableType::Reference => Instruction::PushCopy { stack_delta: delta },
@@ -1210,7 +1270,7 @@ impl Compiler {
         self.push_frame();
 
         for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), i);
+            self.register_symbol(&cap.name, cap.var_type.clone(), cap.function_info.clone(), i);
         }
         let cap_count = captures.len();
 
@@ -1219,7 +1279,7 @@ impl Compiler {
 
         for (i, arg) in l.args.iter().enumerate() {
             let vt = if arg.must_be_reference { VariableType::Reference } else { VariableType::Let };
-            self.register_symbol(&arg.identifier.1.0, vt, cap_count + i);
+            self.register_symbol(&arg.identifier.1.0, vt, SymbolFunctionInfo::None, cap_count + i);
             if arg.default_value.is_some() {
                 default_count += 1;
             } else {
@@ -1244,7 +1304,7 @@ impl Compiler {
 
         for cap in &captures {
             let d = self.stack_delta(cap.stack_position);
-            self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
+            self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
         }
         for arg in &l.args {
             if let Some(ref default) = arg.default_value {
@@ -1281,7 +1341,7 @@ impl Compiler {
         self.push_frame();
         for (i, cap) in captures.iter().enumerate() {
             // captured vars are read-only inside a block regardless of their outer type
-            self.register_symbol(&cap.name, VariableType::Let, i);
+            self.register_symbol(&cap.name, VariableType::Let, cap.function_info.clone(), i);
         }
         self.frame_mut().stack_depth = captures.len();
         self.compile_block_body(&b.body, span);
@@ -1334,7 +1394,7 @@ impl Compiler {
         let body_ip = self.instruction_pointer();
         self.push_frame();
         for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), i);
+            self.register_symbol(&cap.name, cap.var_type.clone(), cap.function_info.clone(), i);
         }
         self.frame_mut().stack_depth = captures.len();
 
@@ -1369,7 +1429,8 @@ impl Compiler {
     // compile a block body: init `_ = []`, compile stmts, implicit `return _`
     fn compile_block_body(&mut self, stmts: &[SpanTagged<Statement>], span: &Span8) {
         self.emit_push(Instruction::PushEmptyVector, span.clone());
-        self.define_symbol("_", VariableType::Var);
+        self.emit(Instruction::PushVar {  }, span.clone());
+        self.define_symbol("_", VariableType::Var, SymbolFunctionInfo::None);
         self.compile_statements(stmts);
         let underscore_pos = self.lookup("_").unwrap().stack_position;
         let d = self.stack_delta(underscore_pos);

@@ -254,7 +254,8 @@ impl PopoverElement {
                 if current_segment.is_empty() {
                     current_segment.push(ch);
                     current_is_highlighted = is_highlighted;
-                } else if is_highlighted == current_is_highlighted {
+                } else if is_highlighted == current_is_highlighted && false {
+                    // disabled for now since it causes visual glitches
                     current_segment.push(ch);
                 } else {
                     segments.push((current_segment.clone(), current_is_highlighted));

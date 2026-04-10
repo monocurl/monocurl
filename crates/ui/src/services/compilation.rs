@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::ptr::replace;
 
-use compiler::compile;
+use compiler::{CompileResult, CursorIdentifierType, compile};
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use lexer::token::Token;
-use parser::ast::{BinaryOperator, Declaration, Expression, LambdaInvocation, OperatorInvocation, Section, Statement, UnaryPreOperator};
-use parser::parse_state::ParseState;
-use parser::parser::{Parser};
-use structs::rope::{Attribute, RLEData, Rope, TextAggregate};
+use parser::import_context::ParseImportContext;
+use parser::parser::{ParseArtifacts, Parser};
+use structs::rope::{Attribute, Rope, TextAggregate};
 use structs::text::{Location8};
 
 use crate::state::diagnostics::{Diagnostic, DiagnosticType};
@@ -46,7 +46,73 @@ impl CompilationService {
         }
     }
 
-    async fn recompile(&mut self, parse_state: &mut ParseState, latest_cursor: Cursor, text_rope: Rope<TextAggregate>, lex_rope: Rope<Attribute<LexData>>,  version: usize) {
+    async fn emit_autocomplete(&mut self, parse: &ParseArtifacts, compile: &CompileResult, latest_cursor: Cursor, version: usize) {
+        fn suggestion(s: impl Into<String>, replacement: impl Into<String>, cursor_delta: usize) -> AutoCompleteItem {
+            let replacement = replacement.into();
+            let rlen = replacement.len();
+            AutoCompleteItem {
+                head: s.into(),
+                replacement: replacement,
+                cursor_anchor_delta: Location8 { row: 0, col: rlen - cursor_delta},
+                cursor_head_delta: Location8 { row: 0, col: rlen - cursor_delta },
+                category: AutoCompleteCategory::Keyword
+            }
+        }
+
+        let mut suggestions = vec![];
+        for token in &parse.cursor_possibilities {
+            if let Some(s) = token.autocomplete() {
+                let (replacement, delta) = match token {
+                    Token::Block | Token::Anim  => (s.to_string() + " {}", 1),
+                    Token::If | Token::While | Token::For => (s.to_string() + " ()", 1),
+                    _ => (s.to_string() + " ", 0),
+                };
+                suggestions.push(suggestion(s, replacement, delta));
+            }
+        }
+
+        if parse.cursor_possibilities.contains(&Token::Identifier) {
+            for ident in &compile.possible_cursor_identifiers {
+                let (replacement, delta) = match ident.identifier_type {
+                    CursorIdentifierType::Lambda => (ident.name.clone() + "()", 1),
+                    CursorIdentifierType::Operator => (ident.name.clone() + "{}", 1),
+                    _ => (ident.name.clone(), 0),
+                };
+                suggestions.push(suggestion(&ident.name, replacement, delta))
+            }
+        }
+
+        self.sm_tx.send(ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor: latest_cursor, version }).await.unwrap();
+    }
+
+    async fn emit_diagnostics(&mut self, parse: &ParseArtifacts, compile: &CompileResult, version: usize) {
+        let mut diagnostics = vec![];
+
+        for parse_error in &parse.error_diagnostics {
+            diagnostics.push(Diagnostic {
+                message: parse_error.message.clone(),
+                span: parse_error.span.clone(),
+                dtype: DiagnosticType::CompileTimeError,
+                title: parse_error.title.clone()
+            });
+        }
+
+        for compile_error in &compile.errors {
+            diagnostics.push(Diagnostic {
+                message: compile_error.message.clone(),
+                span: compile_error.span.clone(),
+                dtype: DiagnosticType::CompileTimeError,
+                title: "Compile Error".into()
+            });
+        }
+
+        self.sm_tx.send(ServiceManagerMessage::UpdateCompileDiagnostics {
+            diagnostics,
+            version,
+        }).await.unwrap();
+    }
+
+    async fn recompile(&mut self, parse_state: &mut ParseImportContext, latest_cursor: Cursor, text_rope: Rope<TextAggregate>, lex_rope: Rope<Attribute<LexData>>,  version: usize) {
         let cursor_pos = if latest_cursor.is_empty() {
             let l = latest_cursor.head;
             Some(text_rope.utf8_line_pos_prefix(l.row, l.col).bytes_utf8)
@@ -55,52 +121,19 @@ impl CompilationService {
             None
         };
 
-        let (bundles, artifacts) = Parser::parse(parse_state, lex_rope, text_rope.clone(), cursor_pos);
-        // reparse + recompile
-        let cursor_poss = artifacts.cursor_possibilities;
+        let (parsed_bundles, parse_artifacts) = Parser::parse(parse_state, lex_rope, text_rope.clone(), cursor_pos);
+        let compile_result = compile(cursor_pos, &parsed_bundles);
 
-        let item = |s: &str| AutoCompleteItem {
-            head: s.to_string(),
-            replacement: s.to_string() + " ",
-            cursor_anchor_delta: Location8 { row: 0, col: s.len() + 1 },
-            cursor_head_delta: Location8 { row: 0, col: s.len() + 1 },
-            category: AutoCompleteCategory::Keyword
-        };
-        let mut diags = artifacts.error_diagnostics;
-        let mut suggestions: Vec<_> = cursor_poss.iter()
-            .flat_map(|token| token.autocomplete().map(|t| item(t)))
-            .collect();
-        {
-            let conv = text_rope.utf8_line_pos_prefix(13, 10).bytes_utf8;
-            let result = compile(cursor_pos, &bundles);
-            for error in result.errors {
-                let diagnostic = parser::parser::Diagnostic {
-                    span: error.span,
-                    title: "Compile Error".into(),
-                    message: error.message
-                };
-                diags.push(diagnostic);
-            }
+        self.emit_autocomplete(&parse_artifacts, &compile_result, latest_cursor, version).await;
+        self.emit_diagnostics(&parse_artifacts, &compile_result, version).await;
 
-            if cursor_poss.contains(&Token::Identifier) {
-                for ident in result.possible_cursor_identifiers {
-                    suggestions.push(item(&ident));
-                }
-            }
+        let okay_bytecode = parse_artifacts.error_diagnostics.is_empty() && compile_result.errors.is_empty();
+        if okay_bytecode {
+            // self.sm_tx.send(ServiceManagerMessage::UpdateBytecode {
+            //     bytecode: compile_result.bytecode.clone(),
+            //     version,
+            // }).await.unwrap();
         }
-
-        self.sm_tx.send(ServiceManagerMessage::UpdateCompileDiagnostics {
-            diagnostics: diags.into_iter()
-                .map(|d| Diagnostic {
-                    message: d.message.clone(),
-                    span: d.span,
-                    dtype: DiagnosticType::CompileTimeError,
-                    title: d.title
-                }).collect(),
-            version,
-        }).await.unwrap();
-
-        self.sm_tx.send(ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor: latest_cursor, version }).await.unwrap();
     }
 
     pub async fn run(mut self) {
@@ -109,7 +142,7 @@ impl CompilationService {
         let mut latest_lex_rope = Rope::default();
         let mut latest_version = 0;
 
-        let mut parse_state = ParseState::default();
+        let mut parse_state = ParseImportContext::default();
 
         while let Some(message) = self.rx.next().await {
             // we should do a select! here for best performance
@@ -120,7 +153,6 @@ impl CompilationService {
                     latest_version = version;
 
                     self.recompile(&mut parse_state, latest_cursor, latest_text_rope.clone(), lex_rope, version).await;
-                    // let _ = self.execution_tx.send(ExecutionMessage::UpdateBytecode).await;
                 },
                 CompilationMessage::UpdateCursor { cursor: c, _version: _} => {
                     latest_cursor = c;
@@ -194,7 +226,7 @@ impl CompilationService {
                     }).await.unwrap();
                 }
                 CompilationMessage::RecheckDependencies { physical_path, open_documents  } => {
-                    parse_state = ParseState {
+                    parse_state = ParseImportContext {
                         root_file_user_path: physical_path,
                         open_tab_ropes: open_documents,
                         cached_parses: Default::default()

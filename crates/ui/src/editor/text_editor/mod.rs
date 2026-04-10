@@ -230,7 +230,6 @@ impl TextEditor {
             });
         }
 
-
         self.set_cursor(group.cursor, cx);
         self.discretely_scroll_to_cursor(cx);
         self.reset_cursor_blink(cx);

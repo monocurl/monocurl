@@ -1,7 +1,7 @@
 use std::{collections::HashMap, ops::Range, path::{Path, PathBuf}, sync::Arc};
 
 use lexer::{lexer::Lexer, token::Token};
-use structs::{assets::Assets, rope::{Attribute, RLEAggregate, Rope, TextAggregate}};
+use structs::{assets::Assets, rope::{Attribute, Rope, TextAggregate}};
 use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{ast::SectionBundle, flatten_lex_stream, flatten_rope, parser::ParseArtifacts};
@@ -12,7 +12,7 @@ pub enum Error {
 
 // context mainly related about finding additional imports
 #[derive(Default)]
-pub struct ParseState {
+pub struct ParseImportContext {
     pub root_file_user_path: Option<PathBuf>,
     pub open_tab_ropes: HashMap<PathBuf, (Rope<Attribute<Token>>, Rope<TextAggregate>)>,
     pub cached_parses: HashMap<PathBuf, (Arc<SectionBundle>, ParseArtifacts)>,
@@ -25,7 +25,7 @@ pub(crate) struct FileResult {
     pub is_stdlib: bool,
 }
 
-impl ParseState {
+impl ParseImportContext {
     pub fn reset(&mut self) {
         self.root_file_user_path = None;
         self.open_tab_ropes.clear();

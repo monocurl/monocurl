@@ -2,9 +2,9 @@ use std::{collections::{HashMap, HashSet}, ops::Range, path::{PathBuf}, sync::Ar
 
 use lexer::{token::Token};
 use smallvec::SmallVec;
-use structs::{rope::{Attribute, RLEAggregate, Rope, TextAggregate}, text::{Count8, Span8}};
+use structs::{rope::{Attribute, Rope, TextAggregate}, text::{Count8, Span8}};
 
-use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, parse_state::{FileResult, ParseState}, flatten_rope, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
+use crate::{ast::{Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While}, import_context::{FileResult, ParseImportContext}, flatten_rope, parser::predicate::{BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate, InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate, UnaryOperatorPred, VariableDeclarationPred}};
 
 
 macro_rules! try_all {
@@ -725,16 +725,13 @@ impl SectionParser {
 
                 // ensure no hanging content
                 if self.peek_token().is_some() {
+
                     try_all!(self, {
                         ExactPred(Token::Newline) => {
                             self.advance_token();
                         },
                         ExactPred(Token::Semicolon) => {
                             self.advance_token();
-                        },
-                        _op = BinaryOperatorPred => {
-                            // solely to emit error that you can add binary operator instead
-                            unreachable!()
                         },
                     })?;
                 }
@@ -1573,7 +1570,7 @@ impl Parser {
         Diagnostic { span, title: "Import Error".to_string(), message: message.to_string() }
     }
 
-    fn dfs(&mut self, root_span: Option<Span8>, external_context: &ParseState, file: FileResult) -> Result<(), ()> {
+    fn dfs(&mut self, root_span: Option<Span8>, external_context: &ParseImportContext, file: FileResult) -> Result<(), ()> {
         if self.preparsed_files.iter().any(|old| old.path == file.path) {
             return Ok(()); // diamond import is fine
         }
@@ -1704,7 +1701,7 @@ impl Parser {
         }
     }
 
-    pub fn parse(external_context: &mut ParseState, lex_rope: Rope<Attribute<Token>>, text_rope: Rope<TextAggregate>, cursor: Option<Count8>) -> (Vec<Arc<SectionBundle>>, ParseArtifacts) {
+    pub fn parse(external_context: &mut ParseImportContext, lex_rope: Rope<Attribute<Token>>, text_rope: Rope<TextAggregate>, cursor: Option<Count8>) -> (Vec<Arc<SectionBundle>>, ParseArtifacts) {
         let mut p = Parser {
             preparsed_files: vec![],
             import_stack: vec![],
