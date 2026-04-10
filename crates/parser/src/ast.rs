@@ -258,8 +258,9 @@ pub struct IdentifierDeclaration(pub String);
 #[derive(Debug, Clone, PartialEq)]
 pub enum IdentifierReference {
     Value(String),
-    Stateful(String),
-    Dereference(String)
+    Reference(String),
+    StatefulReference(String),
+    StatefulDereference(String)
 }
 
 #[derive(Debug, Clone, PartialEq)]

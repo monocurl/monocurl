@@ -260,7 +260,6 @@ impl DocumentView {
 
         // whenever we switch over to here, we recompute the live dependencies cache
         let virtual_path = internal_path.clone();
-        let services_clone = services.clone();
         let window_state_up = window_state.upgrade().unwrap();
         cx.observe(&window_state_up, move |dv, ws, cx| {
             ws.update(cx, |window_state, cx| {

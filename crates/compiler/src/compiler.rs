@@ -12,7 +12,7 @@ use parser::ast::{
     Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript,
     UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType, While,
 };
-use structs::text::Span8;
+use structs::text::{Count8, Span8};
 
 
 pub struct CompileError {
@@ -26,10 +26,42 @@ pub struct CompileError {
 //     pub prototype_index: u32,
 // }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum CursorIdentiferType {
+    Lambda,
+    Operator,
+    Let,
+    Var,
+    Mesh,
+    Param,
+    State
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct CursorIdentifier {
+    pub name: String,
+    pub identifier_type: CursorIdentiferType,
+}
+
+pub enum FunctionalReferenceType {
+    Lambda,
+    Operator,
+}
+
+pub struct FunctionalReferences {
+    pub span: Span8,
+    pub name: String,
+    pub args: Vec<(Span8, Expression)>,
+    pub reference_type: FunctionalReferenceType,
+}
+
 pub struct CompileResult {
     pub bytecode: Bytecode,
     pub errors: Vec<CompileError>,
     // pub known_lambdas:
+    //
+    pub
+    pub possible_cursor_identifiers: HashSet<CursorIdentiferType>,
 }
 
 
@@ -200,15 +232,16 @@ impl FreeVarCollector {
 fn ident_ref_name(ir: &IdentifierReference) -> &str {
     match ir {
         IdentifierReference::Value(n)
-        | IdentifierReference::Stateful(n)
-        | IdentifierReference::Dereference(n) => n,
+        | IdentifierReference::StatefulReference(n)
+        | IdentifierReference::StatefulDereference(n)
+        | IdentifierReference::Reference(n) => n
     }
 }
 
 // returns true if evaluates to a stateful expression
 fn is_stateful(expr: &Expression) -> bool {
     match expr {
-        Expression::IdentifierReference(IdentifierReference::Stateful(_)) => true,
+        Expression::IdentifierReference(IdentifierReference::StatefulReference(_)) => true,
         Expression::IdentifierReference(_) => false,
         Expression::Literal(_) => false,
         Expression::BinaryOperator(b) => is_stateful(&b.lhs.1) || is_stateful(&b.rhs.1),
@@ -255,6 +288,9 @@ struct Compiler {
     bundle_stack_end: Vec<usize>,
 
     root_import_span: Option<Span8>,
+
+    cursor_pos: Option<Count8>,
+    possible_cursor_identifiers: HashSet<String>,
 }
 
 fn default_section() -> SectionBytecode {
@@ -262,7 +298,7 @@ fn default_section() -> SectionBytecode {
 }
 
 impl Compiler {
-    fn new(bundle_count: usize) -> Self {
+    fn new(cursor_pos: Option<Count8>, bundle_count: usize) -> Self {
         Self {
             frames: vec![CompilerFrame {
                 scopes: vec![Scope { base_stack_depth: 0, symbols: HashMap::new() }],
@@ -275,16 +311,18 @@ impl Compiler {
             bundle_exports: vec![HashMap::new(); bundle_count],
             bundle_stack_end: vec![0; bundle_count],
             root_import_span: None,
+            cursor_pos,
+            possible_cursor_identifiers: HashSet::new(),
         }
     }
 
     fn finish(self) -> CompileResult {
-        CompileResult { bytecode: Bytecode::new(self.sections), errors: self.errors }
+        CompileResult { bytecode: Bytecode::new(self.sections), errors: self.errors, possible_cursor_identifiers: self.possible_cursor_identifiers }
     }
 }
 
-pub fn compile(bundles: &[Arc<SectionBundle>]) -> CompileResult {
-    let mut c = Compiler::new(bundles.len());
+pub fn compile(cursor_pos: Option<Count8>, bundles: &[Arc<SectionBundle>]) -> CompileResult {
+    let mut c = Compiler::new(cursor_pos, bundles.len());
     for bundle in bundles {
         c.compile_bundle(bundle);
     }
@@ -500,6 +538,23 @@ impl Compiler {
 }
 
 impl Compiler {
+    // dump all visible symbols at the current positions
+    fn infer_possible_cursor_identifiers(&mut self, statement_span: Span8) {
+        if self.cursor_pos.is_none_or(|cp| !statement_span.contains(&cp) && !statement_span.end.eq(&cp)) {
+            return;
+        }
+
+        for frame in &self.frames {
+            for scope in frame.scopes.iter() {
+                for sym in scope.symbols.values() {
+                    self.possible_cursor_identifiers.insert(sym.name.clone());
+                }
+            }
+        }
+    }
+}
+
+impl Compiler {
     fn compile_statements(&mut self, stmts: &[SpanTagged<Statement>]) {
         for (span, stmt) in stmts {
             self.compile_statement(stmt, span);
@@ -508,18 +563,37 @@ impl Compiler {
 
     fn compile_statement(&mut self, stmt: &Statement, span: &Span8) {
         match stmt {
-            Statement::Break => self.compile_break(span),
-            Statement::Continue => self.compile_continue(span),
-            Statement::Return(r) => self.compile_return(r, span),
+            Statement::Break => {
+                // in most of these, technically we might be including identifiers too early
+                // in the event that there is a nested lambda definition of something similar
+                // but this is just a small performance cost
+                self.infer_possible_cursor_identifiers(span.clone());
+                self.compile_break(span)
+            },
+            Statement::Continue => {
+                self.infer_possible_cursor_identifiers(span.clone());
+                self.compile_continue(span)
+            },
+            Statement::Return(r) => {
+                self.infer_possible_cursor_identifiers(span.clone());
+                self.compile_return(r, span)
+            },
             Statement::While(w) => self.compile_while(w, span),
             Statement::For(f) => self.compile_for(f, span),
             Statement::If(i) => self.compile_if(i, span),
-            Statement::Declaration(d) => self.compile_declaration(d, span),
+            Statement::Declaration(d) => {
+                self.infer_possible_cursor_identifiers(span.clone());
+                self.compile_declaration(d, span)
+            },
             Statement::Expression(e) => {
+                self.infer_possible_cursor_identifiers(span.clone());
                 self.compile_expr(false, e, span);
                 self.emit_pops(1, span.clone());
             }
-            Statement::Play(p) => self.compile_play(p, span),
+            Statement::Play(p) => {
+                self.infer_possible_cursor_identifiers(span.clone());
+                self.compile_play(p, span)
+            }
         }
     }
 
@@ -767,8 +841,8 @@ impl Compiler {
 }
 
 impl Compiler {
-    fn compile_expr(&mut self, mutable: bool, expr: &Expression, span: &Span8) {
-        if mutable
+    fn compile_expr(&mut self, definitely_mutable: bool, expr: &Expression, span: &Span8) {
+        if definitely_mutable
             && !matches!(
                 expr,
                 Expression::IdentifierReference(_)
@@ -780,10 +854,10 @@ impl Compiler {
             self.error(span.clone(), "expression is not assignable");
         }
         match expr {
-            Expression::IdentifierReference(i) => self.compile_ident_ref(mutable, i, span),
-            Expression::Subscript(s) => self.compile_subscript(mutable, s),
-            Expression::Property(p) => self.compile_property(mutable, p),
-            Expression::Literal(l) => self.compile_literal(mutable, l, span),
+            Expression::IdentifierReference(i) => self.compile_ident_ref(definitely_mutable, i, span),
+            Expression::Subscript(s) => self.compile_subscript(definitely_mutable, s),
+            Expression::Property(p) => self.compile_property(definitely_mutable, p),
+            Expression::Literal(l) => self.compile_literal(definitely_mutable, l, span),
             Expression::BinaryOperator(b) => self.compile_binary(b, span),
             Expression::UnaryPreOperator(u) => self.compile_unary(u),
             Expression::LambdaDefinition(l) => self.compile_lambda(l, span),
@@ -809,26 +883,40 @@ impl Compiler {
         let delta = self.stack_delta(sym.stack_position);
 
         match ir {
-            IdentifierReference::Value(_) => {
-                if mutable && sym.var_type == VariableType::Let {
-                    self.error(span.clone(), format!("cannot mutate let '{}'", name));
+            IdentifierReference::Reference(_) => {
+                if sym.var_type == VariableType::Let {
+                    self.error(span.clone(), format!("cannot mutate '{}'", name));
                 }
-
-                let instr = match sym.var_type {
-                    // try to do lvalue even if non mutable, since it might actually be mutable in the case that we're passing to a reference parameter
-                    // these two are explicitly copy only, irrespective of context. Let and mutable will result in an error
-                    VariableType::Reference | VariableType::Let => Instruction::PushCopy { stack_delta: delta },
-                    _ => Instruction::PushLvalue { stack_delta: delta },
+                let inst = match sym.var_type {
+                    // references should be copied to preserve the source reference
+                    VariableType::Reference => Instruction::PushCopy { stack_delta: delta },
+                    _ => Instruction::PushLvalue { stack_delta: delta }
                 };
-                self.emit_push(instr, span.clone());
+                self.emit_push(inst, span.clone());
+            },
+            IdentifierReference::Value(_) if mutable => {
+                if sym.var_type == VariableType::Let {
+                    self.error(span.clone(), format!("cannot mutate '{}'", name));
+                }
+                let inst = match sym.var_type {
+                    VariableType::Reference => Instruction::PushCopy { stack_delta: delta },
+                    _ => Instruction::PushLvalue { stack_delta: delta }
+                };
+                self.emit_push(inst, span.clone());
+            },
+            IdentifierReference::Value(_) => {
+                self.emit_push(
+                    Instruction::PushCopy { stack_delta: delta },
+                    span.clone()
+                );
             }
-            IdentifierReference::Stateful(_) => {
+            IdentifierReference::StatefulReference(_) => {
                 self.emit_push(
                     Instruction::PushStateful { stack_delta: delta },
                     span.clone(),
                 );
             }
-            IdentifierReference::Dereference(_) => {
+            IdentifierReference::StatefulDereference(_) => {
                 self.emit_push(
                     Instruction::PushDereference { stack_delta: delta },
                     span.clone(),
@@ -1344,15 +1432,16 @@ mod test {
 
     fn make_bundle(stmts: Vec<(Span8, Statement)>, section_type: SectionType) -> Arc<SectionBundle> {
         Arc::new(SectionBundle {
-            file_path: PathBuf::new(),
+            file_path: Some(PathBuf::new()),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section { body: stmts, section_type }],
+            root_import_span: None,
         })
     }
 
     fn compile_stmts(stmts: Vec<(Span8, Statement)>) -> CompileResult {
-        compile(&[make_bundle(stmts, SectionType::Slide)])
+        compile(None, &[make_bundle(stmts, SectionType::Slide)])
     }
 
     fn lex(src: &str) -> Vec<(Token, Span8)> {
@@ -1544,7 +1633,7 @@ mod test {
     fn test_cross_bundle_symbol_visible() {
         // bundle 0 defines `x`; bundle 1 imports it and reads it — no error
         let bundle0 = Arc::new(SectionBundle {
-            file_path: PathBuf::new(),
+            file_path: Some(PathBuf::new()),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -1555,9 +1644,10 @@ mod test {
                 }))],
                 section_type: SectionType::UserLibrary,
             }],
+            root_import_span: None,
         });
         let bundle1 = Arc::new(SectionBundle {
-            file_path: PathBuf::new(),
+            file_path: Some(PathBuf::new()),
             file_index: 1,
             imported_files: vec![0],
             sections: vec![Section {
@@ -1566,15 +1656,16 @@ mod test {
                 )))],
                 section_type: SectionType::Slide,
             }],
+            root_import_span: None,
         });
-        no_errors(&compile(&[bundle0, bundle1]));
+        no_errors(&compile(None, &[bundle0, bundle1]));
     }
 
     #[test]
     fn test_cross_bundle_symbol_is_let() {
         // bundle 0 defines `var x`; bundle 1 imports it and tries to assign — error
         let bundle0 = Arc::new(SectionBundle {
-            file_path: PathBuf::new(),
+            file_path: Some(PathBuf::new()),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -1585,9 +1676,10 @@ mod test {
                 }))],
                 section_type: SectionType::UserLibrary,
             }],
+            root_import_span: None
         });
         let bundle1 = Arc::new(SectionBundle {
-            file_path: PathBuf::new(),
+            file_path: Some(PathBuf::new()),
             file_index: 1,
             imported_files: vec![0],
             sections: vec![Section {
@@ -1598,8 +1690,9 @@ mod test {
                 })))],
                 section_type: SectionType::Slide,
             }],
+            root_import_span: None,
         });
-        let result = compile(&[bundle0, bundle1]);
+        let result = compile(None, &[bundle0, bundle1]);
         assert!(has_error(&result, "cannot mutate let"), "imported var should become let");
     }
 

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use compiler::compile;
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use lexer::token::Token;
 use parser::ast::{BinaryOperator, Declaration, Expression, LambdaInvocation, OperatorInvocation, Section, Statement, UnaryPreOperator};
 use parser::parse_state::ParseState;
 use parser::parser::{Parser};
@@ -22,7 +23,7 @@ pub enum CompilationMessage {
     },
     UpdateCursor {
         cursor: Cursor,
-        version: usize,
+        _version: usize,
     },
     RecheckDependencies {
         physical_path: Option<PathBuf>,
@@ -56,11 +57,22 @@ impl CompilationService {
 
         let (bundles, artifacts) = Parser::parse(parse_state, lex_rope, text_rope.clone(), cursor_pos);
         // reparse + recompile
-        let parse_ok = artifacts.error_diagnostics.is_empty();
         let cursor_poss = artifacts.cursor_possibilities;
+
+        let item = |s: &str| AutoCompleteItem {
+            head: s.to_string(),
+            replacement: s.to_string() + " ",
+            cursor_anchor_delta: Location8 { row: 0, col: s.len() + 1 },
+            cursor_head_delta: Location8 { row: 0, col: s.len() + 1 },
+            category: AutoCompleteCategory::Keyword
+        };
         let mut diags = artifacts.error_diagnostics;
+        let mut suggestions: Vec<_> = cursor_poss.iter()
+            .flat_map(|token| token.autocomplete().map(|t| item(t)))
+            .collect();
         {
-            let result = compile(&bundles);
+            let conv = text_rope.utf8_line_pos_prefix(13, 10).bytes_utf8;
+            let result = compile(cursor_pos, &bundles);
             for error in result.errors {
                 let diagnostic = parser::parser::Diagnostic {
                     span: error.span,
@@ -68,6 +80,12 @@ impl CompilationService {
                     message: error.message
                 };
                 diags.push(diagnostic);
+            }
+
+            if cursor_poss.contains(&Token::Identifier) {
+                for ident in result.possible_cursor_identifiers {
+                    suggestions.push(item(&ident));
+                }
             }
         }
 
@@ -81,91 +99,6 @@ impl CompilationService {
                 }).collect(),
             version,
         }).await.unwrap();
-        let item = |s: &str| AutoCompleteItem {
-            head: s.to_string(),
-            replacement: s.to_string() + " ",
-            cursor_anchor_delta: Location8 { row: 0, col: s.len() + 1 },
-            cursor_head_delta: Location8 { row: 0, col: s.len() + 1 },
-            category: AutoCompleteCategory::Keyword
-        };
-
-        let suggestions = cursor_poss.iter()
-            .map(|token| item(token.autocomplete()))
-            .collect();
-
-        let mut should_italicize_rope = Rope::default();
-        should_italicize_rope = should_italicize_rope.replace_range(0..0,
-            [RLEData { codeunits: text_rope.codeunits(), attribute: false }].into_iter()
-        );
-
-        {
-            fn ast_walk3(q: Expression, mut r: Rope<Attribute<bool>>) -> Rope<Attribute<bool>> {
-                match q {
-                    // Expression::OperatorInvocation(OperatorInvocation {
-                    //     operator: _,
-                    //     arguments,
-                    //     operand,
-                    // }) => {
-                    //     for (span, arg) in arguments.1.iter() {
-                    //         if let Some((span, _label)) = span {
-                    //             r = r.replace_range(span.clone(), [RLEData { codeunits: span.len(), attribute: true }].into_iter());
-                    //         }
-                    //     }
-
-                    //     return ast_walk3(*operand.1, r)
-                    // },
-                    Expression::LambdaInvocation(LambdaInvocation {
-                        lambda: operator,
-                        arguments: _,
-                    }) => {
-                        return r.replace_range(operator.0.clone(), [RLEData { codeunits: operator.0.len(), attribute: true }].into_iter())
-                    },
-                    Expression::BinaryOperator(BinaryOperator {
-                        lhs,
-                        op_type: _,
-                        rhs,
-                    }) => {
-                        r = ast_walk3(*lhs.1, r);
-                        return ast_walk3(*rhs.1, r);
-                    },
-                    Expression::UnaryPreOperator(UnaryPreOperator {
-                        op_type: _,
-                        operand,
-                    }) => {
-                        return ast_walk3(*operand.1, r);
-                    },
-                    Expression::OperatorInvocation(OperatorInvocation { operator, arguments, operand }) => {
-                        return ast_walk3(*operand.1, r)
-                    }
-                    _ => return r
-                }
-            }
-
-            fn ast_walk2(q: Declaration, r: Rope<Attribute<bool>>) -> Rope<Attribute<bool>> {
-                return ast_walk3(q.value.1, r);
-            }
-
-            fn ast_walk1(q: Statement, r: Rope<Attribute<bool>>) -> Rope<Attribute<bool>> {
-                match q {
-                    Statement::Expression(e) => return ast_walk3(e, r),
-                    Statement::Declaration(d) => return ast_walk2(d, r),
-                    _ => return r
-                }
-            }
-            fn ast_walk(q: Section, mut r: Rope<Attribute<bool>>) -> Rope<Attribute<bool>> {
-                for (_, child) in q.body {
-                    r = ast_walk1(child, r);
-                }
-                return r
-            }
-
-            if parse_ok {
-                let last = bundles.into_iter().last().unwrap();
-                let last_last = last.sections.clone().into_iter().last().unwrap();
-                should_italicize_rope = ast_walk(last_last, should_italicize_rope);
-                self.sm_tx.send(ServiceManagerMessage::UpdateStaticAnalysisRope { analysis_rope: should_italicize_rope, version }).await.unwrap();
-            }
-        }
 
         self.sm_tx.send(ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor: latest_cursor, version }).await.unwrap();
     }
@@ -176,7 +109,6 @@ impl CompilationService {
         let mut latest_lex_rope = Rope::default();
         let mut latest_version = 0;
 
-        let mut open_files: Vec<Rope<TextAggregate>> = vec![];
         let mut parse_state = ParseState::default();
 
         while let Some(message) = self.rx.next().await {
@@ -190,7 +122,7 @@ impl CompilationService {
                     self.recompile(&mut parse_state, latest_cursor, latest_text_rope.clone(), lex_rope, version).await;
                     // let _ = self.execution_tx.send(ExecutionMessage::UpdateBytecode).await;
                 },
-                CompilationMessage::UpdateCursor { cursor: c, version: _} => {
+                CompilationMessage::UpdateCursor { cursor: c, _version: _} => {
                     latest_cursor = c;
 
                     let hint =  {

@@ -113,7 +113,7 @@ impl ServiceManager {
             self.compilation_tx.send(
                 CompilationMessage::UpdateCursor {
                     cursor: transaction.new_cursor,
-                    version: transaction.final_version
+                    _version: transaction.final_version
                 }
             ).await.unwrap();
 

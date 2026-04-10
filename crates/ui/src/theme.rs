@@ -140,7 +140,7 @@ impl Default for TextEditorStyles {
             gutter_text_color: gpui::hsla(0.61, 0.13, 0.49, 1.0),
             gutter_active_color: gpui::hsla(0.0, 0.59, 0.54, 1.0),
             selection_color: gpui::hsla(0.05, 0.44, 0.80, 0.3),
-            active_line_color: gpui::hsla(0.61, 0.18, 0.89, 0.40),
+            active_line_color: gpui::hsla(0.61, 0.18, 0.83, 0.40),
             scroll_color: gpui::hsla(0.61, 0.13, 0.40, 0.30),
             scroll_background_color: gpui::hsla(0.61, 0.11, 0.86, 0.20),
         }
