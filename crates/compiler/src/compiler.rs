@@ -12,6 +12,7 @@ use parser::ast::{
     Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript,
     UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType, While,
 };
+use stdlib::registry::registry;
 use structs::text::{Count8, Span8};
 
 
@@ -743,8 +744,7 @@ impl Compiler {
         let d = self.stack_delta(iter_pos);
         self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
 
-        // TODO native function lookup
-        let len_idx = self.intern_string("vector_len") as u32;
+        let len_idx = registry().index_of("vector_len") as u32;
         // NativeInvoke pops 1 arg, pushes 1 result — emit_push already counted the slot
         self.emit(Instruction::NativeInvoke { index: len_idx }, span.clone());
 
@@ -1232,8 +1232,7 @@ impl Compiler {
         for arg in &n.arguments {
             self.compile_expr(false, &arg.1, &arg.0);
         }
-        // TODO: replace with a proper native function registry
-        let index = self.intern_string(name) as u32;
+        let index = registry().index_of(&name) as u32;
         self.emit(Instruction::NativeInvoke { index }, span.clone());
         self.dec_stack(n.arguments.len());
         self.inc_stack();

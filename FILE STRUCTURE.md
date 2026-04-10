@@ -13,6 +13,8 @@
   - src/parser.rs: contains the code to actually parse a lexed stream into an AST, ideally error resistant/tolerant
 - renderer: given a state snapshot, actually renders it via platform specific shaders
 - stdlib: actual lib monocurl routine implementations
+  - src/registry.rs: defines `FunctionEntry`, `inventory::collect!`, the `Registry` singleton (lazily built, sorted by name via `OnceLock`), and re-exports the `#[register]` attribute macro
+- stdlib-macros: proc-macro crate providing the `#[register]` attribute; annotated `fn(i32) -> i32` functions are automatically submitted to the `inventory` collector used by `stdlib::registry`
 - structs: helper structs and utilities.
   - src/assets.rs: contains code for location where assets (say fonts) are located
   - src/iterutil.rs: contains code for KLookahead iterator from a base iterator

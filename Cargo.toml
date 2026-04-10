@@ -14,6 +14,7 @@ members = [
     "crates/parser",
     "crates/renderer",
     "crates/stdlib",
+    "crates/stdlib-macros",
     "crates/structs",
     "crates/ui",
 ]
@@ -52,6 +53,8 @@ geo = { path = "crates/geo" }
 lexer = { path = "crates/lexer" }
 parser = { path = "crates/parser" }
 renderer = { path = "crates/renderer" }
+inventory = "0.3"
+stdlib-macros = { path = "crates/stdlib-macros" }
 stdlib = { path = "crates/stdlib" }
 structs = { path = "crates/structs" }
 ui = { path = "crates/ui" }
