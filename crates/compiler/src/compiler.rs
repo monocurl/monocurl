@@ -62,7 +62,7 @@ pub struct CompileResult {
     pub possible_cursor_identifiers: Vec<CursorIdentifier>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum VariableType {
     Let,
     Var,
@@ -241,7 +241,7 @@ impl Compiler {
 
         // define global scene variables
         for (var, init) in [("camera", "initial_camera"), ("background", "initial_background")] {
-            self.emit_push(Instruction::NativeInvoke { index: registry().index_of(init) as u32 }, 0..0);
+            self.emit_push(Instruction::NativeInvoke { index: registry().index_of(init) as u16, arg_count: 0 }, 0..0);
             let name_index = self.intern_string(var);
             self.emit(Instruction::PushState { name_index }, 0..0);
             self.define_symbol(var, VariableType::State, SymbolFunctionInfo::None);
@@ -626,7 +626,7 @@ impl Compiler {
                 self.emit(Instruction::PushParam { name_index: ni }, span.clone());
             }
             VariableType::Let | VariableType::Var | VariableType::Reference => {
-                self.emit(Instruction::PushVar {}, span.clone());
+                self.emit(Instruction::PushVar, span.clone());
             }
         }
         self.define_symbol(&d.identifier.1.0, vt, SymbolFunctionInfo::from(&d.value.1));
@@ -676,13 +676,13 @@ impl Compiler {
         self.compile_val(&f.container.1, &f.container.0);
         let iter_pos = self.stack_depth() - 1;
         // anonymous names (null byte) can't collide with user identifiers
-        self.emit(Instruction::PushVar {}, span.clone());
+        self.emit(Instruction::PushVar, span.clone());
         self.define_symbol("\x00iter", VariableType::Let, SymbolFunctionInfo::None);
 
         let zero = self.intern_int(0);
         self.emit_push(Instruction::PushInt { index: zero }, span.clone());
         let idx_pos = self.stack_depth() - 1;
-        self.emit(Instruction::PushVar {}, span.clone());
+        self.emit(Instruction::PushVar, span.clone());
         self.define_symbol("\x00idx", VariableType::Var, SymbolFunctionInfo::None);
 
         let condition_ip = self.instruction_pointer();
@@ -694,9 +694,8 @@ impl Compiler {
         let d = self.stack_delta(iter_pos);
         self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
 
-        let len_idx = registry().index_of("vector_len") as u32;
-        // NativeInvoke pops 1 arg, pushes 1 result — emit_push already counted the slot
-        self.emit(Instruction::NativeInvoke { index: len_idx }, span.clone());
+        let len_idx = registry().index_of("vector_len") as u16;
+        self.emit(Instruction::NativeInvoke { index: len_idx, arg_count: 1 }, span.clone());
 
         self.emit(Instruction::Lt, span.clone());
         self.dec_stack(1);
@@ -725,7 +724,7 @@ impl Compiler {
         self.emit(Instruction::Subscript { mutable: false }, span.clone());
         self.dec_stack(1);
         self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
-        self.emit(Instruction::PushVar {}, span.clone());
+        self.emit(Instruction::PushVar, span.clone());
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone()); // depth = loop_stack
@@ -740,7 +739,7 @@ impl Compiler {
 
         // idx = idx + 1
         let d = self.stack_delta(idx_pos);
-        self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
+        self.emit_push(Instruction::PushLvalue { stack_delta: d, force_ephemeral: false }, span.clone());
         let d = self.stack_delta(idx_pos);
         self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
         let one = self.intern_int(1);
@@ -904,7 +903,7 @@ impl Compiler {
                 let inst = match sym.var_type {
                     // references should be copied to preserve the source reference
                     VariableType::Reference => Instruction::PushCopy { stack_delta: delta },
-                    _ => Instruction::PushLvalue { stack_delta: delta }
+                    _ => Instruction::PushLvalue { stack_delta: delta, force_ephemeral: true }
                 };
                 self.emit_push(inst, span.clone());
             },
@@ -914,7 +913,7 @@ impl Compiler {
                 }
                 let inst = match sym.var_type {
                     VariableType::Reference => Instruction::PushCopy { stack_delta: delta },
-                    _ => Instruction::PushLvalue { stack_delta: delta }
+                    _ => Instruction::PushLvalue { stack_delta: delta, force_ephemeral: false }
                 };
                 self.emit_push(inst, span.clone());
             },
@@ -998,10 +997,15 @@ impl Compiler {
         span: &Span8,
     ) {
         self.emit_push(Instruction::PushEmptyMap, span.clone());
+        if entries.is_empty() {
+            return;
+        }
+        // needed to subscript lvalue wise
+        self.emit(Instruction::PushVar, span.clone());
         let map_pos = self.stack_depth() - 1;
         for (key, val) in entries {
             let d = self.stack_delta(map_pos);
-            self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
+            self.emit_push(Instruction::PushLvalue { stack_delta: d, force_ephemeral: false }, span.clone());
             self.compile_val(&key.1, &key.0);
             self.emit(Instruction::Subscript { mutable: true }, span.clone());
             self.dec_stack(1);
@@ -1188,8 +1192,9 @@ impl Compiler {
         for arg in &n.arguments {
             self.compile_val(&arg.1, &arg.0);
         }
-        let index = registry().index_of(&name) as u32;
-        self.emit(Instruction::NativeInvoke { index }, span.clone());
+        let index = registry().index_of(&name) as u16;
+        let arg_count = n.arguments.len() as u16;
+        self.emit(Instruction::NativeInvoke { index, arg_count }, span.clone());
         self.dec_stack(n.arguments.len());
         self.inc_stack();
     }
@@ -1198,15 +1203,6 @@ impl Compiler {
 impl Compiler {
     fn compile_lambda(&mut self, l: &LambdaDefinition, span: &Span8) {
         let captures = self.compute_lambda_captures(l);
-
-        for cap in &captures {
-            if cap.var_type != VariableType::Let {
-                self.error(
-                    span.clone(),
-                    "to make capture semantics clear, lambdas can only reference \"let\" variables, but \"".to_string() + &cap.name + "\" is not a \"let\" variable",
-                );
-            }
-        }
 
         let mut saw_default = false;
         for arg in &l.args {
@@ -1218,20 +1214,11 @@ impl Compiler {
             }
         }
 
-        let jump_idx = self.instruction_pointer();
-        self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
-
-        let body_ip = self.instruction_pointer();
-        self.push_frame();
-
-        for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), cap.function_info.clone(), i);
-        }
+        let (jump_idx, body_ip) = self.begin_closure_frame(&captures, span);
         let cap_count = captures.len();
 
         let mut required_args: u32 = 0;
         let mut default_count: u32 = 0;
-
         for (i, arg) in l.args.iter().enumerate() {
             let vt = if arg.must_be_reference { VariableType::Reference } else { VariableType::Let };
             self.register_symbol(&arg.identifier.1.0, vt, SymbolFunctionInfo::None, cap_count + i);
@@ -1254,13 +1241,9 @@ impl Compiler {
             }
         }
 
-        self.pop_frame();
-        self.patch_jump(jump_idx as usize, self.instruction_pointer());
+        self.end_closure_frame(jump_idx);
+        self.push_captures(&captures, false, span);
 
-        for cap in &captures {
-            let d = self.stack_delta(cap.stack_position);
-            self.emit_push(Instruction::PushCopy { stack_delta: d }, span.clone());
-        }
         for arg in &l.args {
             if let Some(ref default) = arg.default_value {
                 self.compile_val(&default.1, &default.0);
@@ -1290,28 +1273,13 @@ impl Compiler {
     fn compile_block(&mut self, b: &Block, span: &Span8) {
         let captures = self.compute_block_captures(&b.body);
 
-        let jump_idx = self.instruction_pointer();
-        self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
-
-        let body_ip = self.instruction_pointer();
-        self.push_frame();
-        for (i, cap) in captures.iter().enumerate() {
-            // captured vars are read-only inside a block regardless of their outer type
-            self.register_symbol(&cap.name, VariableType::Let, cap.function_info.clone(), i);
-        }
-        self.frame_mut().stack_depth = captures.len();
+        let (jump_idx, body_ip) = self.begin_closure_frame(&captures, span);
         self.compile_block_body(&b.body, span);
-        self.pop_frame();
+        self.end_closure_frame(jump_idx);
 
-        self.patch_jump(jump_idx as usize, self.instruction_pointer());
-
-        for cap in &captures {
-            let d = self.stack_delta(cap.stack_position);
-            self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
-        }
+        self.push_captures(&captures, true, span);
 
         let proto_idx = self.current_section().lambda_prototypes.len() as u32;
-
         let section = self.section_index();
         self.current_section_mut().lambda_prototypes.push(LambdaPrototype {
             section,
@@ -1337,37 +1305,16 @@ impl Compiler {
     fn compile_anim(&mut self, a: &Anim, span: &Span8) {
         let captures = self.compute_block_captures(&a.body);
 
-        for cap in &captures {
-            if cap.var_type != VariableType::Let {
-                self.error(
-                    span.clone(),
-                    "to make capture semantics clear, lambdas can only reference \"let\" variables",
-                );
-            }
+        let (jump_idx, body_ip) = self.begin_closure_frame(&captures, span);
+        {
+            self.push_scope();
+            self.compile_statements(&a.body);
+            self.pop_scope(span.clone());
+            self.emit(Instruction::EndOfExecutionHead, span.clone());
         }
+        self.end_closure_frame(jump_idx);
 
-        let jump_idx = self.instruction_pointer();
-        self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
-
-        let body_ip = self.instruction_pointer();
-        self.push_frame();
-        for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(&cap.name, cap.var_type.clone(), cap.function_info.clone(), i);
-        }
-        self.frame_mut().stack_depth = captures.len();
-
-        self.push_scope();
-        self.compile_statements(&a.body);
-        self.pop_scope(span.clone());
-        self.emit(Instruction::EndOfExecutionHead, span.clone());
-
-        self.pop_frame();
-        self.patch_jump(jump_idx as usize, self.instruction_pointer());
-
-        for cap in &captures {
-            let d = self.stack_delta(cap.stack_position);
-            self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
-        }
+        self.push_captures(&captures, false, span);
 
         let proto_idx = self.current_section().anim_prototypes.len() as u32;
         let section = self.section_index();
@@ -1385,10 +1332,43 @@ impl Compiler {
         self.inc_stack();
     }
 
+    fn begin_closure_frame(&mut self, captures: &[Arc<Symbol>], span: &Span8) -> (usize, u32) {
+        let jump_idx = self.instruction_pointer() as usize;
+        self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
+        let body_ip = self.instruction_pointer();
+        self.push_frame();
+        for (i, cap) in captures.iter().enumerate() {
+            self.register_symbol(&cap.name, cap.var_type, cap.function_info.clone(), i);
+        }
+        self.frame_mut().stack_depth = captures.len();
+        (jump_idx, body_ip)
+    }
+
+    fn end_closure_frame(&mut self, jump_idx: usize) {
+        self.pop_frame();
+        self.patch_jump(jump_idx, self.instruction_pointer());
+    }
+
+    fn push_captures(&mut self, captures: &[Arc<Symbol>], immediately_invoked: bool, span: &Span8) {
+        for cap in captures {
+            let stack_delta = self.stack_delta(cap.stack_position);
+            if !immediately_invoked && matches!(cap.var_type, VariableType::Reference | VariableType::Let) {
+                // optimize out the ephemeral
+                self.emit_push(Instruction::PushCopy { stack_delta }, span.clone());
+                self.emit(Instruction::PushVar, span.clone());
+            } else {
+                self.emit_push(
+                    Instruction::PushLvalue { stack_delta, force_ephemeral: !immediately_invoked },
+                    span.clone(),
+                );
+            }
+        }
+    }
+
     // compile a block body: init `_ = []`, compile stmts, implicit `return _`
     fn compile_block_body(&mut self, stmts: &[SpanTagged<Statement>], span: &Span8) {
         self.emit_push(Instruction::PushEmptyVector, span.clone());
-        self.emit(Instruction::PushVar {}, span.clone());
+        self.emit(Instruction::PushVar, span.clone());
         self.define_symbol("_", VariableType::Var, SymbolFunctionInfo::None);
         self.compile_statements(stmts);
         let underscore_pos = self.lookup("_", None, None).unwrap().stack_position;
@@ -1513,7 +1493,8 @@ mod test {
         }))];
         let result = compile_stmts(stmts);
         no_errors(&result);
-        let section = &result.bytecode.sections[0];
+        // sections[0] is the prelude; user code is in sections[1]
+        let section = &result.bytecode.sections[1];
         assert!(section.instructions.iter().any(|i| matches!(i, Instruction::PushInt { .. })));
     }
 
@@ -1555,30 +1536,6 @@ mod test {
     fn test_continue_outside_loop_error() {
         let result = compile_stmts(vec![s(Statement::Continue)]);
         assert!(has_error(&result, "continue outside loop"));
-    }
-
-    #[test]
-    fn test_lambda_capture_non_let_error() {
-        // var x = 1; let f = |-> x  — lambda captures non-let var
-        let stmts = vec![
-            s(Statement::Declaration(Declaration {
-                var_type: VariableType::Var,
-                identifier: s(IdentifierDeclaration("x".into())),
-                value: s(Expression::Literal(Literal::Int(1))),
-            })),
-            s(Statement::Declaration(Declaration {
-                var_type: VariableType::Let,
-                identifier: s(IdentifierDeclaration("f".into())),
-                value: s(Expression::LambdaDefinition(LambdaDefinition {
-                    args: vec![],
-                    body: s(LambdaBody::Inline(Box::new(Expression::IdentifierReference(
-                        IdentifierReference::Value("x".into()),
-                    )))),
-                })),
-            })),
-        ];
-        let result = compile_stmts(stmts);
-        assert!(has_error(&result, "lambdas can only reference"), "expected capture-must-be-let error");
     }
 
     #[test]
@@ -1813,10 +1770,10 @@ mod test {
             value: s(Expression::Literal(Literal::Int(42))),
         }))]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[0];
+        let sec = &result.bytecode.sections[1];
         assert_eq!(
             sec.instructions,
-            vec![Instruction::PushInt { index: 0 }, Instruction::PushVar {}, Instruction::EndOfExecutionHead],
+            vec![Instruction::PushInt { index: 0 }, Instruction::PushVar, Instruction::EndOfExecutionHead],
         );
         assert_eq!(sec.int_pool, vec![42i64]);
         assert!(sec.lambda_prototypes.is_empty());
@@ -1838,13 +1795,13 @@ mod test {
             }))),
         ]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[0];
+        let sec = &result.bytecode.sections[1];
         assert_eq!(
             sec.instructions,
             vec![
                 Instruction::PushInt { index: 0 },          // var x = 0
-                Instruction::PushVar {},                        // create variable slot
-                Instruction::PushLvalue { stack_delta: -1 }, // lvalue of x (at pos 0, depth 1)
+                Instruction::PushVar,                        // create variable slot
+                Instruction::PushLvalue {stack_delta: -1, force_ephemeral: false }, // lvalue of x (at pos 0, depth 1)
                 Instruction::PushInt { index: 1 },           // rhs = 1
                 Instruction::Assign,
                 Instruction::Pop { count: 1 },               // discard assign result
@@ -1867,7 +1824,7 @@ mod test {
             })),
         }))]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[0];
+        let sec = &result.bytecode.sections[1];
         // [0] PushInt(1)  [1] ConditionalJump→4  [2] PushInt(0)  [3] Jump→5
         // [4] PushInt(0)  [5] PushVar  [6] EndOfExecutionHead
         assert_eq!(sec.instructions[0], Instruction::PushInt { index: 0 }); // lhs = 1
@@ -1875,7 +1832,7 @@ mod test {
         assert_eq!(sec.instructions[2], Instruction::PushInt { index: 1 }); // false literal
         assert!(matches!(sec.instructions[3], Instruction::Jump { to: 5, .. }));
         assert_eq!(sec.instructions[4], Instruction::PushInt { index: 1 }); // rhs = 0 (same pool slot)
-        assert_eq!(sec.instructions[5], Instruction::PushVar {});
+        assert_eq!(sec.instructions[5], Instruction::PushVar);
         assert_eq!(sec.instructions[6], Instruction::EndOfExecutionHead);
         assert_eq!(sec.int_pool[0], 1i64);
         assert_eq!(sec.int_pool[1], 0i64);
@@ -1900,7 +1857,7 @@ mod test {
             })),
         }))]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[0];
+        let sec = &result.bytecode.sections[1];
         // [0] Jump{to:3}  [1] PushCopy{-1}  [2] Return{-1}  [3] MakeLambda{proto:0,cap:0}
         // [4] PushVar  [5] EndOfExecutionHead
         assert!(matches!(sec.instructions[0], Instruction::Jump { to: 3, .. }));
@@ -1910,7 +1867,7 @@ mod test {
             sec.instructions[3],
             Instruction::MakeLambda { prototype_index: 0, capture_count: 0 },
         );
-        assert_eq!(sec.instructions[4], Instruction::PushVar {});
+        assert_eq!(sec.instructions[4], Instruction::PushVar);
         assert_eq!(sec.instructions[5], Instruction::EndOfExecutionHead);
         assert_eq!(sec.lambda_prototypes.len(), 1);
         assert_eq!(sec.lambda_prototypes[0].required_args, 1);
