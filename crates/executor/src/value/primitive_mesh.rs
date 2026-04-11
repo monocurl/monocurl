@@ -1,6 +1,6 @@
 use geo::mesh::Mesh;
 
+#[derive(Clone)]
 pub struct PrimitiveMesh {
     pub mesh: Mesh,
-    hash_cache: Option<usize>,
 }

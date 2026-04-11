@@ -30,10 +30,10 @@ pub enum Instruction {
     PushParam { name_index: u32 },
     PushState { name_index: u32 },
     PushMesh { name_index: u32 },
-    PushVar { },
+    PushVar,
 
     PushCopy { stack_delta: i32 },
-    PushLvalue { stack_delta: i32 },
+    PushLvalue { force_ephemeral: bool, stack_delta: i32 },
 
     PushDereference { stack_delta: i32 },
     PushStateful { stack_delta: i32 },
@@ -56,7 +56,7 @@ pub enum Instruction {
     Return { stack_delta: i32 },
     Pop { count: u32 },
 
-    NativeInvoke { index: u32 },
+    NativeInvoke { index: u16, arg_count: u16 },
 
     Play,
 

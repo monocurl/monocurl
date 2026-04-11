@@ -5,6 +5,7 @@ members = [
     "crates/bytecode",
     "crates/cli",
     "crates/compiler",
+    "crates/integration_tests",
     "crates/ui_cli_shared",
     "crates/executor",
     "crates/exporter",

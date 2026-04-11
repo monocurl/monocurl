@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use executor::executor::StdlibFunc;
 
-pub(crate) type StdFunc = fn(i32) -> i32;
-
-pub(crate) struct FunctionEntry {
+pub struct FunctionEntry {
     pub name: &'static str,
-    pub func: StdFunc,
+    pub func: StdlibFunc,
 }
 
 inventory::collect!(FunctionEntry);
@@ -36,9 +35,18 @@ impl Registry {
         *self.index_map.get(name).unwrap()
     }
 
-    #[inline]
-    pub fn call_by_index(&self, idx: usize, arg: i32) -> i32 {
-        (self.entries[idx].func)(arg)
+    /// build a function table (Vec<NativeFunc>) ordered by index,
+    /// suitable for passing to the executor.
+    pub fn func_table(&self) -> Vec<StdlibFunc> {
+        self.entries.iter().map(|e| e.func).collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 }
 

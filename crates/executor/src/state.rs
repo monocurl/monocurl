@@ -1,55 +1,229 @@
-use std::{collections::BTreeMap};
+use crate::{
+    time::Timestamp,
+    value::{
+        InstructionPointer, RcValue, Value, rc_value,
+        leader::Leader,
+        primitive_anim::PrimitiveAnim,
+    },
+};
 
-use bytecode::{SectionBytecode};
-
-use crate::{value::RcValue, vheap::{VHeap, VHeapPtr}};
-
-pub struct Timestamp {
-    slide: usize,
-    time: f64,
-}
-
+/// a single execution context (analogous to a thread / coroutine).
+/// each anim block spawns a new execution stack.
+#[derive(Clone)]
 pub struct ExecutionStack {
-    // for determining what to lerp
-    stack_id: usize,
-    var_stack: Vec<VHeapPtr>,
-    ip_stack: Vec<(u16, u32)>,
-    // index into string labels
-    label_buffer: Vec<usize>,
-    conditional_flag: bool,
-
-    active_child_count: usize,
-    parent_stack_idx: Option<usize>,
+    /// unique id for tracking which stack last touched a leader
+    pub stack_id: usize,
+    /// operand / variable stack
+    pub var_stack: Vec<Value>,
+    /// current instruction pointer
+    pub ip: InstructionPointer,
+    /// call return addresses (pushed on LambdaInvoke, popped on Return)
+    pub call_stack: Vec<InstructionPointer>,
+    /// buffered label string-pool indices for labeled invocations
+    pub label_buffer: Vec<u32>,
+    /// set by comparison instructions, consumed by ConditionalJump
+    pub conditional_flag: bool,
+    /// number of child execution stacks still running
+    pub active_child_count: usize,
+    /// index of the parent execution stack (None for the root)
+    pub parent_idx: Option<usize>,
 }
 
-struct BakedPrimitiveAnim {
-    anim_id: usize,
-    start_time: f64,
-    end_time: f64,
-    parent_stack_idx: Option<usize>
+impl ExecutionStack {
+    pub fn new(stack_id: usize, ip: InstructionPointer, parent_idx: Option<usize>) -> Self {
+        Self {
+            stack_id,
+            var_stack: Vec::new(),
+            ip,
+            call_stack: Vec::new(),
+            label_buffer: Vec::new(),
+            conditional_flag: false,
+            active_child_count: 0,
+            parent_idx,
+        }
+    }
+
+    pub fn push(&mut self, val: Value) {
+        self.var_stack.push(val);
+    }
+
+    pub fn pop(&mut self) -> Value {
+        self.var_stack.pop().expect("stack underflow")
+    }
+
+    pub fn peek(&self) -> &Value {
+        self.var_stack.last().expect("stack underflow")
+    }
+
+    /// read a value at an offset from the current stack top.
+    /// stack_delta is typically negative (pointing below TOS).
+    /// the compiler computes delta as (target_position - current_stack_depth).
+    pub fn read_at(&self, stack_delta: i32) -> &Value {
+        let idx = (self.var_stack.len() as i32 + stack_delta) as usize;
+        &self.var_stack[idx]
+    }
+
+    pub fn stack_len(&self) -> usize {
+        self.var_stack.len()
+    }
+
+    pub fn pop_n(&mut self, n: usize) {
+        let new_len = self.var_stack.len() - n;
+        self.var_stack.truncate(new_len);
+    }
 }
 
+/// a primitive animation that has been "baked" with timing info
+#[derive(Clone)]
+pub struct BakedPrimitiveAnim {
+    pub anim: PrimitiveAnim,
+    pub start_time: f64,
+    pub end_time: f64,
+    /// which execution stack spawned this (to resume when finished)
+    pub parent_stack_idx: usize,
+    /// which stack id for leader tracking
+    pub stack_id: usize,
+}
+
+/// a leader-follower pair entry for quick lookup
+#[derive(Clone)]
+pub struct LeaderEntry {
+    /// the RcValue containing Value::Leader
+    pub leader_rc: RcValue,
+    pub kind: LeaderKind,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum LeaderKind {
+    Mesh,
+    State,
+    Param,
+}
+
+#[derive(Clone)]
 pub struct ExecutionState {
     pub timestamp: Timestamp,
 
-    vheap: VHeap,
-
+    /// monotonically increasing counter for unique stack ids
     stack_counter: usize,
-    execution_stacks: Vec<Option<ExecutionStack>>,
-    primitive_anims: Vec<BakedPrimitiveAnim>,
-    execution_heads: Vec<usize>,
+    /// execution stacks — always appended, never reused.
+    /// Some = active, None = finished.
+    pub execution_stacks: Vec<Option<ExecutionStack>>,
+    /// indices of currently active execution heads (stacks awaiting a Play)
+    pub execution_heads: Vec<usize>,
+    /// currently running primitive animations
+    pub primitive_anims: Vec<BakedPrimitiveAnim>,
 
-    error_state: Vec<u8>,
+    /// all leader-follower pairs registered during execution
+    pub leaders: Vec<LeaderEntry>,
 
-    mesh_followers: Vec<RcValue>,
-    state_followers: Vec<RcValue>,
-    parameter_followers: Vec<RcValue>,
+    /// strong refs for force_ephemeral lvalues (captured variables that may outlive
+    /// their var_stack slot). cleared at section boundaries.
+    pub ephemeral_pool: Vec<RcValue>,
 
-    // for each anim block id
-    dirty_followers: BTreeMap<i64, Vec<u8>>
+    /// accumulated error messages
+    pub errors: Vec<String>,
+
+    /// values captured from the top of root execution stacks when they finish.
+    /// used primarily for testing: the final TOS of each completed root head
+    /// is pushed here so callers can inspect results after execution.
+    pub captured_output: Vec<Value>,
 }
 
-pub struct SlideCache {
-    execution_snapshot: ExecutionState,
-    bytecode: SectionBytecode,
+impl ExecutionState {
+    pub fn new() -> Self {
+        Self {
+            timestamp: Timestamp::default(),
+            stack_counter: 0,
+            execution_stacks: Vec::new(),
+            execution_heads: Vec::new(),
+            primitive_anims: Vec::new(),
+            leaders: Vec::new(),
+            ephemeral_pool: Vec::new(),
+            errors: Vec::new(),
+            captured_output: Vec::new(),
+        }
+    }
+
+    /// allocate a fresh execution stack and return its index.
+    /// always appends — indices are never reused.
+    pub fn alloc_stack(&mut self, ip: InstructionPointer, parent_idx: Option<usize>) -> usize {
+        let id = self.stack_counter;
+        self.stack_counter += 1;
+        let stack = ExecutionStack::new(id, ip, parent_idx);
+        let idx = self.execution_stacks.len();
+        self.execution_stacks.push(Some(stack));
+        idx
+    }
+
+    /// free an execution stack slot
+    pub fn free_stack(&mut self, idx: usize) {
+        self.execution_stacks[idx] = None;
+    }
+
+    pub fn stack(&self, idx: usize) -> &ExecutionStack {
+        self.execution_stacks[idx].as_ref().expect("dead stack")
+    }
+
+    pub fn stack_mut(&mut self, idx: usize) -> &mut ExecutionStack {
+        self.execution_stacks[idx].as_mut().expect("dead stack")
+    }
+
+    /// promote TOS to a heap variable: wrap in RcValue, keep the strong ref on the
+    /// var_stack (as Value::Lvalue). the push_lvalue instruction will create weak refs.
+    pub fn promote_to_var(&mut self, stack_idx: usize) {
+        let stack = self.stack_mut(stack_idx);
+        let val = stack.pop();
+        let rc = rc_value(val);
+        stack.push(Value::Lvalue(rc));
+    }
+
+    /// promote TOS to a leader-follower variable (mesh/state/param).
+    pub fn promote_to_leader(&mut self, stack_idx: usize, kind: LeaderKind) {
+        let stack = self.stack_mut(stack_idx);
+        let init_val = stack.pop();
+
+        let leader_rc = rc_value(init_val.clone());
+        // mesh follower starts as Nil; state/param follower starts as initial value
+        let follower_init = match kind {
+            LeaderKind::Mesh => Value::Nil,
+            LeaderKind::State | LeaderKind::Param => init_val,
+        };
+        let follower_rc = rc_value(follower_init);
+
+        let leader_val = Value::Leader(Leader {
+            last_modified_stack: None,
+            leader_rc: leader_rc.clone(),
+            follower_rc: follower_rc.clone(),
+        });
+        let leader_cell = rc_value(leader_val);
+
+        self.leaders.push(LeaderEntry {
+            leader_rc: leader_cell.clone(),
+            kind,
+        });
+
+        self.stack_mut(stack_idx).push(Value::Lvalue(leader_cell));
+    }
+
+    pub fn error(&mut self, msg: impl Into<String>) {
+        self.errors.push(msg.into());
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.errors.is_empty()
+    }
+
+    pub fn leader_value(leader: &Leader) -> Value {
+        leader.leader_rc.borrow().clone()
+    }
+
+    pub fn follower_value(leader: &Leader) -> Value {
+        leader.follower_rc.borrow().clone()
+    }
+
+    /// clear the ephemeral pool (call at section boundaries)
+    pub fn clear_ephemeral_pool(&mut self) {
+        self.ephemeral_pool.clear();
+    }
 }

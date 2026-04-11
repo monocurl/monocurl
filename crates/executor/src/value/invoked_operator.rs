@@ -1,11 +1,13 @@
-use smallvec::SmallVec;
+use crate::value::Value;
 
-use crate::value::RcValue;
-
+/// result of applying an operator to an operand, possibly with labeled arguments.
+/// stores enough information to recompute when labels change.
+#[derive(Clone)]
 pub struct InvokedOperator {
-    operator: RcValue,
-    arguments: SmallVec<[RcValue; 1]>,
-    operand: RcValue,
-    labels: Vec<(usize, String)>,
-    cached_result: Option<RcValue>,
+    pub operator: Box<Value>,
+    pub arguments: Vec<Value>,
+    pub operand: Box<Value>,
+    /// (argument_index, label_name) pairs
+    pub labels: Vec<(usize, String)>,
+    pub cached_result: Option<Box<Value>>,
 }

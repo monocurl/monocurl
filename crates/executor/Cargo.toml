@@ -6,5 +6,4 @@ edition = "2024"
 [dependencies]
 bytecode.workspace = true
 geo.workspace = true
-
-smallvec.workspace = true
+structs.workspace = true

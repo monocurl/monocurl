@@ -1,12 +1,14 @@
-use crate::value::{InstructionPointer, RcValue};
+use crate::value::{InstructionPointer, Value};
 
-
+#[derive(Clone)]
 pub struct Lambda {
-    instruction_pointer: InstructionPointer,
-    captured_variables: Vec<RcValue>,
-    required_arg_count: u8,
-    reference_arg_prefix: u8,
-    default_args: Vec<RcValue>,
+    pub ip: InstructionPointer,
+    /// captured values from the enclosing scope (typically Lvalue ptrs for let vars)
+    pub captures: Vec<Value>,
+    pub required_args: u16,
+    /// default values for trailing optional parameters
+    pub defaults: Vec<Value>,
 }
 
+#[derive(Clone)]
 pub struct Operator(pub Lambda);

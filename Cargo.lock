@@ -1618,7 +1618,7 @@ version = "0.1.0"
 dependencies = [
  "bytecode",
  "geo",
- "smallvec",
+ "structs",
 ]
 
 [[package]]
@@ -2548,6 +2548,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "integration_tests"
+version = "0.1.0"
+dependencies = [
+ "compiler",
+ "executor",
+ "lexer",
+ "parser",
+ "smol",
+ "stdlib",
+ "structs",
 ]
 
 [[package]]
@@ -4648,6 +4661,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 name = "stdlib"
 version = "0.1.0"
 dependencies = [
+ "executor",
  "inventory",
  "stdlib-macros",
 ]
@@ -4676,6 +4690,7 @@ version = "0.1.0"
 dependencies = [
  "arraydeque",
  "arrayvec",
+ "futures",
 ]
 
 [[package]]

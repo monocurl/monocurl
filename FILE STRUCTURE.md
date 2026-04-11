@@ -3,6 +3,23 @@
 - cli: binary crate that contains the gluing logic for the monocurl cli
 - compiler: converts AST into bytecode, performs static analysis
 - executor: takes bytecode and scene state and executes it
+  - src/error.rs: ExecutorError enum (TypeError, IndexOutOfBounds, DeadWeakRef, AnimPlayedTwice, etc.) with Display impl
+  - src/executor/mod.rs: Executor struct, section_init, async execute_one dispatch, NativeFunc/NativeFuture types, yield_now helper
+  - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion
+  - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, boxed call_lambda_body to break recursion cycle
+  - src/executor/anim.rs: seek_primitive_anim (async, yields between instructions), step_primitive_anims, seek_to (event-driven), play/spawn/bake, double-play guard via AnimBlock.already_played
+  - src/executor/access.rs: subscript/attribute (mutable + immutable), assign, append, Rc-based COW at element level, WeakLvalue handling
+  - src/state.rs: ExecutionState (execution stacks, leaders, primitive anims, ephemeral_pool), ExecutionStack (var stack, IP, call stack, labels), BakedPrimitiveAnim, LeaderEntry. Monotonic stack IDs (never reused).
+  - src/value.rs: Value enum, RcValue = Rc<RefCell<Value>> (owning), WeakValue = Weak<RefCell<Value>> (non-owning), Value::Lvalue (owning), Value::WeakLvalue (pushed refs — breaks reference cycles), helpers for truthiness, resolve, elide_lvalues, as_lvalue_rc
+  - src/value/container.rs: List (Vec<RcValue>) and Map (Vec<(Value, RcValue)>) for mutable subscript lvalue semantics
+  - src/value/lambda.rs: Lambda (captures, defaults, IP) and Operator wrapper
+  - src/value/anim_block.rs: AnimBlock (captures + IP for coroutine-style animation blocks, already_played: Rc<Cell<bool>> to prevent double-play)
+  - src/value/leader.rs: Leader struct (leader_rc, follower_rc as RcValues) for mesh/state/param variables
+  - src/value/invoked_function.rs: InvokedFunction (Labeled with recomputation info, or Unlabeled)
+  - src/value/invoked_operator.rs: InvokedOperator (operator + operand + labels for recomputation)
+  - src/value/primitive_anim.rs: PrimitiveAnim enum (Lerp, Set, Wait) — leaf animations
+  - src/value/stateful.rs: Stateful and StatefulNode for reactive dependency graphs
+  - src/time.rs: Timestamp (slide + time offset)
 - exporter: coordinates process of exporting a scene into a video
 - geo: helper routines for execution (a lot of lib monocurl will reference these routines).
 - lexer: lexing utilites, contains token definition
@@ -12,9 +29,10 @@
   - src/ast.rs: contains structs related to all of the types of ast nodes
   - src/parser.rs: contains the code to actually parse a lexed stream into an AST, ideally error resistant/tolerant
 - renderer: given a state snapshot, actually renders it via platform specific shaders
-- stdlib: actual lib monocurl routine implementations
-  - src/registry.rs: defines `FunctionEntry`, `inventory::collect!`, the `Registry` singleton (lazily built, sorted by name via `OnceLock`), and re-exports the `#[register]` attribute macro
-- stdlib-macros: proc-macro crate providing the `#[register]` attribute; annotated `fn(i32) -> i32` functions are automatically submitted to the `inventory` collector used by `stdlib::registry`
+- stdlib: actual lib monocurl routine implementations. depends on executor for Value types
+  - src/registry.rs: defines `FunctionEntry` (using executor's `NativeFunc` type), `inventory::collect!`, the `Registry` singleton (lazily built, sorted by name via `OnceLock`), and `func_table()` to build a Vec<NativeFunc> for the executor
+  - src/util.rs: basic utility native functions (vector_len, map_len, initial_camera, initial_background)
+- stdlib-macros: proc-macro crate providing the `#[stdlib_func]` attribute; generates a `NativeFunc`-compatible wrapper and submits it to the `inventory` collector used by `stdlib::registry`
 - structs: helper structs and utilities.
   - src/assets.rs: contains code for location where assets (say fonts) are located
   - src/iterutil.rs: contains code for KLookahead iterator from a base iterator
@@ -45,4 +63,6 @@
   - src/navbar_view.rs: navbar element for switching tabs
   - src/theme.rs: a collection of constants related to UI and colors
   - src/window.rs: root GPUI element that owns the global state and muxes between the home and editor views 
+- integration_tests: cross-crate integration tests covering the full lex→parse→compile→execute pipeline
+  - tests/basic_executor_tests.rs: `run(src)` helper + basic executor tests (literal values, arithmetic, strings, lambdas, if/else, error detection)
 - ui_cli_shared: a collection of structs and utilities that are necessary for the user facing interface, but not really execution
