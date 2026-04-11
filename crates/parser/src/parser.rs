@@ -724,7 +724,8 @@ impl SectionParser {
                 let ret = self.parse_statement()?;
 
                 // ensure no hanging content
-                if self.peek_token().is_some() {
+                // when parsing an if, we might actually go through new lines early, so if the most recently consumed token is a newline, no need for this check
+                if self.peek_token().is_some() && (self.token_index == 0 || !matches!(self.tokens[self.token_index - 1].0, Token::Newline | Token::Semicolon)) {
 
                     try_all!(self, {
                         ExactPred(Token::Newline) => {
