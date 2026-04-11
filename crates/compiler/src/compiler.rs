@@ -2,6 +2,7 @@ mod free_vars;
 mod stateful;
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use bytecode::{
@@ -16,7 +17,10 @@ use stateful::is_stateful;
 use stdlib::registry::registry;
 use structs::text::{Count8, Span8};
 
+use crate::cache::CompilerCache;
 
+
+#[derive(Clone)]
 pub struct CompileError {
     pub span: Span8,
     pub message: String,
@@ -94,6 +98,7 @@ impl SymbolFunctionInfo {
 #[derive(Clone, Debug)]
 pub struct Symbol {
     pub name: String,
+    imported: bool,
     stack_position: usize,
     // how the symbol looks like to the current bundle
     // may appear as let, even though declared as var
@@ -131,21 +136,32 @@ fn ident_ref_name(ir: &IdentifierReference) -> &str {
     }
 }
 
-struct Compiler {
-    frames: Vec<CompilerFrame>,
-    sections: Vec<SectionBytecode>,
+pub(crate) struct CompileBundle {
+    path: Option<PathBuf>,
+    exports: HashMap<String, Arc<Symbol>>,
     errors: Vec<CompileError>,
-    root_references: Vec<Reference>,
-    bundle_exports: Vec<HashMap<String, Arc<Symbol>>>,
+    bytecode: Vec<SectionBytecode>,
+    final_stack_depth: usize,
+}
+
+struct Compiler {
+    // inputs
+    cursor_pos: Option<Count8>,
+    // compiler state
+    frames: Vec<CompilerFrame>,
+
+    current_bundle: Option<CompileBundle>,
+
+    // output
+    compile_bundles: Vec<Arc<CompileBundle>>,
+    errors: Vec<CompileError>, // mounted onto root bundle
+    // only applicable to root bundle
+    references: Vec<Reference>,
+    cursor_identifier_set: HashSet<String>,
+    possible_cursor_identifiers: Vec<CursorIdentifier>,
 
     // of the current bundle
     bundle_root_import_span: Option<Span8>,
-    current_section: SectionBytecode,
-
-    cursor_pos: Option<Count8>,
-
-    cursor_identifier_set: HashSet<String>,
-    possible_cursor_identifiers: Vec<CursorIdentifier>,
 }
 
 fn default_section() -> SectionBytecode {
@@ -153,64 +169,135 @@ fn default_section() -> SectionBytecode {
 }
 
 impl Compiler {
-    fn new(cursor_pos: Option<Count8>, bundle_count: usize) -> Self {
+    fn new(cursor_pos: Option<Count8>) -> Self {
         Self {
             frames: vec![CompilerFrame {
                 scopes: vec![Scope { base_stack_depth: 0, symbols: HashMap::new() }],
                 stack_depth: 0,
                 loop_contexts: Vec::new(),
             }],
-            sections: Vec::new(),
-            current_section: default_section(),
+            current_bundle: None,
+            compile_bundles: Vec::new(),
             errors: Vec::new(),
-            bundle_exports: vec![HashMap::new(); bundle_count],
             bundle_root_import_span: None,
             cursor_pos,
             cursor_identifier_set: HashSet::new(),
             possible_cursor_identifiers: Vec::new(),
-            root_references: Vec::new()
+            references: Vec::new(),
         }
     }
 
-    fn finish(self) -> CompileResult {
+    fn finish(self) -> (CompilerCache, CompileResult) {
         // reorder identifiers
         let mut possible_cursor_identifiers = self.possible_cursor_identifiers;
         possible_cursor_identifiers.sort_by_key(|id| (id.frame_depth, id.stack_position));
         possible_cursor_identifiers.reverse();
 
-        CompileResult { bytecode: Bytecode::new(self.sections), errors: self.errors, possible_cursor_identifiers, root_references: self.root_references }
+        let bytecode_sections = self.compile_bundles.iter().flat_map(|sec| sec.bytecode.iter().cloned()).collect();
+
+        let cache = CompilerCache {
+            last_bundles: self.compile_bundles
+        };
+
+        let result = CompileResult { bytecode: Bytecode::new(bytecode_sections), errors: self.errors, possible_cursor_identifiers, root_references: self.references };
+
+        (cache, result)
     }
 }
 
-pub fn compile(cursor_pos: Option<Count8>, bundles: &[Arc<SectionBundle>]) -> CompileResult {
-    let mut c = Compiler::new(cursor_pos, bundles.len());
+pub fn compile(compiler_cache: &mut CompilerCache, cursor_pos: Option<Count8>, bundles: &[Arc<SectionBundle>]) -> CompileResult {
+    let mut c = Compiler::new(cursor_pos);
     c.compile_prelude();
-    for bundle in bundles {
-        c.compile_bundle(bundle);
+
+    let mut allowing_caches = true;
+    for (ind, bundle) in bundles.iter().enumerate() {
+        let can_use_cache = allowing_caches &&
+            bundle.was_cached &&
+            // skip prelude
+            ind + 1 < compiler_cache.last_bundles.len() &&
+            compiler_cache.last_bundles[ind + 1].path == bundle.file_path;
+
+        if can_use_cache {
+            c.emit_cached_bundle(compiler_cache.last_bundles[ind + 1].clone(), bundle.root_import_span.clone());
+        } else {
+            allowing_caches = false;
+            c.compile_bundle(bundle);
+        }
     }
-    c.finish()
+    let (cache, result) = c.finish();
+    *compiler_cache = cache;
+    result
 }
 
 impl Compiler {
     fn compile_prelude(&mut self) {
+        self.current_bundle = Some(CompileBundle {
+            path: None,
+            exports: HashMap::default(),
+            errors: Vec::default(),
+            bytecode: vec![default_section()],
+            final_stack_depth: 0,
+        });
+
         // define global scene variables
-        for var in ["initial_camera", "initial_background"] {
-            self.emit_push(Instruction::NativeInvoke { index: registry().index_of(var) as u32 }, 0..0);
+        for (var, init) in [("camera", "initial_camera"), ("background", "initial_background")] {
+            self.emit_push(Instruction::NativeInvoke { index: registry().index_of(init) as u32 }, 0..0);
             let name_index = self.intern_string(var);
             self.emit(Instruction::PushState { name_index }, 0..0);
             self.define_symbol(var, VariableType::State, SymbolFunctionInfo::None);
         }
+
+        self.emit_current_bundle();
+    }
+
+    fn emit_current_bundle(&mut self) {
+        let mut bundle = self.current_bundle.take().unwrap();
+        bundle.final_stack_depth = self.frame().stack_depth;
+        bundle.exports = self
+            .frame()
+            .scopes
+            .iter()
+            .flat_map(|s| s.symbols.iter().map(|(k, v)| (k.clone(), v.clone())))
+            .filter(|sym| !sym.1.imported)
+            .collect();
+        self.compile_bundles.push(Arc::new(bundle));
+    }
+
+    fn emit_cached_bundle(&mut self, cached_bundle: Arc<CompileBundle>, actual_import_span: Option<Span8>) {
+        self.bundle_root_import_span = actual_import_span;
+
+        self.frame_mut().stack_depth = cached_bundle.final_stack_depth;
+        for error in &cached_bundle.errors {
+            let updated_span = self.bundle_root_import_span.clone().unwrap_or(error.span.clone());
+            self.errors.push(CompileError {
+                span: updated_span,
+                message: error.message.clone()
+            });
+        }
+
+        self.compile_bundles.push(cached_bundle);
     }
 
     fn compile_bundle(&mut self, bundle: &SectionBundle) {
         self.bundle_root_import_span = bundle.root_import_span.clone();
 
         let mut base_symbols = HashMap::new();
-        for p in &bundle.imported_files {
-            for sym in self.bundle_exports[*p].values() {
+
+        // take into account prelude
+        let mapped_imports =
+            bundle.imported_files.iter()
+                .map(|x| 1 + *x)
+                .chain(std::iter::once(0));
+        for p in mapped_imports {
+            for sym in self.compile_bundles[p].exports.values() {
                 base_symbols.insert(sym.name.clone(), Arc::new(Symbol {
-                    // make it constant for future sections
-                    var_type: VariableType::Let,
+                    // make it constant for future sections (unless from prelude)
+                    var_type: if p == 0  {
+                        sym.var_type.clone()
+                    } else {
+                        VariableType::Let
+                    },
+                    imported: true,
                     ..sym.as_ref().clone()
                 }));
             }
@@ -221,45 +308,58 @@ impl Compiler {
         // the overall stack depth is also the same as of the previous section, irrespective of whether or not it was imported
         self.frame_mut().scopes = vec![Scope { base_stack_depth: 0, symbols: base_symbols }];
 
+        self.current_bundle = Some(CompileBundle {
+            path: bundle.file_path.clone(),
+            exports: HashMap::default(),
+            errors: Vec::default(),
+            bytecode: Vec::default(),
+            final_stack_depth: 0,
+        });
+
         for section in &bundle.sections {
             self.compile_section(section);
         }
 
-        self.bundle_exports[bundle.file_index] = self
-            .frame()
-            .scopes
-            .iter()
-            .flat_map(|s| s.symbols.iter().map(|(k, v)| (k.clone(), v.clone())))
-            .collect();
+        self.emit_current_bundle();
     }
 
     fn compile_section(&mut self, section: &Section) {
-        if self.sections.len() >= u16::MAX as usize {
+        if self.compile_bundles.len() >= u16::MAX as usize {
             self.error(0..0, "too many sections (limit 65535)");
             return;
         }
-        self.current_section = SectionBytecode::new(SectionFlags {
-            is_stdlib: section.section_type == SectionType::StandardLibrary,
-            is_library: matches!(
-                section.section_type,
-                SectionType::UserLibrary
-            ),
-        });
+
+        self.current_bundle.as_mut().unwrap().bytecode.push(
+            SectionBytecode::new(SectionFlags {
+                is_stdlib: section.section_type == SectionType::StandardLibrary,
+                is_library: matches!(
+                    section.section_type,
+                    SectionType::UserLibrary
+                ),
+            })
+        );
+
         // symbols declared here land in the current top scope (no push/pop)
         self.compile_statements(&section.body);
         self.emit(Instruction::EndOfExecutionHead, 0..0);
-        let finished = std::mem::replace(&mut self.current_section, default_section());
-        self.sections.push(finished);
     }
 }
 
 impl Compiler {
+    fn current_section(&self) -> &SectionBytecode {
+        self.current_bundle.as_ref().unwrap().bytecode.last().unwrap()
+    }
+
+    fn current_section_mut(&mut self) -> &mut SectionBytecode {
+        self.current_bundle.as_mut().unwrap().bytecode.last_mut().unwrap()
+    }
+
     fn emit(&mut self, instruction: Instruction, src: Span8) {
-        if self.current_section.instructions.len() >= u32::MAX as usize {
+        if self.current_section().instructions.len() >= u32::MAX as usize {
             self.error(src.clone(), "too many instructions in section");
         }
-        self.current_section.instructions.push(instruction);
-        self.current_section
+        self.current_section_mut().instructions.push(instruction);
+        self.current_section_mut()
             .annotations
             .push(InstructionAnnotation { source_loc: src });
     }
@@ -270,15 +370,15 @@ impl Compiler {
     }
 
     fn instruction_pointer(&self) -> u32 {
-        self.current_section.instructions.len() as u32
+        self.current_section().instructions.len() as u32
     }
 
     fn section_index(&self) -> u16 {
-        self.sections.len() as u16
+        self.compile_bundles.len() as u16
     }
 
     fn patch_jump(&mut self, instr_idx: usize, target: u32) {
-        match &mut self.current_section.instructions[instr_idx] {
+        match &mut self.current_section_mut().instructions[instr_idx] {
             Instruction::Jump { to, .. } | Instruction::ConditionalJump { to, .. } => *to = target,
             _ => panic!("patch_jump on non-jump instruction"),
         }
@@ -331,14 +431,14 @@ impl Compiler {
         let position = self.stack_depth() - 1;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
-            Arc::new(Symbol { name: name.to_string(), stack_position: position, var_type, function_info }),
+            Arc::new(Symbol { name: name.to_string(), stack_position: position, var_type, function_info, imported: false }),
         );
     }
 
     fn register_symbol(&mut self, name: &str, var_type: VariableType, function_info: SymbolFunctionInfo, position: usize) {
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
-            Arc::new(Symbol { name: name.to_string(), stack_position: position, var_type, function_info }),
+            Arc::new(Symbol { name: name.to_string(), stack_position: position, var_type, function_info, imported: false }),
         );
     }
 
@@ -349,7 +449,7 @@ impl Compiler {
 
                 if let Some(source_span) = source_span && self.bundle_root_import_span.is_none() {
                     // we are in root, so this constitutes a root reference
-                    self.root_references.push(Reference {
+                    self.references.push(Reference {
                         span: source_span,
                         symbol: clone.clone(),
                         invocation_spans: inv_args
@@ -381,40 +481,43 @@ impl Compiler {
     // -- constant pool helpers --
 
     fn intern_int(&mut self, val: i64) -> u32 {
-        if let Some(idx) = self.current_section.int_pool.iter().position(|&x| x == val) {
+        if let Some(idx) = self.current_section().int_pool.iter().position(|&x| x == val) {
             return idx as u32;
         }
-        let idx = self.current_section.int_pool.len();
-        self.current_section.int_pool.push(val);
+        let idx = self.current_section_mut().int_pool.len();
+        self.current_section_mut().int_pool.push(val);
         idx as u32
     }
 
     fn intern_float(&mut self, val: f64) -> u32 {
         if let Some(idx) = self
-            .current_section
+            .current_section()
             .float_pool
             .iter()
             .position(|x| x.to_bits() == val.to_bits())
         {
             return idx as u32;
         }
-        let idx = self.current_section.float_pool.len();
-        self.current_section.float_pool.push(val);
+        let idx = self.current_section_mut().float_pool.len();
+        self.current_section_mut().float_pool.push(val);
         idx as u32
     }
 
     fn intern_string(&mut self, val: &str) -> u32 {
-        if let Some(idx) = self.current_section.string_pool.iter().position(|x| x == val) {
+        if let Some(idx) = self.current_section().string_pool.iter().position(|x| x == val) {
             return idx as u32;
         }
-        let idx = self.current_section.string_pool.len();
-        self.current_section.string_pool.push(val.to_string());
+        let idx = self.current_section_mut().string_pool.len();
+        self.current_section_mut().string_pool.push(val.to_string());
         idx as u32
     }
 
     fn error(&mut self, span: Span8, msg: impl Into<String>) {
         let real_span = self.bundle_root_import_span.clone().unwrap_or(span);
-        self.errors.push(CompileError { span: real_span, message: msg.into() });
+
+        let error = CompileError { span: real_span.clone(), message: msg.into() };
+        self.errors.push(error.clone());
+        self.current_bundle.as_mut().unwrap().errors.push(error);
     }
 }
 
@@ -1126,8 +1229,8 @@ impl Compiler {
         }
         let cap_count = captures.len();
 
-        let mut required_args: u8 = 0;
-        let mut default_count: u8 = 0;
+        let mut required_args: u32 = 0;
+        let mut default_count: u32 = 0;
 
         for (i, arg) in l.args.iter().enumerate() {
             let vt = if arg.must_be_reference { VariableType::Reference } else { VariableType::Let };
@@ -1164,9 +1267,10 @@ impl Compiler {
             }
         }
 
-        let proto_idx = self.current_section.lambda_prototypes.len() as u32;
-        self.current_section.lambda_prototypes.push(LambdaPrototype {
-            section: self.section_index(),
+        let proto_idx = self.current_section().lambda_prototypes.len() as u32;
+        let section = self.section_index();
+        self.current_section_mut().lambda_prototypes.push(LambdaPrototype {
+            section,
             ip: body_ip,
             required_args,
             default_arg_count: default_count,
@@ -1206,9 +1310,11 @@ impl Compiler {
             self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
         }
 
-        let proto_idx = self.current_section.lambda_prototypes.len() as u32;
-        self.current_section.lambda_prototypes.push(LambdaPrototype {
-            section: self.section_index(),
+        let proto_idx = self.current_section().lambda_prototypes.len() as u32;
+
+        let section = self.section_index();
+        self.current_section_mut().lambda_prototypes.push(LambdaPrototype {
+            section,
             ip: body_ip,
             required_args: 0,
             default_arg_count: 0,
@@ -1263,9 +1369,10 @@ impl Compiler {
             self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
         }
 
-        let proto_idx = self.current_section.anim_prototypes.len() as u32;
-        self.current_section.anim_prototypes.push(AnimPrototype {
-            section: self.section_index(),
+        let proto_idx = self.current_section().anim_prototypes.len() as u32;
+        let section = self.section_index();
+        self.current_section_mut().anim_prototypes.push(AnimPrototype {
+            section,
             ip: body_ip,
         });
 
@@ -1329,6 +1436,8 @@ mod test {
     use structs::rope::Rope;
     use structs::text::Span8;
 
+    use crate::cache::CompilerCache;
+
     use super::{compile, CompileResult};
 
     fn empty_span() -> Span8 {
@@ -1354,8 +1463,12 @@ mod test {
         })
     }
 
+    fn test_compile(sections: &[Arc<SectionBundle>]) -> CompileResult {
+        compile(&mut CompilerCache::default(), None, sections)
+    }
+
     fn compile_stmts(stmts: Vec<(Span8, Statement)>) -> CompileResult {
-        compile(None, &[make_bundle(stmts, SectionType::Slide)])
+        test_compile(&[make_bundle(stmts, SectionType::Slide)])
     }
 
     fn lex(src: &str) -> Vec<(Token, Span8)> {
@@ -1574,7 +1687,7 @@ mod test {
             root_import_span: None,
             was_cached: false,
         });
-        no_errors(&compile(None, &[bundle0, bundle1]));
+        no_errors(&test_compile(&[bundle0, bundle1]));
     }
 
     #[test]
@@ -1610,7 +1723,7 @@ mod test {
             root_import_span: None,
             was_cached: false
         });
-        let result = compile(None, &[bundle0, bundle1]);
+        let result = test_compile(&[bundle0, bundle1]);
         assert!(has_error(&result, "cannot mutate 'x'"), "imported var should become let");
     }
 

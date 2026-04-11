@@ -31,6 +31,12 @@ pub struct SectionBundle {
     pub root_import_span: Option<Span8>,
 }
 
+impl SectionBundle {
+    pub fn is_root(&self) -> bool {
+        self.root_import_span.is_none()
+    }
+}
+
 // a singular slide / init phase / import module
 #[derive(Debug, Clone, PartialEq)]
 pub struct Section {

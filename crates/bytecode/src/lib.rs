@@ -1,18 +1,20 @@
 use structs::text::Span8;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LambdaPrototype {
     pub section: u16,
     pub ip: u32,
-    pub required_args: u8,
-    pub default_arg_count: u8,
+    pub required_args: u32,
+    pub default_arg_count: u32,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AnimPrototype {
     pub section: u16,
     pub ip: u32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Instruction {
     /* push constants */
     PushInt { index: u32 },
@@ -88,15 +90,18 @@ pub enum Instruction {
 const _: () = assert!(std::mem::size_of::<Instruction>() == 8);
 
 
+#[derive(Clone, PartialEq)]
 pub struct InstructionAnnotation {
     pub source_loc: Span8,
 }
 
+#[derive(Clone, PartialEq)]
 pub struct SectionFlags {
     pub is_stdlib: bool,
     pub is_library: bool,
 }
 
+#[derive(Clone, PartialEq)]
 pub struct SectionBytecode {
     pub flags: SectionFlags,
     pub instructions: Vec<Instruction>,

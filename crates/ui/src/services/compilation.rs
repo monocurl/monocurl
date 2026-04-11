@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use compiler::cache::CompilerCache;
 use compiler::compiler::{CompileResult, CursorIdentifierType, SymbolFunctionInfo, compile};
 use futures::{SinkExt, StreamExt};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -214,11 +215,11 @@ impl CompilationService {
     }
 
     #[must_use]
-    async fn recompile(&mut self, parse_state: &mut ParseImportContext, latest_cursor: Cursor, text_rope: Rope<TextAggregate>, lex_rope: Rope<Attribute<LexData>>,  version: usize) -> CompileResult {
+    async fn recompile(&mut self, parse_state: &mut ParseImportContext, compile_state: &mut CompilerCache, latest_cursor: Cursor, text_rope: Rope<TextAggregate>, lex_rope: Rope<Attribute<LexData>>,  version: usize) -> CompileResult {
         let cursor_pos = self.cursor_pos(latest_cursor, &text_rope);
 
         let (parsed_bundles, parse_artifacts) = Parser::parse(parse_state, lex_rope.clone(), text_rope.clone(), cursor_pos);
-        let compile_result = compile(cursor_pos, &parsed_bundles);
+        let compile_result = compile(compile_state, cursor_pos, &parsed_bundles);
 
         self.emit_autocomplete(&parse_artifacts, &compile_result, latest_cursor, version).await;
         self.emit_diagnostics(&parse_artifacts, &compile_result, version).await;
@@ -242,6 +243,7 @@ impl CompilationService {
         let mut latest_version = 0;
 
         let mut parse_state = ParseImportContext::default();
+        let mut compiler_state = CompilerCache::default();
 
         let mut last_compile_result = CompileResult::default();
 
@@ -253,7 +255,7 @@ impl CompilationService {
                     latest_lex_rope = lex_rope.clone();
                     latest_version = version;
 
-                    last_compile_result = self.recompile(&mut parse_state, latest_cursor, latest_text_rope.clone(), lex_rope, version).await;
+                    last_compile_result = self.recompile(&mut parse_state, &mut compiler_state, latest_cursor, latest_text_rope.clone(), lex_rope, version).await;
                 },
                 CompilationMessage::UpdateCursor { cursor: c, _version: _} => {
                     latest_cursor = c;
@@ -267,7 +269,7 @@ impl CompilationService {
                         cached_parses: Default::default()
                     };
 
-                    last_compile_result = self.recompile(&mut parse_state, latest_cursor, latest_text_rope.clone(), latest_lex_rope.clone(), latest_version).await;
+                    last_compile_result = self.recompile(&mut parse_state, &mut compiler_state, latest_cursor, latest_text_rope.clone(), latest_lex_rope.clone(), latest_version).await;
                 }
             }
         }
