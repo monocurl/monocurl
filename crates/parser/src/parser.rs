@@ -1173,6 +1173,7 @@ impl SectionParser {
                 break;
             }
 
+            let pre_token_index = self.token_index;
             let mut read = || {
                 if arguments.len() > 0 {
                     self.read_token_best_effort(Token::Comma);
@@ -1212,7 +1213,14 @@ impl SectionParser {
                 }
             };
 
-            arguments.push(read());
+            let result = read();
+            arguments.push(result);
+            let post_token_index = self.token_index;
+
+            if pre_token_index == post_token_index {
+                // no progress, break to avoid infinite loop
+                break;
+            }
         }
         self.state.pop_frame();
 

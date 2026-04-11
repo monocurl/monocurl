@@ -10,7 +10,7 @@ use crate::{
 };
 
 const PARAMETER_SUPRESSION_DUE_TO_CURSOR: Duration = Duration::from_millis(500);
-const PARAMETER_SUPPRESSION_DUE_TO_AUTOCOMPLETE: Duration = Duration::from_millis(1500);
+const PARAMETER_SUPPRESSION_DUE_TO_AUTOCOMPLETE: Duration = Duration::from_millis(500);
 
 pub struct PopoverElement {
     pub editor: Entity<TextEditor>,
