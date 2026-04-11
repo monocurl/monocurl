@@ -1,3 +1,6 @@
+mod free_vars;
+mod stateful;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -5,9 +8,11 @@ use bytecode::{
     AnimPrototype, Bytecode, Instruction, InstructionAnnotation, LambdaPrototype, SectionBytecode,
     SectionFlags,
 };
+use free_vars::{free_vars_expr, free_vars_stmts};
 use parser::ast::{
     Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If, InvocationArguments, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType, While
 };
+use stateful::is_stateful;
 use stdlib::registry::registry;
 use structs::text::{Count8, Span8};
 
@@ -117,132 +122,6 @@ struct CompilerFrame {
     loop_contexts: Vec<LoopContext>,
 }
 
-struct FreeVarCollector {
-    defined: HashSet<String>,
-    free: Vec<String>,
-    seen_free: HashSet<String>,
-}
-
-impl FreeVarCollector {
-    fn new(predefined: HashSet<String>) -> Self {
-        Self { defined: predefined, free: Vec::new(), seen_free: HashSet::new() }
-    }
-
-    fn define(&mut self, name: &str) {
-        self.defined.insert(name.to_string());
-    }
-
-    fn reference(&mut self, name: &str) {
-        if !self.defined.contains(name) && self.seen_free.insert(name.to_string()) {
-            self.free.push(name.to_string());
-        }
-    }
-
-    fn into_free(self) -> Vec<String> {
-        self.free
-    }
-
-    fn visit_stmts(&mut self, stmts: &[SpanTagged<Statement>]) {
-        for (_, s) in stmts {
-            self.visit_stmt(s);
-        }
-    }
-
-    fn visit_stmt(&mut self, stmt: &Statement) {
-        match stmt {
-            Statement::Expression(e) => self.visit_expr(e),
-            Statement::Declaration(d) => {
-                self.visit_expr(&d.value.1);
-                self.define(&d.identifier.1.0);
-            }
-            Statement::Return(r) => self.visit_expr(&r.value.1),
-            Statement::While(w) => {
-                self.visit_expr(&w.condition.1);
-                self.visit_stmts(&w.body.1);
-            }
-            Statement::For(f) => {
-                self.visit_expr(&f.container.1);
-                self.define(&f.var_name.1.0);
-                self.visit_stmts(&f.body.1);
-            }
-            Statement::If(i) => {
-                self.visit_expr(&i.condition.1);
-                self.visit_stmts(&i.if_block.1);
-                if let Some(ref e) = i.else_block {
-                    self.visit_stmts(&e.1);
-                }
-            }
-            Statement::Play(p) => self.visit_expr(&p.animations.1),
-            Statement::Break | Statement::Continue => {}
-        }
-    }
-
-    fn visit_expr(&mut self, expr: &Expression) {
-        match expr {
-            Expression::IdentifierReference(ir) => self.reference(ident_ref_name(ir)),
-            Expression::BinaryOperator(b) => {
-                self.visit_expr(&b.lhs.1);
-                self.visit_expr(&b.rhs.1);
-            }
-            Expression::UnaryPreOperator(u) => self.visit_expr(&u.operand.1),
-            Expression::Literal(l) => match l {
-                Literal::Vector(v) => {
-                    for e in v { self.visit_expr(&e.1); }
-                }
-                Literal::Map(m) => {
-                    for (k, v) in m { self.visit_expr(&k.1); self.visit_expr(&v.1); }
-                }
-                _ => {}
-            },
-            Expression::Subscript(s) => {
-                self.visit_expr(&s.base.1);
-                self.visit_expr(&s.index.1);
-            }
-            Expression::Property(p) => self.visit_expr(&p.base.1),
-            Expression::LambdaInvocation(l) => {
-                self.visit_expr(&l.lambda.1);
-                for (_, a) in &l.arguments.1 { self.visit_expr(&a.1); }
-            }
-            Expression::OperatorInvocation(o) => {
-                self.visit_expr(&o.operator.1);
-                for (_, a) in &o.arguments.1 { self.visit_expr(&a.1); }
-                self.visit_expr(&o.operand.1);
-            }
-            Expression::NativeInvocation(n) => {
-                for a in &n.arguments { self.visit_expr(&a.1); }
-            }
-            Expression::LambdaDefinition(l) => {
-                // default values evaluated in outer scope
-                for arg in &l.args {
-                    if let Some(ref d) = arg.default_value { self.visit_expr(&d.1); }
-                }
-                let mut inner_pre: HashSet<String> =
-                    l.args.iter().map(|a| a.identifier.1.0.clone()).collect();
-                if matches!(l.body.1, LambdaBody::Block(_)) {
-                    inner_pre.insert("_".to_string());
-                }
-                let mut inner = FreeVarCollector::new(inner_pre);
-                match &l.body.1 {
-                    LambdaBody::Inline(e) => inner.visit_expr(e),
-                    LambdaBody::Block(s) => inner.visit_stmts(s),
-                }
-                for name in inner.into_free() { self.reference(&name); }
-            }
-            Expression::OperationDefinition(o) => self.visit_expr(&o.lambda.1),
-            Expression::Block(b) => {
-                let mut inner = FreeVarCollector::new(HashSet::from(["_".to_string()]));
-                inner.visit_stmts(&b.body);
-                for name in inner.into_free() { self.reference(&name); }
-            }
-            Expression::Anim(a) => {
-                let mut inner = FreeVarCollector::new(HashSet::new());
-                inner.visit_stmts(&a.body);
-                for name in inner.into_free() { self.reference(&name); }
-            }
-        }
-    }
-}
-
 fn ident_ref_name(ir: &IdentifierReference) -> &str {
     match ir {
         IdentifierReference::Value(n)
@@ -250,47 +129,6 @@ fn ident_ref_name(ir: &IdentifierReference) -> &str {
         | IdentifierReference::StatefulDereference(n)
         | IdentifierReference::Reference(n) => n
     }
-}
-
-// returns true if evaluates to a stateful expression
-fn is_stateful(expr: &Expression) -> bool {
-    match expr {
-        Expression::IdentifierReference(IdentifierReference::StatefulReference(_)) => true,
-        Expression::IdentifierReference(_) => false,
-        Expression::Literal(_) => false,
-        Expression::BinaryOperator(b) => is_stateful(&b.lhs.1) || is_stateful(&b.rhs.1),
-        Expression::UnaryPreOperator(u) => is_stateful(&u.operand.1),
-        Expression::Subscript(s) => is_stateful(&s.base.1) || is_stateful(&s.index.1),
-        Expression::Property(p) => is_stateful(&p.base.1),
-        Expression::LambdaInvocation(l) => {
-            is_stateful(&l.lambda.1)
-                || l.arguments.1.iter().any(|(_, a)| is_stateful(&a.1))
-        }
-        Expression::OperatorInvocation(o) => {
-            is_stateful(&o.operator.1)
-                || o.arguments.1.iter().any(|(_, a)| is_stateful(&a.1))
-                || is_stateful(&o.operand.1)
-        }
-        Expression::NativeInvocation(n) => n.arguments.iter().any(|a| is_stateful(&a.1)),
-        // lambdas/blocks/anims close over their environment at creation; stateful-ness
-        // doesn't propagate through them at the call site
-        Expression::LambdaDefinition(_)
-        | Expression::OperationDefinition(_)
-        | Expression::Block(_)
-        | Expression::Anim(_) => false,
-    }
-}
-
-fn free_vars_stmts(stmts: &[SpanTagged<Statement>], pre: HashSet<String>) -> Vec<String> {
-    let mut c = FreeVarCollector::new(pre);
-    c.visit_stmts(stmts);
-    c.into_free()
-}
-
-fn free_vars_expr(expr: &Expression, pre: HashSet<String>) -> Vec<String> {
-    let mut c = FreeVarCollector::new(pre);
-    c.visit_expr(expr);
-    c.into_free()
 }
 
 struct Compiler {
@@ -504,7 +342,7 @@ impl Compiler {
         );
     }
 
-    fn lookup(&mut self, name: &str, source_span: Option<Span8>, invocation: Option<&InvocationArguments>) -> Option<Arc<Symbol>> {
+    fn lookup(&mut self, name: &str, source_span: Option<Span8>, inv_args: Option<&InvocationArguments>) -> Option<Arc<Symbol>> {
         for scope in self.frame().scopes.iter().rev() {
             if let Some(sym) = scope.symbols.get(name) {
                 let clone = sym.clone();
@@ -514,7 +352,7 @@ impl Compiler {
                     self.root_references.push(Reference {
                         span: source_span,
                         symbol: clone.clone(),
-                        invocation_spans: invocation
+                        invocation_spans: inv_args
                             .map(|inv| (
                                 inv.0.clone(),
                                 inv.1.iter().map(|(_, arg)| arg.0.clone()).collect()
@@ -652,7 +490,7 @@ impl Compiler {
             },
             Statement::Expression(e) => {
                 self.infer_possible_cursor_identifiers(span.clone());
-                self.compile_expr(false, None, e, span);
+                self.compile_val(e, span);
                 self.emit_pops(1, span.clone());
             }
             Statement::Play(p) => {
@@ -663,7 +501,7 @@ impl Compiler {
     }
 
     fn compile_declaration(&mut self, d: &Declaration, span: &Span8) {
-        self.compile_expr(false, None, &d.value.1, &d.value.0);
+        self.compile_val(&d.value.1, &d.value.0);
         let vt = match d.var_type {
             AstVariableType::Let => VariableType::Let,
             AstVariableType::Var => VariableType::Var,
@@ -693,7 +531,7 @@ impl Compiler {
 
     fn compile_while(&mut self, w: &While, span: &Span8) {
         let loop_start = self.instruction_pointer();
-        self.compile_expr(false, None, &w.condition.1, &w.condition.0);
+        self.compile_val(&w.condition.1, &w.condition.0);
         self.emit(Instruction::Not, w.condition.0.clone());
         let exit_jump = self.instruction_pointer();
         // to be patched
@@ -732,16 +570,16 @@ impl Compiler {
         // desugars for v in container  ->  while idx < len(container)
         self.push_scope();
 
-        self.compile_expr(false, None, &f.container.1, &f.container.0);
+        self.compile_val(&f.container.1, &f.container.0);
         let iter_pos = self.stack_depth() - 1;
         // anonymous names (null byte) can't collide with user identifiers
-        self.emit(Instruction::PushVar {  }, span.clone());
+        self.emit(Instruction::PushVar {}, span.clone());
         self.define_symbol("\x00iter", VariableType::Let, SymbolFunctionInfo::None);
 
         let zero = self.intern_int(0);
         self.emit_push(Instruction::PushInt { index: zero }, span.clone());
         let idx_pos = self.stack_depth() - 1;
-        self.emit(Instruction::PushVar {  }, span.clone());
+        self.emit(Instruction::PushVar {}, span.clone());
         self.define_symbol("\x00idx", VariableType::Var, SymbolFunctionInfo::None);
 
         let condition_ip = self.instruction_pointer();
@@ -784,7 +622,7 @@ impl Compiler {
         self.emit(Instruction::Subscript { mutable: false }, span.clone());
         self.dec_stack(1);
         self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
-        self.emit(Instruction::PushVar {  }, span.clone());
+        self.emit(Instruction::PushVar {}, span.clone());
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone()); // depth = loop_stack
@@ -826,7 +664,7 @@ impl Compiler {
     }
 
     fn compile_if(&mut self, i: &If, span: &Span8) {
-        self.compile_expr(false, None, &i.condition.1, &i.condition.0);
+        self.compile_val(&i.condition.1, &i.condition.0);
         self.emit(Instruction::Not, i.condition.0.clone());
         let skip_if = self.instruction_pointer();
         self.emit(
@@ -856,7 +694,7 @@ impl Compiler {
     }
 
     fn compile_return(&mut self, r: &Return, span: &Span8) {
-        self.compile_expr(false, None, &r.value.1, &r.value.0);
+        self.compile_val(&r.value.1, &r.value.0);
         let below = self.stack_depth() as i32 - 1;
         self.emit(Instruction::Return { stack_delta: -below }, span.clone());
     }
@@ -903,14 +741,14 @@ impl Compiler {
     }
 
     fn compile_play(&mut self, p: &Play, span: &Span8) {
-        self.compile_expr(false, None, &p.animations.1, &p.animations.0);
+        self.compile_val(&p.animations.1, &p.animations.0);
         self.emit(Instruction::Play, span.clone());
         self.dec_stack(1);
     }
 }
 
 impl Compiler {
-    fn compile_expr(&mut self, definitely_mutable: bool, post_invocation: Option<&InvocationArguments>, expr: &Expression, span: &Span8) {
+    fn compile_expr(&mut self, definitely_mutable: bool, inv_args: Option<&InvocationArguments>, expr: &Expression, span: &Span8) {
         if definitely_mutable
             && !matches!(
                 expr,
@@ -923,7 +761,7 @@ impl Compiler {
             self.error(span.clone(), "expression is not assignable");
         }
         match expr {
-            Expression::IdentifierReference(i) => self.compile_ident_ref(definitely_mutable, post_invocation, i, span),
+            Expression::IdentifierReference(i) => self.compile_ident_ref(definitely_mutable, inv_args, i, span),
             Expression::Subscript(s) => self.compile_subscript(definitely_mutable, s),
             Expression::Property(p) => self.compile_property(definitely_mutable, p),
             Expression::Literal(l) => self.compile_literal(definitely_mutable, l, span),
@@ -938,12 +776,16 @@ impl Compiler {
             Expression::NativeInvocation(n) => self.compile_native_invoke(n, span),
         }
     }
+
+    fn compile_val(&mut self, expr: &Expression, span: &Span8) {
+        self.compile_expr(false, None, expr, span);
+    }
 }
 
 impl Compiler {
-    fn compile_ident_ref(&mut self, mutable: bool, post_invocation: Option<&InvocationArguments>, ir: &IdentifierReference, span: &Span8) {
+    fn compile_ident_ref(&mut self, mutable: bool, inv_args: Option<&InvocationArguments>, ir: &IdentifierReference, span: &Span8) {
         let name = ident_ref_name(ir);
-        let Some(sym) = self.lookup(name, Some(span.clone()), post_invocation) else {
+        let Some(sym) = self.lookup(name, Some(span.clone()), inv_args) else {
             self.error(span.clone(), format!("undefined variable '{}'", name));
             let idx = self.intern_int(0);
             self.emit_push(Instruction::PushInt { index: idx }, span.clone());
@@ -1057,10 +899,10 @@ impl Compiler {
         for (key, val) in entries {
             let d = self.stack_delta(map_pos);
             self.emit_push(Instruction::PushLvalue { stack_delta: d }, span.clone());
-            self.compile_expr(false, None, &key.1, &key.0);
+            self.compile_val(&key.1, &key.0);
             self.emit(Instruction::Subscript { mutable: true }, span.clone());
             self.dec_stack(1);
-            self.compile_expr(false, None, &val.1, &val.0);
+            self.compile_val(&val.1, &val.0);
             self.emit(Instruction::Assign, span.clone());
             self.dec_stack(1);
             self.emit_pops(1, span.clone()); // discard assign result
@@ -1080,8 +922,8 @@ impl Compiler {
     }
 
     fn compile_simple_binary(&mut self, b: &BinaryOperator, span: &Span8) {
-        self.compile_expr(false, None, &b.lhs.1, &b.lhs.0);
-        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
+        self.compile_val(&b.lhs.1, &b.lhs.0);
+        self.compile_val(&b.rhs.1, &b.rhs.0);
         let instr = match b.op_type {
             BinaryOperatorType::Add => Instruction::Add,
             BinaryOperatorType::Subtract => Instruction::Sub,
@@ -1105,21 +947,21 @@ impl Compiler {
 
     fn compile_assign(&mut self, b: &BinaryOperator, span: &Span8) {
         self.compile_expr(true, None, &b.lhs.1, &b.lhs.0);
-        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
+        self.compile_val(&b.rhs.1, &b.rhs.0);
         self.emit(Instruction::Assign, span.clone());
         self.dec_stack(1);
     }
 
     fn compile_dot_assign(&mut self, b: &BinaryOperator, span: &Span8) {
         self.compile_expr(true, None, &b.lhs.1, &b.lhs.0);
-        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
+        self.compile_val(&b.rhs.1, &b.rhs.0);
         self.emit(Instruction::AppendAssign, span.clone());
         self.dec_stack(1);
     }
 
     // `a && b`: short-circuit; result is 0 if a is falsy, else b
     fn compile_and(&mut self, b: &BinaryOperator, span: &Span8) {
-        self.compile_expr(false, None, &b.lhs.1, &b.lhs.0);
+        self.compile_val(&b.lhs.1, &b.lhs.0);
         let jump_rhs = self.instruction_pointer();
         self.emit(
             Instruction::ConditionalJump { section: self.section_index(), to: 0 },
@@ -1134,13 +976,13 @@ impl Compiler {
         self.dec_stack(1); // undo push for tracking; merge point restores
 
         self.patch_jump(jump_rhs as usize, self.instruction_pointer());
-        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
+        self.compile_val(&b.rhs.1, &b.rhs.0);
         self.patch_jump(jump_end as usize, self.instruction_pointer());
     }
 
     // `a || b`: short-circuit; result is 1 if a is truthy, else b
     fn compile_or(&mut self, b: &BinaryOperator, span: &Span8) {
-        self.compile_expr(false, None,&b.lhs.1, &b.lhs.0);
+        self.compile_val(&b.lhs.1, &b.lhs.0);
         let jump_true = self.instruction_pointer();
         self.emit(
             Instruction::ConditionalJump { section: self.section_index(), to: 0 },
@@ -1148,7 +990,7 @@ impl Compiler {
         );
         self.dec_stack(1);
 
-        self.compile_expr(false, None, &b.rhs.1, &b.rhs.0);
+        self.compile_val(&b.rhs.1, &b.rhs.0);
         let jump_end = self.instruction_pointer();
         self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
         self.dec_stack(1);
@@ -1162,7 +1004,7 @@ impl Compiler {
 
 impl Compiler {
     fn compile_unary(&mut self, u: &UnaryPreOperator) {
-        self.compile_expr(false, None, &u.operand.1, &u.operand.0);
+        self.compile_val(&u.operand.1, &u.operand.0);
         let instr = match u.op_type {
             UnaryOperatorType::Negative => Instruction::Negate,
             UnaryOperatorType::Not => Instruction::Not,
@@ -1172,7 +1014,7 @@ impl Compiler {
 
     fn compile_subscript(&mut self, mutable: bool, s: &Subscript) {
         self.compile_expr(mutable, None, &s.base.1, &s.base.0);
-        self.compile_expr(false, None, &s.index.1, &s.index.0);
+        self.compile_val(&s.index.1, &s.index.0);
         self.emit(Instruction::Subscript { mutable }, s.base.0.clone());
         self.dec_stack(1);
     }
@@ -1195,7 +1037,7 @@ impl Compiler {
         // doing arguments first is useful for stack
         // but it also guarantees deepest first ordering for references
         for (_, arg) in &l.arguments.1 {
-            self.compile_expr(false, None, &arg.1, &arg.0);
+            self.compile_val(&arg.1, &arg.0);
         }
         self.compile_expr(false, Some(&l.arguments), &l.lambda.1, &l.lambda.0);
 
@@ -1219,9 +1061,9 @@ impl Compiler {
             || o.arguments.1.iter().any(|(_, a)| is_stateful(&a.1));
         let num_args = o.arguments.1.len() as u32;
 
-        self.compile_expr(false,  None, &o.operand.1, &o.operand.0);
+        self.compile_val(&o.operand.1, &o.operand.0);
         for (_, arg) in &o.arguments.1 {
-            self.compile_expr(false, None, &arg.1, &arg.0);
+            self.compile_val(&arg.1, &arg.0);
         }
         self.compile_expr(false, Some(&o.arguments), &o.operator.1, &o.operator.0);
 
@@ -1241,7 +1083,7 @@ impl Compiler {
     fn compile_native_invoke(&mut self, n: &NativeInvocation, span: &Span8) {
         let name = ident_ref_name(&n.function.1);
         for arg in &n.arguments {
-            self.compile_expr(false, None, &arg.1, &arg.0);
+            self.compile_val(&arg.1, &arg.0);
         }
         let index = registry().index_of(&name) as u32;
         self.emit(Instruction::NativeInvoke { index }, span.clone());
@@ -1300,7 +1142,7 @@ impl Compiler {
 
         match &l.body.1 {
             LambdaBody::Inline(expr) => {
-                self.compile_expr(false, None, expr, &l.body.0);
+                self.compile_val(expr, &l.body.0);
                 let below = self.stack_depth() as i32 - 1;
                 self.emit(Instruction::Return { stack_delta: -below }, l.body.0.clone());
             }
@@ -1318,7 +1160,7 @@ impl Compiler {
         }
         for arg in &l.args {
             if let Some(ref default) = arg.default_value {
-                self.compile_expr(false, None, &default.1, &default.0);
+                self.compile_val(&default.1, &default.0);
             }
         }
 
@@ -1337,7 +1179,7 @@ impl Compiler {
     }
 
     fn compile_operator_def(&mut self, o: &OperatorDefinition, span: &Span8) {
-        self.compile_expr(false, None, &o.lambda.1, &o.lambda.0);
+        self.compile_val(&o.lambda.1, &o.lambda.0);
         self.emit(Instruction::MakeOperator, span.clone());
     }
 
@@ -1439,7 +1281,7 @@ impl Compiler {
     // compile a block body: init `_ = []`, compile stmts, implicit `return _`
     fn compile_block_body(&mut self, stmts: &[SpanTagged<Statement>], span: &Span8) {
         self.emit_push(Instruction::PushEmptyVector, span.clone());
-        self.emit(Instruction::PushVar {  }, span.clone());
+        self.emit(Instruction::PushVar {}, span.clone());
         self.define_symbol("_", VariableType::Var, SymbolFunctionInfo::None);
         self.compile_statements(stmts);
         let underscore_pos = self.lookup("_", None, None).unwrap().stack_position;
@@ -1578,7 +1420,7 @@ mod test {
             }))),
         ];
         let result = compile_stmts(stmts);
-        assert!(has_error(&result, "cannot mutate let"), "expected let mutation error");
+        assert!(has_error(&result, "cannot mutate 'x'"), "expected let mutation error");
     }
 
     #[test]
@@ -1769,7 +1611,7 @@ mod test {
             was_cached: false
         });
         let result = compile(None, &[bundle0, bundle1]);
-        assert!(has_error(&result, "cannot mutate let"), "imported var should become let");
+        assert!(has_error(&result, "cannot mutate 'x'"), "imported var should become let");
     }
 
     #[test]
@@ -1849,8 +1691,7 @@ mod test {
 
     // -- bytecode sequence tests --
 
-    // `let x = 42` should produce exactly PushInt + EndOfExecutionHead
-    // with 42 in the int pool.
+    // `let x = 42` — PushInt evaluates the value, PushVar creates the variable slot.
     #[test]
     fn test_bytecode_single_let_int() {
         let result = compile_stmts(vec![s(Statement::Declaration(Declaration {
@@ -1862,7 +1703,7 @@ mod test {
         let sec = &result.bytecode.sections[0];
         assert_eq!(
             sec.instructions,
-            vec![Instruction::PushInt { index: 0 }, Instruction::EndOfExecutionHead],
+            vec![Instruction::PushInt { index: 0 }, Instruction::PushVar {}, Instruction::EndOfExecutionHead],
         );
         assert_eq!(sec.int_pool, vec![42i64]);
         assert!(sec.lambda_prototypes.is_empty());
@@ -1889,6 +1730,7 @@ mod test {
             sec.instructions,
             vec![
                 Instruction::PushInt { index: 0 },          // var x = 0
+                Instruction::PushVar {},                        // create variable slot
                 Instruction::PushLvalue { stack_delta: -1 }, // lvalue of x (at pos 0, depth 1)
                 Instruction::PushInt { index: 1 },           // rhs = 1
                 Instruction::Assign,
@@ -1914,13 +1756,14 @@ mod test {
         no_errors(&result);
         let sec = &result.bytecode.sections[0];
         // [0] PushInt(1)  [1] ConditionalJump→4  [2] PushInt(0)  [3] Jump→5
-        // [4] PushInt(0)  [5] EndOfExecutionHead
+        // [4] PushInt(0)  [5] PushVar  [6] EndOfExecutionHead
         assert_eq!(sec.instructions[0], Instruction::PushInt { index: 0 }); // lhs = 1
         assert!(matches!(sec.instructions[1], Instruction::ConditionalJump { to: 4, .. }));
         assert_eq!(sec.instructions[2], Instruction::PushInt { index: 1 }); // false literal
         assert!(matches!(sec.instructions[3], Instruction::Jump { to: 5, .. }));
         assert_eq!(sec.instructions[4], Instruction::PushInt { index: 1 }); // rhs = 0 (same pool slot)
-        assert_eq!(sec.instructions[5], Instruction::EndOfExecutionHead);
+        assert_eq!(sec.instructions[5], Instruction::PushVar {});
+        assert_eq!(sec.instructions[6], Instruction::EndOfExecutionHead);
         assert_eq!(sec.int_pool[0], 1i64);
         assert_eq!(sec.int_pool[1], 0i64);
     }
@@ -1946,7 +1789,7 @@ mod test {
         no_errors(&result);
         let sec = &result.bytecode.sections[0];
         // [0] Jump{to:3}  [1] PushCopy{-1}  [2] Return{-1}  [3] MakeLambda{proto:0,cap:0}
-        // [4] EndOfExecutionHead
+        // [4] PushVar  [5] EndOfExecutionHead
         assert!(matches!(sec.instructions[0], Instruction::Jump { to: 3, .. }));
         assert_eq!(sec.instructions[1], Instruction::PushCopy { stack_delta: -1 });
         assert_eq!(sec.instructions[2], Instruction::Return { stack_delta: -1 });
@@ -1954,7 +1797,8 @@ mod test {
             sec.instructions[3],
             Instruction::MakeLambda { prototype_index: 0, capture_count: 0 },
         );
-        assert_eq!(sec.instructions[4], Instruction::EndOfExecutionHead);
+        assert_eq!(sec.instructions[4], Instruction::PushVar {});
+        assert_eq!(sec.instructions[5], Instruction::EndOfExecutionHead);
         assert_eq!(sec.lambda_prototypes.len(), 1);
         assert_eq!(sec.lambda_prototypes[0].required_args, 1);
         assert_eq!(sec.lambda_prototypes[0].default_arg_count, 0);
