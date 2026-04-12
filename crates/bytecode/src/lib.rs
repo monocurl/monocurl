@@ -34,7 +34,7 @@ pub enum Instruction {
 
     // pops old tos if flag is true
     // used for map
-    PushCopy { pop_tos: bool, stack_delta: i32 },
+    PushCopy { pop_tos: bool, mutable: bool, stack_delta: i32 },
     PushLvalue { force_ephemeral: bool, stack_delta: i32 },
 
     PushDereference { stack_delta: i32 },

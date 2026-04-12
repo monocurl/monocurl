@@ -1056,3 +1056,189 @@ fn test_compile_error_return_at_top_level() {
     ");
     r.assert_error("lambda or block");
 }
+
+// -- references --
+
+#[test]
+fn test_ref_basic_mutation() {
+    // mutate increments its reference argument; x should be 1 after the call
+    let r = run("
+        var x = 0
+        let mutate = |&y| {
+            y = y + 1
+        }
+        mutate(&x)
+        let result = x
+    ");
+    r.assert_int(1);
+}
+
+#[test]
+fn test_ref_mutation_does_not_affect_unrelated_var() {
+    let r = run("
+        var x = 10
+        var z = 99
+        let inc = |&y| {
+            y = y + 1
+        }
+        inc(&x)
+        let result = z
+    ");
+    r.assert_int(99);
+}
+
+#[test]
+fn test_ref_called_multiple_times() {
+    let r = run("
+        var x = 0
+        let inc = |&y| {
+            y = y + 1
+        }
+        inc(&x)
+        inc(&x)
+        inc(&x)
+        let result = x
+    ");
+    r.assert_int(3);
+}
+
+#[test]
+fn test_ref_chain_of_lambdas() {
+    // inner passes its reference argument straight through to another lambda
+    let r = run("
+        var x = 0
+        let add_two = |&y| {
+            y = y + 2
+        }
+        let double_add = |&z| {
+            add_two(&z)
+            add_two(&z)
+        }
+        double_add(&x)
+        let result = x
+    ");
+    r.assert_int(4);
+}
+
+#[test]
+fn test_ref_two_distinct_references() {
+    let r = run("
+        var a = 1
+        var b = 10
+        let modify_both = |&x, &y| {
+            x = x + 1
+            y = y + 1
+        }
+        modify_both(&a, &b)
+        let result = a + b
+    ");
+    // a=2, b=11, result=13
+    r.assert_int(13);
+}
+
+#[test]
+fn test_ref_reference_to_list_via_ref() {
+    // pass the whole list by reference; subscript-assign inside the lambda
+    let r = run("
+        var arr = [0, 0, 0]
+        let set_first = |&a| {
+            a[0] = 42
+        }
+        set_first(&arr)
+        let result = arr[0]
+    ");
+    r.assert_int(42);
+}
+
+#[test]
+fn test_ref_destructure_list_references() {
+    // pass a list of references using list destructure assignment inside the lambda
+    let r = run("
+        var a = 0
+        var b = 0
+        let set_both = |&x, &y| {
+            x = 7
+            y = 13
+        }
+        set_both(&a, &b)
+        let result = a + b
+    ");
+    r.assert_int(20);
+}
+
+#[test]
+fn test_ref_reference_in_closure_capture() {
+    // lambda captures a var by value; separate reference arg must not alias the capture
+    let r = run("
+        var captured = 5
+        var target = 0
+        let f = |&r| {
+            r = captured + 1
+        }
+        f(&target)
+        let result = target
+    ");
+    r.assert_int(6);
+}
+
+// -- map: hashable key validation --
+
+#[test]
+fn test_map_integer_key() {
+    let r = run("
+        var m = [->]
+        m[1] = 100
+        let result = m[1]
+    ");
+    r.assert_int(100);
+}
+
+#[test]
+fn test_map_string_key() {
+    let r = run(r#"
+        var m = ["hello" -> 42]
+        let result = m["hello"]
+    "#);
+    r.assert_int(42);
+}
+
+#[test]
+fn test_map_list_key() {
+    // vectors of integers are hashable keys
+    let r = run("
+        var m = [->]
+        m[[1, 2]] = 99
+        let result = m[[1, 2]]
+    ");
+    r.assert_int(99);
+}
+
+#[test]
+fn test_map_unhashable_key_error() {
+    // floats cannot be used as map keys
+    let r = run("
+        var m = [->]
+        m[1.5] = 0
+    ");
+    r.assert_error("cannot use float as a map key");
+}
+
+#[test]
+fn test_map_in_operator_integer_key() {
+    let r = run("
+        var m = [->]
+        m[7] = 1
+        let result = 7 in m
+    ");
+    r.assert_int(1);
+}
+
+#[test]
+fn test_map_in_operator_missing_key() {
+    let r = run("
+        var m = [->]
+        m[1] = 1
+        let result = 2 in m
+    ");
+    r.assert_int(0);
+}

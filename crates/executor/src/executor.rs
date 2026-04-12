@@ -73,10 +73,6 @@ impl Executor {
         self.current_play_time = 0.0;
     }
 
-    // -----------------------------------------------------------------------
-    // single instruction dispatch
-    // -----------------------------------------------------------------------
-
     pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
         let ip = self.state.stack(stack_idx).ip;
         let section_idx = ip.0 as usize;
@@ -138,9 +134,14 @@ impl Executor {
             }
 
             // ----- stack reads -----
-            Instruction::PushCopy { stack_delta, pop_tos } => {
+            Instruction::PushCopy { stack_delta, mutable, pop_tos } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let resolved = val.force_elide_lvalue();
+                let resolved = if mutable {
+                    // want to keep the nested layers of lvalue
+                    val.force_elide_lvalue()
+                } else {
+                    val.elide_lvalue_rec()
+                };
                 if pop_tos {
                     self.state.stack_mut(stack_idx).pop();
                 }
@@ -266,7 +267,7 @@ impl Executor {
                 }
             }
             Instruction::Not => {
-                let val = self.state.stack_mut(stack_idx).pop();
+                let val = self.state.stack_mut(stack_idx).pop().elide_lvalue();
                 let result = Value::Integer(if val.is_truthy() { 0 } else { 1 });
                 self.state.stack_mut(stack_idx).push(result);
             }

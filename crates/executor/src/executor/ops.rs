@@ -1,6 +1,6 @@
 use crate::{
     error::ExecutorError,
-    value::Value,
+    value::{Value, container::HashableKey},
 };
 
 use super::{BinOp, ExecSingle, Executor};
@@ -153,8 +153,8 @@ fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorErr
             Ok(Value::Integer(found as i64))
         }
         (_, Value::Map(map), BinOp::In) => {
-            let found = map.entries.iter().any(|(k, _)| Executor::values_equal(lhs, k));
-            Ok(Value::Integer(found as i64))
+            let key = HashableKey::try_from_value(lhs)?;
+            Ok(Value::Integer(map.entries.contains_key(&key) as i64))
         }
 
         _ => Err(ExecutorError::UnsupportedBinaryOp {

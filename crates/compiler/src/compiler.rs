@@ -430,6 +430,47 @@ impl Compiler {
         self.dec_stack(count);
     }
 
+    fn emit_copy(&mut self, stack_delta: i32, span: Span8) {
+        self.emit_push(Instruction::PushCopy { stack_delta, pop_tos: false, mutable: false }, span);
+    }
+
+    fn emit_copy_ref(&mut self, stack_delta: i32, span: Span8) {
+        self.emit_push(Instruction::PushCopy { stack_delta, pop_tos: false, mutable: true }, span);
+    }
+
+    fn emit_lvalue(&mut self, stack_delta: i32, span: Span8) {
+        self.emit_push(Instruction::PushLvalue { stack_delta, force_ephemeral: false }, span);
+    }
+
+    fn emit_lvalue_ephemeral(&mut self, stack_delta: i32, span: Span8) {
+        self.emit_push(Instruction::PushLvalue { stack_delta, force_ephemeral: true }, span);
+    }
+
+    fn emit_push_int(&mut self, val: i64, span: Span8) {
+        let idx = self.intern_int(val);
+        self.emit_push(Instruction::PushInt { index: idx }, span);
+    }
+
+    /// emit a Jump with section set and `to` = 0; returns the instruction index for later patching
+    fn emit_jump_patch(&mut self, span: Span8) -> usize {
+        let idx = self.instruction_pointer() as usize;
+        self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span);
+        idx
+    }
+
+    /// emit a ConditionalJump with section set and `to` = 0, consuming the condition (dec_stack);
+    /// returns the instruction index for later patching
+    fn emit_cond_jump_patch(&mut self, span: Span8) -> usize {
+        let idx = self.instruction_pointer() as usize;
+        self.emit(Instruction::ConditionalJump { section: self.section_index(), to: 0 }, span);
+        self.dec_stack(1);
+        idx
+    }
+
+    fn emit_jump_to(&mut self, target: u32, span: Span8) {
+        self.emit(Instruction::Jump { section: self.section_index(), to: target }, span);
+    }
+
     fn push_scope(&mut self) {
         let base = self.stack_depth();
         self.frame_mut().scopes.push(Scope { base_stack_depth: base, symbols: HashMap::new() });
@@ -667,13 +708,7 @@ impl Compiler {
         let loop_start = self.instruction_pointer();
         self.compile_val(&w.condition.1, &w.condition.0);
         self.emit(Instruction::Not, w.condition.0.clone());
-        let exit_jump = self.instruction_pointer();
-        // to be patched
-        self.emit(
-            Instruction::ConditionalJump { section: self.section_index(), to: 0 },
-            w.condition.0.clone(),
-        );
-        self.dec_stack(1);
+        let exit_jump = self.emit_cond_jump_patch(w.condition.0.clone());
 
         let loop_stack = self.stack_depth();
         self.frame_mut().loop_contexts.push(LoopContext {
@@ -687,13 +722,10 @@ impl Compiler {
         self.compile_statements(&w.body.1);
         self.pop_scope(span.clone());
 
-        self.emit(
-            Instruction::Jump { section: self.section_index(), to: loop_start },
-            span.clone(),
-        );
+        self.emit_jump_to(loop_start, span.clone());
 
         let loop_end = self.instruction_pointer();
-        self.patch_jump(exit_jump as usize, loop_end);
+        self.patch_jump(exit_jump, loop_end);
         let ctx = self.frame_mut().loop_contexts.pop().unwrap();
         for patch in ctx.break_patches {
             self.patch_jump(patch, loop_end);
@@ -710,8 +742,7 @@ impl Compiler {
         self.emit(Instruction::ConvertVar, span.clone());
         self.define_symbol("\x00iter", VariableType::Let, SymbolFunctionInfo::None);
 
-        let zero = self.intern_int(0);
-        self.emit_push(Instruction::PushInt { index: zero }, span.clone());
+        self.emit_push_int(0, span.clone());
         let idx_pos = self.stack_depth() - 1;
         self.emit(Instruction::ConvertVar, span.clone());
         self.define_symbol("\x00idx", VariableType::Var, SymbolFunctionInfo::None);
@@ -721,9 +752,9 @@ impl Compiler {
 
         // condition: idx < len(iter)
         let d = self.stack_delta(idx_pos);
-        self.emit_push(Instruction::PushCopy { stack_delta: d, pop_tos: false }, span.clone());
+        self.emit_copy(d, span.clone());
         let d = self.stack_delta(iter_pos);
-        self.emit_push(Instruction::PushCopy { stack_delta: d, pop_tos: false }, span.clone());
+        self.emit_copy(d, span.clone());
 
         let len_idx = registry().index_of("vector_len") as u16;
         self.emit(Instruction::NativeInvoke { index: len_idx, arg_count: 1 }, span.clone());
@@ -732,12 +763,7 @@ impl Compiler {
         self.dec_stack(1);
 
         self.emit(Instruction::Not, span.clone());
-        let exit_jump = self.instruction_pointer();
-        self.emit(
-            Instruction::ConditionalJump { section: self.section_index(), to: 0 },
-            span.clone(),
-        );
-        self.dec_stack(1); // depth = loop_stack
+        let exit_jump = self.emit_cond_jump_patch(span.clone()); // depth = loop_stack
 
         self.frame_mut().loop_contexts.push(LoopContext {
             continue_target: None, // patched below after increment is emitted
@@ -749,9 +775,9 @@ impl Compiler {
         // body scope with the for variable
         self.push_scope();
         let d = self.stack_delta(iter_pos);
-        self.emit_push(Instruction::PushCopy { stack_delta: d, pop_tos: false }, span.clone());
+        self.emit_copy(d, span.clone());
         let d = self.stack_delta(idx_pos);
-        self.emit_push(Instruction::PushCopy { stack_delta: d, pop_tos: false }, span.clone());
+        self.emit_copy(d, span.clone());
         self.emit(Instruction::Subscript { mutable: false }, span.clone());
         self.dec_stack(1);
         self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
@@ -770,24 +796,20 @@ impl Compiler {
 
         // idx = idx + 1
         let d = self.stack_delta(idx_pos);
-        self.emit_push(Instruction::PushLvalue { stack_delta: d, force_ephemeral: false }, span.clone());
+        self.emit_lvalue(d, span.clone());
         let d = self.stack_delta(idx_pos);
-        self.emit_push(Instruction::PushCopy { stack_delta: d, pop_tos: false }, span.clone());
-        let one = self.intern_int(1);
-        self.emit_push(Instruction::PushInt { index: one }, span.clone());
+        self.emit_copy(d, span.clone());
+        self.emit_push_int(1, span.clone());
         self.emit(Instruction::Add, span.clone());
         self.dec_stack(1);
         self.emit(Instruction::Assign, span.clone());
         self.dec_stack(1);
         self.emit_pops(1, span.clone()); // discard assign result, depth = loop_stack
 
-        self.emit(
-            Instruction::Jump { section: self.section_index(), to: condition_ip },
-            span.clone(),
-        );
+        self.emit_jump_to(condition_ip, span.clone());
 
         let loop_end = self.instruction_pointer();
-        self.patch_jump(exit_jump as usize, loop_end);
+        self.patch_jump(exit_jump, loop_end);
         let ctx = self.frame_mut().loop_contexts.pop().unwrap();
         for patch in ctx.break_patches {
             self.patch_jump(patch, loop_end);
@@ -799,30 +821,21 @@ impl Compiler {
     fn compile_if(&mut self, i: &If, span: &Span8) {
         self.compile_val(&i.condition.1, &i.condition.0);
         self.emit(Instruction::Not, i.condition.0.clone());
-        let skip_if = self.instruction_pointer();
-        self.emit(
-            Instruction::ConditionalJump { section: self.section_index(), to: 0 },
-            i.condition.0.clone(),
-        );
-        self.dec_stack(1);
+        let skip_if = self.emit_cond_jump_patch(i.condition.0.clone());
 
         self.push_scope();
         self.compile_statements(&i.if_block.1);
         self.pop_scope(span.clone());
 
         if let Some(ref else_block) = i.else_block {
-            let skip_else = self.instruction_pointer();
-            self.emit(
-                Instruction::Jump { section: self.section_index(), to: 0 },
-                span.clone(),
-            );
-            self.patch_jump(skip_if as usize, self.instruction_pointer());
+            let skip_else = self.emit_jump_patch(span.clone());
+            self.patch_jump(skip_if, self.instruction_pointer());
             self.push_scope();
             self.compile_statements(&else_block.1);
             self.pop_scope(span.clone());
-            self.patch_jump(skip_else as usize, self.instruction_pointer());
+            self.patch_jump(skip_else, self.instruction_pointer());
         } else {
-            self.patch_jump(skip_if as usize, self.instruction_pointer());
+            self.patch_jump(skip_if, self.instruction_pointer());
         }
     }
 
@@ -846,11 +859,7 @@ impl Compiler {
         // undo tracking so sequential code after the jump sees consistent depth
         self.frame_mut().stack_depth += pop_count;
 
-        let patch_idx = self.instruction_pointer() as usize;
-        self.emit(
-            Instruction::Jump { section: self.section_index(), to: 0 },
-            span.clone(),
-        );
+        let patch_idx = self.emit_jump_patch(span.clone());
         self.frame_mut().loop_contexts.last_mut().unwrap().break_patches.push(patch_idx);
     }
 
@@ -864,16 +873,11 @@ impl Compiler {
         self.emit_pops(pop_count, span.clone());
         self.frame_mut().stack_depth += pop_count;
 
-        let patch_idx = self.instruction_pointer() as usize;
-        let to = target.unwrap_or(0);
-        self.emit(Instruction::Jump { section: self.section_index(), to }, span.clone());
-        if target.is_none() {
-            self.frame_mut()
-                .loop_contexts
-                .last_mut()
-                .unwrap()
-                .continue_patches
-                .push(patch_idx);
+        if let Some(to) = target {
+            self.emit_jump_to(to, span.clone());
+        } else {
+            let patch_idx = self.emit_jump_patch(span.clone());
+            self.frame_mut().loop_contexts.last_mut().unwrap().continue_patches.push(patch_idx);
         }
     }
 
@@ -939,40 +943,27 @@ impl Compiler {
                 if sym.var_type == VariableType::Let {
                     self.error(span.clone(), format!("cannot mutably reference '{}', consider declaring it as a 'var'", name));
                 }
-                let inst = match sym.var_type {
-                    // references should be copied to preserve the source reference
-                    VariableType::Reference => Instruction::PushCopy { stack_delta: delta, pop_tos: false },
-                    _ => Instruction::PushLvalue { stack_delta: delta, force_ephemeral: true }
-                };
-                self.emit_push(inst, span.clone());
+                // references should be copied to preserve the source reference
+                match sym.var_type {
+                    VariableType::Reference => self.emit_copy_ref(delta, span.clone()),
+                    _ => self.emit_lvalue_ephemeral(delta, span.clone()),
+                }
             },
             IdentifierReference::Value(_) if mutable => {
                 if sym.var_type == VariableType::Let {
                     self.error(span.clone(), format!("cannot mutate '{}', consider declaring it as a 'var'", name));
                 }
-                let inst = match sym.var_type {
-                    VariableType::Reference => Instruction::PushCopy { stack_delta: delta, pop_tos: false },
-                    _ => Instruction::PushLvalue { stack_delta: delta, force_ephemeral: false }
-                };
-                self.emit_push(inst, span.clone());
+                match sym.var_type {
+                    VariableType::Reference => self.emit_copy_ref(delta, span.clone()),
+                    _ => self.emit_lvalue(delta, span.clone()),
+                }
             },
-            IdentifierReference::Value(_) => {
-                self.emit_push(
-                    Instruction::PushCopy { stack_delta: delta, pop_tos: false },
-                    span.clone()
-                );
-            }
+            IdentifierReference::Value(_) => self.emit_copy(delta, span.clone()),
             IdentifierReference::StatefulReference(_) => {
-                self.emit_push(
-                    Instruction::PushStateful { stack_delta: delta },
-                    span.clone(),
-                );
+                self.emit_push(Instruction::PushStateful { stack_delta: delta }, span.clone());
             }
             IdentifierReference::StatefulDereference(_) => {
-                self.emit_push(
-                    Instruction::PushDereference { stack_delta: delta },
-                    span.clone(),
-                );
+                self.emit_push(Instruction::PushDereference { stack_delta: delta }, span.clone());
             }
         }
     }
@@ -1044,7 +1035,7 @@ impl Compiler {
         let map_pos = self.stack_depth() - 1;
         for (key, val) in entries {
             let d = self.stack_delta(map_pos);
-            self.emit_push(Instruction::PushLvalue { stack_delta: d, force_ephemeral: false }, span.clone());
+            self.emit_lvalue(d, span.clone());
             self.compile_val(&key.1, &key.0);
             self.emit(Instruction::Subscript { mutable: true }, span.clone());
             self.dec_stack(1);
@@ -1053,7 +1044,7 @@ impl Compiler {
             self.dec_stack(1);
             self.emit_pops(1, span.clone()); // discard assign result
         }
-        self.emit(Instruction::PushCopy { pop_tos: true, stack_delta: -1 }, span.clone());
+        self.emit(Instruction::PushCopy { pop_tos: true, stack_delta: -1, mutable: false }, span.clone());
     }
 }
 
@@ -1109,43 +1100,29 @@ impl Compiler {
     // `a && b`: short-circuit; result is 0 if a is falsy, else b
     fn compile_and(&mut self, b: &BinaryOperator, span: &Span8) {
         self.compile_val(&b.lhs.1, &b.lhs.0);
-        let jump_rhs = self.instruction_pointer();
-        self.emit(
-            Instruction::ConditionalJump { section: self.section_index(), to: 0 },
-            span.clone(),
-        );
-        self.dec_stack(1);
+        let jump_rhs = self.emit_cond_jump_patch(span.clone());
 
-        let false_idx = self.intern_int(0);
-        self.emit_push(Instruction::PushInt { index: false_idx }, span.clone());
-        let jump_end = self.instruction_pointer();
-        self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
+        self.emit_push_int(0, span.clone());
+        let jump_end = self.emit_jump_patch(span.clone());
         self.dec_stack(1); // undo push for tracking; merge point restores
 
-        self.patch_jump(jump_rhs as usize, self.instruction_pointer());
+        self.patch_jump(jump_rhs, self.instruction_pointer());
         self.compile_val(&b.rhs.1, &b.rhs.0);
-        self.patch_jump(jump_end as usize, self.instruction_pointer());
+        self.patch_jump(jump_end, self.instruction_pointer());
     }
 
     // `a || b`: short-circuit; result is 1 if a is truthy, else b
     fn compile_or(&mut self, b: &BinaryOperator, span: &Span8) {
         self.compile_val(&b.lhs.1, &b.lhs.0);
-        let jump_true = self.instruction_pointer();
-        self.emit(
-            Instruction::ConditionalJump { section: self.section_index(), to: 0 },
-            span.clone(),
-        );
-        self.dec_stack(1);
+        let jump_true = self.emit_cond_jump_patch(span.clone());
 
         self.compile_val(&b.rhs.1, &b.rhs.0);
-        let jump_end = self.instruction_pointer();
-        self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
+        let jump_end = self.emit_jump_patch(span.clone());
         self.dec_stack(1);
 
-        self.patch_jump(jump_true as usize, self.instruction_pointer());
-        let true_idx = self.intern_int(1);
-        self.emit_push(Instruction::PushInt { index: true_idx }, span.clone());
-        self.patch_jump(jump_end as usize, self.instruction_pointer());
+        self.patch_jump(jump_true, self.instruction_pointer());
+        self.emit_push_int(1, span.clone());
+        self.patch_jump(jump_end, self.instruction_pointer());
     }
 }
 
@@ -1382,8 +1359,7 @@ impl Compiler {
     }
 
     fn begin_closure_frame(&mut self, kind: FrameKind, span: &Span8) -> (usize, u32) {
-        let jump_idx = self.instruction_pointer() as usize;
-        self.emit(Instruction::Jump { section: self.section_index(), to: 0 }, span.clone());
+        let jump_idx = self.emit_jump_patch(span.clone());
         let body_ip = self.instruction_pointer();
         self.push_frame(kind);
         (jump_idx, body_ip)
@@ -1406,13 +1382,12 @@ impl Compiler {
             let stack_delta = self.stack_delta(cap.stack_position);
             if !immediately_invoked && matches!(cap.var_type, VariableType::Reference | VariableType::Let) {
                 // optimize out the ephemeral
-                self.emit_push(Instruction::PushCopy { stack_delta, pop_tos: false }, span.clone());
+                self.emit_copy_ref(stack_delta, span.clone());
                 self.emit(Instruction::ConvertVar, span.clone());
+            } else if immediately_invoked {
+                self.emit_lvalue(stack_delta, span.clone());
             } else {
-                self.emit_push(
-                    Instruction::PushLvalue { stack_delta, force_ephemeral: !immediately_invoked },
-                    span.clone(),
-                );
+                self.emit_lvalue_ephemeral(stack_delta, span.clone());
             }
         }
     }
@@ -1425,7 +1400,7 @@ impl Compiler {
         self.compile_statements(stmts);
         let underscore_pos = self.lookup("_", None, None).unwrap().stack_position;
         let d = self.stack_delta(underscore_pos);
-        self.emit_push(Instruction::PushCopy { stack_delta: d, pop_tos: false }, span.clone());
+        self.emit_copy(d, span.clone());
         let below = self.stack_depth() as i32 - 1;
         self.emit(Instruction::Return { stack_delta: -below }, span.clone());
     }
@@ -1913,7 +1888,7 @@ mod test {
         // [0] Jump{to:3}  [1] PushCopy{-1}  [2] Return{-1}  [3] MakeLambda{proto:0,cap:0}
         // [4] PushVar  [5] EndOfExecutionHead
         assert!(matches!(sec.instructions[0], Instruction::Jump { to: 3, .. }));
-        assert_eq!(sec.instructions[1], Instruction::PushCopy {stack_delta: -1, pop_tos: false });
+        assert_eq!(sec.instructions[1], Instruction::PushCopy {stack_delta: -1,pop_tos:false, mutable: false });
         assert_eq!(sec.instructions[2], Instruction::Return { stack_delta: -1 });
         assert_eq!(
             sec.instructions[3],

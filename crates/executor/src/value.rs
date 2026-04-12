@@ -68,6 +68,7 @@ pub enum Value {
     WeakLvalue(WeakValue),
 }
 
+
 impl Value {
     pub fn is_truthy(&self) -> bool {
         match self {
@@ -75,6 +76,40 @@ impl Value {
             Value::Float(f) => *f != 0.0,
             Value::Complex { re, im } => *re != 0.0 || *im != 0.0,
             _ => false,
+        }
+    }
+
+    // an element might contain lvalues if it is itself an lvalue or a nested list
+    fn may_need_lvalue_elision(&self) -> bool {
+        self.is_lvalue() || matches!(self, Value::List(_))
+    }
+
+    // creates owned copy of self which elides all lvalues, recursing on lists and maps
+    pub fn elide_lvalue_rec(self) -> Value {
+        match self {
+            Value::Lvalue(rc) => rc.borrow().clone().elide_lvalue_rec(),
+            Value::WeakLvalue(weak) => weak.upgrade().map(|rc| rc.borrow().clone().elide_lvalue_rec()).unwrap(),
+            Value::List(mut list) => {
+                if !list.elements.iter().any(|e| e.borrow().may_need_lvalue_elision()) {
+                    return Value::List(list);
+                }
+
+                let list_mut = Rc::make_mut(&mut list);
+                for elem in &mut list_mut.elements {
+                    if !elem.borrow().may_need_lvalue_elision() {
+                        continue;
+                    }
+                    let elided = elem.borrow().clone().elide_lvalue_rec();
+                    // reuse the existing allocation when exclusively owned; COW otherwise
+                    if Rc::strong_count(elem) == 1 {
+                        *elem.borrow_mut() = elided;
+                    } else {
+                        *elem = rc_value(elided);
+                    }
+                }
+                Value::List(list)
+            }
+            other => other,
         }
     }
 

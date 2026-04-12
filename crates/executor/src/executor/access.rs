@@ -4,6 +4,7 @@ use crate::{
     error::ExecutorError,
     value::{
         RcValue, Value, rc_value,
+        container::HashableKey,
         invoked_function::InvokedFunction,
     },
 };
@@ -184,15 +185,18 @@ impl Executor {
                     }
                 }
                 Value::Map(map) => {
-                    let existing = map.find_key(&index);
-                    match existing {
-                        Some(entry_idx) => {
-                            let val_rc = map.entries[entry_idx].1.clone();
+                    let key = match HashableKey::try_from_value(&index) {
+                        Ok(k) => k,
+                        Err(e) => return ExecSingle::Error(e),
+                    };
+                    match map.entries.get(&key) {
+                        Some(val_rc) => {
+                            let val_rc = val_rc.clone();
                             if Rc::strong_count(&val_rc) > 1 {
                                 let cloned = rc_value(val_rc.borrow().clone());
                                 drop(base_val);
                                 if let Value::Map(map) = &mut *base_rc.borrow_mut() {
-                                    Rc::make_mut(map).entries[entry_idx].1 = cloned.clone();
+                                    Rc::make_mut(map).entries.insert(key, cloned.clone());
                                 }
                                 self.state
                                     .stack_mut(stack_idx)
@@ -208,7 +212,7 @@ impl Executor {
                             let new_rc = rc_value(Value::Nil);
                             drop(base_val);
                             if let Value::Map(map) = &mut *base_rc.borrow_mut() {
-                                Rc::make_mut(map).entries.push((index, new_rc.clone()));
+                                Rc::make_mut(map).entries.insert(key, new_rc.clone());
                             }
                             self.state
                                 .stack_mut(stack_idx)
@@ -247,11 +251,13 @@ impl Executor {
                     self.state.stack_mut(stack_idx).push(val);
                 }
                 Value::Map(map) => {
-                    let found = map.find_key(&index);
-                    let val = match found {
-                        Some(i) => map.entries[i].1.borrow().clone(),
-                        None => Value::Nil,
+                    let key = match HashableKey::try_from_value(&index) {
+                        Ok(k) => k,
+                        Err(e) => return ExecSingle::Error(e),
                     };
+                    let val = map.entries.get(&key)
+                        .map(|rc| rc.borrow().clone())
+                        .unwrap_or(Value::Nil);
                     self.state.stack_mut(stack_idx).push(val);
                 }
                 Value::String(s) => {
