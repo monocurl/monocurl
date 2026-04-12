@@ -627,6 +627,22 @@ impl Compiler {
             AstVariableType::State => VariableType::State,
             AstVariableType::Param => VariableType::Param,
         };
+        let is_library = self.current_section().flags.is_library;
+        match vt {
+            VariableType::Param | VariableType::State | VariableType::Mesh if is_library => {
+                let kind = match vt {
+                    VariableType::Param => "param",
+                    VariableType::State => "state",
+                    VariableType::Mesh => "mesh",
+                    _ => unreachable!(),
+                };
+                self.error(span.clone(), &format!("'{kind}' declarations are not allowed in user libraries"));
+            }
+            VariableType::Param if self.frames.len() != 1 || self.frame().scopes.len() != 1 => {
+                self.error(span.clone(), "'param' must be declared at the top level of a section, not inside any nested scope");
+            }
+            _ => {}
+        }
         match vt {
             VariableType::Mesh => {
                 let ni = self.intern_string(&d.identifier.1.0);

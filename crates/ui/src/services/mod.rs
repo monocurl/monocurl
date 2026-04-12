@@ -26,6 +26,7 @@ pub enum ServiceManagerMessage {
         lex_rope: Rope<Attribute<LexData>>,
         version: usize,
     },
+    #[allow(unused)]
     UpdateStaticAnalysisRope {
         analysis_rope: Rope<Attribute<StaticAnalysisData>>,
         version: usize,

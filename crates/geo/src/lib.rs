@@ -1,5 +1,4 @@
 pub mod mesh;
-pub mod mesh_set;
 pub mod util;
 pub mod simd;
 
