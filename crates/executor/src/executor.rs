@@ -3,7 +3,7 @@ mod anim;
 mod invoke;
 mod ops;
 
-use std::future::Future;
+use std::{future::Future, rc::Rc};
 use std::pin::Pin;
 
 use bytecode::{Bytecode, Instruction};
@@ -18,11 +18,11 @@ use crate::{
     },
 };
 
-pub type StdlibReturn = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>>>>;
+pub type StdlibReturn<'a> =
+    Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
 
-/// signature for stdlib native functions.
-/// takes owned arguments and returns an async result.
-pub type StdlibFunc = fn(Vec<Value>) -> StdlibReturn;
+pub type StdlibFunc =
+    for<'a> fn(&'a mut ExecutionState, usize) -> StdlibReturn<'a>;
 
 pub enum SeekPrimitiveResult {
     Error(ExecutorError),
@@ -65,7 +65,8 @@ impl Executor {
     /// initialize execution of a section (called once per slide).
     pub fn section_init(&mut self, section_index: u16) {
         let ip: InstructionPointer = (section_index, 0);
-        let stack_idx = self.state.alloc_stack(ip, None);
+        // only one active head at start of section
+        let stack_idx = self.state.alloc_stack(ip, None).unwrap();
         self.state.execution_heads = vec![stack_idx];
         self.state.primitive_anims.clear();
         self.state.clear_ephemeral_pool();
@@ -114,32 +115,35 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(Value::String(s));
             }
             Instruction::PushEmptyMap => {
-                self.state.stack_mut(stack_idx).push(Value::Map(Map::new()));
+                self.state.stack_mut(stack_idx).push(Value::Map(Rc::new(Map::new())));
             }
             Instruction::PushEmptyVector => {
                 self.state
                     .stack_mut(stack_idx)
-                    .push(Value::List(List::new()));
+                    .push(Value::List(Rc::new(List::new())));
             }
 
             // ----- variable promotion -----
-            Instruction::PushVar {} => {
+            Instruction::ConvertVar {} => {
                 self.state.promote_to_var(stack_idx);
             }
-            Instruction::PushMesh { .. } => {
+            Instruction::ConvertMesh { .. } => {
                 self.state.promote_to_leader(stack_idx, LeaderKind::Mesh);
             }
-            Instruction::PushState { .. } => {
+            Instruction::ConvertState { .. } => {
                 self.state.promote_to_leader(stack_idx, LeaderKind::State);
             }
-            Instruction::PushParam { .. } => {
+            Instruction::ConvertParam { .. } => {
                 self.state.promote_to_leader(stack_idx, LeaderKind::Param);
             }
 
             // ----- stack reads -----
-            Instruction::PushCopy { stack_delta } => {
+            Instruction::PushCopy { stack_delta, pop_tos } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let resolved = val.force_elide_lvalue();
+                if pop_tos {
+                    self.state.stack_mut(stack_idx).pop();
+                }
                 self.state.stack_mut(stack_idx).push(resolved);
             }
             Instruction::PushLvalue { stack_delta, force_ephemeral } => {
@@ -195,7 +199,8 @@ impl Executor {
                 let stack = self.state.stack_mut(stack_idx);
                 let val = stack.pop();
                 match val {
-                    Value::Lambda(l) => stack.push(Value::Operator(Operator(l))),
+                    // lambda is Rc<Lambda>, so Operator(rc) is a cheap pointer copy
+                    Value::Lambda(rc) => stack.push(Value::Operator(Operator(rc))),
                     _ => {
                         return ExecSingle::Error(ExecutorError::type_error(
                             "lambda",

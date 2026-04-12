@@ -1,8 +1,6 @@
 use super::{RcValue, Value};
 
-/// list whose elements are reference-counted for lvalue semantics.
-/// `list[i]` returns a mutable lvalue by cloning the Rc.
-/// COW: if `Rc::strong_count > 1`, clone inner value into new Rc before mutating.
+/// list whose elements are reference-counted / COW for lvalue semantics.
 #[derive(Clone)]
 pub struct List {
     pub elements: Vec<RcValue>,

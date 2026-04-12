@@ -361,6 +361,20 @@ fn test_exec_multiple_vars() {
     r.assert_int(21);
 }
 
+#[test]
+fn test_exec_destructure() {
+    let r = run("
+        var a = 3
+        var b = 7
+        var c = 4
+        var d = 1
+        [a, b] = [b, a] # a = 7, b = 3
+        [c, [d, a]] = [a, [b, d]] # c = 7, d = 3, a = 1, b = 3
+        let result = a * 1000 + b * 100 + c * 10 + d
+    ");
+    r.assert_int(1373);
+}
+
 // -- if / else --
 
 #[test]
@@ -797,4 +811,248 @@ fn test_exec_runtime_error_index_out_of_bounds() {
         let result = xs[5]
     ");
     r.assert_error("out of bounds");
+}
+
+#[test]
+fn test_exec_runtime_error_type_in_arithmetic() {
+    let r = run(r#"let x = "hello" - 1"#);
+    r.assert_error("unsupported");
+}
+
+#[test]
+fn test_exec_runtime_error_subscript_non_collection() {
+    let r = run("
+        let x = 42
+        let y = x[0]
+    ");
+    r.assert_error("subscript");
+}
+
+#[test]
+fn test_exec_runtime_error_call_non_lambda() {
+    let r = run("
+        let x = 42
+        let y = x(1)
+    ");
+    r.assert_error("lambda");
+}
+
+// -- COW: list element independence after aliasing --
+
+#[test]
+fn test_cow_list_mutation_doesnt_affect_alias() {
+    // a[0] = 99 must not bleed into b; they share Rc elements until the write triggers COW
+    let r = run("
+        var a = [1, 2, 3]
+        var b = a
+        a[0] = 99
+        let result = b[0]
+    ");
+    r.assert_int(1);
+}
+
+#[test]
+fn test_cow_list_alias_mutation_doesnt_affect_original() {
+    let r = run("
+        var a = [10, 20, 30]
+        var b = a
+        b[2] = 77
+        let result = a[2]
+    ");
+    r.assert_int(30);
+}
+
+#[test]
+fn test_cow_list_both_aliases_mutate_independently() {
+    let r = run("
+        var a = [1, 2, 3]
+        var b = a
+        a[0] = 100
+        b[0] = 200
+        let result = a[0] + b[0]
+    ");
+    r.assert_int(300);
+}
+
+#[test]
+fn test_cow_list_nested_alias_chain() {
+    // a → b → c all start sharing element Rcs; mutation to c must not affect a
+    let r = run("
+        var a = [5, 6, 7]
+        var b = a
+        var c = b
+        c[1] = 99
+        let result = a[1]
+    ");
+    r.assert_int(6);
+}
+
+// -- labeled function invocations --
+#[test]
+fn test_labeled_elide() {
+    let r = run("
+        let f = |x, y| x + y
+        let inv = f(myarg: 10, 30)
+        let result = inv + 10
+    ");
+    r.assert_int(50);
+}
+
+#[test]
+fn test_labeled_recompute() {
+    let r = run("
+        let f = |x, y| x + y
+        var inv = f(myarg: 10, 30)
+        let org = 0 + inv
+        inv.myarg = 30
+        let full = org + inv
+    ");
+    r.assert_int(100);
+}
+
+#[test]
+fn test_labeled_read_first_arg() {
+    let r = run("
+        let f = |x, y| x + y
+        let inv = f(myarg: 10, 30)
+        let result = inv.myarg
+    ");
+    r.assert_int(10);
+}
+
+#[test]
+fn test_labeled_read_second_arg() {
+    let r = run("
+        let f = |x, y| x + y
+        let inv = f(10, second: 30)
+        let result = inv.second
+    ");
+    r.assert_int(30);
+}
+
+#[test]
+fn test_labeled_both_args_readable() {
+    let r = run("
+        let f = |a, b| a - b
+        let inv = f(lhs: 50, rhs: 8)
+        let result = inv.lhs - inv.rhs
+    ");
+    r.assert_int(42);
+}
+
+#[test]
+fn test_labeled_mutate_arg() {
+    let r = run("
+        let f = |x, y| x + y
+        var inv = f(lbl: 10, 30)
+        inv.lbl = 5
+        let result = inv.lbl
+    ");
+    r.assert_int(5);
+}
+
+#[test]
+fn test_labeled_default_arg_is_readable() {
+    let r = run("
+        let f = |x, y = 100| x + y
+        let inv = f(lbl: 7)
+        let result = inv.lbl
+    ");
+    r.assert_int(7);
+}
+
+#[test]
+fn test_labeled_error_on_unknown_label() {
+    let r = run("
+        let f = |x, y| x + y
+        let inv = f(known: 1, 2)
+        let result = inv.unknown_label
+    ");
+    r.assert_error("no labeled argument");
+}
+
+// -- COW on InvokedFunction: mutating one copy must not affect the other --
+
+#[test]
+fn test_cow_invoked_function_mutation_leaves_alias_intact() {
+    // alias and inv start sharing the same Rc<InvokedFunction>;
+    // mutating inv.lbl triggers Rc::make_mut (COW) so alias is unchanged
+    let r = run("
+        let f = |x, y| x + y
+        var inv = f(lbl: 10, 30)
+        let alias = inv
+        inv.lbl = 99
+        let result = alias.lbl
+    ");
+    r.assert_int(10);
+}
+
+#[test]
+fn test_cow_invoked_function_mutated_copy_has_new_value() {
+    let r = run("
+        let f = |x, y| x + y
+        var inv = f(lbl: 10, 30)
+        let _alias = inv
+        inv.lbl = 77
+        let result = inv.lbl
+    ");
+    r.assert_int(77);
+}
+
+// -- stack overflow --
+
+#[test]
+fn test_stack_overflow_infinite_recursion() {
+    // inf captures itself via a var lvalue and recurses indefinitely
+    let r = run("
+        var inf = || 0
+        inf = || inf()
+        inf()
+    ");
+    r.assert_error("stack overflow");
+}
+
+#[test]
+fn test_stack_overflow_mutual_recursion() {
+    // a calls b calls a calls b ...
+    let r = run("
+        var a = || 0
+        var b = || 0
+        a = || b()
+        b = || a()
+        a()
+    ");
+    r.assert_error("stack overflow");
+}
+
+// -- Play / Return context restrictions (compile-time) --
+
+#[test]
+fn test_compile_error_play_in_lambda() {
+    let r = run("
+        let f = |x| {
+            play 0
+        }
+    ");
+    r.assert_error("anim body");
+}
+
+#[test]
+fn test_compile_error_play_in_block() {
+    let r = run("
+        let result = block {
+            play 0
+            return 1
+        }
+    ");
+    r.assert_error("anim body");
+}
+
+#[test]
+fn test_compile_error_return_at_top_level() {
+    let r = run("
+        let x = 5
+        return x
+    ");
+    r.assert_error("lambda or block");
 }

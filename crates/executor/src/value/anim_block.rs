@@ -1,23 +1,27 @@
 use std::cell::Cell;
-use std::rc::Rc;
+
+use smallvec::SmallVec;
 
 use crate::value::{InstructionPointer, Value};
 
+/// animation block captured at definition time.
+/// `Value::AnimBlock` wraps this in `Rc`, so all copies share the same instance
+/// (including the `already_played` flag). no inner Rc needed.
 #[derive(Clone)]
 pub struct AnimBlock {
-    pub captures: Vec<Value>,
+    pub captures: SmallVec<[Value; 8]>,
     pub ip: InstructionPointer,
-    /// shared flag — all clones of the same anim block share this.
-    /// set to true when played; any further play attempt is an error.
-    pub already_played: Rc<Cell<bool>>,
+    /// interior-mutable flag: set to true when played; any further play is an error.
+    /// shared via the outer `Rc<AnimBlock>` in `Value::AnimBlock`.
+    pub already_played: Cell<bool>,
 }
 
 impl AnimBlock {
-    pub fn new(captures: Vec<Value>, ip: InstructionPointer) -> Self {
+    pub fn new(captures: SmallVec<[Value; 8]>, ip: InstructionPointer) -> Self {
         Self {
             captures,
             ip,
-            already_played: Rc::new(Cell::new(false)),
+            already_played: Cell::new(false),
         }
     }
 }

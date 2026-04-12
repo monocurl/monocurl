@@ -46,20 +46,20 @@ pub enum Value {
     Complex { re: f64, im: f64 },
     String(String),
 
-    PrimitiveMesh(PrimitiveMesh),
+    PrimitiveMesh(Rc<PrimitiveMesh>),
     PrimitiveAnim(PrimitiveAnim),
 
-    Lambda(Lambda),
+    Lambda(Rc<Lambda>),
     Operator(Operator),
-    AnimBlock(AnimBlock),
-    Map(Map),
-    List(List),
+    AnimBlock(Rc<AnimBlock>),
+    Map(Rc<Map>),
+    List(Rc<List>),
 
     Stateful(Stateful),
     Leader(Leader),
 
-    InvokedOperator(InvokedOperator),
-    InvokedFunction(InvokedFunction),
+    InvokedOperator(Rc<InvokedOperator>),
+    InvokedFunction(Rc<InvokedFunction>),
 
     /// owning lvalue — the strong Rc lives on the var_stack at the promoted slot.
     Lvalue(RcValue),

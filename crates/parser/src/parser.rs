@@ -720,6 +720,8 @@ impl SectionParser {
                 break;
             }
 
+            let before = self.token_index;
+
             let mut read = || -> Result<SpanTagged<Statement>, ()> {
                 let ret = self.parse_statement()?;
 
@@ -749,6 +751,12 @@ impl SectionParser {
                     }
                 }
             };
+
+            // guard against infinite loop: if nothing was consumed, force-advance past the
+            // unrecognized token to prevent spinning on keywords in the wrong context
+            if self.token_index == before {
+                self.advance_token();
+            }
         }
 
         statements

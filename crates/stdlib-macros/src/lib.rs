@@ -7,10 +7,11 @@ use syn::{ItemFn, parse_macro_input};
 /// the function must be an async fn with signature:
 ///   `async fn(args: Vec<Value>) -> Result<Value, ExecutorError>`
 ///
-/// the generated wrapper matches `NativeFunc`:
-///   `fn(Vec<Value>) -> NativeFuture`
+/// the generated wrapper matches `StdlibFunc`:
+///   `fn(&mut ExecutionState, usize, u16) -> StdlibReturn`
 ///
-/// and submits a `FunctionEntry` to the inventory collector.
+/// args are drained directly from the execution stack (no intermediate clone),
+/// lvalues are resolved before being passed in.
 #[proc_macro_attribute]
 pub fn stdlib_func(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as ItemFn);
@@ -26,9 +27,10 @@ pub fn stdlib_func(_attr: TokenStream, item: TokenStream) -> TokenStream {
         #func
 
         fn #wrapper_ident(
-            args: ::std::vec::Vec<executor::value::Value>,
-        ) -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ::std::result::Result<executor::value::Value, executor::error::ExecutorError>>>> {
-            ::std::boxed::Box::pin(#ident(args))
+            state: &mut executor::state::ExecutionState,
+            stack_idx: usize,
+        ) -> executor::executor::StdlibReturn {
+            ::std::boxed::Box::pin(#ident(state, stack_idx))
         }
 
         ::inventory::submit! {

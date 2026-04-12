@@ -191,6 +191,7 @@ impl Executor {
         let parent_idx = self.state.stack(stack_idx).parent_idx;
 
         // capture TOS for root stacks (no parent) so tests can inspect results
+        #[cfg(feature = "capture_tos")]
         if parent_idx.is_none() {
             let stack = self.state.stack_mut(stack_idx);
             if stack.stack_len() > 0 {
@@ -263,17 +264,17 @@ impl Executor {
     fn spawn_anim_block(
         &mut self,
         parent_stack_idx: usize,
-        anim_block: AnimBlock,
+        anim_block: std::rc::Rc<AnimBlock>,
     ) -> Result<(), ExecutorError> {
         if anim_block.already_played.get() {
             return Err(ExecutorError::AnimPlayedTwice);
         }
         anim_block.already_played.set(true);
 
-        let child_idx = self.state.alloc_stack(anim_block.ip, Some(parent_stack_idx));
+        let child_idx = self.state.alloc_stack(anim_block.ip, Some(parent_stack_idx)).map_err(|_| ExecutorError::TooManyActiveAnimations)?;
         let child = self.state.stack_mut(child_idx);
-        for cap in anim_block.captures {
-            child.push(cap);
+        for cap in &anim_block.captures {
+            child.push(cap.clone());
         }
         self.state.stack_mut(parent_stack_idx).active_child_count += 1;
         self.state.execution_heads.push(child_idx);

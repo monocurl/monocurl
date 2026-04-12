@@ -1,3 +1,5 @@
+use smallvec::SmallVec;
+
 use crate::value::Value;
 
 /// result of calling a function, possibly with labeled arguments.
@@ -7,12 +9,9 @@ use crate::value::Value;
 pub enum InvokedFunction {
     Labeled {
         lambda: Box<Value>,
-        arguments: Vec<Value>,
+        arguments: SmallVec<[Value; 8]>,
         /// (argument_index, label_name) pairs for labeled args
-        labels: Vec<(usize, String)>,
+        labels: SmallVec<[(usize, String); 4]>,
         cached_result: Option<Box<Value>>,
-    },
-    Unlabeled {
-        result: Box<Value>,
     },
 }

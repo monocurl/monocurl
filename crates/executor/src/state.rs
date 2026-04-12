@@ -1,9 +1,11 @@
+use std::rc::Rc;
+
+use smallvec::SmallVec;
+
 use crate::{
     time::Timestamp,
     value::{
-        InstructionPointer, RcValue, Value, rc_value,
-        leader::Leader,
-        primitive_anim::PrimitiveAnim,
+        InstructionPointer, RcValue, Value, container::List, leader::Leader, primitive_anim::PrimitiveAnim, rc_value
     },
 };
 
@@ -20,7 +22,7 @@ pub struct ExecutionStack {
     /// call return addresses (pushed on LambdaInvoke, popped on Return)
     pub call_stack: Vec<InstructionPointer>,
     /// buffered label string-pool indices for labeled invocations
-    pub label_buffer: Vec<u32>,
+    pub label_buffer: SmallVec<[u32; 8]>,
     /// set by comparison instructions, consumed by ConditionalJump
     pub conditional_flag: bool,
     /// number of child execution stacks still running
@@ -36,7 +38,7 @@ impl ExecutionStack {
             var_stack: Vec::new(),
             ip,
             call_stack: Vec::new(),
-            label_buffer: Vec::new(),
+            label_buffer: SmallVec::new(),
             conditional_flag: false,
             active_child_count: 0,
             parent_idx,
@@ -100,14 +102,18 @@ pub enum LeaderKind {
     Param,
 }
 
+/// max sum of call_stack depths across all active stacks before we report overflow.
+pub const MAX_CALL_DEPTH: usize = 2000;
+// max number of concurrent execution heads
+pub const MAX_EXECUTION_HEADS: usize = 1000;
+
 #[derive(Clone)]
 pub struct ExecutionState {
     pub timestamp: Timestamp,
 
-    /// monotonically increasing counter for unique stack ids
-    stack_counter: usize,
-    /// execution stacks — always appended, never reused.
-    /// Some = active, None = finished.
+    global_stack_counter: usize,
+    /// execution stacks always appended, never reused, None = finished.
+    pub alive_stack_count: usize,
     pub execution_stacks: Vec<Option<ExecutionStack>>,
     /// indices of currently active execution heads (stacks awaiting a Play)
     pub execution_heads: Vec<usize>,
@@ -127,37 +133,54 @@ pub struct ExecutionState {
     /// values captured from the top of root execution stacks when they finish.
     /// used primarily for testing: the final TOS of each completed root head
     /// is pushed here so callers can inspect results after execution.
+    #[cfg(feature = "capture_tos")]
     pub captured_output: Vec<Value>,
+
+    /// sum of call_stack depths across all active stacks.
+    /// incremented on every lambda call, decremented on every return.
+    /// checked before each invocation to detect stack overflows.
+    pub call_depth: usize,
 }
 
 impl ExecutionState {
     pub fn new() -> Self {
-        Self {
+       Self {
             timestamp: Timestamp::default(),
-            stack_counter: 0,
+            global_stack_counter: 0,
+            alive_stack_count: 0,
             execution_stacks: Vec::new(),
             execution_heads: Vec::new(),
             primitive_anims: Vec::new(),
             leaders: Vec::new(),
             ephemeral_pool: Vec::new(),
             errors: Vec::new(),
+            #[cfg(feature = "capture_tos")]
             captured_output: Vec::new(),
+            call_depth: 0,
         }
     }
 
     /// allocate a fresh execution stack and return its index.
     /// always appends — indices are never reused.
-    pub fn alloc_stack(&mut self, ip: InstructionPointer, parent_idx: Option<usize>) -> usize {
-        let id = self.stack_counter;
-        self.stack_counter += 1;
+    pub fn alloc_stack(&mut self, ip: InstructionPointer, parent_idx: Option<usize>) -> Result<usize, ()> {
+        if self.alive_stack_count >= MAX_EXECUTION_HEADS {
+            return Err(());
+        }
+
+        self.alive_stack_count += 1;
+        let id = self.global_stack_counter;
+        self.global_stack_counter += 1;
         let stack = ExecutionStack::new(id, ip, parent_idx);
         let idx = self.execution_stacks.len();
         self.execution_stacks.push(Some(stack));
-        idx
+
+        Ok(idx)
     }
 
     /// free an execution stack slot
     pub fn free_stack(&mut self, idx: usize) {
+        debug_assert!(self.execution_stacks[idx].is_some());
+        self.alive_stack_count -= 1;
         self.execution_stacks[idx] = None;
     }
 
@@ -184,9 +207,9 @@ impl ExecutionState {
         let init_val = stack.pop();
 
         let leader_rc = rc_value(init_val.clone());
-        // mesh follower starts as Nil; state/param follower starts as initial value
+        // mesh follower starts as []; state/param follower starts as initial value
         let follower_init = match kind {
-            LeaderKind::Mesh => Value::Nil,
+            LeaderKind::Mesh => Value::List(Rc::new(List::new())),
             LeaderKind::State | LeaderKind::Param => init_val,
         };
         let follower_rc = rc_value(follower_init);
@@ -222,7 +245,6 @@ impl ExecutionState {
         leader.follower_rc.borrow().clone()
     }
 
-    /// clear the ephemeral pool (call at section boundaries)
     pub fn clear_ephemeral_pool(&mut self) {
         self.ephemeral_pool.clear();
     }

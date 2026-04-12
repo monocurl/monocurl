@@ -26,13 +26,15 @@ pub enum Instruction {
     PushEmptyMap,
     PushEmptyVector,
 
-    // register TOS as a leader; name_index into the string pool for debugging
-    PushParam { name_index: u32 },
-    PushState { name_index: u32 },
-    PushMesh { name_index: u32 },
-    PushVar,
+    // register tos as a leader; name_index into the string pool for debugging
+    ConvertParam { name_index: u32 },
+    ConvertState { name_index: u32 },
+    ConvertMesh { name_index: u32 },
+    ConvertVar,
 
-    PushCopy { stack_delta: i32 },
+    // pops old tos if flag is true
+    // used for map
+    PushCopy { pop_tos: bool, stack_delta: i32 },
     PushLvalue { force_ephemeral: bool, stack_delta: i32 },
 
     PushDereference { stack_delta: i32 },

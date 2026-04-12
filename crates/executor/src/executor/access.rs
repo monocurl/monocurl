@@ -11,33 +11,83 @@ use crate::{
 use super::{ExecSingle, Executor};
 
 impl Executor {
-    pub(super) fn exec_assign(&mut self, stack_idx: usize) -> ExecSingle {
-        let stack = self.state.stack_mut(stack_idx);
-        let rhs = stack.pop();
-        let lhs = stack.pop();
 
-        let rhs = rhs.elide_lvalue();
+    fn exec_assign_dfs(
+        &mut self,
+        lhs: Value,
+        rhs: Value,
+        stack_idx: usize,
+    ) -> ExecSingle {
+        if let Value::List(llhs) = &lhs {
+            return match &rhs {
+                Value::List(lrhs) if llhs.len() == lrhs.len() => {
+                    for (l, r) in llhs.elements.iter().zip(lrhs.elements.iter()) {
+                        let res = self.exec_assign_dfs(
+                            l.borrow().clone(),
+                            r.borrow().clone(),
+                            stack_idx,
+                        );
+
+                        if let ExecSingle::Error(_) = res {
+                            return res;
+                        }
+                    }
+                    ExecSingle::Continue
+                }
+                Value::List(lrhs) => ExecSingle::Error(
+                    ExecutorError::DestructuringError {
+                        lhs_size: llhs.len(),
+                        rhs_size: Some(lrhs.len()),
+                        rhs_type: rhs.type_name(),
+                    },
+                ),
+                _ => ExecSingle::Error(ExecutorError::DestructuringError {
+                    lhs_size: llhs.len(),
+                    rhs_size: None,
+                    rhs_type: rhs.type_name(),
+                }),
+            };
+        }
 
         let rc = match lhs.as_lvalue_rc() {
             Some(rc) => rc,
-            None => return ExecSingle::Error(ExecutorError::CannotAssignTo(lhs.type_name())),
+            None => {
+                return ExecSingle::Error(
+                    ExecutorError::CannotAssignTo(lhs.type_name()),
+                )
+            }
         };
 
         let target = rc.borrow().clone();
+
         match target {
             Value::Leader(leader) => {
                 let stack_id = self.state.stack(stack_idx).stack_id;
-                *leader.leader_rc.borrow_mut() = rhs.clone();
+
+                *leader.leader_rc.borrow_mut() = rhs;
+
                 if let Value::Leader(l) = &mut *rc.borrow_mut() {
                     l.last_modified_stack = Some(stack_id as u64);
                 }
             }
             _ => {
-                *rc.borrow_mut() = rhs.clone();
+                *rc.borrow_mut() = rhs;
             }
         }
-        self.state.stack_mut(stack_idx).push(rhs);
+
         ExecSingle::Continue
+    }
+
+    pub(super) fn exec_assign(&mut self, stack_idx: usize) -> ExecSingle {
+        let stack = self.state.stack_mut(stack_idx);
+
+        let rhs = stack.pop();
+        let lhs = stack.pop();
+
+        let ret = self.exec_assign_dfs(lhs.clone(), rhs, stack_idx);
+        self.state.stack_mut(stack_idx).push(lhs);
+
+        ret
     }
 
     pub(super) fn exec_append(&mut self, stack_idx: usize) -> ExecSingle {
@@ -47,7 +97,7 @@ impl Executor {
 
         match lhs {
             Value::List(mut list) => {
-                list.elements.push(rc_value(rhs));
+                Rc::make_mut(&mut list).elements.push(rc_value(rhs));
                 self.state.stack_mut(stack_idx).push(Value::List(list));
                 ExecSingle::Continue
             }
@@ -68,7 +118,7 @@ impl Executor {
         let mut borrowed = rc.borrow_mut();
         match &mut *borrowed {
             Value::List(list) => {
-                list.elements.push(rc_value(rhs));
+                Rc::make_mut(list).elements.push(rc_value(rhs));
             }
             _ => return ExecSingle::Error(ExecutorError::type_error("list", borrowed.type_name())),
         }
@@ -121,7 +171,7 @@ impl Executor {
                         let cloned = rc_value(elem_rc.borrow().clone());
                         drop(base_val);
                         if let Value::List(list) = &mut *base_rc.borrow_mut() {
-                            list.elements[idx] = cloned.clone();
+                            Rc::make_mut(list).elements[idx] = cloned.clone();
                         }
                         self.state
                             .stack_mut(stack_idx)
@@ -142,7 +192,7 @@ impl Executor {
                                 let cloned = rc_value(val_rc.borrow().clone());
                                 drop(base_val);
                                 if let Value::Map(map) = &mut *base_rc.borrow_mut() {
-                                    map.entries[entry_idx].1 = cloned.clone();
+                                    Rc::make_mut(map).entries[entry_idx].1 = cloned.clone();
                                 }
                                 self.state
                                     .stack_mut(stack_idx)
@@ -158,7 +208,7 @@ impl Executor {
                             let new_rc = rc_value(Value::Nil);
                             drop(base_val);
                             if let Value::Map(map) = &mut *base_rc.borrow_mut() {
-                                map.entries.push((index, new_rc.clone()));
+                                Rc::make_mut(map).entries.push((index, new_rc.clone()));
                             }
                             self.state
                                 .stack_mut(stack_idx)
@@ -261,18 +311,17 @@ impl Executor {
 
             let base_val = base_rc.borrow();
             match &*base_val {
-                Value::InvokedFunction(InvokedFunction::Labeled { labels, arguments, .. }) => {
+                Value::InvokedFunction(inv_rc) => {
+                    let InvokedFunction::Labeled { labels, arguments, .. } = inv_rc.as_ref();
                     let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
                         let arg_val = arguments[arg_idx].clone();
                         let arg_rc = rc_value(arg_val);
                         drop(base_val);
-                        if let Value::InvokedFunction(InvokedFunction::Labeled {
-                            arguments,
-                            cached_result,
-                            ..
-                        }) = &mut *base_rc.borrow_mut()
-                        {
+                        // COW: make exclusive before mutating
+                        if let Value::InvokedFunction(ref mut inner_rc) = *base_rc.borrow_mut() {
+                            let inv = Rc::make_mut(inner_rc);
+                            let InvokedFunction::Labeled { arguments, cached_result, .. } = inv;
                             arguments[arg_idx] = Value::Lvalue(arg_rc.clone());
                             *cached_result = None;
                         }
@@ -286,13 +335,15 @@ impl Executor {
                         )));
                     }
                 }
-                Value::InvokedOperator(inv_op) => {
-                    let label_idx = inv_op.labels.iter().find(|(_, name)| name == &attr_name);
+                Value::InvokedOperator(inv_rc) => {
+                    let label_idx = inv_rc.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
-                        let arg_val = inv_op.arguments[arg_idx].clone();
+                        let arg_val = inv_rc.arguments[arg_idx].clone();
                         let arg_rc = rc_value(arg_val);
                         drop(base_val);
-                        if let Value::InvokedOperator(inv) = &mut *base_rc.borrow_mut() {
+
+                        if let Value::InvokedOperator(ref mut inner_rc) = *base_rc.borrow_mut() {
+                            let inv = Rc::make_mut(inner_rc);
                             inv.arguments[arg_idx] = Value::Lvalue(arg_rc.clone());
                             inv.cached_result = None;
                         }
@@ -313,8 +364,8 @@ impl Executor {
         } else {
             let base = base.elide_lvalue();
             match &base {
-                Value::InvokedFunction(InvokedFunction::Labeled { labels, arguments, .. }) => {
-                    let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
+                Value::InvokedFunction(inv_rc) => {
+                    let InvokedFunction::Labeled { labels, arguments, .. } = inv_rc.as_ref();                    let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
                         let val = arguments[arg_idx].clone().elide_lvalue();
                         self.state.stack_mut(stack_idx).push(val);
@@ -325,14 +376,14 @@ impl Executor {
                         )));
                     }
                 }
-                Value::InvokedOperator(inv_op) => {
-                    let label_idx = inv_op.labels.iter().find(|(_, name)| name == &attr_name);
+                Value::InvokedOperator(inv_rc) => {
+                    let label_idx = inv_rc.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
-                        let val = inv_op.arguments[arg_idx].clone().elide_lvalue();
+                        let val = inv_rc.arguments[arg_idx].clone().elide_lvalue();
                         self.state.stack_mut(stack_idx).push(val);
                     } else {
                         return ExecSingle::Error(ExecutorError::Other(format!(
-                            "no labeled argument '{}'",
+                            "no labeled argument '{}' on operator invocation",
                             attr_name
                         )));
                     }
