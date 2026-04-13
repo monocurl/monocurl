@@ -1,7 +1,7 @@
-mod access;
-mod anim;
-mod invoke;
-mod ops;
+pub(crate) mod access;
+pub(crate) mod anim;
+pub(crate) mod invoke;
+pub(crate) mod ops;
 
 use std::collections::BTreeSet;
 use std::{future::Future, rc::Rc};
@@ -278,13 +278,18 @@ impl Executor {
             // ----- unary -----
             Instruction::Negate => {
                 let val = self.state.stack_mut(stack_idx).pop();
-                match self.exec_negate(val) {
+                match self.exec_negate(val).await {
                     Ok(v) => self.state.stack_mut(stack_idx).push(v),
                     Err(e) => return ExecSingle::Error(e),
                 }
             }
             Instruction::Not => {
-                let val = self.state.stack_mut(stack_idx).pop().elide_lvalue();
+                let val = match self.state.stack_mut(stack_idx).pop().elide_wrappers(self).await
+                {
+                    Ok(val) => val,
+                    Err(e) => return ExecSingle::Error(e),
+                };
+
                 let result = Value::Integer(if val.is_truthy() { 0 } else { 1 });
                 self.state.stack_mut(stack_idx).push(result);
             }
@@ -301,19 +306,19 @@ impl Executor {
             }
 
             // ----- binary -----
-            Instruction::Add => return self.exec_binary_op(stack_idx, BinOp::Add),
-            Instruction::Sub => return self.exec_binary_op(stack_idx, BinOp::Sub),
-            Instruction::Mul => return self.exec_binary_op(stack_idx, BinOp::Mul),
-            Instruction::Div => return self.exec_binary_op(stack_idx, BinOp::Div),
-            Instruction::Power => return self.exec_binary_op(stack_idx, BinOp::Power),
-            Instruction::Lt => return self.exec_binary_op(stack_idx, BinOp::Lt),
-            Instruction::Le => return self.exec_binary_op(stack_idx, BinOp::Le),
-            Instruction::Gt => return self.exec_binary_op(stack_idx, BinOp::Gt),
-            Instruction::Ge => return self.exec_binary_op(stack_idx, BinOp::Ge),
-            Instruction::Eq => return self.exec_binary_op(stack_idx, BinOp::Eq),
-            Instruction::Ne => return self.exec_binary_op(stack_idx, BinOp::Ne),
-            Instruction::IntDiv => return self.exec_binary_op(stack_idx, BinOp::IntDiv),
-            Instruction::In => return self.exec_binary_op(stack_idx, BinOp::In),
+            Instruction::Add => return self.exec_binary_op(stack_idx, BinOp::Add).await,
+            Instruction::Sub => return self.exec_binary_op(stack_idx, BinOp::Sub).await,
+            Instruction::Mul => return self.exec_binary_op(stack_idx, BinOp::Mul).await,
+            Instruction::Div => return self.exec_binary_op(stack_idx, BinOp::Div).await,
+            Instruction::Power => return self.exec_binary_op(stack_idx, BinOp::Power).await,
+            Instruction::Lt => return self.exec_binary_op(stack_idx, BinOp::Lt).await,
+            Instruction::Le => return self.exec_binary_op(stack_idx, BinOp::Le).await,
+            Instruction::Gt => return self.exec_binary_op(stack_idx, BinOp::Gt).await,
+            Instruction::Ge => return self.exec_binary_op(stack_idx, BinOp::Ge).await,
+            Instruction::Eq => return self.exec_binary_op(stack_idx, BinOp::Eq).await,
+            Instruction::Ne => return self.exec_binary_op(stack_idx, BinOp::Ne).await,
+            Instruction::IntDiv => return self.exec_binary_op(stack_idx, BinOp::IntDiv).await,
+            Instruction::In => return self.exec_binary_op(stack_idx, BinOp::In).await,
             Instruction::Assign => return self.exec_assign(stack_idx),
             Instruction::AppendAssign => return self.exec_append_assign(stack_idx),
             Instruction::Append => return self.exec_append(stack_idx),

@@ -5,7 +5,6 @@ use crate::{
     value::{
         RcValue, Value, rc_value,
         container::HashableKey,
-        invoked_function::InvokedFunction,
     },
 };
 
@@ -318,18 +317,16 @@ impl Executor {
             let base_val = base_rc.borrow();
             match &*base_val {
                 Value::InvokedFunction(inv_rc) => {
-                    let InvokedFunction::Labeled { labels, arguments, .. } = inv_rc.as_ref();
-                    let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
+                    let label_idx = inv_rc.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
-                        let arg_val = arguments[arg_idx].clone();
+                        let arg_val = inv_rc.arguments[arg_idx].clone();
                         let arg_rc = rc_value(arg_val);
                         drop(base_val);
                         // COW: make exclusive before mutating
                         if let Value::InvokedFunction(ref mut inner_rc) = *base_rc.borrow_mut() {
                             let inv = Rc::make_mut(inner_rc);
-                            let InvokedFunction::Labeled { arguments, cached_result, .. } = inv;
-                            arguments[arg_idx] = Value::Lvalue(arg_rc.clone());
-                            *cached_result = None;
+                            inv.arguments[arg_idx] = Value::Lvalue(arg_rc.clone());
+                            inv.cached_result.take();
                         }
                         self.state
                             .stack_mut(stack_idx)
@@ -351,7 +348,7 @@ impl Executor {
                         if let Value::InvokedOperator(ref mut inner_rc) = *base_rc.borrow_mut() {
                             let inv = Rc::make_mut(inner_rc);
                             inv.arguments[arg_idx] = Value::Lvalue(arg_rc.clone());
-                            inv.cached_result = None;
+                            inv.cached_result.take();
                         }
                         self.state
                             .stack_mut(stack_idx)
@@ -371,9 +368,9 @@ impl Executor {
             let base = base.elide_lvalue();
             match &base {
                 Value::InvokedFunction(inv_rc) => {
-                    let InvokedFunction::Labeled { labels, arguments, .. } = inv_rc.as_ref();                    let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
+                    let label_idx = inv_rc.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
-                        let val = arguments[arg_idx].clone().elide_lvalue();
+                        let val = inv_rc.arguments[arg_idx].clone().elide_lvalue();
                         self.state.stack_mut(stack_idx).push(val);
                     } else {
                         return ExecSingle::Error(ExecutorError::Other(format!(

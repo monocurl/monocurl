@@ -6,13 +6,19 @@ use crate::{
 use super::{BinOp, ExecSingle, Executor};
 
 impl Executor {
-    pub(super) fn exec_binary_op(&mut self, stack_idx: usize, op: BinOp) -> ExecSingle {
+    pub(super) async fn exec_binary_op(&mut self, stack_idx: usize, op: BinOp) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
         let rhs = stack.pop();
         let lhs = stack.pop();
 
-        let lhs = lhs.elide_lvalue();
-        let rhs = rhs.elide_lvalue();
+        let lhs = match lhs.elide_wrappers(self).await {
+            Ok(val) => val,
+            Err(e) => return ExecSingle::Error(e),
+        };
+        let rhs = match rhs.elide_wrappers(self).await {
+            Ok(val) => val,
+            Err(e) => return ExecSingle::Error(e),
+        };
 
         // type promotion: int -> float -> complex
         let (lhs, rhs) = promote_pair(lhs, rhs);
@@ -26,8 +32,12 @@ impl Executor {
         }
     }
 
-    pub(super) fn exec_negate(&self, val: Value) -> Result<Value, ExecutorError> {
-        let val = val.elide_lvalue();
+    pub(super) async fn exec_negate(&mut self, val: Value) -> Result<Value, ExecutorError> {
+        let val = match val.elide_wrappers(self).await {
+            Ok(val) => val,
+            Err(e) => return Err(e),
+        };
+
         match &val {
             Value::Integer(n) => Ok(Value::Integer(-n)),
             Value::Float(f) => Ok(Value::Float(-f)),

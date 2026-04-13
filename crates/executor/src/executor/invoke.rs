@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{cell::Cell, rc::Rc};
 
 use smallvec::SmallVec;
 use structs::futures::PeriodicYielder;
@@ -119,11 +119,11 @@ impl Executor {
 
             match self.eagerly_invoke_lambda(&lambda, &full_args).await {
                 Ok(result_val) => {
-                    let inv =  InvokedFunction::Labeled {
+                    let inv = InvokedFunction {
                         lambda: Box::new(Value::Lambda(lambda)),
                         arguments: full_args.into(),
                         labels,
-                        cached_result: Some(Box::new(result_val)),
+                        cached_result: Cell::new(Some(Box::new(result_val))),
                     };
                     self.state
                         .stack_mut(stack_idx)
@@ -200,7 +200,7 @@ impl Executor {
                 arguments: args.into(),
                 operand: Box::new(operand),
                 labels,
-                cached_result: result.as_ref().ok().map(|v| Box::new(v.clone())),
+                cached_result: Cell::new(result.as_ref().ok().map(|v| Box::new(v.clone()))),
             });
             match result {
                 Ok(_) => {
@@ -278,7 +278,7 @@ impl Executor {
     /// used for labeled/stateful invocations.
     /// yields between instructions so the async executor can interrupt if needed.
     /// boxed to break the execute_one ↔ call_lambda_body async recursion cycle.
-    fn eagerly_invoke_lambda<'a>(
+    pub(crate) fn eagerly_invoke_lambda<'a>(
         &'a mut self,
         lambda: &'a Lambda,
         args: &'a [Value],
@@ -359,7 +359,7 @@ impl Executor {
 }
 
 /// fill default arguments if fewer args were provided
-fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value> {
+pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value> {
     let total = lambda.required_args as usize + lambda.defaults.len();
     if args.len() < total {
         let missing = total - args.len();

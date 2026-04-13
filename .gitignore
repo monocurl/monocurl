@@ -4,6 +4,7 @@ target
 *.swp
 
 CLAUDE.md
+AGENTS.md
 
 # idea
 **/.idea/workspace.xml **/.idea/tasks.xml

@@ -984,6 +984,69 @@ fn test_cow_invoked_function_mutated_copy_has_new_value() {
     r.assert_int(77);
 }
 
+#[test]
+fn test_labeled_nested_live_elision_in_arithmetic() {
+    let r = run("
+        let inner = |x, y| x + y
+        let outer = |seed| inner(lhs: seed * 2, rhs: 5)
+        let result = outer(seed: 7) + 3
+    ");
+    r.assert_int(22);
+}
+
+#[test]
+fn test_labeled_nested_mutation_recomputes_live_value() {
+    let r = run("
+        let inner = |x, y| x + y
+        let outer = |seed| inner(lhs: seed * 2, rhs: 5)
+        var inv = outer(seed: 7)
+        inv.seed = 10
+        let result = inv + 3
+    ");
+    r.assert_int(28);
+}
+
+#[test]
+fn test_labeled_aliases_keep_independent_live_results() {
+    let r = run("
+        let f = |x, y| x + y
+        var inv = f(lbl: 10, 30)
+        let alias = inv
+        inv.lbl = 99
+        let result = alias + inv
+    ");
+    r.assert_int(169);
+}
+
+#[test]
+fn test_live_elision_supports_comparison() {
+    let r = run("
+        let f = |x, y| x + y
+        let result = f(lhs: 8, rhs: 4) == 12
+    ");
+    r.assert_int(1);
+}
+
+#[test]
+fn test_live_elision_supports_negation() {
+    let r = run("
+        let f = |x, y| x - y
+        let result = -f(lhs: 5, rhs: 8)
+    ");
+    r.assert_int(3);
+}
+
+#[test]
+fn test_live_elision_recomputes_defaulted_labeled_invocation() {
+    let r = run("
+        let f = |x, y = 100| x + y
+        var inv = f(lbl: 7)
+        inv.lbl = 20
+        let result = inv + inv.lbl
+    ");
+    r.assert_int(140);
+}
+
 // -- stack overflow --
 
 #[test]

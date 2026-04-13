@@ -11,6 +11,9 @@ pub mod stateful;
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
+use crate::error::ExecutorError;
+use crate::executor::Executor;
+
 use self::{
     anim_block::AnimBlock,
     container::{List, Map},
@@ -124,6 +127,15 @@ impl Value {
                     .unwrap()
             }
             other => other
+        }
+    }
+
+    pub async fn elide_wrappers(self, executor: &mut Executor) -> Result<Value, ExecutorError> {
+        let base = self.elide_lvalue();
+        match base {
+            Value::InvokedOperator(op) => InvokedOperator::value(&op, executor).await,
+            Value::InvokedFunction(func) => InvokedFunction::value(&func, executor).await,
+            other => Ok(other),
         }
     }
 
