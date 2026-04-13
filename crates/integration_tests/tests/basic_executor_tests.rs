@@ -990,9 +990,8 @@ fn test_cow_invoked_function_mutated_copy_has_new_value() {
 fn test_stack_overflow_infinite_recursion() {
     // inf captures itself via a var lvalue and recurses indefinitely
     let r = run("
-        var inf = || 0
-        inf = || inf()
-        inf()
+        let inf = |inf| inf(inf)
+        inf(inf)
     ");
     r.assert_error("stack overflow");
 }
@@ -1001,11 +1000,9 @@ fn test_stack_overflow_infinite_recursion() {
 fn test_stack_overflow_mutual_recursion() {
     // a calls b calls a calls b ...
     let r = run("
-        var a = || 0
-        var b = || 0
-        a = || b()
-        b = || a()
-        a()
+        let a = |a, b| b(a, b)
+        let b = |a, b| a(a, b)
+        a(a, b)
     ");
     r.assert_error("stack overflow");
 }
@@ -1155,7 +1152,7 @@ fn test_ref_destructure_list_references() {
 fn test_ref_reference_in_closure_capture() {
     // lambda captures a var by value; separate reference arg must not alias the capture
     let r = run("
-        var captured = 5
+        let captured = 5
         var target = 0
         let f = |&r| {
             r = captured + 1

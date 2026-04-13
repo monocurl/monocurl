@@ -1236,6 +1236,12 @@ impl Compiler {
             }
         }
 
+        for cap in &captures {
+            if cap.var_type != VariableType::Let {
+                self.error(span.clone(), format!("cannot capture variable '{}' as it is mutable but lambas must be pure functions. Please change the variable type to 'let' ", cap.name));
+            }
+        }
+
         let (jump_idx, body_ip) = self.begin_closure_frame(FrameKind::Lambda, span);
 
         let mut required_args: u32 = 0;
