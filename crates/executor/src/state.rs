@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{collections::BTreeSet, rc::Rc};
 
 use smallvec::SmallVec;
 
@@ -25,7 +25,7 @@ pub struct ExecutionStack {
     pub label_buffer: SmallVec<[u32; 8]>,
     /// set by comparison instructions, consumed by ConditionalJump
     pub conditional_flag: bool,
-    /// number of child execution stacks still running
+    /// number of child execution stacks (or primitive animations) still running
     pub active_child_count: usize,
     /// index of the parent execution stack (None for the root)
     pub parent_idx: Option<usize>,
@@ -112,11 +112,12 @@ pub struct ExecutionState {
     pub timestamp: Timestamp,
 
     global_stack_counter: usize,
-    /// execution stacks always appended, never reused, None = finished.
+    // execution stacks that have not finished yet
     pub alive_stack_count: usize,
+    /// execution stacks always appended, never reused, None = finished.
     pub execution_stacks: Vec<Option<ExecutionStack>>,
     /// indices of currently active execution heads (stacks awaiting a Play)
-    pub execution_heads: Vec<usize>,
+    pub execution_heads: BTreeSet<usize>,
     /// currently running primitive animations
     pub primitive_anims: Vec<BakedPrimitiveAnim>,
 
@@ -143,13 +144,15 @@ pub struct ExecutionState {
 }
 
 impl ExecutionState {
+    pub const ROOT_STACK_ID: usize = 0;
+
     pub fn new() -> Self {
        Self {
             timestamp: Timestamp::default(),
             global_stack_counter: 0,
             alive_stack_count: 0,
             execution_stacks: Vec::new(),
-            execution_heads: Vec::new(),
+            execution_heads: BTreeSet::new(),
             primitive_anims: Vec::new(),
             leaders: Vec::new(),
             ephemeral_pool: Vec::new(),
@@ -243,9 +246,5 @@ impl ExecutionState {
 
     pub fn follower_value(leader: &Leader) -> Value {
         leader.follower_rc.borrow().clone()
-    }
-
-    pub fn clear_ephemeral_pool(&mut self) {
-        self.ephemeral_pool.clear();
     }
 }

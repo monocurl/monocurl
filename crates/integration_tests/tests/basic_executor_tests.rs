@@ -1,11 +1,10 @@
 // lex → parse → compile → execute
 
-use std::sync::Arc;
+use std::{f64, sync::Arc};
 
 use compiler::cache::CompilerCache;
 use executor::{
-    executor::{Executor, SeekPrimitiveResult},
-    value::Value,
+    executor::{Executor, SeekToResult}, time::Timestamp, value::Value
 };
 use lexer::{lexer::Lexer, token::Token};
 use parser::{
@@ -146,36 +145,22 @@ fn run(src: &str) -> ExecResult {
 
     // -- execute --
     let mut executor = Executor::new(result.bytecode, registry().func_table());
-    executor.section_init(1);
+    executor.global_reset();
 
     let mut runtime_errors: Vec<String> = Vec::new();
 
     smol::block_on(async {
-        loop {
-            match executor.seek_primitive_anim().await {
-                SeekPrimitiveResult::EndOfSection => break,
-                SeekPrimitiveResult::PrimitiveAnim => {
-                    // no real timeline in tests; snap all anims to their end instantly
-                    let snap_dt = executor
-                        .state
-                        .primitive_anims
-                        .iter()
-                        .map(|b| b.end_time - executor.current_play_time)
-                        .fold(0.0_f64, f64::max)
-                        .max(f64::MIN_POSITIVE);
-                    executor.step_primitive_anims(snap_dt).await;
-                }
-                SeekPrimitiveResult::Error(e) => {
-                    runtime_errors.push(e.to_string());
-                    break;
-                }
+        match executor.seek_to(Timestamp::new(1, f64::INFINITY)).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => {
+                runtime_errors.push(e.to_string());
             }
         }
     });
 
     runtime_errors.extend(executor.state.errors.iter().cloned());
 
-    let value = executor.state.captured_output.into_iter().next();
+    let value = executor.state.captured_output.into_iter().last();
     ExecResult { value, errors: runtime_errors }
 }
 

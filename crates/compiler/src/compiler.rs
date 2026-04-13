@@ -261,6 +261,8 @@ impl Compiler {
             self.define_symbol(var, VariableType::State, SymbolFunctionInfo::None);
         }
 
+        self.emit(Instruction::EndOfExecutionHead, 0..0);
+
         self.emit_current_bundle();
     }
 

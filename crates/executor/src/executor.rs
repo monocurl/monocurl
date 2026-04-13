@@ -3,11 +3,13 @@ mod anim;
 mod invoke;
 mod ops;
 
+use std::collections::BTreeSet;
 use std::{future::Future, rc::Rc};
 use std::pin::Pin;
 
 use bytecode::{Bytecode, Instruction};
 
+use crate::time::Timestamp;
 use crate::{
     error::ExecutorError,
     state::{ExecutionState, LeaderKind},
@@ -36,6 +38,11 @@ pub enum StepResult {
     EndOfAllAnims,
 }
 
+pub enum SeekToResult {
+    Error(ExecutorError),
+    SeekedTo(Timestamp)
+}
+
 /// result of executing a single instruction
 pub(crate) enum ExecSingle {
     Continue,
@@ -48,8 +55,6 @@ pub struct Executor {
     pub state: ExecutionState,
     pub(crate) bytecode: Bytecode,
     pub(crate) native_funcs: Vec<StdlibFunc>,
-    /// accumulated time for the current batch of primitive anims
-    pub current_play_time: f64,
 }
 
 impl Executor {
@@ -58,19 +63,34 @@ impl Executor {
             state: ExecutionState::new(),
             bytecode,
             native_funcs,
-            current_play_time: 0.0,
         }
     }
 
-    /// initialize execution of a section (called once per slide).
-    pub fn section_init(&mut self, section_index: u16) {
-        let ip: InstructionPointer = (section_index, 0);
-        // only one active head at start of section
+    /// scroll to timestamp 0
+    pub fn global_reset(&mut self) {
+        self.state = ExecutionState::new();
+
+        let ip: InstructionPointer = (0, 0);
         let stack_idx = self.state.alloc_stack(ip, None).unwrap();
-        self.state.execution_heads = vec![stack_idx];
-        self.state.primitive_anims.clear();
-        self.state.clear_ephemeral_pool();
-        self.current_play_time = 0.0;
+        debug_assert_eq!(stack_idx, ExecutionState::ROOT_STACK_ID);
+
+        let mut heads = BTreeSet::new();
+        heads.insert(stack_idx);
+
+        self.state.execution_heads = heads;
+    }
+
+    pub fn advance_section(&mut self) {
+        debug_assert!(self.state.execution_heads.is_empty());
+
+        let mut heads = BTreeSet::new();
+        heads.insert(ExecutionState::ROOT_STACK_ID);
+
+        self.state.execution_heads = heads;
+
+        let ip: InstructionPointer = ((self.state.timestamp.slide + 1) as u16, 0);
+        self.state.stack_mut(ExecutionState::ROOT_STACK_ID).ip = ip;
+        self.state.timestamp.slide += 1;
     }
 
     pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
@@ -78,9 +98,6 @@ impl Executor {
         let section_idx = ip.0 as usize;
         let instr_idx = ip.1 as usize;
 
-        if instr_idx >= self.bytecode.sections[section_idx].instructions.len() {
-            return ExecSingle::EndOfHead;
-        }
         let instr = self.bytecode.sections[section_idx].instructions[instr_idx].clone();
 
         self.state.stack_mut(stack_idx).ip.1 += 1;
@@ -302,6 +319,7 @@ impl Executor {
             Instruction::Append => return self.exec_append(stack_idx),
 
             Instruction::EndOfExecutionHead => {
+                self.finish_execution_head(stack_idx);
                 return ExecSingle::EndOfHead;
             }
         }

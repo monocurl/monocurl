@@ -1,14 +1,11 @@
 use structs::futures::{PeriodicYielder};
 
 use crate::{
-    error::ExecutorError,
-    state::BakedPrimitiveAnim,
-    time::Timestamp,
-    value::{
+    error::ExecutorError, executor::SeekToResult, state::{BakedPrimitiveAnim, ExecutionState}, time::Timestamp, value::{
         Value,
         anim_block::AnimBlock,
         primitive_anim::PrimitiveAnim,
-    },
+    }
 };
 
 use super::{ExecSingle, Executor, SeekPrimitiveResult, StepResult};
@@ -19,68 +16,50 @@ impl Executor {
     pub async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
         let mut yielder = PeriodicYielder::default();
 
-        loop {
-            let mut any_progressed = false;
-            let mut head_idx = 0;
+        while let Some(&stack_idx) = self.state.execution_heads.first() {
 
-            while head_idx < self.state.execution_heads.len() {
-                let stack_idx = self.state.execution_heads[head_idx];
+            // run this head until it yields or ends
+            let result = loop {
+                yielder.tick().await;
 
-                // run this head until it yields (Play) or ends
-                let result = loop {
-                    yielder.tick().await;
-
-                    let r = self.execute_one(stack_idx).await;
-                    match r {
-                        ExecSingle::Continue => {}
-                        other => break other,
-                    }
-                };
-
-                match result {
-                    ExecSingle::Play => {
-                        any_progressed = true;
-                        head_idx += 1;
-                    }
-                    ExecSingle::EndOfHead => {
-                        self.finish_execution_head(stack_idx);
-                        self.state.execution_heads.swap_remove(head_idx);
-                        any_progressed = true;
-                        // don't increment — swapped element is now at this index
-                    }
-                    ExecSingle::Error(e) => return SeekPrimitiveResult::Error(e),
-                    ExecSingle::Continue => unreachable!(),
+                let r = self.execute_one(stack_idx).await;
+                match r {
+                    ExecSingle::Continue => { }
+                    other => break other,
                 }
-            }
+            };
 
-            if self.state.execution_heads.is_empty() && self.state.primitive_anims.is_empty() {
-                return SeekPrimitiveResult::EndOfSection;
+            match result {
+                // in either of the two cases, this execution head gets removed
+                ExecSingle::Play => { }
+                ExecSingle::EndOfHead => { }
+                ExecSingle::Error(e) => return SeekPrimitiveResult::Error(e),
+                ExecSingle::Continue => unreachable!(),
             }
+        }
 
-            if !self.state.primitive_anims.is_empty() {
-                return SeekPrimitiveResult::PrimitiveAnim;
-            }
+        println!("No more execution heads! {} active primitive anims remain.", self.state.primitive_anims.len());
 
-            // if no heads progressed and no anims baked, we're stuck
-            if !any_progressed {
-                return SeekPrimitiveResult::EndOfSection;
-            }
+        if self.state.primitive_anims.is_empty() {
+            return SeekPrimitiveResult::EndOfSection;
+        }
+        else {
+            return SeekPrimitiveResult::PrimitiveAnim;
         }
     }
 
     /// step all active primitive animations by dt seconds.
     pub async fn step_primitive_anims(&mut self, dt: f64) -> StepResult {
-        self.current_play_time += dt;
         self.state.timestamp.time += dt;
 
         let mut finished_indices = Vec::new();
         let mut in_progress = Vec::new();
         for (i, baked) in self.state.primitive_anims.iter().enumerate() {
-            if self.current_play_time >= baked.end_time {
+            if self.state.timestamp.time >= baked.end_time {
                 finished_indices.push(i);
             } else {
                 let t = if baked.end_time > baked.start_time {
-                    (self.current_play_time - baked.start_time)
+                    (self.state.timestamp.time - baked.start_time)
                         / (baked.end_time - baked.start_time)
                 } else {
                     1.0
@@ -107,47 +86,78 @@ impl Executor {
         }
     }
 
+    // given a target, find the first cache point that we can base off of
+    async fn rebase_at_cache_point(&mut self, target: Timestamp) {
+        let valid_state = !self.state.has_errors();
+        let in_future = target.slide > self.state.timestamp.slide || (target.slide == self.state.timestamp.slide && target.time > self.state.timestamp.time);
+        if valid_state && !in_future {
+            // just start from here
+            return;
+        }
+        else {
+            self.global_reset();
+        }
+    }
+
     /// seek to a target timestamp by stepping to the next event (animation end)
     /// rather than fixed dt steps.
-    pub async fn seek_to(&mut self, target: Timestamp) {
-        while self.state.timestamp.slide <= target.slide {
-            match self.seek_primitive_anim().await {
-                SeekPrimitiveResult::EndOfSection => break,
-                SeekPrimitiveResult::Error(e) => {
-                    self.state.error(e.to_string());
-                    break;
+    pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
+        self.rebase_at_cache_point(target).await;
+
+        let mut yielder = PeriodicYielder::default();
+
+        loop {
+            // find first primitive anim that happens before target
+            loop {
+                yielder.tick().await;
+
+                match self.seek_primitive_anim().await {
+                    SeekPrimitiveResult::EndOfSection => {
+                        if self.state.timestamp.slide < target.slide && self.state.timestamp.slide + 1 < self.bytecode.sections.len() {
+                            self.advance_section();
+                        }
+                        else {
+                            // finished
+                            return SeekToResult::SeekedTo(self.state.timestamp);
+                        }
+                    }
+                    SeekPrimitiveResult::Error(e) => {
+                        self.state.error(e.to_string());
+                        return SeekToResult::Error(e);
+                    }
+                    SeekPrimitiveResult::PrimitiveAnim => {
+                        break
+                    }
                 }
-                SeekPrimitiveResult::PrimitiveAnim => {}
             }
 
-            loop {
-                if self.state.timestamp.time >= target.time
-                    && self.state.timestamp.slide >= target.slide
-                {
-                    return;
+            if self.state.timestamp.slide == target.slide && self.state.timestamp.time >= target.time {
+                return SeekToResult::SeekedTo(self.state.timestamp);
+            }
+
+            // keep going until we finish this group or hit the target
+            let next_end = self
+                .state
+                .primitive_anims
+                .iter()
+                .map(|b| b.end_time)
+                .fold(f64::INFINITY, f64::min);
+
+            let step_target = next_end.min(
+                if self.state.timestamp.slide < target.slide {
+                    f64::INFINITY
+                } else {
+                    target.time
                 }
+            );
+            let dt = step_target - self.state.timestamp.time;
 
-                let next_end = self
-                    .state
-                    .primitive_anims
-                    .iter()
-                    .map(|b| b.end_time)
-                    .fold(f64::INFINITY, f64::min);
-
-                let step_target = next_end.min(target.time);
-                let dt = (step_target - self.current_play_time).max(0.0);
-
-                if dt <= 0.0 && self.state.primitive_anims.is_empty() {
-                    break;
-                }
-
-                match self.step_primitive_anims(dt.max(f64::MIN_POSITIVE)).await {
-                    StepResult::EndOfAllAnims => break,
-                    StepResult::Continue => {}
-                    StepResult::Error(e) => {
-                        self.state.error(e.to_string());
-                        return;
-                    }
+            match self.step_primitive_anims(dt.max(f64::MIN_POSITIVE)).await {
+                StepResult::EndOfAllAnims => {},
+                StepResult::Continue => {}
+                StepResult::Error(e) => {
+                    self.state.error(e.to_string());
+                    return SeekToResult::Error(e);
                 }
             }
         }
@@ -183,7 +193,7 @@ impl Executor {
         let parent = self.state.stack_mut(parent_stack_idx);
         parent.active_child_count -= 1;
         if parent.active_child_count == 0 {
-            self.state.execution_heads.push(parent_stack_idx);
+            self.state.execution_heads.insert(parent_stack_idx);
         }
     }
 
@@ -200,12 +210,19 @@ impl Executor {
             }
         }
 
-        self.state.free_stack(stack_idx);
+        self.state.execution_heads.remove(&stack_idx);
+
+        // never free the root stack, even on section end
+        // this is more reliable check than checking parent index due to dedicated lambda stacks
+        if stack_idx != ExecutionState::ROOT_STACK_ID {
+            self.state.free_stack(stack_idx);
+        }
+
         if let Some(parent) = parent_idx {
             let p = self.state.stack_mut(parent);
             p.active_child_count -= 1;
             if p.active_child_count == 0 {
-                self.state.execution_heads.push(parent);
+                self.state.execution_heads.insert(parent);
             }
         }
     }
@@ -217,11 +234,15 @@ impl Executor {
         match val {
             Value::AnimBlock(anim_block) => {
                 match self.spawn_anim_block(stack_idx, anim_block) {
-                    Ok(()) => ExecSingle::Play,
+                    Ok(()) => {
+                        self.state.execution_heads.remove(&stack_idx);
+                        ExecSingle::Play
+                    }
                     Err(e) => ExecSingle::Error(e),
                 }
             }
             Value::PrimitiveAnim(prim) => {
+                self.state.execution_heads.remove(&stack_idx);
                 self.bake_primitive_anim(stack_idx, prim);
                 ExecSingle::Play
             }
@@ -251,6 +272,7 @@ impl Executor {
                 if count == 0 {
                     ExecSingle::Continue
                 } else {
+                    self.state.execution_heads.remove(&stack_idx);
                     ExecSingle::Play
                 }
             }
@@ -277,7 +299,7 @@ impl Executor {
             child.push(cap.clone());
         }
         self.state.stack_mut(parent_stack_idx).active_child_count += 1;
-        self.state.execution_heads.push(child_idx);
+        self.state.execution_heads.insert(child_idx);
         Ok(())
     }
 
@@ -288,7 +310,7 @@ impl Executor {
             PrimitiveAnim::Wait { time } => *time,
         };
 
-        let start = self.current_play_time;
+        let start = self.state.timestamp.time;
         let stack_id = self.state.stack(parent_stack_idx).stack_id;
 
         self.state.primitive_anims.push(BakedPrimitiveAnim {
