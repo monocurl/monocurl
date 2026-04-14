@@ -6,6 +6,7 @@ use crate::theme::TextEditorStyles;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticType {
+    #[allow(unused)]
     CompileTimeWarning,
     CompileTimeError,
     RuntimeError,

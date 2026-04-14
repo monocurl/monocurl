@@ -1,6 +1,7 @@
 pub(crate) mod access;
 pub(crate) mod anim;
 pub(crate) mod invoke;
+pub(crate) mod lerp;
 pub(crate) mod ops;
 
 use std::collections::BTreeSet;
@@ -246,6 +247,9 @@ impl Executor {
                 return self
                     .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args)
                     .await;
+            }
+            Instruction::ConvertToLiveOperator => {
+                return self.exec_convert_to_live_operator(stack_idx);
             }
 
             // ----- control flow -----

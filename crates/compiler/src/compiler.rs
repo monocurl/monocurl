@@ -1207,6 +1207,9 @@ impl Compiler {
         }
         self.emit(Instruction::OperatorInvoke { stateful, labeled, num_args }, span.clone());
         self.dec_stack(num_args as usize + 1);
+        // convert lambda result ([initial, modified]) into a live value;
+        // for labeled invocations the InvokedOperator is already on stack (no-op).
+        self.emit(Instruction::ConvertToLiveOperator, span.clone());
     }
 
     fn compile_native_invoke(&mut self, n: &NativeInvocation, span: &Span8) {

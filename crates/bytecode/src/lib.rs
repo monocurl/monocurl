@@ -52,6 +52,9 @@ pub enum Instruction {
 
     OperatorInvoke { stateful: bool, labeled: bool, num_args: u32 },
     LambdaInvoke { stateful: bool, labeled: bool, num_args: u32 },
+    // pops the operator lambda result ([initial, modified] list) and pushes the live value.
+    // for labeled invocations the InvokedOperator is already on stack; this is a no-op then.
+    ConvertToLiveOperator,
     Jump { section: u16, to: u32 },
     // pops TOS; jumps when truthy
     ConditionalJump { section: u16, to: u32 },

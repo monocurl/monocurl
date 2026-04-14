@@ -23,7 +23,7 @@ use self::{
     leader::Leader,
     primitive_anim::PrimitiveAnim,
     primitive_mesh::PrimitiveMesh,
-    stateful::Stateful,
+    stateful::{Stateful, StatefulNode, StatefulOp},
 };
 
 /// (section_index, instruction_offset)
@@ -46,7 +46,10 @@ pub enum Value {
     Nil,
     Float(f64),
     Integer(i64),
-    Complex { re: f64, im: f64 },
+    Complex {
+        re: f64,
+        im: f64,
+    },
     String(String),
 
     PrimitiveMesh(Rc<PrimitiveMesh>),
@@ -71,7 +74,6 @@ pub enum Value {
     WeakLvalue(WeakValue),
 }
 
-
 impl Value {
     pub fn is_truthy(&self) -> bool {
         match self {
@@ -91,9 +93,16 @@ impl Value {
     pub fn elide_lvalue_rec(self) -> Value {
         match self {
             Value::Lvalue(rc) => rc.borrow().clone().elide_lvalue_rec(),
-            Value::WeakLvalue(weak) => weak.upgrade().map(|rc| rc.borrow().clone().elide_lvalue_rec()).unwrap(),
+            Value::WeakLvalue(weak) => weak
+                .upgrade()
+                .map(|rc| rc.borrow().clone().elide_lvalue_rec())
+                .unwrap(),
             Value::List(mut list) => {
-                if !list.elements.iter().any(|e| e.borrow().may_need_lvalue_elision()) {
+                if !list
+                    .elements
+                    .iter()
+                    .any(|e| e.borrow().may_need_lvalue_elision())
+                {
                     return Value::List(list);
                 }
 
@@ -121,12 +130,8 @@ impl Value {
     pub fn elide_lvalue(self) -> Value {
         match self {
             Value::Lvalue(rc) => rc.borrow().clone(),
-            Value::WeakLvalue(weak) => {
-                weak.upgrade()
-                    .map(|rc| rc.borrow().clone())
-                    .unwrap()
-            }
-            other => other
+            Value::WeakLvalue(weak) => weak.upgrade().map(|rc| rc.borrow().clone()).unwrap(),
+            other => other,
         }
     }
 
@@ -142,12 +147,8 @@ impl Value {
     pub fn force_elide_lvalue(&self) -> Value {
         match self {
             Value::Lvalue(rc) => rc.borrow().clone(),
-            Value::WeakLvalue(weak) => {
-                weak.upgrade()
-                    .map(|rc| rc.borrow().clone())
-                    .unwrap()
-            }
-            _ => panic!("Expected Lvalue")
+            Value::WeakLvalue(weak) => weak.upgrade().map(|rc| rc.borrow().clone()).unwrap(),
+            _ => panic!("Expected Lvalue"),
         }
     }
 
@@ -187,4 +188,179 @@ impl Value {
             Value::WeakLvalue(_) => "lvalue",
         }
     }
+
+    /// structural equality for all value types.
+    /// lvalues are transparently dereferenced.
+    /// for InvokedFunction/InvokedOperator: compares by lambda identity + arguments + labels,
+    /// not by the computed result.
+    /// Rc/pointer equality is used as a fast path where applicable.
+    pub fn values_equal(a: &Value, b: &Value) -> bool {
+        // elide lvalue wrappers without cloning where possible
+        match a {
+            Value::Lvalue(rc) => return Value::values_equal(&rc.borrow(), b),
+            Value::WeakLvalue(weak) => {
+                return weak
+                    .upgrade()
+                    .map_or(false, |rc| Value::values_equal(&rc.borrow(), b));
+            }
+            _ => {}
+        }
+        match b {
+            Value::Lvalue(rc) => return Value::values_equal(a, &rc.borrow()),
+            Value::WeakLvalue(weak) => {
+                return weak
+                    .upgrade()
+                    .map_or(false, |rc| Value::values_equal(a, &rc.borrow()));
+            }
+            _ => {}
+        }
+
+        match (a, b) {
+            (Value::Nil, Value::Nil) => true,
+            (Value::Integer(x), Value::Integer(y)) => x == y,
+            (Value::Float(x), Value::Float(y)) => x == y,
+            // cross-type numeric equality
+            (Value::Integer(x), Value::Float(y)) => (*x as f64) == *y,
+            (Value::Float(x), Value::Integer(y)) => *x == (*y as f64),
+            (Value::Complex { re: ar, im: ai }, Value::Complex { re: br, im: bi }) => {
+                ar == br && ai == bi
+            }
+            (Value::String(x), Value::String(y)) => x == y,
+
+            (Value::Lambda(a), Value::Lambda(b)) => Rc::ptr_eq(a, b) || a.ip == b.ip,
+            (Value::Operator(a), Value::Operator(b)) => Rc::ptr_eq(&a.0, &b.0) || a.0.ip == b.0.ip,
+            // anim blocks are identity-equal (playing one consumes it)
+            (Value::AnimBlock(a), Value::AnimBlock(b)) => Rc::ptr_eq(a, b),
+            // meshes compared by pointer (deep mesh equality would be expensive)
+            (Value::PrimitiveMesh(a), Value::PrimitiveMesh(b)) => Rc::ptr_eq(a, b),
+
+            (Value::PrimitiveAnim(a), Value::PrimitiveAnim(b)) => prim_anim_equal(a, b),
+
+            (Value::List(a), Value::List(b)) => {
+                Rc::ptr_eq(a, b)
+                    || (a.len() == b.len()
+                        && a.elements.iter().zip(b.elements.iter()).all(|(ae, be)| {
+                            Rc::ptr_eq(ae, be) || Value::values_equal(&ae.borrow(), &be.borrow())
+                        }))
+            }
+            (Value::Map(a), Value::Map(b)) => {
+                Rc::ptr_eq(a, b)
+                    || (a.len() == b.len()
+                        && a.iter().all(|(k, av)| {
+                            b.get(k).map_or(false, |bv| {
+                                Rc::ptr_eq(av, bv)
+                                    || Value::values_equal(&av.borrow(), &bv.borrow())
+                            })
+                        }))
+            }
+
+            (Value::Stateful(a), Value::Stateful(b)) => stateful_equal(&a.root, &b.root),
+
+            // leaders compared by identity of the leader cell
+            (Value::Leader(a), Value::Leader(b)) => {
+                Value::values_equal(&*a.leader_rc.borrow(), &*b.leader_rc.borrow())
+            }
+
+            // InvokedFunction: same lambda + same args + same labels
+            (Value::InvokedFunction(a), Value::InvokedFunction(b)) => {
+                Rc::ptr_eq(a, b)
+                    || (Value::values_equal(&a.lambda, &b.lambda)
+                        && a.labels == b.labels
+                        && a.arguments.len() == b.arguments.len()
+                        && a.arguments
+                            .iter()
+                            .zip(b.arguments.iter())
+                            .all(|(ai, bi)| Value::values_equal(ai, bi)))
+            }
+            // InvokedOperator: same operator + same operand + same args + same labels
+            (Value::InvokedOperator(a), Value::InvokedOperator(b)) => {
+                Rc::ptr_eq(a, b)
+                    || (Value::values_equal(&a.operator, &b.operator)
+                        && Value::values_equal(&a.operand, &b.operand)
+                        && a.labels == b.labels
+                        && a.arguments.len() == b.arguments.len()
+                        && a.arguments
+                            .iter()
+                            .zip(b.arguments.iter())
+                            .all(|(ai, bi)| Value::values_equal(ai, bi)))
+            }
+
+            _ => false,
+        }
+    }
+}
+
+fn prim_anim_equal(a: &PrimitiveAnim, b: &PrimitiveAnim) -> bool {
+    match (a, b) {
+        (PrimitiveAnim::Set, PrimitiveAnim::Set) => true,
+        (PrimitiveAnim::Wait { time: ta }, PrimitiveAnim::Wait { time: tb }) => ta == tb,
+        (
+            PrimitiveAnim::Lerp {
+                time: ta,
+                progression: pa,
+            },
+            PrimitiveAnim::Lerp {
+                time: tb,
+                progression: pb,
+            },
+        ) => {
+            ta == tb
+                && match (pa, pb) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => Value::values_equal(a, b),
+                    _ => false,
+                }
+        }
+        _ => false,
+    }
+}
+
+fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
+    match (a, b) {
+        (StatefulNode::LeaderRef(a), StatefulNode::LeaderRef(b)) => Rc::ptr_eq(a, b),
+        (StatefulNode::Constant(a), StatefulNode::Constant(b)) => Value::values_equal(a, b),
+        (
+            StatefulNode::BinaryOp {
+                op: aop,
+                lhs: al,
+                rhs: ar,
+            },
+            StatefulNode::BinaryOp {
+                op: bop,
+                lhs: bl,
+                rhs: br,
+            },
+        ) => stateful_op_eq(*aop, *bop) && stateful_equal(al, bl) && stateful_equal(ar, br),
+        (
+            StatefulNode::UnaryOp {
+                op: aop,
+                operand: ao,
+            },
+            StatefulNode::UnaryOp {
+                op: bop,
+                operand: bo,
+            },
+        ) => stateful_op_eq(*aop, *bop) && stateful_equal(ao, bo),
+        (
+            StatefulNode::FunctionApp { func: af, args: aa },
+            StatefulNode::FunctionApp { func: bf, args: ba },
+        ) => {
+            stateful_equal(af, bf)
+                && aa.len() == ba.len()
+                && aa.iter().zip(ba.iter()).all(|(a, b)| stateful_equal(a, b))
+        }
+        _ => false,
+    }
+}
+
+fn stateful_op_eq(a: StatefulOp, b: StatefulOp) -> bool {
+    matches!(
+        (a, b),
+        (StatefulOp::Add, StatefulOp::Add)
+            | (StatefulOp::Sub, StatefulOp::Sub)
+            | (StatefulOp::Mul, StatefulOp::Mul)
+            | (StatefulOp::Div, StatefulOp::Div)
+            | (StatefulOp::Negate, StatefulOp::Negate)
+            | (StatefulOp::Not, StatefulOp::Not)
+    )
 }

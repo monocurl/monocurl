@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use crate::{
     error::ExecutorError,
-    executor::{Executor, invoke::fill_defaults},
+    executor::{invoke::fill_defaults, Executor},
     value::Value,
 };
 
@@ -22,8 +22,9 @@ pub struct InvokedFunction {
 impl Clone for InvokedFunction {
     fn clone(&self) -> Self {
         let cached_result = self.cached_result.take();
-        let cloned_cached_result =
-            cached_result.as_ref().map(|result| Box::new((**result).clone()));
+        let cloned_cached_result = cached_result
+            .as_ref()
+            .map(|result| Box::new((**result).clone()));
         self.cached_result.set(cached_result);
 
         Self {
@@ -46,20 +47,23 @@ impl InvokedFunction {
                 Some(result) => result,
                 None => {
                     let lambda = match this.lambda.as_ref().clone().elide_lvalue() {
-                    Value::Lambda(lambda) => lambda,
-                    other => {
-                        return Err(ExecutorError::type_error("lambda", other.type_name()));
-                    }
+                        Value::Lambda(lambda) => lambda,
+                        other => {
+                            return Err(ExecutorError::type_error("lambda", other.type_name()));
+                        }
                     };
 
-                    let full_args = fill_defaults(this.arguments.iter().cloned().collect(), &lambda);
+                    let full_args =
+                        fill_defaults(this.arguments.iter().cloned().collect(), &lambda);
                     Box::new(executor.eagerly_invoke_lambda(&lambda, &full_args).await?)
                 }
             };
 
             let live = match result.as_ref() {
                 Value::InvokedFunction(inv) => InvokedFunction::value(inv, executor).await?,
-                Value::InvokedOperator(inv) => crate::value::invoked_operator::InvokedOperator::value(inv, executor).await?,
+                Value::InvokedOperator(inv) => {
+                    crate::value::invoked_operator::InvokedOperator::value(inv, executor).await?
+                }
                 other => other.clone(),
             };
 

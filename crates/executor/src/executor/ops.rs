@@ -11,6 +11,21 @@ impl Executor {
         let rhs = stack.pop();
         let lhs = stack.pop();
 
+        // equality ops use structural comparison — no wrapper resolution
+        match op {
+            BinOp::Eq => {
+                let result = Value::values_equal(&lhs, &rhs);
+                self.state.stack_mut(stack_idx).push(Value::Integer(result as i64));
+                return ExecSingle::Continue;
+            }
+            BinOp::Ne => {
+                let result = !Value::values_equal(&lhs, &rhs);
+                self.state.stack_mut(stack_idx).push(Value::Integer(result as i64));
+                return ExecSingle::Continue;
+            }
+            _ => {}
+        }
+
         let lhs = match lhs.elide_wrappers(self).await {
             Ok(val) => val,
             Err(e) => return ExecSingle::Error(e),
@@ -43,18 +58,6 @@ impl Executor {
             Value::Float(f) => Ok(Value::Float(-f)),
             Value::Complex { re, im } => Ok(Value::Complex { re: -re, im: -im }),
             _ => Err(ExecutorError::UnsupportedNegate(val.type_name())),
-        }
-    }
-
-    pub(crate) fn values_equal(a: &Value, b: &Value) -> bool {
-        match (a, b) {
-            (Value::Integer(x), Value::Integer(y)) => x == y,
-            (Value::Float(x), Value::Float(y)) => x == y,
-            (Value::Integer(x), Value::Float(y)) => (*x as f64) == *y,
-            (Value::Float(x), Value::Integer(y)) => *x == (*y as f64),
-            (Value::String(x), Value::String(y)) => x == y,
-            (Value::Nil, Value::Nil) => true,
-            _ => false,
         }
     }
 }
@@ -112,8 +115,6 @@ fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorErr
         (Value::Integer(a), Value::Integer(b), BinOp::Le) => Ok(Value::Integer((a <= b) as i64)),
         (Value::Integer(a), Value::Integer(b), BinOp::Gt) => Ok(Value::Integer((a > b) as i64)),
         (Value::Integer(a), Value::Integer(b), BinOp::Ge) => Ok(Value::Integer((a >= b) as i64)),
-        (Value::Integer(a), Value::Integer(b), BinOp::Eq) => Ok(Value::Integer((a == b) as i64)),
-        (Value::Integer(a), Value::Integer(b), BinOp::Ne) => Ok(Value::Integer((a != b) as i64)),
 
         // float x float (after promotion, all float pairs land here)
         (Value::Float(a), Value::Float(b), _) => eval_float_binary(*a, *b, op),
@@ -142,29 +143,22 @@ fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorErr
                 })
             }
         }
-        (Value::Complex { re: ar, im: ai }, Value::Complex { re: br, im: bi }, BinOp::Eq) => {
-            Ok(Value::Integer((ar == br && ai == bi) as i64))
-        }
-        (Value::Complex { re: ar, im: ai }, Value::Complex { re: br, im: bi }, BinOp::Ne) => {
-            Ok(Value::Integer((ar != br || ai != bi) as i64))
-        }
 
         // string concatenation
         (Value::String(a), Value::String(b), BinOp::Add) => {
             Ok(Value::String(format!("{}{}", a, b)))
         }
 
-        // in operator for lists/maps
+        // in operator: resolved rhs must be a list or map
         (_, Value::List(list), BinOp::In) => {
             let found = list.elements.iter().any(|rc| {
-                let elem = rc.borrow();
-                Executor::values_equal(lhs, &elem)
+                Value::values_equal(lhs, &rc.borrow())
             });
             Ok(Value::Integer(found as i64))
         }
         (_, Value::Map(map), BinOp::In) => {
             let key = HashableKey::try_from_value(lhs)?;
-            Ok(Value::Integer(map.entries.contains_key(&key) as i64))
+            Ok(Value::Integer(map.contains_key(&key) as i64))
         }
 
         _ => Err(ExecutorError::UnsupportedBinaryOp {
@@ -192,13 +186,7 @@ fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> 
         BinOp::Le => Value::Integer((a <= b) as i64),
         BinOp::Gt => Value::Integer((a > b) as i64),
         BinOp::Ge => Value::Integer((a >= b) as i64),
-        BinOp::Eq => Value::Integer((a == b) as i64),
-        BinOp::Ne => Value::Integer((a != b) as i64),
-        BinOp::In => return Err(ExecutorError::UnsupportedBinaryOp {
-            op: "in",
-            lhs: "float",
-            rhs: "float",
-        }),
+        BinOp::Eq | BinOp::Ne | BinOp::In => unreachable!("handled before promotion"),
     })
 }
 

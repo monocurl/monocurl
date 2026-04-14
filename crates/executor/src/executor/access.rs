@@ -188,14 +188,14 @@ impl Executor {
                         Ok(k) => k,
                         Err(e) => return ExecSingle::Error(e),
                     };
-                    match map.entries.get(&key) {
+                    match map.get(&key) {
                         Some(val_rc) => {
                             let val_rc = val_rc.clone();
                             if Rc::strong_count(&val_rc) > 1 {
                                 let cloned = rc_value(val_rc.borrow().clone());
                                 drop(base_val);
                                 if let Value::Map(map) = &mut *base_rc.borrow_mut() {
-                                    Rc::make_mut(map).entries.insert(key, cloned.clone());
+                                    Rc::make_mut(map).insert(key, cloned.clone());
                                 }
                                 self.state
                                     .stack_mut(stack_idx)
@@ -211,7 +211,7 @@ impl Executor {
                             let new_rc = rc_value(Value::Nil);
                             drop(base_val);
                             if let Value::Map(map) = &mut *base_rc.borrow_mut() {
-                                Rc::make_mut(map).entries.insert(key, new_rc.clone());
+                                Rc::make_mut(map).insert(key, new_rc.clone());
                             }
                             self.state
                                 .stack_mut(stack_idx)
@@ -254,9 +254,7 @@ impl Executor {
                         Ok(k) => k,
                         Err(e) => return ExecSingle::Error(e),
                     };
-                    let val = map.entries.get(&key)
-                        .map(|rc| rc.borrow().clone())
-                        .unwrap_or(Value::Nil);
+                    let val = map.get(&key).map(|rc| rc.borrow().clone()).unwrap_or(Value::Nil);
                     self.state.stack_mut(stack_idx).push(val);
                 }
                 Value::String(s) => {
@@ -348,7 +346,7 @@ impl Executor {
                         if let Value::InvokedOperator(ref mut inner_rc) = *base_rc.borrow_mut() {
                             let inv = Rc::make_mut(inner_rc);
                             inv.arguments[arg_idx] = Value::Lvalue(arg_rc.clone());
-                            inv.cached_result.take();
+                            inv.invalidate_cache();
                         }
                         self.state
                             .stack_mut(stack_idx)

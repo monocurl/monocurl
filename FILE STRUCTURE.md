@@ -6,17 +6,18 @@
   - src/error.rs: ExecutorError enum (TypeError, IndexOutOfBounds, DeadWeakRef, AnimPlayedTwice, etc.) with Display impl
   - src/executor/mod.rs: Executor struct, section_init, async execute_one dispatch, NativeFunc/NativeFuture types, yield_now helper
   - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion
-  - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, boxed call_lambda_body to break recursion cycle
+  - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, exec_convert_to_live_operator (extracts live value from operator result list), boxed call_lambda_body to break recursion cycle
+  - src/executor/lerp.rs: general lerp(a, b, t) for Monocurl values — handles numbers, InvokedFunction (same-lambda arg-wise lerp), InvokedOperator (rules 4/5 via unmodified embed)
   - src/executor/anim.rs: seek_primitive_anim (async, yields between instructions), step_primitive_anims, seek_to (event-driven), play/spawn/bake, double-play guard via AnimBlock.already_played
-  - src/executor/access.rs: subscript/attribute (mutable + immutable), assign, append, Rc-based COW at element level, WeakLvalue handling
+  - src/executor/access.rs: subscript/attribute (mutable + immutable), assign, append, Rc-based COW at element level, WeakLvalue handling; uses Map helper methods for ordered iteration
   - src/state.rs: ExecutionState (execution stacks, leaders, primitive anims, ephemeral_pool), ExecutionStack (var stack, IP, call stack, labels), BakedPrimitiveAnim, LeaderEntry. Monotonic stack IDs (never reused).
-  - src/value.rs: Value enum, RcValue = Rc<RefCell<Value>> (owning), WeakValue = Weak<RefCell<Value>> (non-owning), Value::Lvalue (owning), Value::WeakLvalue (pushed refs — breaks reference cycles), helpers for truthiness, resolve, elide_lvalues, as_lvalue_rc
-  - src/value/container.rs: List (Vec<RcValue>) and Map (Vec<(Value, RcValue)>) for mutable subscript lvalue semantics
+  - src/value.rs: Value enum, RcValue = Rc<RefCell<Value>> (owning), WeakValue = Weak<RefCell<Value>> (non-owning), Value::Lvalue (owning), Value::WeakLvalue (pushed refs — breaks reference cycles), helpers for truthiness, resolve, elide_lvalues, as_lvalue_rc; Value::values_equal for general structural equality (Rc fast-path, InvokedFunction/Operator compared by args+labels not computed result)
+  - src/value/container.rs: List (Vec<RcValue>) and Map (HashMap + insertion_order Vec for deterministic iteration) with insert/get/get_mut/contains_key/iter helpers
   - src/value/lambda.rs: Lambda (captures, defaults, IP) and Operator wrapper
   - src/value/anim_block.rs: AnimBlock (captures + IP for coroutine-style animation blocks, already_played: Rc<Cell<bool>> to prevent double-play)
   - src/value/leader.rs: Leader struct (leader_rc, follower_rc as RcValues) for mesh/state/param variables
   - src/value/invoked_function.rs: InvokedFunction (Labeled with recomputation info, or Unlabeled)
-  - src/value/invoked_operator.rs: InvokedOperator (operator + operand + labels for recomputation)
+  - src/value/invoked_operator.rs: InvokedOperator (operator + operand + labels + unmodified identity embed + cached modified value); extract_operator_result and build_invoked_operator helpers
   - src/value/primitive_anim.rs: PrimitiveAnim enum (Lerp, Set, Wait) — leaf animations
   - src/value/stateful.rs: Stateful and StatefulNode for reactive dependency graphs
   - src/time.rs: Timestamp (slide + time offset)

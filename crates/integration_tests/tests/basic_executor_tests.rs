@@ -1019,12 +1019,33 @@ fn test_labeled_aliases_keep_independent_live_results() {
 }
 
 #[test]
-fn test_live_elision_supports_comparison() {
+fn test_live_function_structural_equality() {
+    // same labeled invocation is structurally equal
+    let r = run("
+        let f = |x, y| x + y
+        let result = f(lhs: 8, rhs: 4) == f(lhs: 8, rhs: 4)
+    ");
+    r.assert_int(1);
+}
+
+#[test]
+fn test_live_function_structural_inequality() {
+    // different args → not equal, even if computed result would be the same
+    let r = run("
+        let f = |x| x * 2
+        let result = f(a: 3) == f(a: 6)
+    ");
+    r.assert_int(0);
+}
+
+#[test]
+fn test_live_function_not_equal_to_primitive() {
+    // a live function invocation is structurally different from a plain integer
     let r = run("
         let f = |x, y| x + y
         let result = f(lhs: 8, rhs: 4) == 12
     ");
-    r.assert_int(1);
+    r.assert_int(0);
 }
 
 #[test]
