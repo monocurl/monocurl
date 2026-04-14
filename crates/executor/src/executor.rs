@@ -3,6 +3,7 @@ pub mod anim;
 pub mod invoke;
 pub mod lerp;
 pub mod ops;
+pub mod cacheing;
 
 use std::collections::BTreeSet;
 use std::{future::Future, rc::Rc};
@@ -10,6 +11,7 @@ use std::pin::Pin;
 
 use bytecode::{Bytecode, Instruction};
 
+use crate::executor::cacheing::ExecutionCache;
 use crate::time::Timestamp;
 use crate::{
     error::ExecutorError,
@@ -56,33 +58,24 @@ pub struct Executor {
     pub state: ExecutionState,
     pub(crate) bytecode: Bytecode,
     pub(crate) native_funcs: Vec<StdlibFunc>,
+    pub(crate) cache: ExecutionCache,
 }
 
 impl Executor {
     pub fn new(bytecode: Bytecode, native_funcs: Vec<StdlibFunc>) -> Self {
+        let cache = ExecutionCache::new(&bytecode);
         Self {
             state: ExecutionState::new(),
             bytecode,
             native_funcs,
+            cache
         }
-    }
-
-    /// scroll to timestamp 0
-    pub fn global_reset(&mut self) {
-        self.state = ExecutionState::new();
-
-        let ip: InstructionPointer = (0, 0);
-        let stack_idx = self.state.alloc_stack(ip, None).unwrap();
-        debug_assert_eq!(stack_idx, ExecutionState::ROOT_STACK_ID);
-
-        let mut heads = BTreeSet::new();
-        heads.insert(stack_idx);
-
-        self.state.execution_heads = heads;
     }
 
     pub fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
+
+        self.save_cache();
 
         let mut heads = BTreeSet::new();
         heads.insert(ExecutionState::ROOT_STACK_ID);

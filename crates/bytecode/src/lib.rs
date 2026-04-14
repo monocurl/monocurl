@@ -140,6 +140,7 @@ pub struct Bytecode {
 
 impl Bytecode {
     pub fn new(sections: Vec<SectionBytecode>) -> Self {
+        assert!(!sections.is_empty());
         Self { sections }
     }
 }

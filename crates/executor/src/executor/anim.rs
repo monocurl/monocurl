@@ -85,19 +85,6 @@ impl Executor {
         }
     }
 
-    // given a target, find the first cache point that we can base off of
-    async fn rebase_at_cache_point(&mut self, target: Timestamp) {
-        let valid_state = !self.state.has_errors();
-        let in_future = target.slide > self.state.timestamp.slide || (target.slide == self.state.timestamp.slide && target.time > self.state.timestamp.time);
-        if valid_state && !in_future {
-            // just start from here
-            return;
-        }
-        else {
-            self.global_reset();
-        }
-    }
-
     /// seek to a target timestamp by stepping to the next event (animation end)
     /// rather than fixed dt steps.
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {

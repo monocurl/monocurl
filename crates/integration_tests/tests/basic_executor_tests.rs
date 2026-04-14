@@ -164,7 +164,6 @@ fn run(src: &str) -> ExecResult {
 
     // -- execute --
     let mut executor = Executor::new(result.bytecode, registry().func_table());
-    executor.global_reset();
 
     let mut runtime_errors: Vec<String> = Vec::new();
 

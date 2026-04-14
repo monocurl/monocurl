@@ -147,7 +147,7 @@ impl ExecutionState {
     pub const ROOT_STACK_ID: usize = 0;
 
     pub fn new() -> Self {
-       Self {
+        let mut ret = Self {
             timestamp: Timestamp::default(),
             global_stack_counter: 0,
             alive_stack_count: 0,
@@ -160,7 +160,18 @@ impl ExecutionState {
             #[cfg(feature = "capture_tos")]
             captured_output: Vec::new(),
             call_depth: 0,
-        }
+        };
+
+        let ip: InstructionPointer = (0, 0);
+        let stack_idx = ret.alloc_stack(ip, None).unwrap();
+        debug_assert_eq!(stack_idx, ExecutionState::ROOT_STACK_ID);
+
+        let mut heads = BTreeSet::new();
+        heads.insert(stack_idx);
+
+        ret.execution_heads = heads;
+
+        ret
     }
 
     /// allocate a fresh execution stack and return its index.
