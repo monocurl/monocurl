@@ -1,3 +1,5 @@
+use std::{rc::Rc, sync::Arc};
+
 use structs::text::Span8;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,11 +137,11 @@ impl SectionBytecode {
 
 #[derive(Default)]
 pub struct Bytecode {
-    pub sections: Vec<SectionBytecode>,
+    pub sections: Vec<Arc<SectionBytecode>>,
 }
 
 impl Bytecode {
-    pub fn new(sections: Vec<SectionBytecode>) -> Self {
+    pub fn new(sections: Vec<Arc<SectionBytecode>>) -> Self {
         assert!(!sections.is_empty());
         Self { sections }
     }

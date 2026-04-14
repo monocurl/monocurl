@@ -153,7 +153,8 @@ pub(crate) struct CompileBundle {
     path: Option<PathBuf>,
     exports: HashMap<String, Arc<Symbol>>,
     errors: Vec<CompileError>,
-    bytecode: Vec<SectionBytecode>,
+    bytecode: Vec<Arc<SectionBytecode>>,
+    current_bytecode: Option<SectionBytecode>,
     final_stack_depth: usize,
 }
 
@@ -175,10 +176,6 @@ struct Compiler {
 
     // of the current bundle
     bundle_root_import_span: Option<Span8>,
-}
-
-fn default_section() -> SectionBytecode {
-    SectionBytecode::new(SectionFlags { is_stdlib: false, is_library: false })
 }
 
 impl Compiler {
@@ -249,8 +246,9 @@ impl Compiler {
             path: None,
             exports: HashMap::default(),
             errors: Vec::default(),
-            bytecode: vec![default_section()],
+            bytecode: vec![],
             final_stack_depth: 0,
+            current_bytecode: Some(SectionBytecode::new(SectionFlags { is_stdlib: true, is_library: true }))
         });
 
         // define global scene variables
@@ -263,7 +261,13 @@ impl Compiler {
 
         self.emit(Instruction::EndOfExecutionHead, 0..0);
 
+        self.emit_current_section();
         self.emit_current_bundle();
+    }
+
+    fn emit_current_section(&mut self) {
+        let bundle = self.current_bundle.as_mut().unwrap();
+        bundle.bytecode.push(Arc::new(bundle.current_bytecode.take().unwrap()));
     }
 
     fn emit_current_bundle(&mut self) {
@@ -329,6 +333,7 @@ impl Compiler {
             exports: HashMap::default(),
             errors: Vec::default(),
             bytecode: Vec::default(),
+            current_bytecode: None,
             final_stack_depth: 0,
         });
 
@@ -345,29 +350,29 @@ impl Compiler {
             return;
         }
 
-        self.current_bundle.as_mut().unwrap().bytecode.push(
-            SectionBytecode::new(SectionFlags {
-                is_stdlib: section.section_type == SectionType::StandardLibrary,
-                is_library: matches!(
-                    section.section_type,
-                    SectionType::UserLibrary
-                ),
-            })
-        );
+        self.current_bundle.as_mut().unwrap().current_bytecode = Some(SectionBytecode::new(SectionFlags {
+            is_stdlib: section.section_type == SectionType::StandardLibrary,
+            is_library: matches!(
+                section.section_type,
+                SectionType::UserLibrary
+            ),
+        }));
 
         // symbols declared here land in the current top scope (no push/pop)
         self.compile_statements(&section.body);
         self.emit(Instruction::EndOfExecutionHead, 0..0);
+
+        self.emit_current_section();
     }
 }
 
 impl Compiler {
     fn current_section(&self) -> &SectionBytecode {
-        self.current_bundle.as_ref().unwrap().bytecode.last().unwrap()
+        self.current_bundle.as_ref().unwrap().current_bytecode.as_ref().unwrap()
     }
 
     fn current_section_mut(&mut self) -> &mut SectionBytecode {
-        self.current_bundle.as_mut().unwrap().bytecode.last_mut().unwrap()
+        self.current_bundle.as_mut().unwrap().current_bytecode.as_mut().unwrap()
     }
 
     fn emit(&mut self, instruction: Instruction, src: Span8) {

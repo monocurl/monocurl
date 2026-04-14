@@ -1,4 +1,6 @@
-use bytecode::Bytecode;
+use std::sync::Arc;
+
+use bytecode::{Bytecode, SectionBytecode};
 
 use crate::{executor::Executor, state::ExecutionState, time::Timestamp};
 
@@ -34,7 +36,10 @@ impl Executor {
 
         let mut first_invalid = None;
         for i in 0..self.cache.entries.len() {
-            if i >= bytecode.sections.len() ||  self.bytecode.sections[i] != bytecode.sections[i] {
+            fn section_eq(a: &Arc<SectionBytecode>, b: &Arc<SectionBytecode>) -> bool {
+                Arc::ptr_eq(a, b) || *a == *b
+            }
+            if i >= bytecode.sections.len() || !section_eq(&self.bytecode.sections[i], &bytecode.sections[i]) {
                 first_invalid = Some(i);
                 break;
             }
