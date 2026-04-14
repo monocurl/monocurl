@@ -5,13 +5,13 @@ use structs::futures::PeriodicYielder;
 
 use crate::{
     error::ExecutorError,
-    state::{MAX_CALL_DEPTH},
+    state::MAX_CALL_DEPTH,
     value::{
-        Value,
         anim_block::AnimBlock,
         invoked_function::InvokedFunction,
-        invoked_operator::InvokedOperator,
-        lambda::Lambda, rc_value,
+        invoked_operator::{build_invoked_operator, extract_operator_result},
+        lambda::Lambda,
+        rc_value, Value,
     },
 };
 
@@ -33,12 +33,15 @@ impl Executor {
         let stack_len = stack.stack_len();
         let start = stack_len - total_pop;
 
-        let captures: SmallVec<[Value; 4]> =
-            stack.var_stack[start..start + capture_count as usize].iter().cloned().collect();
-        let defaults: SmallVec<[Value; 1]> =
-            stack.var_stack[start + capture_count as usize..stack_len].iter()
-                .map(|def| Value::Lvalue(rc_value(def.clone())))
-                .collect();
+        let captures: SmallVec<[Value; 4]> = stack.var_stack[start..start + capture_count as usize]
+            .iter()
+            .cloned()
+            .collect();
+        let defaults: SmallVec<[Value; 1]> = stack.var_stack
+            [start + capture_count as usize..stack_len]
+            .iter()
+            .map(|def| Value::Lvalue(rc_value(def.clone())))
+            .collect();
         stack.pop_n(total_pop);
 
         let lambda = Rc::new(Lambda {
@@ -88,7 +91,10 @@ impl Executor {
         let lambda = match lambda_val {
             Value::Lambda(rc) => rc,
             _ => {
-                return ExecSingle::Error(ExecutorError::type_error("lambda", lambda_val.type_name()))
+                return ExecSingle::Error(ExecutorError::type_error(
+                    "lambda",
+                    lambda_val.type_name(),
+                ))
             }
         };
 
@@ -96,17 +102,22 @@ impl Executor {
         let max_args = min_args + lambda.defaults.len();
 
         if num_args < min_args as u32 {
-            return ExecSingle::Error(ExecutorError::TooFewArguments { minimum: min_args, got: num_args as usize });
+            return ExecSingle::Error(ExecutorError::TooFewArguments {
+                minimum: min_args,
+                got: num_args as usize,
+            });
         }
 
         if num_args > max_args as u32 {
-            return ExecSingle::Error(ExecutorError::TooManyArguments { maximum: max_args, got: num_args as usize });
+            return ExecSingle::Error(ExecutorError::TooManyArguments {
+                maximum: max_args,
+                got: num_args as usize,
+            });
         }
 
         if stateful {
             todo!()
-        }
-        else if labeled {
+        } else if labeled {
             let labels = self.drain_labels(stack_idx, section_idx);
 
             let n = num_args as usize;
@@ -133,8 +144,7 @@ impl Executor {
                 }
                 Err(e) => ExecSingle::Error(e),
             }
-        }
-        else {
+        } else {
             self.setup_lambda_call(stack_idx, num_args as usize, &lambda)
         }
     }
@@ -163,17 +173,22 @@ impl Executor {
         let max_args = min_args + lambda.defaults.len();
 
         if num_args + 1 < min_args as u32 {
-            return ExecSingle::Error(ExecutorError::TooFewArguments { minimum: min_args, got: num_args as usize + 1 });
+            return ExecSingle::Error(ExecutorError::TooFewArguments {
+                minimum: min_args,
+                got: num_args as usize + 1,
+            });
         }
 
         if num_args + 1 > max_args as u32 {
-            return ExecSingle::Error(ExecutorError::TooManyArguments { maximum: max_args, got: num_args as usize + 1 });
+            return ExecSingle::Error(ExecutorError::TooManyArguments {
+                maximum: max_args,
+                got: num_args as usize + 1,
+            });
         }
 
         if stateful {
             todo!()
-        }
-        else if labeled {
+        } else if labeled {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
@@ -181,38 +196,34 @@ impl Executor {
             stack.pop_n(n);
             let operand = stack.pop();
 
-            // operator's lambda takes (target, ...extra_args)
+            let labels = self.drain_labels(stack_idx, section_idx);
+
+            // lambda takes (target, ...extra_args)
             let mut full_args = vec![operand.clone()];
             full_args.extend(args.iter().cloned());
             let full_args = fill_defaults(full_args, &operator.0);
 
-            let labels = self.drain_labels(stack_idx, section_idx);
-
-            let n = num_args as usize;
-            let stack = self.state.stack_mut(stack_idx);
-            let stack_len = stack.stack_len();
-            let args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
-            stack.pop_n(n);
-
-            let result = self.eagerly_invoke_lambda(&operator.0, &full_args).await;
-            let inv = Rc::new(InvokedOperator {
-                operator: Box::new(Value::Operator(operator)),
-                arguments: args.into(),
-                operand: Box::new(operand),
-                labels,
-                cached_result: Cell::new(result.as_ref().ok().map(|v| Box::new(v.clone()))),
-            });
-            match result {
-                Ok(_) => {
-                    self.state
-                        .stack_mut(stack_idx)
-                        .push(Value::InvokedOperator(inv));
-                    ExecSingle::Continue
-                }
+            match self.eagerly_invoke_lambda(&operator.0, &full_args).await {
+                Ok(raw) => match extract_operator_result(raw) {
+                    Ok((initial, modified)) => {
+                        let inv = Rc::new(build_invoked_operator(
+                            Value::Operator(operator),
+                            operand,
+                            args.into(),
+                            labels,
+                            initial,
+                            modified,
+                        ));
+                        self.state
+                            .stack_mut(stack_idx)
+                            .push(Value::InvokedOperator(inv));
+                        ExecSingle::Continue
+                    }
+                    Err(e) => ExecSingle::Error(e),
+                },
                 Err(e) => ExecSingle::Error(e),
             }
-        }
-        else {
+        } else {
             self.setup_lambda_call(stack_idx, 1 + num_args as usize, lambda)
         }
     }
@@ -224,7 +235,7 @@ impl Executor {
         arg_count: u16,
     ) -> ExecSingle {
         let func = self.native_funcs[func_index as usize];
-        match func(&mut self.state, stack_idx).await {
+        match func(self, stack_idx).await {
             Ok(val) => {
                 self.state.stack_mut(stack_idx).pop_n(arg_count as usize);
                 self.state.stack_mut(stack_idx).push(val);
@@ -253,7 +264,12 @@ impl Executor {
         }
     }
 
-    fn setup_lambda_call(&mut self, stack_idx: usize, pushed_args: usize, lambda: &Lambda) -> ExecSingle {
+    fn setup_lambda_call(
+        &mut self,
+        stack_idx: usize,
+        pushed_args: usize,
+        lambda: &Lambda,
+    ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
         if stack.call_stack.len() >= MAX_CALL_DEPTH {
@@ -282,14 +298,18 @@ impl Executor {
         &'a mut self,
         lambda: &'a Lambda,
         args: &'a [Value],
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
+    {
         Box::pin(async move {
             if self.state.call_depth >= MAX_CALL_DEPTH {
                 return Err(ExecutorError::StackOverflow);
             }
             self.state.call_depth += 1;
 
-            let temp_idx = self.state.alloc_stack(lambda.ip, None).map_err(|_| ExecutorError::TooManyActiveAnimations)?;
+            let temp_idx = self
+                .state
+                .alloc_stack(lambda.ip, None)
+                .map_err(|_| ExecutorError::TooManyActiveAnimations)?;
             let stack = self.state.stack_mut(temp_idx);
             for arg in args {
                 stack.push(arg.clone());
@@ -335,7 +355,7 @@ impl Executor {
     fn drain_labels(
         &mut self,
         stack_idx: usize,
-        section_idx: usize
+        section_idx: usize,
     ) -> SmallVec<[(usize, String); 4]> {
         let label_indices: SmallVec<[u32; 8]> = self
             .state
@@ -355,6 +375,37 @@ impl Executor {
                 }
             })
             .collect()
+    }
+
+    /// convert the result of a non-labeled operator invoke into a live value.
+    /// the operator lambda returns `[initial, modified]`; we push `modified`.
+    /// for labeled invocations the stack already has an InvokedOperator — pass through.
+    pub(super) fn exec_convert_to_live_operator(&mut self, stack_idx: usize) -> ExecSingle {
+        let val = self.state.stack_mut(stack_idx).pop().elide_lvalue();
+        match val {
+            Value::InvokedOperator(_) => {
+                // labeled path: already the correct live value
+                self.state.stack_mut(stack_idx).push(val);
+            }
+            Value::List(ref list) if list.elements.len() == 2 => {
+                // non-labeled path: lambda returned [initial, modified]; take modified
+                let live = list.elements[1].borrow().clone();
+                self.state.stack_mut(stack_idx).push(live);
+            }
+            Value::List(ref list) => {
+                return ExecSingle::Error(ExecutorError::Other(format!(
+                    "operator must return a 2-element list, got {}",
+                    list.elements.len()
+                )));
+            }
+            other => {
+                return ExecSingle::Error(ExecutorError::type_error(
+                    "[initial, modified] list",
+                    other.type_name(),
+                ));
+            }
+        }
+        ExecSingle::Continue
     }
 }
 

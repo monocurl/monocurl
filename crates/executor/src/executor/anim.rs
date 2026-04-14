@@ -38,7 +38,6 @@ impl Executor {
             }
         }
 
-        println!("No more execution heads! {} active primitive anims remain.", self.state.primitive_anims.len());
 
         if self.state.primitive_anims.is_empty() {
             return SeekPrimitiveResult::EndOfSection;

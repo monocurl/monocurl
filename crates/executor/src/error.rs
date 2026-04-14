@@ -2,7 +2,7 @@ use std::fmt;
 
 #[derive(Debug, Clone)]
 pub enum ExecutorError {
-    TypeError { expected: &'static str, got: &'static str },
+    TypeError { expected: &'static str, got: &'static str, target: Option<&'static str> },
     IndexOutOfBounds { index: usize, len: usize },
     DivisionByZero,
     DestructuringError { lhs_size: usize, rhs_size: Option<usize>, rhs_type: &'static str },
@@ -25,15 +25,24 @@ pub enum ExecutorError {
 
 impl ExecutorError {
     pub fn type_error(expected: &'static str, got: &'static str) -> Self {
-        Self::TypeError { expected, got }
+        Self::TypeError { expected, got, target: None }
+    }
+
+    pub fn type_error_for(expected: &'static str, got: &'static str, target: &'static str) -> Self {
+        Self::TypeError { expected, got, target: Some(target) }
     }
 }
 
 impl fmt::Display for ExecutorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::TypeError { expected, got } => {
-                write!(f, "type error: expected {}, got {}", expected, got)
+            Self::TypeError { expected, got, target } => {
+                if let Some(target) = target {
+                    write!(f, "type error: expected {}, got {} for {}", expected, got, target)
+                }
+                else {
+                    write!(f, "type error: expected {}, got {}", expected, got)
+                }
             }
             Self::IndexOutOfBounds { index, len } => {
                 write!(f, "index {} out of bounds (len {})", index, len)

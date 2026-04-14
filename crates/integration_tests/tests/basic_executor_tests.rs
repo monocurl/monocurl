@@ -4,7 +4,9 @@ use std::{f64, sync::Arc};
 
 use compiler::cache::CompilerCache;
 use executor::{
-    executor::{Executor, SeekToResult}, time::Timestamp, value::Value
+    executor::{Executor, SeekToResult},
+    time::Timestamp,
+    value::Value,
 };
 use lexer::{lexer::Lexer, token::Token};
 use parser::{
@@ -12,7 +14,10 @@ use parser::{
     parser::SectionParser,
 };
 use stdlib::registry::registry;
-use structs::{rope::{Rope, TextAggregate}, text::Span8};
+use structs::{
+    rope::{Rope, TextAggregate},
+    text::Span8,
+};
 
 struct ExecResult {
     /// the value captured from the root execution head's TOS, if any
@@ -108,9 +113,17 @@ fn run(src: &str) -> ExecResult {
     let mut parser = SectionParser::new(tokens, rope, SectionType::Slide, None, None);
     let stmts = parser.parse_statement_list();
 
-    let parse_errors: Vec<String> = parser.artifacts().error_diagnostics.iter().map(|e| e.message.clone()).collect();
+    let parse_errors: Vec<String> = parser
+        .artifacts()
+        .error_diagnostics
+        .iter()
+        .map(|e| e.message.clone())
+        .collect();
     if !parse_errors.is_empty() {
-        return ExecResult { value: None, errors: parse_errors };
+        return ExecResult {
+            value: None,
+            errors: parse_errors,
+        };
     }
 
     let bundle = Arc::new(SectionBundle {
@@ -130,7 +143,10 @@ fn run(src: &str) -> ExecResult {
 
     let compile_errors: Vec<String> = result.errors.iter().map(|e| e.message.clone()).collect();
     if !compile_errors.is_empty() {
-        return ExecResult { value: None, errors: compile_errors };
+        return ExecResult {
+            value: None,
+            errors: compile_errors,
+        };
     }
 
     // section 0 is the prelude; section 1 is our slide
@@ -141,7 +157,10 @@ fn run(src: &str) -> ExecResult {
         };
     }
 
-    println!("Bytecode Instructions {:?}", result.bytecode.sections[1].instructions);
+    println!(
+        "Bytecode Instructions {:?}",
+        result.bytecode.sections[1].instructions
+    );
 
     // -- execute --
     let mut executor = Executor::new(result.bytecode, registry().func_table());
@@ -161,9 +180,11 @@ fn run(src: &str) -> ExecResult {
     runtime_errors.extend(executor.state.errors.iter().cloned());
 
     let value = executor.state.captured_output.into_iter().last();
-    ExecResult { value, errors: runtime_errors }
+    ExecResult {
+        value,
+        errors: runtime_errors,
+    }
 }
-
 
 // -- literals and arithmetic --
 
@@ -706,6 +727,134 @@ fn test_exec_list_build_with_for() {
         let result = sum_sq
     ");
     r.assert_int(30);
+}
+
+// -- operators --
+
+#[test]
+fn test_exec_operator_creation_and_invocation() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let x = 40
+        let result = add{2} x
+    ");
+    r.assert_int(42);
+}
+
+#[test]
+fn test_exec_operator_creation() {
+    let r = run("
+        let result = operator |target, amount| {
+            return [target, target + amount]
+        }
+    ");
+    r.assert_ok();
+    match &r.value {
+        Some(Value::Operator(_)) => {}
+        other => panic!(
+            "expected operator, got {}",
+            other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+        ),
+    }
+}
+
+#[test]
+fn test_exec_operator_chain_invocation() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let mul = operator |target, factor| {
+            return [target, target * factor]
+        }
+        let x = 10
+        let result = add{2} mul{3} x
+    ");
+    r.assert_int(32);
+}
+
+#[test]
+fn test_exec_operator_chain_with_aliases() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let mul = operator |target, factor| {
+            return [target, target * factor]
+        }
+        let outer = add
+        let inner = mul
+        let x = 10
+        let result = outer{2} inner{3} x
+    ");
+    r.assert_int(32);
+}
+
+#[test]
+fn test_exec_operator_chain_same_operator_multiple_times() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let x = 10
+        let result = add{2} add{3} add{4} x
+    ");
+    r.assert_int(19);
+}
+
+#[test]
+fn test_exec_labeled_operator_arg_readable() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let inv = add{amount: 2} 40
+        let result = inv.amount
+    ");
+    r.assert_int(2);
+}
+
+#[test]
+fn test_exec_labeled_operator_arg_mutable() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        var inv = add{amount: 2} 40
+        inv.amount = 5
+        let result = inv.amount
+    ");
+    r.assert_int(5);
+}
+
+#[test]
+fn test_exec_labeled_operator_mutation_updates_downstream_value() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let mul = operator |target, factor| {
+            return [target, target * factor]
+        }
+        var inv = add{amount: 2} 40
+        inv.amount = 5
+        let result = mul{2} inv
+    ");
+    r.assert_int(90);
+}
+
+#[test]
+fn test_exec_labeled_operator_error_on_unknown_label() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let inv = add{amount: 2} 40
+        let result = inv.unknown_label
+    ");
+    r.assert_error("no labeled argument");
 }
 
 // -- collections: maps --

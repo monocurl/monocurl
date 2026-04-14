@@ -1,8 +1,8 @@
-pub(crate) mod access;
-pub(crate) mod anim;
-pub(crate) mod invoke;
-pub(crate) mod lerp;
-pub(crate) mod ops;
+pub mod access;
+pub mod anim;
+pub mod invoke;
+pub mod lerp;
+pub mod ops;
 
 use std::collections::BTreeSet;
 use std::{future::Future, rc::Rc};
@@ -25,7 +25,7 @@ pub type StdlibReturn<'a> =
     Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
 
 pub type StdlibFunc =
-    for<'a> fn(&'a mut ExecutionState, usize) -> StdlibReturn<'a>;
+    for<'a> fn(&'a mut Executor, usize) -> StdlibReturn<'a>;
 
 pub enum SeekPrimitiveResult {
     Error(ExecutorError),
