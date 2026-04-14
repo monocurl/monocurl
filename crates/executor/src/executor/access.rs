@@ -2,31 +2,19 @@ use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
-    value::{
-        RcValue, Value, rc_value,
-        container::HashableKey,
-    },
+    value::{container::HashableKey, rc_value, RcValue, Value},
 };
 
 use super::{ExecSingle, Executor};
 
 impl Executor {
-
-    fn exec_assign_dfs(
-        &mut self,
-        lhs: Value,
-        rhs: Value,
-        stack_idx: usize,
-    ) -> ExecSingle {
+    fn exec_assign_dfs(&mut self, lhs: Value, rhs: Value, stack_idx: usize) -> ExecSingle {
         if let Value::List(llhs) = &lhs {
             return match &rhs {
                 Value::List(lrhs) if llhs.len() == lrhs.len() => {
                     for (l, r) in llhs.elements.iter().zip(lrhs.elements.iter()) {
-                        let res = self.exec_assign_dfs(
-                            l.borrow().clone(),
-                            r.borrow().clone(),
-                            stack_idx,
-                        );
+                        let res =
+                            self.exec_assign_dfs(l.borrow().clone(), r.borrow().clone(), stack_idx);
 
                         if let ExecSingle::Error(_) = res {
                             return res;
@@ -34,13 +22,11 @@ impl Executor {
                     }
                     ExecSingle::Continue
                 }
-                Value::List(lrhs) => ExecSingle::Error(
-                    ExecutorError::DestructuringError {
-                        lhs_size: llhs.len(),
-                        rhs_size: Some(lrhs.len()),
-                        rhs_type: rhs.type_name(),
-                    },
-                ),
+                Value::List(lrhs) => ExecSingle::Error(ExecutorError::DestructuringError {
+                    lhs_size: llhs.len(),
+                    rhs_size: Some(lrhs.len()),
+                    rhs_type: rhs.type_name(),
+                }),
                 _ => ExecSingle::Error(ExecutorError::DestructuringError {
                     lhs_size: llhs.len(),
                     rhs_size: None,
@@ -51,11 +37,7 @@ impl Executor {
 
         let rc = match lhs.as_lvalue_rc() {
             Some(rc) => rc,
-            None => {
-                return ExecSingle::Error(
-                    ExecutorError::CannotAssignTo(lhs.type_name()),
-                )
-            }
+            None => return ExecSingle::Error(ExecutorError::CannotAssignTo(lhs.type_name())),
         };
 
         let target = rc.borrow().clone();
@@ -112,7 +94,11 @@ impl Executor {
 
         let rc = match lhs.as_lvalue_rc() {
             Some(rc) => rc,
-            None => return ExecSingle::Error(ExecutorError::Other("append-assign: lhs is not an lvalue".into())),
+            None => {
+                return ExecSingle::Error(ExecutorError::Other(
+                    "append-assign: lhs is not an lvalue".into(),
+                ))
+            }
         };
 
         let mut borrowed = rc.borrow_mut();
@@ -123,7 +109,9 @@ impl Executor {
             _ => return ExecSingle::Error(ExecutorError::type_error("list", borrowed.type_name())),
         }
         drop(borrowed);
-        self.state.stack_mut(stack_idx).push(Value::WeakLvalue(RcValue::downgrade(&rc)));
+        self.state
+            .stack_mut(stack_idx)
+            .push(Value::WeakLvalue(RcValue::downgrade(&rc)));
         ExecSingle::Continue
     }
 
@@ -156,7 +144,10 @@ impl Executor {
             match &*base_val {
                 Value::List(list) => {
                     let Value::Integer(idx) = index else {
-                        return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
+                        return ExecSingle::Error(ExecutorError::type_error(
+                            "int",
+                            index.type_name(),
+                        ));
                     };
                     let idx = idx as usize;
                     if idx >= list.elements.len() {
@@ -237,7 +228,10 @@ impl Executor {
             match &base {
                 Value::List(list) => {
                     let Value::Integer(idx) = index else {
-                        return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
+                        return ExecSingle::Error(ExecutorError::type_error(
+                            "int",
+                            index.type_name(),
+                        ));
                     };
                     let idx = idx as usize;
                     if idx >= list.elements.len() {
@@ -254,12 +248,18 @@ impl Executor {
                         Ok(k) => k,
                         Err(e) => return ExecSingle::Error(e),
                     };
-                    let val = map.get(&key).map(|rc| rc.borrow().clone()).unwrap_or(Value::Nil);
+                    let val = map
+                        .get(&key)
+                        .map(|rc| rc.borrow().clone())
+                        .unwrap_or(Value::Nil);
                     self.state.stack_mut(stack_idx).push(val);
                 }
                 Value::String(s) => {
                     let Value::Integer(idx) = index else {
-                        return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
+                        return ExecSingle::Error(ExecutorError::type_error(
+                            "int",
+                            index.type_name(),
+                        ));
                     };
                     let idx = idx as usize;
                     let ch = s.chars().nth(idx).unwrap_or('\0');
@@ -352,10 +352,18 @@ impl Executor {
                             .stack_mut(stack_idx)
                             .push(Value::WeakLvalue(RcValue::downgrade(&arg_rc)));
                     } else {
-                        return ExecSingle::Error(ExecutorError::Other(format!(
-                            "no labeled argument '{}' on operator invocation",
-                            attr_name
-                        )));
+                        let operand_rc = rc_value(inv_rc.operand.as_ref().clone().elide_lvalue());
+                        drop(base_val);
+
+                        if let Value::InvokedOperator(ref mut inner_rc) = *base_rc.borrow_mut() {
+                            let inv = Rc::make_mut(inner_rc);
+                            inv.operand = Box::new(Value::Lvalue(operand_rc.clone()));
+                            inv.invalidate_cache();
+                        }
+                        self.state
+                            .stack_mut(stack_idx)
+                            .push(Value::WeakLvalue(RcValue::downgrade(&operand_rc)));
+                        return self.exec_attribute(stack_idx, section_idx, true, string_index);
                     }
                 }
                 _ => {
@@ -383,10 +391,10 @@ impl Executor {
                         let val = inv_rc.arguments[arg_idx].clone().elide_lvalue();
                         self.state.stack_mut(stack_idx).push(val);
                     } else {
-                        return ExecSingle::Error(ExecutorError::Other(format!(
-                            "no labeled argument '{}' on operator invocation",
-                            attr_name
-                        )));
+                        self.state
+                            .stack_mut(stack_idx)
+                            .push(inv_rc.operand.as_ref().clone().elide_lvalue());
+                        return self.exec_attribute(stack_idx, section_idx, false, string_index);
                     }
                 }
                 _ => {

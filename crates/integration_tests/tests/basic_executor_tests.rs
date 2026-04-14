@@ -848,13 +848,55 @@ fn test_exec_labeled_operator_mutation_updates_downstream_value() {
 #[test]
 fn test_exec_labeled_operator_error_on_unknown_label() {
     let r = run("
-        let add = operator |target, amount| {
-            return [target, target + amount]
+        let f = |x, y| x + y
+        let passthrough = operator |target, amount| {
+            return [target, target]
         }
-        let inv = add{amount: 2} 40
+        let inv = passthrough{amount: 2} f(lbl: 40, 2)
         let result = inv.unknown_label
     ");
     r.assert_error("no labeled argument");
+}
+
+#[test]
+fn test_exec_labeled_operator_delegates_read_to_operand_attribute() {
+    let r = run("
+        let f = |x, y| x + y
+        let passthrough = operator |target, amount| {
+            return [target, target]
+        }
+        let inv = passthrough{amount: 2} f(lbl: 40, 2)
+        let result = inv.lbl
+    ");
+    r.assert_int(40);
+}
+
+#[test]
+fn test_exec_labeled_operator_delegates_mutation_to_operand_attribute() {
+    let r = run("
+        let f = |x, y| x + y
+        let passthrough = operator |target, amount| {
+            return [target, target]
+        }
+        var inv = passthrough{amount: 2} f(lbl: 40, 2)
+        inv.lbl = 50
+        let result = inv.lbl
+    ");
+    r.assert_int(50);
+}
+
+#[test]
+fn test_exec_labeled_operator_operand_mutation_invalidates_cache() {
+    let r = run("
+        let f = |x, y| x + y
+        let passthrough = operator |target, amount| {
+            return [target, target]
+        }
+        var inv = passthrough{amount: 2} f(lbl: 40, 2)
+        inv.lbl = 50
+        let result = inv + 0
+    ");
+    r.assert_int(52);
 }
 
 // -- collections: maps --
