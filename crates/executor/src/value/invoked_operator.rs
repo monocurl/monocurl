@@ -16,7 +16,7 @@ pub struct InvokedOperator {
     pub operand: Box<Value>,
     /// (argument_index, label_name) pairs
     pub labels: SmallVec<[(usize, String); 4]>,
-    /// operator(operand, args)[0]: the identity embed (needed for lerp rule 4/5)
+    /// operator(operand, args)[0]: the identity embed (needed for lerp rule 5)
     pub unmodified: Cell<Option<Box<Value>>>,
     /// operator(operand, args)[1]: the live transformed value
     pub cached_result: Cell<Option<Box<Value>>>,

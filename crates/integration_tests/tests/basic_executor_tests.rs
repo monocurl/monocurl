@@ -107,10 +107,14 @@ fn lex(src: &str) -> Vec<(Token, Span8)> {
 /// compile and execute a snippet of Monocurl slide code.
 /// the source is treated as the body of a single Slide section
 fn run(src: &str) -> ExecResult {
+    run_section(src, SectionType::Slide)
+}
+
+fn run_section(src: &str, section_type: SectionType) -> ExecResult {
     // -- parse --
     let tokens = lex(src);
     let rope: Rope<TextAggregate> = Rope::from_str(src);
-    let mut parser = SectionParser::new(tokens, rope, SectionType::Slide, None, None);
+    let mut parser = SectionParser::new(tokens, rope, section_type.clone(), None, None);
     let stmts = parser.parse_statement_list();
 
     let parse_errors: Vec<String> = parser
@@ -132,7 +136,7 @@ fn run(src: &str) -> ExecResult {
         imported_files: vec![],
         sections: vec![Section {
             body: stmts,
-            section_type: SectionType::Slide,
+            section_type,
         }],
         root_import_span: None,
         was_cached: false,
@@ -896,6 +900,34 @@ fn test_exec_labeled_operator_operand_mutation_invalidates_cache() {
         let result = inv + 0
     ");
     r.assert_int(52);
+}
+
+#[test]
+fn test_exec_native_lerp_numbers() {
+    let r = run_section("
+        let result = __monocurl__native__ lerp(10, 20, 0.25)
+    ", SectionType::StandardLibrary);
+    r.assert_float(12.5);
+}
+
+#[test]
+fn test_exec_native_lerp_list_element() {
+    let r = run_section("
+        let xs = __monocurl__native__ lerp([0, 10], [10, 20], 0.5)
+        let result = xs[1]
+    ", SectionType::StandardLibrary);
+    r.assert_float(15.0);
+}
+
+#[test]
+fn test_exec_native_lerp_operator_rhs_uses_operand() {
+    let r = run_section("
+        let shift = operator |target, delta| {
+            return [target + 100, target + delta]
+        }
+        let result = __monocurl__native__ lerp(10, shift{delta: 4} 20, 0.5)
+    ", SectionType::StandardLibrary);
+    r.assert_float(67.0);
 }
 
 // -- collections: maps --

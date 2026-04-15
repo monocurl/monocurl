@@ -126,11 +126,7 @@ impl Executor {
         t: f64,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            InvokedOperator::value(b_inv, self).await?;
-            let b_unmodified = b_inv.unmodified.take().map(|v| *v).unwrap_or(Value::Nil);
-            b_inv.unmodified.set(Some(Box::new(b_unmodified.clone())));
-
-            let mid = self.lerp(a, b_unmodified, t).await?;
+            let mid = self.lerp(a, b_inv.operand.as_ref().clone(), t).await?;
 
             let operator = match b_inv.operator.as_ref().clone().elide_lvalue() {
                 Value::Operator(op) => op,
