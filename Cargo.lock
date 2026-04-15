@@ -1620,6 +1620,7 @@ dependencies = [
  "geo",
  "smallvec",
  "structs",
+ "sysinfo",
 ]
 
 [[package]]

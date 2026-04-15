@@ -40,6 +40,7 @@ futures = "0.3.31"
 smol = "2.0.2"
 itertools = "0.14.0"
 wide = "0.7"
+sysinfo = "0.31.4"
 
 gpui = { path = "../gpui/crates/gpui" }
 

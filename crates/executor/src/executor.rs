@@ -11,6 +11,7 @@ use std::pin::Pin;
 
 use bytecode::{Bytecode, Instruction};
 use structs::futures::PeriodicYielder;
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 
 use crate::executor::cacheing::ExecutionCache;
 use crate::time::Timestamp;
@@ -56,12 +57,72 @@ pub(crate) enum ExecSingle {
     Error(ExecutorError),
 }
 
+const EXECUTOR_MEMORY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+const MEMORY_CHECK_PERIOD: u32 = 4_096;
+
+struct PeriodicMemoryChecker {
+    count: u32,
+    period: u32,
+    pid: Option<Pid>,
+    system: System,
+    limit_bytes: u64,
+}
+
+impl PeriodicMemoryChecker {
+    fn new(limit_bytes: u64, period: u32) -> Self {
+        let pid = sysinfo::get_current_pid().ok();
+        let refresh_kind = RefreshKind::new().with_processes(
+            ProcessRefreshKind::new().with_memory(),
+        );
+
+        Self {
+            count: 0,
+            period,
+            pid,
+            system: System::new_with_specifics(refresh_kind),
+            limit_bytes,
+        }
+    }
+
+    fn tick(&mut self) -> Result<(), ExecutorError> {
+        self.count += 1;
+        if self.count < self.period {
+            return Ok(());
+        }
+        self.count = 0;
+
+        let Some(pid) = self.pid else {
+            return Ok(());
+        };
+
+        self.system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            ProcessRefreshKind::new().with_memory(),
+        );
+
+        let Some(process) = self.system.process(pid) else {
+            return Ok(());
+        };
+
+        let used = process.memory();
+        if used > self.limit_bytes {
+            return Err(ExecutorError::MemoryLimitExceeded {
+                used,
+                limit: self.limit_bytes,
+            });
+        }
+
+        Ok(())
+    }
+}
+
 pub struct Executor {
     pub state: ExecutionState,
     pub(crate) bytecode: Bytecode,
     pub(crate) native_funcs: Vec<StdlibFunc>,
     pub(crate) cache: ExecutionCache,
     pub(crate) yielder: PeriodicYielder,
+    memory_checker: PeriodicMemoryChecker,
 }
 
 impl Executor {
@@ -73,6 +134,10 @@ impl Executor {
             native_funcs,
             cache,
             yielder: PeriodicYielder::default(),
+            memory_checker: PeriodicMemoryChecker::new(
+                EXECUTOR_MEMORY_LIMIT_BYTES,
+                MEMORY_CHECK_PERIOD,
+            ),
         }
     }
 
@@ -96,6 +161,10 @@ impl Executor {
     }
 
     pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
+        if let Err(err) = self.memory_checker.tick() {
+            return ExecSingle::Error(err);
+        }
+
         let ip = self.state.stack(stack_idx).ip;
         let section_idx = ip.0 as usize;
         let instr_idx = ip.1 as usize;
