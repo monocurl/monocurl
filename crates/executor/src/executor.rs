@@ -20,6 +20,7 @@ use crate::{
         InstructionPointer, RcValue, Value,
         container::{List, Map},
         lambda::Operator,
+        stateful::{Stateful, StatefulNode},
     },
 };
 
@@ -180,10 +181,25 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(resolved);
             }
             Instruction::PushStateful { stack_delta } => {
-                // TODO: build stateful dependency graph
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let resolved = resolve_dereference(&val);
-                self.state.stack_mut(stack_idx).push(resolved);
+                let leader_cell_rc = match val.as_lvalue_rc() {
+                    Some(rc) => rc,
+                    None => return ExecSingle::Error(ExecutorError::type_error(
+                        "state or param variable",
+                        val.type_name(),
+                    )),
+                };
+                if !matches!(&*leader_cell_rc.borrow(), Value::Leader(_)) {
+                    return ExecSingle::Error(ExecutorError::type_error(
+                        "leader",
+                        leader_cell_rc.borrow().type_name(),
+                    ));
+                }
+                let stateful = Stateful {
+                    roots: vec![leader_cell_rc.clone()],
+                    root: StatefulNode::LeaderRef(leader_cell_rc),
+                };
+                self.state.stack_mut(stack_idx).push(Value::Stateful(stateful));
             }
 
             // ----- labels -----
@@ -251,8 +267,14 @@ impl Executor {
             }
             Instruction::ConditionalJump { section, to } => {
                 let val = self.state.stack_mut(stack_idx).pop();
-                if val.is_truthy() {
-                    self.state.stack_mut(stack_idx).ip = (section, to);
+                let val = match val.elide_wrappers(self).await {
+                    Ok(v) => v,
+                    Err(e) => return ExecSingle::Error(e),
+                };
+                match val.check_truthy() {
+                    Ok(true) => { self.state.stack_mut(stack_idx).ip = (section, to); }
+                    Ok(false) => {}
+                    Err(e) => return ExecSingle::Error(e),
                 }
             }
             Instruction::Return { stack_delta } => {
@@ -281,14 +303,16 @@ impl Executor {
                 }
             }
             Instruction::Not => {
-                let val = match self.state.stack_mut(stack_idx).pop().elide_wrappers(self).await
-                {
+                let val = match self.state.stack_mut(stack_idx).pop().elide_wrappers(self).await {
                     Ok(val) => val,
                     Err(e) => return ExecSingle::Error(e),
                 };
-
-                let result = Value::Integer(if val.is_truthy() { 0 } else { 1 });
-                self.state.stack_mut(stack_idx).push(result);
+                match val.check_truthy() {
+                    Ok(truthy) => {
+                        self.state.stack_mut(stack_idx).push(Value::Integer(!truthy as i64));
+                    }
+                    Err(e) => return ExecSingle::Error(e),
+                }
             }
 
             // ----- subscript / attribute -----

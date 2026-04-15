@@ -19,7 +19,7 @@
   - src/value/invoked_function.rs: InvokedFunction (Labeled with recomputation info, or Unlabeled)
   - src/value/invoked_operator.rs: InvokedOperator (operator + operand + labels + unmodified identity embed + cached modified value); extract_operator_result and build_invoked_operator helpers
   - src/value/primitive_anim.rs: PrimitiveAnim enum (Lerp, Set, Wait) — leaf animations
-  - src/value/stateful.rs: Stateful and StatefulNode for reactive dependency graphs
+  - src/value/stateful.rs: Stateful (roots: Vec<RcValue> + root: StatefulNode + evaluate()) and StatefulNode enum for reactive dependency graphs; StatefulOp for arithmetic
   - src/time.rs: Timestamp (slide + time offset)
 - exporter: coordinates process of exporting a scene into a video
 - geo: helper routines for execution (a lot of lib monocurl will reference these routines).
@@ -49,11 +49,11 @@
     - wrapped_line.rs: The text editor is implemented to always soft wrap, so this contains the code for rendering a single logical line onto the screen as possibly many lines, with styling. It also allows for e.g. querying the on screen position given a character location.
     - line_shaper.rs: given the lexing data, static analysis data, and diagnostics associated with a single logical line, it applies styling and splits that into the text runs where within each run all characters are styled the same. This effectively creates the data necessary for a wrapped line.
     - line_map.rs: given a bunch of wrapped lines representing the content, it computes the height each line takes up as well as the y position of any logical line number. This allows for various different coordinate system conversions.
-  - src/services/{mod.rs,lexing.rs,compilation.rs,execution.rs}: background services that run off the main thread. While the user makes changes or seeks to a different spot in the timeline, these services asynchronously update the state of the application. mod.rs contains ServiceManager which proxies the messages between services and the ui state
+  - src/services/{mod.rs,lexing.rs,compilation.rs,execution.rs}: background services that run off the main thread. mod.rs contains ServiceManager and ServiceManagerMessage (including ExecutionSnapshot re-export). execution.rs spawns a dedicated OS thread that owns the Executor (Rc-based, !Send), handles UpdateBytecode/SeekTo/TogglePlay, and sends ExecutionSnapshot back via ServiceManagerMessage::ExecutionStateUpdated
   - src/state: code related to global, document, text editor, and similar state
     - diagnostics.rs: errors, warnings, suggestions that are present in the text editor
     - document_state.rs: for a given document, this is just the textual state and the execution state 
-    - execution_state.rs: (which is anything that is needed for actual execution, such as the current timestamp, the bytecode, parameters).
+    - execution_state.rs: UI-side execution state (current_timestamp, runtime_errors, slide_durations, slide_count, is_playing) updated via ExecutionSnapshot from the executor thread
     - textual_state.rs: this is not only the current text of the document, but also any part of the state of the text editor that might be queryable / editable by other entities in the system (like the current diagnostics, autocomplete). Some other state is owned fully by the text editor instead, in the editor directory. The line is a bit blurry 
     - window_state.rs: global application state, consisting of the active document, which tabs are open, etc
   - src/timeline: a module related to timeline rendering

@@ -5324,6 +5324,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "smol",
+ "stdlib",
  "structs",
  "ui_cli_shared",
  "unicode-segmentation",

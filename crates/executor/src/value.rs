@@ -75,12 +75,12 @@ pub enum Value {
 }
 
 impl Value {
-    pub fn is_truthy(&self) -> bool {
+    pub fn check_truthy(&self) -> Result<bool, ExecutorError> {
         match self {
-            Value::Integer(n) => *n != 0,
-            Value::Float(f) => *f != 0.0,
-            Value::Complex { re, im } => *re != 0.0 || *im != 0.0,
-            _ => false,
+            Value::Integer(n) => Ok(*n != 0),
+            Value::Float(f) => Ok(*f != 0.0),
+            Value::Complex { re, im } => Ok(*re != 0.0 || *im != 0.0),
+            _ => Err(ExecutorError::InvalidCondition(self.type_name())),
         }
     }
 

@@ -20,6 +20,7 @@ pub enum ExecutorError {
     UnsupportedBinaryOp { op: &'static str, lhs: &'static str, rhs: &'static str },
     UnsupportedNegate(&'static str),
     UnhashableKey(&'static str),
+    InvalidCondition(&'static str),
     Other(String),
 }
 
@@ -69,6 +70,7 @@ impl fmt::Display for ExecutorError {
             }
             Self::UnsupportedNegate(ty) => write!(f, "cannot negate {}", ty),
             Self::UnhashableKey(ty) => write!(f, "cannot use {} as a map key", ty),
+            Self::InvalidCondition(ty) => write!(f, "{} has no truthiness — use a numeric or boolean expression instead", ty),
             Self::DestructuringError { lhs_size, rhs_size, rhs_type } => {
                 if let Some(rhs_size) = rhs_size {
                     write!(f, "list destructuring assignment error: cannot assign {} values into a list of length {}", rhs_size, lhs_size)
