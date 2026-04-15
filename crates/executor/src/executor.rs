@@ -10,6 +10,7 @@ use std::{future::Future, rc::Rc};
 use std::pin::Pin;
 
 use bytecode::{Bytecode, Instruction};
+use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
 use crate::time::Timestamp;
@@ -60,6 +61,7 @@ pub struct Executor {
     pub(crate) bytecode: Bytecode,
     pub(crate) native_funcs: Vec<StdlibFunc>,
     pub(crate) cache: ExecutionCache,
+    pub(crate) yielder: PeriodicYielder,
 }
 
 impl Executor {
@@ -69,8 +71,13 @@ impl Executor {
             state: ExecutionState::new(),
             bytecode,
             native_funcs,
-            cache
+            cache,
+            yielder: PeriodicYielder::default(),
         }
+    }
+
+    pub(crate) async fn tick_yielder(&mut self) {
+        self.yielder.tick().await;
     }
 
     pub fn advance_section(&mut self) {

@@ -16,6 +16,10 @@ impl PeriodicYielder {
         Self { count: 0, period }
     }
 
+    pub fn reset(&mut self) {
+        self.count = 0;
+    }
+
     pub async fn tick(&mut self) {
         self.count += 1;
         if self.count >= self.period {

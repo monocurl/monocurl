@@ -37,6 +37,12 @@ pub struct CompilationService {
     sm_tx: UnboundedSender<ServiceManagerMessage>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BatchCompileAction {
+    None,
+    Recompile,
+}
+
 impl CompilationService {
     pub fn new(rx: UnboundedReceiver<CompilationMessage>, execution_tx: UnboundedSender<ExecutionMessage>, sm_tx: UnboundedSender<ServiceManagerMessage>) -> Self {
         Self {
@@ -248,29 +254,52 @@ impl CompilationService {
         let mut last_compile_result = CompileResult::default();
 
         while let Some(message) = self.rx.next().await {
-            // we should do a select! here for best performance
-            match message {
-                CompilationMessage::UpdateLexRope { lex_rope, version, for_text_rope  } => {
-                    latest_text_rope = for_text_rope.clone();
-                    latest_lex_rope = lex_rope.clone();
-                    latest_version = version;
+            let mut compile_action = BatchCompileAction::None;
+            let mut emit_parameter_hint = false;
 
-                    last_compile_result = self.recompile(&mut parse_state, &mut compiler_state, latest_cursor, latest_text_rope.clone(), lex_rope, version).await;
-                },
-                CompilationMessage::UpdateCursor { cursor: c, _version: _} => {
-                    latest_cursor = c;
-
-                    self.emit_parameter_hint(latest_cursor, &last_compile_result, latest_text_rope.clone(), latest_lex_rope.clone(), latest_version).await;
+            for message in std::iter::once(message).chain(std::iter::from_fn(|| self.rx.try_next().ok().flatten())) {
+                match message {
+                    CompilationMessage::UpdateLexRope { lex_rope, version, for_text_rope } => {
+                        latest_text_rope = for_text_rope;
+                        latest_lex_rope = lex_rope;
+                        latest_version = version;
+                        compile_action = BatchCompileAction::Recompile;
+                    },
+                    CompilationMessage::UpdateCursor { cursor: c, _version: _ } => {
+                        latest_cursor = c;
+                        emit_parameter_hint = true;
+                    }
+                    CompilationMessage::RecheckDependencies { physical_path, open_documents } => {
+                        parse_state = ParseImportContext {
+                            root_file_user_path: physical_path,
+                            open_tab_ropes: open_documents,
+                            cached_parses: Default::default()
+                        };
+                        compile_action = BatchCompileAction::Recompile;
+                    }
                 }
-                CompilationMessage::RecheckDependencies { physical_path, open_documents  } => {
-                    parse_state = ParseImportContext {
-                        root_file_user_path: physical_path,
-                        open_tab_ropes: open_documents,
-                        cached_parses: Default::default()
-                    };
+            }
 
-                    last_compile_result = self.recompile(&mut parse_state, &mut compiler_state, latest_cursor, latest_text_rope.clone(), latest_lex_rope.clone(), latest_version).await;
-                }
+            if compile_action == BatchCompileAction::Recompile {
+                last_compile_result = self.recompile(
+                    &mut parse_state,
+                    &mut compiler_state,
+                    latest_cursor,
+                    latest_text_rope.clone(),
+                    latest_lex_rope.clone(),
+                    latest_version
+                ).await;
+                continue;
+            }
+
+            if emit_parameter_hint {
+                self.emit_parameter_hint(
+                    latest_cursor,
+                    &last_compile_result,
+                    latest_text_rope.clone(),
+                    latest_lex_rope.clone(),
+                    latest_version
+                ).await;
             }
         }
     }

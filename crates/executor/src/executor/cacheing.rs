@@ -31,7 +31,7 @@ impl ExecutionCache {
 }
 
 impl Executor {
-    pub async fn update_bytecode(&mut self, bytecode: Bytecode) {
+    pub fn update_bytecode(&mut self, bytecode: Bytecode) {
         // move to latest position that we can
 
         let mut first_invalid = None;
@@ -96,5 +96,15 @@ impl Executor {
         self.cache.entries[self.state.timestamp.slide] = Some(CacheEntry {
             state_after: self.state.clone(),
         });
+    }
+
+    pub fn slide_count(&self) -> usize {
+        self.bytecode.sections.len()
+    }
+
+    pub fn slide_durations(&self) -> Vec<Option<f64>> {
+        self.cache.entries.iter()
+            .map(|e| e.as_ref().map(|en| en.slide_duration()))
+            .collect()
     }
 }

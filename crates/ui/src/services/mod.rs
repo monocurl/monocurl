@@ -12,6 +12,8 @@ mod lexing;
 mod compilation;
 mod execution;
 
+pub(crate) use execution::ExecutionSnapshot;
+
 pub struct ServiceManager {
     textual_state: Entity<TextualState>,
     execution_state: Entity<ExecutionState>,
@@ -50,7 +52,9 @@ pub enum ServiceManagerMessage {
         version: usize,
     },
     UpdateByteCode,
-    ExecutionStateUpdated,
+    ExecutionStateUpdated {
+        snapshot: ExecutionSnapshot,
+    },
 }
 
 impl ServiceManager {
@@ -97,7 +101,7 @@ impl ServiceManager {
 
         cx.background_spawn(lexing.run()).detach();
         cx.background_spawn(compilation.run()).detach();
-        cx.background_spawn(execution.run()).detach();
+        execution.run(); // spawns its own dedicated OS thread (Executor is !Send)
 
         Self {
             textual_state,
@@ -179,8 +183,11 @@ impl ServiceManager {
             ServiceManagerMessage::UpdateByteCode => {
                 // currently no-op
             }
-            ServiceManagerMessage::ExecutionStateUpdated => {
-                // currently no-op
+            ServiceManagerMessage::ExecutionStateUpdated { snapshot } => {
+                self.execution_state.update(cx, |state, cx| {
+                    state.apply_snapshot(snapshot);
+                    cx.notify();
+                });
             }
         }
     }

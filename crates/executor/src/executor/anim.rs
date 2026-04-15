@@ -1,5 +1,3 @@
-use structs::futures::{PeriodicYielder};
-
 use crate::{
     error::ExecutorError, executor::SeekToResult, state::{BakedPrimitiveAnim, ExecutionState}, time::Timestamp, value::{
         Value,
@@ -14,13 +12,10 @@ impl Executor {
     /// run all execution heads until each hits a Play instruction or ends.
     /// yields between iterations so the async executor can interrupt if needed.
     pub async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
-        let mut yielder = PeriodicYielder::default();
-
         while let Some(&stack_idx) = self.state.execution_heads.first() {
-
             // run this head until it yields or ends
             let result = loop {
-                yielder.tick().await;
+                self.tick_yielder().await;
 
                 let r = self.execute_one(stack_idx).await;
                 match r {
@@ -90,12 +85,10 @@ impl Executor {
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
         self.rebase_at_cache_point(target).await;
 
-        let mut yielder = PeriodicYielder::default();
-
         loop {
             // find first primitive anim that happens before target
             loop {
-                yielder.tick().await;
+                self.tick_yielder().await;
 
                 match self.seek_primitive_anim().await {
                     SeekPrimitiveResult::EndOfSection => {

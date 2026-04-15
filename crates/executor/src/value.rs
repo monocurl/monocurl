@@ -10,6 +10,7 @@ pub mod stateful;
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
+use std::sync::Arc;
 
 use crate::error::ExecutorError;
 use crate::executor::Executor;
@@ -23,7 +24,7 @@ use self::{
     leader::Leader,
     primitive_anim::PrimitiveAnim,
     primitive_mesh::PrimitiveMesh,
-    stateful::{Stateful, StatefulNode, StatefulOp},
+    stateful::{Stateful, StatefulNode},
 };
 
 /// (section_index, instruction_offset)
@@ -52,7 +53,7 @@ pub enum Value {
     },
     String(String),
 
-    PrimitiveMesh(Rc<PrimitiveMesh>),
+    PrimitiveMesh(Arc<PrimitiveMesh>),
     PrimitiveAnim(PrimitiveAnim),
 
     Lambda(Rc<Lambda>),
@@ -232,7 +233,7 @@ impl Value {
             // anim blocks are identity-equal (playing one consumes it)
             (Value::AnimBlock(a), Value::AnimBlock(b)) => Rc::ptr_eq(a, b),
             // meshes compared by pointer (deep mesh equality would be expensive)
-            (Value::PrimitiveMesh(a), Value::PrimitiveMesh(b)) => Rc::ptr_eq(a, b),
+            (Value::PrimitiveMesh(a), Value::PrimitiveMesh(b)) => Arc::ptr_eq(a, b),
 
             (Value::PrimitiveAnim(a), Value::PrimitiveAnim(b)) => prim_anim_equal(a, b),
 
@@ -320,47 +321,24 @@ fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
         (StatefulNode::LeaderRef(a), StatefulNode::LeaderRef(b)) => Rc::ptr_eq(a, b),
         (StatefulNode::Constant(a), StatefulNode::Constant(b)) => Value::values_equal(a, b),
         (
-            StatefulNode::BinaryOp {
-                op: aop,
-                lhs: al,
-                rhs: ar,
-            },
-            StatefulNode::BinaryOp {
-                op: bop,
-                lhs: bl,
-                rhs: br,
-            },
-        ) => stateful_op_eq(*aop, *bop) && stateful_equal(al, bl) && stateful_equal(ar, br),
-        (
-            StatefulNode::UnaryOp {
-                op: aop,
-                operand: ao,
-            },
-            StatefulNode::UnaryOp {
-                op: bop,
-                operand: bo,
-            },
-        ) => stateful_op_eq(*aop, *bop) && stateful_equal(ao, bo),
-        (
-            StatefulNode::FunctionApp { func: af, args: aa },
-            StatefulNode::FunctionApp { func: bf, args: ba },
+            StatefulNode::LabeledCall { func: af, args: aa, labels: al },
+            StatefulNode::LabeledCall { func: bf, args: ba, labels: bl },
         ) => {
-            stateful_equal(af, bf)
+            al == bl
+                && stateful_equal(af, bf)
+                && aa.len() == ba.len()
+                && aa.iter().zip(ba.iter()).all(|(a, b)| stateful_equal(a, b))
+        }
+        (
+            StatefulNode::LabeledOperatorCall { operator: ao, operand: aop, extra_args: aa, labels: al },
+            StatefulNode::LabeledOperatorCall { operator: bo, operand: bop, extra_args: ba, labels: bl },
+        ) => {
+            al == bl
+                && stateful_equal(ao, bo)
+                && stateful_equal(aop, bop)
                 && aa.len() == ba.len()
                 && aa.iter().zip(ba.iter()).all(|(a, b)| stateful_equal(a, b))
         }
         _ => false,
     }
-}
-
-fn stateful_op_eq(a: StatefulOp, b: StatefulOp) -> bool {
-    matches!(
-        (a, b),
-        (StatefulOp::Add, StatefulOp::Add)
-            | (StatefulOp::Sub, StatefulOp::Sub)
-            | (StatefulOp::Mul, StatefulOp::Mul)
-            | (StatefulOp::Div, StatefulOp::Div)
-            | (StatefulOp::Negate, StatefulOp::Negate)
-            | (StatefulOp::Not, StatefulOp::Not)
-    )
 }
