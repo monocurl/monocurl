@@ -135,7 +135,7 @@ impl SectionBytecode {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Bytecode {
     pub sections: Vec<Arc<SectionBytecode>>,
 }
@@ -144,5 +144,12 @@ impl Bytecode {
     pub fn new(sections: Vec<Arc<SectionBytecode>>) -> Self {
         assert!(!sections.is_empty());
         Self { sections }
+    }
+
+    pub fn library_sections(&self) -> usize {
+        self.sections
+            .iter()
+            .take_while(|s| s.flags.is_library)
+            .count()
     }
 }

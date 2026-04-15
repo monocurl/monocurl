@@ -1,35 +1,45 @@
 use std::{
-    sync::Arc,
-    time::{Duration, Instant},
+    pin::pin, sync::Arc, time::{Duration, Instant}
 };
 
 use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
-    executor::{Executor, SeekPrimitiveResult, SeekToResult, StepResult},
+    executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
     time::Timestamp,
 };
-use futures::{FutureExt, StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSender}, future};
+use futures::{StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSender}, future};
 use smol::Timer;
 use stdlib::registry::registry;
 
 use crate::services::ServiceManagerMessage;
 
-const DEFAULT_PLAYBACK_FPS: f64 = 60.0;
-
 pub struct ExecutionSnapshot {
     pub current_timestamp: Timestamp,
-    pub errors: Vec<String>,
+    pub runtime_errors: Vec<String>,
+    pub has_compiler_error: bool,
     pub slide_count: usize,
     pub slide_durations: Vec<Option<f64>>,
 }
 
+pub enum PlaybackMode {
+    Presentation,
+    Preview
+}
+
+impl PlaybackMode {
+    pub fn default_time_interval(&self) -> f64 {
+        match self {
+            PlaybackMode::Presentation => 1.0 / 60.0,
+            PlaybackMode::Preview => 1.0 / 30.0,
+        }
+    }
+}
+
 pub enum ExecutionMessage {
     UpdateBytecode {
-        bytecode: Bytecode,
+        bytecode: Option<Bytecode>,
     },
-    SetPlaybackFrameRate {
-        fps: f64,
-    },
+    SetPlaybackMode(PlaybackMode),
     UpdateParameter,
     TogglePlay,
     SeekTo {
@@ -42,26 +52,10 @@ pub struct ExecutionService {
     sm_tx: UnboundedSender<ServiceManagerMessage>,
 }
 
-enum PendingEvent {
-    Closed,
-    Message(ExecutionMessage),
-    Ready,
-}
-
-enum SeekEvent {
-    Closed,
-    Message(ExecutionMessage),
-    Ready(SeekToResult),
-}
-
 fn default_bytecode() -> Bytecode {
     let mut section = SectionBytecode::new(SectionFlags { is_stdlib: true, is_library: true });
     section.instructions.push(Instruction::EndOfExecutionHead);
     Bytecode::new(vec![Arc::new(section)])
-}
-
-fn playback_interval(fps: f64) -> Duration {
-    Duration::from_secs_f64(1.0 / fps)
 }
 
 impl ExecutionService {
@@ -82,230 +76,139 @@ impl ExecutionService {
 
     async fn run_loop(mut self) {
         let native_funcs = registry().func_table();
+
+        let mut has_compiler_error = true;
         let mut executor = Executor::new(default_bytecode(), native_funcs);
         let mut target = Timestamp::default();
         let mut is_playing = false;
-        let mut playback_frame_rate = DEFAULT_PLAYBACK_FPS;
-        let mut last_play_step_at = None;
+        let mut has_seeked_for_play = false;
+        let mut playback_mode = PlaybackMode::Presentation;
+
+        let mut last_update_at = Instant::now();
+
+        let Some(mut message) = self.rx.next().await else {
+            return;
+        };
 
         loop {
-            let mut is_closed = false;
-            while let Ok(message) = self.rx.try_next() {
-                match message {
-                    Some(msg) => self.handle_message(
-                        msg,
-                        &mut executor,
-                        &mut target,
-                        &mut is_playing,
-                        &mut playback_frame_rate,
-                        &mut last_play_step_at,
-                    ),
-                    None => {
-                        is_closed = true;
-                        break;
-                    }
-                }
-            }
-
-            if is_closed {
-                break;
-            }
-
-            if is_playing {
-                if executor.state.has_errors() {
+            match message {
+                ExecutionMessage::UpdateBytecode { bytecode } => {
                     is_playing = false;
-                    target = executor.state.timestamp;
-                    last_play_step_at = None;
-                    continue;
+                    if let Some(bytecode) = bytecode {
+                        let old_user_timestamp = executor.internal_to_user_timestamp(target);
+                        executor.update_bytecode(bytecode);
+                        target = executor.user_to_internal_timestamp(old_user_timestamp);
+                        has_compiler_error = false;
+                    }
+                    else {
+                        has_compiler_error = true;
+                    }
+                    self.emit_snapshot(&mut executor, has_compiler_error);
                 }
+                ExecutionMessage::SetPlaybackMode(ctx) => {
+                    log::info!("playback mode -> {}", match ctx {
+                        PlaybackMode::Presentation => "presentation",
+                        PlaybackMode::Preview => "preview",
+                    });
+                    is_playing = false;
+                    playback_mode = ctx;
+                }
+                ExecutionMessage::SeekTo { target: t } => {
+                    log::info!("seek_to {:?}", t);
+                    is_playing = false;
+                    target = executor.user_to_internal_timestamp(t);
+                }
+                ExecutionMessage::TogglePlay => {
+                    is_playing = !is_playing;
+                    log::info!("playback toggled -> {}", if is_playing { "playing" } else { "paused" });
+                    if is_playing {
+                        last_update_at = Instant::now();
+                        has_seeked_for_play = false;
+                    }
+                }
+                ExecutionMessage::UpdateParameter => {
+                    todo!("TODO")
+                }
+            }
 
-                let frame_interval = playback_interval(playback_frame_rate);
-                let last_step_at = last_play_step_at.get_or_insert_with(Instant::now);
-                let now = Instant::now();
-                let next_step_at = *last_step_at + frame_interval;
-
-                if now < next_step_at {
-                    let next_message = FutureExt::fuse(self.rx.next());
-                    let sleep = FutureExt::fuse(Timer::after(next_step_at - now));
-                    futures::pin_mut!(next_message, sleep);
-
-                    match future::select(next_message, sleep).await {
-                        future::Either::Left((Some(msg), _)) => {
-                            self.handle_message(
-                                msg,
-                                &mut executor,
-                                &mut target,
-                                &mut is_playing,
-                                &mut playback_frame_rate,
-                                &mut last_play_step_at,
-                            );
-                            continue;
+            let state_update = async {
+                if !is_playing || !has_seeked_for_play {
+                    has_seeked_for_play = true;
+                    match executor.seek_to(target).await {
+                        SeekToResult::SeekedTo(reached) => {
+                            target = reached;
                         }
-                        future::Either::Left((None, _)) => break,
-                        future::Either::Right((_, _)) => {}
-                    }
-                }
-
-                let step_started_at = Instant::now();
-                let dt = step_started_at.duration_since(*last_step_at).as_secs_f64();
-
-                let play_event = {
-                    let next_message = FutureExt::fuse(self.rx.next());
-                    let play_step = FutureExt::fuse(Self::play_step(&mut executor, dt, &mut is_playing));
-                    futures::pin_mut!(next_message, play_step);
-
-                    match future::select(next_message, play_step).await {
-                        future::Either::Left((Some(msg), _)) => PendingEvent::Message(msg),
-                        future::Either::Left((None, _)) => PendingEvent::Closed,
-                        future::Either::Right((_, _)) => PendingEvent::Ready,
-                    }
-                };
-
-                match play_event {
-                    PendingEvent::Message(msg) => {
-                        self.handle_message(
-                            msg,
-                            &mut executor,
-                            &mut target,
-                            &mut is_playing,
-                            &mut playback_frame_rate,
-                            &mut last_play_step_at,
-                        );
-                    }
-                    PendingEvent::Closed => break,
-                    PendingEvent::Ready => {
-                        last_play_step_at = Some(step_started_at);
-                        target = executor.state.timestamp;
-                        self.emit_snapshot(&executor);
-                    }
-                }
-            } else if executor.state.timestamp != target && !executor.state.has_errors() {
-                let seek_target = target;
-                let seek_event = {
-                    let next_message = FutureExt::fuse(self.rx.next());
-                    let seek = FutureExt::fuse(executor.seek_to(seek_target));
-                    futures::pin_mut!(next_message, seek);
-
-                    match future::select(next_message, seek).await {
-                        future::Either::Left((Some(msg), _)) => SeekEvent::Message(msg),
-                        future::Either::Left((None, _)) => SeekEvent::Closed,
-                        future::Either::Right((result, _)) => SeekEvent::Ready(result),
-                    }
-                };
-
-                match seek_event {
-                    SeekEvent::Message(msg) => {
-                        self.handle_message(
-                            msg,
-                            &mut executor,
-                            &mut target,
-                            &mut is_playing,
-                            &mut playback_frame_rate,
-                            &mut last_play_step_at,
-                        );
-                    }
-                    SeekEvent::Closed => break,
-                    SeekEvent::Ready(result) => {
-                        match result {
-                            SeekToResult::SeekedTo(reached) => target = reached,
-                            SeekToResult::Error(_) => target = executor.state.timestamp,
+                        SeekToResult::Error(_) => {
+                            target = executor.state.timestamp;
+                            is_playing = false;
                         }
-                        self.emit_snapshot(&executor);
                     }
                 }
-            } else {
-                match self.rx.next().await {
-                    None => break,
-                    Some(msg) => {
-                        self.handle_message(
-                            msg,
-                            &mut executor,
-                            &mut target,
-                            &mut is_playing,
-                            &mut playback_frame_rate,
-                            &mut last_play_step_at,
-                        );
+
+                if is_playing {
+                    let time = Instant::now();
+                    let elapsed = (time - last_update_at).as_secs_f64();
+                    let target_dt = playback_mode.default_time_interval().max(elapsed);
+
+                    let max_slide = match playback_mode {
+                        PlaybackMode::Presentation => executor.state.timestamp.slide,
+                        PlaybackMode::Preview => executor.slide_count(),
+                    };
+
+                    match executor.seek_primitive_anim_skip(max_slide).await {
+                        SeekPrimitiveAnimSkipResult::PrimitiveAnim => {},
+                        SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
+                            // even in presentation mode, actually advance
+                            if executor.state.timestamp.slide + 1 < max_slide {
+                                executor.advance_section().await;
+                            }
+                            is_playing = false;
+                        }
+                        SeekPrimitiveAnimSkipResult::Error(_) => {
+                            is_playing = false;
+                        }
                     }
+
+                    // if still deciding to play
+                    if is_playing {
+                        match executor.step_primitive_anims(target_dt).await {
+                            Ok(_) => {},
+                            Err(_) => is_playing = false
+                        }
+
+                        let full_elapsed = Instant::now().duration_since(last_update_at).as_secs_f64();
+                        last_update_at = Instant::now();
+                        if target_dt > full_elapsed {
+                            Timer::after(Duration::from_secs_f64(target_dt - full_elapsed)).await;
+                        }
+                    }
+                }
+
+                // to avoid double borrow
+                &executor
+            };
+
+            match future::select(self.rx.next(), pin!(state_update)).await {
+                future::Either::Left((Some(msg), _)) => {
+                    message = msg;
+                }
+                future::Either::Left((None, _)) => break,
+                future::Either::Right((executor, _)) => {
+                    self.emit_snapshot(executor, has_compiler_error);
+                    message = match self.rx.next().await {
+                        Some(msg) => msg,
+                        None => break,
+                    };
                 }
             }
         }
     }
 
-    async fn play_step(executor: &mut Executor, dt: f64, is_playing: &mut bool) {
-        loop {
-            match executor.seek_primitive_anim().await {
-                SeekPrimitiveResult::PrimitiveAnim => break,
-                SeekPrimitiveResult::EndOfSection => {
-                    if executor.state.timestamp.slide + 1 < executor.slide_count() {
-                        executor.advance_section();
-                    } else {
-                        *is_playing = false;
-                        return;
-                    }
-                }
-                SeekPrimitiveResult::Error(e) => {
-                    executor.state.error(e.to_string());
-                    *is_playing = false;
-                    return;
-                }
-            }
-        }
-
-        match executor.step_primitive_anims(dt.max(f64::MIN_POSITIVE)).await {
-            StepResult::Continue | StepResult::EndOfAllAnims => {}
-            StepResult::Error(e) => {
-                executor.state.error(e.to_string());
-                *is_playing = false;
-            }
-        }
-    }
-
-    fn handle_message(
-        &self,
-        msg: ExecutionMessage,
-        executor: &mut Executor,
-        target: &mut Timestamp,
-        is_playing: &mut bool,
-        playback_frame_rate: &mut f64,
-        last_play_step_at: &mut Option<Instant>,
-    ) {
-        match msg {
-            ExecutionMessage::UpdateBytecode { bytecode } => {
-                executor.update_bytecode(bytecode);
-                *target = executor.state.timestamp;
-                *last_play_step_at = Some(Instant::now());
-                self.emit_snapshot(executor);
-            }
-            ExecutionMessage::SetPlaybackFrameRate { fps } => {
-                if fps.is_finite() && fps > 0.0 {
-                    *playback_frame_rate = fps;
-                    *last_play_step_at = Some(Instant::now());
-                }
-            }
-            ExecutionMessage::SeekTo { target: t } => {
-                *is_playing = false;
-                *target = t;
-                *last_play_step_at = None;
-            }
-            ExecutionMessage::TogglePlay => {
-                *is_playing = !*is_playing;
-                *target = executor.state.timestamp;
-                if *is_playing {
-                    *last_play_step_at = Some(Instant::now());
-                } else {
-                    *last_play_step_at = None;
-                }
-            }
-            ExecutionMessage::UpdateParameter => {
-                // TODO: apply parameter change and re-evaluate stateful dependents
-            }
-        }
-    }
-
-    fn emit_snapshot(&self, executor: &Executor) {
+    fn emit_snapshot(&self, executor: &Executor, has_compiler_error: bool) {
         let snapshot = ExecutionSnapshot {
             current_timestamp: executor.state.timestamp,
-            errors: executor.state.errors.clone(),
+            runtime_errors: executor.state.errors.clone(),
+            has_compiler_error,
             slide_count: executor.slide_count(),
             slide_durations: executor.slide_durations(),
         };

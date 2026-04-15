@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
+use smallvec::SmallVec;
+
 use crate::error::ExecutorError;
 
 use super::{RcValue, Value};
@@ -8,13 +10,13 @@ use super::{RcValue, Value};
 /// list whose elements are reference-counted / COW for lvalue semantics.
 #[derive(Clone)]
 pub struct List {
-    pub elements: Vec<RcValue>,
+    pub elements: SmallVec<[RcValue; 4]>,
 }
 
 impl List {
     pub fn new() -> Self {
         Self {
-            elements: Vec::new(),
+            elements: SmallVec::new()
         }
     }
 

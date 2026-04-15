@@ -1,17 +1,17 @@
 use crate::{
-    error::ExecutorError, executor::SeekToResult, state::{BakedPrimitiveAnim, ExecutionState}, time::Timestamp, value::{
+    error::ExecutorError, executor::{SeekPrimitiveAnimSkipResult, SeekToResult}, state::{BakedPrimitiveAnim, ExecutionState}, time::Timestamp, value::{
         Value,
         anim_block::AnimBlock,
         primitive_anim::PrimitiveAnim,
     }
 };
 
-use super::{ExecSingle, Executor, SeekPrimitiveResult, StepResult};
+use super::{ExecSingle, Executor, SeekPrimitiveResult};
 
 impl Executor {
     /// run all execution heads until each hits a Play instruction or ends.
     /// yields between iterations so the async executor can interrupt if needed.
-    pub async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
+    async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
         while let Some(&stack_idx) = self.state.execution_heads.first() {
             // run this head until it yields or ends
             let result = loop {
@@ -28,11 +28,13 @@ impl Executor {
                 // in either of the two cases, this execution head gets removed
                 ExecSingle::Play => { }
                 ExecSingle::EndOfHead => { }
-                ExecSingle::Error(e) => return SeekPrimitiveResult::Error(e),
+                ExecSingle::Error(e) => {
+                    self.state.error(e.to_string());
+                    return SeekPrimitiveResult::Error(e)
+                }
                 ExecSingle::Continue => unreachable!(),
             }
         }
-
 
         if self.state.primitive_anims.is_empty() {
             return SeekPrimitiveResult::EndOfSection;
@@ -42,8 +44,36 @@ impl Executor {
         }
     }
 
-    /// step all active primitive animations by dt seconds.
-    pub async fn step_primitive_anims(&mut self, dt: f64) -> StepResult {
+    // seek primitive anim, possibly skipping slides
+    pub async fn seek_primitive_anim_skip(&mut self, max_slide: usize) -> SeekPrimitiveAnimSkipResult {
+        loop {
+            self.tick_yielder().await;
+
+            match self.seek_primitive_anim().await {
+                SeekPrimitiveResult::EndOfSection => {
+                    if self.state.timestamp.slide < max_slide && self.state.timestamp.slide + 1 < self.bytecode.sections.len() {
+                        self.advance_section().await;
+                    }
+                    else {
+                        return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
+                    }
+                }
+                SeekPrimitiveResult::Error(e) => {
+                    return SeekPrimitiveAnimSkipResult::Error(e);
+                }
+                SeekPrimitiveResult::PrimitiveAnim => {
+                    break
+                }
+            }
+        }
+
+        SeekPrimitiveAnimSkipResult::PrimitiveAnim
+    }
+
+    /// step all active primitive animations by dt seconds
+    /// TODO maybe track progress a bit more effective since this suffers from excess dt issues?
+    pub async fn step_primitive_anims(&mut self, dt: f64) -> Result<(), ExecutorError> {
+        debug_assert!(self.state.execution_heads.is_empty());
         self.state.timestamp.time += dt;
 
         let mut finished_indices = Vec::new();
@@ -63,21 +93,23 @@ impl Executor {
         }
 
         for (anim, t) in &in_progress {
-            self.apply_primitive_anim_step(anim, *t);
+            if let Err(err) = self.apply_primitive_anim_step(anim, *t) {
+                self.state.error(err.to_string());
+                return Err(err)
+            }
         }
 
         // finalize finished anims (snap to final state), reverse to preserve indices
         for &i in finished_indices.iter().rev() {
             let baked = self.state.primitive_anims.remove(i);
-            self.apply_primitive_anim_step(&baked.anim, 1.0);
+            if let Err(err) = self.apply_primitive_anim_step(&baked.anim, 1.0) {
+                self.state.error(err.to_string());
+                return Err(err)
+            }
             self.resume_parent_after_anim(baked.parent_stack_idx);
         }
 
-        if self.state.primitive_anims.is_empty() {
-            StepResult::EndOfAllAnims
-        } else {
-            StepResult::Continue
-        }
+        Ok(())
     }
 
     /// seek to a target timestamp by stepping to the next event (animation end)
@@ -87,27 +119,10 @@ impl Executor {
 
         loop {
             // find first primitive anim that happens before target
-            loop {
-                self.tick_yielder().await;
-
-                match self.seek_primitive_anim().await {
-                    SeekPrimitiveResult::EndOfSection => {
-                        if self.state.timestamp.slide < target.slide && self.state.timestamp.slide + 1 < self.bytecode.sections.len() {
-                            self.advance_section();
-                        }
-                        else {
-                            // finished
-                            return SeekToResult::SeekedTo(self.state.timestamp);
-                        }
-                    }
-                    SeekPrimitiveResult::Error(e) => {
-                        self.state.error(e.to_string());
-                        return SeekToResult::Error(e);
-                    }
-                    SeekPrimitiveResult::PrimitiveAnim => {
-                        break
-                    }
-                }
+            match self.seek_primitive_anim_skip(target.slide).await {
+                SeekPrimitiveAnimSkipResult::PrimitiveAnim => {},
+                SeekPrimitiveAnimSkipResult::NoAnimsLeft => return SeekToResult::SeekedTo(self.state.timestamp),
+                SeekPrimitiveAnimSkipResult::Error(e) => return SeekToResult::Error(e),
             }
 
             if self.state.timestamp.slide == target.slide && self.state.timestamp.time >= target.time {
@@ -132,9 +147,8 @@ impl Executor {
             let dt = step_target - self.state.timestamp.time;
 
             match self.step_primitive_anims(dt.max(f64::MIN_POSITIVE)).await {
-                StepResult::EndOfAllAnims => {},
-                StepResult::Continue => {}
-                StepResult::Error(e) => {
+                Ok(_) => {}
+                Err(e) => {
                     self.state.error(e.to_string());
                     return SeekToResult::Error(e);
                 }
@@ -142,7 +156,7 @@ impl Executor {
         }
     }
 
-    fn apply_primitive_anim_step(&mut self, anim: &PrimitiveAnim, t: f64) {
+    fn apply_primitive_anim_step(&mut self, anim: &PrimitiveAnim, t: f64) -> Result<(), ExecutorError> {
         match anim {
             PrimitiveAnim::Set => {
                 for entry in &self.state.leaders {
@@ -166,6 +180,8 @@ impl Executor {
                 }
             }
         }
+
+        Ok(())
     }
 
     fn resume_parent_after_anim(&mut self, parent_stack_idx: usize) {

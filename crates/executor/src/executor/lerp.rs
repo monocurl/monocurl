@@ -279,7 +279,7 @@ impl Executor {
                         )));
                     }
 
-                    let mut elements = Vec::with_capacity(a_list.len());
+                    let mut elements = SmallVec::with_capacity(a_list.len());
                     for (index, (a_elem, b_elem)) in
                         a_list.elements.iter().zip(&b_list.elements).enumerate()
                     {
@@ -316,8 +316,8 @@ impl Executor {
 
                     let mut map = Map::new();
                     for key in &a_map.insertion_order {
-                        let a_value = a_map.get(key).expect("map key missing from entries");
-                        let b_value = b_map.get(key).expect("map key missing from entries");
+                        let a_value = a_map.get(key).unwrap();
+                        let b_value = b_map.get(key).unwrap();
                         map.insert(
                             key.clone(),
                             rc_value(

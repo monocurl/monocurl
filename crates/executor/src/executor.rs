@@ -32,16 +32,16 @@ pub type StdlibReturn<'a> =
 pub type StdlibFunc =
     for<'a> fn(&'a mut Executor, usize) -> StdlibReturn<'a>;
 
-pub enum SeekPrimitiveResult {
+enum SeekPrimitiveResult {
     Error(ExecutorError),
     EndOfSection,
     PrimitiveAnim,
 }
 
-pub enum StepResult {
+pub enum SeekPrimitiveAnimSkipResult {
     Error(ExecutorError),
-    Continue,
-    EndOfAllAnims,
+    PrimitiveAnim,
+    NoAnimsLeft
 }
 
 pub enum SeekToResult {
@@ -145,7 +145,25 @@ impl Executor {
         self.yielder.tick().await;
     }
 
-    pub fn advance_section(&mut self) {
+    pub fn total_sections(&self) -> usize {
+        self.bytecode.sections.len()
+    }
+
+    pub fn user_to_internal_timestamp(&self, user_ts: Timestamp) -> Timestamp {
+        Timestamp {
+            slide: user_ts.slide + self.bytecode.library_sections(),
+            time: user_ts.time,
+        }
+    }
+
+    pub fn internal_to_user_timestamp(&self, internal_ts: Timestamp) -> Timestamp {
+        Timestamp {
+            slide: internal_ts.slide.saturating_sub(self.bytecode.library_sections()),
+            time: internal_ts.time,
+        }
+    }
+
+    pub async fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
 
         self.save_cache();

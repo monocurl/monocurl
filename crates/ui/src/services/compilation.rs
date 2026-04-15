@@ -232,12 +232,9 @@ impl CompilationService {
         self.emit_parameter_hint(latest_cursor, &compile_result, text_rope, lex_rope, version).await;
 
         let okay_bytecode = parse_artifacts.error_diagnostics.is_empty() && compile_result.errors.is_empty();
-        if okay_bytecode {
-            // self.sm_tx.send(ServiceManagerMessage::UpdateBytecode {
-            //     bytecode: compile_result.bytecode.clone(),
-            //     version,
-            // }).await.unwrap();
-        }
+        self.execution_tx.send(ExecutionMessage::UpdateBytecode {
+            bytecode: okay_bytecode.then_some(compile_result.bytecode.clone()),
+        }).await.unwrap();
 
         return compile_result;
     }
