@@ -58,7 +58,7 @@ pub(crate) enum ExecSingle {
 }
 
 const EXECUTOR_MEMORY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-const MEMORY_CHECK_PERIOD: u32 = 4_096;
+const MEMORY_CHECK_PERIOD: u32 = 8_192;
 
 struct PeriodicMemoryChecker {
     count: u32,
