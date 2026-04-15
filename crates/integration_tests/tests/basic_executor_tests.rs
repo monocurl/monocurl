@@ -65,6 +65,38 @@ impl ExecResult {
         }
     }
 
+    fn assert_float_list(&self, expected: &[f64]) {
+        self.assert_ok();
+        match &self.value {
+            Some(Value::List(list)) => {
+                assert_eq!(
+                    list.elements.len(),
+                    expected.len(),
+                    "list length mismatch"
+                );
+
+                for (actual, expected) in list.elements.iter().zip(expected.iter()) {
+                    match &*actual.borrow() {
+                        Value::Float(f) => assert!(
+                            (f - expected).abs() < 1e-9,
+                            "float mismatch: expected {}, got {}",
+                            expected,
+                            f
+                        ),
+                        other => panic!(
+                            "expected float list element, got {}",
+                            other.type_name()
+                        ),
+                    }
+                }
+            }
+            other => panic!(
+                "expected List, got {}",
+                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+            ),
+        }
+    }
+
     fn assert_string(&self, expected: &str) {
         self.assert_ok();
         match &self.value {
@@ -920,6 +952,50 @@ fn test_exec_native_lerp_list_element() {
 }
 
 #[test]
+fn test_exec_native_lerp_vector() {
+    let r = run_section("
+        let result = __monocurl__native__ lerp([0, 10, 20], [10, 20, 30], 0.25)
+    ", SectionType::StandardLibrary);
+    r.assert_float_list(&[2.5, 12.5, 22.5]);
+}
+
+#[test]
+fn test_exec_native_lerp_nested_vector() {
+    let r = run_section("
+        let rows = __monocurl__native__ lerp([[0, 10], [20, 30]], [[10, 20], [30, 40]], 0.5)
+        let result = rows[1]
+    ", SectionType::StandardLibrary);
+    r.assert_float_list(&[25.0, 35.0]);
+}
+
+#[test]
+fn test_exec_native_lerp_labeled_function_result_value() {
+    let r = run_section("
+        let f = |x, y| x + y
+        let result = __monocurl__native__ lerp(f(lbl: 0, 10), f(lbl: 8, 10), 0.25) + 0
+    ", SectionType::StandardLibrary);
+    r.assert_float(12.0);
+}
+
+#[test]
+fn test_exec_native_lerp_labeled_function_preserves_label() {
+    let r = run_section("
+        let f = |x, y| x + y
+        let result = (__monocurl__native__ lerp(f(lbl: 0, 10), f(lbl: 8, 10), 0.25)).lbl
+    ", SectionType::StandardLibrary);
+    r.assert_float(2.0);
+}
+
+#[test]
+fn test_exec_native_lerp_labeled_function_rejects_unlabeled_difference() {
+    let r = run_section("
+        let f = |x, y| x + y
+        let result = __monocurl__native__ lerp(f(1, lbl: 10), f(2, lbl: 20), 0.5)
+    ", SectionType::StandardLibrary);
+    r.assert_error("unlabeled argument at index 0 differs");
+}
+
+#[test]
 fn test_exec_native_lerp_operator_rhs_uses_operand() {
     let r = run_section("
         let shift = operator |target, delta| {
@@ -928,6 +1004,78 @@ fn test_exec_native_lerp_operator_rhs_uses_operand() {
         let result = __monocurl__native__ lerp(10, shift{delta: 4} 20, 0.5)
     ", SectionType::StandardLibrary);
     r.assert_float(67.0);
+}
+
+#[test]
+fn test_exec_native_lerp_labeled_operator_rhs() {
+    let r = run_section("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let result = __monocurl__native__ lerp(10, add{amount: 8} 20, 0.25)
+    ", SectionType::StandardLibrary);
+    r.assert_float(14.5);
+}
+
+#[test]
+fn test_exec_native_lerp_copied_labeled_operator_preserves_label() {
+    let r = run_section("
+        let shift = operator |target, lbl| {
+            return [target, target + lbl]
+        }
+        var x = shift{lbl: 1} 10
+        var y = x
+        y.lbl = 10
+        let result = (__monocurl__native__ lerp(x, y, 0.5)).lbl
+    ", SectionType::StandardLibrary);
+    r.assert_float(5.5);
+}
+
+#[test]
+fn test_exec_native_lerp_copied_labeled_operator_value() {
+    let r = run_section("
+        let shift = operator |target, lbl| {
+            return [target, target + lbl]
+        }
+        var x = shift{lbl: 1} 10
+        var y = x
+        y.lbl = 10
+        let result = (__monocurl__native__ lerp(x, y, 0.5)) + 0
+    ", SectionType::StandardLibrary);
+    r.assert_float(15.5);
+}
+
+#[test]
+fn test_exec_native_lerp_nested_labeled_operator_rhs() {
+    let r = run_section("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let mul = operator |target, factor| {
+            return [target, target * factor]
+        }
+        let result = __monocurl__native__ lerp(10, add{amount: 2} mul{factor: 3} 4, 0.5)
+    ", SectionType::StandardLibrary);
+    r.assert_float(15.0);
+}
+
+#[test]
+fn test_exec_native_lerp_copied_nested_labeled_operator() {
+    let r = run_section("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let mul = operator |target, factor| {
+            return [target, target * factor]
+        }
+        var x = add{amount: 2} mul{factor: 3} 4
+        var y = x
+        y.amount = 6
+        y.factor = 5
+        let z = __monocurl__native__ lerp(x, y, 0.5)
+        let result = z.amount + z.factor + (z + 0)
+    ", SectionType::StandardLibrary);
+    r.assert_float(28.0);
 }
 
 // -- collections: maps --

@@ -22,7 +22,8 @@ impl Executor {
     /// 1. `a == b` (primitive equality) → `a`
     /// 2. both numbers → linear blend
     /// 3. both `InvokedFunction` of the same lambda (same IP) → lerp args element-wise
-    /// 4. `b` is `InvokedOperator` → apply operator to lerped unmodified+b, then lerp embeds
+    /// 4. `InvokedOperator`s recurse by operator stack depth; equal-depth matching stacks lerp
+    ///    operands and labeled args, otherwise the deeper side pops one operator layer
     pub fn lerp<'a>(
         &'a mut self,
         a: Value,
@@ -36,8 +37,25 @@ impl Executor {
                 return Ok(a);
             }
 
-            if let Value::InvokedOperator(ref b_inv) = b {
-                return self.lerp_operator_rhs(a.clone(), b_inv, t).await;
+            let a_operator_count = operator_count(&a);
+            let b_operator_count = operator_count(&b);
+
+            if a_operator_count > b_operator_count {
+                if let Value::InvokedOperator(ref a_inv) = a {
+                    return self.lerp_popped_operator_lhs(a_inv, b.clone(), t).await;
+                }
+            }
+
+            if b_operator_count > a_operator_count {
+                if let Value::InvokedOperator(ref b_inv) = b {
+                    return self.lerp_popped_operator_rhs(a.clone(), b_inv, t).await;
+                }
+            }
+
+            if a_operator_count > 0 {
+                if let (Value::InvokedOperator(a_inv), Value::InvokedOperator(b_inv)) = (&a, &b) {
+                    return self.lerp_invoked_operators(a_inv, b_inv, t).await;
+                }
             }
 
             if let (Value::InvokedFunction(a_inv), Value::InvokedFunction(b_inv)) = (&a, &b) {
@@ -119,21 +137,123 @@ impl Executor {
         })
     }
 
-    fn lerp_operator_rhs<'a>(
+    fn lerp_invoked_operators<'a>(
         &'a mut self,
-        a: Value,
+        a_inv: &'a Rc<InvokedOperator>,
         b_inv: &'a Rc<InvokedOperator>,
         t: f64,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            let mid = self.lerp(a, b_inv.operand.as_ref().clone(), t).await?;
+            if !Value::values_equal(&a_inv.operator, &b_inv.operator) || a_inv.labels != b_inv.labels {
+                return Err(ExecutorError::Other(format!(
+                    "cannot lerp invoked operators with different operators or labeled arguments ({})",
+                    format_label_mismatch(
+                        &a_inv.labels,
+                        &b_inv.labels,
+                        a_inv.arguments.len().max(b_inv.arguments.len())
+                    )
+                )));
+            }
 
-            let operator = match b_inv.operator.as_ref().clone().elide_lvalue() {
+            if a_inv.arguments.len() != b_inv.arguments.len() {
+                return Err(ExecutorError::Other(format!(
+                    "cannot lerp invoked operators with different arity: {} vs {}",
+                    a_inv.arguments.len(),
+                    b_inv.arguments.len()
+                )));
+            }
+
+            let lerped_operand = self
+                .lerp(a_inv.operand.as_ref().clone(), b_inv.operand.as_ref().clone(), t)
+                .await
+                .map_err(|err| lerp_context("cannot lerp operator operands".into(), err))?;
+
+            let mut lerped_args = SmallVec::new();
+            for (index, (ai, bi)) in a_inv
+                .arguments
+                .iter()
+                .cloned()
+                .zip(b_inv.arguments.iter().cloned())
+                .enumerate()
+            {
+                if label_name_at(&a_inv.labels, index).is_some() {
+                    lerped_args.push(self.lerp(ai, bi, t).await.map_err(|err| {
+                        lerp_context(
+                            format!("cannot lerp labeled operator argument at index {}", index),
+                            err,
+                        )
+                    })?);
+                } else if Value::values_equal(&ai, &bi) {
+                    lerped_args.push(ai);
+                } else {
+                    return Err(ExecutorError::Other(format!(
+                        "cannot lerp invoked operators when unlabeled argument at index {} differs",
+                        index
+                    )));
+                }
+            }
+
+            let operator_value = a_inv.operator.as_ref().clone();
+            let operator = match operator_value.clone().elide_lvalue() {
+                Value::Operator(op) => op,
+                other => return Err(ExecutorError::type_error("operator", other.type_name())),
+            };
+
+            let mut full_args: Vec<Value> = vec![lerped_operand.clone()];
+            full_args.extend(lerped_args.iter().cloned());
+            let full_args = fill_defaults(full_args, &operator.0);
+
+            let raw = self.eagerly_invoke_lambda(&operator.0, &full_args).await?;
+            let (initial, modified) = extract_operator_result(raw)?;
+
+            Ok(Value::InvokedOperator(Rc::new(crate::value::invoked_operator::build_invoked_operator(
+                operator_value,
+                lerped_operand,
+                lerped_args,
+                a_inv.labels.clone(),
+                initial,
+                modified,
+            ))))
+        })
+    }
+
+    fn lerp_popped_operator_lhs<'a>(
+        &'a mut self,
+        inv: &'a Rc<InvokedOperator>,
+        other: Value,
+        t: f64,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
+        Box::pin(async move {
+            let mid = self.lerp(inv.operand.as_ref().clone(), other, t).await?;
+            self.lerp_operator_embeds(inv, mid, t).await
+        })
+    }
+
+    fn lerp_popped_operator_rhs<'a>(
+        &'a mut self,
+        other: Value,
+        inv: &'a Rc<InvokedOperator>,
+        t: f64,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
+        Box::pin(async move {
+            let mid = self.lerp(other, inv.operand.as_ref().clone(), t).await?;
+            self.lerp_operator_embeds(inv, mid, t).await
+        })
+    }
+
+    fn lerp_operator_embeds<'a>(
+        &'a mut self,
+        inv: &'a Rc<InvokedOperator>,
+        mid: Value,
+        t: f64,
+    ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
+        Box::pin(async move {
+            let operator = match inv.operator.as_ref().clone().elide_lvalue() {
                 Value::Operator(op) => op,
                 other => return Err(ExecutorError::type_error("operator", other.type_name())),
             };
             let mut full_args: Vec<Value> = vec![mid];
-            full_args.extend(b_inv.arguments.iter().map(|b| b.clone().elide_lvalue()));
+            full_args.extend(inv.arguments.iter().map(|b| b.clone().elide_lvalue()));
             let full_args = fill_defaults(full_args, &operator.0);
 
             let raw = self.eagerly_invoke_lambda(&operator.0, &full_args).await?;
@@ -233,6 +353,22 @@ fn same_lambda_ip(a: &Value, b: &Value) -> Option<InstructionPointer> {
         _ => return None,
     };
     (a_ip == b_ip).then_some(a_ip)
+}
+
+fn operator_count(value: &Value) -> usize {
+    match value {
+        Value::Lvalue(rc) => {
+            let value = rc.borrow();
+            operator_count(&value)
+        }
+        Value::WeakLvalue(weak) => {
+            let rc = weak.upgrade().unwrap();
+            let value = rc.borrow();
+            operator_count(&value)
+        }
+        Value::InvokedOperator(inv) => 1 + operator_count(inv.operand.as_ref()),
+        _ => 0,
+    }
 }
 
 fn lerp_numbers(a: Value, b: Value, t: f64) -> Result<Value, ExecutorError> {
