@@ -22,6 +22,7 @@ pub enum ExecutorError {
     UnsupportedNegate(&'static str),
     UnhashableKey(&'static str),
     InvalidCondition(&'static str),
+    InvalidArgument { arg: &'static str, message: &'static str },
     Other(String),
 }
 
@@ -99,6 +100,9 @@ impl fmt::Display for ExecutorError {
                 }
             },
             Self::TooManyActiveAnimations => write!(f, "too many active animations: limit exceeded"),
+            Self::InvalidArgument { arg, message } => {
+                write!(f, "invalid argument '{}': {}", arg, message)
+            }
             Self::Other(msg) => write!(f, "{}", msg),
         }
     }

@@ -150,21 +150,23 @@ impl ExecutionService {
                         SeekToResult::SeekedTo(reached) => {
                             target = reached;
                         }
-                        SeekToResult::Error(e) => {
+                        SeekToResult::Error(_) => {
                             target = executor.state.timestamp;
                             is_playing = false;
                         }
                     }
+
+                    Self::emit_snapshot(&self.sm_tx, &executor, has_compiler_error, is_playing, false, version);
                 }
 
-                if is_playing {
+                while is_playing {
                     let time = Instant::now();
                     let elapsed = (time - last_update_at).as_secs_f64();
                     let target_dt = playback_mode.default_time_interval().max(elapsed);
 
                     let max_slide = match playback_mode {
                         PlaybackMode::Presentation => executor.state.timestamp.slide,
-                        PlaybackMode::Preview => executor.real_slide_count(),
+                        PlaybackMode::Preview => executor.total_sections(),
                     };
 
                     match executor.seek_primitive_anim_skip(max_slide).await {
@@ -188,16 +190,20 @@ impl ExecutionService {
                             Err(_) => is_playing = false
                         }
 
+                        target = executor.state.timestamp;
+
+                        Self::emit_snapshot(&self.sm_tx, &executor, has_compiler_error, is_playing, false, version);
+
                         let full_elapsed = Instant::now().duration_since(last_update_at).as_secs_f64();
                         last_update_at = Instant::now();
                         if target_dt > full_elapsed {
                             Timer::after(Duration::from_secs_f64(target_dt - full_elapsed)).await;
                         }
                     }
+                    else {
+                        Self::emit_snapshot(&self.sm_tx, &executor, has_compiler_error, is_playing, false, version);
+                    }
                 }
-
-                // to avoid double borrow
-                (&executor, is_playing)
             };
 
             match future::select(self.rx.next(), pin!(state_update)).await {
@@ -205,8 +211,7 @@ impl ExecutionService {
                     message = msg;
                 }
                 future::Either::Left((None, _)) => break,
-                future::Either::Right(((executor, snap_is_playing), _)) => {
-                    Self::emit_snapshot(&self.sm_tx, executor, has_compiler_error, snap_is_playing, false, version);
+                future::Either::Right((_, _)) => {
                     message = match self.rx.next().await {
                         Some(msg) => msg,
                         None => break,

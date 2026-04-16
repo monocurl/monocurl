@@ -80,7 +80,10 @@ struct TrackPrepaint {
     slide_xs: Vec<f32>,
     gap_ws: Vec<f32>,
     playhead_x: f32,
+    // effective display duration per slide (may be inferred from current_time)
     durations: Vec<Option<f64>>,
+    // true if the duration was explicitly provided (determines border color)
+    explicit: Vec<bool>,
     // vertical offset to center content when canvas is taller than CONTENT_H
     vert_offset: f32,
     dur_texts: Vec<ShapedLine>,
@@ -243,7 +246,11 @@ impl Timeline {
         durations: Vec<Option<f64>>,
         zoom: f32,
     ) -> impl IntoElement {
-        let track_w = compute_track_width(slide_count, &durations, zoom);
+        // use inferred duration for the current slide when computing track width
+        let effective_for_width: Vec<Option<f64>> = durations.iter().enumerate().map(|(i, &d)| {
+            if d.is_none() && i == current_slide && current_time > 0.0 { Some(current_time) } else { d }
+        }).collect();
+        let track_w = compute_track_width(slide_count, &effective_for_width, zoom);
         let font = font(FontSet::UI);
 
         let track = canvas(
@@ -251,8 +258,18 @@ impl Timeline {
                 let durations = durations.clone();
                 let font = font.clone();
                 move |bounds, window, _cx| {
-                    let slide_xs = compute_slide_xs(slide_count, &durations, zoom);
-                    let gap_ws = compute_gap_ws(slide_count, &durations, zoom);
+                    // fill in current_time for the current slide if its duration is unknown
+                    let effective: Vec<Option<f64>> = durations.iter().enumerate().map(|(i, &d)| {
+                        if d.is_none() && i == current_slide && current_time > 0.0 {
+                            Some(current_time)
+                        } else {
+                            d
+                        }
+                    }).collect();
+                    let explicit: Vec<bool> = durations.iter().map(|d| d.is_some()).collect();
+
+                    let slide_xs = compute_slide_xs(slide_count, &effective, zoom);
+                    let gap_ws = compute_gap_ws(slide_count, &effective, zoom);
                     let playhead_x = compute_playhead_x(current_slide, current_time, &slide_xs, &gap_ws, zoom);
                     let vert_offset = (f32::from(bounds.size.height) - CONTENT_H).max(0.0) / 2.0;
 
@@ -267,7 +284,7 @@ impl Timeline {
                     };
 
                     let dur_texts = (0..slide_count).map(|i| {
-                        let s = durations.get(i).and_then(|d| *d)
+                        let s = effective.get(i).and_then(|d| *d)
                             .map(|d| format!("{:.2}s", d))
                             .unwrap_or_else(|| "—".to_string());
                         ts.shape_line(SharedString::from(s.clone()), px(DUR_FONT_SIZE), &[make_run(&s, SUBTEXT)], None)
@@ -278,11 +295,11 @@ impl Timeline {
                         ts.shape_line(SharedString::from(s.clone()), px(LABEL_FONT_SIZE), &[make_run(&s, SUBTEXT)], None)
                     }).collect();
 
-                    TrackPrepaint { slide_xs, gap_ws, playhead_x, durations, vert_offset, dur_texts, label_texts }
+                    TrackPrepaint { slide_xs, gap_ws, playhead_x, durations: effective, explicit, vert_offset, dur_texts, label_texts }
                 }
             },
             move |bounds, prepaint, window, cx| {
-                let TrackPrepaint { slide_xs, gap_ws, playhead_x, durations, vert_offset, dur_texts, label_texts } = prepaint;
+                let TrackPrepaint { slide_xs, gap_ws, playhead_x, durations, explicit, vert_offset, dur_texts, label_texts } = prepaint;
                 let ox = bounds.origin.x;
                 // oy_full: top of canvas (for playhead spanning full height)
                 // oy: content origin, offset to vertically center slides
@@ -335,7 +352,7 @@ impl Timeline {
                 // slide boxes with duration text at top and label below
                 for i in 0..slide_count {
                     let bx = slide_xs[i];
-                    let border_color: Hsla = if i <= current_slide { ACTIVE_BORDER } else { INACTIVE_BORDER }.into();
+                    let border_color: Hsla = if explicit[i] { ACTIVE_BORDER } else { INACTIVE_BORDER }.into();
                     let box_bounds = Bounds::new(
                         point(ox + px(bx), oy + px(PADDING_V)),
                         size(px(SLIDE_W), px(SLIDE_H)),

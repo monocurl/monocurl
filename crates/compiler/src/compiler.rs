@@ -381,9 +381,11 @@ impl Compiler {
             self.error(src.clone(), "too many instructions in section");
         }
         self.current_section_mut().instructions.push(instruction);
+
+        let real_span = self.bundle_root_import_span.clone().unwrap_or(src);
         self.current_section_mut()
             .annotations
-            .push(InstructionAnnotation { source_loc: src });
+            .push(InstructionAnnotation { source_loc: real_span });
     }
 
     fn emit_push(&mut self, instruction: Instruction, src: Span8) {

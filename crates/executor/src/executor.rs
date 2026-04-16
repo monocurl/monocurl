@@ -151,14 +151,14 @@ impl Executor {
 
     pub fn user_to_internal_timestamp(&self, user_ts: Timestamp) -> Timestamp {
         Timestamp {
-            slide: user_ts.slide + self.bytecode.library_sections(),
+            slide: user_ts.slide + self.bytecode.non_slide_sections(),
             time: user_ts.time,
         }
     }
 
     pub fn internal_to_user_timestamp(&self, internal_ts: Timestamp) -> Timestamp {
         Timestamp {
-            slide: internal_ts.slide.saturating_sub(self.bytecode.library_sections()),
+            slide: internal_ts.slide.saturating_sub(self.bytecode.non_slide_sections()),
             time: internal_ts.time,
         }
     }
@@ -176,6 +176,7 @@ impl Executor {
         let ip: InstructionPointer = ((self.state.timestamp.slide + 1) as u16, 0);
         self.state.stack_mut(ExecutionState::ROOT_STACK_ID).ip = ip;
         self.state.timestamp.slide += 1;
+        self.state.timestamp.time = 0.0;
     }
 
     pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {

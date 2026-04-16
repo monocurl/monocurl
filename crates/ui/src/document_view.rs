@@ -21,7 +21,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
         KeyBinding::new("escape", UnfocusEditor, Some("!presenter")),
 
-        KeyBinding::new("space shift-space", TogglePlaying, Some("!editor")),
+        KeyBinding::new("space", TogglePlaying, Some("!editor")),
+        KeyBinding::new("shift-space", TogglePlaying, Some("!editor")),
         KeyBinding::new("secondary-shift-space,", TogglePlaying, None),
 
         KeyBinding::new(",", PrevSlide, Some("!editor")),
@@ -154,14 +155,14 @@ impl DocumentView {
     fn epsilon_forward(&mut self, _ : &EpsilonForward, _w: &mut Window, cx: &mut Context<Self>) {
         println!("Epsilon Forward");
         self.timestamp_transform(cx, |timestamp| {
-            Timestamp::new(timestamp.slide, timestamp.time + 1e-3)
+            Timestamp::new(timestamp.slide, timestamp.time + 1.0 / 30.0)
         });
     }
 
     fn epsilon_backward(&mut self, _ : &EpsilonBackward, _w: &mut Window, cx: &mut Context<Self>) {
         println!("Epsilon Backward");
         self.timestamp_transform(cx, |timestamp| {
-            Timestamp::new(timestamp.slide, (timestamp.time - 1e-3).max(0.0))
+            Timestamp::new(timestamp.slide, (timestamp.time - 1.0 / 30.0).max(0.0))
         });
     }
 

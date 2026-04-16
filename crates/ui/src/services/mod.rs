@@ -216,8 +216,10 @@ impl ServiceManager {
         let ts = self.timestamp(cx);
         let next = if ts.time > 1e-3 {
             Timestamp::new(ts.slide, 0.0)
+        } else if ts.slide == 0 {
+            Timestamp::new(0, 0.0)
         } else {
-            Timestamp::new(ts.slide.saturating_sub(1), f64::INFINITY)
+            Timestamp::new(ts.slide - 1, 0.0)
         };
         self.seek_to(next);
     }

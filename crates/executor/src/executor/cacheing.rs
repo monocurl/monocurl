@@ -10,8 +10,7 @@ struct CacheEntry {
 
 impl CacheEntry {
     pub fn slide_duration(&self) -> f64 {
-        self.state_after.timestamp.slide as f64 + 3.0
-        // self.state_after.timestamp.time
+        self.state_after.timestamp.time
     }
 }
 
@@ -70,9 +69,9 @@ impl Executor {
     // given a target, find the first cache point that we can base off of
     pub(crate) async fn rebase_at_cache_point(&mut self, target: Timestamp) {
         let valid_state = !self.state.has_errors();
-        let in_future = target > self.state.timestamp;
+        let in_future = target >= self.state.timestamp;
 
-        if valid_state && !in_future {
+        if valid_state && in_future {
             // just start from here
             return;
         }
