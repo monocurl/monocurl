@@ -178,17 +178,10 @@ fn load_stdlib_bundle(path: impl AsRef<Path>) -> Arc<SectionBundle> {
     })
 }
 
-/// core runner: compiles and executes the given slides, seeking to the target
-/// timestamp within the given user slide index.
-///
-/// `stdlib_bundles` are prepended before the user bundle; the user bundle
-/// automatically imports all of them by index.
-fn run_anim_impl(
+fn build_anim_executor(
     slides: &[(&str, SectionType)],
-    target_slide: usize,
-    target_time: f64,
     stdlib_bundles: &[Arc<SectionBundle>],
-) -> AnimResult {
+) -> Result<(Executor, usize), AnimResult> {
     let mut all_errors: Vec<String> = Vec::new();
     let mut sections: Vec<Section> = Vec::new();
     for (src, section_type) in slides {
@@ -198,15 +191,14 @@ fn run_anim_impl(
     }
 
     if !all_errors.is_empty() {
-        return AnimResult {
+        return Err(AnimResult {
             timestamp: Timestamp::default(),
             leaders: vec![],
             user_slide_count: 0,
             errors: all_errors,
-        };
+        });
     }
 
-    // the user bundle imports all stdlib bundles by their position in the slice
     let imported_files: Vec<usize> = (0..stdlib_bundles.len()).collect();
 
     let user_bundle = Arc::new(SectionBundle {
@@ -218,7 +210,6 @@ fn run_anim_impl(
         was_cached: false,
     });
 
-    // compile: stdlib bundles first, then the user bundle
     let mut bundles: Vec<Arc<SectionBundle>> = stdlib_bundles.to_vec();
     bundles.push(user_bundle);
 
@@ -227,31 +218,22 @@ fn run_anim_impl(
 
     let compile_errors: Vec<String> = result.errors.iter().map(|e| e.message.clone()).collect();
     if !compile_errors.is_empty() {
-        return AnimResult {
+        return Err(AnimResult {
             timestamp: Timestamp::default(),
             leaders: vec![],
             user_slide_count: 0,
             errors: compile_errors,
-        };
+        });
     }
 
-    let mut executor = Executor::new(result.bytecode, registry().func_table());
-
-    // compute how many sections are non-slide (prelude + stdlib) by mapping
-    // user slide 0 → its internal index
+    let executor = Executor::new(result.bytecode, registry().func_table());
     let non_slide = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0)).slide;
     let user_slide_count = executor.total_sections() - non_slide;
 
-    let internal_target = executor.user_to_internal_timestamp(Timestamp::new(target_slide, target_time));
+    Ok((executor, user_slide_count))
+}
 
-    let mut runtime_errors: Vec<String> = Vec::new();
-    smol::block_on(async {
-        match executor.seek_to(internal_target).await {
-            SeekToResult::SeekedTo(_) => {}
-            SeekToResult::Error(e) => runtime_errors.push(e.to_string()),
-        }
-    });
-
+fn collect_anim_result(executor: Executor, user_slide_count: usize, mut runtime_errors: Vec<String>) -> AnimResult {
     runtime_errors.extend(executor.state.errors.iter().map(|(msg, _)| msg.clone()));
 
     let leaders = executor
@@ -281,6 +263,75 @@ fn run_anim_impl(
     }
 }
 
+/// core runner: compiles and executes the given slides, seeking to the target
+/// timestamp within the given user slide index.
+///
+/// `stdlib_bundles` are prepended before the user bundle; the user bundle
+/// automatically imports all of them by index.
+fn run_anim_impl(
+    slides: &[(&str, SectionType)],
+    target_slide: usize,
+    target_time: f64,
+    stdlib_bundles: &[Arc<SectionBundle>],
+) -> AnimResult {
+    let (mut executor, user_slide_count) = match build_anim_executor(slides, stdlib_bundles) {
+        Ok(data) => data,
+        Err(result) => return result,
+    };
+
+    let internal_target = executor.user_to_internal_timestamp(Timestamp::new(target_slide, target_time));
+
+    let mut runtime_errors: Vec<String> = Vec::new();
+    smol::block_on(async {
+        match executor.seek_to(internal_target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => runtime_errors.push(e.to_string()),
+        }
+    });
+
+    collect_anim_result(executor, user_slide_count, runtime_errors)
+}
+
+fn run_anim_playback_impl(
+    slides: &[(&str, SectionType)],
+    start_slide: usize,
+    start_time: f64,
+    dt: f64,
+    stdlib_bundles: &[Arc<SectionBundle>],
+) -> AnimResult {
+    let (mut executor, user_slide_count) = match build_anim_executor(slides, stdlib_bundles) {
+        Ok(data) => data,
+        Err(result) => return result,
+    };
+
+    let internal_start = executor.user_to_internal_timestamp(Timestamp::new(start_slide, start_time));
+
+    let mut runtime_errors = Vec::new();
+    smol::block_on(async {
+        match executor.seek_to(internal_start).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => {
+                runtime_errors.push(e.to_string());
+                return;
+            }
+        }
+
+        let max_slide = executor.total_sections();
+        loop {
+            match executor.advance_playback(max_slide, dt).await {
+                Ok(true) => {}
+                Ok(false) => break,
+                Err(e) => {
+                    runtime_errors.push(e.to_string());
+                    break;
+                }
+            }
+        }
+    });
+
+    collect_anim_result(executor, user_slide_count, runtime_errors)
+}
+
 // ── public runners ────────────────────────────────────────────────────────────
 
 /// run a single Slide section, seek to end of slide.
@@ -302,6 +353,11 @@ pub fn run_anim_with_stdlib(src: &str) -> AnimResult {
 pub fn run_anim_with_stdlib_at(src: &str, time: f64) -> AnimResult {
     let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
     run_anim_impl(&[(src, SectionType::Slide)], 0, time, &[anim_mcl])
+}
+
+pub fn run_anim_with_stdlib_playback_at(src: &str, start_time: f64, dt: f64) -> AnimResult {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    run_anim_playback_impl(&[(src, SectionType::Slide)], 0, start_time, dt, &[anim_mcl])
 }
 
 /// run multiple Slide sections, seeking to the given user slide and time.
@@ -361,6 +417,57 @@ fn test_wait_sequential_total_duration() {
         play Wait(2)
     ");
     r.assert_ok().assert_slide_time_approx(3.0, 1e-9);
+}
+
+#[test]
+fn test_wait_sequential_playback_keeps_leftover_dt() {
+    let r = run_anim_with_stdlib_playback_at("
+        play Wait(0.01)
+        play Wait(0.02)
+        play Wait(0.03)
+    ", 0.0, 0.03);
+    r.assert_ok().assert_slide_time_approx(0.06, 1e-9);
+}
+
+#[test]
+fn test_wait_sequential_playback_from_off_grid_start_keeps_true_end_time() {
+    let r = run_anim_with_stdlib_playback_at("
+        play Wait(0.01)
+        play Wait(0.02)
+        play Wait(0.03)
+    ", 0.0234234, 0.03);
+    r.assert_ok().assert_slide_time_approx(0.06, 1e-9);
+}
+
+#[test]
+fn test_wait_nested_playback_keeps_leftover_dt_across_resumed_parent() {
+    let r = run_anim_with_stdlib_playback_at("
+        let nested = anim {
+            play Wait(0.01)
+            play Wait(0.02)
+        }
+        play nested
+        play Wait(0.03)
+    ", 0.0, 0.04);
+    r.assert_ok().assert_slide_time_approx(0.06, 1e-9);
+}
+
+#[test]
+fn test_wait_parallel_playback_keeps_leftover_dt_until_all_heads_finish() {
+    let r = run_anim_with_stdlib_playback_at("
+        play [Wait(0.01), Wait(0.05)]
+        play Wait(0.02)
+    ", 0.0, 0.03);
+    r.assert_ok().assert_slide_time_approx(0.07, 1e-9);
+}
+
+#[test]
+fn test_wait_parallel_playback_from_off_grid_start_keeps_true_end_time() {
+    let r = run_anim_with_stdlib_playback_at("
+        play [Wait(0.01), Wait(0.05)]
+        play Wait(0.02)
+    ", 0.0234234, 0.03);
+    r.assert_ok().assert_slide_time_approx(0.07, 1e-9);
 }
 
 #[test]

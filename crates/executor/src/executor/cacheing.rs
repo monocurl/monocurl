@@ -73,6 +73,7 @@ impl Executor {
 
         if valid_state && in_future {
             // just start from here
+            self.state.pending_playback_time = 0.0;
             return;
         }
         else {
@@ -87,6 +88,8 @@ impl Executor {
                 self.state = ExecutionState::new();
             }
         }
+
+        self.state.pending_playback_time = 0.0;
     }
 
     // called right before advance to next section

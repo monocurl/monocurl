@@ -92,7 +92,6 @@ impl Executor {
     }
 
     /// step all active primitive animations by dt seconds
-    /// TODO maybe track progress a bit more effective since this suffers from excess dt issues?
     pub async fn step_primitive_anims(&mut self, dt: f64) -> Result<(), ExecutorError> {
         debug_assert!(self.state.execution_heads.is_empty());
         self.state.timestamp.time += dt;
@@ -133,6 +132,46 @@ impl Executor {
         Ok(())
     }
 
+    /// consume playback time continuously, carrying leftover dt across resumed heads
+    pub async fn advance_playback(&mut self, max_slide: usize, dt: f64) -> Result<bool, ExecutorError> {
+        debug_assert!(dt >= 0.0);
+        self.state.pending_playback_time += dt;
+
+        while self.state.pending_playback_time > 0.0 {
+            match self.seek_primitive_anim_skip(max_slide).await {
+                SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
+                SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
+                    self.state.pending_playback_time = 0.0;
+                    return Ok(false);
+                }
+                SeekPrimitiveAnimSkipResult::Error(e) => {
+                    self.state.pending_playback_time = 0.0;
+                    return Err(e);
+                }
+            }
+
+            let next_end = self
+                .state
+                .primitive_anims
+                .iter()
+                .map(|b| b.end_time)
+                .fold(f64::INFINITY, f64::min);
+
+            let step_dt = (next_end - self.state.timestamp.time)
+                .min(self.state.pending_playback_time)
+                .max(0.0);
+
+            self.step_primitive_anims(step_dt).await?;
+            self.state.pending_playback_time -= step_dt;
+
+            if self.state.pending_playback_time <= f64::EPSILON {
+                self.state.pending_playback_time = 0.0;
+            }
+        }
+
+        Ok(true)
+    }
+
     /// seek to a target timestamp by stepping to the next event (animation end)
     /// rather than fixed dt steps.
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
@@ -167,7 +206,7 @@ impl Executor {
             );
             let dt = step_target - self.state.timestamp.time;
 
-            match self.step_primitive_anims(dt.max(f64::MIN_POSITIVE)).await {
+            match self.step_primitive_anims(dt).await {
                 Ok(_) => {}
                 Err(e) => {
                     return SeekToResult::Error(e);

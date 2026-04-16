@@ -112,6 +112,8 @@ pub const MAX_EXECUTION_HEADS: usize = 1000;
 #[derive(Clone)]
 pub struct ExecutionState {
     pub timestamp: Timestamp,
+    /// playback time budget that still needs to be consumed after resuming heads
+    pub pending_playback_time: f64,
 
     global_stack_counter: usize,
     // execution stacks that have not finished yet
@@ -151,6 +153,7 @@ impl ExecutionState {
     pub fn new() -> Self {
         let mut ret = Self {
             timestamp: Timestamp::default(),
+            pending_playback_time: 0.0,
             global_stack_counter: 0,
             alive_stack_count: 0,
             execution_stacks: Vec::new(),

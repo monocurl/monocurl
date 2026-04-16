@@ -186,8 +186,12 @@ impl ExecutionService {
 
                     // if still deciding to play
                     if is_playing {
-                        match executor.step_primitive_anims(target_dt).await {
-                            Ok(_) => {},
+                        match executor.advance_playback(max_slide, target_dt).await {
+                            Ok(still_has_work) => {
+                                if !still_has_work {
+                                    is_playing = false;
+                                }
+                            }
                             Err(_) => is_playing = false
                         }
 
