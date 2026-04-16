@@ -488,6 +488,60 @@ fn test_anim_block_duration() {
     r.assert_ok().assert_slide_time_approx(2.5, 1e-9);
 }
 
+#[test]
+fn test_anim_blocks_played_in_loop_are_sequential() {
+    let r = run_anim_with_stdlib("
+        for (i in [1, 2, 3]) {
+            play anim {
+                play Wait(i)
+            }
+        }
+    ");
+    r.assert_ok().assert_slide_time_approx(6.0, 1e-9);
+}
+
+#[test]
+fn test_anim_block_list_built_in_loop_plays_in_parallel() {
+    let r = run_anim_with_stdlib("
+        var blocks = []
+        for (i in [1, 2, 3]) {
+            blocks .= anim {
+                play Wait(i)
+            }
+        }
+        play blocks
+    ");
+    r.assert_ok().assert_slide_time_approx(3.0, 1e-9);
+}
+
+#[test]
+fn test_nested_anim_blocks_accumulate_duration() {
+    let r = run_anim_with_stdlib("
+        play anim {
+            play anim {
+                play Wait(1)
+                play anim {
+                    play Wait(2)
+                }
+            }
+            play Wait(3)
+        }
+    ");
+    r.assert_ok().assert_slide_time_approx(6.0, 1e-9);
+}
+
+#[test]
+fn test_anim_blocks_generated_from_lambdas() {
+    let r = run_anim_with_stdlib("
+        let make_wait = |t| anim {
+            play Wait(t)
+        }
+        play make_wait(1.5)
+        play make_wait(2.25)
+    ");
+    r.assert_ok().assert_slide_time_approx(3.75, 1e-9);
+}
+
 // -- seeking to a specific time within a slide --
 
 #[test]

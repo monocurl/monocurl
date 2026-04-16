@@ -36,7 +36,7 @@ impl Render for Viewport {
                     .flex_1()
                     .size_full()
                     .bg(ring_color)
-                    .p(px(1.5))
+                    .p(px(1.0))
                     .child(
                         gpui::div()
                             .size_full()
