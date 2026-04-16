@@ -1,6 +1,8 @@
 use gpui::*;
 use std::{cell::Cell, rc::Rc};
 
+use crate::theme::Theme;
+
 const HANDLE_SIZE: f32 = 4.0;
 const DIVIDER_SIZE: f32 = 1.0;
 const MIN_SIZE: f32 = 50.0;
@@ -10,6 +12,7 @@ pub struct Split {
     first: AnyElement,
     second: AnyElement,
     default_flex: f32,
+    divider_color: Hsla,
 }
 
 impl Split {
@@ -19,11 +22,17 @@ impl Split {
             first,
             second,
             default_flex: 0.5,
+            divider_color: Theme::light().split_divider.into(),
         }
     }
 
     pub fn default_flex(mut self, ratio: f32) -> Self {
         self.default_flex = ratio;
+        self
+    }
+
+    pub fn divider_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.divider_color = color.into();
         self
     }
 }
@@ -137,7 +146,7 @@ impl Element for Split {
         self.first.paint(window, cx);
 
         // paint divider on top of children so it's visible
-        window.paint_quad(fill(layout.divider_bounds, rgba(0x9CA0B0ff)));
+        window.paint_quad(fill(layout.divider_bounds, self.divider_color));
     }
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {

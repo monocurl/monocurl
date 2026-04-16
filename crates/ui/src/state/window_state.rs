@@ -38,7 +38,7 @@ pub struct RecentlyOpened {
 struct WindowStateSerde {
     pub screen: ActiveScreenSerde,
     pub recently_opened: Vec<RecentlyOpened>,
-    pub open_documents: Vec<OpenDocumentSerde>
+    pub open_documents: Vec<OpenDocumentSerde>,
 }
 
 #[derive(Clone, Debug)]
@@ -200,7 +200,7 @@ impl WindowState {
             open_documents: self.open_documents.iter().map(|doc| OpenDocumentSerde {
                 internal_path: doc.internal_path.clone(),
                 user_path: doc.user_path.clone()
-            }).collect()
+            }).collect(),
         };
 
         let data = serde_json::to_string_pretty(&serde).expect("Could not serialize window state");

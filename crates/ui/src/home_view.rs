@@ -4,7 +4,7 @@ use gpui::*;
 use ui_cli_shared::doc_type::DocumentType;
 use structs::assets::Assets;
 
-use crate::{components::buttons::link_button, navbar_view::Navbar, state::window_state::WindowState, theme::ColorSet};
+use crate::{components::buttons::link_button, navbar_view::Navbar, state::window_state::WindowState, theme::ThemeSettings};
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
 
@@ -24,6 +24,13 @@ pub struct HomeView {
 
 impl HomeView {
     pub fn new(cx: &mut Context<HomeView>, state: Entity<WindowState>) -> Self {
+        cx.observe(&state, |_this, _, cx| {
+            cx.notify();
+        }).detach();
+        cx.observe_global::<ThemeSettings>(|_this, cx| {
+            cx.notify();
+        }).detach();
+
         let navbar = cx.new(|cx| {
             Navbar::new(state.downgrade(), cx)
         });
@@ -71,6 +78,8 @@ impl HomeView {
     }
 
     fn render_logo(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = ThemeSettings::theme(cx);
+
         div()
             .flex()
             .flex_col()
@@ -93,36 +102,37 @@ impl HomeView {
                                 div()
                                     .child("Monocurl")
                                     .text_2xl()
-                                    .text_color(white())
+                                    .text_color(gpui::white())
                             )
                             .child(
                                 div()
                                     .flex()
                                     .flex_row()
-                                    .child(link_button("Website", cx.listener(|_, _, _, _| {
+                                    .child(link_button("Website", theme.link_text, cx.listener(|_, _, _, _| {
                                         let _ = open::that("https://monocurl.com");
                                     })))
-                                    .child(link_button("Source Code", cx.listener(|_, _, _, _| {
+                                    .child(link_button("Source Code", theme.link_text, cx.listener(|_, _, _, _| {
                                         let _ =open::that("https://github.com/monocurl/monocurl");
                                     })))
-                                    .child(link_button("Discord", cx.listener(|_, _, _, _| {
+                                    .child(link_button("Discord", theme.link_text, cx.listener(|_, _, _, _| {
                                         let _ = open::that("https://discord.com/invite/7g94JR3SAD");
                                     })))
                                     .gap_3()
                             )
                             .rounded(px(6.))
-                            .bg(black())
+                            .bg(gpui::black())
                             .p_8()
                             .w(px(400.))
                     )
             )
-            .bg(ColorSet::SIDE_PANEL_GRAY)
+            .bg(theme.home_sidebar_background)
             .min_w(px(500.))
             .w(relative(0.5))
             .max_w(px(600.))
     }
 
     fn single_project(&self, internal_path: std::path::PathBuf, user_path: Option<std::path::PathBuf>, cx: &Context<HomeView>) -> impl IntoElement + use<> {
+        let theme = ThemeSettings::theme(cx);
         let path = if let Some(ref path) = user_path {
             sub_home_dir(&path)
             .unwrap_or(path.to_path_buf())
@@ -157,8 +167,11 @@ impl HomeView {
                     .top(px(0.))
                     .left(px(0.))
                     .size_full()
-                    .bg(black().opacity(0.0))
-                    .group_hover(group_name.clone(), |this| this.bg(black().opacity(0.1)))
+                    .bg(Rgba { a: 0.0, ..theme.row_hover_overlay })
+                    .group_hover(group_name.clone(), {
+                        let overlay = theme.row_hover_overlay;
+                        move |this| this.bg(overlay)
+                    })
             )
             .child(
                 div()
@@ -182,12 +195,12 @@ impl HomeView {
                                 div()
                                     .child(name.clone())
                                     .text_sm()
-                                    .text_color(gpui::black())
+                                    .text_color(theme.text_primary)
                             )
                             .child(
                                 div()
                                     .text_xs()
-                                    .text_color(ColorSet::GRAY)
+                                    .text_color(theme.text_muted)
                                     .child(path)
                                     .truncate()
                             )
@@ -203,7 +216,10 @@ impl HomeView {
                             .rounded(px(3.))
                             .opacity(0.0)
                             .group_hover(group_name.clone(), |this| this.opacity(1.0))
-                            .hover(|this| this.text_color(gpui::red()))
+                            .hover({
+                                let danger = theme.danger;
+                                move |this| this.text_color(danger)
+                            })
                             .cursor_pointer()
                             .child(
                                 div()
@@ -283,6 +299,8 @@ impl HomeView {
     }
 
     fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = ThemeSettings::theme(cx);
+
         div()
             .flex()
             .flex_col()
@@ -300,7 +318,7 @@ impl HomeView {
                             .p_1()
                     )
                     .child(
-                        link_button("Import", cx.listener(|_, _, _, cx| {
+                        link_button("Import", theme.link_text, cx.listener(|_, _, _, cx| {
                             let options = PathPromptOptions {
                                 files: true,
                                 directories: false,
@@ -330,12 +348,12 @@ impl HomeView {
                         }))
                     )
                     .child(
-                        link_button("New Scene", cx.listener(move |this, _, window, cx| {
+                        link_button("New Scene", theme.link_text, cx.listener(move |this, _, window, cx| {
                             this.create_default(DocumentType::Scene, window, cx);
                         }))
                     )
                     .child(
-                        link_button("New Library", cx.listener(move |this, _, window, cx| {
+                        link_button("New Library", theme.link_text, cx.listener(move |this, _, window, cx| {
                             this.create_default(DocumentType::Library, window, cx);
                         }))
                     )
@@ -346,15 +364,17 @@ impl HomeView {
                 div()
                     .h(px(2.))
                     .w_full()
-                    .bg(ColorSet::PURPLE)
+                    .bg(theme.accent)
             )
             .child(self.projects_list(cx))
-            .bg(ColorSet::SUPER_LIGHT_GRAY)
+            .bg(theme.home_panel_background)
     }
 }
 
 impl Render for HomeView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = ThemeSettings::theme(cx);
+
         div()
             .flex_col()
             .child(
@@ -369,12 +389,13 @@ impl Render for HomeView {
                         div()
                             .w(px(4.))
                             .h_full()
-                            .bg(ColorSet::PURPLE)
+                            .bg(theme.accent)
                     )
                     .child(self.render_projects(cx))
                     .size_full()
             )
-            .text_color(gpui::black())
+            .bg(theme.app_background)
+            .text_color(theme.text_primary)
             .size_full()
     }
 }

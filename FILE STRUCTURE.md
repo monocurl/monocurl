@@ -55,14 +55,14 @@
     - document_state.rs: for a given document, this is just the textual state and the execution state 
     - execution_state.rs: UI-side execution state (current_timestamp, runtime_errors, slide_durations, slide_count, is_playing) updated via ExecutionSnapshot from the executor thread
     - textual_state.rs: this is not only the current text of the document, but also any part of the state of the text editor that might be queryable / editable by other entities in the system (like the current diagnostics, autocomplete). Some other state is owned fully by the text editor instead, in the editor directory. The line is a bit blurry 
-    - window_state.rs: global application state, consisting of the active document, which tabs are open, etc
+    - window_state.rs: global application state, consisting of the active document, open tabs, recently opened projects, and navbar scroll state
   - src/timeline: a module related to timeline rendering
   - src/viewport: a module related to viewport rendering
   - src/document_view.rs: code related to rendering the document view (in either presentation mode or not). Sets up keyboard shortcuts. Owns the state of the document, handles save actions but proxies most other actions. Layouts the timeline, viewport, and editor based on presentation mode. The actual code for rendering those components is present in separate files.
-  - src/home_view.rs: code related to the actual home element (list of projects, creating and deleting)
+  - src/home_view.rs: code related to the actual home element (list of projects, creating and deleting); now themed from `theme.rs`
   - src/main.rs: init code that sets up menus, calls init sections of other modules, launches the app
-  - src/navbar_view.rs: navbar element for switching tabs
-  - src/theme.rs: a collection of constants related to UI and colors
+  - src/navbar_view.rs: navbar element for switching tabs, navigating home, and toggling dark mode
+  - src/theme.rs: semantic UI theme definitions, including the GPUI-global persisted `ThemeSettings`, light/dark `ThemeMode`, Catppuccin-Mocha-inspired dark palette, and text editor styling
   - src/window.rs: root GPUI element that owns the global state and muxes between the home and editor views 
 - integration_tests: cross-crate integration tests covering the full lex→parse→compile→execute pipeline
   - tests/basic_executor_tests.rs: `run(src)` helper + basic executor tests (literal values, arithmetic, strings, lambdas, if/else, error detection)

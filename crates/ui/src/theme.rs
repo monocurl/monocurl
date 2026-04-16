@@ -1,72 +1,103 @@
-use gpui::{Font, Hsla, Pixels, Rgba, px};
+use std::path::PathBuf;
 
-pub struct ColorSet;
+use gpui::{App, Font, Global, Hsla, Pixels, ReadGlobal, Rgba, UpdateGlobal, px};
+use serde::{Deserialize, Serialize};
 
-impl ColorSet {
+const fn rgba(hex: u32) -> Rgba {
+    Rgba {
+        r: ((hex >> 16) & 0xff) as f32 / 255.0,
+        g: ((hex >> 8) & 0xff) as f32 / 255.0,
+        b: (hex & 0xff) as f32 / 255.0,
+        a: 1.0,
+    }
+}
 
-    pub const BLUE: Rgba = Rgba {
-        r: 90.0 / 255.0,
-        g: 134.0 / 255.0,
-        b: 238.0 / 255.0,
-        a: 1.0
-    };
+const fn hsla(h: f32, s: f32, l: f32, a: f32) -> Hsla {
+    Hsla { h, s, l, a }
+}
 
-    pub const PURPLE: Rgba = Rgba {
-        r: 135.0 / 255.0,
-        g: 116.0 / 255.0,
-        b: 144.0 / 255.0,
-        a:  1.0
-    };
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ThemeMode {
+    #[default]
+    Light,
+    Dark,
+}
 
-    pub const SIDE_PANEL_GRAY: Rgba = Rgba {
-        r: 230.0 / 255.0,
-        g: 233.0 / 255.0,
-        b: 238.0 / 255.0,
-        a: 1.0
-    };
+impl ThemeMode {
+    pub fn toggled(self) -> Self {
+        match self {
+            Self::Light => Self::Dark,
+            Self::Dark => Self::Light,
+        }
+    }
+}
 
-    pub const TOOLBAR_GRAY: Rgba = Rgba {
-        r: 211.0 / 255.0,
-        g: 215.0 / 255.0,
-        b: 225.0 / 255.0,
-        a: 1.0
-    };
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ThemeSettings {
+    pub mode: ThemeMode,
+}
 
-    pub const SUPER_LIGHT_GRAY: Rgba = Rgba {
-        r: 239.0 / 255.0,
-        g: 241.0 / 255.0,
-        b: 245.0 / 255.0,
-        a: 1.0
-    };
+impl Default for ThemeSettings {
+    fn default() -> Self {
+        Self {
+            mode: ThemeMode::default(),
+        }
+    }
+}
 
-    pub const LIGHT_GRAY: Rgba = Rgba {
-        r: 221.0 / 255.0,
-        g: 224.0 / 255.0,
-        b: 231.0 / 255.0,
-        a: 1.0
-    };
+impl Global for ThemeSettings {}
 
-    pub const GRAY: Rgba = Rgba {
-        r: 85.0 / 255.0,
-        g: 85.0 / 255.0,
-        b: 85.0 / 255.0,
-        a: 1.0
-    };
+impl ThemeSettings {
+    fn save_file() -> PathBuf {
+        let mut path = dirs::data_local_dir().expect("Could not find local data directory");
+        path.push("Monocurl");
+        if !path.exists() {
+            std::fs::create_dir_all(&path).expect("Could not create settings directory");
+        }
+        path.push("theme.json");
+        path
+    }
 
-    pub const DARK_GRAY: Rgba = Rgba {
-        r: 43.0 / 255.0,
-        g: 46.0 / 255.0,
-        b: 47.0 / 255.0,
-        a: 1.0
-    };
+    pub fn load() -> Self {
+        let path = Self::save_file();
+        if path.exists() {
+            std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|data| serde_json::from_str(&data).ok())
+                .unwrap_or_default()
+        } else {
+            Self::default()
+        }
+    }
 
-    pub const SUPER_DARK_GRAY: Rgba = Rgba {
-        r: 20.0 / 255.0,
-        g: 20.0 / 255.0,
-        b: 20.0 / 255.0,
-        a: 1.0
-    };
+    pub fn save(&self) {
+        let data = serde_json::to_string_pretty(self).expect("Could not serialize theme settings");
+        let path = Self::save_file();
+        std::fs::write(path, data).ok()
+            .unwrap_or_else(|| {
+                log::warn!("Unable to save theme settings")
+            });
+    }
 
+    pub fn init(cx: &mut App) {
+        Self::set_global(cx, Self::load());
+    }
+
+    pub fn read(cx: &App) -> &Self {
+        Self::global(cx)
+    }
+
+    pub fn theme(cx: &App) -> Theme {
+        Theme::for_mode(Self::read(cx).mode)
+    }
+
+    pub fn toggle(cx: &mut App) {
+        Self::update_global(cx, |settings, _cx| {
+            settings.mode = settings.mode.toggled();
+            settings.save();
+        });
+    }
 }
 
 pub struct FontSet;
@@ -74,6 +105,147 @@ pub struct FontSet;
 impl FontSet {
     pub const MONOSPACE: &'static str = "IBM Plex Mono";
     pub const UI: &'static str = "Lilex";
+}
+
+#[derive(Clone, Copy)]
+pub struct Theme {
+    pub mode: ThemeMode,
+    pub app_background: Rgba,
+    pub document_background: Rgba,
+    pub viewport_background: Rgba,
+
+    pub text_primary: Rgba,
+    pub text_muted: Rgba,
+    pub text_inverse: Rgba,
+    pub link_text: Rgba,
+    pub danger: Rgba,
+
+    pub accent: Rgba,
+
+    pub navbar_background: Rgba,
+    pub navbar_border: Rgba,
+    pub tab_background: Rgba,
+    pub tab_active_background: Rgba,
+    pub tab_close_hover_background: Rgba,
+
+    pub home_sidebar_background: Rgba,
+    pub home_panel_background: Rgba,
+    pub row_hover_overlay: Rgba,
+
+    pub split_divider: Rgba,
+
+    pub timeline_background: Hsla,
+    pub timeline_toolbar_background: Rgba,
+    pub timeline_slide_background: Rgba,
+    pub timeline_active_border: Rgba,
+    pub timeline_inactive_border: Rgba,
+    pub timeline_connector: Rgba,
+    pub timeline_tick: Rgba,
+    pub timeline_text: Rgba,
+    pub timeline_subtext: Rgba,
+    pub timeline_divider: Rgba,
+    pub timeline_status_error: Rgba,
+    pub timeline_status_ok: Rgba,
+    pub timeline_playhead: Rgba,
+}
+
+impl Theme {
+    pub fn for_mode(mode: ThemeMode) -> Self {
+        match mode {
+            ThemeMode::Light => Self::light(),
+            ThemeMode::Dark => Self::dark(),
+        }
+    }
+
+    pub fn light() -> Self {
+        Self {
+            mode: ThemeMode::Light,
+            app_background: rgba(0xEFF1F5),
+            document_background: rgba(0x2B2E2F),
+            viewport_background: rgba(0xDCE0E8),
+
+            text_primary: rgba(0x4C4F69),
+            text_muted: rgba(0x6C6F85),
+            text_inverse: rgba(0xEFF1F5),
+            link_text: rgba(0x1E66F5),
+            danger: rgba(0xD20F39),
+
+            accent: rgba(0x74C0FC),
+
+            navbar_background: rgba(0xDDE0E7),
+            navbar_border: rgba(0x9CA0B0),
+            tab_background: rgba(0xCCD0DA),
+            tab_active_background: rgba(0xEFF1F5),
+            tab_close_hover_background: rgba(0xBCC0CC),
+
+            home_sidebar_background: rgba(0xE6E9EF),
+            home_panel_background: rgba(0xEFF1F5),
+            row_hover_overlay: Rgba { a: 0.08, ..rgba(0x11111B) },
+
+            split_divider: rgba(0x9CA0B0),
+
+            timeline_background: hsla(0.61, 0.21, 0.87, 1.0),
+            timeline_toolbar_background: rgba(0xE6E9EF),
+            timeline_slide_background: rgba(0xCCD0DA),
+            timeline_active_border: rgba(0x1E66F5),
+            timeline_inactive_border: rgba(0x8C8FA1),
+            timeline_connector: rgba(0xBCC0CC),
+            timeline_tick: rgba(0x7C7F93),
+            timeline_text: rgba(0x4C4F69),
+            timeline_subtext: rgba(0x6C6F85),
+            timeline_divider: rgba(0xDCE0E8),
+            timeline_status_error: rgba(0xD20F39),
+            timeline_status_ok: rgba(0x179299),
+            timeline_playhead: rgba(0x5C5F77),
+        }
+    }
+
+    pub fn dark() -> Self {
+        Self {
+            mode: ThemeMode::Dark,
+            app_background: rgba(0x1E1E1E),
+            document_background: rgba(0x1E1E1E),
+            viewport_background: rgba(0x252526),
+
+            text_primary: rgba(0xD4D4D4),
+            text_muted: rgba(0x969696),
+            text_inverse: rgba(0xFFFFFF),
+            link_text: rgba(0x3794FF),
+            danger: rgba(0xF14C4C),
+
+            accent: rgba(0x3794FF),
+
+            navbar_background: rgba(0x2D2D2D),
+            navbar_border: rgba(0x3C3C3C),
+            tab_background: rgba(0x2D2D2D),
+            tab_active_background: rgba(0x1E1E1E),
+            tab_close_hover_background: rgba(0x4A4A4A),
+
+            home_sidebar_background: rgba(0x252526),
+            home_panel_background: rgba(0x1E1E1E),
+            row_hover_overlay: Rgba { a: 0.06, ..rgba(0xFFFFFF) },
+
+            split_divider: rgba(0x3C3C3C),
+
+            timeline_background: hsla(0.0, 0.0, 0.15, 1.0),
+            timeline_toolbar_background: rgba(0x252526),
+            timeline_slide_background: rgba(0x2D2D30),
+            timeline_active_border: rgba(0x3794FF),
+            timeline_inactive_border: rgba(0xBFBFBF),
+            timeline_connector: rgba(0xD4D4D4),
+            timeline_tick: rgba(0xD4D4D4),
+            timeline_text: rgba(0xD4D4D4),
+            timeline_subtext: rgba(0xB3B3B3),
+            timeline_divider: rgba(0x3C3C3C),
+            timeline_status_error: rgba(0xF14C4C),
+            timeline_status_ok: rgba(0x3794FF),
+            timeline_playhead: rgba(0xFFFFFF),
+        }
+    }
+
+    pub fn text_editor_styles(self) -> TextEditorStyles {
+        TextEditorStyles::for_mode(self.mode)
+    }
 }
 
 #[derive(Clone)]
@@ -111,38 +283,114 @@ pub struct TextEditorStyles {
 
     pub scroll_color: Hsla,
     pub scroll_background_color: Hsla,
+
+    pub popover_background_color: Rgba,
+    pub popover_border_color: Rgba,
+    pub popover_shadow_color: Hsla,
+    pub popover_title_color: Rgba,
+    pub popover_text_color: Rgba,
+    pub popover_highlight_color: Rgba,
+    pub popover_selected_background_color: Rgba,
+    pub popover_hover_background_color: Rgba,
+    pub popover_active_argument_color: Rgba,
+    pub popover_inactive_argument_color: Rgba,
 }
 
-impl Default for TextEditorStyles {
-    fn default() -> Self {
+impl TextEditorStyles {
+    pub fn for_mode(mode: ThemeMode) -> Self {
+        match mode {
+            ThemeMode::Light => Self::light(),
+            ThemeMode::Dark => Self::dark(),
+        }
+    }
+
+    pub fn light() -> Self {
         Self {
-            bg_color: gpui::hsla(0.61, 0.23, 0.9, 1.0),
+            bg_color: hsla(0.61, 0.23, 0.9, 1.0),
             text_font: gpui::font(FontSet::MONOSPACE),
             italic_text_font: gpui::font(FontSet::MONOSPACE).italic(),
 
             text_size: px(14.0),
             line_height: px(20.0),
-            control_flow_color: gpui::hsla(0.76, 0.59, 0.52, 1.0),
-            non_control_flow_color: gpui::hsla(0.98, 0.62, 0.47, 1.0),
-            comment_color: gpui::hsla(0.61, 0.13, 0.49, 0.65),
-            text_literal_color: gpui::hsla(0.36, 0.29, 0.44, 1.0),
-            numeric_literal_color: gpui::hsla(0.07, 0.99, 0.45, 1.0),
-            identifier_color: gpui::hsla(0.61, 0.16, 0.23, 1.0),
-            argument_label_color: gpui::hsla(0.61, 0.91, 0.54, 1.0),
-            operator_color: gpui::hsla(0.54, 0.59, 0.45, 1.0),
-            punctuation_color: gpui::hsla(0.61, 0.13, 0.40, 1.0),
-            default_text_color: gpui::hsla(0.61, 0.16, 0.23, 1.0),
-            runtime_error_color: gpui::hsla(0.85, 0.76, 0.56, 1.0),
-            compile_time_error_color: gpui::hsla(0.01, 0.76, 0.56, 1.0),
-            compile_time_warning_color: gpui::hsla(0.13, 0.91, 0.62, 1.0),
-            cursor_color: gpui::hsla(0.03, 0.59, 0.65, 1.0),
+            control_flow_color: hsla(0.76, 0.59, 0.52, 1.0),
+            non_control_flow_color: hsla(0.98, 0.62, 0.47, 1.0),
+            comment_color: hsla(0.61, 0.13, 0.49, 0.65),
+            text_literal_color: hsla(0.36, 0.29, 0.44, 1.0),
+            numeric_literal_color: hsla(0.07, 0.99, 0.45, 1.0),
+            identifier_color: hsla(0.61, 0.16, 0.23, 1.0),
+            argument_label_color: hsla(0.61, 0.91, 0.54, 1.0),
+            operator_color: hsla(0.54, 0.59, 0.45, 1.0),
+            punctuation_color: hsla(0.61, 0.13, 0.40, 1.0),
+            default_text_color: hsla(0.61, 0.16, 0.23, 1.0),
+            runtime_error_color: hsla(0.85, 0.76, 0.56, 1.0),
+            compile_time_error_color: hsla(0.01, 0.76, 0.56, 1.0),
+            compile_time_warning_color: hsla(0.13, 0.91, 0.62, 1.0),
+            cursor_color: hsla(0.03, 0.59, 0.65, 1.0),
             gutter_font: gpui::font(FontSet::MONOSPACE),
-            gutter_text_color: gpui::hsla(0.61, 0.13, 0.49, 1.0),
-            gutter_active_color: gpui::hsla(0.0, 0.59, 0.54, 1.0),
-            selection_color: gpui::hsla(0.05, 0.44, 0.80, 0.3),
-            active_line_color: gpui::hsla(0.61, 0.18, 0.83, 0.40),
-            scroll_color: gpui::hsla(0.61, 0.13, 0.40, 0.30),
-            scroll_background_color: gpui::hsla(0.61, 0.11, 0.74, 0.20),
+            gutter_text_color: hsla(0.61, 0.13, 0.49, 1.0),
+            gutter_active_color: hsla(0.0, 0.59, 0.54, 1.0),
+            selection_color: hsla(0.05, 0.44, 0.80, 0.3),
+            active_line_color: hsla(0.61, 0.18, 0.83, 0.40),
+            scroll_color: hsla(0.61, 0.13, 0.40, 0.30),
+            scroll_background_color: hsla(0.61, 0.11, 0.74, 0.20),
+            popover_background_color: rgba(0xE6E9EF),
+            popover_border_color: rgba(0xCCD0DA),
+            popover_shadow_color: hsla(0.0, 0.0, 0.0, 0.10),
+            popover_title_color: rgba(0x11111B),
+            popover_text_color: rgba(0x313244),
+            popover_highlight_color: rgba(0x1E66F5),
+            popover_selected_background_color: rgba(0xDCE0E8),
+            popover_hover_background_color: rgba(0xCCD0DA),
+            popover_active_argument_color: rgba(0x1E66F5),
+            popover_inactive_argument_color: rgba(0x6C6F85),
         }
+    }
+
+    pub fn dark() -> Self {
+        Self {
+            bg_color: hsla(0.0, 0.0, 0.12, 1.0),
+            text_font: gpui::font(FontSet::MONOSPACE),
+            italic_text_font: gpui::font(FontSet::MONOSPACE).italic(),
+
+            text_size: px(14.0),
+            line_height: px(20.0),
+            control_flow_color: hsla(0.58, 0.61, 0.59, 1.0),
+            non_control_flow_color: hsla(0.58, 0.72, 0.60, 1.0),
+            comment_color: hsla(0.27, 0.22, 0.51, 1.0),
+            text_literal_color: hsla(0.06, 0.52, 0.68, 1.0),
+            numeric_literal_color: hsla(0.24, 0.38, 0.73, 1.0),
+            identifier_color: hsla(0.00, 0.00, 0.83, 1.0),
+            argument_label_color: hsla(0.54, 0.92, 0.81, 1.0),
+            operator_color: hsla(0.00, 0.00, 0.83, 1.0),
+            punctuation_color: hsla(0.00, 0.00, 0.83, 1.0),
+            default_text_color: hsla(0.00, 0.00, 0.83, 1.0),
+            runtime_error_color: hsla(0.00, 0.86, 0.62, 1.0),
+            compile_time_error_color: hsla(0.00, 0.86, 0.62, 1.0),
+            compile_time_warning_color: hsla(0.15, 0.65, 0.72, 1.0),
+            cursor_color: hsla(0.00, 0.00, 0.85, 1.0),
+            gutter_font: gpui::font(FontSet::MONOSPACE),
+            gutter_text_color: hsla(0.00, 0.00, 0.40, 1.0),
+            gutter_active_color: hsla(0.00, 0.00, 0.83, 1.0),
+            selection_color: hsla(0.58, 0.61, 0.59, 0.30),
+            active_line_color: hsla(0.00, 0.00, 0.16, 1.0),
+            scroll_color: hsla(0.00, 0.00, 0.55, 0.45),
+            scroll_background_color: hsla(0.00, 0.00, 0.22, 0.50),
+            popover_background_color: rgba(0x252526),
+            popover_border_color: rgba(0x454545),
+            popover_shadow_color: hsla(0.0, 0.0, 0.0, 0.25),
+            popover_title_color: rgba(0xD4D4D4),
+            popover_text_color: rgba(0xCCCCCC),
+            popover_highlight_color: rgba(0x3794FF),
+            popover_selected_background_color: rgba(0x37373D),
+            popover_hover_background_color: rgba(0x2A2D2E),
+            popover_active_argument_color: rgba(0x3794FF),
+            popover_inactive_argument_color: rgba(0x969696),
+        }
+    }
+}
+
+impl Default for TextEditorStyles {
+    fn default() -> Self {
+        Self::for_mode(ThemeMode::default())
     }
 }

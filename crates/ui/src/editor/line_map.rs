@@ -128,6 +128,10 @@ impl LineMap {
         agg.wrapped_line_count
     }
 
+    pub fn set_line_height(&mut self, line_height: Pixels) {
+        self.line_height = line_height;
+    }
+
     pub fn y_range(&self, line_no: Range<usize>) -> Range<Pixels> {
         let s = self.wrapped_count_before(line_no.start);
         let e = self.wrapped_count_before(line_no.end);

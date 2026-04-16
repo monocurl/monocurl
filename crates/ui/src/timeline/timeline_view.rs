@@ -4,7 +4,7 @@ use gpui::*;
 use crate::{
     actions::{ZoomIn, ZoomOut},
     services::ServiceManager,
-    theme::{ColorSet, FontSet},
+    theme::{FontSet, ThemeSettings},
 };
 
 // layout
@@ -23,20 +23,6 @@ const MIN_GAP: f32 = 24.0;
 
 const ZOOM_LEVELS: [u32; 9] = [25, 50, 75, 100, 150, 200, 300, 400, 800];
 const DEFAULT_ZOOM_IDX: usize = 3;
-
-const BG: Hsla            = Hsla { h: 0.61, s: 0.21, l: 0.87, a: 1.0 };
-const TOOLBAR_BG: Rgba    = ColorSet::SIDE_PANEL_GRAY;  // #E6E9EE — matches app toolbar tone
-const SLIDE_BG: Rgba      = ColorSet::TOOLBAR_GRAY;     // #D3D7E1 — slightly darker than bg
-const ACTIVE_BORDER: Rgba = Rgba { r: 0.42, g: 0.58, b: 0.82, a: 1.0 }; // steel blue, toned down
-const INACTIVE_BORDER: Rgba = Rgba { r: 0.54, g: 0.55, b: 0.60, a: 1.0 }; // medium gray
-const CONNECTOR_COLOR: Rgba = Rgba { r: 0.780, g: 0.788, b: 0.808, a: 1.0 }; // mid-gray
-const TICK_COLOR: Rgba    = Rgba { r: 0.620, g: 0.630, b: 0.660, a: 1.0 }; // darker tick
-const TEXT: Rgba          = Rgba { r: 0.298, g: 0.310, b: 0.412, a: 1.0 }; // #4C4F69
-const SUBTEXT: Rgba       = Rgba { r: 0.424, g: 0.435, b: 0.522, a: 1.0 }; // #6C6F85
-const DIVIDER: Rgba       = ColorSet::LIGHT_GRAY;       // #DDE0E7
-const ERROR_DOT: Rgba     = Rgba { r: 0.824, g: 0.059, b: 0.224, a: 1.0 }; // red
-const OK_DOT: Rgba        = Rgba { r: 0.090, g: 0.573, b: 0.600, a: 1.0 }; // teal
-const PLAYHEAD_COLOR: Rgba = Rgba { r: 0.28, g: 0.3, b: 0.3, a: 1.0 };
 
 // --- geometry helpers ---
 
@@ -99,7 +85,12 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    pub fn new(services: Entity<ServiceManager>, _cx: &mut Context<Self>) -> Self {
+    pub fn new(services: Entity<ServiceManager>, cx: &mut Context<Self>) -> Self {
+        cx.observe_global::<ThemeSettings>(|_this, cx| {
+            cx.notify();
+        })
+        .detach();
+
         Self { services, scroll: ScrollHandle::new(), zoom_idx: DEFAULT_ZOOM_IDX }
     }
 
@@ -130,7 +121,8 @@ impl Timeline {
         current_time: f64,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let status_dot = if has_error { ERROR_DOT } else { OK_DOT };
+        let theme = ThemeSettings::theme(cx);
+        let status_dot = if has_error { theme.timeline_status_error } else { theme.timeline_status_ok };
         let svc = self.services.downgrade();
         let this = cx.weak_entity();
         let zoom_pct = ZOOM_LEVELS[self.zoom_idx];
@@ -140,7 +132,7 @@ impl Timeline {
                 .id(id)
                 .w(px(22.0)).h(px(22.0))
                 .flex().items_center().justify_center()
-                .text_color(SUBTEXT).text_size(px(11.0))
+                .text_color(theme.timeline_subtext).text_size(px(11.0))
                 .cursor_pointer()
                 .hover(|s| s.opacity(0.6))
                 .child(label)
@@ -153,9 +145,9 @@ impl Timeline {
             .gap_2()
             .px_3()
             .h(px(TOOLBAR_H))
-            .bg(TOOLBAR_BG)
+            .bg(theme.timeline_toolbar_background)
             .border_b(px(0.5))
-            .border_color(DIVIDER)
+            .border_color(theme.timeline_divider)
             .child({
                 let svc = svc.clone();
                 nav_btn("tl-scene-start", "⏮")
@@ -171,7 +163,7 @@ impl Timeline {
                     .id("tl-play")
                     .w(px(22.0)).h(px(22.0))
                     .flex().items_center().justify_center()
-                    .text_color(TEXT).text_size(px(11.0))
+                    .text_color(theme.timeline_text).text_size(px(11.0))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.6))
                     .child(if is_playing { "▐▐" } else { "▶" })
@@ -191,11 +183,11 @@ impl Timeline {
             })
             .child(div().w(px(6.0)).h(px(6.0)).rounded_full().bg(status_dot))
             .child(
-                div().text_color(TEXT).text_size(px(11.0))
+                div().text_color(theme.timeline_text).text_size(px(11.0))
                     .child(format!("Slide {} / {}", (current_slide + 1).min(slide_count), slide_count))
             )
             .child(
-                div().text_color(SUBTEXT).text_size(px(11.0))
+                div().text_color(theme.timeline_subtext).text_size(px(11.0))
                     .child(format!("{:.2}s", current_time))
             )
             .child(div().flex_1())
@@ -204,7 +196,7 @@ impl Timeline {
                     .id("tl-zoom-out")
                     .w(px(20.0)).h(px(20.0))
                     .flex().items_center().justify_center()
-                    .text_color(SUBTEXT).text_size(px(14.0))
+                    .text_color(theme.timeline_subtext).text_size(px(14.0))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.6))
                     .child("−")
@@ -216,7 +208,7 @@ impl Timeline {
                     })
             )
             .child(
-                div().text_color(SUBTEXT).text_size(px(10.0))
+                div().text_color(theme.timeline_subtext).text_size(px(10.0))
                     .child(format!("{}%", zoom_pct))
                     .w(px(36.0))
                     .flex().justify_center()
@@ -226,7 +218,7 @@ impl Timeline {
                     .id("tl-zoom-in")
                     .w(px(20.0)).h(px(20.0))
                     .flex().items_center().justify_center()
-                    .text_color(SUBTEXT).text_size(px(14.0))
+                    .text_color(theme.timeline_subtext).text_size(px(14.0))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.6))
                     .child("+")
@@ -245,6 +237,7 @@ impl Timeline {
         slide_count: usize,
         durations: Vec<Option<f64>>,
         zoom: f32,
+        theme: crate::theme::Theme,
     ) -> impl IntoElement {
         // use inferred duration for the current slide when computing track width
         let effective_for_width: Vec<Option<f64>> = durations.iter().enumerate().map(|(i, &d)| {
@@ -287,12 +280,12 @@ impl Timeline {
                         let s = effective.get(i).and_then(|d| *d)
                             .map(|d| format!("{:.2}s", d))
                             .unwrap_or_else(|| "—".to_string());
-                        ts.shape_line(SharedString::from(s.clone()), px(DUR_FONT_SIZE), &[make_run(&s, SUBTEXT)], None)
+                        ts.shape_line(SharedString::from(s.clone()), px(DUR_FONT_SIZE), &[make_run(&s, theme.timeline_subtext)], None)
                     }).collect();
 
                     let label_texts = (0..slide_count).map(|i| {
                         let s = format!("Slide {}", i + 1);
-                        ts.shape_line(SharedString::from(s.clone()), px(LABEL_FONT_SIZE), &[make_run(&s, SUBTEXT)], None)
+                        ts.shape_line(SharedString::from(s.clone()), px(LABEL_FONT_SIZE), &[make_run(&s, theme.timeline_subtext)], None)
                     }).collect();
 
                     TrackPrepaint { slide_xs, gap_ws, playhead_x, durations: effective, explicit, vert_offset, dur_texts, label_texts }
@@ -320,7 +313,7 @@ impl Timeline {
                             point(ox + px(gap_x), oy + px(line_y - 0.5)),
                             size(px(gw), px(1.0)),
                         ),
-                        CONNECTOR_COLOR,
+                        theme.timeline_connector,
                     ));
 
                     // leading tick at start of gap
@@ -329,7 +322,7 @@ impl Timeline {
                             point(ox + px(gap_x), oy + px(line_y - 4.0)),
                             size(px(1.5), px(8.0)),
                         ),
-                        TICK_COLOR,
+                        theme.timeline_tick,
                     ));
 
                     // per-second stub marks
@@ -343,7 +336,7 @@ impl Timeline {
                                     point(ox + px(mark_x - 0.5), oy + px(line_y - 3.0)),
                                     size(px(1.0), px(6.0)),
                                 ),
-                                TICK_COLOR,
+                                theme.timeline_tick,
                             ));
                         }
                     }
@@ -352,7 +345,7 @@ impl Timeline {
                 // slide boxes with duration text at top and label below
                 for i in 0..slide_count {
                     let bx = slide_xs[i];
-                    let border_color: Hsla = if explicit[i] { ACTIVE_BORDER } else { INACTIVE_BORDER }.into();
+                    let border_color: Hsla = if explicit[i] { theme.timeline_active_border } else { theme.timeline_inactive_border }.into();
                     let box_bounds = Bounds::new(
                         point(ox + px(bx), oy + px(PADDING_V)),
                         size(px(SLIDE_W), px(SLIDE_H)),
@@ -360,7 +353,7 @@ impl Timeline {
                     window.paint_quad(quad(
                         box_bounds,
                         px(5.0),
-                        SLIDE_BG,
+                        theme.timeline_slide_background,
                         px(1.5),
                         border_color,
                         BorderStyle::Solid,
@@ -387,7 +380,7 @@ impl Timeline {
                         point(ox + px(playhead_x - 1.0), oy_full),
                         size(px(2.0), bounds.size.height),
                     ),
-                    PLAYHEAD_COLOR,
+                    theme.timeline_playhead,
                 ));
 
                 // click-to-seek
@@ -433,6 +426,7 @@ impl Render for Timeline {
         let slide_count = exec.slide_count;
         let durations = exec.slide_durations.clone();
         let has_error = exec.has_error();
+        let theme = ThemeSettings::theme(cx);
 
         let toolbar = self.render_toolbar(is_playing, has_error, current_slide, slide_count, current_time, cx);
         let track = Self::render_track(
@@ -442,13 +436,14 @@ impl Render for Timeline {
             slide_count,
             durations,
             self.zoom_factor(),
+            theme,
         );
 
         div()
             .flex()
             .flex_col()
             .size_full()
-            .bg(BG)
+            .bg(theme.timeline_background)
             .child(toolbar)
             .child(
                 div()

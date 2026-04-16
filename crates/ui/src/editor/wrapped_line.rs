@@ -1,15 +1,27 @@
 use std::{ops::Range, sync::Arc};
 
-use gpui::{App, Bounds, DecorationRun, Half, Hsla, LineLayout, Pixels, Point, StrikethroughStyle, TextRun, UnderlineStyle, Window, WrapBoundary, black, fill, point, px, size};
+use gpui::{App, Bounds, DecorationRun, Half, Hsla, LineLayout, Pixels, Point, StrikethroughStyle, TextRun, UnderlineStyle, Window, WrapBoundary, fill, point, px, size};
 use smallvec::SmallVec;
 use structs::text::{Count8, Span8};
 
 // adapted from gpui's wrapped line
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct WrappedLine {
     unwrapped_layout: Arc<LineLayout>,
     wrap_boundaries: SmallVec<[(WrapBoundary, Pixels); 1]>,
     decoration_runs: SmallVec<[DecorationRun; 32]>,
+    default_color: Hsla,
+}
+
+impl Default for WrappedLine {
+    fn default() -> Self {
+        Self {
+            unwrapped_layout: Default::default(),
+            wrap_boundaries: Default::default(),
+            decoration_runs: Default::default(),
+            default_color: Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.0 },
+        }
+    }
 }
 
 impl WrappedLine {
@@ -110,11 +122,15 @@ impl WrappedLine {
         }).collect();
 
         let wrap_boundaries = Self::build_wrap_boundaries(text, &unwrapped_layout, wrap_width);
+        let default_color = runs.first()
+            .map(|run| run.color)
+            .unwrap_or(Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.0 });
 
         Self {
             unwrapped_layout,
             wrap_boundaries,
             decoration_runs,
+            default_color,
         }
     }
 
@@ -221,6 +237,7 @@ impl WrappedLine {
         let layout = &self.unwrapped_layout;
         let wrap_boundaries = &self.wrap_boundaries;
         let decoration_runs = &self.decoration_runs;
+        let default_color = self.default_color;
 
         let line_bounds = Bounds::new(
             origin,
@@ -235,7 +252,7 @@ impl WrappedLine {
             let mut decoration_runs = decoration_runs.iter();
             let mut wraps = wrap_boundaries.iter().peekable();
             let mut run_end = 0;
-            let mut color = black();
+            let mut color = default_color;
             let mut current_underline: Option<(Point<Pixels>, UnderlineStyle)> = None;
             let mut current_strikethrough: Option<(Point<Pixels>, StrikethroughStyle)> = None;
             let text_system = cx.text_system().clone();

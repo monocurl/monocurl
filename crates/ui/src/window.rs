@@ -1,6 +1,6 @@
 use gpui::*;
 
-use crate::{document_view::OpenDocument, home_view::HomeView, state::window_state::{ActiveScreen, WindowState}, theme::FontSet};
+use crate::{document_view::OpenDocument, home_view::HomeView, state::window_state::{ActiveScreen, WindowState}, theme::{FontSet, ThemeSettings}};
 
 pub struct MonocurlWindow {
     state: Entity<WindowState>,
@@ -11,6 +11,9 @@ impl MonocurlWindow {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let state = cx.new(|cx| WindowState::new(window, cx));
         let home = cx.new(|cx| HomeView::new(cx, state.clone()));
+        cx.observe_global::<ThemeSettings>(|_this, cx| {
+            cx.notify();
+        }).detach();
 
         Self {
             state: state,
@@ -18,19 +21,22 @@ impl MonocurlWindow {
         }
     }
 
-    pub fn render_screen(&self, view: impl IntoElement) -> impl IntoElement {
+    pub fn render_screen(&self, view: impl IntoElement, cx: &Context<Self>) -> impl IntoElement {
+        let theme = ThemeSettings::theme(cx);
         div()
             .child(view)
             .font_family(FontSet::UI)
+            .bg(theme.app_background)
+            .text_color(theme.text_primary)
             .size_full()
     }
 
-    pub fn render_home(&self, _cx: &Context<Self>) -> impl IntoElement {
-        self.render_screen(self.home.clone())
+    pub fn render_home(&self, cx: &Context<Self>) -> impl IntoElement {
+        self.render_screen(self.home.clone(), cx)
     }
 
-    pub fn render_editor(&self, document: &OpenDocument, _cx: &Context<Self>) -> impl IntoElement {
-        self.render_screen(document.view.clone())
+    pub fn render_editor(&self, document: &OpenDocument, cx: &Context<Self>) -> impl IntoElement {
+        self.render_screen(document.view.clone(), cx)
     }
 
 }

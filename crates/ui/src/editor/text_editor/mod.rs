@@ -10,7 +10,7 @@ use crate::editor::line_shaper::LineShaper;
 use crate::editor::wrapped_line::WrappedLine;
 use crate::editor::line_map::LineMap;
 use crate::editor::text_editor::text_element::TextElement;
-use crate::theme::{TextEditorStyles};
+use crate::theme::{TextEditorStyles, ThemeSettings};
 use gpui::*;
 use smallvec::SmallVec;
 use structs::text::{Count8, Location8, Span8, Span16};
@@ -130,12 +130,17 @@ pub struct TextEditor {
 
 impl TextEditor {
     pub fn new(state: Entity<TextualState>, window: &mut Window, cx: &mut Context<Self>, content: String, dirty: Entity<bool>, internal_dirty: Entity<bool>) -> Self {
-        let text_styles = TextEditorStyles::default();
+        let text_styles = ThemeSettings::theme(cx).text_editor_styles();
         let line_height = text_styles.line_height;
 
         // re render whenever state changes
         // (mainly want the rerender when theres external changes to the state)
         cx.observe(&state, |_me, _, cx| {
+            cx.notify();
+        }).detach();
+        cx.observe_global::<ThemeSettings>(|editor, cx| {
+            let styles = ThemeSettings::theme(cx).text_editor_styles();
+            editor.apply_theme(styles, cx);
             cx.notify();
         }).detach();
 
@@ -209,6 +214,19 @@ impl TextEditor {
             ret.history_disabled = false;
         }
         ret
+    }
+
+    fn apply_theme(&mut self, styles: TextEditorStyles, cx: &mut Context<Self>) {
+        self.line_height = styles.line_height;
+        self.line_map.set_line_height(styles.line_height);
+        self.text_styles = styles;
+
+        let line_count = self.line_map.line_count();
+        if line_count > 0 {
+            self.state.update(cx, |state, _| {
+                state.mark_lines_needing_relayout(0..line_count);
+            });
+        }
     }
 }
 

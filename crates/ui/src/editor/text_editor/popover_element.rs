@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use gpui::{
-    AnyElement, App, AppContext, AsyncApp, Bounds, BoxShadow, Element, ElementId, Entity, FontWeight, GlobalElementId, Hsla, InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, StatefulInteractiveElement, Style, Styled, Window, black, div, point, prelude::FluentBuilder, px, relative, rgb, size
+    AnyElement, App, AppContext, AsyncApp, Bounds, BoxShadow, Element, ElementId, Entity, FontWeight, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels, Point, Position, Size, StatefulInteractiveElement, Style, Styled, Window, div, point, prelude::FluentBuilder, px, relative, size
 };
 use smallvec::SmallVec;
 use structs::text::Location8;
@@ -185,8 +185,9 @@ impl PopoverElement {
     fn build_diagnostic_popover(
         &self,
         diagnostic: &Diagnostic,
+        styles: &TextEditorStyles,
     ) -> AnyElement {
-        let color = diagnostic.color(&TextEditorStyles::default());
+        let color = diagnostic.color(styles);
         let padding = px(8.0);
         let margin = px(4.0);
         let max_w = px(600.0);
@@ -203,7 +204,7 @@ impl PopoverElement {
                     .flex()
                     .flex_col()
                     .max_w(max_w)
-                    .bg(rgb(0xe6e9ee))
+                    .bg(styles.popover_background_color)
                     .rounded_md()
                     .border_1()
                     .border_color(color)
@@ -211,18 +212,18 @@ impl PopoverElement {
                         offset: Point { x: px(0.), y: px(0.) },
                         blur_radius: px(2.),
                         spread_radius: px(2.),
-                        color: Hsla { h: 0., s: 0., l: 0., a: 0.10 },
+                        color: styles.popover_shadow_color,
                     }])
                     .child(
                         div()
                             .text_sm()
-                            .text_color(rgb(0x000000))
+                            .text_color(styles.popover_title_color)
                             .child(diagnostic.title.clone())
                     )
                     .child(
                         div()
                             .text_xs()
-                            .text_color(rgb(0x141414))
+                            .text_color(styles.popover_text_color)
                             .child(diagnostic.message.clone())
                     )
             )
@@ -237,13 +238,14 @@ impl PopoverElement {
         text: &str,
         highlight_indices: &[usize],
         is_selected: bool,
+        styles: &TextEditorStyles,
     ) -> AnyElement {
         let base_color = if is_selected {
-            rgb(0x000000)
+            styles.popover_title_color
         } else {
-            rgb(0x333333)
+            styles.popover_text_color
         };
-        let highlight_color = rgb(0x2c5a70);
+        let highlight_color = styles.popover_highlight_color;
 
         let mut segments = Vec::new();
         let mut current_segment = String::new();
@@ -292,6 +294,7 @@ impl PopoverElement {
     fn build_autocomplete_popover(
         &self,
         autocomplete_state: &Rc<RefCell<AutoCompleteState>>,
+        styles: &TextEditorStyles,
     ) -> AnyElement {
         let padding = px(4.0);
         let item_padding_x = px(8.0);
@@ -305,16 +308,16 @@ impl PopoverElement {
             .flex()
             .absolute()
             .p(padding)
-            .bg(rgb(0xe6e9ee))
+            .bg(styles.popover_background_color)
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xd0d3d8))
+            .border_color(styles.popover_border_color)
             .max_w(max_w)
             .shadow(vec![BoxShadow {
                 offset: Point { x: px(0.), y: px(0.) },
                 blur_radius: px(2.),
                 spread_radius: px(2.),
-                color: Hsla { h: 0., s: 0., l: 0., a: 0.10 },
+                color: styles.popover_shadow_color,
             }])
             .child(
                 div()
@@ -348,11 +351,14 @@ impl PopoverElement {
                                             .py(item_padding_y)
                                             .rounded_sm()
                                             .when(is_selected, |this| {
-                                                this.bg(rgb(0xDDDDDF))
+                                                this.bg(styles.popover_selected_background_color)
                                             })
                                             .when(!is_selected, |this| {
-                                                this.bg(rgb(0xe6e9ee))
-                                                    .hover(|style| style.bg(rgb(0xd6dae0)))
+                                                this.bg(styles.popover_background_color)
+                                                    .hover({
+                                                        let hover = styles.popover_hover_background_color;
+                                                        move |style| style.bg(hover)
+                                                    })
                                             })
                                             .cursor_pointer()
                                             .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
@@ -370,7 +376,8 @@ impl PopoverElement {
                                                         Self::render_highlighted_text(
                                                             &head,
                                                             highlights,
-                                                            is_selected
+                                                            is_selected,
+                                                            styles,
                                                         )
                                                     )
                                             )
@@ -384,6 +391,7 @@ impl PopoverElement {
     fn build_parameter_hint_popover(
         &self,
         parameter_hint_state: &Rc<RefCell<ParameterPositionState>>,
+        styles: &TextEditorStyles,
     ) -> AnyElement {
         let item_padding_x = px(12.0);
         let item_padding_y = px(6.0);
@@ -396,17 +404,17 @@ impl PopoverElement {
         div()
             .flex()
             .absolute()
-            .bg(rgb(0xe6e9ee))
+            .bg(styles.popover_background_color)
             .rounded_md()
             .border_1()
-            .border_color(rgb(0xd0d3d8))
+            .border_color(styles.popover_border_color)
             .min_w(min_w)
             .max_w(max_w)
             .shadow(vec![BoxShadow {
                 offset: Point { x: px(0.), y: px(0.) },
                 blur_radius: px(1.),
                 spread_radius: px(1.),
-                color: Hsla { h: 0., s: 0., l: 0., a: 0.10 },
+                color: styles.popover_shadow_color,
             }])
             .child(
                 div()
@@ -418,13 +426,13 @@ impl PopoverElement {
                     .text_sm()
                     .child(
                         div()
-                            .text_color(black())
+                            .text_color(styles.popover_title_color)
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .child(hint.name.clone())
                     )
                     .child(
                         div()
-                            .text_color(black())
+                            .text_color(styles.popover_title_color)
                             .child(if hint.is_operator { "{" } else { "(" })
                     )
                     .children(
@@ -436,12 +444,12 @@ impl PopoverElement {
                                 let mut elements = vec![
                                     div()
                                         .when(is_active, |this| {
-                                            this.text_color(rgb(0x2c5aa0))
+                                            this.text_color(styles.popover_active_argument_color)
                                                 .font_weight(gpui::FontWeight::BOLD)
                                                 .underline()
                                         })
                                         .when(!is_active, |this| {
-                                            this.text_color(rgb(0x666666))
+                                            this.text_color(styles.popover_inactive_argument_color)
                                         })
                                         .child(arg.clone())
                                         .into_any_element(),
@@ -450,7 +458,7 @@ impl PopoverElement {
                                 if i < hint.args.len() - 1 {
                                     elements.push(
                                         div()
-                                            .text_color(black())
+                                            .text_color(styles.popover_title_color)
                                             .child(", ")
                                             .into_any_element()
                                     );
@@ -461,7 +469,7 @@ impl PopoverElement {
                     )
                     .child(
                         div()
-                            .text_color(black())
+                            .text_color(styles.popover_title_color)
                             .child(if hint.is_operator { "}" } else { ")" })
                     )
             )
@@ -527,10 +535,11 @@ impl Element for PopoverElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let diagnostic_state = self.hovered_diagnostic(cx);
+        let styles = self.editor.read(cx).text_styles.clone();
 
         let mut children: SmallVec<_> = SmallVec::new();
         if let Some(ref ac_state) = self.autocomplete_state(window, cx) {
-            let mut popover_content = self.build_autocomplete_popover(&ac_state.autocomplete_state);
+            let mut popover_content = self.build_autocomplete_popover(&ac_state.autocomplete_state, &styles);
             let content_layout_id = popover_content.request_layout(window, cx);
             let pos_in_container = ac_state.pos_in_container;
 
@@ -539,7 +548,7 @@ impl Element for PopoverElement {
         }
 
         if let Some(ref parameter_hint) = self.parameter_hint_state(window, cx) {
-            let mut popover_content = self.build_parameter_hint_popover(&parameter_hint.parameter_hint_state);
+            let mut popover_content = self.build_parameter_hint_popover(&parameter_hint.parameter_hint_state, &styles);
             let content_layout_id = popover_content.request_layout(window, cx);
             let pos_in_container = parameter_hint.pos_in_container;
 
@@ -548,7 +557,7 @@ impl Element for PopoverElement {
 
         if let Some(ref diag_state) = diagnostic_state {
 
-            let mut popover_content = self.build_diagnostic_popover(&diag_state.diagnostic);
+            let mut popover_content = self.build_diagnostic_popover(&diag_state.diagnostic, &styles);
             let content_layout_id = popover_content.request_layout(window, cx);
 
             children.push(ChildElementState { popover_content, pos_in_container: diag_state.pos_in_container, prefer_up: false, content_layout_id });

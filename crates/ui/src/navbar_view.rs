@@ -1,10 +1,15 @@
 use gpui::*;
 
-use crate::{components::buttons::link_button, document_view::OpenDocument, state::window_state::{ActiveScreen, WindowState}, theme::ColorSet};
+use crate::{
+    components::buttons::link_button,
+    document_view::OpenDocument,
+    state::window_state::{ActiveScreen, WindowState},
+    theme::{ThemeSettings, ThemeMode},
+};
 
 pub struct Navbar {
     window_state: WeakEntity<WindowState>,
-    document_list: Entity<DocumentList>
+    document_list: Entity<DocumentList>,
 }
 
 struct DocumentList {
@@ -12,7 +17,6 @@ struct DocumentList {
 }
 
 impl DocumentList {
-
     fn render_tab(&self, doc: &OpenDocument, is_active: bool, cx: &Context<Self>) -> impl IntoElement {
         let filename = doc.user_path
             .as_ref()
@@ -20,19 +24,23 @@ impl DocumentList {
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or(
                 "Untitled".to_string()
-                 + &doc.internal_path
-                    .extension()
-                    .map(|e| ".".to_string() + &e.to_string_lossy().to_string())
-                    .unwrap_or_default()
+                    + &doc.internal_path
+                        .extension()
+                        .map(|e| ".".to_string() + &e.to_string_lossy().to_string())
+                        .unwrap_or_default(),
             );
 
         let dirty = *doc.dirty.read(cx);
-
         let up = doc.user_path.clone();
         let ip0 = doc.internal_path.clone();
         let ip = doc.internal_path.clone();
+        let theme = ThemeSettings::theme(cx);
 
-        let col = if is_active { ColorSet::SUPER_LIGHT_GRAY } else { ColorSet::TOOLBAR_GRAY };
+        let bg = if is_active {
+            theme.tab_active_background
+        } else {
+            theme.tab_background
+        };
 
         div()
             .flex()
@@ -43,17 +51,17 @@ impl DocumentList {
             .pr_1()
             .h_full()
             .border_r(px(0.5))
-            .border_color(ColorSet::PURPLE)
-            .h(px(30.))
-            .bg(col)
+            .border_color(theme.accent)
+            .h(px(30.0))
+            .bg(bg)
+            .text_color(theme.text_primary)
             .child(
                 div()
                     .size_1()
                     .rounded_full()
-                    .bg(if dirty { ColorSet::PURPLE } else { col })
+                    .bg(if dirty { theme.accent } else { bg }),
             )
             .child(filename)
-            .text_color(black())
             .id(SharedString::new(doc.internal_path.to_string_lossy().to_string()))
             .child(
                 div()
@@ -62,7 +70,10 @@ impl DocumentList {
                     .items_center()
                     .justify_center()
                     .rounded_sm()
-                    .hover(|style| style.bg(ColorSet::LIGHT_GRAY))
+                    .hover({
+                        let hover = theme.tab_close_hover_background;
+                        move |style| style.bg(hover)
+                    })
                     .child("×")
                     .id("close-button")
                     .on_click(cx.listener(move |this, _, window, cx| {
@@ -74,15 +85,15 @@ impl DocumentList {
                             wstate.close_tab(&ip, cx, window);
                             cx.notify();
                         })
-                    }))
+                    })),
             )
-            .on_click(cx.listener(move |this, _, w, cx| {
+            .on_click(cx.listener(move |this, _, window, cx| {
                 let state = this.window_state.upgrade().unwrap();
                 let statec = state.clone();
                 let up = up.clone();
                 let ip = ip.clone();
                 state.update(cx, move |wstate, cx| {
-                    wstate.navigate_to(up.clone(), ip.clone(), statec, w, cx);
+                    wstate.navigate_to(up.clone(), ip.clone(), statec, window, cx);
                     cx.notify();
                 })
             }))
@@ -94,11 +105,10 @@ impl Render for DocumentList {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = self.window_state.upgrade().unwrap();
         let state = entity.read(cx);
+        let theme = ThemeSettings::theme(cx);
         let active = match state.screen {
             ActiveScreen::Home => None,
-            ActiveScreen::Document(ref open_document) => {
-                Some(open_document.internal_path.clone())
-            }
+            ActiveScreen::Document(ref open_document) => Some(open_document.internal_path.clone()),
         };
 
         div()
@@ -108,13 +118,13 @@ impl Render for DocumentList {
             .h_full()
             .id("document-list")
             .border(px(1.0))
+            .border_color(theme.navbar_border)
             .children(
                 state
                     .open_documents()
-                    .map(|doc|  self.render_tab(doc, Some(&doc.internal_path) == active.as_ref(), cx))
+                    .map(|doc| self.render_tab(doc, Some(&doc.internal_path) == active.as_ref(), cx)),
             )
             .text_size(px(12.0))
-            .pr_32()
             .overflow_x_scroll()
             .track_scroll(state.navbar_scroll())
     }
@@ -123,12 +133,86 @@ impl Render for DocumentList {
 impl Navbar {
     pub fn new(state: WeakEntity<WindowState>, cx: &mut Context<Self>) -> Self {
         let s = state.clone();
+        if let Some(window_state) = state.upgrade() {
+            cx.observe(&window_state, |_this, _, cx| {
+                cx.notify();
+            })
+            .detach();
+        }
+        cx.observe_global::<ThemeSettings>(|_this, cx| {
+            cx.notify();
+        })
+        .detach();
+
         Self {
             window_state: state,
-            document_list: cx.new(|_| DocumentList {
-                window_state: s,
-            })
+            document_list: cx.new(|_cx| DocumentList { window_state: s }),
         }
+    }
+
+    fn render_theme_toggle(&self, is_dark: bool, cx: &Context<Self>) -> impl IntoElement {
+        let theme = ThemeSettings::theme(cx);
+
+        let switch = if is_dark {
+            div()
+                .w(px(34.0))
+                .h(px(18.0))
+                .px(px(2.0))
+                .flex()
+                .items_center()
+                .justify_end()
+                .rounded_full()
+                .border_1()
+                .border_color(theme.accent)
+                .bg(theme.navbar_background)
+                .child(
+                    div()
+                        .w(px(12.0))
+                        .h(px(12.0))
+                        .rounded_full()
+                        .bg(theme.accent),
+                )
+        } else {
+            div()
+                .w(px(34.0))
+                .h(px(18.0))
+                .px(px(2.0))
+                .flex()
+                .items_center()
+                .justify_start()
+                .rounded_full()
+                .border_1()
+                .border_color(theme.navbar_border)
+                .bg(theme.navbar_background)
+                .child(
+                    div()
+                        .w(px(12.0))
+                        .h(px(12.0))
+                        .rounded_full()
+                        .bg(theme.text_inverse),
+                )
+        };
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .px_3()
+            .h_full()
+            .text_color(theme.text_muted)
+            .child(
+                div()
+                    .text_xs()
+                    .child("Dark"),
+            )
+            .child(switch)
+            .cursor_pointer()
+            .hover(|style| style.opacity(0.92))
+            .id("theme-toggle")
+            .on_click(cx.listener(|_this, _, _, cx| {
+                ThemeSettings::toggle(cx);
+            }))
     }
 }
 
@@ -136,7 +220,7 @@ impl Render for Navbar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let entity = self.window_state.upgrade().unwrap();
         let state = entity.read(cx);
-
+        let theme = ThemeSettings::theme(cx);
         let home_active = matches!(state.screen, ActiveScreen::Home);
 
         div()
@@ -145,39 +229,45 @@ impl Render for Navbar {
             .items_center()
             .justify_between()
             .w_full()
-            .h(px(30.))
-            .bg(ColorSet::LIGHT_GRAY)
-            .border_color(ColorSet::SUPER_DARK_GRAY)
+            .h(px(30.0))
+            .bg(theme.navbar_background)
+            .border_color(theme.navbar_border)
             .border_b(px(0.5))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
+                    .h_full()
+                    .flex_1()
                     .child(
                         div()
-                            .child(
-                                link_button("Home",  cx.listener(|this, _, _, cx| {
-                                    let state = this.window_state.upgrade().unwrap();
-                                    state.update(cx, |state, cx| {
-                                        state.navigate_to_home();
-                                        cx.notify();
-                                    })
-                                }))
-                            )
+                            .child(link_button("Home", theme.link_text, cx.listener(|this, _, _, cx| {
+                                let state = this.window_state.upgrade().unwrap();
+                                state.update(cx, |state, cx| {
+                                    state.navigate_to_home();
+                                    cx.notify();
+                                })
+                            })))
                             .px_3()
+                            .h_full()
+                            .flex()
+                            .items_center(),
                     )
-                    .bg(if home_active { ColorSet::SUPER_LIGHT_GRAY } else { ColorSet::TOOLBAR_GRAY })
-                    .h(px(30.))
+                    .bg(if home_active {
+                        theme.tab_active_background
+                    } else {
+                        theme.tab_background
+                    })
                     .border_r(px(0.5))
-                    .border_color(ColorSet::PURPLE)
-            )
-            .child(
-                div()
-                    .w_full()
+                    .border_color(theme.accent)
                     .child(
-                        self.document_list.clone()
-                    )
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(self.document_list.clone()),
+                    ),
             )
+            .child(self.render_theme_toggle(matches!(ThemeSettings::read(cx).mode, ThemeMode::Dark), cx))
     }
 }

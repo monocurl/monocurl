@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use gpui::*;
 use structs::assets::Assets;
-use crate::{actions::{Copy, Cut, EpsilonBackward, EpsilonForward, NextSlide, Paste, PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, editor::text_editor, window::MonocurlWindow};
+use crate::{actions::{Copy, Cut, EpsilonBackward, EpsilonForward, NextSlide, Paste, PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, editor::text_editor, theme::ThemeSettings, window::MonocurlWindow};
 
 mod document_view;
 mod editor;
@@ -125,6 +125,7 @@ impl MonocurlLauncher {
     fn launch() {
         Application::new().run(|cx: &mut App| {
             Self::setup_fonts(cx);
+            ThemeSettings::init(cx);
             Self::setup_modules(cx);
             Self::setup_global_actions(cx);
             Self::setup_menus(cx);

@@ -5,7 +5,7 @@ use gpui::*;
 use structs::rope::{Attribute, Rope, TextAggregate};
 use ui_cli_shared::doc_type::DocumentType;
 
-use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut}, components::split_pane::Split, editor::editor_view::Editor, navbar_view::Navbar, services::{PlaybackMode, ServiceManager}, state::{document_state::DocumentState, textual_state::LexData, window_state::{ActiveScreen, WindowState}}, theme::ColorSet, timeline::timeline_view::Timeline, viewport::viewport_view::Viewport};
+use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut}, components::split_pane::Split, editor::editor_view::Editor, navbar_view::Navbar, services::{PlaybackMode, ServiceManager}, state::{document_state::DocumentState, textual_state::LexData, window_state::{ActiveScreen, WindowState}}, theme::ThemeSettings, timeline::timeline_view::Timeline, viewport::viewport_view::Viewport};
 
 
 pub fn init(cx: &mut App) {
@@ -292,7 +292,7 @@ impl DocumentView {
         let services = cx.new(|cx| ServiceManager::new(state.textual_state.clone(), state.execution_state.clone(), cx));
 
         let editor = cx.new(|cx| Editor::new(state.textual_state.clone(), internal_path.clone(), dirty.clone(), window, cx));
-        let viewport = cx.new(|cx| Viewport::new(cx));
+        let viewport = cx.new(Viewport::new);
         let timeline = cx.new(|cx| Timeline::new(services.clone(), cx));
 
         // whenever we switch over to here, we recompute the live dependencies cache
@@ -306,6 +306,12 @@ impl DocumentView {
                     }
                 }
             });
+        }).detach();
+        cx.observe(&window_state_up, |_dv, _, cx| {
+            cx.notify();
+        }).detach();
+        cx.observe_global::<ThemeSettings>(|_dv, cx| {
+            cx.notify();
         }).detach();
 
         dirty.update(cx, |dirty, _| {
@@ -330,9 +336,12 @@ impl DocumentView {
     }
 
     fn render_presentation(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = ThemeSettings::theme(cx);
+
         div()
             .child("Presenting")
-            .text_color(white())
+            .text_color(theme.text_primary)
+            .bg(theme.document_background)
             .key_context("document presenter")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_presentation))
@@ -345,15 +354,18 @@ impl DocumentView {
             .on_action(cx.listener(Self::epsilon_backward))
     }
 
-    fn viewport_timeline(&self) -> Split {
+    fn viewport_timeline(&self, divider_color: impl Into<Hsla>) -> Split {
         Split::new(
             Axis::Vertical,
             self.viewport.clone().into_any_element(),
             self.timeline.clone().into_any_element(),
         )
+        .divider_color(divider_color)
     }
 
     fn render_editing(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = ThemeSettings::theme(cx);
+
         div()
             .flex()
             .flex_col()
@@ -362,12 +374,13 @@ impl DocumentView {
                 Split::new(
                     Axis::Horizontal,
                     self.editor.clone().into_any_element(),
-                    self.viewport_timeline().into_any_element()
+                    self.viewport_timeline(theme.split_divider).into_any_element()
                 )
                 .default_flex(0.5)
+                .divider_color(theme.split_divider)
             )
-            .text_color(white())
-            .bg(ColorSet::DARK_GRAY)
+            .text_color(theme.text_primary)
+            .bg(theme.document_background)
             .size_full()
             .key_context("document")
             .track_focus(&self.focus_handle)

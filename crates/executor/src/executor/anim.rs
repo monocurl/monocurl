@@ -71,7 +71,6 @@ impl Executor {
             match self.seek_primitive_anim().await {
                 SeekPrimitiveResult::EndOfSection => {
                     if self.state.timestamp.slide < max_slide && self.state.timestamp.slide + 1 < self.bytecode.sections.len() {
-                        println!("Advancing to next section: {}", self.state.timestamp.slide + 1);
                         self.advance_section().await;
                     }
                     else {
