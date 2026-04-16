@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use gpui::{App, Font, Global, Hsla, Pixels, ReadGlobal, Rgba, UpdateGlobal, px};
 use serde::{Deserialize, Serialize};
 
+use crate::services::ExecutionStatus;
+
 const fn rgba(hex: u32) -> Rgba {
     Rgba {
         r: ((hex >> 16) & 0xff) as f32 / 255.0,
@@ -113,6 +115,12 @@ pub struct Theme {
     pub app_background: Rgba,
     pub document_background: Rgba,
     pub viewport_background: Rgba,
+    pub viewport_stage_background: Rgba,
+    pub viewport_status_playing: Rgba,
+    pub viewport_status_loading: Rgba,
+    pub viewport_status_paused: Rgba,
+    pub viewport_status_runtime_error: Rgba,
+    pub viewport_status_compile_error: Rgba,
 
     pub text_primary: Rgba,
     pub text_muted: Rgba,
@@ -163,6 +171,12 @@ impl Theme {
             app_background: rgba(0xEFF1F5),
             document_background: rgba(0x2B2E2F),
             viewport_background: rgba(0xDCE0E8),
+            viewport_stage_background: rgba(0xF5EBEA),
+            viewport_status_playing: rgba(0xFFFFFF),
+            viewport_status_loading: rgba(0x1E66F5),
+            viewport_status_paused: rgba(0xFFFFFF),
+            viewport_status_runtime_error: rgba(0x8839EF),
+            viewport_status_compile_error: rgba(0xD20F39),
 
             text_primary: rgba(0x4C4F69),
             text_muted: rgba(0x6C6F85),
@@ -196,7 +210,7 @@ impl Theme {
             timeline_divider: rgba(0xDCE0E8),
             timeline_status_error: rgba(0xD20F39),
             timeline_status_ok: rgba(0x179299),
-            timeline_playhead: rgba(0x007fff),
+            timeline_playhead: rgba(0x000000),
         }
     }
 
@@ -206,6 +220,12 @@ impl Theme {
             app_background: rgba(0x252525),
             document_background: rgba(0x252525),
             viewport_background: rgba(0x2D2D2D),
+            viewport_stage_background: rgba(0xF2E9E4),
+            viewport_status_playing: rgba(0xFFFFFF),
+            viewport_status_loading: rgba(0x78AEDE),
+            viewport_status_paused: rgba(0xFFFFFF),
+            viewport_status_runtime_error: rgba(0xB08AE0),
+            viewport_status_compile_error: rgba(0xE06C6C),
 
             text_primary: rgba(0xD4D4D4),
             text_muted: rgba(0x8A8A8A),
@@ -245,6 +265,16 @@ impl Theme {
 
     pub fn text_editor_styles(self) -> TextEditorStyles {
         TextEditorStyles::for_mode(self.mode)
+    }
+
+    pub fn viewport_status_ring(self, status: ExecutionStatus) -> Rgba {
+        match status {
+            ExecutionStatus::Playing => self.viewport_status_playing,
+            ExecutionStatus::Paused => self.viewport_status_paused,
+            ExecutionStatus::Seeking => self.viewport_status_loading,
+            ExecutionStatus::RuntimeError => self.viewport_status_runtime_error,
+            ExecutionStatus::CompileError => self.viewport_status_compile_error,
+        }
     }
 }
 

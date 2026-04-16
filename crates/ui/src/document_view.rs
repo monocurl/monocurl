@@ -292,7 +292,7 @@ impl DocumentView {
         let services = cx.new(|cx| ServiceManager::new(state.textual_state.clone(), state.execution_state.clone(), cx));
 
         let editor = cx.new(|cx| Editor::new(state.textual_state.clone(), internal_path.clone(), dirty.clone(), window, cx));
-        let viewport = cx.new(Viewport::new);
+        let viewport = cx.new(|cx| Viewport::new(services.clone(), cx));
         let timeline = cx.new(|cx| Timeline::new(services.clone(), cx));
 
         // whenever we switch over to here, we recompute the live dependencies cache

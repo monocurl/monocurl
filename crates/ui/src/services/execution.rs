@@ -25,6 +25,7 @@ pub enum PlaybackMode {
     Preview
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExecutionStatus {
     Playing,
     Paused,

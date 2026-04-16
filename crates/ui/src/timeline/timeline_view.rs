@@ -333,8 +333,8 @@ impl Timeline {
                         if mark_x < gap_x + gw {
                             window.paint_quad(fill(
                                 Bounds::new(
-                                    point(ox + px(mark_x - 0.65), oy + px(line_y - 3.0)),
-                                    size(px(1.5), px(6.0)),
+                                    point(ox + px(mark_x - 1.0), oy + px(line_y - 3.0)),
+                                    size(px(2.0), px(6.0)),
                                 ),
                                 theme.timeline_tick,
                             ));
@@ -377,8 +377,8 @@ impl Timeline {
                 // playhead: 2px vertical line spanning full canvas height
                 window.paint_quad(fill(
                     Bounds::new(
-                        point(ox + px(playhead_x - 0.5), oy_full),
-                        size(px(1.0), bounds.size.height),
+                        point(ox + px(playhead_x - 0.75), oy_full),
+                        size(px(1.5), bounds.size.height),
                     ),
                     theme.timeline_playhead,
                 ));
