@@ -106,6 +106,7 @@ pub struct InstructionAnnotation {
 pub struct SectionFlags {
     pub is_stdlib: bool,
     pub is_library: bool,
+    pub is_init: bool
 }
 
 #[derive(Clone, PartialEq)]
@@ -150,6 +151,13 @@ impl Bytecode {
         self.sections
             .iter()
             .take_while(|s| s.flags.is_library)
+            .count()
+    }
+
+    pub fn non_slide_sections(&self) -> usize {
+        self.sections
+            .iter()
+            .take_while(|s| s.flags.is_library || s.flags.is_init)
             .count()
     }
 }

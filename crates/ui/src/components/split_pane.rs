@@ -135,6 +135,9 @@ impl Element for Split {
 
         self.second.paint(window, cx);
         self.first.paint(window, cx);
+
+        // paint divider on top of children so it's visible
+        window.paint_quad(fill(layout.divider_bounds, rgba(0x9CA0B0ff)));
     }
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
@@ -166,12 +169,6 @@ fn paint_split_handle(
     } else {
         window.set_cursor_style(cursor_style, &layout.handle_hitbox);
     }
-
-    // Paint divider
-    window.paint_quad(fill(
-        layout.divider_bounds,
-        gpui::black()
-    ));
 
     window.on_mouse_event({
         let hitbox = layout.handle_hitbox.clone();

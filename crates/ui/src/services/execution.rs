@@ -11,12 +11,11 @@ use futures::{StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSender}, fu
 use smol::Timer;
 use stdlib::registry::registry;
 
-use crate::services::ServiceManagerMessage;
+use crate::{services::ServiceManagerMessage, state::diagnostics::Diagnostic};
 
 pub struct ExecutionSnapshot {
     pub current_timestamp: Timestamp,
-    pub runtime_errors: Vec<String>,
-    pub has_compiler_error: bool,
+    pub status: ExecutionStatus,
     pub slide_count: usize,
     pub slide_durations: Vec<Option<f64>>,
 }
@@ -24,6 +23,14 @@ pub struct ExecutionSnapshot {
 pub enum PlaybackMode {
     Presentation,
     Preview
+}
+
+pub enum ExecutionStatus {
+    Playing,
+    Paused,
+    Seeking,
+    RuntimeError,
+    CompileError
 }
 
 impl PlaybackMode {
@@ -38,6 +45,7 @@ impl PlaybackMode {
 pub enum ExecutionMessage {
     UpdateBytecode {
         bytecode: Option<Bytecode>,
+        version: usize,
     },
     SetPlaybackMode(PlaybackMode),
     UpdateParameter,
@@ -53,7 +61,7 @@ pub struct ExecutionService {
 }
 
 fn default_bytecode() -> Bytecode {
-    let mut section = SectionBytecode::new(SectionFlags { is_stdlib: true, is_library: true });
+    let mut section = SectionBytecode::new(SectionFlags { is_stdlib: true, is_library: true, is_init: false });
     section.instructions.push(Instruction::EndOfExecutionHead);
     Bytecode::new(vec![Arc::new(section)])
 }
@@ -77,12 +85,13 @@ impl ExecutionService {
     async fn run_loop(mut self) {
         let native_funcs = registry().func_table();
 
+        let mut version = 0;
         let mut has_compiler_error = true;
         let mut executor = Executor::new(default_bytecode(), native_funcs);
         let mut target = Timestamp::default();
         let mut is_playing = false;
         let mut has_seeked_for_play = false;
-        let mut playback_mode = PlaybackMode::Presentation;
+        let mut playback_mode = PlaybackMode::Preview;
 
         let mut last_update_at = Instant::now();
 
@@ -92,7 +101,8 @@ impl ExecutionService {
 
         loop {
             match message {
-                ExecutionMessage::UpdateBytecode { bytecode } => {
+                ExecutionMessage::UpdateBytecode { bytecode, version: nversion } => {
+                    version = nversion;
                     is_playing = false;
                     if let Some(bytecode) = bytecode {
                         let old_user_timestamp = executor.internal_to_user_timestamp(target);
@@ -103,7 +113,6 @@ impl ExecutionService {
                     else {
                         has_compiler_error = true;
                     }
-                    self.emit_snapshot(&mut executor, has_compiler_error);
                 }
                 ExecutionMessage::SetPlaybackMode(ctx) => {
                     log::info!("playback mode -> {}", match ctx {
@@ -132,13 +141,16 @@ impl ExecutionService {
             }
 
             let state_update = async {
+
                 if !is_playing || !has_seeked_for_play {
+                    Self::emit_snapshot(&self.sm_tx, &executor, has_compiler_error, is_playing, true, version);
+
                     has_seeked_for_play = true;
                     match executor.seek_to(target).await {
                         SeekToResult::SeekedTo(reached) => {
                             target = reached;
                         }
-                        SeekToResult::Error(_) => {
+                        SeekToResult::Error(e) => {
                             target = executor.state.timestamp;
                             is_playing = false;
                         }
@@ -152,7 +164,7 @@ impl ExecutionService {
 
                     let max_slide = match playback_mode {
                         PlaybackMode::Presentation => executor.state.timestamp.slide,
-                        PlaybackMode::Preview => executor.slide_count(),
+                        PlaybackMode::Preview => executor.real_slide_count(),
                     };
 
                     match executor.seek_primitive_anim_skip(max_slide).await {
@@ -185,7 +197,7 @@ impl ExecutionService {
                 }
 
                 // to avoid double borrow
-                &executor
+                (&executor, is_playing)
             };
 
             match future::select(self.rx.next(), pin!(state_update)).await {
@@ -193,8 +205,8 @@ impl ExecutionService {
                     message = msg;
                 }
                 future::Either::Left((None, _)) => break,
-                future::Either::Right((executor, _)) => {
-                    self.emit_snapshot(executor, has_compiler_error);
+                future::Either::Right(((executor, snap_is_playing), _)) => {
+                    Self::emit_snapshot(&self.sm_tx, executor, has_compiler_error, snap_is_playing, false, version);
                     message = match self.rx.next().await {
                         Some(msg) => msg,
                         None => break,
@@ -204,17 +216,46 @@ impl ExecutionService {
         }
     }
 
-    fn emit_snapshot(&self, executor: &Executor, has_compiler_error: bool) {
-        let snapshot = ExecutionSnapshot {
-            current_timestamp: executor.state.timestamp,
-            runtime_errors: executor.state.errors.clone(),
-            has_compiler_error,
-            slide_count: executor.slide_count(),
-            slide_durations: executor.slide_durations(),
+    fn emit_snapshot(sm_tx: &UnboundedSender<ServiceManagerMessage>, executor: &Executor, has_compiler_error: bool, is_playing: bool, is_loading: bool, version: usize) {
+        let status = if has_compiler_error {
+            ExecutionStatus::CompileError
+        }
+        else if !executor.state.errors.is_empty() {
+            ExecutionStatus::RuntimeError
+        }
+        else if is_loading {
+            ExecutionStatus::Seeking
+        }
+        else if is_playing {
+            ExecutionStatus::Playing
+        }
+        else {
+            ExecutionStatus::Paused
         };
 
-        self.sm_tx
+        let snapshot = ExecutionSnapshot {
+            current_timestamp: executor.internal_to_user_timestamp( executor.state.timestamp),
+            status,
+            slide_count: executor.real_slide_count(),
+            slide_durations: executor.real_slide_durations(),
+        };
+
+        sm_tx
             .unbounded_send(ServiceManagerMessage::ExecutionStateUpdated { snapshot })
+            .ok();
+
+        let diagnostics = executor.state.errors
+            .iter()
+            .map(|(msg, span)| Diagnostic {
+                dtype: crate::state::diagnostics::DiagnosticType::RuntimeError,
+                span: span.clone(),
+                title: "Runtime Error".into(),
+                message: msg.clone(),
+            })
+            .collect();
+
+        sm_tx
+            .unbounded_send(ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics, version })
             .ok();
     }
 }

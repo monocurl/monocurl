@@ -1,0 +1,1 @@
+let Wait = |time = 1| __monocurl__native__ wait(time)

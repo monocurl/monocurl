@@ -52,5 +52,7 @@ actions!(
         NextSlide,
         EpsilonForward,
         EpsilonBackward,
+        ZoomIn,
+        ZoomOut,
     ]
 );

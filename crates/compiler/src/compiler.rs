@@ -248,7 +248,7 @@ impl Compiler {
             errors: Vec::default(),
             bytecode: vec![],
             final_stack_depth: 0,
-            current_bytecode: Some(SectionBytecode::new(SectionFlags { is_stdlib: true, is_library: true }))
+            current_bytecode: Some(SectionBytecode::new(SectionFlags { is_stdlib: true, is_library: true, is_init: false }))
         });
 
         // define global scene variables
@@ -354,8 +354,9 @@ impl Compiler {
             is_stdlib: section.section_type == SectionType::StandardLibrary,
             is_library: matches!(
                 section.section_type,
-                SectionType::UserLibrary
+                SectionType::UserLibrary | SectionType::StandardLibrary
             ),
+            is_init: section.section_type == SectionType::Init
         }));
 
         // symbols declared here land in the current top scope (no push/pop)
@@ -1169,7 +1170,7 @@ impl Compiler {
         // but it also guarantees deepest first ordering for references
         for (_, arg) in &l.arguments.1 {
             self.compile_val(&arg.1, &arg.0);
-            self.emit(Instruction::ConvertVar, span.clone());
+            self.emit(Instruction::ConvertVar, arg.0.clone());
         }
         self.compile_expr(false, Some(&l.arguments), &l.lambda.1, &l.lambda.0);
 
@@ -1186,18 +1187,21 @@ impl Compiler {
         self.dec_stack(num_args as usize); // goes from +(args+1) to +1
     }
 
-    fn compile_operator_invoke(&mut self, o: &OperatorInvocation, span: &Span8) {
+    fn compile_operator_invoke(&mut self, o: &OperatorInvocation, _span: &Span8) {
         let labeled = o.arguments.1.iter().any(|(lbl, _)| lbl.is_some());
         let stateful = is_stateful(&o.operator.1)
             || is_stateful(&o.operand.1)
             || o.arguments.1.iter().any(|(_, a)| is_stateful(&a.1));
         let num_args = o.arguments.1.len() as u32;
 
+        // span covering just `operator{args}`, excluding the operand
+        let invoke_span = o.operator.0.start..o.arguments.0.end;
+
         self.compile_val(&o.operand.1, &o.operand.0);
-        self.emit(Instruction::ConvertVar, span.clone());
+        self.emit(Instruction::ConvertVar, o.operand.0.clone());
         for (_, arg) in &o.arguments.1 {
             self.compile_val(&arg.1, &arg.0);
-            self.emit(Instruction::ConvertVar, span.clone());
+            self.emit(Instruction::ConvertVar, arg.0.clone());
         }
         self.compile_expr(false, Some(&o.arguments), &o.operator.1, &o.operator.0);
 
@@ -1207,14 +1211,14 @@ impl Compiler {
                     Some((_, IdentifierDeclaration(name))) => self.intern_string(name,),
                     None => u32::MAX,
                 };
-                self.emit(Instruction::BufferLabelOrAttribute { string_index: si }, span.clone());
+                self.emit(Instruction::BufferLabelOrAttribute { string_index: si }, invoke_span.clone());
             }
         }
-        self.emit(Instruction::OperatorInvoke { stateful, labeled, num_args }, span.clone());
+        self.emit(Instruction::OperatorInvoke { stateful, labeled, num_args }, invoke_span.clone());
         self.dec_stack(num_args as usize + 1);
         // convert lambda result ([initial, modified]) into a live value;
         // for labeled invocations the InvokedOperator is already on stack (no-op).
-        self.emit(Instruction::ConvertToLiveOperator, span.clone());
+        self.emit(Instruction::ConvertToLiveOperator, invoke_span);
     }
 
     fn compile_native_invoke(&mut self, n: &NativeInvocation, span: &Span8) {

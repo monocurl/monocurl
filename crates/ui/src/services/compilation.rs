@@ -126,7 +126,8 @@ impl CompilationService {
                             SymbolFunctionInfo::Lambda { args } | SymbolFunctionInfo::Operator { args } => {
                                 let func_start_loc = latest_text_rope.utf8_prefix_summary(reference.span.start);
 
-                                let args = if args.is_empty() { vec!["".to_string()] } else { args.clone()};
+                                let offset = if matches!(sym.function_info, SymbolFunctionInfo::Operator { .. }) { 1 } else { 0 };
+                                let args = if args.len() <= offset { vec!["".to_string()] } else { args[offset..].iter().cloned().collect() };
 
                                 let invoked_args = reference.invocation_spans.as_ref().unwrap();
                                 let active_index = find_active_index(&invoked_args.1, cursor, args.len());
@@ -234,6 +235,7 @@ impl CompilationService {
         let okay_bytecode = parse_artifacts.error_diagnostics.is_empty() && compile_result.errors.is_empty();
         self.execution_tx.send(ExecutionMessage::UpdateBytecode {
             bytecode: okay_bytecode.then_some(compile_result.bytecode.clone()),
+            version,
         }).await.unwrap();
 
         return compile_result;

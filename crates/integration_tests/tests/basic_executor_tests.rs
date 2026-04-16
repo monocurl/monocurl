@@ -212,7 +212,8 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         }
     });
 
-    runtime_errors.extend(executor.state.errors.iter().cloned());
+
+    runtime_errors.extend(executor.state.errors.iter().map(|err| err.0.clone()));
 
     let value = executor.state.captured_output.into_iter().last();
     ExecResult {
@@ -691,6 +692,30 @@ fn test_exec_lambda_returns_lambda() {
         let result = add5(37)
     ");
     r.assert_int(42);
+}
+
+#[test]
+fn test_unused_block() {
+    let r = run("
+        var gamma = |lambda| { return lambda }
+        let g = block {
+            return 2 + 5
+        }
+        let g = gamma(|x| x)(7)
+    ");
+    r.assert_int(7);
+}
+
+#[test]
+fn test_used_block() {
+    let r = run("
+        let x = block {
+            var a = 2
+            var b = 7
+            return a + b
+        }
+    ");
+    r.assert_int(9);
 }
 
 // -- collections: lists --

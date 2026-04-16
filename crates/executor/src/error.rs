@@ -9,8 +9,8 @@ pub enum ExecutorError {
     CannotAssignTo(&'static str),
     CannotSubscript(&'static str),
     CannotAttribute(&'static str),
-    TooFewArguments { minimum: usize, got: usize },
-    TooManyArguments { maximum: usize, got: usize },
+    TooFewArguments { minimum: usize, got: usize, operator: bool },
+    TooManyArguments { maximum: usize, got: usize, operator: bool },
     AnimPlayedTwice,
     PlayInLabeledInvocation,
     StackOverflow,
@@ -53,11 +53,21 @@ impl fmt::Display for ExecutorError {
             Self::CannotAssignTo(ty) => write!(f, "cannot assign to {}. You might have forgotten to pass a variable by reference (e.g. &var)", ty),
             Self::CannotSubscript(ty) => write!(f, "cannot subscript {}", ty),
             Self::CannotAttribute(ty) => write!(f, "attribute access on {}", ty),
-            Self::TooFewArguments { minimum, got } => {
-                write!(f, "too few arguments: expected at least {}, got {}", minimum, got)
+            Self::TooFewArguments { minimum, got, operator } => {
+                if *operator {
+                    write!(f, "too few arguments for operator: expected at least {}, got {}", minimum.saturating_sub(1), got.saturating_sub(1))
+                }
+                else {
+                    write!(f, "too few positional arguments: expected at least {}, got {}", minimum, got)
+                }
             }
-            Self::TooManyArguments { maximum, got } => {
-                write!(f, "too many arguments: expected at most {}, got {}", maximum, got)
+            Self::TooManyArguments { maximum, got, operator } => {
+                if *operator {
+                    write!(f, "too many arguments for operator: expected at most {}, got {}", maximum.saturating_sub(1), got.saturating_sub(1))
+                }
+                else {
+                    write!(f, "too many positional arguments: expected at most {}, got {}", maximum, got)
+                }
             }
             Self::AnimPlayedTwice => write!(f, "animation block was already played"),
             Self::PlayInLabeledInvocation => {

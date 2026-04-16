@@ -1,17 +1,18 @@
 use std::{cell::Cell, rc::Rc};
 
 use smallvec::SmallVec;
-use structs::futures::PeriodicYielder;
-
 use crate::{
     error::ExecutorError,
     state::MAX_CALL_DEPTH,
     value::{
+        InstructionPointer,
         anim_block::AnimBlock,
         invoked_function::InvokedFunction,
         invoked_operator::{build_invoked_operator, extract_operator_result},
         lambda::Lambda,
-        rc_value, Value,
+        rc_value,
+        stateful::{Stateful, StatefulNode, dedup_roots_by_ptr, value_into_stateful_parts},
+        Value,
     },
 };
 
@@ -83,6 +84,7 @@ impl Executor {
         stateful: bool,
         labeled: bool,
         num_args: u32,
+        next_ip: &mut InstructionPointer,
     ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
@@ -105,6 +107,7 @@ impl Executor {
             return ExecSingle::Error(ExecutorError::TooFewArguments {
                 minimum: min_args,
                 got: num_args as usize,
+                operator: false
             });
         }
 
@@ -112,11 +115,41 @@ impl Executor {
             return ExecSingle::Error(ExecutorError::TooManyArguments {
                 maximum: max_args,
                 got: num_args as usize,
+                operator: false
             });
         }
 
         if stateful {
-            todo!()
+            let labels = if labeled {
+                self.drain_labels(stack_idx, section_idx)
+            } else {
+                SmallVec::new()
+            };
+
+            let n = num_args as usize;
+            let stack = self.state.stack_mut(stack_idx);
+            let stack_len = stack.stack_len();
+            let args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
+            stack.pop_n(n);
+
+            // lambda was already popped above; wrap it back as a node
+            let (func_node, mut roots) = value_into_stateful_parts(Value::Lambda(lambda));
+            let arg_nodes: Vec<StatefulNode> = args.into_iter().map(|a| {
+                let (node, arg_roots) = value_into_stateful_parts(a);
+                roots.extend(arg_roots);
+                node
+            }).collect();
+            dedup_roots_by_ptr(&mut roots);
+
+            self.state.stack_mut(stack_idx).push(Value::Stateful(Stateful {
+                roots,
+                root: StatefulNode::LabeledCall {
+                    func: Box::new(func_node),
+                    args: arg_nodes,
+                    labels,
+                },
+            }));
+            return ExecSingle::Continue;
         } else if labeled {
             let labels = self.drain_labels(stack_idx, section_idx);
 
@@ -145,7 +178,7 @@ impl Executor {
                 Err(e) => ExecSingle::Error(e),
             }
         } else {
-            self.setup_lambda_call(stack_idx, num_args as usize, &lambda)
+            self.setup_lambda_call(stack_idx, num_args as usize, &lambda, next_ip)
         }
     }
 
@@ -156,6 +189,7 @@ impl Executor {
         stateful: bool,
         labeled: bool,
         num_args: u32,
+        next_ip: &mut InstructionPointer,
     ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
@@ -176,6 +210,7 @@ impl Executor {
             return ExecSingle::Error(ExecutorError::TooFewArguments {
                 minimum: min_args,
                 got: num_args as usize + 1,
+                operator: true
             });
         }
 
@@ -183,11 +218,45 @@ impl Executor {
             return ExecSingle::Error(ExecutorError::TooManyArguments {
                 maximum: max_args,
                 got: num_args as usize + 1,
+                operator: true
             });
         }
 
         if stateful {
-            todo!()
+            let n = num_args as usize;
+            let stack = self.state.stack_mut(stack_idx);
+            let stack_len = stack.stack_len();
+            let extra_args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
+            stack.pop_n(n);
+            let operand = stack.pop().elide_lvalue();
+
+            let labels = if labeled {
+                self.drain_labels(stack_idx, section_idx)
+            } else {
+                SmallVec::new()
+            };
+
+            // operator was already popped above; wrap it back as a node
+            let (op_node, mut roots) = value_into_stateful_parts(Value::Operator(operator));
+            let (operand_node, operand_roots) = value_into_stateful_parts(operand);
+            roots.extend(operand_roots);
+            let extra_arg_nodes: Vec<StatefulNode> = extra_args.into_iter().map(|a| {
+                let (node, arg_roots) = value_into_stateful_parts(a);
+                roots.extend(arg_roots);
+                node
+            }).collect();
+            dedup_roots_by_ptr(&mut roots);
+
+            self.state.stack_mut(stack_idx).push(Value::Stateful(Stateful {
+                roots,
+                root: StatefulNode::LabeledOperatorCall {
+                    operator: Box::new(op_node),
+                    operand: Box::new(operand_node),
+                    extra_args: extra_arg_nodes,
+                    labels,
+                },
+            }));
+            return ExecSingle::Continue;
         } else if labeled {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
@@ -224,7 +293,7 @@ impl Executor {
                 Err(e) => ExecSingle::Error(e),
             }
         } else {
-            self.setup_lambda_call(stack_idx, 1 + num_args as usize, lambda)
+            self.setup_lambda_call(stack_idx, 1 + num_args as usize, lambda, next_ip)
         }
     }
 
@@ -245,7 +314,7 @@ impl Executor {
         }
     }
 
-    pub(super) fn exec_return(&mut self, stack_idx: usize, stack_delta: i32) -> ExecSingle {
+    pub(super) fn exec_return(&mut self, stack_idx: usize, stack_delta: i32, next_ip: &mut InstructionPointer) -> ExecSingle {
         let ret_val = self.state.stack_mut(stack_idx).pop();
 
         let to_pop = (-stack_delta) as usize;
@@ -256,7 +325,7 @@ impl Executor {
         let ret_ip = self.state.stack_mut(stack_idx).call_stack.pop();
         if let Some(ip) = ret_ip {
             self.state.call_depth -= 1;
-            self.state.stack_mut(stack_idx).ip = ip;
+            *next_ip = ip;
             ExecSingle::Continue
         } else {
             // running on isolated head
@@ -269,6 +338,7 @@ impl Executor {
         stack_idx: usize,
         pushed_args: usize,
         lambda: &Lambda,
+        next_ip: &mut InstructionPointer,
     ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
@@ -283,9 +353,10 @@ impl Executor {
             stack.push(cap.clone());
         }
 
-        stack.call_stack.push(stack.ip);
-        stack.ip = lambda.ip;
+        // *next_ip is already the instruction after the call site — use it as return address
+        stack.call_stack.push(*next_ip);
         self.state.call_depth += 1;
+        *next_ip = lambda.ip;
 
         ExecSingle::Continue
     }
@@ -319,10 +390,8 @@ impl Executor {
                 stack.push(cap.clone());
             }
 
-            let mut yielder = PeriodicYielder::default();
-
             loop {
-                yielder.tick().await;
+                self.tick_yielder().await;
 
                 match self.execute_one(temp_idx).await {
                     ExecSingle::Continue => {}
@@ -384,7 +453,7 @@ impl Executor {
         let val = self.state.stack_mut(stack_idx).pop().elide_lvalue();
         match val {
             Value::InvokedOperator(_) => {
-                // labeled path: already the correct live value
+                // either labeled path, or the implicit assumption that we are just using that operator result
                 self.state.stack_mut(stack_idx).push(val);
             }
             Value::List(ref list) if list.elements.len() == 2 => {

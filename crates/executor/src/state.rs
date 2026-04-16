@@ -1,6 +1,7 @@
 use std::{collections::BTreeSet, rc::Rc};
 
 use smallvec::SmallVec;
+use structs::text::Span8;
 
 use crate::{
     time::Timestamp,
@@ -85,6 +86,7 @@ pub struct BakedPrimitiveAnim {
     pub parent_stack_idx: usize,
     /// which stack id for leader tracking
     pub stack_id: usize,
+    pub span: Span8
 }
 
 /// a leader-follower pair entry for quick lookup
@@ -129,7 +131,7 @@ pub struct ExecutionState {
     pub ephemeral_pool: Vec<RcValue>,
 
     /// accumulated error messages
-    pub errors: Vec<String>,
+    pub errors: Vec<(String, Span8)>,
 
     /// values captured from the top of root execution stacks when they finish.
     /// used primarily for testing: the final TOS of each completed root head
@@ -243,8 +245,8 @@ impl ExecutionState {
         self.stack_mut(stack_idx).push(Value::Lvalue(leader_cell));
     }
 
-    pub fn error(&mut self, msg: impl Into<String>) {
-        self.errors.push(msg.into());
+    pub fn error(&mut self, msg: impl Into<String>, span: Span8) {
+        self.errors.push((msg.into(), span));
     }
 
     pub fn has_errors(&self) -> bool {

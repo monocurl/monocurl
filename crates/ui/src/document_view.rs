@@ -1,10 +1,11 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use executor::time::Timestamp;
 use gpui::*;
 use structs::rope::{Attribute, Rope, TextAggregate};
 use ui_cli_shared::doc_type::DocumentType;
 
-use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor}, components::split_pane::Split, editor::editor_view::Editor, navbar_view::Navbar, services::ServiceManager, state::{document_state::DocumentState, textual_state::LexData, window_state::{ActiveScreen, WindowState}}, theme::ColorSet, timeline::timeline_view::Timeline, viewport::viewport_view::Viewport};
+use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut}, components::split_pane::Split, editor::editor_view::Editor, navbar_view::Navbar, services::{PlaybackMode, ServiceManager}, state::{document_state::DocumentState, textual_state::LexData, window_state::{ActiveScreen, WindowState}}, theme::ColorSet, timeline::timeline_view::Timeline, viewport::viewport_view::Viewport};
 
 
 pub fn init(cx: &mut App) {
@@ -37,6 +38,9 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-;", EpsilonBackward, None),
         KeyBinding::new("'", EpsilonForward, Some("!editor")),
         KeyBinding::new("secondary-'", EpsilonForward, None),
+
+        KeyBinding::new("secondary-=", ZoomIn, None),
+        KeyBinding::new("secondary--", ZoomOut, None),
     ]);
 }
 
@@ -92,14 +96,19 @@ impl DocumentView {
             if w.is_fullscreen() && !self.was_fullscreen_before_presenting {
                 w.toggle_fullscreen();
             }
-            self.is_presenting = false
+            self.is_presenting = false;
+            self.services.update(cx, |services, _| {
+                services.set_playback_mode(PlaybackMode::Presentation);
+            });
         }
         else {
             self.was_fullscreen_before_presenting = w.is_fullscreen();
             if !w.is_fullscreen() {
                 w.toggle_fullscreen();
             }
-            self.is_presenting = true
+            self.services.update(cx, |services, _| {
+                services.set_playback_mode(PlaybackMode::Preview);
+            });
         }
         log::info!("Toggled presentation mode to {}", self.is_presenting);
         cx.notify();
@@ -109,32 +118,59 @@ impl DocumentView {
         w.focus(&self.focus_handle);
     }
 
-    fn toggle_playing(&mut self, _ : &TogglePlaying, _w: &mut Window, _cx: &mut Context<Self>) {
-        println!("Toggle Playing");
+    fn toggle_playing(&mut self, _ : &TogglePlaying, _w: &mut Window, cx: &mut Context<Self>) {
+        log::info!("Toggled playing");
+        self.services.update(cx, |services, _| services.toggle_play());
     }
 
-    fn prev_slide(&mut self, _ : &PrevSlide, _w: &mut Window, _cx: &mut Context<Self>) {
-        println!("Prev Slide");
+    fn timestamp_transform(&mut self, cx: &mut Context<Self>, f: impl Fn(Timestamp) -> Timestamp) {
+        self.services.update(cx, |services, cx| {
+            let timestamp = services.timestamp(cx);
+            let next = f(timestamp);
+            services.seek_to(next);
+        });
     }
 
-    fn next_slide(&mut self, _ : &NextSlide, _w: &mut Window, _cx: &mut Context<Self>) {
-        println!("Next Slide");
+    fn prev_slide(&mut self, _: &PrevSlide, _w: &mut Window, cx: &mut Context<Self>) {
+        log::info!("Prev Slide");
+        self.services.update(cx, |s, cx| s.prev_slide(cx));
     }
 
-    fn scene_start(&mut self, _ : &SceneStart, _w: &mut Window, _cx: &mut Context<Self>) {
-        println!("Scene Start");
+    fn next_slide(&mut self, _: &NextSlide, _w: &mut Window, cx: &mut Context<Self>) {
+        log::info!("Next Slide");
+        self.services.update(cx, |s, cx| s.next_slide(cx));
     }
 
-    fn scene_end(&mut self, _ : &SceneEnd, _w: &mut Window, _cx: &mut Context<Self>) {
-        println!("Scene End");
+    fn scene_start(&mut self, _: &SceneStart, _w: &mut Window, cx: &mut Context<Self>) {
+        log::info!("Scene Start");
+        self.services.update(cx, |s, _| s.scene_start());
     }
 
-    fn epsilon_forward(&mut self, _ : &EpsilonForward, _w: &mut Window, _cx: &mut Context<Self>) {
+    fn scene_end(&mut self, _: &SceneEnd, _w: &mut Window, cx: &mut Context<Self>) {
+        log::info!("Scene End");
+        self.services.update(cx, |s, cx| s.scene_end(cx));
+    }
+
+    fn epsilon_forward(&mut self, _ : &EpsilonForward, _w: &mut Window, cx: &mut Context<Self>) {
         println!("Epsilon Forward");
+        self.timestamp_transform(cx, |timestamp| {
+            Timestamp::new(timestamp.slide, timestamp.time + 1e-3)
+        });
     }
 
-    fn epsilon_backward(&mut self, _ : &EpsilonBackward, _w: &mut Window, _cx: &mut Context<Self>) {
+    fn epsilon_backward(&mut self, _ : &EpsilonBackward, _w: &mut Window, cx: &mut Context<Self>) {
         println!("Epsilon Backward");
+        self.timestamp_transform(cx, |timestamp| {
+            Timestamp::new(timestamp.slide, (timestamp.time - 1e-3).max(0.0))
+        });
+    }
+
+    fn zoom_in(&mut self, action: &ZoomIn, w: &mut Window, cx: &mut Context<Self>) {
+        self.timeline.update(cx, |tl, cx| tl.zoom_in(action, w, cx));
+    }
+
+    fn zoom_out(&mut self, action: &ZoomOut, w: &mut Window, cx: &mut Context<Self>) {
+        self.timeline.update(cx, |tl, cx| tl.zoom_out(action, w, cx));
     }
 
     fn undo(&mut self, _ : &Undo, w: &mut Window, cx: &mut Context<Self>) {
@@ -256,7 +292,7 @@ impl DocumentView {
 
         let editor = cx.new(|cx| Editor::new(state.textual_state.clone(), internal_path.clone(), dirty.clone(), window, cx));
         let viewport = cx.new(|cx| Viewport::new(cx));
-        let timeline = cx.new(|cx| Timeline::new(cx));
+        let timeline = cx.new(|cx| Timeline::new(services.clone(), cx));
 
         // whenever we switch over to here, we recompute the live dependencies cache
         let virtual_path = internal_path.clone();
@@ -348,6 +384,8 @@ impl DocumentView {
             .on_action(cx.listener(Self::save_document))
             .on_action(cx.listener(Self::save_document_custom_path))
             .on_action(cx.listener(Self::close_document))
+            .on_action(cx.listener(Self::zoom_in))
+            .on_action(cx.listener(Self::zoom_out))
     }
 }
 

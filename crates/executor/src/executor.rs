@@ -189,8 +189,14 @@ impl Executor {
 
         let instr = self.bytecode.sections[section_idx].instructions[instr_idx].clone();
 
-        self.state.stack_mut(stack_idx).ip.1 += 1;
+        let mut next_ip = (section_idx as u16, (instr_idx + 1) as u32);
+        let ret = self.execute_instr(section_idx, stack_idx, instr, &mut next_ip).await;
+        self.state.stack_mut(stack_idx).ip = next_ip;
+        ret
+    }
 
+    #[inline]
+    async fn execute_instr(&mut self, section_idx: usize, stack_idx: usize, instr: Instruction, next_ip: &mut InstructionPointer) -> ExecSingle {
         match instr {
             // ----- push constants -----
             Instruction::PushInt { index } => {
@@ -339,7 +345,7 @@ impl Executor {
                 num_args,
             } => {
                 return self
-                    .exec_lambda_invoke(stack_idx, section_idx, stateful, labeled, num_args)
+                    .exec_lambda_invoke(stack_idx, section_idx, stateful, labeled, num_args, next_ip)
                     .await;
             }
             Instruction::OperatorInvoke {
@@ -348,7 +354,7 @@ impl Executor {
                 num_args,
             } => {
                 return self
-                    .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args)
+                    .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args, next_ip)
                     .await;
             }
             Instruction::ConvertToLiveOperator => {
@@ -357,7 +363,7 @@ impl Executor {
 
             // ----- control flow -----
             Instruction::Jump { section, to } => {
-                self.state.stack_mut(stack_idx).ip = (section, to);
+                *next_ip = (section, to);
             }
             Instruction::ConditionalJump { section, to } => {
                 let val = self.state.stack_mut(stack_idx).pop();
@@ -366,13 +372,15 @@ impl Executor {
                     Err(e) => return ExecSingle::Error(e),
                 };
                 match val.check_truthy() {
-                    Ok(true) => { self.state.stack_mut(stack_idx).ip = (section, to); }
+                    Ok(true) => {
+                        *next_ip = (section, to);
+                    }
                     Ok(false) => {}
                     Err(e) => return ExecSingle::Error(e),
                 }
             }
             Instruction::Return { stack_delta } => {
-                return self.exec_return(stack_idx, stack_delta);
+                return self.exec_return(stack_idx, stack_delta, next_ip);
             }
             Instruction::Pop { count } => {
                 self.state.stack_mut(stack_idx).pop_n(count as usize);

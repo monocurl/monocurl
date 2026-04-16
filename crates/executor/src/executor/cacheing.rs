@@ -10,7 +10,8 @@ struct CacheEntry {
 
 impl CacheEntry {
     pub fn slide_duration(&self) -> f64 {
-        self.state_after.timestamp.time
+        self.state_after.timestamp.slide as f64 + 3.0
+        // self.state_after.timestamp.time
     }
 }
 
@@ -89,7 +90,6 @@ impl Executor {
         }
     }
 
-
     // called right before advance to next section
     pub(crate) fn save_cache(&mut self) {
         assert!(!self.state.has_errors());
@@ -98,12 +98,13 @@ impl Executor {
         });
     }
 
-    pub fn slide_count(&self) -> usize {
-        self.bytecode.sections.len()
+    pub fn real_slide_count(&self) -> usize {
+        self.bytecode.sections.len() - self.bytecode.non_slide_sections()
     }
 
-    pub fn slide_durations(&self) -> Vec<Option<f64>> {
+    pub fn real_slide_durations(&self) -> Vec<Option<f64>> {
         self.cache.entries.iter()
+            .skip(self.bytecode.non_slide_sections())
             .map(|e| e.as_ref().map(|en| en.slide_duration()))
             .collect()
     }

@@ -1,6 +1,7 @@
 
 use std::{collections::HashMap, path::PathBuf};
 
+use executor::time::Timestamp;
 use gpui::{App, AppContext, Context, Entity};
 use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
@@ -12,7 +13,7 @@ mod lexing;
 mod compilation;
 mod execution;
 
-pub(crate) use execution::ExecutionSnapshot;
+pub(crate) use execution::{ExecutionSnapshot, ExecutionStatus, PlaybackMode};
 
 pub struct ServiceManager {
     textual_state: Entity<TextualState>,
@@ -51,7 +52,6 @@ pub enum ServiceManagerMessage {
         cursor: Cursor,
         version: usize,
     },
-    UpdateByteCode,
     ExecutionStateUpdated {
         snapshot: ExecutionSnapshot,
     },
@@ -180,9 +180,6 @@ impl ServiceManager {
                     }
                 });
             }
-            ServiceManagerMessage::UpdateByteCode => {
-                // currently no-op
-            }
             ServiceManagerMessage::ExecutionStateUpdated { snapshot } => {
                 self.execution_state.update(cx, |state, cx| {
                     state.apply_snapshot(snapshot);
@@ -201,5 +198,61 @@ impl ServiceManager {
                 }
             ).await.unwrap();
         })
+    }
+
+    pub fn timestamp(&self, cx: &App) -> Timestamp {
+        self.execution_state.read(cx).current_timestamp
+    }
+
+    pub fn seek_to(&mut self, target: Timestamp) {
+        smol::block_on(async {
+            self.execution_tx.send(
+                ExecutionMessage::SeekTo { target }
+            ).await.unwrap();
+        })
+    }
+
+    pub fn prev_slide(&mut self, cx: &App) {
+        let ts = self.timestamp(cx);
+        let next = if ts.time > 1e-3 {
+            Timestamp::new(ts.slide, 0.0)
+        } else {
+            Timestamp::new(ts.slide.saturating_sub(1), f64::INFINITY)
+        };
+        self.seek_to(next);
+    }
+
+    pub fn next_slide(&mut self, cx: &App) {
+        let ts = self.timestamp(cx);
+        self.seek_to(Timestamp::new(ts.slide + 1, 0.0));
+    }
+
+    pub fn scene_start(&mut self) {
+        self.seek_to(Timestamp::new(0, 0.0));
+    }
+
+    pub fn scene_end(&mut self, cx: &App) {
+        let slide_count = self.execution_state.read(cx).slide_count;
+        self.seek_to(Timestamp::new(slide_count, 0.0));
+    }
+
+    pub fn toggle_play(&mut self) {
+        smol::block_on(async {
+            self.execution_tx.send(
+                ExecutionMessage::TogglePlay
+            ).await.unwrap();
+        })
+    }
+
+    pub fn set_playback_mode(&mut self, ctx: PlaybackMode) {
+        smol::block_on(async {
+            self.execution_tx.send(
+                ExecutionMessage::SetPlaybackMode(ctx)
+            ).await.unwrap();
+        })
+    }
+
+    pub fn execution_state(&self) -> &Entity<ExecutionState> {
+        &self.execution_state
     }
 }

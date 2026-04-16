@@ -1,3 +1,5 @@
+use structs::text::Span8;
+
 use crate::{
     error::ExecutorError, executor::{SeekPrimitiveAnimSkipResult, SeekToResult}, state::{BakedPrimitiveAnim, ExecutionState}, time::Timestamp, value::{
         Value,
@@ -9,6 +11,23 @@ use crate::{
 use super::{ExecSingle, Executor, SeekPrimitiveResult};
 
 impl Executor {
+    fn instruction_span(&self, stack_idx: usize) -> Span8 {
+        let ip = self.state
+            .stack(stack_idx)
+            .ip;
+        let raw = self.bytecode.sections[ip.0 as usize]
+            .annotations[ip.1 as usize]
+            .source_loc
+            .clone();
+
+        if raw.is_empty() {
+            raw.start .. raw.end + 1
+        }
+        else {
+            raw
+        }
+    }
+
     /// run all execution heads until each hits a Play instruction or ends.
     /// yields between iterations so the async executor can interrupt if needed.
     async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
@@ -29,7 +48,7 @@ impl Executor {
                 ExecSingle::Play => { }
                 ExecSingle::EndOfHead => { }
                 ExecSingle::Error(e) => {
-                    self.state.error(e.to_string());
+                    self.state.error(e.to_string(), self.instruction_span(stack_idx));
                     return SeekPrimitiveResult::Error(e)
                 }
                 ExecSingle::Continue => unreachable!(),
@@ -55,6 +74,8 @@ impl Executor {
                         self.advance_section().await;
                     }
                     else {
+                        self.save_cache();
+
                         return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
                     }
                 }
@@ -88,13 +109,13 @@ impl Executor {
                 } else {
                     1.0
                 };
-                in_progress.push((baked.anim.clone(), t));
+                in_progress.push((baked.anim.clone(), t, baked.stack_id));
             }
         }
 
-        for (anim, t) in &in_progress {
+        for (anim, t, stack_idx) in &in_progress {
             if let Err(err) = self.apply_primitive_anim_step(anim, *t) {
-                self.state.error(err.to_string());
+                self.state.error(err.to_string(), self.instruction_span(*stack_idx));
                 return Err(err)
             }
         }
@@ -103,7 +124,7 @@ impl Executor {
         for &i in finished_indices.iter().rev() {
             let baked = self.state.primitive_anims.remove(i);
             if let Err(err) = self.apply_primitive_anim_step(&baked.anim, 1.0) {
-                self.state.error(err.to_string());
+                self.state.error(err.to_string(), self.instruction_span(baked.stack_id));
                 return Err(err)
             }
             self.resume_parent_after_anim(baked.parent_stack_idx);
@@ -149,7 +170,6 @@ impl Executor {
             match self.step_primitive_anims(dt.max(f64::MIN_POSITIVE)).await {
                 Ok(_) => {}
                 Err(e) => {
-                    self.state.error(e.to_string());
                     return SeekToResult::Error(e);
                 }
             }
@@ -314,6 +334,7 @@ impl Executor {
             end_time: start + duration,
             parent_stack_idx,
             stack_id,
+            span: self.instruction_span(stack_id)
         });
         self.state.stack_mut(parent_stack_idx).active_child_count += 1;
     }
