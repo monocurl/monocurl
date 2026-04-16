@@ -191,8 +191,13 @@ impl Executor {
         let instr = self.bytecode.sections[section_idx].instructions[instr_idx].clone();
 
         let mut next_ip = (section_idx as u16, (instr_idx + 1) as u32);
-        let ret = self.execute_instr(section_idx, stack_idx, instr, &mut next_ip).await;
         self.state.stack_mut(stack_idx).ip = next_ip;
+
+        let ret = self.execute_instr(section_idx, stack_idx, instr, &mut next_ip).await;
+        // skip ip overwrite for freed stacks (child stacks freed by EndOfExecutionHead)
+        if self.state.execution_stacks[stack_idx].is_some() {
+            self.state.stack_mut(stack_idx).ip = next_ip;
+        }
         ret
     }
 

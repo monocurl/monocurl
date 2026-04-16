@@ -1,4 +1,3 @@
-- autocomplete: may be deleted and combined into compiler code, but this potentially contains utilities for actually inferring autocomplete from AST / compiler output
 - bytecode: contains the enum of the Monocurl VM bytecode
 - cli: binary crate that contains the gluing logic for the monocurl cli
 - compiler: converts AST into bytecode, performs static analysis
@@ -66,4 +65,5 @@
   - src/window.rs: root GPUI element that owns the global state and muxes between the home and editor views 
 - integration_tests: cross-crate integration tests covering the full lex→parse→compile→execute pipeline
   - tests/basic_executor_tests.rs: `run(src)` helper + basic executor tests (literal values, arithmetic, strings, lambdas, if/else, error detection)
+  - tests/anim_tests.rs: animation test framework + tests; `AnimResult` (timestamp, leaders, errors), `LeaderInfo` (kind, target, current); runners: `run_anim`, `run_anim_at`, `run_anim_with_stdlib`, `run_multi_anim`, etc.; covers Wait duration, anim block timing, seek mid-animation, state/param leaders, multi-slide, error cases
 - ui_cli_shared: a collection of structs and utilities that are necessary for the user facing interface, but not really execution

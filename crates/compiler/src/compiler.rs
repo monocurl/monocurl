@@ -398,7 +398,11 @@ impl Compiler {
     }
 
     fn section_index(&self) -> u16 {
-        self.compile_bundles.len() as u16
+        let current_bundle_sections = self
+            .current_bundle
+            .as_ref()
+            .map_or(0, |bundle| bundle.bytecode.len());
+        (self.compile_bundles.len() + current_bundle_sections) as u16
     }
 
     fn patch_jump(&mut self, instr_idx: usize, target: u32) {

@@ -215,12 +215,16 @@ impl Executor {
     pub(super) fn finish_execution_head(&mut self, stack_idx: usize) {
         let parent_idx = self.state.stack(stack_idx).parent_idx;
 
-        // capture TOS for root stacks (no parent) so tests can inspect results
+        // capture TOS for root stacks so tests can inspect results.
+        // peek (clone without pop) so that variables remain on the stack for
+        // subsequent sections to access by position — necessary for cross-section
+        // imports (e.g. stdlib symbols defined in a library section then used in
+        // user slides).
         #[cfg(feature = "capture_tos")]
         if parent_idx.is_none() {
-            let stack = self.state.stack_mut(stack_idx);
+            let stack = self.state.stack(stack_idx);
             if stack.stack_len() > 0 {
-                let val = stack.pop().elide_lvalue();
+                let val = stack.peek().clone().elide_lvalue();
                 self.state.captured_output.push(val);
             }
         }
