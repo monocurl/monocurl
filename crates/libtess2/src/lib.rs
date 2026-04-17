@@ -389,9 +389,11 @@ mod tests {
 
         assert_eq!(tessellation.triangles.len(), 2);
         assert_eq!(tessellation.vertices.len(), 4);
-        assert!(tessellation
-            .vertices
-            .iter()
-            .all(|vertex| (vertex.z - (vertex.x + vertex.y)).abs() < 1e-5));
+        assert!(
+            tessellation
+                .vertices
+                .iter()
+                .all(|vertex| (vertex.z - (vertex.x + vertex.y)).abs() < 1e-5)
+        );
     }
 }

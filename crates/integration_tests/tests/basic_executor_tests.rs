@@ -24,7 +24,7 @@ struct ExecResult {
     value: Option<Value>,
     /// compile-time or runtime error messages
     errors: Vec<String>,
-    error_spans: Vec<Span8>,
+    _error_spans: Vec<Span8>,
 }
 
 impl ExecResult {
@@ -81,6 +81,28 @@ impl ExecResult {
                             f
                         ),
                         other => panic!("expected float list element, got {}", other.type_name()),
+                    }
+                }
+            }
+            other => panic!(
+                "expected List, got {}",
+                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+            ),
+        }
+    }
+
+    fn assert_int_list(&self, expected: &[i64]) {
+        self.assert_ok();
+        match &self.value {
+            Some(Value::List(list)) => {
+                assert_eq!(list.elements.len(), expected.len(), "list length mismatch");
+
+                for (actual, expected) in list.elements.iter().zip(expected.iter()) {
+                    match &*actual.borrow() {
+                        Value::Integer(n) => {
+                            assert_eq!(*n, *expected, "integer mismatch");
+                        }
+                        other => panic!("expected int list element, got {}", other.type_name()),
                     }
                 }
             }
@@ -153,7 +175,7 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         return ExecResult {
             value: None,
             errors: parse_errors,
-            error_spans: vec![],
+            _error_spans: vec![],
         };
     }
 
@@ -177,7 +199,7 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         return ExecResult {
             value: None,
             errors: compile_errors,
-            error_spans: vec![],
+            _error_spans: vec![],
         };
     }
 
@@ -186,7 +208,7 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         return ExecResult {
             value: None,
             errors: vec!["no user section was compiled".into()],
-            error_spans: vec![],
+            _error_spans: vec![],
         };
     }
 
@@ -227,7 +249,7 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
     ExecResult {
         value,
         errors: runtime_errors,
-        error_spans,
+        _error_spans: error_spans,
     }
 }
 
@@ -293,6 +315,33 @@ fn test_exec_subtraction() {
 fn test_exec_unary_negate_float() {
     let r = run("let x = -(1.5 + 0.5)");
     r.assert_float(-2.0);
+}
+
+#[test]
+fn test_exec_scalar_multiply_nested_list() {
+    let r = run("
+        let rows = 2 * [[1, 2], [3, 4]]
+        let result = rows[1]
+    ");
+    r.assert_int_list(&[6, 8]);
+}
+
+#[test]
+fn test_exec_nested_list_addition() {
+    let r = run("
+        let rows = [[1, 2], [3, 4]] + [[10, 20], [30, 40]]
+        let result = rows[0][1] + rows[1][0]
+    ");
+    r.assert_int(55);
+}
+
+#[test]
+fn test_exec_negate_nested_list() {
+    let r = run("
+        let rows = -[[1, 2], [3, 4]]
+        let result = rows[0]
+    ");
+    r.assert_int_list(&[-1, -2]);
 }
 
 // -- comparison and equality --
@@ -1259,6 +1308,32 @@ fn test_exec_runtime_error_index_out_of_bounds() {
 fn test_exec_runtime_error_type_in_arithmetic() {
     let r = run(r#"let x = "hello" - 1"#);
     r.assert_error("unsupported");
+}
+
+#[test]
+fn test_exec_runtime_error_list_add_length_mismatch() {
+    let r = run("
+        let x = [[1], [2, 3]] + [[4], [5]]
+    ");
+    r.assert_error("different lengths");
+}
+
+#[test]
+fn test_exec_runtime_error_list_scalar_multiply_bad_element() {
+    let r = run(r#"
+        let x = 2 * [1, "hello"]
+    "#);
+    r.assert_error("list element [1]");
+    r.assert_error("unsupported binary op * on int and string");
+}
+
+#[test]
+fn test_exec_runtime_error_list_negate_bad_element() {
+    let r = run(r#"
+        let x = -[1, "hello"]
+    "#);
+    r.assert_error("cannot negate list element [1]");
+    r.assert_error("cannot negate string");
 }
 
 #[test]

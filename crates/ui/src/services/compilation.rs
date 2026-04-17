@@ -312,7 +312,7 @@ impl CompilationService {
             lex_rope,
             version,
         )
-            .await;
+        .await;
 
         let okay_bytecode =
             parse_artifacts.error_diagnostics.is_empty() && compile_result.errors.is_empty();

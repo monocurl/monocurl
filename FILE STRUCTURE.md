@@ -5,7 +5,7 @@
 - executor: takes bytecode and scene state and executes it
   - src/error.rs: ExecutorError enum plus RuntimeError / RuntimeCallFrame (raw execution error, selected span, bounded recovered callstack)
   - src/executor/mod.rs: Executor struct, async execute_one dispatch with direct IP mutation, recovered runtime call-chain building, NativeFunc/NativeFuture types
-  - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion
+  - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion plus recursive list linear ops (scalar multiply, elementwise add, negate)
   - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, isolated eager lambda execution with trace-parent stack links, exec_convert_to_live_operator (extracts live value from operator result list)
   - src/executor/lerp.rs: general lerp(a, b, t) for Monocurl values — handles numbers, InvokedFunction (same-lambda arg-wise lerp), InvokedOperator (rules 4/5 via unmodified embed)
   - src/executor/anim.rs: seek_primitive_anim (async, yields between instructions), step_primitive_anims, seek_to (event-driven), play/spawn/bake, primitive target flattening/deduction, leader lock handling, double-play guard via AnimBlock.already_played

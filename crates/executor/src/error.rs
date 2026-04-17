@@ -48,6 +48,11 @@ pub enum ExecutorError {
         lhs: &'static str,
         rhs: &'static str,
     },
+    ListLengthMismatch {
+        op: &'static str,
+        lhs_len: usize,
+        rhs_len: usize,
+    },
     UnsupportedNegate(&'static str),
     UnhashableKey(&'static str),
     InvalidCondition(&'static str),
@@ -178,6 +183,17 @@ impl fmt::Display for ExecutorError {
             Self::MissingArgument(name) => write!(f, "{}: missing argument", name),
             Self::UnsupportedBinaryOp { op, lhs, rhs } => {
                 write!(f, "unsupported binary op {} on {} and {}", op, lhs, rhs)
+            }
+            Self::ListLengthMismatch {
+                op,
+                lhs_len,
+                rhs_len,
+            } => {
+                write!(
+                    f,
+                    "cannot apply {} to lists of different lengths: lhs has length {}, rhs has length {}",
+                    op, lhs_len, rhs_len
+                )
             }
             Self::UnsupportedNegate(ty) => write!(f, "cannot negate {}", ty),
             Self::UnhashableKey(ty) => write!(f, "cannot use {} as a map key", ty),

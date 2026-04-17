@@ -1,6 +1,10 @@
 use crate::{
     error::ExecutorError,
-    value::{Value, container::HashableKey},
+    value::{
+        Value,
+        container::{HashableKey, List},
+        rc_value,
+    },
 };
 
 use super::{BinOp, ExecSingle, Executor};
@@ -39,9 +43,6 @@ impl Executor {
             Err(e) => return ExecSingle::Error(e),
         };
 
-        // type promotion: int -> float -> complex
-        let (lhs, rhs) = promote_pair(lhs, rhs);
-
         match eval_binary(&lhs, &rhs, op) {
             Ok(val) => {
                 self.state.stack_mut(stack_idx).push(val);
@@ -61,6 +62,7 @@ impl Executor {
             Value::Integer(n) => Ok(Value::Integer(-n)),
             Value::Float(f) => Ok(Value::Float(-f)),
             Value::Complex { re, im } => Ok(Value::Complex { re: -re, im: -im }),
+            Value::List(list) => negate_list(list),
             _ => Err(ExecutorError::UnsupportedNegate(val.type_name())),
         }
     }
@@ -93,6 +95,25 @@ fn promote_pair(lhs: Value, rhs: Value) -> (Value, Value) {
 }
 
 fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorError> {
+    match (lhs, rhs, op) {
+        (Value::List(lhs_list), Value::List(rhs_list), BinOp::Add) => {
+            return add_lists(lhs_list, rhs_list);
+        }
+        (Value::List(list), rhs, BinOp::Mul) if !matches!(rhs, Value::List(_)) => {
+            return multiply_list(list, rhs, false);
+        }
+        (lhs, Value::List(list), BinOp::Mul) if !matches!(lhs, Value::List(_)) => {
+            return multiply_list(list, lhs, true);
+        }
+        _ => {}
+    }
+
+    let (lhs, rhs) = promote_pair(lhs.clone(), rhs.clone());
+
+    eval_non_list_binary(&lhs, &rhs, op)
+}
+
+fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorError> {
     match (lhs, rhs, op) {
         // int x int
         (Value::Integer(a), Value::Integer(b), BinOp::Add) => Ok(Value::Integer(a + b)),
@@ -178,6 +199,100 @@ fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorErr
             rhs: rhs.type_name(),
         }),
     }
+}
+
+fn negate_list(list: &List) -> Result<Value, ExecutorError> {
+    let mut elements = Vec::with_capacity(list.elements.len());
+
+    for (idx, elem) in list.elements.iter().enumerate() {
+        let value = elem.borrow().clone();
+        let negated = match value {
+            Value::Integer(n) => Value::Integer(-n),
+            Value::Float(f) => Value::Float(-f),
+            Value::Complex { re, im } => Value::Complex { re: -re, im: -im },
+            Value::List(inner) => {
+                negate_list(&inner).map_err(|err| list_index_err("negate", idx, err))?
+            }
+            other => {
+                return Err(list_element_err(
+                    "negate",
+                    idx,
+                    ExecutorError::UnsupportedNegate(other.type_name()),
+                ));
+            }
+        };
+        elements.push(rc_value(negated));
+    }
+
+    Ok(Value::List(std::rc::Rc::new(List {
+        elements: elements.into(),
+    })))
+}
+
+fn add_lists(lhs: &List, rhs: &List) -> Result<Value, ExecutorError> {
+    if lhs.len() != rhs.len() {
+        return Err(ExecutorError::ListLengthMismatch {
+            op: BinOp::Add.name(),
+            lhs_len: lhs.len(),
+            rhs_len: rhs.len(),
+        });
+    }
+
+    let mut elements = Vec::with_capacity(lhs.len());
+    for (idx, (lhs_elem, rhs_elem)) in lhs.elements.iter().zip(rhs.elements.iter()).enumerate() {
+        let lhs_value = lhs_elem.borrow().clone();
+        let rhs_value = rhs_elem.borrow().clone();
+        let sum = match (lhs_value, rhs_value) {
+            (Value::List(lhs_inner), Value::List(rhs_inner)) => {
+                add_lists(&lhs_inner, &rhs_inner)
+                    .map_err(|err| list_index_err(BinOp::Add.name(), idx, err))?
+            }
+            (lhs_value, rhs_value) => eval_binary(&lhs_value, &rhs_value, BinOp::Add)
+                .map_err(|err| list_index_err(BinOp::Add.name(), idx, err))?,
+        };
+        elements.push(rc_value(sum));
+    }
+
+    Ok(Value::List(std::rc::Rc::new(List {
+        elements: elements.into(),
+    })))
+}
+
+fn multiply_list(list: &List, scalar: &Value, scalar_on_lhs: bool) -> Result<Value, ExecutorError> {
+    let mut elements = Vec::with_capacity(list.len());
+
+    for (idx, elem) in list.elements.iter().enumerate() {
+        let elem_value = elem.borrow().clone();
+        let product = match elem_value {
+            Value::List(inner) => multiply_list(&inner, scalar, scalar_on_lhs)
+                .map_err(|err| list_index_err(BinOp::Mul.name(), idx, err))?,
+            other => {
+                let (lhs, rhs) = if scalar_on_lhs {
+                    (scalar.clone(), other)
+                } else {
+                    (other, scalar.clone())
+                };
+                eval_binary(&lhs, &rhs, BinOp::Mul)
+                    .map_err(|err| list_index_err(BinOp::Mul.name(), idx, err))?
+            }
+        };
+        elements.push(rc_value(product));
+    }
+
+    Ok(Value::List(std::rc::Rc::new(List {
+        elements: elements.into(),
+    })))
+}
+
+fn list_index_err(op: &'static str, idx: usize, err: ExecutorError) -> ExecutorError {
+    ExecutorError::Other(format!(
+        "cannot apply {} to list element [{}]: {}",
+        op, idx, err
+    ))
+}
+
+fn list_element_err(op: &'static str, idx: usize, err: ExecutorError) -> ExecutorError {
+    ExecutorError::Other(format!("cannot {} list element [{}]: {}", op, idx, err))
 }
 
 fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> {

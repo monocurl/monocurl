@@ -317,7 +317,9 @@ impl Executor {
                 Value::Leader(leader) => {
                     let leader_rc = leader.leader_rc.clone();
                     drop(base_val);
-                    self.state.stack_mut(stack_idx).push(Value::Lvalue(leader_rc));
+                    self.state
+                        .stack_mut(stack_idx)
+                        .push(Value::Lvalue(leader_rc));
                     return self.exec_attribute(stack_idx, section_idx, true, string_index);
                 }
                 Value::InvokedFunction(inv_rc) => {
