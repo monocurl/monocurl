@@ -110,6 +110,7 @@ pub struct TextEditor {
     hover_task: Option<Task<()>>,
     // version, diagnostic
     hover_item: Option<(usize, Diagnostic)>,
+    copied_hover_message: Option<String>,
 
     parameter_hint_suppression_task: Option<Task<()>>,
     parameter_hint_suppressed: bool,
@@ -201,6 +202,7 @@ impl TextEditor {
             hover_task: None,
 
             hover_item: None,
+            copied_hover_message: None,
             parameter_hint_suppression_task: None,
             parameter_hint_suppressed: false,
 
@@ -543,6 +545,7 @@ impl TextEditor {
         self.hover_task = None;
         self.last_hover_start = None;
         self.hover_item = None;
+        self.copied_hover_message = None;
     }
 
     fn character_mouse_is_on_top_of(&self, cx: &App) -> Option<Count8> {

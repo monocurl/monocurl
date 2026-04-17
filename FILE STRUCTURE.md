@@ -45,7 +45,7 @@
   - src/components/split_pane.rs: gpui element that implements vertical and horizontal split pane
   - src/editor: code related to the text editor. 
     - text_editor/mod.rs: contains most of the code related to the actual text editor, which include input handling, trait implementation, action handling, delegating to line reshpaing. Rendering is delegated to other files though.
-    - text_editor/popover_element.rs: this is the element that shows a popover when you hover over a diagnostics (such as a warning).
+    - text_editor/popover_element.rs: this is the element that shows editor popovers for diagnostics, autocomplete, and parameter hints; diagnostic popovers also include a clipboard copy action
     - text_editor/text_element: this contains the rendering logic for the actual text editor (including scroll bar and everything on the base layer).
     - wrapped_line.rs: The text editor is implemented to always soft wrap, so this contains the code for rendering a single logical line onto the screen as possibly many lines, with styling. It also allows for e.g. querying the on screen position given a character location.
     - line_shaper.rs: given the lexing data, static analysis data, and diagnostics associated with a single logical line, it applies styling and splits that into the text runs where within each run all characters are styled the same. This effectively creates the data necessary for a wrapped line.
