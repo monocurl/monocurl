@@ -1346,10 +1346,12 @@ impl SectionParser {
         self.debug_assert_token_eq(Token::Pipe);
         let base_span = self.advance_token();
         let mut args = Vec::new();
+        self.advance_newlines();
         // parse arguments (and default values)
         if self.read_if_token(Token::Pipe).is_none() {
             let mut is_first = true;
             loop {
+                self.advance_newlines();
                 if !is_first {
                     let mut done = true;
                     try_all!(self, {
@@ -1358,6 +1360,7 @@ impl SectionParser {
                         },
                         ExactPred(Token::Comma) => {
                             self.advance_token();
+                            self.advance_newlines();
                             done = false;
                         },
                     })
@@ -1370,7 +1373,9 @@ impl SectionParser {
 
                 let reference = self.read_if_token(Token::Reference).is_some();
                 let name = self.parse_identifier_declaration();
+                self.advance_newlines();
                 let default_value = if self.read_if_token(Token::Assign).is_some() {
+                    self.advance_newlines();
                     Some(self.parse_expr_best_effort())
                 } else {
                     None
@@ -1383,6 +1388,7 @@ impl SectionParser {
             }
         }
 
+        self.advance_newlines();
         let body = try_all!(self, {
             ExactPred(Token::LFlower) => {
                 let body = self.parse_body(|frame| {
@@ -2445,6 +2451,48 @@ mod test {
             ),
         });
         assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_multiline_lambda_inline_body() {
+        let result = parse_expr_test("|\nx,\ny = 5\n|\nx + y");
+        let Expression::LambdaDefinition(LambdaDefinition { args, body }) = result.1 else {
+            panic!("expected lambda definition");
+        };
+
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0].identifier.1.0, "x");
+        assert_eq!(args[0].default_value, None);
+        assert_eq!(args[1].identifier.1.0, "y");
+        match &args[1].default_value {
+            Some((_span, Expression::Literal(Literal::Int(5)))) => {}
+            _ => panic!("expected default value 5"),
+        }
+
+        match body.1 {
+            LambdaBody::Inline(expr) => match *expr {
+                Expression::BinaryOperator(BinaryOperator {
+                    op_type: BinaryOperatorType::Add,
+                    ..
+                }) => {}
+                other => panic!("expected inline add body, got {:?}", std::mem::discriminant(&other)),
+            },
+            _ => panic!("expected inline lambda body"),
+        }
+    }
+
+    #[test]
+    fn test_multiline_lambda_block_body() {
+        let result = parse_expr_test("|\n|\n{\n    return 42\n}");
+        let Expression::LambdaDefinition(LambdaDefinition { args, body }) = result.1 else {
+            panic!("expected lambda definition");
+        };
+
+        assert!(args.is_empty());
+        match body.1 {
+            LambdaBody::Block(statements) => assert_eq!(statements.len(), 1),
+            _ => panic!("expected block lambda body"),
+        }
     }
 
     // Function invocation tests
