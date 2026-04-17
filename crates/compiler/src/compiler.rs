@@ -279,6 +279,7 @@ impl Compiler {
                 is_stdlib: true,
                 is_library: true,
                 is_init: false,
+                is_root_module: true,
             })),
         });
 
@@ -414,6 +415,7 @@ impl Compiler {
                     SectionType::UserLibrary | SectionType::StandardLibrary
                 ),
                 is_init: section.section_type == SectionType::Init,
+                is_root_module: self.bundle_root_import_span.is_none(),
             }));
 
         // symbols declared here land in the current top scope (no push/pop)

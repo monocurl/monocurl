@@ -3,13 +3,13 @@
 - compiler: converts AST into bytecode, performs static analysis
 - executor: takes bytecode and scene state and executes it
   - src/error.rs: ExecutorError enum (TypeError, IndexOutOfBounds, AnimPlayedTwice, ConcurrentAnimation, etc.) with Display impl
-  - src/executor/mod.rs: Executor struct, section_init, async execute_one dispatch, NativeFunc/NativeFuture types, yield_now helper
+  - src/executor/mod.rs: Executor struct, async execute_one dispatch with direct IP mutation, runtime call-chain recovery for error attribution, NativeFunc/NativeFuture types
   - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion
-  - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, exec_convert_to_live_operator (extracts live value from operator result list), boxed call_lambda_body to break recursion cycle
+  - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, isolated eager lambda execution with trace-parent stack links, exec_convert_to_live_operator (extracts live value from operator result list)
   - src/executor/lerp.rs: general lerp(a, b, t) for Monocurl values — handles numbers, InvokedFunction (same-lambda arg-wise lerp), InvokedOperator (rules 4/5 via unmodified embed)
   - src/executor/anim.rs: seek_primitive_anim (async, yields between instructions), step_primitive_anims, seek_to (event-driven), play/spawn/bake, primitive target flattening/deduction, leader lock handling, double-play guard via AnimBlock.already_played
   - src/executor/access.rs: subscript/attribute (mutable + immutable), assign, append, Rc-based COW at element level, WeakLvalue handling; uses Map helper methods for ordered iteration
-  - src/state.rs: ExecutionState (execution stacks, leaders, primitive anims, ephemeral_pool), ExecutionStack (var stack, IP, call stack, labels), BakedPrimitiveAnim (target leaders + starting followers), LeaderEntry. Monotonic stack IDs and primitive animation IDs.
+  - src/state.rs: ExecutionState (execution stacks, leaders, primitive anims, ephemeral_pool), ExecutionStack (var stack, IP, call stack, labels, control parent + trace parent), BakedPrimitiveAnim (target leaders + starting followers), LeaderEntry. Monotonic stack IDs and primitive animation IDs.
   - src/value.rs: Value enum, RcValue = Rc<RefCell<Value>> (owning), WeakValue = Weak<RefCell<Value>> (non-owning), Value::Lvalue (owning), Value::WeakLvalue (pushed refs — breaks reference cycles), helpers for truthiness, resolve, elide_lvalues, as_lvalue_rc; Value::values_equal for general structural equality (Rc fast-path, InvokedFunction/Operator compared by args+labels not computed result)
   - src/value/container.rs: List (Vec<RcValue>) and Map (HashMap + insertion_order Vec for deterministic iteration) with insert/get/get_mut/contains_key/iter helpers
   - src/value/lambda.rs: Lambda (captures, defaults, IP) and Operator wrapper
@@ -66,5 +66,5 @@
   - src/window.rs: root GPUI element that owns the global state and muxes between the home and editor views 
 - integration_tests: cross-crate integration tests covering the full lex→parse→compile→execute pipeline
   - tests/basic_executor_tests.rs: `run(src)` helper + basic executor tests (literal values, arithmetic, strings, lambdas, if/else, error detection)
-  - tests/anim_tests.rs: animation test framework + tests; `AnimResult` (timestamp, leaders, errors), `LeaderInfo` (kind, target, current); runners: `run_anim`, `run_anim_at`, `run_anim_with_stdlib`, `run_multi_anim`, etc.; covers Wait/Set/Lerp behavior, anim block timing, seek mid-animation, state/param leaders, multi-slide, and lock/error cases
+  - tests/anim_tests.rs: animation test framework + tests; `AnimResult` (timestamp, leaders, errors, error spans), `LeaderInfo` (kind, target, current); runners: `run_anim`, `run_anim_at`, `run_anim_with_stdlib`, `run_multi_anim`, etc.; covers Wait/Set/Lerp behavior, anim block timing, seek mid-animation, state/param leaders, multi-slide, lock/error cases, and imported-runtime error attribution
 - ui_cli_shared: a collection of structs and utilities that are necessary for the user facing interface, but not really execution

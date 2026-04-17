@@ -11,6 +11,7 @@ use std::{future::Future, rc::Rc};
 
 use bytecode::{Bytecode, Instruction};
 use structs::futures::PeriodicYielder;
+use structs::text::Span8;
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 
 use crate::executor::cacheing::ExecutionCache;
@@ -120,6 +121,7 @@ pub struct Executor {
     pub(crate) cache: ExecutionCache,
     pub(crate) yielder: PeriodicYielder,
     memory_checker: PeriodicMemoryChecker,
+    pending_error_stack_idx: Option<usize>,
 }
 
 impl Executor {
@@ -135,6 +137,7 @@ impl Executor {
                 EXECUTOR_MEMORY_LIMIT_BYTES,
                 MEMORY_CHECK_PERIOD,
             ),
+            pending_error_stack_idx: None,
         }
     }
 
@@ -179,7 +182,10 @@ impl Executor {
     }
 
     pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
+        self.pending_error_stack_idx = None;
+
         if let Err(err) = self.memory_checker.tick() {
+            self.pending_error_stack_idx = Some(stack_idx);
             return ExecSingle::Error(err);
         }
 
@@ -189,15 +195,11 @@ impl Executor {
 
         let instr = self.bytecode.sections[section_idx].instructions[instr_idx].clone();
 
-        let mut next_ip = (section_idx as u16, (instr_idx + 1) as u32);
-        self.state.stack_mut(stack_idx).ip = next_ip;
+        self.state.stack_mut(stack_idx).ip = (section_idx as u16, (instr_idx + 1) as u32);
 
-        let ret = self
-            .execute_instr(section_idx, stack_idx, instr, &mut next_ip)
-            .await;
-        // skip ip overwrite for freed stacks (child stacks freed by EndOfExecutionHead)
-        if self.state.execution_stacks[stack_idx].is_some() {
-            self.state.stack_mut(stack_idx).ip = next_ip;
+        let ret = self.execute_instr(section_idx, stack_idx, instr).await;
+        if matches!(ret, ExecSingle::Error(_)) && self.pending_error_stack_idx.is_none() {
+            self.pending_error_stack_idx = Some(stack_idx);
         }
         ret
     }
@@ -208,7 +210,6 @@ impl Executor {
         section_idx: usize,
         stack_idx: usize,
         instr: Instruction,
-        next_ip: &mut InstructionPointer,
     ) -> ExecSingle {
         match instr {
             // ----- push constants -----
@@ -371,14 +372,7 @@ impl Executor {
                 num_args,
             } => {
                 return self
-                    .exec_lambda_invoke(
-                        stack_idx,
-                        section_idx,
-                        stateful,
-                        labeled,
-                        num_args,
-                        next_ip,
-                    )
+                    .exec_lambda_invoke(stack_idx, section_idx, stateful, labeled, num_args)
                     .await;
             }
             Instruction::OperatorInvoke {
@@ -387,14 +381,7 @@ impl Executor {
                 num_args,
             } => {
                 return self
-                    .exec_operator_invoke(
-                        stack_idx,
-                        section_idx,
-                        stateful,
-                        labeled,
-                        num_args,
-                        next_ip,
-                    )
+                    .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args)
                     .await;
             }
             Instruction::ConvertToLiveOperator => {
@@ -403,7 +390,7 @@ impl Executor {
 
             // ----- control flow -----
             Instruction::Jump { section, to } => {
-                *next_ip = (section, to);
+                self.state.stack_mut(stack_idx).ip = (section, to);
             }
             Instruction::ConditionalJump { section, to } => {
                 let val = self.state.stack_mut(stack_idx).pop();
@@ -413,14 +400,14 @@ impl Executor {
                 };
                 match val.check_truthy() {
                     Ok(true) => {
-                        *next_ip = (section, to);
+                        self.state.stack_mut(stack_idx).ip = (section, to);
                     }
                     Ok(false) => {}
                     Err(e) => return ExecSingle::Error(e),
                 }
             }
             Instruction::Return { stack_delta } => {
-                return self.exec_return(stack_idx, stack_delta, next_ip);
+                return self.exec_return(stack_idx, stack_delta);
             }
             Instruction::Pop { count } => {
                 self.state.stack_mut(stack_idx).pop_n(count as usize);
@@ -501,6 +488,99 @@ impl Executor {
         }
 
         ExecSingle::Continue
+    }
+
+    pub(crate) fn take_error_stack_idx(&mut self, fallback_stack_idx: usize) -> usize {
+        self.pending_error_stack_idx
+            .take()
+            .unwrap_or(fallback_stack_idx)
+    }
+
+    pub(crate) fn runtime_error_span(&self, stack_idx: usize) -> Span8 {
+        let mut fallback_span = self.current_instruction_span(stack_idx);
+        let mut root_span = None;
+
+        for frame in self.recover_call_stack(stack_idx) {
+            let Some(span) = self.span_for_next_ip(frame.next_ip) else {
+                continue;
+            };
+            fallback_span = span.clone();
+            if self.bytecode.sections[frame.next_ip.0 as usize]
+                .flags
+                .is_root_module
+            {
+                root_span = Some(span);
+            }
+        }
+
+        root_span.unwrap_or(fallback_span)
+    }
+
+    fn current_instruction_span(&self, stack_idx: usize) -> Span8 {
+        self.span_for_next_ip(self.state.stack(stack_idx).ip)
+            .unwrap_or_else(|| {
+                let ip = self.state.stack(stack_idx).ip;
+                self.annotation_span(ip)
+            })
+    }
+
+    fn annotation_span(&self, ip: InstructionPointer) -> Span8 {
+        let raw = self.bytecode.sections[ip.0 as usize].annotations[ip.1 as usize]
+            .source_loc
+            .clone();
+        normalized_span(raw)
+    }
+
+    fn span_for_next_ip(&self, next_ip: InstructionPointer) -> Option<Span8> {
+        let instr_idx = next_ip.1.checked_sub(1)? as usize;
+        let raw = self.bytecode.sections[next_ip.0 as usize]
+            .annotations
+            .get(instr_idx)?
+            .source_loc
+            .clone();
+        Some(normalized_span(raw))
+    }
+
+    fn recover_call_stack(&self, stack_idx: usize) -> std::vec::IntoIter<RecoveredFrame> {
+        let mut frames = Vec::new();
+        let mut cursor = Some(stack_idx);
+
+        while let Some(idx) = cursor {
+            let stack = self.state.stack(idx);
+            frames.push(RecoveredFrame {
+                stack_idx: idx,
+                next_ip: stack.ip,
+            });
+            frames.extend(
+                stack
+                    .call_stack
+                    .iter()
+                    .rev()
+                    .copied()
+                    .map(|next_ip| RecoveredFrame {
+                        stack_idx: idx,
+                        next_ip,
+                    }),
+            );
+            cursor = stack.trace_parent_idx;
+        }
+
+        frames.into_iter()
+    }
+}
+
+#[derive(Clone, Copy)]
+struct RecoveredFrame {
+    #[allow(dead_code)]
+    stack_idx: usize,
+    next_ip: InstructionPointer,
+}
+
+fn normalized_span(raw: Span8) -> Span8 {
+    if raw.is_empty() {
+        raw.start..raw.end + 1
+    } else {
+        raw
     }
 }
 

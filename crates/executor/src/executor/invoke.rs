@@ -4,7 +4,7 @@ use crate::{
     error::ExecutorError,
     state::MAX_CALL_DEPTH,
     value::{
-        InstructionPointer, Value,
+        Value,
         anim_block::AnimBlock,
         invoked_function::InvokedFunction,
         invoked_operator::{build_invoked_operator, extract_operator_result},
@@ -83,7 +83,6 @@ impl Executor {
         stateful: bool,
         labeled: bool,
         num_args: u32,
-        next_ip: &mut InstructionPointer,
     ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
@@ -165,7 +164,10 @@ impl Executor {
 
             let full_args = fill_defaults(args, &lambda);
 
-            match self.eagerly_invoke_lambda(&lambda, &full_args).await {
+            match self
+                .eagerly_invoke_lambda(&lambda, &full_args, Some(stack_idx))
+                .await
+            {
                 Ok(result_val) => {
                     let inv = InvokedFunction {
                         lambda: Box::new(Value::Lambda(lambda)),
@@ -182,7 +184,7 @@ impl Executor {
                 Err(e) => ExecSingle::Error(e),
             }
         } else {
-            self.setup_lambda_call(stack_idx, num_args as usize, &lambda, next_ip)
+            self.setup_lambda_call(stack_idx, num_args as usize, &lambda)
         }
     }
 
@@ -193,7 +195,6 @@ impl Executor {
         stateful: bool,
         labeled: bool,
         num_args: u32,
-        next_ip: &mut InstructionPointer,
     ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
@@ -284,7 +285,10 @@ impl Executor {
             full_args.extend(args.iter().cloned());
             let full_args = fill_defaults(full_args, &operator.0);
 
-            match self.eagerly_invoke_lambda(&operator.0, &full_args).await {
+            match self
+                .eagerly_invoke_lambda(&operator.0, &full_args, Some(stack_idx))
+                .await
+            {
                 Ok(raw) => match extract_operator_result(raw) {
                     Ok((initial, modified)) => {
                         let inv = Rc::new(build_invoked_operator(
@@ -305,7 +309,7 @@ impl Executor {
                 Err(e) => ExecSingle::Error(e),
             }
         } else {
-            self.setup_lambda_call(stack_idx, 1 + num_args as usize, lambda, next_ip)
+            self.setup_lambda_call(stack_idx, 1 + num_args as usize, lambda)
         }
     }
 
@@ -326,12 +330,7 @@ impl Executor {
         }
     }
 
-    pub(super) fn exec_return(
-        &mut self,
-        stack_idx: usize,
-        stack_delta: i32,
-        next_ip: &mut InstructionPointer,
-    ) -> ExecSingle {
+    pub(super) fn exec_return(&mut self, stack_idx: usize, stack_delta: i32) -> ExecSingle {
         let ret_val = self.state.stack_mut(stack_idx).pop();
 
         let to_pop = (-stack_delta) as usize;
@@ -342,7 +341,7 @@ impl Executor {
         let ret_ip = self.state.stack_mut(stack_idx).call_stack.pop();
         if let Some(ip) = ret_ip {
             self.state.call_depth -= 1;
-            *next_ip = ip;
+            self.state.stack_mut(stack_idx).ip = ip;
             ExecSingle::Continue
         } else {
             // running on isolated head
@@ -355,25 +354,25 @@ impl Executor {
         stack_idx: usize,
         pushed_args: usize,
         lambda: &Lambda,
-        next_ip: &mut InstructionPointer,
     ) -> ExecSingle {
-        let stack = self.state.stack_mut(stack_idx);
-
-        if stack.call_stack.len() >= MAX_CALL_DEPTH {
+        if self.state.stack(stack_idx).call_stack.len() >= MAX_CALL_DEPTH {
             return ExecSingle::Error(ExecutorError::StackOverflow);
         }
 
-        for def in &lambda.defaults[pushed_args - lambda.required_args as usize..] {
-            stack.push(def.clone());
-        }
-        for cap in &lambda.captures {
-            stack.push(cap.clone());
-        }
+        {
+            let stack = self.state.stack_mut(stack_idx);
+            for def in &lambda.defaults[pushed_args - lambda.required_args as usize..] {
+                stack.push(def.clone());
+            }
+            for cap in &lambda.captures {
+                stack.push(cap.clone());
+            }
 
-        // *next_ip is already the instruction after the call site — use it as return address
-        stack.call_stack.push(*next_ip);
+            // stack.ip is already the instruction after the call site — use it as return address
+            stack.call_stack.push(stack.ip);
+            stack.ip = lambda.ip;
+        }
         self.state.call_depth += 1;
-        *next_ip = lambda.ip;
 
         ExecSingle::Continue
     }
@@ -386,6 +385,7 @@ impl Executor {
         &'a mut self,
         lambda: &'a Lambda,
         args: &'a [Value],
+        trace_parent_idx: Option<usize>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
         Box::pin(async move {
@@ -396,7 +396,7 @@ impl Executor {
 
             let temp_idx = self
                 .state
-                .alloc_stack(lambda.ip, None)
+                .alloc_stack(lambda.ip, None, trace_parent_idx)
                 .map_err(|_| ExecutorError::TooManyActiveAnimations)?;
             let stack = self.state.stack_mut(temp_idx);
             for arg in args {

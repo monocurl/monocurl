@@ -72,6 +72,7 @@ fn default_bytecode() -> Bytecode {
         is_stdlib: true,
         is_library: true,
         is_init: false,
+        is_root_module: true,
     });
     section.instructions.push(Instruction::EndOfExecutionHead);
     Bytecode::new(vec![Arc::new(section)])

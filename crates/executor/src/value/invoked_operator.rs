@@ -72,7 +72,7 @@ impl InvokedOperator {
                     let full_args = fill_defaults(full_args, &operator.0);
 
                     let raw = executor
-                        .eagerly_invoke_lambda(&operator.0, &full_args)
+                        .eagerly_invoke_lambda(&operator.0, &full_args, None)
                         .await?;
                     let (initial, modified) = extract_operator_result(raw)?;
                     this.unmodified.set(Some(Box::new(initial)));

@@ -31,10 +31,17 @@ pub struct ExecutionStack {
     pub active_child_count: usize,
     /// index of the parent execution stack (None for the root)
     pub parent_idx: Option<usize>,
+    /// stack to use when reconstructing runtime call chains
+    pub trace_parent_idx: Option<usize>,
 }
 
 impl ExecutionStack {
-    pub fn new(stack_id: usize, ip: InstructionPointer, parent_idx: Option<usize>) -> Self {
+    pub fn new(
+        stack_id: usize,
+        ip: InstructionPointer,
+        parent_idx: Option<usize>,
+        trace_parent_idx: Option<usize>,
+    ) -> Self {
         Self {
             stack_id,
             var_stack: Vec::new(),
@@ -44,6 +51,7 @@ impl ExecutionStack {
             conditional_flag: false,
             active_child_count: 0,
             parent_idx,
+            trace_parent_idx,
         }
     }
 
@@ -174,7 +182,7 @@ impl ExecutionState {
         };
 
         let ip: InstructionPointer = (0, 0);
-        let stack_idx = ret.alloc_stack(ip, None).unwrap();
+        let stack_idx = ret.alloc_stack(ip, None, None).unwrap();
         debug_assert_eq!(stack_idx, ExecutionState::ROOT_STACK_ID);
 
         let mut heads = BTreeSet::new();
@@ -191,6 +199,7 @@ impl ExecutionState {
         &mut self,
         ip: InstructionPointer,
         parent_idx: Option<usize>,
+        trace_parent_idx: Option<usize>,
     ) -> Result<usize, ()> {
         if self.alive_stack_count >= MAX_EXECUTION_HEADS {
             return Err(());
@@ -199,7 +208,7 @@ impl ExecutionState {
         self.alive_stack_count += 1;
         let id = self.global_stack_counter;
         self.global_stack_counter += 1;
-        let stack = ExecutionStack::new(id, ip, parent_idx);
+        let stack = ExecutionStack::new(id, ip, parent_idx, trace_parent_idx);
         let idx = self.execution_stacks.len();
         self.execution_stacks.push(Some(stack));
 

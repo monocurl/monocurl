@@ -1,7 +1,5 @@
 use std::rc::Rc;
 
-use structs::text::Span8;
-
 use crate::{
     error::ExecutorError,
     executor::{SeekPrimitiveAnimSkipResult, SeekToResult},
@@ -13,19 +11,6 @@ use crate::{
 use super::{ExecSingle, Executor, SeekPrimitiveResult};
 
 impl Executor {
-    fn instruction_span(&self, stack_idx: usize) -> Span8 {
-        let ip = self.state.stack(stack_idx).ip;
-        let raw = self.bytecode.sections[ip.0 as usize].annotations[ip.1 as usize]
-            .source_loc
-            .clone();
-
-        if raw.is_empty() {
-            raw.start..raw.end + 1
-        } else {
-            raw
-        }
-    }
-
     /// run all execution heads until each hits a Play instruction or ends.
     /// yields between iterations so the async executor can interrupt if needed.
     async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
@@ -46,8 +31,9 @@ impl Executor {
                 ExecSingle::Play => {}
                 ExecSingle::EndOfHead => {}
                 ExecSingle::Error(e) => {
-                    self.state
-                        .error(e.to_string(), self.instruction_span(stack_idx));
+                    let error_stack_idx = self.take_error_stack_idx(stack_idx);
+                    let span = self.runtime_error_span(error_stack_idx);
+                    self.state.error(e.to_string(), span);
                     return SeekPrimitiveResult::Error(e);
                 }
                 ExecSingle::Continue => unreachable!(),
@@ -114,10 +100,8 @@ impl Executor {
 
         for (baked, t) in &in_progress {
             if let Err(err) = self.apply_primitive_anim_step(baked, *t).await {
-                self.state.error(
-                    err.to_string(),
-                    self.instruction_span(baked.parent_stack_idx),
-                );
+                let span = self.runtime_error_span(baked.parent_stack_idx);
+                self.state.error(err.to_string(), span);
                 return Err(err);
             }
         }
@@ -127,10 +111,8 @@ impl Executor {
             let baked = self.state.primitive_anims.remove(i);
             if let Err(err) = self.apply_primitive_anim_step(&baked, 1.0).await {
                 self.release_primitive_anim_locks(&baked);
-                self.state.error(
-                    err.to_string(),
-                    self.instruction_span(baked.parent_stack_idx),
-                );
+                let span = self.runtime_error_span(baked.parent_stack_idx);
+                self.state.error(err.to_string(), span);
                 return Err(err);
             }
             self.release_primitive_anim_locks(&baked);
@@ -396,7 +378,11 @@ impl Executor {
 
         let child_idx = self
             .state
-            .alloc_stack(anim_block.ip, Some(parent_stack_idx))
+            .alloc_stack(
+                anim_block.ip,
+                Some(parent_stack_idx),
+                Some(parent_stack_idx),
+            )
             .map_err(|_| ExecutorError::TooManyActiveAnimations)?;
         let child = self.state.stack_mut(child_idx);
         for cap in &anim_block.captures {
@@ -453,7 +439,7 @@ impl Executor {
             start_followers,
             parent_stack_idx,
             stack_id,
-            span: self.instruction_span(parent_stack_idx),
+            span: self.current_instruction_span(parent_stack_idx),
         })
     }
 

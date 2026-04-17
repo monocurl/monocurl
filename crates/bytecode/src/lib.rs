@@ -167,6 +167,7 @@ pub struct SectionFlags {
     pub is_stdlib: bool,
     pub is_library: bool,
     pub is_init: bool,
+    pub is_root_module: bool,
 }
 
 #[derive(Clone, PartialEq)]

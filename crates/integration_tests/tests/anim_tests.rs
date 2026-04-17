@@ -85,6 +85,7 @@ pub struct AnimResult {
     /// number of user-visible slides in the compiled scene
     pub user_slide_count: usize,
     pub errors: Vec<String>,
+    pub error_spans: Vec<Span8>,
 }
 
 impl AnimResult {
@@ -200,6 +201,44 @@ fn load_stdlib_bundle(path: impl AsRef<Path>) -> Arc<SectionBundle> {
     })
 }
 
+fn load_stdlib_bundle_with_import_span(
+    path: impl AsRef<Path>,
+    import_span: Span8,
+) -> Arc<SectionBundle> {
+    let src = fs::read_to_string(path).expect("failed to read stdlib file");
+    let (section, errors) = parse_section(&src, SectionType::StandardLibrary);
+    assert!(errors.is_empty(), "stdlib parse errors: {:?}", errors);
+    Arc::new(SectionBundle {
+        file_path: None,
+        file_index: 0,
+        imported_files: vec![],
+        sections: vec![section],
+        root_import_span: Some(import_span),
+        was_cached: false,
+    })
+}
+
+fn make_imported_bundle(
+    src: &str,
+    section_type: SectionType,
+    import_span: Span8,
+) -> Arc<SectionBundle> {
+    let (section, errors) = parse_section(src, section_type);
+    assert!(
+        errors.is_empty(),
+        "imported bundle parse errors: {:?}",
+        errors
+    );
+    Arc::new(SectionBundle {
+        file_path: None,
+        file_index: 0,
+        imported_files: vec![],
+        sections: vec![section],
+        root_import_span: Some(import_span),
+        was_cached: false,
+    })
+}
+
 fn build_anim_executor(
     slides: &[(&str, SectionType)],
     stdlib_bundles: &[Arc<SectionBundle>],
@@ -218,6 +257,7 @@ fn build_anim_executor(
             leaders: vec![],
             user_slide_count: 0,
             errors: all_errors,
+            error_spans: vec![],
         });
     }
 
@@ -245,6 +285,7 @@ fn build_anim_executor(
             leaders: vec![],
             user_slide_count: 0,
             errors: compile_errors,
+            error_spans: vec![],
         });
     }
 
@@ -263,6 +304,12 @@ fn collect_anim_result(
     mut runtime_errors: Vec<String>,
 ) -> AnimResult {
     runtime_errors.extend(executor.state.errors.iter().map(|(msg, _)| msg.clone()));
+    let error_spans = executor
+        .state
+        .errors
+        .iter()
+        .map(|(_, span)| span.clone())
+        .collect();
 
     let leaders = executor
         .state
@@ -288,6 +335,7 @@ fn collect_anim_result(
         leaders,
         user_slide_count,
         errors: runtime_errors,
+        error_spans,
     }
 }
 
@@ -785,6 +833,43 @@ fn test_wait_negative_time_error() {
     // Wait validates that time ≥ 0
     let r = run_anim_with_stdlib("play Wait(-1)");
     r.assert_error("non-negative");
+}
+
+#[test]
+fn test_imported_stdlib_runtime_error_uses_root_callsite_span() {
+    let import_span = 1000..1006;
+    let src = "play Wait(-1)";
+    let anim_mcl = load_stdlib_bundle_with_import_span(
+        Assets::std_lib().join("std/anim.mcl"),
+        import_span.clone(),
+    );
+    let r = run_anim_impl(&[(src, SectionType::Slide)], 0, f64::INFINITY, &[anim_mcl]);
+    r.assert_error("non-negative");
+    assert!(!r.error_spans.is_empty(), "expected runtime error span");
+    assert_ne!(
+        r.error_spans[0], import_span,
+        "error should not use import span"
+    );
+    assert!(
+        r.error_spans[0].end <= src.len(),
+        "expected callsite span inside root source, got {:?}",
+        r.error_spans[0]
+    );
+}
+
+#[test]
+fn test_imported_init_runtime_error_uses_import_span_when_no_root_frame_exists() {
+    let import_span = 2000..2006;
+    let imported = make_imported_bundle("let x = 1 / 0", SectionType::Init, import_span.clone());
+    let r = run_anim_impl(
+        &[("let y = 1", SectionType::Slide)],
+        0,
+        f64::INFINITY,
+        &[imported],
+    );
+    r.assert_error("division by zero");
+    assert!(!r.error_spans.is_empty(), "expected runtime error span");
+    assert_eq!(r.error_spans[0], import_span);
 }
 
 #[test]

@@ -126,7 +126,9 @@ impl Executor {
                 other => return Err(ExecutorError::type_error("lambda", other.type_name())),
             };
             let full_args = fill_defaults(lerped_args.iter().cloned().collect(), &lambda);
-            let result = self.eagerly_invoke_lambda(&lambda, &full_args).await?;
+            let result = self
+                .eagerly_invoke_lambda(&lambda, &full_args, None)
+                .await?;
 
             let inv = InvokedFunction {
                 lambda: Box::new(lambda_val),
@@ -210,7 +212,9 @@ impl Executor {
             full_args.extend(lerped_args.iter().cloned());
             let full_args = fill_defaults(full_args, &operator.0);
 
-            let raw = self.eagerly_invoke_lambda(&operator.0, &full_args).await?;
+            let raw = self
+                .eagerly_invoke_lambda(&operator.0, &full_args, None)
+                .await?;
             let (initial, modified) = extract_operator_result(raw)?;
 
             Ok(Value::InvokedOperator(Rc::new(
@@ -265,7 +269,9 @@ impl Executor {
             full_args.extend(inv.arguments.iter().map(|b| b.clone().elide_lvalue()));
             let full_args = fill_defaults(full_args, &operator.0);
 
-            let raw = self.eagerly_invoke_lambda(&operator.0, &full_args).await?;
+            let raw = self
+                .eagerly_invoke_lambda(&operator.0, &full_args, None)
+                .await?;
             let (embed0, embed1) = extract_operator_result(raw)?;
             self.lerp(embed0, embed1, t).await
         })

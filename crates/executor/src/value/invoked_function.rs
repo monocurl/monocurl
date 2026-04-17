@@ -55,7 +55,11 @@ impl InvokedFunction {
 
                     let full_args =
                         fill_defaults(this.arguments.iter().cloned().collect(), &lambda);
-                    Box::new(executor.eagerly_invoke_lambda(&lambda, &full_args).await?)
+                    Box::new(
+                        executor
+                            .eagerly_invoke_lambda(&lambda, &full_args, None)
+                            .await?,
+                    )
                 }
             };
 
