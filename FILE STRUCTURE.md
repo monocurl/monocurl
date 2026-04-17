@@ -23,6 +23,10 @@
   - src/time.rs: Timestamp (slide + time offset)
 - exporter: coordinates process of exporting a scene into a video
 - geo: helper routines for execution (a lot of lib monocurl will reference these routines).
+- libtess2: safe Rust wrapper over a vendored copy of the upstream libtess2 tessellator
+  - src/lib.rs: `Float3`-based contour input, tessellation options/error types, safe triangle output extraction from `TESStesselator`
+  - build.rs: compiles the vendored upstream C sources from `upstream/Source` and links them into the Rust crate
+  - upstream/: git-cloned `https://github.com/memononen/libtess2` source tree with `.git` removed and `LICENSE.txt` retained
 - lexer: lexing utilites, contains token definition
   - src/lexer.rs: actually lexes a stream of characters
   - src/token.rs: contains an enum of all of the tokens and helper functions related to them

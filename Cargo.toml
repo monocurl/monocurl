@@ -10,6 +10,7 @@ members = [
     "crates/executor",
     "crates/exporter",
     "crates/geo",
+    "crates/libtess2",
     "crates/lexer",
     "crates/parser",
     "crates/renderer",
@@ -41,6 +42,7 @@ smol = "2.0.2"
 itertools = "0.14.0"
 wide = "0.7"
 sysinfo = "0.31.4"
+cc = "1.2.41"
 
 gpui = { path = "../gpui/crates/gpui" }
 
@@ -52,6 +54,7 @@ executor = { path = "crates/executor" }
 exporter = { path = "crates/exporter" }
 geo = { path = "crates/geo" }
 lexer = { path = "crates/lexer" }
+libtess2 = { path = "crates/libtess2" }
 parser = { path = "crates/parser" }
 renderer = { path = "crates/renderer" }
 inventory = "0.3"
