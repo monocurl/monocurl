@@ -553,7 +553,7 @@ impl Executor {
         let raw = self.bytecode.sections[ip.0 as usize].annotations[ip.1 as usize]
             .source_loc
             .clone();
-        normalized_span(raw)
+        nondegenerate_span(raw)
     }
 
     fn span_for_next_ip(&self, next_ip: InstructionPointer) -> Option<Span8> {
@@ -563,7 +563,7 @@ impl Executor {
             .get(instr_idx)?
             .source_loc
             .clone();
-        Some(normalized_span(raw))
+        Some(nondegenerate_span(raw))
     }
 
     fn recover_call_stack(&self, stack_idx: usize) -> std::vec::IntoIter<RecoveredFrame> {
@@ -601,7 +601,7 @@ struct RecoveredFrame {
     next_ip: InstructionPointer,
 }
 
-fn normalized_span(raw: Span8) -> Span8 {
+fn nondegenerate_span(raw: Span8) -> Span8 {
     if raw.is_empty() {
         raw.start..raw.end + 1
     } else {
