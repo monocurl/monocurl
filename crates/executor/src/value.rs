@@ -5,12 +5,13 @@ pub mod invoked_operator;
 pub mod lambda;
 pub mod leader;
 pub mod primitive_anim;
-pub mod primitive_mesh;
 pub mod stateful;
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
+
+use geo::mesh::Mesh;
 
 use crate::error::ExecutorError;
 use crate::executor::Executor;
@@ -23,7 +24,6 @@ use self::{
     lambda::{Lambda, Operator},
     leader::Leader,
     primitive_anim::PrimitiveAnim,
-    primitive_mesh::PrimitiveMesh,
     stateful::{Stateful, StatefulNode},
 };
 
@@ -53,7 +53,7 @@ pub enum Value {
     },
     String(String),
 
-    PrimitiveMesh(Arc<PrimitiveMesh>),
+    Mesh(Arc<Mesh>),
     PrimitiveAnim(PrimitiveAnim),
 
     Lambda(Rc<Lambda>),
@@ -177,7 +177,7 @@ impl Value {
             Value::Integer(_) => "int",
             Value::Complex { .. } => "complex",
             Value::String(_) => "string",
-            Value::PrimitiveMesh(_) => "mesh",
+            Value::Mesh(_) => "mesh",
             Value::PrimitiveAnim(_) => "primitive_anim",
             Value::Lambda(_) => "lambda",
             Value::Operator(_) => "operator",
@@ -236,7 +236,7 @@ impl Value {
             // anim blocks are identity-equal (playing one consumes it)
             (Value::AnimBlock(a), Value::AnimBlock(b)) => Rc::ptr_eq(a, b),
             // meshes compared by pointer (deep mesh equality would be expensive)
-            (Value::PrimitiveMesh(a), Value::PrimitiveMesh(b)) => Arc::ptr_eq(a, b),
+            (Value::Mesh(a), Value::Mesh(b)) => Arc::ptr_eq(a, b),
 
             (Value::PrimitiveAnim(a), Value::PrimitiveAnim(b)) => prim_anim_equal(a, b),
 

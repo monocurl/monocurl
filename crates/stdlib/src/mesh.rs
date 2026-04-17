@@ -7,7 +7,7 @@ use std::{collections::HashSet, future::Future, pin::Pin, rc::Rc, sync::Arc};
 use executor::{
     error::ExecutorError,
     executor::Executor,
-    value::{Value, container::List, lambda::Lambda, primitive_mesh::PrimitiveMesh, rc_value},
+    value::{Value, container::List, lambda::Lambda, rc_value},
 };
 use geo::{
     mesh::Mesh,
@@ -19,7 +19,7 @@ use crate::read_float;
 
 #[derive(Clone)]
 enum MeshTree {
-    Mesh(Mesh),
+    Mesh(Arc<Mesh>),
     List(Vec<MeshTree>),
 }
 
@@ -35,7 +35,7 @@ impl MeshTree {
 
     fn for_each_mut(&mut self, f: &mut impl FnMut(&mut Mesh)) {
         match self {
-            MeshTree::Mesh(mesh) => f(mesh),
+            MeshTree::Mesh(arc) => f(Arc::make_mut(arc)),
             MeshTree::List(children) => {
                 for child in children {
                     child.for_each_mut(f);
@@ -46,20 +46,20 @@ impl MeshTree {
 
     fn into_value(self) -> Value {
         match self {
-            MeshTree::Mesh(mesh) => mesh_value(mesh),
+            MeshTree::Mesh(arc) => Value::Mesh(arc),
             MeshTree::List(children) => list_value(children.into_iter().map(MeshTree::into_value)),
         }
     }
 
-    fn flatten(self) -> Vec<Mesh> {
+    fn flatten(self) -> Vec<Arc<Mesh>> {
         let mut meshes = Vec::new();
         self.flatten_into(&mut meshes);
         meshes
     }
 
-    fn flatten_into(self, out: &mut Vec<Mesh>) {
+    fn flatten_into(self, out: &mut Vec<Arc<Mesh>>) {
         match self {
-            MeshTree::Mesh(mesh) => out.push(mesh),
+            MeshTree::Mesh(arc) => out.push(arc),
             MeshTree::List(children) => {
                 for child in children {
                     child.flatten_into(out);
@@ -79,7 +79,7 @@ impl<'a> Iterator for MeshTreeIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(node) = self.stack.pop() {
             match node {
-                MeshTree::Mesh(mesh) => return Some(mesh),
+                MeshTree::Mesh(arc) => return Some(arc),
                 MeshTree::List(children) => {
                     self.stack.extend(children.iter().rev());
                 }
@@ -93,10 +93,6 @@ fn list_value(values: impl IntoIterator<Item = Value>) -> Value {
     Value::List(Rc::new(List {
         elements: values.into_iter().map(rc_value).collect(),
     }))
-}
-
-fn mesh_value(mesh: Mesh) -> Value {
-    Value::PrimitiveMesh(Arc::new(PrimitiveMesh { mesh }))
 }
 
 fn float_to_value(value: f64) -> Value {
@@ -286,7 +282,7 @@ fn read_mesh_tree<'a>(
     Box::pin(async move {
         let value = value.elide_wrappers(executor).await?;
         match value {
-            Value::PrimitiveMesh(mesh) => Ok(MeshTree::Mesh(mesh.mesh.clone())),
+            Value::Mesh(arc) => Ok(MeshTree::Mesh(arc)),
             Value::List(list) => {
                 let mut children = Vec::with_capacity(list.elements.len());
                 for child in &list.elements {
@@ -1224,7 +1220,7 @@ pub async fn mesh_contour_separate(
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
-    Ok(list_value(tree.flatten().into_iter().map(mesh_value)))
+    Ok(list_value(tree.flatten().into_iter().map(Value::Mesh)))
 }
 
 #[cfg(test)]
@@ -1252,10 +1248,10 @@ mod tests {
     #[test]
     fn mesh_tree_iter_walks_nested_lists() {
         let tree = MeshTree::List(vec![
-            MeshTree::Mesh(dot_mesh([0.0, 0.0, 0.0], &[1])),
+            MeshTree::Mesh(Arc::new(dot_mesh([0.0, 0.0, 0.0], &[1]))),
             MeshTree::List(vec![
-                MeshTree::Mesh(dot_mesh([1.0, 0.0, 0.0], &[2])),
-                MeshTree::Mesh(dot_mesh([2.0, 0.0, 0.0], &[3])),
+                MeshTree::Mesh(Arc::new(dot_mesh([1.0, 0.0, 0.0], &[2]))),
+                MeshTree::Mesh(Arc::new(dot_mesh([2.0, 0.0, 0.0], &[3]))),
             ]),
         ]);
 
@@ -1266,8 +1262,8 @@ mod tests {
     #[test]
     fn mesh_tree_iter_mut_updates_all_leaves() {
         let mut tree = MeshTree::List(vec![
-            MeshTree::Mesh(dot_mesh([0.0, 0.0, 0.0], &[1])),
-            MeshTree::List(vec![MeshTree::Mesh(dot_mesh([1.0, 0.0, 0.0], &[2]))]),
+            MeshTree::Mesh(Arc::new(dot_mesh([0.0, 0.0, 0.0], &[1]))),
+            MeshTree::List(vec![MeshTree::Mesh(Arc::new(dot_mesh([1.0, 0.0, 0.0], &[2])))]),
         ]);
 
         tree.for_each_mut(&mut |mesh| {
@@ -1281,10 +1277,10 @@ mod tests {
     #[test]
     fn tag_filter_keeps_only_matching_meshes() {
         let tree = MeshTree::List(vec![
-            MeshTree::Mesh(dot_mesh([0.0, 0.0, 0.0], &[1])),
+            MeshTree::Mesh(Arc::new(dot_mesh([0.0, 0.0, 0.0], &[1]))),
             MeshTree::List(vec![
-                MeshTree::Mesh(dot_mesh([1.0, 0.0, 0.0], &[2])),
-                MeshTree::Mesh(dot_mesh([2.0, 0.0, 0.0], &[3, 4])),
+                MeshTree::Mesh(Arc::new(dot_mesh([1.0, 0.0, 0.0], &[2]))),
+                MeshTree::Mesh(Arc::new(dot_mesh([2.0, 0.0, 0.0], &[3, 4]))),
             ]),
         ]);
 
