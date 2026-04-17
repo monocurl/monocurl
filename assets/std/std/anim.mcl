@@ -1,3 +1,113 @@
-let Set = |vars = []| __monocurl__native__ set(vars)
-let Lerp = |time = 1, vars = []| __monocurl__native__ lerp_anim(vars, time)
+# animations, rate functions, and operators that modify animations.
+#
+# rate functions
+# unit_map in the old libmc. A rate function takes t in [0, 1] and returns
+# a (usually monotonic) value in [0, 1], and is what gives Lerp its
+# ease-in/ease-out feel.
+
+# the pure identity; equivalent to "no easing."
+let linear = |t| t
+
+# smooth-step, monotone, symmetric around t=0.5.
+let smooth = |t| t * t * (3 - 2 * t)
+
+# quadratic ease-in.
+let smooth_in  = |t| t * t
+
+# quadratic ease-out.
+let smooth_out = |t| 1 - (1 - t) * (1 - t)
+
+# slower ease-in-out (5th-order smoothstep).
+let smoother = |t| t * t * t * (t * (t * 6 - 15) + 10)
+
+# gentle cosine-based ease.
+let cosine = |t| (1 - __monocurl__native__ cos(3.141592653589793 * t)) / 2
+
+# ease functions raised to some power; higher = more aggressive.
+let ease_in    = |t, p = 3| __monocurl__native__ pow(t, p)
+let ease_out   = |t, p = 3| 1 - __monocurl__native__ pow(1 - t, p)
+let ease_in_out = |t, p = 3| {
+    if (t < 0.5) { return ease_in(2 * t, p) / 2 }
+    return 1 - ease_in(2 * (1 - t), p) / 2
+}
+
+# exponential-style; fast start, slow end.
+let exponential = |t| 1 - __monocurl__native__ pow(2, -10 * t)
+
+# bounce-out — a few decaying overshoots.
+let bounce = |t| __monocurl__native__ rate_bounce(t)
+
+# elastic-out — overshoots then rings in.
+let elastic = |t| __monocurl__native__ rate_elastic(t)
+
+# reverse a rate function.
+let reversed = operator |target| [target, |t| target(1 - t)]
+
+# primitive animations
+# these are the leaf animations the executor knows how to step. All higher
+# animations eventually decompose into one of these.
+
+# do nothing for `time` seconds.
 let Wait = |time = 1| __monocurl__native__ wait(time)
+
+# instantly snap follower(s) to leader. Omitting `vars` targets all dirty leaders.
+let Set = |vars = []| __monocurl__native__ set(vars)
+
+# linearly (or eased) interpolate follower(s) toward leader over `time`.
+let Lerp = |time = 1, vars = [], rate = smooth| __monocurl__native__ lerp_anim(vars, time, rate)
+
+# follower animations
+# these each have a specific transform they apply to the follower start state
+# before letting a standard interpolation finish the job.
+
+# points start co-located at the mesh centroid and grow outward.
+let Grow = |meshes = [], time = 1, rate = smooth| __monocurl__native__ grow_anim(meshes, time, rate)
+
+# interpolate opacity from 0 (or along `delta`) to full.
+let Fade = |meshes = [], time = 1, rate = smooth, delta = [0, 0, 0]| __monocurl__native__ fade_anim(meshes, time, rate, delta)
+
+# tracing animation for line / polyline content.
+let Write = |meshes = [], time = 1, rate = smooth| __monocurl__native__ write_anim(meshes, time, rate)
+
+# interpolate by matching points between start and end meshes.
+let Transform = |meshes = [], time = 1, rate = smooth, path_arc = 0| __monocurl__native__ transform_anim(meshes, time, rate, path_arc)
+
+# like Transform, but pairs sub-meshes by their `tag` rather than by order.
+let TagTransform = |meshes = [], time = 1, rate = smooth, path_arc = 0| __monocurl__native__ tag_transform_anim(meshes, time, rate, path_arc)
+
+# camera-aware lerp that slerps the orientation to avoid gimbal lock.
+let CameraLerp = |camera = [], time = 1, rate = smooth| __monocurl__native__ camera_lerp_anim(camera, time, rate)
+
+# indication animations
+
+# flash a mesh to `color` and back.
+let Highlight = |value, color, time = 1, rate = smooth| __monocurl__native__ highlight_anim(value, color, time, rate)
+
+# brief "write then unwrite" over stroke of a mesh.
+let Flash = |value, time = 1, lead = smooth, trail = smooth| __monocurl__native__ flash_anim(value, time, lead, trail)
+
+# transfer animations
+# move / duplicate content from one leader into another, keyed by tag.
+
+let Transfer = |from, into| __monocurl__native__ transfer_anim(from, into)
+
+let Copy = |from, into| __monocurl__native__ copy_anim(from, into)
+
+# parallel with lag
+# start a list of animations in parallel, but offset consecutive ones.
+
+let LaggedMap = |anims, average_offset = 0.1, unit_map = smooth| __monocurl__native__ lagged_map(anims, average_offset, unit_map)
+
+# animation operators
+# play slow{2} Lerp(1)   → Lerp runs over 2 seconds
+# play fast{2} Lerp(2)   → Lerp runs over 1 second
+# play delayed{0.5} Lerp(1) → 0.5s pause, then Lerp
+
+let slow = operator |target, factor = 2| [target, __monocurl__native__ anim_time_scale(target, factor)]
+
+let fast = operator |target, factor = 2| [target, __monocurl__native__ anim_time_scale(target, 1 / factor)]
+
+let delayed = operator |target, time = 0.5| [target, __monocurl__native__ anim_delayed(target, time)]
+
+# override the rate function on a primitive animation.
+let with_rate = operator |target, rate| [target, __monocurl__native__ anim_with_rate(target, rate)]

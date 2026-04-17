@@ -13,9 +13,13 @@ use syn::{ItemFn, parse_macro_input};
 pub fn stdlib_func(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let func = parse_macro_input!(item as ItemFn);
     let ident = &func.sig.ident;
-    let name_str = ident.to_string();
+    // raw identifiers (e.g. `r#mod`) stringify with the `r#` prefix — strip it
+    // so the registered monocurl name is just `mod`.
+    let raw_name = ident.to_string();
+    let name_str = raw_name.trim_start_matches("r#").to_string();
+    let wrapper_base = name_str.clone();
 
-    let wrapper_ident = syn::Ident::new(&format!("__{}_native_wrapper", ident), ident.span());
+    let wrapper_ident = syn::Ident::new(&format!("__{}_native_wrapper", wrapper_base), ident.span());
 
     let expanded = quote! {
         #func

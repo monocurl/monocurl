@@ -1,0 +1,119 @@
+# general-purpose container, iteration, and string utilities.
+# anything math-related lives in std.math; mesh-related in std.mesh.
+
+# identity function; useful as a default key / mapper.
+let identity = |x| x
+
+# build [start, start + step, ..., last < stop]; step defaults to 1.
+let range = |start, stop, step = 1| __monocurl__native__ range(start, stop, step)
+
+# element count of a list, map, or string.
+let len = |container| __monocurl__native__ len(container)
+
+# reverse a list, map iteration order, or string.
+let reverse = |v| __monocurl__native__ reverse(v)
+
+# stable sort; a key lambda may be supplied for custom orderings.
+let sort = |v, key = identity| __monocurl__native__ sort(v, key)
+
+# apply f to every element, returning a new list.
+let map = |v, f| {
+    var out = []
+    for (x in v) { out .= f(x) }
+    return out
+}
+
+# keep only elements satisfying predicate.
+let filter = |v, predicate| {
+    var out = []
+    for (x in v) {
+        if (predicate(x)) { out .= x }
+    }
+    return out
+}
+
+# left fold with seed: reduce([a, b, c], seed, f) = f(f(f(seed, a), b), c).
+let reduce = |v, seed, binary| {
+    var acc = seed
+    for (x in v) { acc = binary(acc, x) }
+    return acc
+}
+
+# pair up corresponding elements; truncates to the shorter sequence.
+let zip = |u, v| __monocurl__native__ zip(u, v)
+
+# [[0, v[0]], [1, v[1]], ...]
+let enumerate = |v| __monocurl__native__ enumerate(v)
+
+# true when every element is truthy.
+let all = |v| {
+    for (x in v) { if (not x) { return 0 } }
+    return 1
+}
+
+# true when any element is truthy.
+let any = |v| {
+    for (x in v) { if (x) { return 1 } }
+    return 0
+}
+
+# number of elements satisfying predicate.
+let count = |v, predicate| {
+    var n = 0
+    for (x in v) { if (predicate(x)) { n = n + 1 } }
+    return n
+}
+
+# sum of elements — works for numbers and (element-wise) for lists.
+let sum = |v| {
+    var s = 0
+    for (x in v) { s = s + x }
+    return s
+}
+
+# product of elements.
+let product = |v| {
+    var p = 1
+    for (x in v) { p = p * x }
+    return p
+}
+
+# max / min of a non-empty list. For pairwise use math.max / math.min.
+let max_of = |v, key = identity| __monocurl__native__ max_of(v, key)
+let min_of = |v, key = identity| __monocurl__native__ min_of(v, key)
+
+# map helpers
+let keys   = |m| __monocurl__native__ map_keys(m)
+let values = |m| __monocurl__native__ map_values(m)
+let items  = |m| __monocurl__native__ map_items(m)
+
+# first n elements of a list.
+let take = |v, n| __monocurl__native__ take(v, n)
+
+# list with the first n elements removed.
+let drop = |v, n| __monocurl__native__ drop(v, n)
+
+# concatenate one level of nesting.
+let flatten = |v| {
+    var out = []
+    for (x in v) {
+        for (y in x) { out .= y }
+    }
+    return out
+}
+
+# maximum nesting depth of a list (0 for atoms).
+let depth = |v| __monocurl__native__ depth(v)
+
+# string utilities
+let str_len     = |s| __monocurl__native__ str_len(s)
+let str_replace = |s, needle, with| __monocurl__native__ str_replace(s, needle, with)
+let str_split   = |s, sep| __monocurl__native__ str_split(s, sep)
+let str_upper   = |s| __monocurl__native__ str_upper(s)
+let str_lower   = |s| __monocurl__native__ str_lower(s)
+let str_join    = |parts, sep = ""| __monocurl__native__ str_join(parts, sep)
+
+# type coercion
+let to_string = |x| __monocurl__native__ to_string(x)
+let to_int    = |x| __monocurl__native__ to_int(x)
+let to_float  = |x| __monocurl__native__ to_float(x)

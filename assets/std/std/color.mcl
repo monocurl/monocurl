@@ -1,0 +1,41 @@
+# colors are RGBA 4-vectors in [0, 1].
+# all constants are fully opaque unless their name says otherwise.
+
+let RED        = [0.9, 0.3, 0.2, 1]
+let ORANGE     = [1.0, 0.7, 0.2, 1]
+let YELLOW     = [1.0, 1.0, 0.0, 1]
+let GREEN      = [0.2, 0.6, 0.3, 1]
+let TEAL       = [0.2, 0.7, 0.7, 1]
+let CYAN       = [0.1, 0.7, 0.9, 1]
+let BLUE       = [0.1, 0.4, 0.6, 1]
+let NAVY       = [0.05, 0.1, 0.4, 1]
+let PURPLE     = [0.6, 0.4, 0.7, 1]
+let MAGENTA    = [0.9, 0.2, 0.7, 1]
+let PINK       = [1.0, 0.6, 0.7, 1]
+let BROWN      = [0.5, 0.3, 0.2, 1]
+
+let WHITE      = [1.0, 1.0, 1.0, 1]
+let LIGHT_GRAY = [0.7, 0.7, 0.7, 1]
+let GRAY       = [0.5, 0.5, 0.5, 1]
+let DARK_GRAY  = [0.3, 0.3, 0.3, 1]
+let BLACK      = [0.0, 0.0, 0.0, 1]
+
+# fully transparent black — handy as an "invisible" fill.
+let CLEAR      = [0.0, 0.0, 0.0, 0]
+
+# ─── constructors ───────────────────────────────────────────────────────────
+
+# r, g, b in [0, 1]; alpha defaults to fully opaque.
+let rgb  = |r, g, b, a = 1| [r, g, b, a]
+
+# h in [0, 1] (or 360 if degrees=1), s, v, a in [0, 1].
+let hsv  = |h, s, v, a = 1| __monocurl__native__ hsv(h, s, v, a)
+
+# grayscale shade at given luminance.
+let gray_shade = |v, a = 1| [v, v, v, a]
+
+# drop the alpha component of a color.
+let with_alpha = |color, a| [color[0], color[1], color[2], a]
+
+# linear blend between two colors in RGBA.
+let mix = |a, b, t| a + (b - a) * t

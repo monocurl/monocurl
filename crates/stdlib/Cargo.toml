@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 executor.workspace = true
 inventory.workspace = true
+smallvec.workspace = true
 stdlib-macros.workspace = true

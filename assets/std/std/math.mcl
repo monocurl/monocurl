@@ -1,0 +1,121 @@
+# mathematical constants, scalar functions, and vector operations.
+#
+# note: element-wise arithmetic on lists (u + v, a * u, -u) is built into the
+# language, so linear algebra reads naturally without helper functions.
+# scalar / vector dispatch is handled by the runtime; use (+, -, *, /) freely.
+
+# constants
+let E   = 2.7182818284590452
+let PI  = 3.1415926535897932
+let TAU = 6.2831853071795864
+let INF = 1.0 / 0.0
+let NAN = 0.0 / 0.0
+
+# canonical 3-vectors. Direction-suffix literals (1l, 1r, 1u, 1d, 1f, 1b)
+# produce the same values; these names read more naturally in expressions.
+let ORIGIN   = [0, 0, 0]
+let ZERO_V   = [0, 0, 0]
+let ONE_V    = [1, 1, 1]
+let LEFT     = 1l
+let RIGHT    = 1r
+let UP       = 1u
+let DOWN     = 1d
+let FORWARD  = 1f
+let BACKWARD = 1b
+
+# basis vectors
+let X_HAT = RIGHT
+let Y_HAT = UP
+let Z_HAT = FORWARD
+
+# scalar functions
+let sqrt  = |x| __monocurl__native__ sqrt(x)
+let cbrt  = |x| __monocurl__native__ cbrt(x)
+let exp   = |x| __monocurl__native__ exp(x)
+let ln    = |x| __monocurl__native__ ln(x)
+let log   = |x, base = E| ln(x) / ln(base)
+let log2  = |x| log(x, 2)
+let log10 = |x| log(x, 10)
+
+let sin = |x| __monocurl__native__ sin(x)
+let cos = |x| __monocurl__native__ cos(x)
+let tan = |x| __monocurl__native__ tan(x)
+let cot = |x| 1 / tan(x)
+let sec = |x| 1 / cos(x)
+let csc = |x| 1 / sin(x)
+
+let arcsin  = |x| __monocurl__native__ arcsin(x)
+let arccos  = |x| __monocurl__native__ arccos(x)
+let arctan  = |x| __monocurl__native__ arctan(x)
+let arctan2 = |y, x| __monocurl__native__ arctan2(y, x)
+
+let sinh = |x| __monocurl__native__ sinh(x)
+let cosh = |x| __monocurl__native__ cosh(x)
+let tanh = |x| __monocurl__native__ tanh(x)
+
+let abs    = |x| __monocurl__native__ abs(x)
+let sign   = |x| __monocurl__native__ sign(x)
+let floor  = |x| __monocurl__native__ floor(x)
+let ceil   = |x| __monocurl__native__ ceil(x)
+let round  = |x| __monocurl__native__ round(x)
+let trunc  = |x| __monocurl__native__ trunc(x)
+let mod    = |n, m| __monocurl__native__ mod(n, m)
+
+# pairwise min / max of numbers.
+let min = |a, b| __monocurl__native__ min(a, b)
+let max = |a, b| __monocurl__native__ max(a, b)
+
+# x pinned to [low, high].
+let clamp = |low, x, high| min(high, max(low, x))
+
+# common activation / util shapes.
+let relu    = |x| max(0, x)
+let sigmoid = |x| 1 / (1 + exp(-x))
+
+# combinatorics & integer utilities
+let factorial = |n| __monocurl__native__ factorial(n)
+let choose    = |n, r| __monocurl__native__ choose(n, r)
+let permute   = |n, r| __monocurl__native__ permute(n, r)
+let gcd       = |n, m| __monocurl__native__ gcd(n, m)
+let lcm       = |n, m| __monocurl__native__ lcm(n, m)
+let is_prime  = |n| __monocurl__native__ is_prime(n)
+
+# scene-load-time randomness. calling these inside a lambda body that may be
+# re-evaluated will make the animation non-deterministic; prefer top-level use.
+let random  = |low = 0, high = 1| __monocurl__native__ random(low, high)
+let randint = |low, high|         __monocurl__native__ randint(low, high)
+
+# statistics
+let mean = |v| __monocurl__native__ mean(v)
+let variance = |v| __monocurl__native__ variance(v)
+let std_dev  = |v| sqrt(variance(v))
+
+# vector operations
+# many obvious linear operations (u + v, c * u, -u) are built in as binary ops
+# over lists; these exposed natives are the ones that aren't element-wise.
+
+let dot      = |u, v| __monocurl__native__ dot(u, v)
+let cross    = |u, v| __monocurl__native__ cross(u, v)
+let norm     = |v| sqrt(dot(v, v))
+let normalize = |v| v * (1 / norm(v))
+# projection of u onto v.
+let proj     = |u, v| v * (dot(u, v) / dot(v, v))
+
+# angle between two vectors, in radians.
+let angle_between = |u, v| arccos(dot(u, v) / (norm(u) * norm(v)))
+
+# interpolation
+# full interpolation: follows the rules described in Monocurl Language.md
+# (numbers, matching function invocations, operator embeds, elementwise lists).
+let lerp = |a, b, t| __monocurl__native__ lerp(a, b, t)
+
+# keyframes = [[t0, v0], [t1, v1], ...]; piecewise lerp across t.
+let keyframe_lerp = |keyframes, t| __monocurl__native__ keyframe_lerp(keyframes, t)
+
+# map x linearly from [in_min, in_max] to [out_min, out_max].
+let map_range = |x, in_min, in_max, out_min, out_max| out_min + (x - in_min) / (in_max - in_min) * (out_max - out_min)
+
+# degrees / radians conversions. (The `dg` literal suffix already produces
+# radians from a degree literal; these are for runtime values.)
+let deg_to_rad = |x| x * (PI / 180)
+let rad_to_deg = |x| x * (180 / PI)

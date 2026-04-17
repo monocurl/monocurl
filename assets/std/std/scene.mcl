@@ -1,0 +1,38 @@
+# scene-level defaults: camera rig, background, and render hints.
+#
+# Camera is the only "special" mesh — the renderer treats it as the view
+# transform rather than drawable geometry. Every scene has exactly one
+# camera leader, typically bound via `mesh camera = DEFAULT_CAMERA`.
+
+# constructors
+
+# build a camera from a position, a point to look at, and an up vector.
+# `fov` is the vertical field of view in radians.
+let Camera = |position = [0, 0, -10], look_at = [0, 0, 0], up = 1u, fov = 0.6981317007977318, near = 0.1, far = 100, ortho = 0| __monocurl__native__ mk_camera(position, look_at, up, fov, near, far, ortho)
+
+# orthographic camera with an explicit viewport width (height derived from
+# aspect ratio).
+let OrthographicCamera = |position = [0, 0, -10], look_at = [0, 0, 0], up = 1u, width = 10, near = 0.1, far = 100| Camera(position, look_at, up, 0, near, far, 1)
+
+# defaults
+# these two names are conventional — `mesh camera = DEFAULT_CAMERA` /
+# `state background = DEFAULT_BACKGROUND` give you a sensible starting scene.
+
+let DEFAULT_CAMERA     = __monocurl__native__ initial_camera()
+let DEFAULT_BACKGROUND = __monocurl__native__ initial_background()
+
+# solid-color background (RGBA).
+let SolidBackground = |color = [0, 0, 0, 1]| __monocurl__native__ mk_solid_background(color)
+
+# vertical gradient between two colors.
+let GradientBackground = |top = [0, 0, 0, 1], bottom = [0.1, 0.1, 0.2, 1]| __monocurl__native__ mk_gradient_background(top, bottom)
+
+# viewport hints
+# canonical aspect ratios — useful when setting up orthographic bounds.
+let ASPECT_16_9 = 16 / 9
+let ASPECT_4_3  = 4 / 3
+let ASPECT_1_1  = 1
+
+# half-extents of the default 16:9 viewport at unit camera distance.
+let FRAME_X_RADIUS = 7.11111111111
+let FRAME_Y_RADIUS = 4

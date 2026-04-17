@@ -4680,6 +4680,7 @@ version = "0.1.0"
 dependencies = [
  "executor",
  "inventory",
+ "smallvec",
  "stdlib-macros",
 ]
 

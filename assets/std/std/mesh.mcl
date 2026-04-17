@@ -1,4 +1,306 @@
-let len = |vector| __monocurl__native__ vector_len(4)
-let bad = 3
-let g = bad + bad
-let trans = 4
+# mesh constructors, transformations (as operators), and queries.
+#
+# design notes:
+#
+# 1. constructors are PascalCase (Circle, Square, Tex, Axis2d). Their
+#    arguments are named so that labeled invocation lets the caller mutate
+#    properties after construction (e.g. `var c = Circle(radius: 1); c.radius = 2`).
+#
+# 2. transformations that used to be functions (Shifted, Scaled, Faded, ...)
+#    are now operators, so they can be applied with snake_case postfix sugar:
+#
+#        shift{1r} scale{2} Circle(radius: 1)
+#
+#    The operator invocation syntax preserves the labels on the inner
+#    constructor, so you can still write `q.radius = 2` after the fact.
+#
+# 3. queries (extents, centers, sampling, ...) are plain snake_case
+#    functions. They evaluate immediately against the current leader mesh.
+
+# helpers for operator identity embeds
+# every mesh operator below follows the shape
+#     let op = operator |target, arg| {
+#         let go = |a| __monocurl__native__ mesh_op(target, a)
+#         [go(IDENTITY), go(arg)]
+#     }
+# this factor is extracted here so the file reads more easily.
+
+# primitive constructors
+
+let Dot = |point = [0, 0, 0], tag = 0, color = [1, 1, 1, 1]| __monocurl__native__ mk_dot(point, tag, color)
+
+let Circle = |center = [0, 0, 0], radius = 1, samples = 64, normal = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_circle(center, radius, samples, normal, tag, stroke, fill)
+
+let Annulus = |center = [0, 0, 0], inner = 0.5, outer = 1, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_annulus(center, inner, outer, tag, stroke, fill)
+
+let Square = |center = [0, 0, 0], width = 1, normal = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_square(center, width, normal, tag, stroke, fill)
+
+let Rect = |center = [0, 0, 0], width = 1, height = 1, normal = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_rect(center, width, height, normal, tag, stroke, fill)
+
+let RegularPolygon = |center = [0, 0, 0], n = 3, circumradius = 1, normal = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_regular_polygon(center, n, circumradius, normal, tag, stroke, fill)
+
+let Polygon = |vertices = [], normal_hint = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_polygon(vertices, normal_hint, tag, stroke, fill)
+
+let Polyline = |vertices = [], normal_hint = 1f, tag = 0, stroke = [1, 1, 1, 1], dot = [0, 0, 0, 0]| __monocurl__native__ mk_polyline(vertices, normal_hint, tag, stroke, dot)
+
+let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1f, tag = 0, stroke = [1, 1, 1, 1], dot = [0, 0, 0, 0]| __monocurl__native__ mk_line(start, end, normal, tag, stroke, dot)
+
+let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1f, path_arc = 0, tag = 0, stroke = [1, 1, 1, 1], fill = [1, 1, 1, 1]| __monocurl__native__ mk_arrow(start, end, normal, path_arc, tag, stroke, fill)
+
+let Arc = |center = [0, 0, 0], radius = 1, theta_start = 0, theta_end = 3.14159265358979, normal = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_arc(center, radius, theta_start, theta_end, normal, tag, stroke, fill)
+
+let Capsule = |start_center = [-1, 0, 0], end_center = [1, 0, 0], in_rad = 0.4, out_rad = 0.5, normal = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_capsule(start_center, end_center, in_rad, out_rad, normal, tag, stroke, fill)
+
+let Triangle = |p = [0, 0, 0], q = [1, 0, 0], r = [0, 1, 0], normal_hint = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_triangle(p, q, r, normal_hint, tag, stroke, fill)
+
+# 3-d primitives
+
+let Sphere = |center = [0, 0, 0], radius = 1, sample_depth = 2, tag = 0, surface = [1, 1, 1, 1]| __monocurl__native__ mk_sphere(center, radius, sample_depth, tag, surface)
+
+let RectangularPrism = |center = [0, 0, 0], dimensions = [1, 1, 1], tag = 0, surface = [1, 1, 1, 1]| __monocurl__native__ mk_rect_prism(center, dimensions, tag, surface)
+
+let Cylinder = |center = [0, 0, 0], radius = 1, height = 2, direction = 1u, sample_count = 32, tag = 0, surface = [1, 1, 1, 1]| __monocurl__native__ mk_cylinder(center, radius, height, direction, sample_count, tag, surface)
+
+let Cone = |apex = [0, 1, 0], base = [0, 0, 0], radius = 1, sample_count = 32, tag = 0, surface = [1, 1, 1, 1]| __monocurl__native__ mk_cone(apex, base, radius, sample_count, tag, surface)
+
+let Torus = |center = [0, 0, 0], major = 1, minor = 0.3, normal = 1u, major_samples = 48, minor_samples = 24, tag = 0, surface = [1, 1, 1, 1]| __monocurl__native__ mk_torus(center, major, minor, normal, major_samples, minor_samples, tag, surface)
+
+let Plane = |normal = 1u, dist = 0, width = 4, height = 4, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_plane(normal, dist, width, height, tag, stroke, fill)
+
+# visual / graphical
+
+let Bezier = |control_points = [], tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_bezier(control_points, tag, stroke, fill)
+
+let Vector = |tail = [0, 0, 0], delta = 1r, normal = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [1, 1, 1, 1]| __monocurl__native__ mk_vector(tail, delta, normal, tag, stroke, fill)
+
+let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1f, tag = 0, stroke = [1, 1, 1, 1], fill = [1, 1, 1, 1]| __monocurl__native__ mk_half_vector(tail, delta, normal, tag, stroke, fill)
+
+let Image = |name, center = [0, 0, 0], width = 1, height = 1, normal = 1f, tag = 0, stroke = [0, 0, 0, 0], fill = [1, 1, 1, 1]| __monocurl__native__ mk_image(name, center, width, height, normal, tag, stroke, fill)
+
+# sample a scalar color field over a grid.
+let ColorGrid = |x_min = -1, x_max = 1, y_min = -1, y_max = 1, x_step = 0.1, y_step = 0.1, mask = |pos| 1, color_at, tag = 0, stroke = [1, 1, 1, 0]| __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_step, y_step, mask, color_at, tag, stroke)
+
+# sample an arbitrary mesh-generating function over a grid.
+let Field = |x_min = -1, x_max = 1, y_min = -1, y_max = 1, x_step = 0.1, y_step = 0.1, mask = |pos| 1, mesh_at| __monocurl__native__ mk_field(x_min, x_max, y_min, y_max, x_step, y_step, mask, mesh_at)
+
+# text / labels
+
+let Text = |text = "", scale = 1, tag = 0, stroke = [0, 0, 0, 0], fill = [1, 1, 1, 1]| __monocurl__native__ mk_text(text, scale, tag, stroke, fill)
+
+let Tex = |tex = "", scale = 1, tag = 0, stroke = [0, 0, 0, 0], fill = [1, 1, 1, 1]| __monocurl__native__ mk_tex(tex, scale, tag, stroke, fill)
+
+let Brace = |mesh, dir = 1d, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_brace(mesh, dir, tag, stroke, fill)
+
+let Measure = |mesh, dir = 1d, tag = 0, stroke = [1, 1, 1, 1]| __monocurl__native__ mk_measure(mesh, dir, tag, stroke)
+
+let Label = |mesh, str = "", scale = 1, dir = 1u, tag = 0, stroke = [0, 0, 0, 0], fill = [1, 1, 1, 1]| __monocurl__native__ mk_label(mesh, str, scale, dir, tag, stroke, fill)
+
+let Number = |value = 0, precision = 2, scale = 1, tag = 0, stroke = [0, 0, 0, 0], fill = [1, 1, 1, 1]| __monocurl__native__ mk_number(value, precision, scale, tag, stroke, fill)
+
+# graphing
+
+let Axis1d = |center = [0, 0, 0], pos_x_axis = 1r, normal = 1f, x_min = -5, x_max = 5, x_unit = 1, x_tick_step = 1, x_label = |v| v, x_label_rate = 1, tag = 0, color = [1, 1, 1, 1]| __monocurl__native__ mk_axis1d(center, pos_x_axis, normal, x_min, x_max, x_unit, x_tick_step, x_label, x_label_rate, tag, color)
+
+let Axis2d = |center = [0, 0, 0], pos_x_axis = 1r, pos_y_axis = 1u, x_min = -5, x_max = 5, x_unit = 1, x_tick_step = 1, y_min = -5, y_max = 5, y_unit = 1, y_tick_step = 1, x_label = |v| v, x_label_rate = 1, y_label = |v| v, y_label_rate = 1, grid = 0, tag = 0, color = [1, 1, 1, 1]| __monocurl__native__ mk_axis2d(center, pos_x_axis, pos_y_axis, x_min, x_max, x_unit, x_tick_step, y_min, y_max, y_unit, y_tick_step, x_label, x_label_rate, y_label, y_label_rate, grid, tag, color)
+
+let Axis3d = |center = [0, 0, 0], pos_x_axis = 1r, pos_y_axis = 1u, pos_z_axis = 1f, x_min = -5, x_max = 5, x_unit = 1, x_tick_step = 1, y_min = -5, y_max = 5, y_unit = 1, y_tick_step = 1, z_min = -5, z_max = 5, z_unit = 1, z_tick_step = 1, x_label = |v| v, y_label = |v| v, z_label = |v| v, grid = 0, tag = 0, color = [1, 1, 1, 1]| __monocurl__native__ mk_axis3d(center, pos_x_axis, pos_y_axis, pos_z_axis, x_min, x_max, x_unit, x_tick_step, y_min, y_max, y_unit, y_tick_step, z_min, z_max, z_unit, z_tick_step, x_label, y_label, z_label, grid, tag, color)
+
+let PolarAxis = |center = [0, 0, 0], normal = 1f, x_min = -5, x_max = 5, x_tick_step = 1, x_label_step = 1, y_min = 0, y_max = 5, y_tick_step = 1, y_label_step = 1| __monocurl__native__ mk_polar_axis(center, normal, x_min, x_max, x_tick_step, x_label_step, y_min, y_max, y_tick_step, y_label_step)
+
+# sample a parametric curve t ↦ f(t) over [start, stop].
+let ParametricFunc = |f, start = 0, stop = 1, samples = 64, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_parametric(f, start, stop, samples, tag, stroke, fill)
+
+# sample y = f(x) over [start, stop].
+let ExplicitFunc = |f, start = -5, stop = 5, samples = 128, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_explicit(f, start, stop, samples, tag, stroke, fill)
+
+# surface z = f(x, y) over a rectangle.
+let ExplicitFunc2d = |f, x_min = -1, x_max = 1, y_min = -1, y_max = 1, x_step = 0.1, y_step = 0.1, tag = 0, stroke = [1, 1, 1, 1], fill = [0.3, 0.3, 0.3, 1]| __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_step, y_step, tag, stroke, fill)
+
+# level set { (x, y) : f(x, y) = 0 }.
+let ImplicitFunc2d = |f, x_min = -1, x_max = 1, y_min = -1, y_max = 1, x_step = 0.05, y_step = 0.05, tag = 0, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_implicit2d(f, x_min, x_max, y_min, y_max, x_step, y_step, tag, stroke, fill)
+
+# fill the region between two explicit curves.
+let ExplicitFuncDiff = |f, g, start = -5, stop = 5, samples = 128, tag = 0, pos_fill = [0.3, 0.8, 0.3, 0.5], neg_fill = [0.8, 0.3, 0.3, 0.5]| __monocurl__native__ mk_explicit_diff(f, g, start, stop, samples, tag, pos_fill, neg_fill)
+
+# layout / grouping
+
+let Stack = |meshes = [], dir = 1r, align_dir = [0, 0, 0]| __monocurl__native__ mk_stack(meshes, dir, align_dir)
+
+let XStack = |meshes = [], align_dir = [0, 0, 0]| Stack(meshes, 1r, align_dir)
+let YStack = |meshes = [], align_dir = [0, 0, 0]| Stack(meshes, 1u, align_dir)
+let ZStack = |meshes = [], align_dir = [0, 0, 0]| Stack(meshes, 1f, align_dir)
+
+# arrange a rectangular list-of-lists of meshes as a grid.
+let Grid = |mesh_array = []| __monocurl__native__ mk_grid(mesh_array)
+
+# Grid plus cell borders.
+let Table = |mesh_array = [], stroke_tag = 0, stroke = [1, 1, 1, 1]| __monocurl__native__ mk_table(mesh_array, stroke_tag, stroke)
+
+# axis-aligned bounding rectangle of a mesh.
+let BoundingBox = |mesh, tag = 0, buffer = 0.1, stroke = [1, 1, 1, 1], fill = [0, 0, 0, 0]| __monocurl__native__ mk_bounding_box(mesh, tag, buffer, stroke, fill)
+
+# transform operators
+# these are the main way users manipulate meshes. Operator form means they
+# chain naturally (`shift{1r} scale{2} Circle()`) and interpolate smoothly
+# via rule 4 in the interpolation rules.
+
+let shift = operator |target, delta = [0, 0, 0]| {
+    let go = |d| __monocurl__native__ op_shift(target, d)
+    [go([0, 0, 0]), go(delta)]
+}
+
+let scale = operator |target, factor = 1| {
+    let go = |s| __monocurl__native__ op_scale(target, s)
+    [go(1), go(factor)]
+}
+
+let scale_xyz = operator |target, factors = [1, 1, 1]| {
+    let go = |s| __monocurl__native__ op_scale_xyz(target, s)
+    [go([1, 1, 1]), go(factors)]
+}
+
+let rotate = operator |target, rotation = [0, 0, 0]| {
+    let go = |r| __monocurl__native__ op_rotate(target, r)
+    [go([0, 0, 0]), go(rotation)]
+}
+
+let rotate_around = operator |target, pivot = [0, 0, 0], rotation = [0, 0, 0]| {
+    let go = |r| __monocurl__native__ op_rotate_around(target, pivot, r)
+    [go([0, 0, 0]), go(rotation)]
+}
+
+let fade = operator |target, opacity = 0| {
+    let go = |o| __monocurl__native__ op_fade(target, o)
+    [go(1), go(opacity)]
+}
+
+# replace stroke color.
+let stroke = operator |target, color = [1, 1, 1, 1]| {
+    let go = |c| __monocurl__native__ op_restroke(target, c)
+    [target, go(color)]
+}
+
+# replace fill color.
+let fill = operator |target, color = [1, 1, 1, 1]| {
+    let go = |c| __monocurl__native__ op_refill(target, c)
+    [target, go(color)]
+}
+
+# replace dot color.
+let dotted = operator |target, color = [1, 1, 1, 1]| {
+    let go = |c| __monocurl__native__ op_redot(target, c)
+    [target, go(color)]
+}
+
+# apply an image texture.
+let textured = operator |target, image| [target, __monocurl__native__ op_retextured(target, image)]
+
+# z-order override.
+let with_z = operator |target, index = 0| [target, __monocurl__native__ op_with_z(target, index)]
+
+# add specular gloss for 3d surfaces.
+let gloss = operator |target| [target, __monocurl__native__ op_gloss(target)]
+
+# remap each vertex position through a function.
+let point_map = operator |target, f = identity| [__monocurl__native__ op_point_map(target, |p| p), __monocurl__native__ op_point_map(target, f)]
+
+# remap each vertex color through a function of position.
+let color_map = operator |target, f| [target, __monocurl__native__ op_color_map(target, f)]
+
+# assign uv coordinates per vertex.
+let uv_map = operator |target, f| [target, __monocurl__native__ op_uv_map(target, f)]
+
+# rename tags through a pure function.
+let retagged = operator |target, f = identity| [target, __monocurl__native__ op_retagged(target, f)]
+
+# map sub-meshes by tag.
+let tag_map = operator |target, f| [target, __monocurl__native__ op_tag_map(target, f)]
+
+# topological operators
+let uprank     = operator |target| [target, __monocurl__native__ op_uprank(target)]
+let downrank   = operator |target| [target, __monocurl__native__ op_downrank(target)]
+let wireframe  = operator |target| [target, __monocurl__native__ op_wireframe(target)]
+
+# subdivide each line into `factor` segments.
+let subdivide = operator |target, factor = 2| [__monocurl__native__ op_subdivide(target, 1), __monocurl__native__ op_subdivide(target, factor)]
+
+# increase geometric complexity by recursive splitting.
+let tesselated = operator |target, depth = 1| [__monocurl__native__ op_tesselated(target, 0), __monocurl__native__ op_tesselated(target, depth)]
+
+# lift each mesh along `delta` to form a solid.
+let extrude = operator |target, delta = 1f| [__monocurl__native__ op_extrude(target, [0, 0, 0]), __monocurl__native__ op_extrude(target, delta)]
+
+# rotate each line-mesh around an axis to produce a surface.
+let revolve = operator |target, rotation = [0, 3.14, 0]| [__monocurl__native__ op_revolve(target, [0, 0, 0]), __monocurl__native__ op_revolve(target, rotation)]
+
+# positional operators - translate so the mesh sits at a specific place.
+
+let centered_at = operator |target, at = [0, 0, 0]| [target, __monocurl__native__ op_centered(target, at)]
+
+# move to a screen edge or corner indicated by `dir` (e.g. 1l for left edge).
+let moved_to_side = operator |target, dir = [0, 0, 0]| [target, __monocurl__native__ op_moved_to_side(target, dir)]
+
+# align an edge of `target` with an edge of `ref` on `dir`.
+let matched_edge = operator |target, ref, dir = 1r| [target, __monocurl__native__ op_matched_edge(target, ref, dir)]
+
+# place `target` next to `ref` in direction `dir`.
+let next_to = operator |target, ref, dir = 1r| [target, __monocurl__native__ op_next_to(target, ref, dir)]
+
+# project each point onto another mesh along `ray`.
+let projected = operator |target, screen, ray = 1b| [target, __monocurl__native__ op_projected(target, screen, ray)]
+
+# embed a mesh from axes-space into world-space.
+let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1f| [target, __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit)]
+
+# boolean mesh ops
+
+# keep only the part of `target` inside `mask`.
+let masked = operator |target, mask| [target, __monocurl__native__ op_masked(target, mask)]
+
+let joined = operator |target, additional| [target, __monocurl__native__ op_joined(target, additional)]
+
+let set_diff = operator |target, subtraction| [target, __monocurl__native__ op_set_diff(target, subtraction)]
+
+let sym_diff = operator |target, subtraction| [target, __monocurl__native__ op_sym_diff(target, subtraction)]
+
+let minkowski_sum = operator |target, adder| [target, __monocurl__native__ op_minkowski_sum(target, adder)]
+
+# queries
+# these return scalars/vectors/lists derived from the current leader state.
+
+# axis-aligned extremes.
+let mesh_left     = |mesh| __monocurl__native__ mesh_left(mesh)
+let mesh_right    = |mesh| __monocurl__native__ mesh_right(mesh)
+let mesh_up       = |mesh| __monocurl__native__ mesh_up(mesh)
+let mesh_down     = |mesh| __monocurl__native__ mesh_down(mesh)
+let mesh_forward  = |mesh| __monocurl__native__ mesh_forward(mesh)
+let mesh_backward = |mesh| __monocurl__native__ mesh_backward(mesh)
+
+# farthest point along an arbitrary direction.
+let mesh_direc = |mesh, direc| __monocurl__native__ mesh_direc(mesh, direc)
+
+let mesh_width  = |mesh| __monocurl__native__ mesh_width(mesh)
+let mesh_height = |mesh| __monocurl__native__ mesh_height(mesh)
+
+# centroid.
+let mesh_center = |mesh| __monocurl__native__ mesh_center(mesh)
+
+# -1 empty · 0 dots · 1 lines · 2 triangles.
+let mesh_rank = |mesh| __monocurl__native__ mesh_rank(mesh)
+
+# sample a mesh parameterised over [0, 1] (for curves) / [0,1]² (for surfaces).
+let mesh_sample  = |mesh, t| __monocurl__native__ mesh_sample(mesh, t)
+let mesh_normal  = |mesh, t| __monocurl__native__ mesh_normal(mesh, t)
+let mesh_tangent = |mesh, t| __monocurl__native__ mesh_tangent(mesh, t)
+
+# inside/outside + distance
+let mesh_contains = |mesh, point| __monocurl__native__ mesh_contains(mesh, point)
+let mesh_dist     = |mesh, test_point| __monocurl__native__ mesh_dist(mesh, test_point)
+let mesh_raycast  = |mesh, src, direction| __monocurl__native__ mesh_raycast(mesh, src, direction)
+
+# geometry introspection
+let mesh_vertex_set     = |mesh| __monocurl__native__ mesh_vertex_set(mesh)
+let mesh_edge_set       = |mesh| __monocurl__native__ mesh_edge_set(mesh)
+let mesh_triangle_set   = |mesh| __monocurl__native__ mesh_triangle_set(mesh)
+let mesh_contour_count    = |mesh| __monocurl__native__ mesh_contour_count(mesh)
+let mesh_contour_separate = |mesh| __monocurl__native__ mesh_contour_separate(mesh)

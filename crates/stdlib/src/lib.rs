@@ -1,8 +1,11 @@
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 
 mod anim;
+mod color;
+mod math;
 mod mesh;
 pub mod registry;
+mod scene;
 mod util;
 
 fn read_float(

@@ -37,7 +37,11 @@
 - stdlib: actual lib monocurl routine implementations. depends on executor for Value types
   - src/registry.rs: defines `FunctionEntry` (using executor's `NativeFunc` type), `inventory::collect!`, the `Registry` singleton (lazily built, sorted by name via `OnceLock`), and `func_table()` to build a Vec<NativeFunc> for the executor
   - src/anim.rs: native primitive animation constructors for `Set`, `Lerp`, and `Wait`
-  - src/util.rs: basic utility native functions vector_len, map_len, initial_camera, initial_background)
+  - src/color.rs: color-related native helpers such as `hsv`
+  - src/math.rs: scalar math/statistics/vector native helpers used by `std.math`
+  - src/mesh.rs: native mesh constructors, mesh operators, and mesh query hooks backing `std.mesh` (many are still placeholders)
+  - src/scene.rs: scene/camera/background native helpers backing `std.scene`; currently returns structured placeholder values for the default prelude scene state
+  - src/util.rs: general collection/string/conversion helpers used by `std.util`
 - stdlib-macros: proc-macro crate providing the `#[stdlib_func]` attribute; generates a `NativeFunc`-compatible wrapper and submits it to the `inventory` collector used by `stdlib::registry`
 - structs: helper structs and utilities.
   - src/assets.rs: contains code for location where assets (say fonts) are located
