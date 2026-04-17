@@ -1733,10 +1733,12 @@ impl Parser {
 
         let mut bundles = HashMap::new();
         let mut artifacts = ParseArtifacts::default();
+        let mut sorted_bundles = Vec::new();
         for file in p.preparsed_files {
             if file.root_import_span.is_some() && let Some(result) = external_context.cache_get(&file.path) {
-                bundles.insert(file.path.unwrap(), result.0);
                 artifacts.extend(result.1);
+                sorted_bundles.push(result.0.clone());
+                bundles.insert(file.path.unwrap(), result.0);
                 continue;
             }
 
@@ -1747,14 +1749,12 @@ impl Parser {
                 external_context.set_cache(key, &bundle, sub_artifacts.clone());
             }
 
+            artifacts.extend(sub_artifacts);
+            sorted_bundles.push(bundle.clone());
             if let Some(key) = key {
                 bundles.insert(key, bundle);
             }
-            artifacts.extend(sub_artifacts);
         }
-
-        let mut sorted_bundles: Vec<_> = bundles.values().cloned().collect();
-        sorted_bundles.sort_by_key(|x| x.file_index);
 
         (sorted_bundles, artifacts)
     }
