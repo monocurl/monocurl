@@ -314,6 +314,12 @@ impl Executor {
 
             let base_val = base_rc.borrow();
             match &*base_val {
+                Value::Leader(leader) => {
+                    let leader_rc = leader.leader_rc.clone();
+                    drop(base_val);
+                    self.state.stack_mut(stack_idx).push(Value::Lvalue(leader_rc));
+                    return self.exec_attribute(stack_idx, section_idx, true, string_index);
+                }
                 Value::InvokedFunction(inv_rc) => {
                     let label_idx = inv_rc.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
@@ -373,6 +379,11 @@ impl Executor {
         } else {
             let base = base.elide_lvalue();
             match &base {
+                Value::Leader(leader) => {
+                    let inner = leader.leader_rc.borrow().clone();
+                    self.state.stack_mut(stack_idx).push(inner);
+                    return self.exec_attribute(stack_idx, section_idx, false, string_index);
+                }
                 Value::InvokedFunction(inv_rc) => {
                     let label_idx = inv_rc.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {

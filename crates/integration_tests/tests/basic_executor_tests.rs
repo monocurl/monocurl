@@ -899,6 +899,20 @@ fn test_exec_labeled_operator_arg_mutable() {
 }
 
 #[test]
+fn test_exec_mesh_leader_labeled_attribute_mutable() {
+    let r = run_section(
+        "
+        let hello = |origin, radius| origin + radius
+        mesh base = hello(origin: 10, radius: 2)
+        base.origin = 45
+        let result = base.origin
+    ",
+        SectionType::Slide,
+    );
+    r.assert_int(45);
+}
+
+#[test]
 fn test_exec_labeled_operator_mutation_updates_downstream_value() {
     let r = run("
         let add = operator |target, amount| {
