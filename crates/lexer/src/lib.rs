@@ -5,6 +5,5 @@ pub mod token;
 mod tests {
 
     #[test]
-    fn it_works() {
-    }
+    fn it_works() {}
 }

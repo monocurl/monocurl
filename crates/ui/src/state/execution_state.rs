@@ -40,7 +40,10 @@ impl ExecutionState {
     }
 
     pub fn has_error(&self) -> bool {
-        matches!(self.status, ExecutionStatus::CompileError | ExecutionStatus::RuntimeError)
+        matches!(
+            self.status,
+            ExecutionStatus::CompileError | ExecutionStatus::RuntimeError
+        )
     }
 
     pub fn apply_snapshot(&mut self, snapshot: ExecutionSnapshot) {

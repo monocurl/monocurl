@@ -1,5 +1,5 @@
+pub mod assets;
+pub mod futures;
+pub mod iterutil;
 pub mod rope;
 pub mod text;
-pub mod assets;
-pub mod iterutil;
-pub mod futures;

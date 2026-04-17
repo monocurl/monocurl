@@ -3,7 +3,13 @@ use lexer::token::TokenCategory;
 use smallvec::SmallVec;
 use structs::text::Count8;
 
-use crate::{state::{diagnostics::{Diagnostic}, textual_state::{LexData, StaticAnalysisData}}, theme::TextEditorStyles};
+use crate::{
+    state::{
+        diagnostics::Diagnostic,
+        textual_state::{LexData, StaticAnalysisData},
+    },
+    theme::TextEditorStyles,
+};
 
 // It may be assumed that the style of any text run
 // does not affect the layout. In particular, that on lex / static analysis rope changes
@@ -21,7 +27,7 @@ where
     lex_item: Option<(Count8, LexData)>,
     analysis_item: Option<(Count8, StaticAnalysisData)>,
     diagnostics_item: Option<(Count8, SmallVec<[&'a Diagnostic; 1]>)>,
-    remaining: Count8
+    remaining: Count8,
 }
 
 impl<'a, LexIt, AnalysisIt, DiagnosticsIt> LineShaper<'a, LexIt, AnalysisIt, DiagnosticsIt>
@@ -35,7 +41,7 @@ where
         lex_it: LexIt,
         analysis_it: AnalysisIt,
         diagnostics_it: DiagnosticsIt,
-        len: Count8
+        len: Count8,
     ) -> Self {
         Self {
             style,
@@ -54,7 +60,7 @@ where
         size: usize,
         lex_data: &LexData,
         analysis_data: &StaticAnalysisData,
-        diagnostics: &SmallVec<[&'a Diagnostic; 1]>
+        diagnostics: &SmallVec<[&'a Diagnostic; 1]>,
     ) -> TextRun {
         let t_category = lex_data.category();
 
@@ -73,13 +79,14 @@ where
             TokenCategory::Unknown => self.style.default_text_color,
         };
 
-        let underline = diagnostics
-            .iter()
-            .next()
-            .map(|d| {
-                let color = d.color(self.style);
-                UnderlineStyle { thickness: px(1.0), color: Some(color), wavy: true }
-            });
+        let underline = diagnostics.iter().next().map(|d| {
+            let color = d.color(self.style);
+            UnderlineStyle {
+                thickness: px(1.0),
+                color: Some(color),
+                wavy: true,
+            }
+        });
 
         let italicize = *analysis_data;
 
@@ -93,12 +100,13 @@ where
             color,
             background_color: None,
             underline: underline,
-            strikethrough: None
+            strikethrough: None,
         }
     }
 }
 
-impl<'a, LexIt, AnalysisIt, DiagnosticsIt> Iterator for LineShaper<'a, LexIt, AnalysisIt, DiagnosticsIt>
+impl<'a, LexIt, AnalysisIt, DiagnosticsIt> Iterator
+    for LineShaper<'a, LexIt, AnalysisIt, DiagnosticsIt>
 where
     LexIt: Iterator<Item = (Count8, LexData)>,
     AnalysisIt: Iterator<Item = (Count8, StaticAnalysisData)>,
@@ -120,11 +128,11 @@ where
             self.diagnostics_item = Some(self.diagnostics_it.next()?);
         }
 
-        let chunk_size =
-            self.remaining
-                .min(self.lex_item.as_ref().unwrap().0)
-                .min(self.analysis_item.as_ref().unwrap().0)
-                .min(self.diagnostics_item.as_ref().unwrap().0);
+        let chunk_size = self
+            .remaining
+            .min(self.lex_item.as_ref().unwrap().0)
+            .min(self.analysis_item.as_ref().unwrap().0)
+            .min(self.diagnostics_item.as_ref().unwrap().0);
 
         self.remaining -= chunk_size;
         self.lex_item.as_mut().unwrap().0 -= chunk_size;

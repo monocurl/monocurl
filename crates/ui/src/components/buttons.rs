@@ -1,6 +1,10 @@
 use gpui::*;
 
-pub fn link_button(text: &'static str, text_color: impl Into<Hsla>, action: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> impl IntoElement {
+pub fn link_button(
+    text: &'static str,
+    text_color: impl Into<Hsla>,
+    action: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
     div()
         .id(text)
         .child(text)

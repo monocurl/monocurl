@@ -1,15 +1,15 @@
 use std::collections::VecDeque;
-use std::usize;
-use std::{time::Duration};
 use std::ops::Range;
+use std::time::Duration;
+use std::usize;
 
+use crate::editor::line_map::LineMap;
+use crate::editor::line_shaper::LineShaper;
 use crate::editor::text_editor::popover_element::PopoverElement;
+use crate::editor::text_editor::text_element::TextElement;
+use crate::editor::wrapped_line::WrappedLine;
 use crate::state::diagnostics::Diagnostic;
 use crate::state::textual_state::{AutoCompleteState, Cursor, TextualState};
-use crate::editor::line_shaper::LineShaper;
-use crate::editor::wrapped_line::WrappedLine;
-use crate::editor::line_map::LineMap;
-use crate::editor::text_editor::text_element::TextElement;
 use crate::theme::{TextEditorStyles, ThemeSettings};
 use gpui::*;
 use smallvec::SmallVec;
@@ -30,8 +30,8 @@ const AUTO_SCROLL_MAX_THRESHOLD: f32 = 70.0;
 const BOTTOM_SCROLL_PADDING: f32 = 400.0;
 const MAX_UNDO_GROUPS: usize = 4096;
 
-mod text_element;
 mod popover_element;
+mod text_element;
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -129,7 +129,14 @@ pub struct TextEditor {
 }
 
 impl TextEditor {
-    pub fn new(state: Entity<TextualState>, window: &mut Window, cx: &mut Context<Self>, content: String, dirty: Entity<bool>, internal_dirty: Entity<bool>) -> Self {
+    pub fn new(
+        state: Entity<TextualState>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        content: String,
+        dirty: Entity<bool>,
+        internal_dirty: Entity<bool>,
+    ) -> Self {
         let text_styles = ThemeSettings::theme(cx).text_editor_styles();
         let line_height = text_styles.line_height;
 
@@ -137,12 +144,14 @@ impl TextEditor {
         // (mainly want the rerender when theres external changes to the state)
         cx.observe(&state, |_me, _, cx| {
             cx.notify();
-        }).detach();
+        })
+        .detach();
         cx.observe_global::<ThemeSettings>(|editor, cx| {
             let styles = ThemeSettings::theme(cx).text_editor_styles();
             editor.apply_theme(styles, cx);
             cx.notify();
-        }).detach();
+        })
+        .detach();
 
         let window_focus_subscription = cx.observe_window_activation(window, |e, window, cx| {
             if window.is_window_active() && e.focus_handle.is_focused(window) {
@@ -231,9 +240,17 @@ impl TextEditor {
 }
 
 impl TextEditor {
-    fn perform_group(&mut self, group: HistoryGroup, window: &mut Window, cx: &mut Context<Self>) -> HistoryGroup {
+    fn perform_group(
+        &mut self,
+        group: HistoryGroup,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> HistoryGroup {
         self.state.update(cx, |state, _| state.start_transaction());
-        let mut inverse = HistoryGroup { items: SmallVec::new(), cursor: self.cursor(cx) };
+        let mut inverse = HistoryGroup {
+            items: SmallVec::new(),
+            cursor: self.cursor(cx),
+        };
 
         for item in group.items.iter().rev() {
             let old_text = self.state.read(cx).read(item.old.clone());
@@ -264,7 +281,10 @@ impl TextEditor {
 
         let must_form_isolated_group = new_text.contains('\n');
         if self.undo_stack.is_empty() || must_form_isolated_group {
-            self.undo_stack.push_back(HistoryGroup { items: SmallVec::new(), cursor: self.cursor(cx)});
+            self.undo_stack.push_back(HistoryGroup {
+                items: SmallVec::new(),
+                cursor: self.cursor(cx),
+            });
 
             while self.undo_stack.len() > MAX_UNDO_GROUPS {
                 self.undo_stack.pop_front();
@@ -272,12 +292,15 @@ impl TextEditor {
         }
 
         let replacement = self.state.read(cx).read(old.clone());
-        let range = old.start .. old.start + new_text.len();
+        let range = old.start..old.start + new_text.len();
         let group = self.undo_stack.back_mut().unwrap();
         if group.items.is_empty() {
             group.cursor = self.state.read(cx).cursor();
         }
-        group.items.push(HistoryItem { old: range, replacement: replacement.to_string() });
+        group.items.push(HistoryItem {
+            old: range,
+            replacement: replacement.to_string(),
+        });
 
         if must_form_isolated_group {
             self.undo_group_boundary(cx);
@@ -322,7 +345,10 @@ impl TextEditor {
 
     fn undo_group_boundary(&mut self, cx: &App) {
         if self.undo_stack.back().is_none_or(|g| !g.items.is_empty()) {
-            self.undo_stack.push_back(HistoryGroup { items: SmallVec::new(), cursor: self.cursor(cx)});
+            self.undo_stack.push_back(HistoryGroup {
+                items: SmallVec::new(),
+                cursor: self.cursor(cx),
+            });
         }
 
         while self.undo_stack.len() > MAX_UNDO_GROUPS {
@@ -330,7 +356,13 @@ impl TextEditor {
         }
     }
 
-    pub fn replace(&mut self, utf8_range: Span8, new_text: &str, window: &mut Window, cx: &mut App) {
+    pub fn replace(
+        &mut self,
+        utf8_range: Span8,
+        new_text: &str,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         self.report_undo_candidate(utf8_range.clone(), new_text, cx);
 
         let (del_range, ins_range) = self.state.update(cx, |state, subcx| {
@@ -348,7 +380,12 @@ impl TextEditor {
     // 2. if inserting closing parenthesis and next character is not closing, do normal
     // 3. if inserting closing parenthesis and next character is closing, skip insertion
     // 4. if inserting opening parenthesis, insert matching closing parenthesis after
-    fn match_parenthesis(&mut self, del: Span16, new_text: &str, cx: &App) -> Option<(Span8, String)> {
+    fn match_parenthesis(
+        &mut self,
+        del: Span16,
+        new_text: &str,
+        cx: &App,
+    ) -> Option<(Span8, String)> {
         fn in_literal(s: &str) -> bool {
             let escape = '%';
             let mut in_string = false;
@@ -359,7 +396,7 @@ impl TextEditor {
                     continue;
                 }
 
-                if ch == '"' && !prev_was_escape  {
+                if ch == '"' && !prev_was_escape {
                     in_string = !in_string;
                 }
                 prev_was_escape = false;
@@ -381,8 +418,7 @@ impl TextEditor {
                 if next.chars().next().unwrap() == ch {
                     // already exists
                     return Some((del.clone(), String::new()));
-                }
-                else {
+                } else {
                     return None;
                 }
             };
@@ -391,39 +427,47 @@ impl TextEditor {
                 '(' | '{' | '[' | '"' | '|' => {
                     let state = self.state.read(cx);
                     let line = state.offset8_to_loc8(del.start);
-                    let start_of_line = state.loc8_to_offset8(Location8 { row: line.row, col: 0 });
+                    let start_of_line = state.loc8_to_offset8(Location8 {
+                        row: line.row,
+                        col: 0,
+                    });
                     let line_content = self.state.read(cx).read(start_of_line..del.start);
                     if in_literal(&line_content) {
                         if ch == '"' || ch == '\'' {
                             return handle_closing();
                         }
                         return None;
-                    }
-                    else if ch == '|'  && in_lambda_definition(&line_content) {
+                    } else if ch == '|' && in_lambda_definition(&line_content) {
                         return handle_closing();
                     }
-                    return Some((del, format!("{}{}", ch, match ch {
-                        '(' => ')',
-                        '{' => '}',
-                        '[' => ']',
-                        '"' => '"',
-                        '|' => '|',
-                        _ => unreachable!(),
-                    })));
-                },
+                    return Some((
+                        del,
+                        format!(
+                            "{}{}",
+                            ch,
+                            match ch {
+                                '(' => ')',
+                                '{' => '}',
+                                '[' => ']',
+                                '"' => '"',
+                                '|' => '|',
+                                _ => unreachable!(),
+                            }
+                        ),
+                    ));
+                }
                 ')' | '}' | ']' => {
                     return handle_closing();
-                },
+                }
                 _ => return None,
             }
-        }
-        else if del.len() == 1 && new_text.len() == 0 {
+        } else if del.len() == 1 && new_text.len() == 0 {
             // does this undo the last matched insertion?
             if Some(del.end) == self.last_op_matched_character {
                 let state = self.state.read(cx);
                 if del.end < state.len() {
                     let prev = state.read(del.end.saturating_sub(1)..del.end);
-                    let next = state.read(del.end..del.end+ 1);
+                    let next = state.read(del.end..del.end + 1);
                     let matching = match prev.chars().next() {
                         Some('(') => ')',
                         Some('{') => '}',
@@ -433,11 +477,17 @@ impl TextEditor {
                         _ => return None,
                     };
                     if next.chars().next() == Some(matching) {
-                        return Some((Span8 { start: del.start, end: del.end + 1 }, String::new()));
+                        return Some((
+                            Span8 {
+                                start: del.start,
+                                end: del.end + 1,
+                            },
+                            String::new(),
+                        ));
                     }
                 }
             }
-            return None
+            return None;
         }
         None
     }
@@ -457,21 +507,27 @@ impl TextEditor {
             .or(self.marked_range.clone())
             .unwrap_or_else(|| self.state.read(cx).cursor_range());
 
-        if raw_keystroke && let Some((range, matched)) = self.match_parenthesis(range.clone(), new_text, cx) {
+        if raw_keystroke
+            && let Some((range, matched)) = self.match_parenthesis(range.clone(), new_text, cx)
+        {
             if matched.len() == 2 {
                 self.last_op_matched_character = Some(range.start + 1);
             } else {
                 self.last_op_matched_character = None;
             }
             self.replace(range, &matched, window, cx);
-        }
-        else {
+        } else {
             self.last_op_matched_character = None;
             self.replace(range.clone(), new_text, window, cx);
         }
 
         let new_offset = range.start + new_text.len();
-        self.move_to(self.state.read(cx).offset8_to_loc8(new_offset), false, false, cx);
+        self.move_to(
+            self.state.read(cx).offset8_to_loc8(new_offset),
+            false,
+            false,
+            cx,
+        );
         self.discretely_scroll_to_cursor(cx);
 
         self.stop_hover();
@@ -525,26 +581,25 @@ impl TextEditor {
 
         if let Some((version, ref hover)) = self.hover_item {
             // only change if we move out of the hover item, or if version has changed
-            let position_changed = self.character_mouse_is_on_top_of(cx)
+            let position_changed = self
+                .character_mouse_is_on_top_of(cx)
                 .is_none_or(|pos| !hover.span.contains(&pos));
             let version_changed = version != self.state.read(cx).version();
             if position_changed || version_changed {
                 return spawn_task(self, cx);
-            }
-            else {
+            } else {
                 return false;
             }
-        }
-        else {
+        } else {
             let version = self.state.read(cx).version();
-            if self.last_hover_start.is_none() || (mouse, version, scroll) != self.last_hover_start.unwrap() {
+            if self.last_hover_start.is_none()
+                || (mouse, version, scroll) != self.last_hover_start.unwrap()
+            {
                 return spawn_task(self, cx);
-            }
-            else {
+            } else {
                 false
             }
         }
-
     }
 
     fn reset_hover_task(&mut self, cx: &mut Context<Self>) {
@@ -555,15 +610,25 @@ impl TextEditor {
                 return;
             };
             // show hover if directly on a position
-            let Some(offset8) = app.read_entity(&editor, |e, cx| e.character_mouse_is_on_top_of(cx)).ok().flatten() else {
+            let Some(offset8) = app
+                .read_entity(&editor, |e, cx| e.character_mouse_is_on_top_of(cx))
+                .ok()
+                .flatten()
+            else {
                 return;
             };
 
             app.update_entity(&editor, |editor, cx| {
-                let diagnostic = editor.state.read(cx).diagnostics().diagnostic_for_point(offset8).cloned();
+                let diagnostic = editor
+                    .state
+                    .read(cx)
+                    .diagnostics()
+                    .diagnostic_for_point(offset8)
+                    .cloned();
                 editor.hover_item = diagnostic.map(|d| (editor.state.read(cx).version(), d));
                 cx.notify();
-            }).ok();
+            })
+            .ok();
         }));
     }
 }
@@ -585,30 +650,38 @@ impl TextEditor {
         self.cursor_blink_state = true;
         cx.notify();
 
-        let task = cx.spawn(async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
-            cx.background_executor().timer(CURSOR_BLINK_DELAY).await;
-            loop {
-                let should_continue = editor
-                    .update(cx, |editor, cx| {
-                        editor.cursor_blink_state = !editor.cursor_blink_state;
-                        cx.notify();
-                        true
-                    })
-                    .ok()
-                    .unwrap_or(false);
+        let task = cx.spawn(
+            async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
+                cx.background_executor().timer(CURSOR_BLINK_DELAY).await;
+                loop {
+                    let should_continue = editor
+                        .update(cx, |editor, cx| {
+                            editor.cursor_blink_state = !editor.cursor_blink_state;
+                            cx.notify();
+                            true
+                        })
+                        .ok()
+                        .unwrap_or(false);
 
-                if !should_continue {
-                    break;
+                    if !should_continue {
+                        break;
+                    }
+
+                    cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
                 }
-
-                cx.background_executor().timer(CURSOR_BLINK_INTERVAL).await;
-            }
-        });
+            },
+        );
         // cancels any previous tasks as well
         self.cursor_blink_task = Some(task);
     }
 
-    fn move_to(&mut self, pos: Location8, mouse_origin: bool, key_origin: bool, cx: &mut Context<Self>) {
+    fn move_to(
+        &mut self,
+        pos: Location8,
+        mouse_origin: bool,
+        key_origin: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.set_cursor(Cursor::collapsed(pos), cx);
         self.reset_cursor_blink(cx);
         if !mouse_origin {
@@ -620,7 +693,13 @@ impl TextEditor {
         }
     }
 
-    fn select_to(&mut self, pos: Location8, mouse_origin: bool, key_origin: bool, cx: &mut Context<Self>) {
+    fn select_to(
+        &mut self,
+        pos: Location8,
+        mouse_origin: bool,
+        key_origin: bool,
+        cx: &mut Context<Self>,
+    ) {
         self.state.update(cx, |state, cx| {
             state.start_transaction();
             state.set_cursor_head(pos, cx);
@@ -647,10 +726,10 @@ impl TextEditor {
 
     pub(super) fn restore_scroll_to_anchor_line(&mut self) {
         if let Some((anchor_line, offset)) = self.resize_anchor_line.take() {
-            let target_y = self.line_map.y_range(anchor_line..anchor_line + 1).start +
-                offset;
+            let target_y = self.line_map.y_range(anchor_line..anchor_line + 1).start + offset;
             let scroll_offset = self.scroll_handle.offset();
-            self.scroll_handle.set_offset(point(scroll_offset.x, -target_y));
+            self.scroll_handle
+                .set_offset(point(scroll_offset.x, -target_y));
         }
     }
 
@@ -668,68 +747,83 @@ impl TextEditor {
 
         if cursor_y - margin_height < visible_top {
             let new_scroll_y = -(cursor_y - margin_height).max(px(0.0));
-            self.scroll_handle.set_offset(point(scroll_offset.x, new_scroll_y));
+            self.scroll_handle
+                .set_offset(point(scroll_offset.x, new_scroll_y));
         } else if cursor_y + self.line_height + margin_height > visible_bottom {
             let new_scroll_y = -(cursor_y + self.line_height - viewport_height + margin_height);
-            self.scroll_handle.set_offset(point(scroll_offset.x, new_scroll_y));
+            self.scroll_handle
+                .set_offset(point(scroll_offset.x, new_scroll_y));
         }
     }
 
     fn start_responding_to_mouse_movements(&mut self, cx: &mut Context<Self>) {
-        let task = cx.spawn(async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
-            loop {
-                cx.background_executor().timer(AUTO_SCROLL_INTERVAL).await;
+        let task = cx.spawn(
+            async move |editor: WeakEntity<TextEditor>, cx: &mut AsyncApp| {
+                loop {
+                    cx.background_executor().timer(AUTO_SCROLL_INTERVAL).await;
 
-                let should_continue = editor.update(cx, |editor, cx| {
-                    if !editor.is_selecting {
-                        return false;
+                    let should_continue = editor
+                        .update(cx, |editor, cx| {
+                            if !editor.is_selecting {
+                                return false;
+                            }
+
+                            if let Some(mouse_pos) = editor.auto_scroll_last_mouse_position {
+                                // if no motion, don't falsely select to this point since it could just be a Float click
+                                let delta = mouse_pos - editor.last_click_position;
+                                let dist = point_dist(delta);
+                                if dist < MULTI_CLICK_TOLERANCE {
+                                    return true;
+                                }
+
+                                let pos = editor.closest_index_for_mouse_position(mouse_pos);
+                                editor.select_to(pos, true, false, cx);
+
+                                let scroll_bounds = editor.scroll_handle.bounds();
+                                let viewport_top = scroll_bounds.top();
+                                let viewport_bottom = scroll_bounds.bottom();
+
+                                let distance_above =
+                                    (viewport_top - mouse_pos.y - px(AUTO_SCROLL_MIN_THRESHOLD))
+                                        .max(px(0.0));
+                                let distance_below =
+                                    (mouse_pos.y - viewport_bottom - px(AUTO_SCROLL_MIN_THRESHOLD))
+                                        .max(px(0.0));
+
+                                if distance_above > px(0.0) || distance_below > px(0.0) {
+                                    let scroll_offset = editor.scroll_handle.offset();
+                                    let distance = distance_above.max(distance_below);
+
+                                    let interpolate = |x: f64| x;
+                                    let t = (distance
+                                        / (AUTO_SCROLL_MAX_THRESHOLD - AUTO_SCROLL_MIN_THRESHOLD))
+                                        .min(px(1.0));
+                                    let scroll_speed =
+                                        px(interpolate(t.to_f64()) as f32) * AUTO_SCROLL_MAX_SPEED;
+
+                                    let new_scroll_y = if distance_above > px(0.0) {
+                                        scroll_offset.y + scroll_speed
+                                    } else {
+                                        scroll_offset.y - scroll_speed
+                                    };
+
+                                    editor
+                                        .scroll_handle
+                                        .set_offset(point(scroll_offset.x, new_scroll_y));
+                                    cx.notify();
+                                }
+                            }
+
+                            true
+                        })
+                        .unwrap_or(false);
+
+                    if !should_continue {
+                        break;
                     }
-
-                    if let Some(mouse_pos) = editor.auto_scroll_last_mouse_position {
-                        // if no motion, don't falsely select to this point since it could just be a Float click
-                        let delta = mouse_pos - editor.last_click_position;
-                        let dist = point_dist(delta);
-                        if dist < MULTI_CLICK_TOLERANCE {
-                            return true;
-                        }
-
-                        let pos = editor.closest_index_for_mouse_position(mouse_pos);
-                        editor.select_to(pos, true, false, cx);
-
-                        let scroll_bounds = editor.scroll_handle.bounds();
-                        let viewport_top = scroll_bounds.top();
-                        let viewport_bottom = scroll_bounds.bottom();
-
-                        let distance_above = (viewport_top - mouse_pos.y - px(AUTO_SCROLL_MIN_THRESHOLD)).max(px(0.0));
-                        let distance_below = (mouse_pos.y - viewport_bottom - px(AUTO_SCROLL_MIN_THRESHOLD)).max(px(0.0));
-
-                        if distance_above > px(0.0) || distance_below > px(0.0) {
-                            let scroll_offset = editor.scroll_handle.offset();
-                            let distance = distance_above.max(distance_below);
-
-                            let interpolate = |x: f64| x;
-                            let t = (distance / (AUTO_SCROLL_MAX_THRESHOLD - AUTO_SCROLL_MIN_THRESHOLD)).min(px(1.0));
-                            let scroll_speed = px(interpolate(t.to_f64()) as f32) * AUTO_SCROLL_MAX_SPEED;
-
-                            let new_scroll_y = if distance_above > px(0.0) {
-                                scroll_offset.y + scroll_speed
-                            } else {
-                                scroll_offset.y - scroll_speed
-                            };
-
-                            editor.scroll_handle.set_offset(point(scroll_offset.x, new_scroll_y));
-                            cx.notify();
-                        }
-                    }
-
-                    true
-                }).unwrap_or(false);
-
-                if !should_continue {
-                    break;
                 }
-            }
-        });
+            },
+        );
         self.auto_scroll_task = Some(task);
     }
 
@@ -759,14 +853,23 @@ impl TextEditor {
         let start_loc = Location8 { row: line, col: 0 };
         let start_offset = state.loc8_to_offset8(start_loc);
 
-        let end_loc = Location8 { row: line + 1, col: 0 };
+        let end_loc = Location8 {
+            row: line + 1,
+            col: 0,
+        };
         let end_offset = state.loc8_to_offset8(end_loc).min(state.len());
 
         let text = state.read(start_offset..end_offset);
         (start_offset, end_offset, text)
     }
 
-    fn reshape_line(&mut self, wrap_width: Pixels, line_no: usize, window: &mut Window, cx: &mut App) -> WrappedLine {
+    fn reshape_line(
+        &mut self,
+        wrap_width: Pixels,
+        line_no: usize,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> WrappedLine {
         self.state.update(cx, |state, _| {
             let (start, end, mut line_text) = self.line_range_and_text(state, line_no);
             state.mark_line_as_up_to_date_attributes(start, end);
@@ -781,53 +884,66 @@ impl TextEditor {
                 state.lex_rope().iterator(start),
                 state.static_analysis_rope().iterator(start),
                 state.diagnostics().iterator(start),
-                line_text.len()
-            ).collect();
+                line_text.len(),
+            )
+            .collect();
 
             WrappedLine::new(
                 &line_text,
                 self.text_styles.text_size,
                 &runs,
                 wrap_width,
-                window
+                window,
             )
         })
     }
 
-    fn reshape_lines(&mut self, del_range: Range<usize>, ins_range: Range<usize>, window: &mut Window, cx: &mut App) {
+    fn reshape_lines(
+        &mut self,
+        del_range: Range<usize>,
+        ins_range: Range<usize>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let wrap_width = self.wrap_width();
 
         let replacement: SmallVec<[WrappedLine; 32]> = ins_range
             .map(|line_no| self.reshape_line(wrap_width, line_no, window, cx))
             .collect();
 
-        self.line_map.replace_lines(del_range, replacement.into_iter());
+        self.line_map
+            .replace_lines(del_range, replacement.into_iter());
     }
 
     pub(super) fn reshape_lines_needing_layout(&mut self, window: &mut Window, cx: &mut App) {
-        let dirty = self.state.update(cx, |state, _cx| {
-            state.take_lines_needing_relayout()
-        });
+        let dirty = self
+            .state
+            .update(cx, |state, _cx| state.take_lines_needing_relayout());
 
         if let Some(dirty) = dirty {
             self.reshape_lines(dirty.clone(), dirty, window, cx);
         }
     }
 
-    pub(super) fn reshape_visible_lines_with_stale_attributes(&mut self, window: &mut Window, cx: &mut App) {
+    pub(super) fn reshape_visible_lines_with_stale_attributes(
+        &mut self,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let wrap_width = self.wrap_width();
         for line in self.visible_lines() {
             let needs_reshaping = self.state.read(cx).line_has_new_attributes(line);
             if needs_reshaping {
                 let new_line = self.reshape_line(wrap_width, line, window, cx);
-                self.line_map.replace_lines(line..line + 1, std::iter::once(new_line));
+                self.line_map
+                    .replace_lines(line..line + 1, std::iter::once(new_line));
             }
         }
     }
 
     pub(super) fn visible_lines(&self) -> Range<usize> {
-        let scroll_range = -self.scroll_handle.offset().y ..
-            (-self.scroll_handle.offset().y + self.scroll_handle.bounds().size.height);
+        let scroll_range = -self.scroll_handle.offset().y
+            ..(-self.scroll_handle.offset().y + self.scroll_handle.bounds().size.height);
         self.line_map.prewrapped_visible_lines(scroll_range)
     }
 }
@@ -836,7 +952,10 @@ impl TextEditor {
     fn vertical_cursor_movement(&self, delta_lines: isize, cx: &App) -> Location8 {
         let current_pos = self.line_map.point_for_location(self.cursor(cx).head);
         let target_y = current_pos.y + delta_lines as f32 * self.line_height;
-        match self.line_map.location_for_point(point(current_pos.x, target_y)) {
+        match self
+            .line_map
+            .location_for_point(point(current_pos.x, target_y))
+        {
             Ok(loc) => loc,
             Err(loc) => loc,
         }
@@ -844,29 +963,34 @@ impl TextEditor {
 
     fn do_autocomplete_action(&mut self, cx: &mut Context<Self>) -> bool {
         let state = self.state.read(cx);
-        state.autocomplete_state().borrow_mut().recheck_should_display(state.cursor())
+        state
+            .autocomplete_state()
+            .borrow_mut()
+            .recheck_should_display(state.cursor())
     }
 
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
         if self.do_autocomplete_action(cx) {
-            self.state.read(cx).autocomplete_state()
+            self.state
+                .read(cx)
+                .autocomplete_state()
                 .borrow_mut()
                 .move_index(-1);
             cx.notify();
-        }
-        else {
+        } else {
             self.move_to(self.vertical_cursor_movement(-1, cx), false, true, cx);
         }
     }
 
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) {
         if self.do_autocomplete_action(cx) {
-            self.state.read(cx).autocomplete_state()
+            self.state
+                .read(cx)
+                .autocomplete_state()
                 .borrow_mut()
                 .move_index(1);
             cx.notify();
-        }
-        else {
+        } else {
             self.move_to(self.vertical_cursor_movement(1, cx), false, true, cx);
         }
     }
@@ -919,23 +1043,32 @@ impl TextEditor {
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
-        self.set_cursor(Cursor {
-            anchor: Location8 { row: 0, col: 0 },
-            head: state.offset8_to_loc8(state.len()),
-        }, cx);
+        self.set_cursor(
+            Cursor {
+                anchor: Location8 { row: 0, col: 0 },
+                head: state.offset8_to_loc8(state.len()),
+            },
+            cx,
+        );
         self.discretely_scroll_to_cursor(cx);
         cx.notify();
     }
 
     fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
-        let new_pos = Location8 { row: self.cursor(cx).head.row, col: 0 };
+        let new_pos = Location8 {
+            row: self.cursor(cx).head.row,
+            col: 0,
+        };
         self.move_to(new_pos, false, true, cx);
     }
 
     fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
         let row = self.cursor(cx).head.row;
-        let next_line = state.loc8_to_offset8(Location8 { row: row + 1, col: 0 });
+        let next_line = state.loc8_to_offset8(Location8 {
+            row: row + 1,
+            col: 0,
+        });
         let line_end = next_line.saturating_sub(1).min(state.len());
         self.move_to(state.offset8_to_loc8(line_end), false, true, cx);
     }
@@ -950,7 +1083,7 @@ impl TextEditor {
 
             let line_start = state.loc8_to_offset8(Location8 {
                 row: self.cursor(cx).head.row,
-                col: 0
+                col: 0,
             });
             let text_before = state.read(line_start..offset);
 
@@ -969,8 +1102,7 @@ impl TextEditor {
             }
 
             self.replace_text_in_utf16_range(None, "", true, window, cx);
-        }
-        else {
+        } else {
             self.undo_group_boundary(cx);
             self.replace_text_in_utf16_range(None, "", true, window, cx);
             self.undo_group_boundary(cx);
@@ -986,8 +1118,7 @@ impl TextEditor {
             let new_offset = state.next_boundary(offset);
             self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
             self.replace_text_in_utf16_range(None, "", false, window, cx);
-        }
-        else {
+        } else {
             self.undo_group_boundary(cx);
             self.replace_text_in_utf16_range(None, "", false, window, cx);
             self.undo_group_boundary(cx);
@@ -1011,7 +1142,15 @@ impl TextEditor {
     fn backspace_line(&mut self, _: &BackspaceLine, window: &mut Window, cx: &mut Context<Self>) {
         self.state.update(cx, |state, _| state.start_transaction());
         self.undo_group_boundary(cx);
-        self.select_to(Location8 { row: self.cursor(cx).head.row, col: 0 }, false, false, cx);
+        self.select_to(
+            Location8 {
+                row: self.cursor(cx).head.row,
+                col: 0,
+            },
+            false,
+            false,
+            cx,
+        );
         self.replace_text_in_utf16_range(None, "", false, window, cx);
         self.undo_group_boundary(cx);
         self.state.update(cx, |state, cx| state.end_transaction(cx));
@@ -1022,25 +1161,26 @@ impl TextEditor {
         if self.do_autocomplete_action(cx) {
             let ac = self.state.read(cx).autocomplete_state();
             AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
-        }
-        else {
+        } else {
             if self.cursor(cx).is_empty() {
                 // try to preserve indentation if possible
                 let state = self.state.read(cx);
                 let offset = state.loc8_to_offset8(self.cursor(cx).head);
                 let line_start = state.loc8_to_offset8(Location8 {
                     row: self.cursor(cx).head.row,
-                    col: 0
+                    col: 0,
                 });
                 let line_end = state.loc8_to_offset8(Location8 {
                     row: self.cursor(cx).head.row,
-                    col: usize::MAX
+                    col: usize::MAX,
                 });
                 let text_before = state.read(line_start..offset);
                 let text_after = state.read(offset..line_end);
                 let leading_spaces = text_before.chars().take_while(|c| *c == ' ').count();
                 let indent = " ".repeat(leading_spaces);
-                if text_before.ends_with("{") && (text_after.is_empty() || text_after.starts_with("}")) {
+                if text_before.ends_with("{")
+                    && (text_after.is_empty() || text_after.starts_with("}"))
+                {
                     // special case: if we are between braces, insert a newline with indentation,
                     // then another newline with decreased indentation
                     let inner_indent = " ".repeat(leading_spaces + TAB_SIZE);
@@ -1048,10 +1188,9 @@ impl TextEditor {
                     let org_loc = self.cursor(cx).head;
                     self.replace_text_in_utf16_range(
                         None,
-                       & if text_after.starts_with("}") {
+                        &if text_after.starts_with("}") {
                             format!("\n{}\n{}", inner_indent, indent)
-                        }
-                        else {
+                        } else {
                             format!("\n{}", inner_indent)
                         },
                         true,
@@ -1065,10 +1204,16 @@ impl TextEditor {
                     };
                     self.set_cursor(Cursor::collapsed(new_cursor_loc), cx);
                 } else {
-                    self.replace_text_in_utf16_range(None, &format!("\n{}", indent), true, window, cx);
+                    self.replace_text_in_utf16_range(
+                        None,
+                        &format!("\n{}", indent),
+                        true,
+                        window,
+                        cx,
+                    );
                 }
             } else {
-                self.replace_text_in_utf16_range(None, "\n",  true, window, cx);
+                self.replace_text_in_utf16_range(None, "\n", true, window, cx);
             }
         }
         self.state.update(cx, |state, cx| state.end_transaction(cx));
@@ -1079,8 +1224,7 @@ impl TextEditor {
         if self.do_autocomplete_action(cx) {
             let ac = self.state.read(cx).autocomplete_state();
             AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
-        }
-        else {
+        } else {
             self.undo_group_boundary(cx);
             if self.cursor(cx).is_empty() {
                 self.replace_text_in_utf16_range(None, &" ".repeat(TAB_SIZE), false, window, cx);
@@ -1089,20 +1233,26 @@ impl TextEditor {
                 let end_loc = self.cursor(cx).anchor.max(self.cursor(cx).head);
 
                 for row in start_loc.row..=end_loc.row {
-                    let line_start = self.state.read(cx).loc8_to_offset8(Location8 { row, col: 0 });
+                    let line_start = self
+                        .state
+                        .read(cx)
+                        .loc8_to_offset8(Location8 { row, col: 0 });
                     self.replace(line_start..line_start, &" ".repeat(TAB_SIZE), window, cx);
                 }
 
-                self.set_cursor(Cursor {
-                    anchor: Location8 {
-                        row: self.cursor(cx).anchor.row,
-                        col: self.cursor(cx).anchor.col + TAB_SIZE,
+                self.set_cursor(
+                    Cursor {
+                        anchor: Location8 {
+                            row: self.cursor(cx).anchor.row,
+                            col: self.cursor(cx).anchor.col + TAB_SIZE,
+                        },
+                        head: Location8 {
+                            row: self.cursor(cx).head.row,
+                            col: self.cursor(cx).head.col + TAB_SIZE,
+                        },
                     },
-                    head: Location8 {
-                        row: self.cursor(cx).head.row,
-                        col: self.cursor(cx).head.col + TAB_SIZE,
-                    },
-                }, cx);
+                    cx,
+                );
                 self.reset_cursor_blink(cx);
             }
             self.undo_group_boundary(cx);
@@ -1121,11 +1271,16 @@ impl TextEditor {
         for row in (start_loc.row..=end_loc.row).rev() {
             let state = self.state.read(cx);
             let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
-            let line_end = state.loc8_to_offset8(Location8 { row: row + 1, col: 0 })
+            let line_end = state
+                .loc8_to_offset8(Location8 {
+                    row: row + 1,
+                    col: 0,
+                })
                 .min(state.len());
             let line_text = state.read(line_start..line_end);
 
-            let spaces_to_remove = line_text.chars()
+            let spaces_to_remove = line_text
+                .chars()
                 .take(TAB_SIZE)
                 .take_while(|&c| c == ' ')
                 .count();
@@ -1155,7 +1310,9 @@ impl TextEditor {
             return None;
         };
 
-        self.line_map.location_for_point(position - point(self.gutter_width, bounds.top())).ok()
+        self.line_map
+            .location_for_point(position - point(self.gutter_width, bounds.top()))
+            .ok()
     }
 
     fn closest_index_for_mouse_position(&self, position: Point<Pixels>) -> Location8 {
@@ -1163,9 +1320,12 @@ impl TextEditor {
             return Location8 { row: 0, col: 0 };
         };
 
-        match self.line_map.location_for_point(position - point(self.gutter_width, bounds.top())) {
+        match self
+            .line_map
+            .location_for_point(position - point(self.gutter_width, bounds.top()))
+        {
             Ok(loc) => loc,
-            Err(loc) => loc
+            Err(loc) => loc,
         }
     }
 
@@ -1203,26 +1363,36 @@ impl TextEditor {
                 let offset = state.loc8_to_offset8(pos);
                 let word_range = state.word(offset, false);
 
-                self.set_cursor(Cursor {
-                    anchor: state.offset8_to_loc8(word_range.start),
-                    head: state.offset8_to_loc8(word_range.end),
-                }, cx);
+                self.set_cursor(
+                    Cursor {
+                        anchor: state.offset8_to_loc8(word_range.start),
+                        head: state.offset8_to_loc8(word_range.end),
+                    },
+                    cx,
+                );
                 self.is_selecting = true;
                 self.reset_cursor_blink(cx);
             }
             _ => {
                 let state = self.state.read(cx);
-                let line_start = Location8 { row: pos.row, col: 0 };
-                let line_end_offset = state.loc8_to_offset8(
-                    Location8 { row: pos.row, col: usize::MAX }
-                );
+                let line_start = Location8 {
+                    row: pos.row,
+                    col: 0,
+                };
+                let line_end_offset = state.loc8_to_offset8(Location8 {
+                    row: pos.row,
+                    col: usize::MAX,
+                });
                 let line_end_offset = line_end_offset.min(state.len());
                 let line_end = state.offset8_to_loc8(line_end_offset);
 
-                self.set_cursor(Cursor {
-                    anchor: line_start,
-                    head: line_end,
-                }, cx);
+                self.set_cursor(
+                    Cursor {
+                        anchor: line_start,
+                        head: line_end,
+                    },
+                    cx,
+                );
                 self.is_selecting = true;
                 self.reset_cursor_blink(cx);
             }
@@ -1231,7 +1401,11 @@ impl TextEditor {
         if self.reset_hover_task_if_necessary(cx) {
             cx.notify();
         }
-        self.state.read(cx).autocomplete_state().borrow_mut().disable();
+        self.state
+            .read(cx)
+            .autocomplete_state()
+            .borrow_mut()
+            .disable();
     }
 
     fn on_mouse_up(&mut self, _event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
@@ -1240,7 +1414,12 @@ impl TextEditor {
         self.auto_scroll_last_mouse_position = None;
     }
 
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // mouse position tracking is mainly done in the listener registered in the paint
         // since we don't get mouse move events if the mouse is outside the view in this method
         self.last_in_frame_mouse_position = Some(event.position);
@@ -1249,7 +1428,12 @@ impl TextEditor {
         }
     }
 
-    fn on_scroll_wheel(&mut self, _event: &ScrollWheelEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_scroll_wheel(
+        &mut self,
+        _event: &ScrollWheelEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.reset_hover_task_if_necessary(cx) {
             cx.notify();
         }
@@ -1266,16 +1450,19 @@ impl TextEditor {
                 // pretty dumb but whatever
                 let state = self.state.read(cx);
                 let cursor_loc = self.cursor(cx).head.min(self.cursor(cx).anchor);
-                let line_start_offset = state.loc8_to_offset8(Location8 { row: cursor_loc.row, col: 0 });
-                let line_start_text = state.read(line_start_offset..state.loc8_to_offset8(cursor_loc));
+                let line_start_offset = state.loc8_to_offset8(Location8 {
+                    row: cursor_loc.row,
+                    col: 0,
+                });
+                let line_start_text =
+                    state.read(line_start_offset..state.loc8_to_offset8(cursor_loc));
                 let mut leading_spaces = line_start_text.chars().take_while(|c| *c == ' ').count();
 
                 let mut new_text = String::new();
                 for line in text.split('\n') {
                     let real_pad = if new_text.is_empty() {
                         0
-                    }
-                    else {
+                    } else {
                         new_text.push('\n');
                         if line.trim_start().starts_with('}') {
                             leading_spaces = leading_spaces.saturating_sub(TAB_SIZE);
@@ -1301,9 +1488,7 @@ impl TextEditor {
         if !self.cursor(cx).is_empty() {
             let state = self.state.read(cx);
             let range = state.cursor_range();
-            cx.write_to_clipboard(ClipboardItem::new_string(
-                state.read(range),
-            ));
+            cx.write_to_clipboard(ClipboardItem::new_string(state.read(range)));
         }
     }
 
@@ -1312,9 +1497,7 @@ impl TextEditor {
             self.undo_group_boundary(cx);
             let state = self.state.read(cx);
             let range = state.cursor_range();
-            cx.write_to_clipboard(ClipboardItem::new_string(
-                state.read(range),
-            ));
+            cx.write_to_clipboard(ClipboardItem::new_string(state.read(range)));
             self.replace_text_in_utf16_range(None, "", false, window, cx);
             self.undo_group_boundary(cx);
         }
@@ -1409,10 +1592,13 @@ impl EntityInputHandler for TextEditor {
             let new_range = state.span16_to_span8(&new_range_utf16);
             let adjusted_start = range.start + new_range.start;
             let adjusted_end = range.start + new_range.end;
-            self.set_cursor(Cursor {
-                anchor: state.offset8_to_loc8(adjusted_start),
-                head: state.offset8_to_loc8(adjusted_end),
-            }, cx);
+            self.set_cursor(
+                Cursor {
+                    anchor: state.offset8_to_loc8(adjusted_start),
+                    head: state.offset8_to_loc8(adjusted_end),
+                },
+                cx,
+            );
         }
 
         cx.notify();
@@ -1437,7 +1623,7 @@ impl EntityInputHandler for TextEditor {
 
         Some(Bounds::from_corners(
             point(
-               bounds.left() + self.gutter_width + start.x,
+                bounds.left() + self.gutter_width + start.x,
                 bounds.top() + start.y + scroll_offset.y,
             ),
             point(
@@ -1509,10 +1695,10 @@ impl Render for TextEditor {
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_move(cx.listener(Self::on_mouse_move))
                     .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
-                    .child( TextElement { editor: cx.entity() } )
+                    .child(TextElement {
+                        editor: cx.entity(),
+                    }),
             )
-            .child (
-                PopoverElement::new(cx.entity())
-            )
+            .child(PopoverElement::new(cx.entity()))
     }
 }

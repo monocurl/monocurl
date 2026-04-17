@@ -1,6 +1,9 @@
 use std::{ops::Range, sync::Arc};
 
-use gpui::{App, Bounds, DecorationRun, Half, Hsla, LineLayout, Pixels, Point, StrikethroughStyle, TextRun, UnderlineStyle, Window, WrapBoundary, fill, point, px, size};
+use gpui::{
+    App, Bounds, DecorationRun, Half, Hsla, LineLayout, Pixels, Point, StrikethroughStyle, TextRun,
+    UnderlineStyle, Window, WrapBoundary, fill, point, px, size,
+};
 use smallvec::SmallVec;
 use structs::text::{Count8, Span8};
 
@@ -19,13 +22,22 @@ impl Default for WrappedLine {
             unwrapped_layout: Default::default(),
             wrap_boundaries: Default::default(),
             decoration_runs: Default::default(),
-            default_color: Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.0 },
+            default_color: Hsla {
+                h: 0.0,
+                s: 0.0,
+                l: 0.0,
+                a: 0.0,
+            },
         }
     }
 }
 
 impl WrappedLine {
-    fn build_wrap_boundaries(text: &str, unwrapped_layout: &LineLayout, wrap_width: Pixels) -> SmallVec<[(WrapBoundary, Pixels); 1]> {
+    fn build_wrap_boundaries(
+        text: &str,
+        unwrapped_layout: &LineLayout,
+        wrap_width: Pixels,
+    ) -> SmallVec<[(WrapBoundary, Pixels); 1]> {
         debug_assert!(!text.contains('\n'));
 
         let is_word_boundary = |ch: char| !ch.is_alphanumeric();
@@ -36,18 +48,26 @@ impl WrappedLine {
         let mut hanging_indentation = None;
         let mut current_x_offset = px(0.0);
 
-        let mut word_start = (WrapBoundary {
-            run_ix: 0,
-            glyph_ix: 0,
-        }, px(0.0));
-        let mut big_word_start = (WrapBoundary {
-            run_ix: 0,
-            glyph_ix: 0,
-        }, px(0.0));
+        let mut word_start = (
+            WrapBoundary {
+                run_ix: 0,
+                glyph_ix: 0,
+            },
+            px(0.0),
+        );
+        let mut big_word_start = (
+            WrapBoundary {
+                run_ix: 0,
+                glyph_ix: 0,
+            },
+            px(0.0),
+        );
         let mut prev_ch = '\0';
 
         let mut glyphs = unwrapped_layout
-            .runs.iter().enumerate()
+            .runs
+            .iter()
+            .enumerate()
             .flat_map(|(run_ix, run)| {
                 run.glyphs.iter().enumerate().map(move |(glyph_ix, glyph)| {
                     let character = text[glyph.index..].chars().next().unwrap();
@@ -79,17 +99,16 @@ impl WrappedLine {
 
                 let (start_boundary, start_x) = word_start;
                 // try to wrap at start of word it fits
-                let (wrap_boundary, wrap_x) =
-                    if next_x - big_start_x + *indent <= wrap_width {
-                        // wrap at big word boundary
-                        (big_start_boundary, big_start_x)
-                    } else if next_x - start_x + *indent <= wrap_width {
-                        // wrap at start of word
-                        (start_boundary, start_x)
-                    } else {
-                        // wrap at current position
-                        (boundary, x)
-                    };
+                let (wrap_boundary, wrap_x) = if next_x - big_start_x + *indent <= wrap_width {
+                    // wrap at big word boundary
+                    (big_start_boundary, big_start_x)
+                } else if next_x - start_x + *indent <= wrap_width {
+                    // wrap at start of word
+                    (start_boundary, start_x)
+                } else {
+                    // wrap at current position
+                    (boundary, x)
+                };
 
                 word_start = word_start.max((wrap_boundary, wrap_x));
                 big_word_start = big_word_start.max((wrap_boundary, wrap_x));
@@ -108,23 +127,33 @@ impl WrappedLine {
         wrap_boundaries
     }
 
-    pub fn new(text: &str, size: Pixels, runs: &[TextRun], wrap_width: Pixels, window: &mut Window) -> Self {
+    pub fn new(
+        text: &str,
+        size: Pixels,
+        runs: &[TextRun],
+        wrap_width: Pixels,
+        window: &mut Window,
+    ) -> Self {
         let unwrapped_layout = window.text_system().layout_line(text, size, runs, None);
 
-        let decoration_runs = runs.iter().map(|run| {
-            DecorationRun {
+        let decoration_runs = runs
+            .iter()
+            .map(|run| DecorationRun {
                 len: run.len as u32,
                 color: run.color,
                 background_color: run.background_color,
                 underline: run.underline.clone(),
                 strikethrough: run.strikethrough.clone(),
-            }
-        }).collect();
+            })
+            .collect();
 
         let wrap_boundaries = Self::build_wrap_boundaries(text, &unwrapped_layout, wrap_width);
-        let default_color = runs.first()
-            .map(|run| run.color)
-            .unwrap_or(Hsla { h: 0.0, s: 0.0, l: 0.0, a: 0.0 });
+        let default_color = runs.first().map(|run| run.color).unwrap_or(Hsla {
+            h: 0.0,
+            s: 0.0,
+            l: 0.0,
+            a: 0.0,
+        });
 
         Self {
             unwrapped_layout,
@@ -134,7 +163,11 @@ impl WrappedLine {
         }
     }
 
-    pub fn closest_index(&self, position: Point<Pixels>, line_height: Pixels) -> Result<Count8, Count8> {
+    pub fn closest_index(
+        &self,
+        position: Point<Pixels>,
+        line_height: Pixels,
+    ) -> Result<Count8, Count8> {
         let line_count = self.wrap_boundaries.len() + 1;
 
         let wrapped_line_ix = (position.y / line_height) as usize;
@@ -165,22 +198,30 @@ impl WrappedLine {
             px(0.0)
         } else {
             let (boundary, indent) = &self.wrap_boundaries[wrapped_line_ix - 1];
-            self.unwrapped_layout.runs[boundary.run_ix]
-                .glyphs[boundary.glyph_ix]
-                .position.x - *indent
+            self.unwrapped_layout.runs[boundary.run_ix].glyphs[boundary.glyph_ix]
+                .position
+                .x
+                - *indent
         };
 
         let adjusted_x = position.x + x_offset;
         let raw = self.unwrapped_layout.closest_index_for_x(adjusted_x);
         let clamped = raw.clamp(wrap_start_index, wrap_end_index);
-        if raw < wrap_start_index || raw > wrap_end_index || adjusted_x > self.unwrapped_layout.width {
+        if raw < wrap_start_index
+            || raw > wrap_end_index
+            || adjusted_x > self.unwrapped_layout.width
+        {
             Err(clamped)
         } else {
             Ok(raw)
         }
     }
 
-    pub fn location_for_index(&self, index: Count8, line_height: Pixels) -> (usize, Count8, Point<Pixels>) {
+    pub fn location_for_index(
+        &self,
+        index: Count8,
+        line_height: Pixels,
+    ) -> (usize, Count8, Point<Pixels>) {
         let mut line_ix = 0;
         for (boundary, _) in &self.wrap_boundaries {
             let run = &self.unwrapped_layout.runs[boundary.run_ix];
@@ -201,7 +242,11 @@ impl WrappedLine {
         };
 
         let local_x = self.unwrapped_layout.x_for_index(index) + x_offset;
-        (line_ix, col_index, point(local_x, line_height * line_ix as f32))
+        (
+            line_ix,
+            col_index,
+            point(local_x, line_height * line_ix as f32),
+        )
     }
 
     pub fn len(&self) -> Count8 {
@@ -212,7 +257,7 @@ impl WrappedLine {
         self.wrap_boundaries.len() + 1
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=SingleWrappedLine<'_>> {
+    pub fn iter(&self) -> impl Iterator<Item = SingleWrappedLine<'_>> {
         (0..self.line_count()).map(move |line_ix| {
             let prev_boundary = if line_ix > 0 {
                 Some(&self.wrap_boundaries[line_ix - 1])
@@ -233,7 +278,13 @@ impl WrappedLine {
         })
     }
 
-    pub fn paint(&self, origin: Point<Pixels>, line_height: Pixels, window: &mut Window, cx: &App) -> Result<(), anyhow::Error> {
+    pub fn paint(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        window: &mut Window,
+        cx: &App,
+    ) -> Result<(), anyhow::Error> {
         let layout = &self.unwrapped_layout;
         let wrap_boundaries = &self.wrap_boundaries;
         let decoration_runs = &self.decoration_runs;
@@ -272,7 +323,9 @@ impl WrappedLine {
                     if wraps.peek().map(|w| &w.0) == Some(&&WrapBoundary { run_ix, glyph_ix }) {
                         let indent = wraps.peek().unwrap().1;
                         wraps.next();
-                        if let Some((underline_origin, underline_style)) = current_underline.as_mut() {
+                        if let Some((underline_origin, underline_style)) =
+                            current_underline.as_mut()
+                        {
                             if glyph_origin.x == underline_origin.x {
                                 underline_origin.x -= max_glyph_size.width.half();
                             };
@@ -305,7 +358,8 @@ impl WrappedLine {
                     prev_glyph_position = glyph.position;
 
                     let mut finished_underline: Option<(Point<Pixels>, UnderlineStyle)> = None;
-                    let mut finished_strikethrough: Option<(Point<Pixels>, StrikethroughStyle)> = None;
+                    let mut finished_strikethrough: Option<(Point<Pixels>, StrikethroughStyle)> =
+                        None;
                     if glyph.index >= run_end {
                         let mut style_run = decoration_runs.next();
 
@@ -328,7 +382,9 @@ impl WrappedLine {
                                 current_underline.get_or_insert((
                                     point(
                                         glyph_origin.x,
-                                        glyph_origin.y + baseline_offset.y + (layout.descent * 0.618),
+                                        glyph_origin.y
+                                            + baseline_offset.y
+                                            + (layout.descent * 0.618),
                                     ),
                                     UnderlineStyle {
                                         color: Some(run_underline.color.unwrap_or(style_run.color)),
@@ -350,7 +406,9 @@ impl WrappedLine {
                                             + (((layout.ascent * 0.5) + baseline_offset.y) * 0.5),
                                     ),
                                     StrikethroughStyle {
-                                        color: Some(run_strikethrough.color.unwrap_or(style_run.color)),
+                                        color: Some(
+                                            run_strikethrough.color.unwrap_or(style_run.color),
+                                        ),
                                         thickness: run_strikethrough.thickness,
                                     },
                                 ));
@@ -435,7 +493,9 @@ impl WrappedLine {
                 );
             }
 
-            if let Some((mut strikethrough_start, strikethrough_style)) = current_strikethrough.take() {
+            if let Some((mut strikethrough_start, strikethrough_style)) =
+                current_strikethrough.take()
+            {
                 if last_line_end_x == strikethrough_start.x {
                     strikethrough_start.x -= max_glyph_size.width.half()
                 };
@@ -451,7 +511,13 @@ impl WrappedLine {
     }
 
     #[allow(unused)]
-    pub fn paint_background(&self, origin: Point<Pixels>, line_height: Pixels, window: &mut Window, cx: &mut App) -> Result<(), anyhow::Error> {
+    pub fn paint_background(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<(), anyhow::Error> {
         let layout = &self.unwrapped_layout;
         let wrap_boundaries = &self.wrap_boundaries;
         let decoration_runs = &self.decoration_runs;
@@ -481,7 +547,8 @@ impl WrappedLine {
                     if wraps.peek().map(|w| &w.0) == Some(&&WrapBoundary { run_ix, glyph_ix }) {
                         let indent = wraps.peek().unwrap().1;
                         wraps.next();
-                        if let Some((background_origin, background_color)) = current_background.as_mut()
+                        if let Some((background_origin, background_color)) =
+                            current_background.as_mut()
                         {
                             if glyph_origin.x == background_origin.x {
                                 background_origin.x -= max_glyph_size.width.half()
@@ -583,15 +650,18 @@ pub struct SingleWrappedLine<'a> {
 
 impl<'a> SingleWrappedLine<'a> {
     pub fn x_range(&self, unwrapped_char_range: Span8) -> Option<Range<Pixels>> {
-        let (start_x, org_start_x, line_start_index) = if let Some((prev_boundary, indent)) = self.prev_boundary {
-            let glyph = &self.line.unwrapped_layout.runs[prev_boundary.run_ix].glyphs[prev_boundary.glyph_ix];
-            (*indent, glyph.position.x, glyph.index)
-        } else {
-            (px(0.0), px(0.0), 0)
-        };
+        let (start_x, org_start_x, line_start_index) =
+            if let Some((prev_boundary, indent)) = self.prev_boundary {
+                let glyph = &self.line.unwrapped_layout.runs[prev_boundary.run_ix].glyphs
+                    [prev_boundary.glyph_ix];
+                (*indent, glyph.position.x, glyph.index)
+            } else {
+                (px(0.0), px(0.0), 0)
+            };
 
         let line_end_index = if let Some((next_boundary, _)) = self.next_boundary {
-            let glyph = &self.line.unwrapped_layout.runs[next_boundary.run_ix].glyphs[next_boundary.glyph_ix];
+            let glyph = &self.line.unwrapped_layout.runs[next_boundary.run_ix].glyphs
+                [next_boundary.glyph_ix];
             glyph.index
         } else {
             self.line.unwrapped_layout.len
@@ -602,12 +672,19 @@ impl<'a> SingleWrappedLine<'a> {
             start_x + (x - org_start_x)
         };
 
-        if (line_start_index >= unwrapped_char_range.end || line_end_index <= unwrapped_char_range.start) && line_start_index != line_end_index {
+        if (line_start_index >= unwrapped_char_range.end
+            || line_end_index <= unwrapped_char_range.start)
+            && line_start_index != line_end_index
+        {
             return None;
         }
 
-        let clamped_start_index = unwrapped_char_range.start.clamp(line_start_index, line_end_index);
-        let clamped_end_index = unwrapped_char_range.end.clamp(line_start_index, line_end_index);
+        let clamped_start_index = unwrapped_char_range
+            .start
+            .clamp(line_start_index, line_end_index);
+        let clamped_end_index = unwrapped_char_range
+            .end
+            .clamp(line_start_index, line_end_index);
 
         let range_start_x = if unwrapped_char_range.start < line_start_index {
             px(0.0)

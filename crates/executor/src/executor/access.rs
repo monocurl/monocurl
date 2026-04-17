@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
-    value::{container::HashableKey, rc_value, RcValue, Value},
+    value::{RcValue, Value, container::HashableKey, rc_value},
 };
 
 use super::{ExecSingle, Executor};
@@ -49,7 +49,7 @@ impl Executor {
                 *leader.leader_rc.borrow_mut() = rhs;
 
                 if let Value::Leader(l) = &mut *rc.borrow_mut() {
-                    l.last_modified_stack = Some(stack_id as u64);
+                    l.last_modified_stack = Some(stack_id);
                 }
             }
             _ => {
@@ -97,7 +97,7 @@ impl Executor {
             None => {
                 return ExecSingle::Error(ExecutorError::Other(
                     "append-assign: lhs is not an lvalue".into(),
-                ))
+                ));
             }
         };
 
@@ -135,7 +135,7 @@ impl Executor {
                     let stack_id = self.state.stack(stack_idx).stack_id;
                     drop(base_val);
                     if let Value::Leader(l) = &mut *base_rc.borrow_mut() {
-                        l.last_modified_stack = Some(stack_id as u64);
+                        l.last_modified_stack = Some(stack_id);
                     }
                 }
             }
@@ -307,7 +307,7 @@ impl Executor {
                     let stack_id = self.state.stack(stack_idx).stack_id;
                     drop(base_val);
                     if let Value::Leader(l) = &mut *base_rc.borrow_mut() {
-                        l.last_modified_stack = Some(stack_id as u64);
+                        l.last_modified_stack = Some(stack_id);
                     }
                 }
             }

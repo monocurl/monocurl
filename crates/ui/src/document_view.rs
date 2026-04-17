@@ -5,41 +5,51 @@ use gpui::*;
 use structs::rope::{Attribute, Rope, TextAggregate};
 use ui_cli_shared::doc_type::DocumentType;
 
-use crate::{actions::{CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut}, components::split_pane::Split, editor::editor_view::Editor, navbar_view::Navbar, services::{PlaybackMode, ServiceManager}, state::{document_state::DocumentState, textual_state::LexData, window_state::{ActiveScreen, WindowState}}, theme::ThemeSettings, timeline::timeline_view::Timeline, viewport::viewport_view::Viewport};
-
+use crate::{
+    actions::{
+        CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo,
+        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying,
+        TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut,
+    },
+    components::split_pane::Split,
+    editor::editor_view::Editor,
+    navbar_view::Navbar,
+    services::{PlaybackMode, ServiceManager},
+    state::{
+        document_state::DocumentState,
+        textual_state::LexData,
+        window_state::{ActiveScreen, WindowState},
+    },
+    theme::ThemeSettings,
+    timeline::timeline_view::Timeline,
+    viewport::viewport_view::Viewport,
+};
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-s", SaveActiveDocument, None),
         KeyBinding::new("secondary-shift-s", SaveActiveDocumentCustomPath, None),
         KeyBinding::new("secondary-w", CloseActiveDocument, None),
-
         KeyBinding::new("secondary-z", Undo, None),
         KeyBinding::new("secondary-shift-z", Redo, None),
-
         KeyBinding::new("secondary-p", TogglePresentationMode, None),
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
         KeyBinding::new("escape", UnfocusEditor, Some("!presenter")),
-
         KeyBinding::new("space", TogglePlaying, Some("!editor")),
         KeyBinding::new("shift-space", TogglePlaying, Some("!editor")),
         KeyBinding::new("secondary-shift-space,", TogglePlaying, None),
-
         KeyBinding::new(",", PrevSlide, Some("!editor")),
         KeyBinding::new("secondary-,", PrevSlide, None),
         KeyBinding::new(".", NextSlide, Some("!editor")),
         KeyBinding::new("secondary-.", NextSlide, None),
-
         KeyBinding::new("<", SceneStart, Some("!editor")),
         KeyBinding::new("secondary-<", SceneStart, None),
         KeyBinding::new(">", SceneEnd, Some("!editor")),
         KeyBinding::new("secondary->", SceneEnd, None),
-
         KeyBinding::new(";", EpsilonBackward, Some("!editor")),
         KeyBinding::new("secondary-;", EpsilonBackward, None),
         KeyBinding::new("'", EpsilonForward, Some("!editor")),
         KeyBinding::new("secondary-'", EpsilonForward, None),
-
         KeyBinding::new("secondary-=", ZoomIn, None),
         KeyBinding::new("secondary--", ZoomOut, None),
     ]);
@@ -89,8 +99,12 @@ fn dirty_file(internal: &PathBuf, user: &Option<PathBuf>) -> bool {
 
 /* action handlers */
 impl DocumentView {
-
-    fn toggle_presentation(&mut self, _ : &TogglePresentationMode, w: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_presentation(
+        &mut self,
+        _: &TogglePresentationMode,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         w.focus(&self.focus_handle);
 
         if self.is_presenting {
@@ -101,8 +115,7 @@ impl DocumentView {
             self.services.update(cx, |services, _| {
                 services.set_playback_mode(PlaybackMode::Presentation);
             });
-        }
-        else {
+        } else {
             self.was_fullscreen_before_presenting = w.is_fullscreen();
             if !w.is_fullscreen() {
                 w.toggle_fullscreen();
@@ -115,13 +128,14 @@ impl DocumentView {
         cx.notify();
     }
 
-    fn unfocus_editor(&mut self, _ : &UnfocusEditor, w: &mut Window, _cx: &mut Context<Self>) {
+    fn unfocus_editor(&mut self, _: &UnfocusEditor, w: &mut Window, _cx: &mut Context<Self>) {
         w.focus(&self.focus_handle);
     }
 
-    fn toggle_playing(&mut self, _ : &TogglePlaying, _w: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_playing(&mut self, _: &TogglePlaying, _w: &mut Window, cx: &mut Context<Self>) {
         log::info!("Toggled playing");
-        self.services.update(cx, |services, _| services.toggle_play());
+        self.services
+            .update(cx, |services, _| services.toggle_play());
     }
 
     fn timestamp_transform(&mut self, cx: &mut Context<Self>, f: impl Fn(Timestamp) -> Timestamp) {
@@ -152,14 +166,14 @@ impl DocumentView {
         self.services.update(cx, |s, cx| s.scene_end(cx));
     }
 
-    fn epsilon_forward(&mut self, _ : &EpsilonForward, _w: &mut Window, cx: &mut Context<Self>) {
+    fn epsilon_forward(&mut self, _: &EpsilonForward, _w: &mut Window, cx: &mut Context<Self>) {
         println!("Epsilon Forward");
         self.timestamp_transform(cx, |timestamp| {
             Timestamp::new(timestamp.slide, timestamp.time + 1.0 / 30.0)
         });
     }
 
-    fn epsilon_backward(&mut self, _ : &EpsilonBackward, _w: &mut Window, cx: &mut Context<Self>) {
+    fn epsilon_backward(&mut self, _: &EpsilonBackward, _w: &mut Window, cx: &mut Context<Self>) {
         println!("Epsilon Backward");
         self.timestamp_transform(cx, |timestamp| {
             Timestamp::new(timestamp.slide, (timestamp.time - 1.0 / 30.0).max(0.0))
@@ -171,16 +185,17 @@ impl DocumentView {
     }
 
     fn zoom_out(&mut self, action: &ZoomOut, w: &mut Window, cx: &mut Context<Self>) {
-        self.timeline.update(cx, |tl, cx| tl.zoom_out(action, w, cx));
+        self.timeline
+            .update(cx, |tl, cx| tl.zoom_out(action, w, cx));
     }
 
-    fn undo(&mut self, _ : &Undo, w: &mut Window, cx: &mut Context<Self>) {
+    fn undo(&mut self, _: &Undo, w: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| {
             editor.undo(w, cx);
         });
     }
 
-    fn redo(&mut self, _ : &Redo, w: &mut Window, cx: &mut Context<Self>) {
+    fn redo(&mut self, _: &Redo, w: &mut Window, cx: &mut Context<Self>) {
         self.editor.update(cx, |editor, cx| {
             editor.redo(w, cx);
         });
@@ -207,23 +222,35 @@ impl DocumentView {
         })
     }
 
-    fn save_document_custom_path(&mut self, _ : &SaveActiveDocumentCustomPath, _w: &mut Window, cx: &mut Context<Self>) {
-        let directory =
-            self.user_path
-                .as_ref().and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                .unwrap_or(dirs::home_dir().unwrap());
-        let name =
-            self.user_path
-                .as_ref().and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
-                .unwrap_or("Untitled.".to_string() + self.internal_path.extension().and_then(|e| e.to_str()).unwrap_or(DocumentType::Scene.extension()));
+    fn save_document_custom_path(
+        &mut self,
+        _: &SaveActiveDocumentCustomPath,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let directory = self
+            .user_path
+            .as_ref()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or(dirs::home_dir().unwrap());
+        let name = self
+            .user_path
+            .as_ref()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or(
+                "Untitled.".to_string()
+                    + self
+                        .internal_path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or(DocumentType::Scene.extension()),
+            );
         let path = cx.prompt_for_new_path(&directory, Some(name.as_str()));
         cx.spawn(async move |this, app| {
             let Some(this) = this.upgrade() else {
                 return;
             };
-            let Some(path) = path.await
-                .ok().map(|s| s.ok())
-                .flatten().flatten() else {
+            let Some(path) = path.await.ok().map(|s| s.ok()).flatten().flatten() else {
                 return;
             };
 
@@ -234,11 +261,16 @@ impl DocumentView {
                     this.really_save(path, cx);
                 });
             });
-        }).detach();
+        })
+        .detach();
     }
 
-    fn save_document(&mut self, _ : &SaveActiveDocument, w: &mut Window, cx: &mut Context<Self>) {
-        log::info!("Saving document {:?} {:?}", &self.internal_path, &self.user_path);
+    fn save_document(&mut self, _: &SaveActiveDocument, w: &mut Window, cx: &mut Context<Self>) {
+        log::info!(
+            "Saving document {:?} {:?}",
+            &self.internal_path,
+            &self.user_path
+        );
         if let Some(user_path) = &self.user_path {
             self.really_save(user_path.clone(), cx);
         } else {
@@ -246,8 +278,12 @@ impl DocumentView {
         }
     }
 
-    fn close_document(&mut self, _ : &CloseActiveDocument, w: &mut Window, cx: &mut Context<Self>) {
-        log::info!("Closing document {:?} {:?}", &self.internal_path, &self.user_path);
+    fn close_document(&mut self, _: &CloseActiveDocument, w: &mut Window, cx: &mut Context<Self>) {
+        log::info!(
+            "Closing document {:?} {:?}",
+            &self.internal_path,
+            &self.user_path
+        );
 
         self.window_state.upgrade().map(|state| {
             state.update(cx, |state, cx| {
@@ -259,10 +295,16 @@ impl DocumentView {
 }
 
 impl DocumentView {
-    fn get_live_ropes(&self, window_state: &WindowState, cx: &App) -> HashMap<PathBuf, (Rope<Attribute<LexData>>, Rope<TextAggregate>)> {
+    fn get_live_ropes(
+        &self,
+        window_state: &WindowState,
+        cx: &App,
+    ) -> HashMap<PathBuf, (Rope<Attribute<LexData>>, Rope<TextAggregate>)> {
         let mut ret = HashMap::new();
         for doc in window_state.open_documents() {
-            if &doc.internal_path != &self.internal_path && let Some(ref physical) = doc.user_path {
+            if &doc.internal_path != &self.internal_path
+                && let Some(ref physical) = doc.user_path
+            {
                 let state = doc.view.read(cx).state.textual_state.read(cx);
                 let text_rope = state.text_rope().clone();
                 let lex_rope = state.lex_rope().clone();
@@ -285,13 +327,34 @@ impl DocumentView {
         });
     }
 
-    pub fn new(internal_path: PathBuf, user_path: Option<PathBuf>,  window_state: WeakEntity<WindowState>, dirty: Entity<bool>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        internal_path: PathBuf,
+        user_path: Option<PathBuf>,
+        window_state: WeakEntity<WindowState>,
+        dirty: Entity<bool>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         // note that text editor is responsible for initially bootstrapping the content
         let state = DocumentState::new(cx);
         // connects everything together
-        let services = cx.new(|cx| ServiceManager::new(state.textual_state.clone(), state.execution_state.clone(), cx));
+        let services = cx.new(|cx| {
+            ServiceManager::new(
+                state.textual_state.clone(),
+                state.execution_state.clone(),
+                cx,
+            )
+        });
 
-        let editor = cx.new(|cx| Editor::new(state.textual_state.clone(), internal_path.clone(), dirty.clone(), window, cx));
+        let editor = cx.new(|cx| {
+            Editor::new(
+                state.textual_state.clone(),
+                internal_path.clone(),
+                dirty.clone(),
+                window,
+                cx,
+            )
+        });
         let viewport = cx.new(|cx| Viewport::new(services.clone(), cx));
         let timeline = cx.new(|cx| Timeline::new(services.clone(), cx));
 
@@ -306,13 +369,16 @@ impl DocumentView {
                     }
                 }
             });
-        }).detach();
+        })
+        .detach();
         cx.observe(&window_state_up, |_dv, _, cx| {
             cx.notify();
-        }).detach();
+        })
+        .detach();
         cx.observe_global::<ThemeSettings>(|_dv, cx| {
             cx.notify();
-        }).detach();
+        })
+        .detach();
 
         dirty.update(cx, |dirty, _| {
             *dirty = dirty_file(&internal_path, &user_path);
@@ -374,10 +440,11 @@ impl DocumentView {
                 Split::new(
                     Axis::Horizontal,
                     self.editor.clone().into_any_element(),
-                    self.viewport_timeline(theme.split_divider).into_any_element()
+                    self.viewport_timeline(theme.split_divider)
+                        .into_any_element(),
                 )
                 .default_flex(0.5)
-                .divider_color(theme.split_divider)
+                .divider_color(theme.split_divider),
             )
             .text_color(theme.text_primary)
             .bg(theme.document_background)
@@ -404,7 +471,11 @@ impl DocumentView {
 }
 
 impl Render for DocumentView {
-    fn render(&mut self, window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(
+        &mut self,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
         if window.focused(cx).is_none() {
             window.focus(&self.focus_handle);
         }

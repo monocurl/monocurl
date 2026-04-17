@@ -4,7 +4,7 @@ use crate::{
     components::buttons::link_button,
     document_view::OpenDocument,
     state::window_state::{ActiveScreen, WindowState},
-    theme::{ThemeSettings, ThemeMode},
+    theme::{ThemeMode, ThemeSettings},
 };
 
 pub struct Navbar {
@@ -17,14 +17,21 @@ struct DocumentList {
 }
 
 impl DocumentList {
-    fn render_tab(&self, doc: &OpenDocument, is_active: bool, cx: &Context<Self>) -> impl IntoElement {
-        let filename = doc.user_path
+    fn render_tab(
+        &self,
+        doc: &OpenDocument,
+        is_active: bool,
+        cx: &Context<Self>,
+    ) -> impl IntoElement {
+        let filename = doc
+            .user_path
             .as_ref()
             .and_then(|f| f.file_name())
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or(
                 "Untitled".to_string()
-                    + &doc.internal_path
+                    + &doc
+                        .internal_path
                         .extension()
                         .map(|e| ".".to_string() + &e.to_string_lossy().to_string())
                         .unwrap_or_default(),
@@ -62,7 +69,9 @@ impl DocumentList {
                     .bg(if dirty { theme.accent } else { bg }),
             )
             .child(filename)
-            .id(SharedString::new(doc.internal_path.to_string_lossy().to_string()))
+            .id(SharedString::new(
+                doc.internal_path.to_string_lossy().to_string(),
+            ))
             .child(
                 div()
                     .size_3()
@@ -120,9 +129,9 @@ impl Render for DocumentList {
             .border(px(1.0))
             .border_color(theme.navbar_border)
             .children(
-                state
-                    .open_documents()
-                    .map(|doc| self.render_tab(doc, Some(&doc.internal_path) == active.as_ref(), cx)),
+                state.open_documents().map(|doc| {
+                    self.render_tab(doc, Some(&doc.internal_path) == active.as_ref(), cx)
+                }),
             )
             .text_size(px(12.0))
             .overflow_x_scroll()
@@ -201,11 +210,7 @@ impl Navbar {
             .px_3()
             .h_full()
             .text_color(theme.text_muted)
-            .child(
-                div()
-                    .text_xs()
-                    .child("Dark"),
-            )
+            .child(div().text_xs().child("Dark"))
             .child(switch)
             .cursor_pointer()
             .hover(|style| style.opacity(0.92))
@@ -242,13 +247,17 @@ impl Render for Navbar {
                     .flex_1()
                     .child(
                         div()
-                            .child(link_button("Home", theme.link_text, cx.listener(|this, _, _, cx| {
-                                let state = this.window_state.upgrade().unwrap();
-                                state.update(cx, |state, cx| {
-                                    state.navigate_to_home();
-                                    cx.notify();
-                                })
-                            })))
+                            .child(link_button(
+                                "Home",
+                                theme.link_text,
+                                cx.listener(|this, _, _, cx| {
+                                    let state = this.window_state.upgrade().unwrap();
+                                    state.update(cx, |state, cx| {
+                                        state.navigate_to_home();
+                                        cx.notify();
+                                    })
+                                }),
+                            ))
                             .px_3()
                             .h_full()
                             .flex()
@@ -261,13 +270,13 @@ impl Render for Navbar {
                     })
                     .border_r(px(0.5))
                     .border_color(theme.accent)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .child(self.document_list.clone()),
-                    ),
+                    .child(div().flex_1().min_w_0().child(self.document_list.clone())),
             )
-            .child(self.render_theme_toggle(matches!(ThemeSettings::read(cx).mode, ThemeMode::Dark), cx))
+            .child(
+                self.render_theme_toggle(
+                    matches!(ThemeSettings::read(cx).mode, ThemeMode::Dark),
+                    cx,
+                ),
+            )
     }
 }

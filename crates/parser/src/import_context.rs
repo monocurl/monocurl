@@ -1,13 +1,21 @@
-use std::{collections::HashMap, ops::Range, path::{Path, PathBuf}, sync::Arc};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use lexer::{lexer::Lexer, token::Token};
-use structs::{assets::Assets, rope::{Attribute, Rope, TextAggregate}};
+use structs::{
+    assets::Assets,
+    rope::{Attribute, Rope, TextAggregate},
+};
 use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{ast::SectionBundle, flatten_lex_stream, flatten_rope, parser::ParseArtifacts};
 
 pub enum Error {
-    NotFound
+    NotFound,
 }
 
 // context mainly related about finding additional imports
@@ -32,11 +40,13 @@ impl ParseImportContext {
         self.cached_parses.clear();
     }
 
-    pub fn cache_get(&self, path: &Option<PathBuf>) -> Option<(Arc<SectionBundle>, ParseArtifacts)> {
+    pub fn cache_get(
+        &self,
+        path: &Option<PathBuf>,
+    ) -> Option<(Arc<SectionBundle>, ParseArtifacts)> {
         if let Some(path) = path {
             self.cached_parses.get(path).cloned()
-        }
-        else {
+        } else {
             None
         }
     }
@@ -47,11 +57,14 @@ impl ParseImportContext {
         self.cached_parses.insert(path, (Arc::new(raw), artifacts));
     }
 
-    pub(crate) fn file_content(&self, working_directory: Option<&Path>, relative_path: &Path) -> Option<FileResult> {
+    pub(crate) fn file_content(
+        &self,
+        working_directory: Option<&Path>,
+        relative_path: &Path,
+    ) -> Option<FileResult> {
         let paths = if let Some(working_directory) = working_directory {
             vec![working_directory.to_path_buf(), Assets::std_lib()]
-        }
-        else {
+        } else {
             vec![Assets::std_lib()]
         };
 
@@ -67,8 +80,7 @@ impl ParseImportContext {
                     text_rope: text_rope.clone(),
                     is_stdlib,
                 });
-            }
-            else {
+            } else {
                 let Ok(content) = std::fs::read_to_string(&p) else {
                     continue;
                 };

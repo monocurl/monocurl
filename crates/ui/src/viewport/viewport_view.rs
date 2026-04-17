@@ -18,7 +18,11 @@ impl Viewport {
 }
 
 impl Render for Viewport {
-    fn render(&mut self, _window: &mut gpui::Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(
+        &mut self,
+        _window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
         let exec = self.services.read(cx).execution_state().read(cx);
         let ring_color = theme.viewport_status_ring(exec.status);
@@ -37,11 +41,7 @@ impl Render for Viewport {
                     .size_full()
                     .bg(ring_color)
                     .p(px(1.0))
-                    .child(
-                        gpui::div()
-                            .size_full()
-                            .bg(theme.viewport_stage_background)
-                    )
+                    .child(gpui::div().size_full().bg(theme.viewport_stage_background)),
             )
     }
 }

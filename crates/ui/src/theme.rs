@@ -76,10 +76,9 @@ impl ThemeSettings {
     pub fn save(&self) {
         let data = serde_json::to_string_pretty(self).expect("Could not serialize theme settings");
         let path = Self::save_file();
-        std::fs::write(path, data).ok()
-            .unwrap_or_else(|| {
-                log::warn!("Unable to save theme settings")
-            });
+        std::fs::write(path, data)
+            .ok()
+            .unwrap_or_else(|| log::warn!("Unable to save theme settings"));
     }
 
     pub fn init(cx: &mut App) {
@@ -194,7 +193,10 @@ impl Theme {
 
             home_sidebar_background: rgba(0xE6E9EF),
             home_panel_background: rgba(0xEFF1F5),
-            row_hover_overlay: Rgba { a: 0.08, ..rgba(0x11111B) },
+            row_hover_overlay: Rgba {
+                a: 0.08,
+                ..rgba(0x11111B)
+            },
 
             split_divider: rgba(0x9CA0B0),
 
@@ -243,7 +245,10 @@ impl Theme {
 
             home_sidebar_background: rgba(0x1E1E1E),
             home_panel_background: rgba(0x252525),
-            row_hover_overlay: Rgba { a: 0.05, ..rgba(0xFFFFFF) },
+            row_hover_overlay: Rgba {
+                a: 0.05,
+                ..rgba(0xFFFFFF)
+            },
 
             split_divider: rgba(0x3C3C3C),
 

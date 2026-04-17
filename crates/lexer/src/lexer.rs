@@ -1,8 +1,14 @@
-use structs::{iterutil::KLookahead, text::{Count8, Span8}};
 use crate::token::Token;
+use structs::{
+    iterutil::KLookahead,
+    text::{Count8, Span8},
+};
 
 // upholds the contract that '\n' is a universal separator
-pub struct Lexer<I> where I: Iterator<Item = char> {
+pub struct Lexer<I>
+where
+    I: Iterator<Item = char>,
+{
     chars: KLookahead<I, 2>,
     byte_count: Count8,
     // in import lines, "escape" all keywords
@@ -11,7 +17,7 @@ pub struct Lexer<I> where I: Iterator<Item = char> {
 
 impl<I> Lexer<I>
 where
-    I: Iterator<Item = char>
+    I: Iterator<Item = char>,
 {
     pub fn token_stream(chars: I) -> Vec<(Token, Span8)> {
         let mut utf8 = 0;
@@ -64,7 +70,9 @@ where
         }
     }
 
-    fn skip_while<F>(&mut self, mut predicate: F) -> Count8 where F: FnMut(char) -> bool
+    fn skip_while<F>(&mut self, mut predicate: F) -> Count8
+    where
+        F: FnMut(char) -> bool,
     {
         let start = self.byte_count;
         while let Some(ch) = self.peek() {
@@ -77,7 +85,9 @@ where
         self.byte_count - start
     }
 
-    fn collect_while<F>(&mut self, mut predicate: F) -> String where F: FnMut(char) -> bool
+    fn collect_while<F>(&mut self, mut predicate: F) -> String
+    where
+        F: FnMut(char) -> bool,
     {
         let mut result = String::new();
         while let Some(ch) = self.peek() {
@@ -113,7 +123,10 @@ where
                 self.advance();
                 self.advance();
             }
-            (Some('i') | Some('d') | Some('u') | Some('f') | Some('b') | Some('l') | Some('r'), _) => {
+            (
+                Some('i') | Some('d') | Some('u') | Some('f') | Some('b') | Some('l') | Some('r'),
+                _,
+            ) => {
                 self.advance();
             }
             _ => {}
@@ -200,7 +213,7 @@ where
 
 impl<I> Iterator for Lexer<I>
 where
-    I: Iterator<Item = char>
+    I: Iterator<Item = char>,
 {
     type Item = (Token, Count8);
 
@@ -225,8 +238,7 @@ where
             '-' => {
                 if self.advance_if('>') {
                     Token::KeyValueMap
-                }
-                else {
+                } else {
                     Token::Minus
                 }
             }
@@ -292,7 +304,9 @@ where
             }
             '"' => return Some(self.lex_string()),
             _ if ch.is_ascii_digit() => return Some(self.lex_number(ch)),
-            _ if ch.is_alphabetic() || ch == '_' => return Some(self.lex_identifier_or_keyword(ch)),
+            _ if ch.is_alphabetic() || ch == '_' => {
+                return Some(self.lex_identifier_or_keyword(ch));
+            }
             _ => Token::Illegal,
         };
 

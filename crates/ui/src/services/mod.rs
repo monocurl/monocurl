@@ -1,17 +1,30 @@
-
 use std::{collections::HashMap, path::PathBuf};
 
+use crate::{
+    services::{
+        compilation::{CompilationMessage, CompilationService},
+        execution::{ExecutionMessage, ExecutionService},
+        lexing::{LexingMessage, LexingService},
+    },
+    state::{
+        diagnostics::Diagnostic,
+        execution_state::ExecutionState,
+        textual_state::{
+            AutoCompleteItem, Cursor, LexData, ParameterPositionHint, StaticAnalysisData,
+            TextualState, TransactionSummary,
+        },
+    },
+};
 use executor::time::Timestamp;
-use gpui::{App, AppContext, Context, Entity};
-use futures::{SinkExt, StreamExt, channel::mpsc::{UnboundedSender}};
 use futures::channel::mpsc::unbounded;
+use futures::{SinkExt, StreamExt, channel::mpsc::UnboundedSender};
+use gpui::{App, AppContext, Context, Entity};
 use lexer::token::Token;
 use structs::rope::{Attribute, Rope, TextAggregate};
-use crate::{services::{compilation::{CompilationMessage, CompilationService}, execution::{ExecutionMessage, ExecutionService}, lexing::{LexingMessage, LexingService}}, state::{diagnostics::Diagnostic, execution_state::ExecutionState, textual_state::{AutoCompleteItem, Cursor, LexData, ParameterPositionHint, StaticAnalysisData, TextualState, TransactionSummary}}};
 
-mod lexing;
 mod compilation;
 mod execution;
+mod lexing;
 
 pub(crate) use execution::{ExecutionSnapshot, ExecutionStatus, PlaybackMode};
 
@@ -58,22 +71,29 @@ pub enum ServiceManagerMessage {
 }
 
 impl ServiceManager {
-    pub fn new(textual_state: Entity<TextualState>, execution_state: Entity<ExecutionState>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        textual_state: Entity<TextualState>,
+        execution_state: Entity<ExecutionState>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let (sm_tx, mut sm_rx) = unbounded();
         let (lexing_tx, lexing_rx) = unbounded();
         let (compilation_tx, compilation_rx) = unbounded();
         let (execution_tx, execution_rx) = unbounded();
 
         let lexing = LexingService::new(lexing_rx, compilation_tx.clone(), sm_tx.clone());
-        let compilation = CompilationService::new(compilation_rx, execution_tx.clone(), sm_tx.clone());
+        let compilation =
+            CompilationService::new(compilation_rx, execution_tx.clone(), sm_tx.clone());
         let execution = ExecutionService::new(execution_rx, sm_tx.clone());
 
         let weak_service_manager = cx.weak_entity();
         textual_state.update(cx, |state, _| {
             state.add_transaction_listener(move |transaction, cx| {
-                weak_service_manager.update(cx, |service_manager, cx| {
-                    service_manager.on_transaction(transaction, cx);
-                }).unwrap();
+                weak_service_manager
+                    .update(cx, |service_manager, cx| {
+                        service_manager.on_transaction(transaction, cx);
+                    })
+                    .unwrap();
             });
         });
 
@@ -82,22 +102,22 @@ impl ServiceManager {
         cx.spawn(async move |sm, cx| {
             log::info!("Starting Service Manager Foreground Handling");
             while let Some(message) = sm_rx.next().await {
-                let Some(_) = sm.upgrade()
-                    .and_then(|sm| {
-                        cx.update_entity(&sm, |sm, cx| {
-                            sm.on_sm_message_recv(message, cx);
+                let Some(_) = sm.upgrade().and_then(|sm| {
+                    cx.update_entity(&sm, |sm, cx| {
+                        sm.on_sm_message_recv(message, cx);
 
-                            while let Ok(Some(sub_message)) = sm_rx.try_next() {
-                                sm.on_sm_message_recv(sub_message, cx);
-                            }
-                        }).ok()
+                        while let Ok(Some(sub_message)) = sm_rx.try_next() {
+                            sm.on_sm_message_recv(sub_message, cx);
+                        }
                     })
-                else {
+                    .ok()
+                }) else {
                     break;
                 };
             }
             log::info!("Exiting Service Manager Foreground Handling");
-        }).detach();
+        })
+        .detach();
 
         cx.background_spawn(lexing.run()).detach();
         cx.background_spawn(compilation.run()).detach();
@@ -109,7 +129,7 @@ impl ServiceManager {
 
             lexing_tx,
             compilation_tx,
-            execution_tx
+            execution_tx,
         }
     }
 
@@ -117,22 +137,30 @@ impl ServiceManager {
         smol::block_on(async {
             // because cursor is sent first, it must be the case that
             // compilation thread will receive cursor messages before any rope updates
-            self.compilation_tx.send(
-                CompilationMessage::UpdateCursor {
+            self.compilation_tx
+                .send(CompilationMessage::UpdateCursor {
                     cursor: transaction.new_cursor,
-                    _version: transaction.final_version
-                }
-            ).await.unwrap();
+                    _version: transaction.final_version,
+                })
+                .await
+                .unwrap();
 
-            self.lexing_tx.send_all(&mut futures::stream::iter(
-                transaction.text_changes.iter()
-                    .map(|(old, new_text, new_rope, version)| Ok(LexingMessage::UpdateRope {
-                        old: old.clone(),
-                        new: new_text.len(),
-                        new_rope: new_rope.clone(),
-                        version: *version
-                    }))
-            )).await.unwrap();
+            self.lexing_tx
+                .send_all(&mut futures::stream::iter(
+                    transaction
+                        .text_changes
+                        .iter()
+                        .map(|(old, new_text, new_rope, version)| {
+                            Ok(LexingMessage::UpdateRope {
+                                old: old.clone(),
+                                new: new_text.len(),
+                                new_rope: new_rope.clone(),
+                                version: *version,
+                            })
+                        }),
+                ))
+                .await
+                .unwrap();
         })
     }
 
@@ -144,36 +172,53 @@ impl ServiceManager {
                         cx.notify();
                     }
                 });
-            },
-            ServiceManagerMessage::UpdateStaticAnalysisRope { analysis_rope, version } => {
+            }
+            ServiceManagerMessage::UpdateStaticAnalysisRope {
+                analysis_rope,
+                version,
+            } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_static_analysis_rope(analysis_rope, version) {
                         cx.notify();
                     }
                 });
-            },
-            ServiceManagerMessage::UpdateCompileDiagnostics { diagnostics, version } => {
+            }
+            ServiceManagerMessage::UpdateCompileDiagnostics {
+                diagnostics,
+                version,
+            } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_compile_diagnostics(diagnostics, version) {
                         cx.notify();
                     }
                 });
-            },
-            ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics, version } => {
+            }
+            ServiceManagerMessage::UpdateRuntimeDiagnostics {
+                diagnostics,
+                version,
+            } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_runtime_diagnostics(diagnostics, version) {
                         cx.notify();
                     }
                 });
             }
-            ServiceManagerMessage::UpdateAutocompleteSuggestions { suggestions, cursor, version } => {
+            ServiceManagerMessage::UpdateAutocompleteSuggestions {
+                suggestions,
+                cursor,
+                version,
+            } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_autocomplete_state(suggestions, version, cursor) {
                         cx.notify();
                     }
                 });
             }
-            ServiceManagerMessage::UpdateParameterHintPosition { hint, cursor, version } => {
+            ServiceManagerMessage::UpdateParameterHintPosition {
+                hint,
+                cursor,
+                version,
+            } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_parameter_position_state(hint, version, cursor) {
                         cx.notify();
@@ -189,14 +234,19 @@ impl ServiceManager {
         }
     }
 
-    pub fn invalidate_dependencies(&mut self, physical_path: Option<PathBuf>, live_ropes: HashMap<PathBuf, (Rope<Attribute<Token>>, Rope<TextAggregate>)>) {
+    pub fn invalidate_dependencies(
+        &mut self,
+        physical_path: Option<PathBuf>,
+        live_ropes: HashMap<PathBuf, (Rope<Attribute<Token>>, Rope<TextAggregate>)>,
+    ) {
         smol::block_on(async {
-            self.compilation_tx.send(
-                CompilationMessage::RecheckDependencies {
+            self.compilation_tx
+                .send(CompilationMessage::RecheckDependencies {
                     physical_path,
-                    open_documents: live_ropes
-                }
-            ).await.unwrap();
+                    open_documents: live_ropes,
+                })
+                .await
+                .unwrap();
         })
     }
 
@@ -206,9 +256,10 @@ impl ServiceManager {
 
     pub fn seek_to(&mut self, target: Timestamp) {
         smol::block_on(async {
-            self.execution_tx.send(
-                ExecutionMessage::SeekTo { target }
-            ).await.unwrap();
+            self.execution_tx
+                .send(ExecutionMessage::SeekTo { target })
+                .await
+                .unwrap();
         })
     }
 
@@ -240,17 +291,19 @@ impl ServiceManager {
 
     pub fn toggle_play(&mut self) {
         smol::block_on(async {
-            self.execution_tx.send(
-                ExecutionMessage::TogglePlay
-            ).await.unwrap();
+            self.execution_tx
+                .send(ExecutionMessage::TogglePlay)
+                .await
+                .unwrap();
         })
     }
 
     pub fn set_playback_mode(&mut self, ctx: PlaybackMode) {
         smol::block_on(async {
-            self.execution_tx.send(
-                ExecutionMessage::SetPlaybackMode(ctx)
-            ).await.unwrap();
+            self.execution_tx
+                .send(ExecutionMessage::SetPlaybackMode(ctx))
+                .await
+                .unwrap();
         })
     }
 

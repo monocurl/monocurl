@@ -11,8 +11,7 @@ pub(super) fn is_stateful(expr: &Expression) -> bool {
         Expression::Subscript(s) => is_stateful(&s.base.1) || is_stateful(&s.index.1),
         Expression::Property(p) => is_stateful(&p.base.1),
         Expression::LambdaInvocation(l) => {
-            is_stateful(&l.lambda.1)
-                || l.arguments.1.iter().any(|(_, a)| is_stateful(&a.1))
+            is_stateful(&l.lambda.1) || l.arguments.1.iter().any(|(_, a)| is_stateful(&a.1))
         }
         Expression::OperatorInvocation(o) => {
             is_stateful(&o.operator.1)

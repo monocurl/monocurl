@@ -1,5 +1,7 @@
 use std::{
-    pin::pin, sync::Arc, time::{Duration, Instant}
+    pin::pin,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
@@ -7,7 +9,11 @@ use executor::{
     executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
     time::Timestamp,
 };
-use futures::{StreamExt, channel::mpsc::{UnboundedReceiver, UnboundedSender}, future};
+use futures::{
+    StreamExt,
+    channel::mpsc::{UnboundedReceiver, UnboundedSender},
+    future,
+};
 use smol::Timer;
 use stdlib::registry::registry;
 
@@ -22,7 +28,7 @@ pub struct ExecutionSnapshot {
 
 pub enum PlaybackMode {
     Presentation,
-    Preview
+    Preview,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,7 +37,7 @@ pub enum ExecutionStatus {
     Paused,
     Seeking,
     RuntimeError,
-    CompileError
+    CompileError,
 }
 
 impl PlaybackMode {
@@ -62,7 +68,11 @@ pub struct ExecutionService {
 }
 
 fn default_bytecode() -> Bytecode {
-    let mut section = SectionBytecode::new(SectionFlags { is_stdlib: true, is_library: true, is_init: false });
+    let mut section = SectionBytecode::new(SectionFlags {
+        is_stdlib: true,
+        is_library: true,
+        is_init: false,
+    });
     section.instructions.push(Instruction::EndOfExecutionHead);
     Bytecode::new(vec![Arc::new(section)])
 }
@@ -102,7 +112,10 @@ impl ExecutionService {
 
         loop {
             match message {
-                ExecutionMessage::UpdateBytecode { bytecode, version: nversion } => {
+                ExecutionMessage::UpdateBytecode {
+                    bytecode,
+                    version: nversion,
+                } => {
                     version = nversion;
                     is_playing = false;
                     if let Some(bytecode) = bytecode {
@@ -110,16 +123,18 @@ impl ExecutionService {
                         executor.update_bytecode(bytecode);
                         target = executor.user_to_internal_timestamp(old_user_timestamp);
                         has_compiler_error = false;
-                    }
-                    else {
+                    } else {
                         has_compiler_error = true;
                     }
                 }
                 ExecutionMessage::SetPlaybackMode(ctx) => {
-                    log::info!("playback mode -> {}", match ctx {
-                        PlaybackMode::Presentation => "presentation",
-                        PlaybackMode::Preview => "preview",
-                    });
+                    log::info!(
+                        "playback mode -> {}",
+                        match ctx {
+                            PlaybackMode::Presentation => "presentation",
+                            PlaybackMode::Preview => "preview",
+                        }
+                    );
                     is_playing = false;
                     playback_mode = ctx;
                 }
@@ -130,7 +145,10 @@ impl ExecutionService {
                 }
                 ExecutionMessage::TogglePlay => {
                     is_playing = !is_playing;
-                    log::info!("playback toggled -> {}", if is_playing { "playing" } else { "paused" });
+                    log::info!(
+                        "playback toggled -> {}",
+                        if is_playing { "playing" } else { "paused" }
+                    );
                     if is_playing {
                         last_update_at = Instant::now();
                         has_seeked_for_play = false;
@@ -142,9 +160,15 @@ impl ExecutionService {
             }
 
             let state_update = async {
-
                 if !is_playing || !has_seeked_for_play {
-                    Self::emit_snapshot(&self.sm_tx, &executor, has_compiler_error, is_playing, true, version);
+                    Self::emit_snapshot(
+                        &self.sm_tx,
+                        &executor,
+                        has_compiler_error,
+                        is_playing,
+                        true,
+                        version,
+                    );
 
                     has_seeked_for_play = true;
                     match executor.seek_to(target).await {
@@ -157,7 +181,14 @@ impl ExecutionService {
                         }
                     }
 
-                    Self::emit_snapshot(&self.sm_tx, &executor, has_compiler_error, is_playing, false, version);
+                    Self::emit_snapshot(
+                        &self.sm_tx,
+                        &executor,
+                        has_compiler_error,
+                        is_playing,
+                        false,
+                        version,
+                    );
                 }
 
                 while is_playing {
@@ -171,7 +202,7 @@ impl ExecutionService {
                     };
 
                     match executor.seek_primitive_anim_skip(max_slide).await {
-                        SeekPrimitiveAnimSkipResult::PrimitiveAnim => {},
+                        SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                         SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
                             // even in presentation mode, actually advance
                             if executor.state.timestamp.slide + 1 < max_slide {
@@ -192,21 +223,35 @@ impl ExecutionService {
                                     is_playing = false;
                                 }
                             }
-                            Err(_) => is_playing = false
+                            Err(_) => is_playing = false,
                         }
 
                         target = executor.state.timestamp;
 
-                        Self::emit_snapshot(&self.sm_tx, &executor, has_compiler_error, is_playing, false, version);
+                        Self::emit_snapshot(
+                            &self.sm_tx,
+                            &executor,
+                            has_compiler_error,
+                            is_playing,
+                            false,
+                            version,
+                        );
 
-                        let full_elapsed = Instant::now().duration_since(last_update_at).as_secs_f64();
+                        let full_elapsed =
+                            Instant::now().duration_since(last_update_at).as_secs_f64();
                         last_update_at = Instant::now();
                         if target_dt > full_elapsed {
                             Timer::after(Duration::from_secs_f64(target_dt - full_elapsed)).await;
                         }
-                    }
-                    else {
-                        Self::emit_snapshot(&self.sm_tx, &executor, has_compiler_error, is_playing, false, version);
+                    } else {
+                        Self::emit_snapshot(
+                            &self.sm_tx,
+                            &executor,
+                            has_compiler_error,
+                            is_playing,
+                            false,
+                            version,
+                        );
                     }
                 }
             };
@@ -226,25 +271,28 @@ impl ExecutionService {
         }
     }
 
-    fn emit_snapshot(sm_tx: &UnboundedSender<ServiceManagerMessage>, executor: &Executor, has_compiler_error: bool, is_playing: bool, is_loading: bool, version: usize) {
+    fn emit_snapshot(
+        sm_tx: &UnboundedSender<ServiceManagerMessage>,
+        executor: &Executor,
+        has_compiler_error: bool,
+        is_playing: bool,
+        is_loading: bool,
+        version: usize,
+    ) {
         let status = if has_compiler_error {
             ExecutionStatus::CompileError
-        }
-        else if !executor.state.errors.is_empty() {
+        } else if !executor.state.errors.is_empty() {
             ExecutionStatus::RuntimeError
-        }
-        else if is_loading {
+        } else if is_loading {
             ExecutionStatus::Seeking
-        }
-        else if is_playing {
+        } else if is_playing {
             ExecutionStatus::Playing
-        }
-        else {
+        } else {
             ExecutionStatus::Paused
         };
 
         let snapshot = ExecutionSnapshot {
-            current_timestamp: executor.internal_to_user_timestamp( executor.state.timestamp),
+            current_timestamp: executor.internal_to_user_timestamp(executor.state.timestamp),
             status,
             slide_count: executor.real_slide_count(),
             slide_durations: executor.real_slide_durations(),
@@ -254,7 +302,9 @@ impl ExecutionService {
             .unbounded_send(ServiceManagerMessage::ExecutionStateUpdated { snapshot })
             .ok();
 
-        let diagnostics = executor.state.errors
+        let diagnostics = executor
+            .state
+            .errors
             .iter()
             .map(|(msg, span)| Diagnostic {
                 dtype: crate::state::diagnostics::DiagnosticType::RuntimeError,
@@ -266,12 +316,17 @@ impl ExecutionService {
 
         if has_compiler_error {
             sm_tx
-                 .unbounded_send(ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics: Vec::new(), version })
-                 .ok();
-        }
-        else {
+                .unbounded_send(ServiceManagerMessage::UpdateRuntimeDiagnostics {
+                    diagnostics: Vec::new(),
+                    version,
+                })
+                .ok();
+        } else {
             sm_tx
-                .unbounded_send(ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics, version })
+                .unbounded_send(ServiceManagerMessage::UpdateRuntimeDiagnostics {
+                    diagnostics,
+                    version,
+                })
                 .ok();
         }
     }

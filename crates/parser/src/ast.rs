@@ -10,7 +10,7 @@ pub enum SectionType {
     StandardLibrary,
     UserLibrary,
     Init,
-    Slide
+    Slide,
 }
 
 impl SectionType {
@@ -41,7 +41,7 @@ impl SectionBundle {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Section {
     pub body: Vec<SpanTagged<Statement>>,
-    pub section_type: SectionType
+    pub section_type: SectionType,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -87,7 +87,7 @@ pub enum DirectionalLiteral {
     Left(f64),
     Right(f64),
     Forward(f64),
-    Backward(f64)
+    Backward(f64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -98,21 +98,21 @@ pub enum Literal {
     Directional(DirectionalLiteral),
     Imaginary(f64),
     Vector(Vec<SpanTagged<Expression>>),
-    Map(Vec<(SpanTagged<Expression>, SpanTagged<Expression>)>)
+    Map(Vec<(SpanTagged<Expression>, SpanTagged<Expression>)>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LambdaArg {
     pub identifier: SpanTagged<IdentifierDeclaration>,
     pub default_value: Option<SpanTagged<Expression>>,
-    pub must_be_reference: bool
+    pub must_be_reference: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LambdaDefinition {
     // identifier and default value
     pub args: Vec<LambdaArg>,
-    pub body: SpanTagged<LambdaBody>
+    pub body: SpanTagged<LambdaBody>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -123,17 +123,17 @@ pub enum LambdaBody {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperatorDefinition {
-    pub lambda: BoxSpanTagged<Expression>
+    pub lambda: BoxSpanTagged<Expression>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Block {
-    pub body: Vec<SpanTagged<Statement>>
+    pub body: Vec<SpanTagged<Statement>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Anim {
-    pub body: Vec<SpanTagged<Statement>>
+    pub body: Vec<SpanTagged<Statement>>,
 }
 
 pub type OperatorPriority = usize;
@@ -164,8 +164,7 @@ impl BinaryOperatorType {
     /// higher priorty -> binds tighter
     pub fn priority(&self) -> OperatorPriority {
         match self {
-            BinaryOperatorType::Assign
-            | BinaryOperatorType::DotAssign => 1,
+            BinaryOperatorType::Assign | BinaryOperatorType::DotAssign => 1,
 
             BinaryOperatorType::Append => 2,
 
@@ -180,8 +179,7 @@ impl BinaryOperatorType {
             | BinaryOperatorType::Ge
             | BinaryOperatorType::In => 5,
 
-            BinaryOperatorType::Add
-            | BinaryOperatorType::Subtract => 6,
+            BinaryOperatorType::Add | BinaryOperatorType::Subtract => 6,
 
             BinaryOperatorType::Multiply
             | BinaryOperatorType::Divide
@@ -213,14 +211,14 @@ pub struct BinaryOperator {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnaryOperatorType {
     Negative,
-    Not
+    Not,
 }
 
 impl UnaryOperatorType {
     pub fn priority(&self) -> OperatorPriority {
         match self {
             UnaryOperatorType::Negative => 8,
-            UnaryOperatorType::Not => 8
+            UnaryOperatorType::Not => 8,
         }
     }
 }
@@ -234,16 +232,21 @@ pub struct UnaryPreOperator {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Subscript {
     pub base: BoxSpanTagged<Expression>,
-    pub index: BoxSpanTagged<Expression>
+    pub index: BoxSpanTagged<Expression>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Property {
     pub base: BoxSpanTagged<Expression>,
-    pub attribute: SpanTagged<IdentifierReference>
+    pub attribute: SpanTagged<IdentifierReference>,
 }
 
-pub type InvocationArguments =  SpanTagged<Vec<(Option<SpanTagged<IdentifierDeclaration>>, SpanTagged<Expression>)>>;
+pub type InvocationArguments = SpanTagged<
+    Vec<(
+        Option<SpanTagged<IdentifierDeclaration>>,
+        SpanTagged<Expression>,
+    )>,
+>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LambdaInvocation {
@@ -272,7 +275,7 @@ pub enum IdentifierReference {
     Value(String),
     Reference(String),
     StatefulReference(String),
-    StatefulDereference(String)
+    StatefulDereference(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -281,7 +284,7 @@ pub enum VariableType {
     Var,
     Mesh,
     State,
-    Param
+    Param,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -293,20 +296,20 @@ pub struct Declaration {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Return {
-    pub value: SpanTagged<Expression>
+    pub value: SpanTagged<Expression>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct While {
     pub condition: SpanTagged<Expression>,
-    pub body: SpanTagged<Vec<SpanTagged<Statement>>>
+    pub body: SpanTagged<Vec<SpanTagged<Statement>>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct For {
     pub var_name: SpanTagged<IdentifierDeclaration>,
     pub container: SpanTagged<Expression>,
-    pub body: SpanTagged<Vec<SpanTagged<Statement>>>
+    pub body: SpanTagged<Vec<SpanTagged<Statement>>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -318,5 +321,5 @@ pub struct If {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Play {
-    pub animations: SpanTagged<Expression>
+    pub animations: SpanTagged<Expression>,
 }

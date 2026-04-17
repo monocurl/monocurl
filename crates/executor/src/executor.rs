@@ -1,13 +1,13 @@
 pub mod access;
 pub mod anim;
+pub mod cacheing;
 pub mod invoke;
 pub mod lerp;
 pub mod ops;
-pub mod cacheing;
 
 use std::collections::BTreeSet;
-use std::{future::Future, rc::Rc};
 use std::pin::Pin;
+use std::{future::Future, rc::Rc};
 
 use bytecode::{Bytecode, Instruction};
 use structs::futures::PeriodicYielder;
@@ -26,11 +26,9 @@ use crate::{
     },
 };
 
-pub type StdlibReturn<'a> =
-    Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
+pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
 
-pub type StdlibFunc =
-    for<'a> fn(&'a mut Executor, usize) -> StdlibReturn<'a>;
+pub type StdlibFunc = for<'a> fn(&'a mut Executor, usize) -> StdlibReturn<'a>;
 
 enum SeekPrimitiveResult {
     Error(ExecutorError),
@@ -41,12 +39,12 @@ enum SeekPrimitiveResult {
 pub enum SeekPrimitiveAnimSkipResult {
     Error(ExecutorError),
     PrimitiveAnim,
-    NoAnimsLeft
+    NoAnimsLeft,
 }
 
 pub enum SeekToResult {
     Error(ExecutorError),
-    SeekedTo(Timestamp)
+    SeekedTo(Timestamp),
 }
 
 /// result of executing a single instruction
@@ -71,9 +69,8 @@ struct PeriodicMemoryChecker {
 impl PeriodicMemoryChecker {
     fn new(limit_bytes: u64, period: u32) -> Self {
         let pid = sysinfo::get_current_pid().ok();
-        let refresh_kind = RefreshKind::new().with_processes(
-            ProcessRefreshKind::new().with_memory(),
-        );
+        let refresh_kind =
+            RefreshKind::new().with_processes(ProcessRefreshKind::new().with_memory());
 
         Self {
             count: 0,
@@ -158,7 +155,9 @@ impl Executor {
 
     pub fn internal_to_user_timestamp(&self, internal_ts: Timestamp) -> Timestamp {
         Timestamp {
-            slide: internal_ts.slide.saturating_sub(self.bytecode.non_slide_sections()),
+            slide: internal_ts
+                .slide
+                .saturating_sub(self.bytecode.non_slide_sections()),
             time: internal_ts.time,
         }
     }
@@ -193,7 +192,9 @@ impl Executor {
         let mut next_ip = (section_idx as u16, (instr_idx + 1) as u32);
         self.state.stack_mut(stack_idx).ip = next_ip;
 
-        let ret = self.execute_instr(section_idx, stack_idx, instr, &mut next_ip).await;
+        let ret = self
+            .execute_instr(section_idx, stack_idx, instr, &mut next_ip)
+            .await;
         // skip ip overwrite for freed stacks (child stacks freed by EndOfExecutionHead)
         if self.state.execution_stacks[stack_idx].is_some() {
             self.state.stack_mut(stack_idx).ip = next_ip;
@@ -202,7 +203,13 @@ impl Executor {
     }
 
     #[inline]
-    async fn execute_instr(&mut self, section_idx: usize, stack_idx: usize, instr: Instruction, next_ip: &mut InstructionPointer) -> ExecSingle {
+    async fn execute_instr(
+        &mut self,
+        section_idx: usize,
+        stack_idx: usize,
+        instr: Instruction,
+        next_ip: &mut InstructionPointer,
+    ) -> ExecSingle {
         match instr {
             // ----- push constants -----
             Instruction::PushInt { index } => {
@@ -229,7 +236,9 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(Value::String(s));
             }
             Instruction::PushEmptyMap => {
-                self.state.stack_mut(stack_idx).push(Value::Map(Rc::new(Map::new())));
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::Map(Rc::new(Map::new())));
             }
             Instruction::PushEmptyVector => {
                 self.state
@@ -252,7 +261,11 @@ impl Executor {
             }
 
             // ----- stack reads -----
-            Instruction::PushCopy { stack_delta, mutable, pop_tos } => {
+            Instruction::PushCopy {
+                stack_delta,
+                mutable,
+                pop_tos,
+            } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let resolved = if mutable {
                     // want to keep the nested layers of lvalue
@@ -265,7 +278,10 @@ impl Executor {
                 }
                 self.state.stack_mut(stack_idx).push(resolved);
             }
-            Instruction::PushLvalue { stack_delta, force_ephemeral } => {
+            Instruction::PushLvalue {
+                stack_delta,
+                force_ephemeral,
+            } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let rc = match val {
                     Value::Lvalue(rc) => rc,
@@ -290,10 +306,12 @@ impl Executor {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let leader_cell_rc = match val.as_lvalue_rc() {
                     Some(rc) => rc,
-                    None => return ExecSingle::Error(ExecutorError::type_error(
-                        "state or param variable",
-                        val.type_name(),
-                    )),
+                    None => {
+                        return ExecSingle::Error(ExecutorError::type_error(
+                            "state or param variable",
+                            val.type_name(),
+                        ));
+                    }
                 };
                 if !matches!(&*leader_cell_rc.borrow(), Value::Leader(_)) {
                     return ExecSingle::Error(ExecutorError::type_error(
@@ -305,7 +323,9 @@ impl Executor {
                     roots: vec![leader_cell_rc.clone()],
                     root: StatefulNode::LeaderRef(leader_cell_rc),
                 };
-                self.state.stack_mut(stack_idx).push(Value::Stateful(stateful));
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::Stateful(stateful));
             }
 
             // ----- labels -----
@@ -339,7 +359,7 @@ impl Executor {
                         return ExecSingle::Error(ExecutorError::type_error(
                             "lambda",
                             val.type_name(),
-                        ))
+                        ));
                     }
                 }
             }
@@ -351,7 +371,14 @@ impl Executor {
                 num_args,
             } => {
                 return self
-                    .exec_lambda_invoke(stack_idx, section_idx, stateful, labeled, num_args, next_ip)
+                    .exec_lambda_invoke(
+                        stack_idx,
+                        section_idx,
+                        stateful,
+                        labeled,
+                        num_args,
+                        next_ip,
+                    )
                     .await;
             }
             Instruction::OperatorInvoke {
@@ -360,7 +387,14 @@ impl Executor {
                 num_args,
             } => {
                 return self
-                    .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args, next_ip)
+                    .exec_operator_invoke(
+                        stack_idx,
+                        section_idx,
+                        stateful,
+                        labeled,
+                        num_args,
+                        next_ip,
+                    )
                     .await;
             }
             Instruction::ConvertToLiveOperator => {
@@ -411,13 +445,21 @@ impl Executor {
                 }
             }
             Instruction::Not => {
-                let val = match self.state.stack_mut(stack_idx).pop().elide_wrappers(self).await {
+                let val = match self
+                    .state
+                    .stack_mut(stack_idx)
+                    .pop()
+                    .elide_wrappers(self)
+                    .await
+                {
                     Ok(val) => val,
                     Err(e) => return ExecSingle::Error(e),
                 };
                 match val.check_truthy() {
                     Ok(truthy) => {
-                        self.state.stack_mut(stack_idx).push(Value::Integer(!truthy as i64));
+                        self.state
+                            .stack_mut(stack_idx)
+                            .push(Value::Integer(!truthy as i64));
                     }
                     Err(e) => return ExecSingle::Error(e),
                 }
@@ -471,12 +513,10 @@ impl Executor {
 fn resolve_dereference(val: &Value) -> Value {
     let rc = match val {
         Value::Lvalue(rc) => rc.borrow().clone(),
-        Value::WeakLvalue(weak) => {
-            match weak.upgrade() {
-                Some(rc) => rc.borrow().clone(),
-                None => return Value::Nil,
-            }
-        }
+        Value::WeakLvalue(weak) => match weak.upgrade() {
+            Some(rc) => rc.borrow().clone(),
+            None => return Value::Nil,
+        },
         other => return other.clone(),
     };
     match rc {

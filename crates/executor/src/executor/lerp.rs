@@ -6,10 +6,11 @@ use crate::{
     error::ExecutorError,
     executor::invoke::fill_defaults,
     value::{
+        InstructionPointer, Value,
         container::{HashableKey, List, Map},
         invoked_function::InvokedFunction,
-        invoked_operator::{extract_operator_result, InvokedOperator},
-        rc_value, InstructionPointer, Value,
+        invoked_operator::{InvokedOperator, extract_operator_result},
+        rc_value,
     },
 };
 
@@ -144,7 +145,9 @@ impl Executor {
         t: f64,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            if !Value::values_equal(&a_inv.operator, &b_inv.operator) || a_inv.labels != b_inv.labels {
+            if !Value::values_equal(&a_inv.operator, &b_inv.operator)
+                || a_inv.labels != b_inv.labels
+            {
                 return Err(ExecutorError::Other(format!(
                     "cannot lerp invoked operators with different operators or labeled arguments ({})",
                     format_label_mismatch(
@@ -164,7 +167,11 @@ impl Executor {
             }
 
             let lerped_operand = self
-                .lerp(a_inv.operand.as_ref().clone(), b_inv.operand.as_ref().clone(), t)
+                .lerp(
+                    a_inv.operand.as_ref().clone(),
+                    b_inv.operand.as_ref().clone(),
+                    t,
+                )
                 .await
                 .map_err(|err| lerp_context("cannot lerp operator operands".into(), err))?;
 
@@ -206,14 +213,16 @@ impl Executor {
             let raw = self.eagerly_invoke_lambda(&operator.0, &full_args).await?;
             let (initial, modified) = extract_operator_result(raw)?;
 
-            Ok(Value::InvokedOperator(Rc::new(crate::value::invoked_operator::build_invoked_operator(
-                operator_value,
-                lerped_operand,
-                lerped_args,
-                a_inv.labels.clone(),
-                initial,
-                modified,
-            ))))
+            Ok(Value::InvokedOperator(Rc::new(
+                crate::value::invoked_operator::build_invoked_operator(
+                    operator_value,
+                    lerped_operand,
+                    lerped_args,
+                    a_inv.labels.clone(),
+                    initial,
+                    modified,
+                ),
+            )))
         })
     }
 

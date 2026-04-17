@@ -24,9 +24,7 @@ impl ExecutionCache {
         let mut entries = Vec::new();
         entries.resize_with(bytecode.sections.len(), || None);
 
-        Self {
-            entries
-        }
+        Self { entries }
     }
 }
 
@@ -39,14 +37,18 @@ impl Executor {
             fn section_eq(a: &Arc<SectionBytecode>, b: &Arc<SectionBytecode>) -> bool {
                 Arc::ptr_eq(a, b) || *a == *b
             }
-            if i >= bytecode.sections.len() || !section_eq(&self.bytecode.sections[i], &bytecode.sections[i]) {
+            if i >= bytecode.sections.len()
+                || !section_eq(&self.bytecode.sections[i], &bytecode.sections[i])
+            {
                 first_invalid = Some(i);
                 break;
             }
         }
 
         self.bytecode = bytecode;
-        self.cache.entries.resize_with(self.bytecode.sections.len(), || None);
+        self.cache
+            .entries
+            .resize_with(self.bytecode.sections.len(), || None);
         if let Some(i) = first_invalid {
             self.cache.entries[i..]
                 .iter_mut()
@@ -54,12 +56,12 @@ impl Executor {
 
             // possibly go backwards to latest valid state
             if self.state.timestamp.slide >= i {
-                let latest = self.cache.entries
-                    .iter()
-                    .rposition(|en| en.is_some());
+                let latest = self.cache.entries.iter().rposition(|en| en.is_some());
 
                 match latest {
-                    Some(j) => self.state = self.cache.entries[j].as_ref().unwrap().state_after.clone(),
+                    Some(j) => {
+                        self.state = self.cache.entries[j].as_ref().unwrap().state_after.clone()
+                    }
                     None => self.state = ExecutionState::new(),
                 };
             }
@@ -75,16 +77,15 @@ impl Executor {
             // just start from here
             self.state.pending_playback_time = 0.0;
             return;
-        }
-        else {
-            let latest = self.cache.entries
-                .iter()
-                .rfind(|en| en.is_some() && en.as_ref().unwrap().state_after.timestamp <= target);
+        } else {
+            let latest =
+                self.cache.entries.iter().rfind(|en| {
+                    en.is_some() && en.as_ref().unwrap().state_after.timestamp <= target
+                });
 
             if let Some(en) = latest {
                 self.state = en.as_ref().unwrap().state_after.clone();
-            }
-            else {
+            } else {
                 self.state = ExecutionState::new();
             }
         }
@@ -105,7 +106,9 @@ impl Executor {
     }
 
     pub fn real_slide_durations(&self) -> Vec<Option<f64>> {
-        self.cache.entries.iter()
+        self.cache
+            .entries
+            .iter()
             .skip(self.bytecode.non_slide_sections())
             .map(|e| e.as_ref().map(|en| en.slide_duration()))
             .collect()

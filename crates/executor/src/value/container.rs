@@ -16,7 +16,7 @@ pub struct List {
 impl List {
     pub fn new() -> Self {
         Self {
-            elements: SmallVec::new()
+            elements: SmallVec::new(),
         }
     }
 

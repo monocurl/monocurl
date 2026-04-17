@@ -1,1 +1,3 @@
+let Set = |vars = []| __monocurl__native__ set(vars)
+let Lerp = |time = 1, vars = []| __monocurl__native__ lerp_anim(vars, time)
 let Wait = |time = 1| __monocurl__native__ wait(time)

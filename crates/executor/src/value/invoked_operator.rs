@@ -4,8 +4,8 @@ use smallvec::SmallVec;
 
 use crate::{
     error::ExecutorError,
-    executor::{invoke::fill_defaults, Executor},
-    value::{invoked_function::InvokedFunction, Value},
+    executor::{Executor, invoke::fill_defaults},
+    value::{Value, invoked_function::InvokedFunction},
 };
 
 /// result of applying an operator to an operand, possibly with labeled arguments.
@@ -62,7 +62,7 @@ impl InvokedOperator {
                     let operator = match this.operator.as_ref().clone().elide_lvalue() {
                         Value::Operator(op) => op,
                         other => {
-                            return Err(ExecutorError::type_error("operator", other.type_name()))
+                            return Err(ExecutorError::type_error("operator", other.type_name()));
                         }
                     };
 

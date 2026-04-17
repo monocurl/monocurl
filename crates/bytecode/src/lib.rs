@@ -19,51 +19,107 @@ pub struct AnimPrototype {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Instruction {
     /* push constants */
-    PushInt { index: u32 },
-    PushFloat { index: u32 },
+    PushInt {
+        index: u32,
+    },
+    PushFloat {
+        index: u32,
+    },
     // pushes complex(0, float_pool[index])
-    PushImaginary { index: u32 },
-    PushChar { char: char },
-    PushString { index: u32 },
+    PushImaginary {
+        index: u32,
+    },
+    PushChar {
+        char: char,
+    },
+    PushString {
+        index: u32,
+    },
     PushEmptyMap,
     PushEmptyVector,
 
     // register tos as a leader; name_index into the string pool for debugging
-    ConvertParam { name_index: u32 },
-    ConvertState { name_index: u32 },
-    ConvertMesh { name_index: u32 },
+    ConvertParam {
+        name_index: u32,
+    },
+    ConvertState {
+        name_index: u32,
+    },
+    ConvertMesh {
+        name_index: u32,
+    },
     ConvertVar,
 
     // pops old tos if flag is true
     // used for map
-    PushCopy { pop_tos: bool, mutable: bool, stack_delta: i32 },
-    PushLvalue { force_ephemeral: bool, stack_delta: i32 },
+    PushCopy {
+        pop_tos: bool,
+        mutable: bool,
+        stack_delta: i32,
+    },
+    PushLvalue {
+        force_ephemeral: bool,
+        stack_delta: i32,
+    },
 
-    PushDereference { stack_delta: i32 },
-    PushStateful { stack_delta: i32 },
+    PushDereference {
+        stack_delta: i32,
+    },
+    PushStateful {
+        stack_delta: i32,
+    },
 
     // u16::MAX indicates unlabeled
-    BufferLabelOrAttribute { string_index: u32 },
+    BufferLabelOrAttribute {
+        string_index: u32,
+    },
 
     // pops capture_count lvalues + prototype.default_arg_count values, pushes lambda
-    MakeLambda { capture_count: u16, prototype_index: u32 },
+    MakeLambda {
+        capture_count: u16,
+        prototype_index: u32,
+    },
     // pops capture_count lvalues, pushes anim
-    MakeAnim { capture_count: u16, prototype_index: u32 },
+    MakeAnim {
+        capture_count: u16,
+        prototype_index: u32,
+    },
     // pops a lambda, pushes an operator wrapping it
     MakeOperator,
 
-    OperatorInvoke { stateful: bool, labeled: bool, num_args: u32 },
-    LambdaInvoke { stateful: bool, labeled: bool, num_args: u32 },
+    OperatorInvoke {
+        stateful: bool,
+        labeled: bool,
+        num_args: u32,
+    },
+    LambdaInvoke {
+        stateful: bool,
+        labeled: bool,
+        num_args: u32,
+    },
     // pops the operator lambda result ([initial, modified] list) and pushes the live value.
     // for labeled invocations the InvokedOperator is already on stack; this is a no-op then.
     ConvertToLiveOperator,
-    Jump { section: u16, to: u32 },
+    Jump {
+        section: u16,
+        to: u32,
+    },
     // pops TOS; jumps when truthy
-    ConditionalJump { section: u16, to: u32 },
-    Return { stack_delta: i32 },
-    Pop { count: u32 },
+    ConditionalJump {
+        section: u16,
+        to: u32,
+    },
+    Return {
+        stack_delta: i32,
+    },
+    Pop {
+        count: u32,
+    },
 
-    NativeInvoke { index: u16, arg_count: u16 },
+    NativeInvoke {
+        index: u16,
+        arg_count: u16,
+    },
 
     Play,
 
@@ -71,8 +127,13 @@ pub enum Instruction {
     Negate,
     Not,
 
-    Subscript { mutable: bool },
-    Attribute { mutable: bool, string_index: u32 },
+    Subscript {
+        mutable: bool,
+    },
+    Attribute {
+        mutable: bool,
+        string_index: u32,
+    },
 
     /* binary (pop 2, push 1) */
     Add,
@@ -96,7 +157,6 @@ pub enum Instruction {
 }
 const _: () = assert!(std::mem::size_of::<Instruction>() == 8);
 
-
 #[derive(Clone, PartialEq)]
 pub struct InstructionAnnotation {
     pub source_loc: Span8,
@@ -106,7 +166,7 @@ pub struct InstructionAnnotation {
 pub struct SectionFlags {
     pub is_stdlib: bool,
     pub is_library: bool,
-    pub is_init: bool
+    pub is_init: bool,
 }
 
 #[derive(Clone, PartialEq)]

@@ -1,35 +1,39 @@
 use std::borrow::Cow;
 
+use crate::{
+    actions::{
+        Copy, Cut, EpsilonBackward, EpsilonForward, NextSlide, Paste, PrevSlide, Quit, Redo,
+        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying,
+        TogglePresentationMode, Undo,
+    },
+    editor::text_editor,
+    theme::ThemeSettings,
+    window::MonocurlWindow,
+};
 use gpui::*;
 use structs::assets::Assets;
-use crate::{actions::{Copy, Cut, EpsilonBackward, EpsilonForward, NextSlide, Paste, PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying, TogglePresentationMode, Undo}, editor::text_editor, theme::ThemeSettings, window::MonocurlWindow};
 
+mod actions;
+mod components;
 mod document_view;
 mod editor;
 mod home_view;
 mod navbar_view;
+mod services;
 mod state;
 mod theme;
 mod timeline;
 mod viewport;
 mod window;
-mod actions;
-mod components;
-mod services;
 
 pub struct MonocurlLauncher;
 
 impl MonocurlLauncher {
-
     fn setup_fonts(cx: &mut App) {
         cx.text_system()
             .add_fonts(vec![
-                Cow::Owned(
-                    std::fs::read(Assets::font("IBMPlexMono-Regular.ttf")).unwrap()
-                ),
-                Cow::Owned(
-                    std::fs::read(Assets::font("IBMPlexMono-Italic.ttf")).unwrap()
-                )
+                Cow::Owned(std::fs::read(Assets::font("IBMPlexMono-Regular.ttf")).unwrap()),
+                Cow::Owned(std::fs::read(Assets::font("IBMPlexMono-Italic.ttf")).unwrap()),
             ])
             .unwrap();
 
@@ -62,7 +66,7 @@ impl MonocurlLauncher {
                     MenuItem::action("Save", SaveActiveDocument),
                     MenuItem::action("Save As", SaveActiveDocumentCustomPath),
                     MenuItem::separator(),
-                    MenuItem::action("Present", TogglePresentationMode)
+                    MenuItem::action("Present", TogglePresentationMode),
                 ],
             },
             Menu {
@@ -92,13 +96,12 @@ impl MonocurlLauncher {
                 name: "Help".into(),
                 items: vec![],
             },
-            ]
-        );
+        ]);
     }
 
     fn setup_modules(cx: &mut App) {
-       document_view::init(cx);
-       text_editor::init(cx);
+        document_view::init(cx);
+        text_editor::init(cx);
     }
 
     fn create_window(cx: &mut App) {
@@ -111,8 +114,10 @@ impl MonocurlLauncher {
             focus: true,
             ..Default::default()
         };
-        cx.open_window(options, |window, cx| cx.new(|cx| MonocurlWindow::new(window, cx)))
-            .unwrap();
+        cx.open_window(options, |window, cx| {
+            cx.new(|cx| MonocurlWindow::new(window, cx))
+        })
+        .unwrap();
 
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
@@ -132,13 +137,12 @@ impl MonocurlLauncher {
             Self::create_window(cx);
         });
     }
-
 }
 
 fn main() {
     env_logger::Builder::from_default_env()
-          .filter_level(log::LevelFilter::Info)
-          .init();
+        .filter_level(log::LevelFilter::Info)
+        .init();
 
     MonocurlLauncher::launch();
 }

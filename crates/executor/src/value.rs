@@ -293,19 +293,24 @@ impl Value {
 
 fn prim_anim_equal(a: &PrimitiveAnim, b: &PrimitiveAnim) -> bool {
     match (a, b) {
-        (PrimitiveAnim::Set, PrimitiveAnim::Set) => true,
+        (PrimitiveAnim::Set { candidates: a }, PrimitiveAnim::Set { candidates: b }) => {
+            Value::values_equal(a, b)
+        }
         (PrimitiveAnim::Wait { time: ta }, PrimitiveAnim::Wait { time: tb }) => ta == tb,
         (
             PrimitiveAnim::Lerp {
+                candidates: ca,
                 time: ta,
                 progression: pa,
             },
             PrimitiveAnim::Lerp {
+                candidates: cb,
                 time: tb,
                 progression: pb,
             },
         ) => {
             ta == tb
+                && Value::values_equal(ca, cb)
                 && match (pa, pb) {
                     (None, None) => true,
                     (Some(a), Some(b)) => Value::values_equal(a, b),
@@ -321,8 +326,16 @@ fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
         (StatefulNode::LeaderRef(a), StatefulNode::LeaderRef(b)) => Rc::ptr_eq(a, b),
         (StatefulNode::Constant(a), StatefulNode::Constant(b)) => Value::values_equal(a, b),
         (
-            StatefulNode::LabeledCall { func: af, args: aa, labels: al },
-            StatefulNode::LabeledCall { func: bf, args: ba, labels: bl },
+            StatefulNode::LabeledCall {
+                func: af,
+                args: aa,
+                labels: al,
+            },
+            StatefulNode::LabeledCall {
+                func: bf,
+                args: ba,
+                labels: bl,
+            },
         ) => {
             al == bl
                 && stateful_equal(af, bf)
@@ -330,8 +343,18 @@ fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
                 && aa.iter().zip(ba.iter()).all(|(a, b)| stateful_equal(a, b))
         }
         (
-            StatefulNode::LabeledOperatorCall { operator: ao, operand: aop, extra_args: aa, labels: al },
-            StatefulNode::LabeledOperatorCall { operator: bo, operand: bop, extra_args: ba, labels: bl },
+            StatefulNode::LabeledOperatorCall {
+                operator: ao,
+                operand: aop,
+                extra_args: aa,
+                labels: al,
+            },
+            StatefulNode::LabeledOperatorCall {
+                operator: bo,
+                operand: bop,
+                extra_args: ba,
+                labels: bl,
+            },
         ) => {
             al == bl
                 && stateful_equal(ao, bo)

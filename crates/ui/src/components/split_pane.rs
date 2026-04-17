@@ -93,8 +93,16 @@ impl Element for Split {
         let is_horizontal = self.orientation == Axis::Horizontal;
 
         // Get main and cross axis dimensions
-        let main_axis = if is_horizontal { bounds.size.width } else { bounds.size.height };
-        let cross_axis = if is_horizontal { bounds.size.height } else { bounds.size.width };
+        let main_axis = if is_horizontal {
+            bounds.size.width
+        } else {
+            bounds.size.height
+        };
+        let cross_axis = if is_horizontal {
+            bounds.size.height
+        } else {
+            bounds.size.width
+        };
         let split_pos = main_axis * flex;
 
         // Helper to create bounds based on orientation
@@ -102,12 +110,18 @@ impl Element for Split {
             if is_horizontal {
                 Bounds {
                     origin: point(bounds.origin.x + main_offset, bounds.origin.y),
-                    size: Size { width: main_size, height: cross_axis },
+                    size: Size {
+                        width: main_size,
+                        height: cross_axis,
+                    },
                 }
             } else {
                 Bounds {
                     origin: point(bounds.origin.x, bounds.origin.y + main_offset),
-                    size: Size { width: cross_axis, height: main_size },
+                    size: Size {
+                        width: cross_axis,
+                        height: main_size,
+                    },
                 }
             }
         };
@@ -117,8 +131,10 @@ impl Element for Split {
         let handle_bounds = make_bounds(split_pos - px(HANDLE_SIZE / 2.0), px(HANDLE_SIZE));
         let divider_bounds = make_bounds(split_pos, px(DIVIDER_SIZE));
 
-        self.second.prepaint_as_root(second_bounds.origin, second_bounds.size.into(), window, cx);
-        self.first.prepaint_as_root(first_bounds.origin, first_bounds.size.into(), window, cx);
+        self.second
+            .prepaint_as_root(second_bounds.origin, second_bounds.size.into(), window, cx);
+        self.first
+            .prepaint_as_root(first_bounds.origin, first_bounds.size.into(), window, cx);
 
         SplitLayout {
             container_bounds: bounds,
@@ -163,11 +179,7 @@ pub struct SplitLayout {
     axis: Axis,
 }
 
-fn paint_split_handle(
-    layout: &mut SplitLayout,
-    window: &mut Window,
-    _cx: &mut App,
-) {
+fn paint_split_handle(layout: &mut SplitLayout, window: &mut Window, _cx: &mut App) {
     let cursor_style = match layout.axis {
         Axis::Horizontal => CursorStyle::ResizeColumn,
         Axis::Vertical => CursorStyle::ResizeRow,

@@ -3,13 +3,18 @@ use std::{cell::RefCell, isize, ops::Range, rc::Rc};
 use gpui::{App, Context, Entity, ScrollHandle, Window};
 use lexer::token::Token;
 use smallvec::SmallVec;
-use structs::{rope::{Attribute, RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str}, text::{Count8, Count16, Location8, Span8, Span16}};
+use structs::{
+    rope::{Attribute, RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str},
+    text::{Count8, Count16, Location8, Span8, Span16},
+};
 
-use crate::{editor::text_editor::TextEditor, state::diagnostics::{Diagnostic, DiagnosticContainer}};
+use crate::{
+    editor::text_editor::TextEditor,
+    state::diagnostics::{Diagnostic, DiagnosticContainer},
+};
 
 pub type LexData = Token;
 pub type StaticAnalysisData = bool;
-
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AutoCompleteCategory {
@@ -26,7 +31,14 @@ pub struct AutoCompleteItem {
 }
 
 impl AutoCompleteItem {
-    pub fn apply(&self, replacement_size: Count8, to: &mut TextEditor, state: Entity<TextualState>, window: &mut Window, cx: &mut App) {
+    pub fn apply(
+        &self,
+        replacement_size: Count8,
+        to: &mut TextEditor,
+        state: Entity<TextualState>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let cursor = {
             let state = state.read(cx);
             state.loc8_to_offset8(state.cursor().anchor)
@@ -69,14 +81,12 @@ impl AutoCompleteState {
 
     fn refilter(&mut self, can_only_shrink: bool) {
         let base_indices: Vec<_> = if can_only_shrink {
-            self.filtered_items
-                .iter()
-                .map(|(i, _)| *i)
-                .collect()
+            self.filtered_items.iter().map(|(i, _)| *i).collect()
         } else {
             (0..self.items.len()).collect()
         };
-        self.filtered_items = base_indices.into_iter()
+        self.filtered_items = base_indices
+            .into_iter()
             .filter_map(|i| {
                 let item = &self.items[i];
                 // only allow if cursor_token is a subsequence of item.head
@@ -107,61 +117,76 @@ impl AutoCompleteState {
             .collect();
         // heuristic for ordering items
         self.filtered_items.sort_by_key(|(idx, indices)| {
-            (indices.iter().map(|x| *x * *x).sum::<usize>(), self.items[*idx].head.len())
+            (
+                indices.iter().map(|x| *x * *x).sum::<usize>(),
+                self.items[*idx].head.len(),
+            )
         });
 
         self.scroll_handle.scroll_to_item(0);
-        self.selected_index = self.filtered_items.get(0)
-            .map(|(i, _)| *i)
-            .unwrap_or(0);
+        self.selected_index = self.filtered_items.get(0).map(|(i, _)| *i).unwrap_or(0);
     }
 
     pub fn word_start(&self) -> Location8 {
-        Location8 { row: self.cursor_at.row, col: self.cursor_at.col - self.cursor_token.len() }
+        Location8 {
+            row: self.cursor_at.row,
+            col: self.cursor_at.col - self.cursor_token.len(),
+        }
     }
 
     pub fn transition(&mut self, old: Span8, new: &str, state: &TextualState) {
         if new.is_empty() && old.len() == 1 {
             if self.cursor_token.len() == 1 {
                 self.disable();
-            }
-            else if !self.forcefully_disabled {
+            } else if !self.forcefully_disabled {
                 // assume backspace
                 self.cursor_token.pop();
                 self.cursor_at.col = self.cursor_at.col.saturating_sub(old.len());
                 self.refilter(false);
             }
-        }
-        else if new.len() == 1 && old.is_empty() && self.alphanumeric(new.chars().next().unwrap()) {
+        } else if new.len() == 1 && old.is_empty() && self.alphanumeric(new.chars().next().unwrap())
+        {
             if self.forcefully_disabled {
                 // compute new state and enable
                 self.forcefully_disabled = false;
                 self.cursor_at = state.cursor().head;
                 self.cursor_at.col += new.len();
-                let chars_rev: String = state.text_rope
+                let chars_rev: String = state
+                    .text_rope
                     .rev_iterator(state.loc8_to_offset8(self.cursor_at))
                     .take_while(|c| self.alphanumeric(*c))
                     .collect();
                 self.cursor_token = chars_rev.chars().rev().collect();
                 self.refilter(false);
-            }
-            else {
+            } else {
                 self.cursor_at.col += new.len();
                 self.cursor_token.push_str(new);
                 self.refilter(true);
             }
-        }
-        else {
+        } else {
             self.disable();
         }
     }
 
-    pub fn apply_selected(this: &Rc<RefCell<Self>>, editor: &mut TextEditor, state: Entity<TextualState>, window: &mut Window, cx: &mut Context<TextEditor>) {
+    pub fn apply_selected(
+        this: &Rc<RefCell<Self>>,
+        editor: &mut TextEditor,
+        state: Entity<TextualState>,
+        window: &mut Window,
+        cx: &mut Context<TextEditor>,
+    ) {
         let index = this.borrow().selected_index;
         Self::apply_index(this, index, editor, state, window, cx);
     }
 
-    pub fn apply_index(this: &Rc<RefCell<Self>>, index: usize, editor: &mut TextEditor, state: Entity<TextualState>, window: &mut Window, cx: &mut Context<TextEditor>) {
+    pub fn apply_index(
+        this: &Rc<RefCell<Self>>,
+        index: usize,
+        editor: &mut TextEditor,
+        state: Entity<TextualState>,
+        window: &mut Window,
+        cx: &mut Context<TextEditor>,
+    ) {
         let (replacement_size, item) = {
             let this = this.borrow();
             let item = this.items[index].clone();
@@ -191,14 +216,18 @@ impl AutoCompleteState {
     }
 
     pub fn move_index(&mut self, delta: isize) {
-        let current_index_of_index = self.filtered_items.iter().position(|(i, _)| *i == self.selected_index)
+        let current_index_of_index = self
+            .filtered_items
+            .iter()
+            .position(|(i, _)| *i == self.selected_index)
             .unwrap_or(0);
-        let new_index = (current_index_of_index as isize + delta).clamp(0, ( self.filtered_items.len() as isize - 1).max(0)) as usize;
+        let new_index = (current_index_of_index as isize + delta)
+            .clamp(0, (self.filtered_items.len() as isize - 1).max(0))
+            as usize;
         if new_index < self.filtered_items.len() {
             self.selected_index = self.filtered_items[new_index].0;
             self.scroll_handle.scroll_to_item(new_index);
-        }
-        else {
+        } else {
             self.selected_index = 0;
         }
     }
@@ -223,7 +252,7 @@ pub struct ParameterPositionHint {
     pub args: Vec<String>,
     pub active_index: usize,
     pub function_start: Location8,
-    pub is_operator: bool
+    pub is_operator: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -241,7 +270,7 @@ impl ParameterPositionState {
     pub fn recheck_should_display(&mut self, cursor: Cursor) -> bool {
         if cursor.head != cursor.anchor {
             self.hint = None;
-            return false
+            return false;
         }
 
         self.hint.as_ref().is_some_and(|h| !h.args.is_empty())
@@ -256,7 +285,10 @@ pub struct Cursor {
 
 impl Cursor {
     pub fn collapsed(pos: Location8) -> Self {
-        Self { anchor: pos, head: pos }
+        Self {
+            anchor: pos,
+            head: pos,
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -308,11 +340,14 @@ pub struct TextualState {
 
     nested_transaction_count: usize,
     current_transaction: TransactionSummary,
-    transaction_listeners: Vec<Box<dyn FnMut(&TransactionSummary, &mut App) + Send>>
+    transaction_listeners: Vec<Box<dyn FnMut(&TransactionSummary, &mut App) + Send>>,
 }
 
 impl TextualState {
-    pub fn add_transaction_listener(&mut self,  f: impl FnMut(&TransactionSummary, &mut App) + Send + 'static) {
+    pub fn add_transaction_listener(
+        &mut self,
+        f: impl FnMut(&TransactionSummary, &mut App) + Send + 'static,
+    ) {
         self.transaction_listeners.push(Box::new(f));
     }
 
@@ -337,26 +372,39 @@ impl TextualState {
     }
 
     // returns the line range before and after that are affected
-    pub fn replace(&mut self, span: Span8, new_text: &str, _cx: &mut App) -> (Range<usize>, Range<usize>) {
+    pub fn replace(
+        &mut self,
+        span: Span8,
+        new_text: &str,
+        _cx: &mut App,
+    ) -> (Range<usize>, Range<usize>) {
         debug_assert!(self.nested_transaction_count > 0);
         let del_range = {
             let start_loc = self.offset8_to_loc8(span.start);
             let end_loc = self.offset8_to_loc8(span.end);
-            start_loc.row .. end_loc.row + 1
+            start_loc.row..end_loc.row + 1
         };
-        self.text_rope = self.text_rope.replace_range(span.clone(), leaves_from_str(new_text));
+        self.text_rope = self
+            .text_rope
+            .replace_range(span.clone(), leaves_from_str(new_text));
         let ins_range = {
             let start_loc = del_range.start;
             let end_loc = self.offset8_to_loc8(span.start + new_text.len());
-            start_loc .. end_loc.row + 1
+            start_loc..end_loc.row + 1
         };
 
-        self.autocomplete.borrow_mut().transition(span.clone(), new_text, self);
+        self.autocomplete
+            .borrow_mut()
+            .transition(span.clone(), new_text, self);
 
-        self.diagnostics.apply_replacement(span.clone(), new_text.len());
+        self.diagnostics
+            .apply_replacement(span.clone(), new_text.len());
         self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
             span.clone(),
-            std::iter::once(RLEData { codeunits: ins_range.len(), attribute: false }),
+            std::iter::once(RLEData {
+                codeunits: ins_range.len(),
+                attribute: false,
+            }),
         );
 
         // update lex_rope and static analysis rope with best effort of extending the previous runs
@@ -365,44 +413,57 @@ impl TextualState {
         // does not really matter since they will be updated regardless when we relayout lines
         let lex_replacement = if span.start == 0 {
             LexData::default()
-        }
-        else {
+        } else {
             self.lex_rope.attribute_at(span.start - 1).clone()
         };
         self.lex_rope = self.lex_rope.replace_range(
             span.clone(),
-            std::iter::once(RLEData { codeunits: new_text.len(), attribute: lex_replacement.clone() }),
+            std::iter::once(RLEData {
+                codeunits: new_text.len(),
+                attribute: lex_replacement.clone(),
+            }),
         );
         self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
             span.clone(),
-            std::iter::once(RLEData { codeunits: new_text.len(), attribute: lex_replacement }),
+            std::iter::once(RLEData {
+                codeunits: new_text.len(),
+                attribute: lex_replacement,
+            }),
         );
 
         let sa_replacement = if span.start == 0 {
             StaticAnalysisData::default()
-        }
-        else {
+        } else {
             *self.static_analysis_rope.attribute_at(span.start - 1)
         };
         self.static_analysis_rope = self.static_analysis_rope.replace_range(
             span.clone(),
-            std::iter::once(RLEData { codeunits: new_text.len(), attribute: sa_replacement.clone() }),
+            std::iter::once(RLEData {
+                codeunits: new_text.len(),
+                attribute: sa_replacement.clone(),
+            }),
         );
         self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
             span.clone(),
-            std::iter::once(RLEData { codeunits: new_text.len(), attribute: sa_replacement }),
+            std::iter::once(RLEData {
+                codeunits: new_text.len(),
+                attribute: sa_replacement,
+            }),
         );
 
         self.version += 1;
-        self.current_transaction.text_changes.push((span, new_text.into(), self.text_rope.clone(), self.version()));
+        self.current_transaction.text_changes.push((
+            span,
+            new_text.into(),
+            self.text_rope.clone(),
+            self.version(),
+        ));
 
         (del_range, ins_range)
     }
 
     pub fn read(&self, span: Span8) -> String {
-        self.text_rope
-            .iterator_range(span)
-            .collect()
+        self.text_rope.iterator_range(span).collect()
     }
 
     pub fn version(&self) -> usize {
@@ -460,16 +521,21 @@ impl TextualState {
 
     pub fn set_cursor_head(&mut self, head: Location8, cx: &mut App) {
         debug_assert!(self.nested_transaction_count > 0);
-        self.set_cursor(Cursor {
-            anchor: self.cursor.anchor,
-            head,
-        }, cx);
+        self.set_cursor(
+            Cursor {
+                anchor: self.cursor.anchor,
+                head,
+            },
+            cx,
+        );
     }
 
     pub fn set_cursor(&mut self, cursor: Cursor, _cx: &mut App) {
         debug_assert!(self.nested_transaction_count > 0);
         self.cursor = cursor;
-        self.autocomplete_state().borrow_mut().cursor_moved_to(&self.cursor);
+        self.autocomplete_state()
+            .borrow_mut()
+            .cursor_moved_to(&self.cursor);
     }
 }
 
@@ -485,11 +551,9 @@ impl TextualState {
     // maximal word containing position
     // or, if this is empty due to whitespace, the previous word (along with contents up till offset)
     pub fn word(&self, offset: Count8, only_expand_left: bool) -> Span8 {
-        let not_separator = |c: char| {
-            c.is_alphanumeric() || c == '_'
-        };
+        let not_separator = |c: char| c.is_alphanumeric() || c == '_';
 
-        let mut start  = offset;
+        let mut start = offset;
         while start > 0 {
             let prev = self.prev_boundary(start);
             let ch = self.read(prev..start);
@@ -527,17 +591,14 @@ impl TextualState {
                 let is_whitespace = ch.chars().all(|c| c.is_whitespace());
                 if is_whitespace && first_nonwhitespace == -1 {
                     start = prev;
-                }
-                else {
+                } else {
                     first_nonwhitespace = first_nonwhitespace.max(start as isize);
                     if ch.chars().all(not_separator) {
                         start = prev;
-                    }
-                    else if start as isize == first_nonwhitespace {
+                    } else if start as isize == first_nonwhitespace {
                         start = prev;
                         break;
-                    }
-                    else {
+                    } else {
                         break;
                     }
                 }
@@ -569,7 +630,11 @@ impl TextualState {
         &self.static_analysis_rope
     }
 
-    pub fn set_static_analysis_rope(&mut self, rope: Rope<Attribute<StaticAnalysisData>>, for_version: usize) -> bool {
+    pub fn set_static_analysis_rope(
+        &mut self,
+        rope: Rope<Attribute<StaticAnalysisData>>,
+        for_version: usize,
+    ) -> bool {
         if for_version != self.version {
             return false;
         }
@@ -578,22 +643,28 @@ impl TextualState {
     }
 
     pub fn mark_line_as_up_to_date_attributes(&mut self, start: usize, end: usize) {
-        let lex_content = self.lex_rope
-            .iterator_range(start..end)
-            .map(|(bytes_utf8, attribute)| RLEData { codeunits: bytes_utf8, attribute });
+        let lex_content =
+            self.lex_rope
+                .iterator_range(start..end)
+                .map(|(bytes_utf8, attribute)| RLEData {
+                    codeunits: bytes_utf8,
+                    attribute,
+                });
 
-        self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
-            start..end,
-            lex_content,
-        );
+        self.rendered_lex_rope = self
+            .rendered_lex_rope
+            .replace_range(start..end, lex_content);
 
-        let sa_content = self.static_analysis_rope
-            .iterator_range(start..end)
-            .map(|(bytes_utf8, attribute)| RLEData { codeunits: bytes_utf8, attribute });
-        self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
-            start..end,
-            sa_content,
-        );
+        let sa_content =
+            self.static_analysis_rope
+                .iterator_range(start..end)
+                .map(|(bytes_utf8, attribute)| RLEData {
+                    codeunits: bytes_utf8,
+                    attribute,
+                });
+        self.rendered_static_analysis_rope = self
+            .rendered_static_analysis_rope
+            .replace_range(start..end, sa_content);
     }
 
     pub fn line_has_new_attributes(&self, line_no: usize) -> bool {
@@ -602,16 +673,16 @@ impl TextualState {
         }
 
         let line_start = self.text_rope.utf8_line_pos_prefix(line_no, 0).bytes_utf8;
-        let line_end = self.text_rope.utf8_line_pos_prefix(line_no + 1, 0).bytes_utf8;
+        let line_end = self
+            .text_rope
+            .utf8_line_pos_prefix(line_no + 1, 0)
+            .bytes_utf8;
 
         let lex_diff = {
             let lex_content = self.lex_rope.iterator_range(line_start..line_end);
             let rendered_lex_content = self.rendered_lex_rope.iterator_range(line_start..line_end);
 
-            std::iter::zip(lex_content, rendered_lex_content)
-                .any(|(a, b)| {
-                    a != b
-                })
+            std::iter::zip(lex_content, rendered_lex_content).any(|(a, b)| a != b)
         };
 
         if lex_diff {
@@ -619,11 +690,14 @@ impl TextualState {
         }
 
         let sa_diff = {
-            let sa_content = self.static_analysis_rope.iterator_range(line_start..line_end);
-            let rendered_sa_content = self.rendered_static_analysis_rope.iterator_range(line_start..line_end);
+            let sa_content = self
+                .static_analysis_rope
+                .iterator_range(line_start..line_end);
+            let rendered_sa_content = self
+                .rendered_static_analysis_rope
+                .iterator_range(line_start..line_end);
 
-            std::iter::zip(sa_content, rendered_sa_content)
-                .any(|(a, b)| a != b)
+            std::iter::zip(sa_content, rendered_sa_content).any(|(a, b)| a != b)
         };
 
         return sa_diff;
@@ -655,7 +729,9 @@ impl TextualState {
     ) -> bool {
         debug_assert!(new_diags.iter().all(filter));
 
-        for diag in self.diagnostics.diagnostics_list()
+        for diag in self
+            .diagnostics
+            .diagnostics_list()
             .iter()
             .chain(new_diags.iter())
             .filter(|d| filter(d))
@@ -675,23 +751,33 @@ impl TextualState {
         true
     }
 
-    pub fn set_compile_diagnostics(&mut self, diagnostics: Vec<Diagnostic>, for_version: usize) -> bool {
+    pub fn set_compile_diagnostics(
+        &mut self,
+        diagnostics: Vec<Diagnostic>,
+        for_version: usize,
+    ) -> bool {
         if for_version != self.version {
             return false;
         }
 
         self.set_dirty_flags_on_diagnostics_change(&diagnostics, |d| d.is_compile_time());
-        self.diagnostics.set_compile_time_diagnostics(diagnostics.into_iter());
+        self.diagnostics
+            .set_compile_time_diagnostics(diagnostics.into_iter());
         true
     }
 
-    pub fn set_runtime_diagnostics(&mut self, diagnostics: Vec<Diagnostic>, for_version: usize) -> bool {
+    pub fn set_runtime_diagnostics(
+        &mut self,
+        diagnostics: Vec<Diagnostic>,
+        for_version: usize,
+    ) -> bool {
         if for_version != self.version {
             return false;
         }
 
         self.set_dirty_flags_on_diagnostics_change(&diagnostics, |d| d.is_runtime());
-        self.diagnostics.set_runtime_diagnostics(diagnostics.into_iter());
+        self.diagnostics
+            .set_runtime_diagnostics(diagnostics.into_iter());
         true
     }
 
@@ -709,8 +795,16 @@ impl TextualState {
         self.autocomplete.clone()
     }
 
-    pub fn set_autocomplete_state(&mut self, items: Vec<AutoCompleteItem>, for_version: usize, for_cursor: Cursor) -> bool {
-        if for_version != self.version || self.cursor() != for_cursor || self.autocomplete.borrow().items == items {
+    pub fn set_autocomplete_state(
+        &mut self,
+        items: Vec<AutoCompleteItem>,
+        for_version: usize,
+        for_cursor: Cursor,
+    ) -> bool {
+        if for_version != self.version
+            || self.cursor() != for_cursor
+            || self.autocomplete.borrow().items == items
+        {
             return false;
         }
         let mut ac_state = self.autocomplete.borrow_mut();
@@ -722,8 +816,13 @@ impl TextualState {
         self.parameter_position.clone()
     }
 
-    pub fn set_parameter_position_state(&mut self, state: Option<ParameterPositionHint>, for_version: usize, for_cursor: Cursor) -> bool {
-        if for_version != self.version || self.cursor() != for_cursor  {
+    pub fn set_parameter_position_state(
+        &mut self,
+        state: Option<ParameterPositionHint>,
+        for_version: usize,
+        for_cursor: Cursor,
+    ) -> bool {
+        if for_version != self.version || self.cursor() != for_cursor {
             return false;
         }
         let mut param_state = self.parameter_position.borrow_mut();
@@ -734,7 +833,11 @@ impl TextualState {
     }
 }
 
-fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Count8, forward: bool) -> Count8 {
+fn grapheme_boundary<const N: usize>(
+    rope: &Rope<TextAggregate, N>,
+    offset: Count8,
+    forward: bool,
+) -> Count8 {
     use unicode_segmentation::{GraphemeCursor, GraphemeIncomplete};
 
     let len = rope.codeunits();
@@ -786,7 +889,9 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
                 let mut utf8 = 0;
                 chunk.clear();
                 for ch in rope.iterator(chunk_end) {
-                    if utf8 >= CHUNK { break; }
+                    if utf8 >= CHUNK {
+                        break;
+                    }
                     chunk.push(ch);
                     utf8 += ch.len_utf8();
                 }
@@ -799,7 +904,9 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
                 let mut buffer = String::new();
                 let mut utf8 = 0;
                 for ch in rope.rev_iterator(chunk_start) {
-                    if utf8 >= CHUNK { break; }
+                    if utf8 >= CHUNK {
+                        break;
+                    }
                     buffer.push(ch);
                     utf8 += ch.len_utf8();
                 }
@@ -812,7 +919,9 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
                 let mut buffer = String::new();
                 let mut bytes = 0;
                 for ch in rope.rev_iterator(ctx_end) {
-                    if bytes >= CHUNK { break; }
+                    if bytes >= CHUNK {
+                        break;
+                    }
                     buffer.push(ch);
                     bytes += ch.len_utf8();
                 }
@@ -822,7 +931,10 @@ fn grapheme_boundary<const N: usize>(rope: &Rope<TextAggregate, N>, offset: Coun
                 cursor.provide_context(&buffer, ctx_end - bytes);
             }
             Err(GraphemeIncomplete::InvalidOffset) => {
-                log::error!("Invalid offset passed to grapheme boundary detection: {}", offset);
+                log::error!(
+                    "Invalid offset passed to grapheme boundary detection: {}",
+                    offset
+                );
                 return offset;
             }
         }
@@ -916,9 +1028,7 @@ mod tests {
 
     #[test]
     fn grapheme_mixed_lines() {
-        assert_grapheme_boundaries(
-            "a\u{0301}\n👩‍❤️‍👩\n🇺🇸x"
-        );
+        assert_grapheme_boundaries("a\u{0301}\n👩‍❤️‍👩\n🇺🇸x");
     }
 
     #[test]
@@ -950,7 +1060,8 @@ mod tests {
             "\n".into(),
             "🇺🇸🇨🇦".repeat(400),
             "xyz".repeat(500),
-        ].concat();
+        ]
+        .concat();
 
         assert_grapheme_boundaries(&s);
     }

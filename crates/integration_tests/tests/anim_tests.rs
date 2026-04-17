@@ -46,7 +46,8 @@ impl LeaderInfo {
             Value::Float(f) => assert!(
                 (f - expected).abs() < eps,
                 "leader target float mismatch: expected {}, got {}",
-                expected, f
+                expected,
+                f
             ),
             other => panic!("expected Float({}), got {}", expected, other.type_name()),
         }
@@ -66,7 +67,8 @@ impl LeaderInfo {
             Value::Float(f) => assert!(
                 (f - expected).abs() < eps,
                 "leader current float mismatch: expected {}, got {}",
-                expected, f
+                expected,
+                f
             ),
             other => panic!("expected Float({}), got {}", expected, other.type_name()),
         }
@@ -87,7 +89,11 @@ pub struct AnimResult {
 
 impl AnimResult {
     pub fn assert_ok(&self) -> &Self {
-        assert!(self.errors.is_empty(), "expected no errors, got: {:?}", self.errors);
+        assert!(
+            self.errors.is_empty(),
+            "expected no errors, got: {:?}",
+            self.errors
+        );
         self
     }
 
@@ -118,7 +124,8 @@ impl AnimResult {
         assert!(
             (actual - expected).abs() < eps,
             "slide time mismatch: expected ~{}, got {}",
-            expected, actual
+            expected,
+            actual
         );
         self
     }
@@ -129,15 +136,24 @@ impl AnimResult {
     }
 
     pub fn state_leaders(&self) -> Vec<&LeaderInfo> {
-        self.leaders.iter().filter(|l| l.kind == LeaderKind::State).collect()
+        self.leaders
+            .iter()
+            .filter(|l| l.kind == LeaderKind::State)
+            .collect()
     }
 
     pub fn mesh_leaders(&self) -> Vec<&LeaderInfo> {
-        self.leaders.iter().filter(|l| l.kind == LeaderKind::Mesh).collect()
+        self.leaders
+            .iter()
+            .filter(|l| l.kind == LeaderKind::Mesh)
+            .collect()
     }
 
     pub fn param_leaders(&self) -> Vec<&LeaderInfo> {
-        self.leaders.iter().filter(|l| l.kind == LeaderKind::Param).collect()
+        self.leaders
+            .iter()
+            .filter(|l| l.kind == LeaderKind::Param)
+            .collect()
     }
 }
 
@@ -161,7 +177,13 @@ fn parse_section(src: &str, section_type: SectionType) -> (Section, Vec<String>)
         .iter()
         .map(|e| e.message.clone())
         .collect();
-    (Section { body: stmts, section_type }, errors)
+    (
+        Section {
+            body: stmts,
+            section_type,
+        },
+        errors,
+    )
 }
 
 fn load_stdlib_bundle(path: impl AsRef<Path>) -> Arc<SectionBundle> {
@@ -227,13 +249,19 @@ fn build_anim_executor(
     }
 
     let executor = Executor::new(result.bytecode, registry().func_table());
-    let non_slide = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0)).slide;
+    let non_slide = executor
+        .user_to_internal_timestamp(Timestamp::new(0, 0.0))
+        .slide;
     let user_slide_count = executor.total_sections() - non_slide;
 
     Ok((executor, user_slide_count))
 }
 
-fn collect_anim_result(executor: Executor, user_slide_count: usize, mut runtime_errors: Vec<String>) -> AnimResult {
+fn collect_anim_result(
+    executor: Executor,
+    user_slide_count: usize,
+    mut runtime_errors: Vec<String>,
+) -> AnimResult {
     runtime_errors.extend(executor.state.errors.iter().map(|(msg, _)| msg.clone()));
 
     let leaders = executor
@@ -279,7 +307,8 @@ fn run_anim_impl(
         Err(result) => return result,
     };
 
-    let internal_target = executor.user_to_internal_timestamp(Timestamp::new(target_slide, target_time));
+    let internal_target =
+        executor.user_to_internal_timestamp(Timestamp::new(target_slide, target_time));
 
     let mut runtime_errors: Vec<String> = Vec::new();
     smol::block_on(async {
@@ -304,7 +333,8 @@ fn run_anim_playback_impl(
         Err(result) => return result,
     };
 
-    let internal_start = executor.user_to_internal_timestamp(Timestamp::new(start_slide, start_time));
+    let internal_start =
+        executor.user_to_internal_timestamp(Timestamp::new(start_slide, start_time));
 
     let mut runtime_errors = Vec::new();
     smol::block_on(async {
@@ -412,61 +442,83 @@ fn test_wait_three_seconds() {
 #[test]
 fn test_wait_sequential_total_duration() {
     // two sequential waits: total = 1 + 2 = 3
-    let r = run_anim_with_stdlib("
+    let r = run_anim_with_stdlib(
+        "
         play Wait(1)
         play Wait(2)
-    ");
+    ",
+    );
     r.assert_ok().assert_slide_time_approx(3.0, 1e-9);
 }
 
 #[test]
 fn test_wait_sequential_playback_keeps_leftover_dt() {
-    let r = run_anim_with_stdlib_playback_at("
+    let r = run_anim_with_stdlib_playback_at(
+        "
         play Wait(0.01)
         play Wait(0.02)
         play Wait(0.03)
-    ", 0.0, 0.03);
+    ",
+        0.0,
+        0.03,
+    );
     r.assert_ok().assert_slide_time_approx(0.06, 1e-9);
 }
 
 #[test]
 fn test_wait_sequential_playback_from_off_grid_start_keeps_true_end_time() {
-    let r = run_anim_with_stdlib_playback_at("
+    let r = run_anim_with_stdlib_playback_at(
+        "
         play Wait(0.01)
         play Wait(0.02)
         play Wait(0.03)
-    ", 0.0234234, 0.03);
+    ",
+        0.0234234,
+        0.03,
+    );
     r.assert_ok().assert_slide_time_approx(0.06, 1e-9);
 }
 
 #[test]
 fn test_wait_nested_playback_keeps_leftover_dt_across_resumed_parent() {
-    let r = run_anim_with_stdlib_playback_at("
+    let r = run_anim_with_stdlib_playback_at(
+        "
         let nested = anim {
             play Wait(0.01)
             play Wait(0.02)
         }
         play nested
         play Wait(0.03)
-    ", 0.0, 0.04);
+    ",
+        0.0,
+        0.04,
+    );
     r.assert_ok().assert_slide_time_approx(0.06, 1e-9);
 }
 
 #[test]
 fn test_wait_parallel_playback_keeps_leftover_dt_until_all_heads_finish() {
-    let r = run_anim_with_stdlib_playback_at("
+    let r = run_anim_with_stdlib_playback_at(
+        "
         play [Wait(0.01), Wait(0.05)]
         play Wait(0.02)
-    ", 0.0, 0.03);
+    ",
+        0.0,
+        0.03,
+    );
     r.assert_ok().assert_slide_time_approx(0.07, 1e-9);
 }
 
 #[test]
 fn test_wait_parallel_playback_from_off_grid_start_keeps_true_end_time() {
-    let r = run_anim_with_stdlib_playback_at("
+    let r = run_anim_with_stdlib_playback_at(
+        "
         play [Wait(0.01), Wait(0.05)]
         play Wait(0.02)
-    ", 0.0234234, 0.03);
+    ",
+        0.0234234,
+        0.03,
+    );
     r.assert_ok().assert_slide_time_approx(0.07, 1e-9);
 }
 
@@ -480,29 +532,34 @@ fn test_no_animation_duration_is_zero() {
 
 #[test]
 fn test_anim_block_duration() {
-    let r = run_anim_with_stdlib("
+    let r = run_anim_with_stdlib(
+        "
         play anim {
             play Wait(2.5)
         }
-    ");
+    ",
+    );
     r.assert_ok().assert_slide_time_approx(2.5, 1e-9);
 }
 
 #[test]
 fn test_anim_blocks_played_in_loop_are_sequential() {
-    let r = run_anim_with_stdlib("
+    let r = run_anim_with_stdlib(
+        "
         for (i in [1, 2, 3]) {
             play anim {
                 play Wait(i)
             }
         }
-    ");
+    ",
+    );
     r.assert_ok().assert_slide_time_approx(6.0, 1e-9);
 }
 
 #[test]
 fn test_anim_block_list_built_in_loop_plays_in_parallel() {
-    let r = run_anim_with_stdlib("
+    let r = run_anim_with_stdlib(
+        "
         var blocks = []
         for (i in [1, 2, 3]) {
             blocks .= anim {
@@ -510,13 +567,15 @@ fn test_anim_block_list_built_in_loop_plays_in_parallel() {
             }
         }
         play blocks
-    ");
+    ",
+    );
     r.assert_ok().assert_slide_time_approx(3.0, 1e-9);
 }
 
 #[test]
 fn test_nested_anim_blocks_accumulate_duration() {
-    let r = run_anim_with_stdlib("
+    let r = run_anim_with_stdlib(
+        "
         play anim {
             play anim {
                 play Wait(1)
@@ -526,19 +585,22 @@ fn test_nested_anim_blocks_accumulate_duration() {
             }
             play Wait(3)
         }
-    ");
+    ",
+    );
     r.assert_ok().assert_slide_time_approx(6.0, 1e-9);
 }
 
 #[test]
 fn test_anim_blocks_generated_from_lambdas() {
-    let r = run_anim_with_stdlib("
+    let r = run_anim_with_stdlib(
+        "
         let make_wait = |t| anim {
             play Wait(t)
         }
         play make_wait(1.5)
         play make_wait(2.25)
-    ");
+    ",
+    );
     r.assert_ok().assert_slide_time_approx(3.75, 1e-9);
 }
 
@@ -565,7 +627,11 @@ fn test_state_leader_count_prelude_only() {
     // no user-defined leaders → only camera + background from prelude
     let r = run_anim("let x = 1");
     r.assert_ok();
-    assert_eq!(r.state_leaders().len(), 2, "expected camera and background from prelude");
+    assert_eq!(
+        r.state_leaders().len(),
+        2,
+        "expected camera and background from prelude"
+    );
     assert_eq!(r.mesh_leaders().len(), 0);
     assert_eq!(r.param_leaders().len(), 0);
 }
@@ -582,10 +648,12 @@ fn test_state_leader_initial_value() {
 
 #[test]
 fn test_multiple_state_leaders() {
-    let r = run_anim("
+    let r = run_anim(
+        "
         state a = 10
         state b = 20
-    ");
+    ",
+    );
     r.assert_ok();
     // prelude (2 state) + user (2 state)
     assert_eq!(r.state_leaders().len(), 4);
@@ -599,7 +667,77 @@ fn test_param_leader() {
     let r = run_anim("param speed = 5");
     r.assert_ok();
     assert_eq!(r.param_leaders().len(), 1);
-    r.param_leaders()[0].assert_target_int(5).assert_current_int(5);
+    r.param_leaders()[0]
+        .assert_target_int(5)
+        .assert_current_int(5);
+}
+
+// -- set / lerp --
+
+#[test]
+fn test_set_syncs_only_explicit_candidates() {
+    let r = run_anim_with_stdlib(
+        "
+        state a = 1
+        state b = 2
+        a = 10
+        b = 20
+        play Set([&a])
+    ",
+    );
+    r.assert_ok();
+    let state = r.state_leaders();
+    state[2].assert_target_int(10).assert_current_int(10);
+    state[3].assert_target_int(20).assert_current_int(2);
+}
+
+#[test]
+fn test_lerp_auto_deduces_detached_followers() {
+    let r = run_anim_with_stdlib_at(
+        "
+        state x = 0
+        x = 10
+        play Lerp(2)
+    ",
+        1.0,
+    );
+    r.assert_ok();
+    let state = r.state_leaders();
+    state[2]
+        .assert_target_int(10)
+        .assert_current_float(5.0, 1e-9);
+}
+
+#[test]
+fn test_lerp_flattens_nested_candidate_tree() {
+    let r = run_anim_with_stdlib_at(
+        "
+        state a = 0
+        state b = 2
+        a = 10
+        b = 20
+        play Lerp(2, [[&a], []])
+    ",
+        1.0,
+    );
+    r.assert_ok();
+    let state = r.state_leaders();
+    state[2]
+        .assert_target_int(10)
+        .assert_current_float(5.0, 1e-9);
+    state[3].assert_target_int(20).assert_current_int(2);
+}
+
+#[test]
+fn test_concurrent_primitive_animation_lock_error() {
+    let r = run_anim_with_stdlib(
+        "
+        state x = 0
+        x = 10
+        play [Lerp(1, [&x]), Set([&x])]
+    ",
+    );
+    r.assert_error("concurrent animation");
 }
 
 // -- multi-slide --
@@ -612,14 +750,7 @@ fn test_multi_slide_count() {
 
 #[test]
 fn test_multi_slide_seek_first_slide() {
-    let r = run_multi_anim_with_stdlib(
-        &[
-            "play Wait(2)",
-            "play Wait(5)",
-        ],
-        0,
-        f64::INFINITY,
-    );
+    let r = run_multi_anim_with_stdlib(&["play Wait(2)", "play Wait(5)"], 0, f64::INFINITY);
     r.assert_ok();
     assert_eq!(r.timestamp.slide, 0, "should remain on slide 0");
     r.assert_slide_time_approx(2.0, 1e-9);
@@ -627,14 +758,7 @@ fn test_multi_slide_seek_first_slide() {
 
 #[test]
 fn test_multi_slide_seek_second_slide() {
-    let r = run_multi_anim_with_stdlib(
-        &[
-            "play Wait(1)",
-            "play Wait(3)",
-        ],
-        1,
-        f64::INFINITY,
-    );
+    let r = run_multi_anim_with_stdlib(&["play Wait(1)", "play Wait(3)"], 1, f64::INFINITY);
     r.assert_ok();
     assert_eq!(r.timestamp.slide, 1, "should be on slide 1");
     r.assert_slide_time_approx(3.0, 1e-9);
@@ -643,15 +767,14 @@ fn test_multi_slide_seek_second_slide() {
 #[test]
 fn test_multi_slide_state_persists_across_slides() {
     // state variables declared in slide 0 remain visible in slide 1
-    let r = run_multi_anim(
-        &["state counter = 99", "let check = 1"],
-        1,
-        f64::INFINITY,
-    );
+    let r = run_multi_anim(&["state counter = 99", "let check = 1"], 1, f64::INFINITY);
     r.assert_ok();
     let user_states = r.state_leaders();
     // prelude (2) + counter (1)
-    assert!(user_states.len() >= 3, "expected user state leader to persist");
+    assert!(
+        user_states.len() >= 3,
+        "expected user state leader to persist"
+    );
     user_states[2].assert_target_int(99);
 }
 
@@ -666,11 +789,13 @@ fn test_wait_negative_time_error() {
 
 #[test]
 fn test_anim_played_twice_error() {
-    let r = run_anim_with_stdlib("
+    let r = run_anim_with_stdlib(
+        "
         let w = anim { play Wait(1) }
         play w
         play w
-    ");
+    ",
+    );
     r.assert_error("already played");
 }
 
@@ -680,7 +805,8 @@ fn test_anim_played_twice_error() {
 fn test_wait_duration_after_while_loop() {
     // while loop before play should not affect animation timing
     // x(1) = 1 * 2 = 2; total = Wait(2) + Wait(2) = 4
-    let r = run_anim_with_stdlib("
+    let r = run_anim_with_stdlib(
+        "
         let x = |y| y * 2
         var i = 0
         while (i < 100) {
@@ -688,7 +814,8 @@ fn test_wait_duration_after_while_loop() {
         }
         play Wait(x(1))
         play Wait(2)
-    ");
+    ",
+    );
     r.assert_ok().assert_slide_time_approx(4.0, 1e-9);
 }
 
@@ -699,14 +826,17 @@ fn test_wait_duration_cross_section_lambda_with_while_loop() {
     let r = run_anim_impl(
         &[
             ("let x = |y| y * 2", SectionType::Init),
-            ("
+            (
+                "
                 var i = 0
                 while (i < 100) {
                     i = i + 1
                 }
                 play Wait(x(1))
                 play Wait(2)
-            ", SectionType::Slide),
+            ",
+                SectionType::Slide,
+            ),
         ],
         0,
         f64::INFINITY,

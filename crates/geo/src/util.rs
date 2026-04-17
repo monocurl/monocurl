@@ -4,14 +4,11 @@ impl Mesh {
     pub fn rank(&self) -> usize {
         if !self.tris.is_empty() {
             3
-        }
-        else if !self.lins.is_empty() {
+        } else if !self.lins.is_empty() {
             2
-        }
-        else if !self.dots.is_empty() {
+        } else if !self.dots.is_empty() {
             1
-        }
-        else {
+        } else {
             0
         }
     }
@@ -33,13 +30,9 @@ impl Mesh {
 
     pub fn rotate() {}
 
-    pub fn extrude() {
+    pub fn extrude() {}
 
-    }
-
-    pub fn revolve() {
-
-    }
+    pub fn revolve() {}
 
     pub fn contour_separate() {}
 
@@ -53,5 +46,4 @@ impl Mesh {
 }
 
 // MARK: color / visuals
-impl Mesh {
-}
+impl Mesh {}

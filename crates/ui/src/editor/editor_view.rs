@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
-use gpui::{App, AppContext, AsyncApp, Entity, IntoElement, Render, Subscription, WeakEntity, Window};
+use gpui::{
+    App, AppContext, AsyncApp, Entity, IntoElement, Render, Subscription, WeakEntity, Window,
+};
 
-use crate::{state::textual_state::TextualState, editor::text_editor::TextEditor};
+use crate::{editor::text_editor::TextEditor, state::textual_state::TextualState};
 
 const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -16,7 +18,13 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn new(state: Entity<TextualState>, internal_path: PathBuf, dirty: Entity<bool>, window: &mut Window, cx: &mut gpui::Context<Self>) -> Self {
+    pub fn new(
+        state: Entity<TextualState>,
+        internal_path: PathBuf,
+        dirty: Entity<bool>,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> Self {
         let content = std::fs::read_to_string(internal_path.clone()).unwrap_or_default();
         let internal_dirty = cx.new(|_| false);
 
@@ -47,7 +55,16 @@ impl Editor {
 
         Self {
             internal_path,
-            editor: cx.new(|cx| TextEditor::new(state.clone(), window, cx, content, dirty, internal_dirty.clone())),
+            editor: cx.new(|cx| {
+                TextEditor::new(
+                    state.clone(),
+                    window,
+                    cx,
+                    content,
+                    dirty,
+                    internal_dirty.clone(),
+                )
+            }),
             state,
             internal_dirty,
             _drop_handle: drop_handle,
@@ -86,7 +103,11 @@ impl Editor {
 }
 
 impl Render for Editor {
-    fn render(&mut self, _window: &mut gpui::Window, _cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    fn render(
+        &mut self,
+        _window: &mut gpui::Window,
+        _cx: &mut gpui::Context<Self>,
+    ) -> impl IntoElement {
         self.editor.clone()
     }
 }

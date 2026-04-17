@@ -15,12 +15,16 @@ impl Executor {
         match op {
             BinOp::Eq => {
                 let result = Value::values_equal(&lhs, &rhs);
-                self.state.stack_mut(stack_idx).push(Value::Integer(result as i64));
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::Integer(result as i64));
                 return ExecSingle::Continue;
             }
             BinOp::Ne => {
                 let result = !Value::values_equal(&lhs, &rhs);
-                self.state.stack_mut(stack_idx).push(Value::Integer(result as i64));
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::Integer(result as i64));
                 return ExecSingle::Continue;
             }
             _ => {}
@@ -69,21 +73,21 @@ fn promote_pair(lhs: Value, rhs: Value) -> (Value, Value) {
         (Value::Integer(a), Value::Float(_)) => (Value::Float(*a as f64), rhs),
         (Value::Float(_), Value::Integer(b)) => (lhs, Value::Float(*b as f64)),
         (Value::Integer(a), Value::Complex { .. }) => (
-            Value::Complex { re: *a as f64, im: 0.0 },
+            Value::Complex {
+                re: *a as f64,
+                im: 0.0,
+            },
             rhs,
         ),
         (Value::Complex { .. }, Value::Integer(b)) => (
             lhs,
-            Value::Complex { re: *b as f64, im: 0.0 },
+            Value::Complex {
+                re: *b as f64,
+                im: 0.0,
+            },
         ),
-        (Value::Float(a), Value::Complex { .. }) => (
-            Value::Complex { re: *a, im: 0.0 },
-            rhs,
-        ),
-        (Value::Complex { .. }, Value::Float(b)) => (
-            lhs,
-            Value::Complex { re: *b, im: 0.0 },
-        ),
+        (Value::Float(a), Value::Complex { .. }) => (Value::Complex { re: *a, im: 0.0 }, rhs),
+        (Value::Complex { .. }, Value::Float(b)) => (lhs, Value::Complex { re: *b, im: 0.0 }),
         _ => (lhs, rhs),
     }
 }
@@ -121,10 +125,16 @@ fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorErr
 
         // complex x complex (after promotion)
         (Value::Complex { re: ar, im: ai }, Value::Complex { re: br, im: bi }, BinOp::Add) => {
-            Ok(Value::Complex { re: ar + br, im: ai + bi })
+            Ok(Value::Complex {
+                re: ar + br,
+                im: ai + bi,
+            })
         }
         (Value::Complex { re: ar, im: ai }, Value::Complex { re: br, im: bi }, BinOp::Sub) => {
-            Ok(Value::Complex { re: ar - br, im: ai - bi })
+            Ok(Value::Complex {
+                re: ar - br,
+                im: ai - bi,
+            })
         }
         (Value::Complex { re: ar, im: ai }, Value::Complex { re: br, im: bi }, BinOp::Mul) => {
             Ok(Value::Complex {
@@ -151,9 +161,10 @@ fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorErr
 
         // in operator: resolved rhs must be a list or map
         (_, Value::List(list), BinOp::In) => {
-            let found = list.elements.iter().any(|rc| {
-                Value::values_equal(lhs, &rc.borrow())
-            });
+            let found = list
+                .elements
+                .iter()
+                .any(|rc| Value::values_equal(lhs, &rc.borrow()));
             Ok(Value::Integer(found as i64))
         }
         (_, Value::Map(map), BinOp::In) => {

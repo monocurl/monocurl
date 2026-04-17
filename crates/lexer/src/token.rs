@@ -1,4 +1,3 @@
-
 // might need to add lambdas, labels
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Token {
@@ -80,11 +79,14 @@ impl Token {
         match self {
             Illegal => TokenCategory::Unknown,
             Newline | Whitespace => TokenCategory::Whitespace,
-            StatefulReference | Plus | Minus | Multiply | Power | Divide | IntegerDivide | Assign
-            | KeyValueMap | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In
-            | Pipe | Comma | Dot | DotAssign | Append | Reference | Semicolon => TokenCategory::Operator,
-            LParen | RParen | LBracket | RBracket | LFlower | RFlower => TokenCategory::Punctutation,
-            Block | Operator | Anim | Play | Break | Continue | Return | If | Else | For | While => TokenCategory::ControlFlow,
+            StatefulReference | Plus | Minus | Multiply | Power | Divide | IntegerDivide
+            | Assign | KeyValueMap | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In | Pipe
+            | Comma | Dot | DotAssign | Append | Reference | Semicolon => TokenCategory::Operator,
+            LParen | RParen | LBracket | RBracket | LFlower | RFlower => {
+                TokenCategory::Punctutation
+            }
+            Block | Operator | Anim | Play | Break | Continue | Return | If | Else | For
+            | While => TokenCategory::ControlFlow,
             Import | Let | Var | Mesh | State | Param | Slide | Native => {
                 TokenCategory::NonControlFlowKeyword
             }

@@ -1,10 +1,13 @@
-use arrayvec::{ArrayString, ArrayVec};
-use std::ops::Range;
-use std::{marker::PhantomData, sync::Arc};
-use std::str::Chars;
 use crate::rope::internal::RopeNode;
 use crate::text::Span8;
-use crate::{rope::iterator::{RopeIterator}, text::{Count8, Count16}};
+use crate::{
+    rope::iterator::RopeIterator,
+    text::{Count8, Count16},
+};
+use arrayvec::{ArrayString, ArrayVec};
+use std::ops::Range;
+use std::str::Chars;
+use std::{marker::PhantomData, sync::Arc};
 
 // Inspired by: https://zed.dev/blog/zed-decoded-rope-sumtree
 //
@@ -12,7 +15,9 @@ pub const MAX_LEAF_SIZE: usize = 64;
 const DEFAULT_CHILDREN: usize = 8;
 
 pub trait LeafData: Clone + Sized {
-    type Iterator<'a>: DoubleEndedIterator where Self: 'a;
+    type Iterator<'a>: DoubleEndedIterator
+    where
+        Self: 'a;
 
     fn identity() -> Self;
 
@@ -28,7 +33,7 @@ pub trait AggregateData: Clone + Sized {
     type LeafData: LeafData;
 
     fn from_leaf(data: &Self::LeafData) -> Self;
-    fn merge(children: impl DoubleEndedIterator<Item=Self> + Clone) -> Self;
+    fn merge(children: impl DoubleEndedIterator<Item = Self> + Clone) -> Self;
 
     fn codeunits(&self) -> usize;
     fn height(&self) -> u32;
@@ -39,7 +44,7 @@ mod internal {
 
     use arrayvec::ArrayVec;
 
-    use crate::{rope::{AggregateData, DEFAULT_CHILDREN}};
+    use crate::rope::{AggregateData, DEFAULT_CHILDREN};
 
     pub(super) enum RopeNode<S: AggregateData, const N: usize = DEFAULT_CHILDREN> {
         Internal {
@@ -102,12 +107,17 @@ impl<S: AggregateData, const N: usize> Default for Rope<S, N> {
 }
 
 impl<S: AggregateData, const N: usize> Rope<S, N> {
-
-    pub fn iterator(&self, pos: Count8) -> impl Iterator<Item=<<S::LeafData as LeafData>::Iterator<'_> as Iterator>::Item> {
+    pub fn iterator(
+        &self,
+        pos: Count8,
+    ) -> impl Iterator<Item = <<S::LeafData as LeafData>::Iterator<'_> as Iterator>::Item> {
         RopeIterator::<'_, S, N, true>::new(self, pos)
     }
 
-    pub fn rev_iterator(&self, pos: Count8) -> impl Iterator<Item=<<S::LeafData as LeafData>::Iterator<'_> as Iterator>::Item> {
+    pub fn rev_iterator(
+        &self,
+        pos: Count8,
+    ) -> impl Iterator<Item = <<S::LeafData as LeafData>::Iterator<'_> as Iterator>::Item> {
         RopeIterator::<'_, S, N, false>::new(self, pos)
     }
 
@@ -117,34 +127,36 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 }
 
 impl<const N: usize> Rope<TextAggregate, N> {
-    pub fn iterator_range(&self, mut range: Span8) -> impl Iterator<Item=char> + use<'_, N> {
-        self.iterator(range.start)
-            .take_while(move |c| {
-                range.start += c.len_utf8();
-                range.start <= range.end
-            })
+    pub fn iterator_range(&self, mut range: Span8) -> impl Iterator<Item = char> + use<'_, N> {
+        self.iterator(range.start).take_while(move |c| {
+            range.start += c.len_utf8();
+            range.start <= range.end
+        })
     }
 }
 
-impl<T, const ALLOW_MERGING: bool, const N: usize> Rope<RLEAggregate<T, ALLOW_MERGING>, N> where T: PartialEq + Default + Clone
+impl<T, const ALLOW_MERGING: bool, const N: usize> Rope<RLEAggregate<T, ALLOW_MERGING>, N>
+where
+    T: PartialEq + Default + Clone,
 {
-    pub fn iterator_range(&self, mut range: Span8) -> impl Iterator<Item=(Count8, T)> + use<'_, N, ALLOW_MERGING, T> {
-        self.iterator(range.start)
-            .map_while(move |(c, item)| {
-                if range.start >= range.end {
-                    None
-                }
-                else {
-                    let count = c.min(range.end - range.start);
-                    range.start += count;
-                    Some((count, item))
-                }
-            })
+    pub fn iterator_range(
+        &self,
+        mut range: Span8,
+    ) -> impl Iterator<Item = (Count8, T)> + use<'_, N, ALLOW_MERGING, T> {
+        self.iterator(range.start).map_while(move |(c, item)| {
+            if range.start >= range.end {
+                None
+            } else {
+                let count = c.min(range.end - range.start);
+                range.start += count;
+                Some((count, item))
+            }
+        })
     }
 }
 
 impl<S: AggregateData, const N: usize> Rope<S, N> {
-    fn check_invariants_rec(&self, _root: &Arc<RopeNode<S, N>>, ) {
+    fn check_invariants_rec(&self, _root: &Arc<RopeNode<S, N>>) {
         #[cfg(test)]
         match &**_root {
             RopeNode::Internal { children, .. } => {
@@ -157,7 +169,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
                     self.check_invariants_rec(child);
                 }
             }
-            RopeNode::Leaf { .. } => { }
+            RopeNode::Leaf { .. } => {}
         }
     }
 
@@ -171,7 +183,9 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
             return Self::default();
         }
         if nodes.len() == 1 {
-            return Rope { root: nodes[0].clone() };
+            return Rope {
+                root: nodes[0].clone(),
+            };
         }
 
         // build tree layer-by-layer
@@ -194,11 +208,18 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
             nodes = next_level;
         }
 
-        Rope { root: nodes[0].clone() }.check_invariants()
+        Rope {
+            root: nodes[0].clone(),
+        }
+        .check_invariants()
     }
 
     #[must_use]
-    pub fn replace_range(&self, range: Range<usize>, new_data: impl Iterator<Item = S::LeafData>) -> Self {
+    pub fn replace_range(
+        &self,
+        range: Range<usize>,
+        new_data: impl Iterator<Item = S::LeafData>,
+    ) -> Self {
         let leaves = new_data
             .map(|ld| Arc::new(RopeNode::new_leaf(ld)))
             .collect();
@@ -225,11 +246,19 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
             (None, None) => unreachable!(),
             (None, Some(rp)) => Rope { root: rp },
             (Some(lp), None) => Rope { root: lp },
-            (Some(lp), Some(rp)) => Rope { root: Arc::new(RopeNode::new_internal(ArrayVec::from_iter([lp, rp].into_iter())) ) }
-        }.check_invariants()
+            (Some(lp), Some(rp)) => Rope {
+                root: Arc::new(RopeNode::new_internal(ArrayVec::from_iter(
+                    [lp, rp].into_iter(),
+                ))),
+            },
+        }
+        .check_invariants()
     }
 
-    fn group_children_into_two_parents(count: usize, children_iterator: impl Iterator<Item=Arc<RopeNode<S, N>>>) -> (Arc<RopeNode<S, N>>, Arc<RopeNode<S, N>>) {
+    fn group_children_into_two_parents(
+        count: usize,
+        children_iterator: impl Iterator<Item = Arc<RopeNode<S, N>>>,
+    ) -> (Arc<RopeNode<S, N>>, Arc<RopeNode<S, N>>) {
         debug_assert!(count >= N && count <= 2 * N);
         let split = count / 2;
         let mut left_children = ArrayVec::new();
@@ -244,50 +273,74 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 
         (
             Arc::new(RopeNode::new_internal(left_children)),
-            Arc::new(RopeNode::new_internal(right_children))
+            Arc::new(RopeNode::new_internal(right_children)),
         )
     }
 
     // returns either a single one, or two that cannot be combined
     // any returned value has the same height as the maximum of the two
-    fn join_equal_heights(left: &Arc<RopeNode<S, N>>, right: &Arc<RopeNode<S, N>>) -> (Option<Arc<RopeNode<S, N>>>, Option<Arc<RopeNode<S, N>>>) {
+    fn join_equal_heights(
+        left: &Arc<RopeNode<S, N>>,
+        right: &Arc<RopeNode<S, N>>,
+    ) -> (Option<Arc<RopeNode<S, N>>>, Option<Arc<RopeNode<S, N>>>) {
         match (&**left, &**right) {
-            (RopeNode::Internal { children: left_children, .. } ,
-                RopeNode::Internal { children: right_children, .. })  =>
-            {
+            (
+                RopeNode::Internal {
+                    children: left_children,
+                    ..
+                },
+                RopeNode::Internal {
+                    children: right_children,
+                    ..
+                },
+            ) => {
                 if left_children.len() + right_children.len() <= N {
                     let mut children = ArrayVec::new();
                     children.extend(left_children.iter().cloned());
                     children.extend(right_children.iter().cloned());
 
                     (Some(Arc::new(RopeNode::new_internal(children))), None)
-                }
-                else {
+                } else {
                     // it may be the case that the left is super full and right is unfilled
                     // (or vice versa). In this case, we want to donate some nodes from left to right
                     let (lp, rp) = Self::group_children_into_two_parents(
                         left_children.len() + right_children.len(),
-                        left_children.iter().cloned().chain(right_children.iter().cloned())
+                        left_children
+                            .iter()
+                            .cloned()
+                            .chain(right_children.iter().cloned()),
                     );
 
                     (Some(lp), Some(rp))
                 }
-            },
-            (RopeNode::Leaf { data: left_data, .. }, RopeNode::Leaf { data: right_data, .. }) => {
+            }
+            (
+                RopeNode::Leaf {
+                    data: left_data, ..
+                },
+                RopeNode::Leaf {
+                    data: right_data, ..
+                },
+            ) => {
                 let mut combined_data = left_data.clone();
                 if let Some(remaining) = combined_data.try_append(right_data.clone()) {
                     let left_leaf = Arc::new(RopeNode::new_leaf(combined_data));
                     let right_leaf = Arc::new(RopeNode::new_leaf(remaining));
-                    return (Some(left_leaf), Some(right_leaf))
+                    return (Some(left_leaf), Some(right_leaf));
                 } else {
                     return (Some(Arc::new(RopeNode::new_leaf(combined_data))), None);
                 }
             }
-            _ => { unreachable!("heights improperly calculated"); }
+            _ => {
+                unreachable!("heights improperly calculated");
+            }
         }
     }
 
-    fn join_subtree(left: &Arc<RopeNode<S, N>>, right: &Arc<RopeNode<S, N>>) -> (Option<Arc<RopeNode<S, N>>>, Option<Arc<RopeNode<S, N>>>) {
+    fn join_subtree(
+        left: &Arc<RopeNode<S, N>>,
+        right: &Arc<RopeNode<S, N>>,
+    ) -> (Option<Arc<RopeNode<S, N>>>, Option<Arc<RopeNode<S, N>>>) {
         if left.is_empty() {
             return (None, Some(right.clone()));
         }
@@ -300,8 +353,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         let rh = right.aggregate().height();
         if lh == rh {
             Self::join_equal_heights(left, right)
-        }
-        else if lh > rh {
+        } else if lh > rh {
             // descend left
             let (left_child, left_overflow) = Self::join_subtree(
                 &left.children_slice()[left.children_slice().len() - 1],
@@ -317,31 +369,25 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 
             if total_c <= N {
                 // if we have space for two, add them both
-                let children = ArrayVec::from_iter(
-                    new_children_iterator
-                );
+                let children = ArrayVec::from_iter(new_children_iterator);
 
                 (Some(Arc::new(RopeNode::new_internal(children))), None)
-            }
-            else {
+            } else {
                 // otherwise, must split ourselves into two
-                let (lp, rp) = Self::group_children_into_two_parents(
-                    total_c,
-                    new_children_iterator
-                );
+                let (lp, rp) =
+                    Self::group_children_into_two_parents(total_c, new_children_iterator);
 
                 (Some(lp), Some(rp))
             }
-        }
-        else {
+        } else {
             // descend right
             // note that in this case, the right overflow should be the FIRST child
-            let (right_overflow, right_child) = Self::join_subtree(
-                left,
-                &right.children_slice()[0],
-            );
-            let total_c = right.children_slice().len() + if right_overflow.is_some() { 1 } else { 0 };
-            let new_children_iterator = right_overflow.into_iter()
+            let (right_overflow, right_child) =
+                Self::join_subtree(left, &right.children_slice()[0]);
+            let total_c =
+                right.children_slice().len() + if right_overflow.is_some() { 1 } else { 0 };
+            let new_children_iterator = right_overflow
+                .into_iter()
                 .chain(right_child.into_iter())
                 .chain(right.children_slice()[1..].iter().cloned());
 
@@ -349,13 +395,10 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
                 let children = ArrayVec::from_iter(new_children_iterator);
 
                 (None, Some(Arc::new(RopeNode::new_internal(children))))
-            }
-            else {
+            } else {
                 // split ourselves into two
-                let (lp, rp) = Self::group_children_into_two_parents(
-                    total_c,
-                    new_children_iterator
-                );
+                let (lp, rp) =
+                    Self::group_children_into_two_parents(total_c, new_children_iterator);
 
                 (Some(lp), Some(rp))
             }
@@ -371,12 +414,19 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         }
 
         let (left, right) = self.split_node(&self.root, pos);
-        (Rope { root: left }.check_invariants(), Rope { root: right }.check_invariants())
+        (
+            Rope { root: left }.check_invariants(),
+            Rope { root: right }.check_invariants(),
+        )
     }
 
     // helper method for splitting
     // cut_child follows the properties specified in split_node
-    fn balanced_merge(siblings: &[Arc<RopeNode<S, N>>], cut_child: Arc<RopeNode<S, N>>, merge_front: bool) -> Arc<RopeNode<S, N>> {
+    fn balanced_merge(
+        siblings: &[Arc<RopeNode<S, N>>],
+        cut_child: Arc<RopeNode<S, N>>,
+        merge_front: bool,
+    ) -> Arc<RopeNode<S, N>> {
         if siblings.is_empty() {
             return cut_child.clone();
         }
@@ -387,15 +437,17 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
             ArrayVec::from_iter(
                 lp.into_iter()
                     .chain(rp.into_iter())
-                    .chain(siblings[1..].iter().cloned())
+                    .chain(siblings[1..].iter().cloned()),
             )
         } else {
             let (lp, rp) = Self::join_subtree(&siblings[siblings.len() - 1], &cut_child);
 
             ArrayVec::from_iter(
-                siblings[..(siblings.len() - 1)].iter().cloned()
+                siblings[..(siblings.len() - 1)]
+                    .iter()
+                    .cloned()
                     .chain(lp.into_iter())
-                    .chain(rp.into_iter())
+                    .chain(rp.into_iter()),
             )
         };
 
@@ -422,10 +474,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
 
                 let right_leaf = RopeNode::new_leaf(right_data);
 
-                (
-                    Arc::new(left_leaf),
-                    Arc::new(right_leaf),
-                )
+                (Arc::new(left_leaf), Arc::new(right_leaf))
             }
             RopeNode::Internal { children, .. } => {
                 let mut utf8 = 0;
@@ -459,16 +508,14 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         self.find_leaf_rec(&mut agg, &self.root, &mut lt)
     }
 
-     fn find_leaf_rec<'a>(
+    fn find_leaf_rec<'a>(
         &'a self,
         agg: &mut S,
         node: &'a Arc<RopeNode<S, N>>,
         lt: &mut impl FnMut(&S) -> bool,
-     ) -> &'a S::LeafData {
+    ) -> &'a S::LeafData {
         match &**node {
-            RopeNode::Leaf { data, .. } => {
-                data
-            }
+            RopeNode::Leaf { data, .. } => data,
             RopeNode::Internal { children, .. } => {
                 for child in children.iter() {
                     let combined = S::merge([agg.clone(), child.aggregate().clone()].into_iter());
@@ -482,13 +529,17 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
                 panic!("Predicate should have failed before exhausting all children")
             }
         }
-     }
+    }
 
     // Find the last leaf where the predicate is true
     // le returns true to fully consume over the current aggregate
     // walk_leaf is called with the prefix aggregate when we find the target leaf
     // NOTE returned value of height is unspecified
-    pub fn walk(&self, mut le: impl FnMut(&S) -> bool, walk_leaf: impl FnOnce(&mut S, &S::LeafData)) -> S {
+    pub fn walk(
+        &self,
+        mut le: impl FnMut(&S) -> bool,
+        walk_leaf: impl FnOnce(&mut S, &S::LeafData),
+    ) -> S {
         let mut agg = S::from_leaf(&S::LeafData::identity());
         self.walk_rec(&mut agg, &self.root, &mut le, walk_leaf);
         agg
@@ -499,7 +550,7 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
         agg: &mut S,
         node: &Arc<RopeNode<S, N>>,
         le: &mut impl FnMut(&S) -> bool,
-        walk_leaf: impl FnOnce(&mut S, &S::LeafData)
+        walk_leaf: impl FnOnce(&mut S, &S::LeafData),
     ) {
         match &**node {
             RopeNode::Leaf { data, .. } => {
@@ -553,7 +604,8 @@ impl<S: AggregateData, const N: usize> Rope<S, N> {
                     let start_in_child = local_range.start.saturating_sub(utf8);
                     let end_in_child = (local_range.end - utf8).min(child_size);
 
-                    let child_agg = self.subrange_aggregate_rec(child, start_in_child..end_in_child);
+                    let child_agg =
+                        self.subrange_aggregate_rec(child, start_in_child..end_in_child);
                     collected_aggs.push(child_agg);
 
                     utf8 += child_size;
@@ -602,12 +654,9 @@ impl<const N: usize> Rope<TextAggregate, N> {
 
     fn text_walk(&self, le: impl FnMut(&TextAggregate) -> bool + Clone) -> TextPrefixSummary {
         self.walk(le.clone(), |agg, leaf_data| {
-            Self::walk_chars_until(
-                agg,
-                leaf_data.0.chars(),
-                le.clone()
-            );
-        }).prefix_summary
+            Self::walk_chars_until(agg, leaf_data.0.chars(), le.clone());
+        })
+        .prefix_summary
     }
 
     pub fn utf8_prefix_summary(&self, at: Count8) -> TextPrefixSummary {
@@ -626,7 +675,9 @@ impl<const N: usize> Rope<TextAggregate, N> {
     }
 }
 
-impl<T, const ALLOW_MERGING: bool> Rope<RLEAggregate<T, ALLOW_MERGING>> where T: PartialEq + Default + Clone
+impl<T, const ALLOW_MERGING: bool> Rope<RLEAggregate<T, ALLOW_MERGING>>
+where
+    T: PartialEq + Default + Clone,
 {
     pub fn attribute_at(&self, index: usize) -> &T {
         &self.find_leaf(|agg| agg.codeunits() <= index).attribute
@@ -636,9 +687,12 @@ impl<T, const ALLOW_MERGING: bool> Rope<RLEAggregate<T, ALLOW_MERGING>> where T:
 mod iterator {
     use std::sync::Arc;
 
-    use crate::{rope::{AggregateData, Rope}, text::Count8};
-    use crate::rope::internal::RopeNode;
     use crate::rope::LeafData;
+    use crate::rope::internal::RopeNode;
+    use crate::{
+        rope::{AggregateData, Rope},
+        text::Count8,
+    };
 
     pub(crate) struct RopeIterator<'a, S: AggregateData, const N: usize, const F: bool> {
         // (node, index in parent)
@@ -647,8 +701,11 @@ mod iterator {
     }
 
     impl<'a, S: AggregateData, const N: usize, const F: bool> RopeIterator<'a, S, N, F> {
-
-        fn build_stack(node: &'a Arc<RopeNode<S, N>>, local_pos: Count8, stack: &mut Vec<(&'a Arc<RopeNode<S, N>>, usize)>) -> <S::LeafData as LeafData>::Iterator<'a> {
+        fn build_stack(
+            node: &'a Arc<RopeNode<S, N>>,
+            local_pos: Count8,
+            stack: &mut Vec<(&'a Arc<RopeNode<S, N>>, usize)>,
+        ) -> <S::LeafData as LeafData>::Iterator<'a> {
             match &**node {
                 RopeNode::Leaf { data, .. } => {
                     if F {
@@ -661,14 +718,10 @@ mod iterator {
                     let mut utf8 = 0usize;
                     for (index, child) in children.iter().enumerate() {
                         let end = utf8 + child.aggregate().codeunits();
-                        let in_child = if F {
-                            local_pos < end
-                        } else {
-                            local_pos <= end
-                        };
+                        let in_child = if F { local_pos < end } else { local_pos <= end };
                         if in_child {
                             stack.push((child, index));
-                            return Self::build_stack(child, local_pos - utf8, stack)
+                            return Self::build_stack(child, local_pos - utf8, stack);
                         }
                         utf8 = end;
                     }
@@ -679,25 +732,20 @@ mod iterator {
 
         pub fn new(rope: &'a Rope<S, N>, pos: Count8) -> Self {
             assert!(pos <= rope.codeunits());
-            let end = if F {
-                pos == rope.codeunits()
-            } else {
-                pos == 0
-            };
+            let end = if F { pos == rope.codeunits() } else { pos == 0 };
 
             if end {
                 Self {
                     stack: vec![],
                     sub_iterator: None,
                 }
-            }
-            else {
+            } else {
                 let mut stack = Vec::new();
                 stack.push((&rope.root, 0));
                 let sub_iterator = Self::build_stack(&rope.root, pos, &mut stack);
                 Self {
                     stack,
-                    sub_iterator: Some(sub_iterator)
+                    sub_iterator: Some(sub_iterator),
                 }
             }
         }
@@ -723,19 +771,22 @@ mod iterator {
                             let (index, pos) = if F {
                                 (last_index + 1, 0)
                             } else {
-                                (last_index - 1, children[last_index - 1].aggregate().codeunits())
+                                (
+                                    last_index - 1,
+                                    children[last_index - 1].aggregate().codeunits(),
+                                )
                             };
 
                             self.stack.push((&children[index], index));
-                            self.sub_iterator = Some(Self::build_stack(&children[index], pos, &mut self.stack));
-                            break
-                        }
-                        else {
+                            self.sub_iterator =
+                                Some(Self::build_stack(&children[index], pos, &mut self.stack));
+                            break;
+                        } else {
                             // climb up the stack
                             last_index = self.stack.pop().unwrap().1;
                         }
                     }
-                    RopeNode::Leaf { .. } => unreachable!()
+                    RopeNode::Leaf { .. } => unreachable!(),
                 }
             }
 
@@ -750,13 +801,15 @@ mod iterator {
                     unreachable!();
                 };
 
-                data.iterator(0,agg.codeunits())
+                data.iterator(0, agg.codeunits())
             });
 
             result
         }
 
-        fn sub_advance(&mut self) -> Option<<<S::LeafData as LeafData>::Iterator<'a> as Iterator>::Item> {
+        fn sub_advance(
+            &mut self,
+        ) -> Option<<<S::LeafData as LeafData>::Iterator<'a> as Iterator>::Item> {
             if F {
                 self.sub_iterator.as_mut().and_then(|it| it.next())
             } else {
@@ -779,7 +832,6 @@ mod iterator {
         }
     }
 }
-
 
 #[derive(Debug, Clone)]
 pub struct TextData(pub ArrayString<MAX_LEAF_SIZE>);
@@ -838,7 +890,6 @@ impl LeafData for TextData {
     fn codeunits(&self) -> Count8 {
         self.0.len()
     }
-
 }
 
 impl AggregateData for TextAggregate {
@@ -865,11 +916,13 @@ impl AggregateData for TextAggregate {
         }
     }
 
-    fn merge(children: impl DoubleEndedIterator<Item=Self> + Clone) -> Self {
+    fn merge(children: impl DoubleEndedIterator<Item = Self> + Clone) -> Self {
         let bytes_utf8 = children.clone().map(|c| c.prefix_summary.bytes_utf8).sum();
-        let bytes_utf16 = children.clone().map(|c| c.prefix_summary.codeunits_utf16).sum();
+        let bytes_utf16 = children
+            .clone()
+            .map(|c| c.prefix_summary.codeunits_utf16)
+            .sum();
         let newlines = children.clone().map(|c| c.prefix_summary.newlines).sum();
-
 
         let mut bytes_utf8_since_newline = 0;
         for child in children.clone().rev() {
@@ -925,7 +978,10 @@ pub fn leaves_from_str(text: &str) -> impl Iterator<Item = TextData> + use<'_> {
                 end -= 1;
             }
 
-            debug_assert!(end != self.start, "utf8 character larger than max leaf size?");
+            debug_assert!(
+                end != self.start,
+                "utf8 character larger than max leaf size?"
+            );
 
             let slice = &self.text[self.start..end];
             self.start = end;
@@ -947,7 +1003,7 @@ impl<const N: usize> Rope<TextAggregate, N> {
 pub struct RLEAggregate<T, const ALLOW_MERGING: bool = true> {
     pub codeunits: usize,
     pub height: usize,
-    phantom_t: PhantomData<T>
+    phantom_t: PhantomData<T>,
 }
 
 pub type Attribute<T> = RLEAggregate<T, false>;
@@ -960,9 +1016,12 @@ pub struct RLEData<T, const ALLOW_MERGING: bool = true> {
 
 impl<T, const ALLOW_MERGING: bool> LeafData for RLEData<T, ALLOW_MERGING>
 where
-    T: PartialEq + Default + Clone
+    T: PartialEq + Default + Clone,
 {
-    type Iterator<'a> = <Option<(Count8, T)> as IntoIterator>::IntoIter where T: 'a;
+    type Iterator<'a>
+        = <Option<(Count8, T)> as IntoIterator>::IntoIter
+    where
+        T: 'a;
 
     fn identity() -> Self {
         RLEData {
@@ -983,27 +1042,21 @@ where
             if self.attribute == from.attribute {
                 self.codeunits += from.codeunits;
                 None
-            }
-            else if self.codeunits == 0 {
+            } else if self.codeunits == 0 {
                 *self = from.clone();
                 None
-            }
-            else if from.codeunits == 0 {
+            } else if from.codeunits == 0 {
                 None
-            }
-            else {
+            } else {
                 Some(from)
             }
-        }
-        else {
+        } else {
             if self.codeunits == 0 {
                 *self = from.clone();
                 None
-            }
-            else if from.codeunits == 0 {
+            } else if from.codeunits == 0 {
                 None
-            }
-            else {
+            } else {
                 Some(from)
             }
         }
@@ -1021,7 +1074,8 @@ where
 }
 
 impl<T, const ALLOW_MERGING: bool> AggregateData for RLEAggregate<T, ALLOW_MERGING>
-    where T: PartialEq + Default + Clone
+where
+    T: PartialEq + Default + Clone,
 {
     type LeafData = RLEData<T, ALLOW_MERGING>;
 
@@ -1034,7 +1088,7 @@ impl<T, const ALLOW_MERGING: bool> AggregateData for RLEAggregate<T, ALLOW_MERGI
         }
     }
 
-    fn merge(children: impl DoubleEndedIterator<Item=Self> + Clone) -> Self {
+    fn merge(children: impl DoubleEndedIterator<Item = Self> + Clone) -> Self {
         let bytes_utf8 = children.clone().map(|c| c.codeunits).sum();
         let height = children.clone().map(|c| c.height).max().unwrap_or(0) + 1;
 
@@ -1314,7 +1368,8 @@ mod tests {
 
     #[test]
     fn test_text_data_try_append_unicode_boundary() {
-        let mut data1 = TextData(ArrayString::from("a".repeat(MAX_LEAF_SIZE - 1).as_str()).unwrap());
+        let mut data1 =
+            TextData(ArrayString::from("a".repeat(MAX_LEAF_SIZE - 1).as_str()).unwrap());
         let data2 = TextData(ArrayString::from("🦀").unwrap()); // 4 bytes
         let remaining = data1.try_append(data2);
         assert_eq!(data1.0.len(), MAX_LEAF_SIZE - 1);
@@ -1504,19 +1559,13 @@ mod replace_tests {
         let leaves: Vec<_> = replacement
             .as_bytes()
             .chunks(MAX_LEAF_SIZE)
-            .map(|chunk| {
-                TextData(ArrayString::from(std::str::from_utf8(chunk).unwrap()).unwrap())
-            })
+            .map(|chunk| TextData(ArrayString::from(std::str::from_utf8(chunk).unwrap()).unwrap()))
             .collect();
 
         let result = rope.replace_range(50..150, leaves.into_iter());
         let result_str: String = result.iterator(0).collect();
 
-        let expected = format!("{}{}{}",
-            "a".repeat(50),
-            "b".repeat(100),
-            "a".repeat(50)
-        );
+        let expected = format!("{}{}{}", "a".repeat(50), "b".repeat(100), "a".repeat(50));
 
         assert_eq!(result_str, expected);
     }
@@ -1528,10 +1577,7 @@ mod replace_tests {
 
         for i in 0..=text.len() {
             let (l, r) = rope.split_at(i);
-            assert_eq!(
-                collect_string(&l) + &collect_string(&r),
-                text
-            );
+            assert_eq!(collect_string(&l) + &collect_string(&r), text);
             assert_invariants(&l);
             assert_invariants(&r);
         }
@@ -1544,10 +1590,7 @@ mod replace_tests {
 
         for i in (0..=text.len()).step_by(17) {
             let (l, r) = rope.split_at(i);
-            assert_eq!(
-                collect_string(&l) + &collect_string(&r),
-                text
-            );
+            assert_eq!(collect_string(&l) + &collect_string(&r), text);
             assert_invariants(&l);
             assert_invariants(&r);
         }
@@ -1579,10 +1622,7 @@ mod replace_tests {
             collect_string(&joined1),
             "small".to_string() + &"L".repeat(2000)
         );
-        assert_eq!(
-            collect_string(&joined2),
-            "L".repeat(2000) + "small"
-        );
+        assert_eq!(collect_string(&joined2), "L".repeat(2000) + "small");
 
         assert_invariants(&joined1);
         assert_invariants(&joined2);
@@ -1679,5 +1719,4 @@ mod replace_tests {
             assert_invariants(&rope);
         }
     }
-
 }

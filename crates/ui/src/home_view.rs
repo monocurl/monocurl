@@ -1,10 +1,13 @@
 use std::{ops::Range, path::PathBuf};
 
 use gpui::*;
-use ui_cli_shared::doc_type::DocumentType;
 use structs::assets::Assets;
+use ui_cli_shared::doc_type::DocumentType;
 
-use crate::{components::buttons::link_button, navbar_view::Navbar, state::window_state::WindowState, theme::ThemeSettings};
+use crate::{
+    components::buttons::link_button, navbar_view::Navbar, state::window_state::WindowState,
+    theme::ThemeSettings,
+};
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
 
@@ -19,50 +22,57 @@ fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
 
 pub struct HomeView {
     navbar: Entity<Navbar>,
-    state: Entity<WindowState>
+    state: Entity<WindowState>,
 }
 
 impl HomeView {
     pub fn new(cx: &mut Context<HomeView>, state: Entity<WindowState>) -> Self {
         cx.observe(&state, |_this, _, cx| {
             cx.notify();
-        }).detach();
+        })
+        .detach();
         cx.observe_global::<ThemeSettings>(|_this, cx| {
             cx.notify();
-        }).detach();
+        })
+        .detach();
 
-        let navbar = cx.new(|cx| {
-            Navbar::new(state.downgrade(), cx)
-        });
+        let navbar = cx.new(|cx| Navbar::new(state.downgrade(), cx));
 
-        Self {
-            navbar,
-            state
-        }
+        Self { navbar, state }
     }
 
-    fn open(&mut self, internal_path: std::path::PathBuf, user_path: Option<std::path::PathBuf>, window: &mut Window, cx: &mut App) {
+    fn open(
+        &mut self,
+        internal_path: std::path::PathBuf,
+        user_path: Option<std::path::PathBuf>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         log::info!("Opening project {:?}", user_path);
 
         self.state.update(cx, move |state, cx| {
-            state.navigate_to(user_path.clone(), internal_path.clone(), cx.entity(), window, cx);
+            state.navigate_to(
+                user_path.clone(),
+                internal_path.clone(),
+                cx.entity(),
+                window,
+                cx,
+            );
         });
     }
 
     fn import(&mut self, path: std::path::PathBuf, cx: &mut App) -> Result<(), String> {
         log::info!("Adding project {:?}", path);
 
-        self.state.update(cx, move |state, _cx| {
-            state.import(path)
-        })
+        self.state.update(cx, move |state, _cx| state.import(path))
     }
 
     fn create_default(&mut self, dtype: DocumentType, window: &mut Window, cx: &mut App) {
         log::info!("Creating default {:?}", dtype);
 
-        let path = self.state.update(cx, move |state, _cx| {
-            state.create_new_document(dtype)
-        });
+        let path = self
+            .state
+            .update(cx, move |state, _cx| state.create_new_document(dtype));
 
         self.state.update(cx, move |state, cx| {
             state.navigate_to(None, path, cx.entity(), window, cx);
@@ -86,44 +96,50 @@ impl HomeView {
             .justify_center()
             .items_center()
             .child(
-                div()
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .child(
-                                img(Assets::image("monocurl-1024.png"))
-                                    .w(px(300.))
-                                    .h(px(300.))
-                                    .p_10()
-                            )
-                            .child(
-                                div()
-                                    .child("Monocurl")
-                                    .text_2xl()
-                                    .text_color(gpui::white())
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_row()
-                                    .child(link_button("Website", theme.link_text, cx.listener(|_, _, _, _| {
+                div().child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .child(
+                            img(Assets::image("monocurl-1024.png"))
+                                .w(px(300.))
+                                .h(px(300.))
+                                .p_10(),
+                        )
+                        .child(div().child("Monocurl").text_2xl().text_color(gpui::white()))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .child(link_button(
+                                    "Website",
+                                    theme.link_text,
+                                    cx.listener(|_, _, _, _| {
                                         let _ = open::that("https://monocurl.com");
-                                    })))
-                                    .child(link_button("Source Code", theme.link_text, cx.listener(|_, _, _, _| {
-                                        let _ =open::that("https://github.com/monocurl/monocurl");
-                                    })))
-                                    .child(link_button("Discord", theme.link_text, cx.listener(|_, _, _, _| {
+                                    }),
+                                ))
+                                .child(link_button(
+                                    "Source Code",
+                                    theme.link_text,
+                                    cx.listener(|_, _, _, _| {
+                                        let _ = open::that("https://github.com/monocurl/monocurl");
+                                    }),
+                                ))
+                                .child(link_button(
+                                    "Discord",
+                                    theme.link_text,
+                                    cx.listener(|_, _, _, _| {
                                         let _ = open::that("https://discord.com/invite/7g94JR3SAD");
-                                    })))
-                                    .gap_3()
-                            )
-                            .rounded(px(6.))
-                            .bg(gpui::black())
-                            .p_8()
-                            .w(px(400.))
-                    )
+                                    }),
+                                ))
+                                .gap_3(),
+                        )
+                        .rounded(px(6.))
+                        .bg(gpui::black())
+                        .p_8()
+                        .w(px(400.)),
+                ),
             )
             .bg(theme.home_sidebar_background)
             .min_w(px(500.))
@@ -131,12 +147,18 @@ impl HomeView {
             .max_w(px(600.))
     }
 
-    fn single_project(&self, internal_path: std::path::PathBuf, user_path: Option<std::path::PathBuf>, cx: &Context<HomeView>) -> impl IntoElement + use<> {
+    fn single_project(
+        &self,
+        internal_path: std::path::PathBuf,
+        user_path: Option<std::path::PathBuf>,
+        cx: &Context<HomeView>,
+    ) -> impl IntoElement + use<> {
         let theme = ThemeSettings::theme(cx);
         let path = if let Some(ref path) = user_path {
             sub_home_dir(&path)
-            .unwrap_or(path.to_path_buf())
-            .to_string_lossy().to_string()
+                .unwrap_or(path.to_path_buf())
+                .to_string_lossy()
+                .to_string()
         } else {
             "Untitled".to_string()
         };
@@ -167,11 +189,14 @@ impl HomeView {
                     .top(px(0.))
                     .left(px(0.))
                     .size_full()
-                    .bg(Rgba { a: 0.0, ..theme.row_hover_overlay })
+                    .bg(Rgba {
+                        a: 0.0,
+                        ..theme.row_hover_overlay
+                    })
                     .group_hover(group_name.clone(), {
                         let overlay = theme.row_hover_overlay;
                         move |this| this.bg(overlay)
-                    })
+                    }),
             )
             .child(
                 div()
@@ -195,15 +220,15 @@ impl HomeView {
                                 div()
                                     .child(name.clone())
                                     .text_sm()
-                                    .text_color(theme.text_primary)
+                                    .text_color(theme.text_primary),
                             )
                             .child(
                                 div()
                                     .text_xs()
                                     .text_color(theme.text_muted)
                                     .child(path)
-                                    .truncate()
-                            )
+                                    .truncate(),
+                            ),
                     )
                     .child(
                         div()
@@ -221,11 +246,7 @@ impl HomeView {
                                 move |this| this.text_color(danger)
                             })
                             .cursor_pointer()
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .child("×")
-                            )
+                            .child(div().text_xs().child("×"))
                             .on_click(cx.listener(move |this, _event, window, cx| {
                                 cx.stop_propagation();
                                 window.prevent_default();
@@ -240,8 +261,12 @@ impl HomeView {
                                         PromptLevel::Warning,
                                         &format!("Forget \"{}\"?", name),
                                         None,
-                                        &[PromptButton::Cancel("Cancel".into()), PromptButton::Ok("Forget Project".into())],
-                                        cx);
+                                        &[
+                                            PromptButton::Cancel("Cancel".into()),
+                                            PromptButton::Ok("Forget Project".into()),
+                                        ],
+                                        cx,
+                                    );
 
                                     let path_copy = internal_path_for_remove.clone();
                                     cx.spawn(async move |this, app| {
@@ -256,13 +281,13 @@ impl HomeView {
                                                 });
                                             });
                                         }
-                                    }).detach();
-                                }
-                                else {
+                                    })
+                                    .detach();
+                                } else {
                                     this.forget(internal_path_for_remove.clone(), cx);
                                 }
-                            }))
-                    )
+                            })),
+                    ),
             )
     }
 
@@ -273,29 +298,32 @@ impl HomeView {
             .size_full()
             .p_2()
             .overflow_hidden()
-            .child(
-                if projects.is_empty() {
-                    div()
-                        .text_center()
-                        .child("No recent projects")
-                        .into_any_element()
-                } else {
-                    uniform_list(
-                        "project-list",
-                        projects.len(),
-                        cx.processor(move |this, range: Range<usize>, _, cx| {
-                            this.state.read(cx)
-                                .recently_opened[range]
-                                .iter()
-                                .map(|p| this.single_project(p.internal_path.clone(), p.user_path.clone(), cx))
-                                .collect()
-                        })
-                    )
-                    .size_full()
-                    .pb_10()
+            .child(if projects.is_empty() {
+                div()
+                    .text_center()
+                    .child("No recent projects")
                     .into_any_element()
-                }
-            )
+            } else {
+                uniform_list(
+                    "project-list",
+                    projects.len(),
+                    cx.processor(move |this, range: Range<usize>, _, cx| {
+                        this.state.read(cx).recently_opened[range]
+                            .iter()
+                            .map(|p| {
+                                this.single_project(
+                                    p.internal_path.clone(),
+                                    p.user_path.clone(),
+                                    cx,
+                                )
+                            })
+                            .collect()
+                    }),
+                )
+                .size_full()
+                .pb_10()
+                .into_any_element()
+            })
     }
 
     fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -311,14 +339,11 @@ impl HomeView {
                     .flex()
                     .justify_center()
                     .items_center()
-                    .child(
-                        div()
-                            .child("Projects")
-                            .text_xl()
-                            .p_1()
-                    )
-                    .child(
-                        link_button("Import", theme.link_text, cx.listener(|_, _, _, cx| {
+                    .child(div().child("Projects").text_xl().p_1())
+                    .child(link_button(
+                        "Import",
+                        theme.link_text,
+                        cx.listener(|_, _, _, cx| {
                             let options = PathPromptOptions {
                                 files: true,
                                 directories: false,
@@ -331,11 +356,15 @@ impl HomeView {
                                 let Some(this) = this.upgrade() else {
                                     return;
                                 };
-                                let Some(path) = path.await
-                                    .ok().map(|s| s.ok())
-                                    .flatten().flatten()
+                                let Some(path) = path
+                                    .await
+                                    .ok()
+                                    .map(|s| s.ok())
+                                    .flatten()
+                                    .flatten()
                                     .map(|ps| ps.into_iter().next())
-                                    .flatten() else {
+                                    .flatten()
+                                else {
                                     return;
                                 };
 
@@ -344,28 +373,28 @@ impl HomeView {
                                         let _ = this.import(path, cx);
                                     });
                                 });
-                            }).detach();
-                        }))
-                    )
-                    .child(
-                        link_button("New Scene", theme.link_text, cx.listener(move |this, _, window, cx| {
+                            })
+                            .detach();
+                        }),
+                    ))
+                    .child(link_button(
+                        "New Scene",
+                        theme.link_text,
+                        cx.listener(move |this, _, window, cx| {
                             this.create_default(DocumentType::Scene, window, cx);
-                        }))
-                    )
-                    .child(
-                        link_button("New Library", theme.link_text, cx.listener(move |this, _, window, cx| {
+                        }),
+                    ))
+                    .child(link_button(
+                        "New Library",
+                        theme.link_text,
+                        cx.listener(move |this, _, window, cx| {
                             this.create_default(DocumentType::Library, window, cx);
-                        }))
-                    )
+                        }),
+                    ))
                     .gap_2()
-                    .p_2()
+                    .p_2(),
             )
-            .child(
-                div()
-                    .h(px(2.))
-                    .w_full()
-                    .bg(theme.accent)
-            )
+            .child(div().h(px(2.)).w_full().bg(theme.accent))
             .child(self.projects_list(cx))
             .bg(theme.home_panel_background)
     }
@@ -377,22 +406,15 @@ impl Render for HomeView {
 
         div()
             .flex_col()
-            .child(
-                self.navbar.clone()
-            )
+            .child(self.navbar.clone())
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .child(self.render_logo(cx))
-                    .child(
-                        div()
-                            .w(px(4.))
-                            .h_full()
-                            .bg(theme.accent)
-                    )
+                    .child(div().w(px(4.)).h_full().bg(theme.accent))
                     .child(self.render_projects(cx))
-                    .size_full()
+                    .size_full(),
             )
             .bg(theme.app_background)
             .text_color(theme.text_primary)

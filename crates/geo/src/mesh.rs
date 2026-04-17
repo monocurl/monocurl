@@ -14,7 +14,7 @@ pub struct Dot {
 #[derive(Debug, Clone, Copy)]
 pub struct LinVertex {
     pub pos: Float3,
-    pub col: Float4
+    pub col: Float4,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -55,7 +55,7 @@ pub struct Tri {
 #[derive(Debug, Clone)]
 pub struct Uniforms {
     pub alpha: f64,
-    pub img: Option<String>
+    pub img: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -6,7 +6,8 @@ use structs::text::Span8;
 use crate::{
     time::Timestamp,
     value::{
-        InstructionPointer, RcValue, Value, container::List, leader::Leader, primitive_anim::PrimitiveAnim, rc_value
+        InstructionPointer, RcValue, Value, container::List, leader::Leader,
+        primitive_anim::PrimitiveAnim, rc_value,
     },
 };
 
@@ -79,14 +80,17 @@ impl ExecutionStack {
 /// a primitive animation that has been "baked" with timing info
 #[derive(Clone)]
 pub struct BakedPrimitiveAnim {
+    pub anim_id: usize,
     pub anim: PrimitiveAnim,
     pub start_time: f64,
     pub end_time: f64,
+    pub targets: Vec<RcValue>,
+    pub start_followers: Vec<Value>,
     /// which execution stack spawned this (to resume when finished)
     pub parent_stack_idx: usize,
     /// which stack id for leader tracking
     pub stack_id: usize,
-    pub span: Span8
+    pub span: Span8,
 }
 
 /// a leader-follower pair entry for quick lookup
@@ -116,6 +120,7 @@ pub struct ExecutionState {
     pub pending_playback_time: f64,
 
     global_stack_counter: usize,
+    global_primitive_anim_counter: usize,
     // execution stacks that have not finished yet
     pub alive_stack_count: usize,
     /// execution stacks always appended, never reused, None = finished.
@@ -155,6 +160,7 @@ impl ExecutionState {
             timestamp: Timestamp::default(),
             pending_playback_time: 0.0,
             global_stack_counter: 0,
+            global_primitive_anim_counter: 0,
             alive_stack_count: 0,
             execution_stacks: Vec::new(),
             execution_heads: BTreeSet::new(),
@@ -181,7 +187,11 @@ impl ExecutionState {
 
     /// allocate a fresh execution stack and return its index.
     /// always appends — indices are never reused.
-    pub fn alloc_stack(&mut self, ip: InstructionPointer, parent_idx: Option<usize>) -> Result<usize, ()> {
+    pub fn alloc_stack(
+        &mut self,
+        ip: InstructionPointer,
+        parent_idx: Option<usize>,
+    ) -> Result<usize, ()> {
         if self.alive_stack_count >= MAX_EXECUTION_HEADS {
             return Err(());
         }
@@ -194,6 +204,12 @@ impl ExecutionState {
         self.execution_stacks.push(Some(stack));
 
         Ok(idx)
+    }
+
+    pub fn alloc_primitive_anim_id(&mut self) -> usize {
+        let id = self.global_primitive_anim_counter;
+        self.global_primitive_anim_counter += 1;
+        id
     }
 
     /// free an execution stack slot
@@ -235,6 +251,7 @@ impl ExecutionState {
 
         let leader_val = Value::Leader(Leader {
             last_modified_stack: None,
+            locked_by_anim: None,
             leader_rc: leader_rc.clone(),
             follower_rc: follower_rc.clone(),
         });

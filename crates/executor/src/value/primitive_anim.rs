@@ -6,11 +6,12 @@ pub enum PrimitiveAnim {
     /// interpolate all dirty followers toward their leaders over `time` seconds.
     /// optional `progression` lambda maps t in [0,1] to a modified t (easing).
     Lerp {
+        candidates: Box<Value>,
         time: f64,
         progression: Option<Box<Value>>,
     },
     /// instantly snap all dirty followers to their leaders.
-    Set,
+    Set { candidates: Box<Value> },
     /// do nothing for `time` seconds (keeps the animation running).
     Wait { time: f64 },
 }

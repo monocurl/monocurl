@@ -1,8 +1,15 @@
-use std::{ops::Range};
+use std::ops::Range;
 
-use gpui::{App, Bounds, DispatchPhase, Element, ElementId, ElementInputHandler, Entity, GlobalElementId, Hsla, IntoElement, LayoutId, MouseMoveEvent, Pixels, Point, Style, TextRun, Window, fill, point, px, relative, size};
+use gpui::{
+    App, Bounds, DispatchPhase, Element, ElementId, ElementInputHandler, Entity, GlobalElementId,
+    Hsla, IntoElement, LayoutId, MouseMoveEvent, Pixels, Point, Style, TextRun, Window, fill,
+    point, px, relative, size,
+};
 
-use crate::editor::{text_editor::{BOTTOM_SCROLL_PADDING, TextEditor}, wrapped_line::WrappedLine};
+use crate::editor::{
+    text_editor::{BOTTOM_SCROLL_PADDING, TextEditor},
+    wrapped_line::WrappedLine,
+};
 
 pub struct TextElement {
     pub editor: Entity<TextEditor>,
@@ -31,8 +38,17 @@ impl IntoElement for TextElement {
 }
 
 impl TextElement {
-    fn compute_cursor_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, window: &Window, cx: &App) -> Option<Bounds<Pixels>> {
-        if !editor.cursor(cx).is_empty() || !editor.cursor_blink_state || !editor.focus_handle.is_focused(window) {
+    fn compute_cursor_bounds(
+        &self,
+        editor: &TextEditor,
+        bounds: Bounds<Pixels>,
+        window: &Window,
+        cx: &App,
+    ) -> Option<Bounds<Pixels>> {
+        if !editor.cursor(cx).is_empty()
+            || !editor.cursor_blink_state
+            || !editor.focus_handle.is_focused(window)
+        {
             return None;
         }
 
@@ -43,7 +59,13 @@ impl TextElement {
         ))
     }
 
-    fn compute_active_line_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, window: &Window, cx: &App) -> Option<Bounds<Pixels>> {
+    fn compute_active_line_bounds(
+        &self,
+        editor: &TextEditor,
+        bounds: Bounds<Pixels>,
+        window: &Window,
+        cx: &App,
+    ) -> Option<Bounds<Pixels>> {
         if !editor.cursor(cx).is_empty() || !editor.focus_handle.is_focused(window) {
             return None;
         }
@@ -56,7 +78,14 @@ impl TextElement {
         ))
     }
 
-    fn compute_selection_bounds(&self, editor: &TextEditor, bounds: Bounds<Pixels>, visible_lines: Range<usize>, window: &Window, cx: &App) -> Vec<Bounds<Pixels>> {
+    fn compute_selection_bounds(
+        &self,
+        editor: &TextEditor,
+        bounds: Bounds<Pixels>,
+        visible_lines: Range<usize>,
+        window: &Window,
+        cx: &App,
+    ) -> Vec<Bounds<Pixels>> {
         if editor.cursor(cx).is_empty() || !editor.focus_handle.is_focused(window) {
             return Vec::new();
         }
@@ -65,39 +94,56 @@ impl TextElement {
         let start_loc = cursor.anchor.min(cursor.head);
         let end_loc = cursor.anchor.max(cursor.head);
 
-        let visible_selection = visible_lines.start.max(start_loc.row) ..
-            visible_lines.end.min(end_loc.row + 1);
+        let visible_selection =
+            visible_lines.start.max(start_loc.row)..visible_lines.end.min(end_loc.row + 1);
         let mut y = editor.line_map.y_range(0..visible_selection.start).end;
 
-        editor.line_map
+        editor
+            .line_map
             .unwrapped_lines_iter(visible_selection.start)
             .take(visible_selection.len())
             .flat_map(|multi_line| {
                 let line_num = multi_line.unwrapped_line_no;
-                let line_start = if line_num == start_loc.row { start_loc.col } else { 0 };
+                let line_start = if line_num == start_loc.row {
+                    start_loc.col
+                } else {
+                    0
+                };
                 let line_end = if line_num == end_loc.row {
                     end_loc.col
                 } else {
                     editor.line_map.line_len(line_num)
                 };
-                multi_line.line.iter()
-                    .map(move |single_line| {
-                        (line_start..line_end, single_line)
-                    })
+                multi_line
+                    .line
+                    .iter()
+                    .map(move |single_line| (line_start..line_end, single_line))
             })
             .filter_map(|(local_range, single_line)| {
                 y += editor.line_height;
                 let mut x_pixels = single_line.x_range(local_range)?;
                 x_pixels.end = x_pixels.end.max(x_pixels.start + px(5.0));
                 Some(Bounds::from_corners(
-                    point(bounds.left() + editor.gutter_width + x_pixels.start, bounds.top() + y - editor.line_height),
-                    point(bounds.left() + editor.gutter_width + x_pixels.end, bounds.top() + y),
+                    point(
+                        bounds.left() + editor.gutter_width + x_pixels.start,
+                        bounds.top() + y - editor.line_height,
+                    ),
+                    point(
+                        bounds.left() + editor.gutter_width + x_pixels.end,
+                        bounds.top() + y,
+                    ),
                 ))
             })
             .collect()
     }
 
-    fn compute_scroll_bar_state(&self, editor: &TextEditor, bounds: Bounds<Pixels>, _window: &Window, cx: &App) -> Option<ScrollBarState> {
+    fn compute_scroll_bar_state(
+        &self,
+        editor: &TextEditor,
+        bounds: Bounds<Pixels>,
+        _window: &Window,
+        cx: &App,
+    ) -> Option<ScrollBarState> {
         let scroll_offset = editor.scroll_handle.offset();
         let viewport_height = editor.scroll_handle.bounds().size.height;
         let content_height = editor.line_map.total_height() + px(BOTTOM_SCROLL_PADDING);
@@ -108,7 +154,8 @@ impl TextElement {
 
         let wheel_height = (viewport_height / content_height) * viewport_height;
         // offset scroll (realistically this should just be drawn outside of the scroll)
-        let wheel_y = -scroll_offset.y + (-scroll_offset.y / content_height) * viewport_height + bounds.top();
+        let wheel_y =
+            -scroll_offset.y + (-scroll_offset.y / content_height) * viewport_height + bounds.top();
         let width = editor.right_gutter_width;
 
         let wheel_bounds = Bounds::new(
@@ -123,7 +170,8 @@ impl TextElement {
 
         let state = editor.state.read(cx);
         let diagnostic_bounds = state
-            .diagnostics().diagnostics_list()
+            .diagnostics()
+            .diagnostics_list()
             .iter()
             .map(|d| {
                 let color = d.color(&editor.text_styles);
@@ -132,7 +180,11 @@ impl TextElement {
                 let y_start = editor.line_map.y_range(line..line + 1).start;
                 let width = editor.right_gutter_width;
                 let bounds = Bounds::new(
-                    point(bounds.right() - width, bounds.top() - scroll_offset.y + (y_start / content_height) * viewport_height),
+                    point(
+                        bounds.right() - width,
+                        bounds.top() - scroll_offset.y
+                            + (y_start / content_height) * viewport_height,
+                    ),
                     size(width, px(3.0)),
                 );
 
@@ -147,10 +199,18 @@ impl TextElement {
         })
     }
 
-    fn paint_gutter_line(&self, line_num: usize, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
+    fn paint_gutter_line(
+        &self,
+        line_num: usize,
+        y: Pixels,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let editor = self.editor.read(cx);
         let line_range = editor.cursor(cx).line_range();
-        let line_selected = line_range.contains(&line_num) && editor.focus_handle.is_focused(window);
+        let line_selected =
+            line_range.contains(&line_num) && editor.focus_handle.is_focused(window);
         let gutter_color = if line_selected {
             editor.text_styles.gutter_active_color
         } else {
@@ -174,20 +234,38 @@ impl TextElement {
             None,
         );
         let gutter_x = editor.gutter_width - gutter_shaped.width - px(10.0);
-        gutter_shaped.paint(
-            point(bounds.left() + gutter_x, bounds.top() + y),
-            editor.line_height,
-            window,
-            cx,
-        ).ok();
+        gutter_shaped
+            .paint(
+                point(bounds.left() + gutter_x, bounds.top() + y),
+                editor.line_height,
+                window,
+                cx,
+            )
+            .ok();
     }
 
-    fn paint_text_line(&self, gutter_width: Pixels, line_height: Pixels, shaped: &WrappedLine, y: Pixels, bounds: Bounds<Pixels>, window: &mut Window, cx: &App) {
+    fn paint_text_line(
+        &self,
+        gutter_width: Pixels,
+        line_height: Pixels,
+        shaped: &WrappedLine,
+        y: Pixels,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        cx: &App,
+    ) {
         let line_origin = point(bounds.left() + gutter_width, bounds.top() + y);
         shaped.paint(line_origin, line_height, window, cx).ok();
     }
 
-    fn paint_scroll_bar(&self, state: &ScrollBarState, scroll_color: Hsla, scroll_background_color: Hsla, _bounds: Bounds<Pixels>, window: &mut Window) {
+    fn paint_scroll_bar(
+        &self,
+        state: &ScrollBarState,
+        scroll_color: Hsla,
+        scroll_background_color: Hsla,
+        _bounds: Bounds<Pixels>,
+        window: &mut Window,
+    ) {
         window.paint_quad(fill(state.background_bounds, scroll_background_color));
         for (diagnostic_bound, color) in &state.diagnostic_bounds {
             window.paint_quad(fill(*diagnostic_bound, *color));
@@ -196,7 +274,10 @@ impl TextElement {
     }
 
     fn handle_width_resize(&self, editor: &mut TextEditor, bounds: Bounds<Pixels>, cx: &mut App) {
-        if editor.last_bounds.is_none_or(|b| b.size.width != bounds.size.width) {
+        if editor
+            .last_bounds
+            .is_none_or(|b| b.size.width != bounds.size.width)
+        {
             editor.capture_top_visible_line();
             editor.state.update(cx, |state, _| {
                 state.mark_lines_needing_relayout(0..editor.line_map.line_count());
@@ -261,18 +342,21 @@ impl Element for TextElement {
 
             let visible_lines = editor.visible_lines();
 
-            let lines = editor.line_map.unwrapped_lines_iter(visible_lines.start)
+            let lines = editor
+                .line_map
+                .unwrapped_lines_iter(visible_lines.start)
                 .take(visible_lines.len())
                 .map(|line| {
                     let line_no = line.unwrapped_line_no;
-                    let y = editor.line_map.y_range(line_no..line_no+1).start;
+                    let y = editor.line_map.y_range(line_no..line_no + 1).start;
                     (line_no, y, line.line.clone())
                 })
                 .collect();
 
             let cursor_bounds = self.compute_cursor_bounds(editor, bounds, window, cx);
             let active_line_bounds = self.compute_active_line_bounds(editor, bounds, window, cx);
-            let selection_bounds = self.compute_selection_bounds(editor, bounds, visible_lines, window, cx);
+            let selection_bounds =
+                self.compute_selection_bounds(editor, bounds, visible_lines, window, cx);
             let scroll_wheel_bounds = self.compute_scroll_bar_state(editor, bounds, window, cx);
 
             PrepaintState {
@@ -340,7 +424,7 @@ impl Element for TextElement {
             window.paint_quad(fill(cursor_bounds, cursor_color));
         }
 
-        if let Some(state) = &prepaint.scroll_wheel_state{
+        if let Some(state) = &prepaint.scroll_wheel_state {
             self.paint_scroll_bar(state, scroll_color, scroll_background_color, bounds, window);
         }
     }

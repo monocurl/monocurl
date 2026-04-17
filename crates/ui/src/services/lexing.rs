@@ -1,18 +1,23 @@
-
-use futures::{SinkExt, StreamExt};
+use crate::{
+    services::{ServiceManagerMessage, compilation::CompilationMessage},
+    state::textual_state::LexData,
+};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
+use futures::{SinkExt, StreamExt};
 use lexer::lexer::Lexer;
-use structs::{rope::{Rope, TextAggregate}, text::{Count8, Span8}};
 use structs::rope::{Attribute, RLEData};
-use crate::{services::{ServiceManagerMessage, compilation::CompilationMessage}, state::textual_state::{LexData}};
+use structs::{
+    rope::{Rope, TextAggregate},
+    text::{Count8, Span8},
+};
 
 pub enum LexingMessage {
-   UpdateRope {
-       old: Span8,
-       new: Count8,
-       new_rope: Rope<TextAggregate>,
-       version: usize,
-   },
+    UpdateRope {
+        old: Span8,
+        new: Count8,
+        new_rope: Rope<TextAggregate>,
+        version: usize,
+    },
 }
 
 // It may be assumed that the initial text rope is empty
@@ -24,7 +29,11 @@ pub struct LexingService {
 }
 
 impl LexingService {
-    pub fn new(rx: UnboundedReceiver<LexingMessage>, compilation_tx: UnboundedSender<CompilationMessage>, sm_tx: UnboundedSender<ServiceManagerMessage>) -> Self {
+    pub fn new(
+        rx: UnboundedReceiver<LexingMessage>,
+        compilation_tx: UnboundedSender<CompilationMessage>,
+        sm_tx: UnboundedSender<ServiceManagerMessage>,
+    ) -> Self {
         Self {
             rx,
             compilation_tx,
@@ -33,7 +42,14 @@ impl LexingService {
         }
     }
 
-    fn process_message(&mut self, lex: Rope<Attribute<LexData>>, old: Span8, new: usize, old_rope: Rope<TextAggregate>, new_rope: Rope<TextAggregate>) -> Rope<Attribute<LexData>> {
+    fn process_message(
+        &mut self,
+        lex: Rope<Attribute<LexData>>,
+        old: Span8,
+        new: usize,
+        old_rope: Rope<TextAggregate>,
+        new_rope: Rope<TextAggregate>,
+    ) -> Rope<Attribute<LexData>> {
         // since newline is a universal separator, we only need to relex the associated lines
         let line_start = new_rope.utf8_prefix_summary(old.start).newlines;
         let old_line_end = old_rope.utf8_prefix_summary(old.end).newlines + 1;
@@ -42,13 +58,14 @@ impl LexingService {
         let old_utf8_end = old_rope.utf8_line_pos_prefix(old_line_end, 0).bytes_utf8;
         let new_utf8_end = new_rope.utf8_line_pos_prefix(new_line_end, 0).bytes_utf8;
 
-        let relex = Lexer::new(new_rope.iterator_range(utf8_start..new_utf8_end))
-            .map(|(attribute, bytes_utf8)| RLEData { codeunits: bytes_utf8, attribute });
+        let relex = Lexer::new(new_rope.iterator_range(utf8_start..new_utf8_end)).map(
+            |(attribute, bytes_utf8)| RLEData {
+                codeunits: bytes_utf8,
+                attribute,
+            },
+        );
 
-        lex.replace_range(
-            utf8_start..old_utf8_end,
-            relex
-        )
+        lex.replace_range(utf8_start..old_utf8_end, relex)
     }
 
     pub async fn run(mut self) {
@@ -57,8 +74,14 @@ impl LexingService {
         while let Some(message) = self.rx.next().await {
             let mut current_version;
             match message {
-                LexingMessage::UpdateRope { old, new, new_rope, version } => {
-                    lex_rope = self.process_message(lex_rope, old, new, text_rope, new_rope.clone());
+                LexingMessage::UpdateRope {
+                    old,
+                    new,
+                    new_rope,
+                    version,
+                } => {
+                    lex_rope =
+                        self.process_message(lex_rope, old, new, text_rope, new_rope.clone());
                     text_rope = new_rope;
                     current_version = version;
                 }
@@ -66,8 +89,14 @@ impl LexingService {
 
             while let Ok(Some(message)) = self.rx.try_next() {
                 match message {
-                    LexingMessage::UpdateRope { old, new, new_rope, version } => {
-                        lex_rope = self.process_message(lex_rope, old, new, text_rope, new_rope.clone());
+                    LexingMessage::UpdateRope {
+                        old,
+                        new,
+                        new_rope,
+                        version,
+                    } => {
+                        lex_rope =
+                            self.process_message(lex_rope, old, new, text_rope, new_rope.clone());
                         text_rope = new_rope;
                         current_version = version;
                     }
@@ -75,16 +104,22 @@ impl LexingService {
             }
 
             // dispatch updates
-            self.compilation_tx.send(CompilationMessage::UpdateLexRope {
-                lex_rope: lex_rope.clone(),
-                for_text_rope: text_rope.clone(),
-                version: current_version,
-            }).await.unwrap();
+            self.compilation_tx
+                .send(CompilationMessage::UpdateLexRope {
+                    lex_rope: lex_rope.clone(),
+                    for_text_rope: text_rope.clone(),
+                    version: current_version,
+                })
+                .await
+                .unwrap();
 
-            self.sm_tx.send(ServiceManagerMessage::UpdateLexRope {
-                lex_rope: lex_rope.clone(),
-                version: current_version,
-            }).await.unwrap();
+            self.sm_tx
+                .send(ServiceManagerMessage::UpdateLexRope {
+                    lex_rope: lex_rope.clone(),
+                    version: current_version,
+                })
+                .await
+                .unwrap();
         }
     }
 }

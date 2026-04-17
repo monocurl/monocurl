@@ -17,8 +17,7 @@ pub struct Registry {
 
 impl Registry {
     fn build() -> Self {
-        let mut entries: Vec<&'static FunctionEntry> =
-            inventory::iter::<FunctionEntry>().collect();
+        let mut entries: Vec<&'static FunctionEntry> = inventory::iter::<FunctionEntry>().collect();
         entries.sort_unstable_by_key(|e| e.name);
 
         let index_map = entries

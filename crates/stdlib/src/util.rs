@@ -59,7 +59,7 @@ pub async fn lerp(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
                 "float",
                 other.type_name(),
                 "t",
-            ))
+            ));
         }
     };
 

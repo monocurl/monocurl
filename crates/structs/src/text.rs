@@ -37,18 +37,10 @@ impl PartialOrd for Location8 {
 
 impl Location8 {
     pub fn min(&self, other: &Self) -> Self {
-        if self <= other {
-            *self
-        } else {
-            *other
-        }
+        if self <= other { *self } else { *other }
     }
     pub fn max(&self, other: &Self) -> Self {
-        if self >= other {
-            *self
-        } else {
-            *other
-        }
+        if self >= other { *self } else { *other }
     }
 }
 

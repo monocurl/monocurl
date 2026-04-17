@@ -6,7 +6,9 @@ use super::RcValue;
 #[derive(Clone)]
 pub struct Leader {
     /// the stack id of the last execution stack that modified this leader
-    pub last_modified_stack: Option<u64>,
+    pub last_modified_stack: Option<usize>,
+    /// active primitive animation currently owning this leader/follower pair
+    pub locked_by_anim: Option<usize>,
     /// the leader value (what code sees)
     pub leader_rc: RcValue,
     /// the follower value (what's on screen)

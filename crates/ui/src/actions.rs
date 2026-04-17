@@ -1,13 +1,14 @@
 use gpui::actions;
 
-actions!(
-    app,
-    [Quit]
-);
+actions!(app, [Quit]);
 
 actions!(
     document,
-    [SaveActiveDocumentCustomPath, SaveActiveDocument, CloseActiveDocument]
+    [
+        SaveActiveDocumentCustomPath,
+        SaveActiveDocument,
+        CloseActiveDocument
+    ]
 );
 
 actions!(

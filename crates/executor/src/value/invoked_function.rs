@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use crate::{
     error::ExecutorError,
-    executor::{invoke::fill_defaults, Executor},
+    executor::{Executor, invoke::fill_defaults},
     value::Value,
 };
 
