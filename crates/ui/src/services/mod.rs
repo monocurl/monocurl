@@ -26,7 +26,9 @@ mod compilation;
 mod execution;
 mod lexing;
 
-pub(crate) use execution::{ExecutionSnapshot, ExecutionStatus, PlaybackMode};
+pub(crate) use execution::{
+    ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue, PlaybackMode,
+};
 
 pub struct ServiceManager {
     textual_state: Entity<TextualState>,
@@ -302,6 +304,15 @@ impl ServiceManager {
         smol::block_on(async {
             self.execution_tx
                 .send(ExecutionMessage::SetPlaybackMode(ctx))
+                .await
+                .unwrap();
+        })
+    }
+
+    pub fn update_parameters(&mut self, updates: HashMap<String, ParameterValue>) {
+        smol::block_on(async {
+            self.execution_tx
+                .send(ExecutionMessage::UpdateParameters { updates })
                 .await
                 .unwrap();
         })

@@ -10,6 +10,7 @@ use executor::{
     error::RuntimeError,
     executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
     time::Timestamp,
+    value::Value,
 };
 use futures::{
     StreamExt,
@@ -22,15 +23,17 @@ use structs::rope::{Rope, TextAggregate};
 
 use crate::{services::ServiceManagerMessage, state::diagnostics::Diagnostic};
 
+#[derive(Clone, Debug, PartialEq)]
 pub enum ParameterValue {
-    Int(usize),
-    SmallVectorInt(Vec<usize>),
+    Int(i64),
+    SmallVectorInt(Vec<i64>),
     Float(f64),
     SmallVectorFloat(Vec<f64>),
-    Complex(),
+    Complex { re: f64, im: f64 },
     Other,
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ParameterSnapshot {
     pub parameters: HashMap<String, ParameterValue>,
 }
@@ -75,7 +78,10 @@ pub enum ExecutionMessage {
         version: usize,
     },
     SetPlaybackMode(PlaybackMode),
-    UpdateParameter,
+    // doesn't have to be all parameters
+    UpdateParameters {
+        updates: HashMap<String, ParameterValue>,
+    },
     TogglePlay,
     SeekTo {
         target: Timestamp,
@@ -99,6 +105,79 @@ fn default_bytecode() -> Bytecode {
 }
 
 impl ExecutionService {
+    fn parameter_value_from_runtime(value: Value) -> ParameterValue {
+        match value {
+            Value::Integer(n) => ParameterValue::Int(n),
+            Value::Float(f) => ParameterValue::Float(f),
+            Value::Complex { re, im } => ParameterValue::Complex { re, im },
+            Value::List(list) => {
+                let ints = list
+                    .elements
+                    .iter()
+                    .map(|value| match &*value.borrow() {
+                        Value::Integer(n) => Some(*n),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>();
+                if let Some(ints) = ints {
+                    return ParameterValue::SmallVectorInt(ints);
+                }
+
+                let floats = list
+                    .elements
+                    .iter()
+                    .map(|value| match &*value.borrow() {
+                        Value::Integer(n) => Some(*n as f64),
+                        Value::Float(f) => Some(*f),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>();
+                floats.map_or(ParameterValue::Other, ParameterValue::SmallVectorFloat)
+            }
+            _ => ParameterValue::Other,
+        }
+    }
+
+    fn runtime_value_from_parameter(value: &ParameterValue) -> Option<Value> {
+        Some(match value {
+            ParameterValue::Int(n) => Value::Integer(*n),
+            ParameterValue::SmallVectorInt(values) => {
+                Value::List(std::rc::Rc::new(executor::value::container::List {
+                    elements: values
+                        .iter()
+                        .map(|value| executor::value::rc_value(Value::Integer(*value)))
+                        .collect(),
+                }))
+            }
+            ParameterValue::Float(f) => Value::Float(*f),
+            ParameterValue::SmallVectorFloat(values) => {
+                Value::List(std::rc::Rc::new(executor::value::container::List {
+                    elements: values
+                        .iter()
+                        .map(|value| executor::value::rc_value(Value::Float(*value)))
+                        .collect(),
+                }))
+            }
+            ParameterValue::Complex { re, im } => Value::Complex { re: *re, im: *im },
+            ParameterValue::Other => return None,
+        })
+    }
+
+    fn parameter_snapshot(executor: &Executor) -> Option<ParameterSnapshot> {
+        let parameters = executor
+            .state
+            .active_params
+            .iter()
+            .map(|param| {
+                (
+                    param.name.clone(),
+                    Self::parameter_value_from_runtime(param.follower_value_rc.borrow().clone()),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        (!parameters.is_empty()).then_some(ParameterSnapshot { parameters })
+    }
+
     pub fn new(
         rx: UnboundedReceiver<ExecutionMessage>,
         sm_tx: UnboundedSender<ServiceManagerMessage>,
@@ -178,8 +257,16 @@ impl ExecutionService {
                         has_seeked_for_play = false;
                     }
                 }
-                ExecutionMessage::UpdateParameter => {
-                    todo!("TODO")
+                ExecutionMessage::UpdateParameters { ref updates } => {
+                    for (name, value) in updates {
+                        let Some(value) = Self::runtime_value_from_parameter(&value) else {
+                            log::warn!("parameter update failed for {}: unsupported value", name);
+                            continue;
+                        };
+                        if let Err(error) = executor.update_parameter(name, value) {
+                            log::warn!("parameter update failed for {}: {}", name, error);
+                        }
+                    }
                 }
             }
 
@@ -326,7 +413,7 @@ impl ExecutionService {
             slide_count: executor.real_slide_count(),
             slide_durations: executor.real_slide_durations(),
             minimum_slide_durations: executor.real_minimum_slide_durations(),
-            parameters: None,
+            parameters: Self::parameter_snapshot(executor),
         };
 
         sm_tx

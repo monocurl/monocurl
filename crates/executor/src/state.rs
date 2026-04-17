@@ -105,9 +105,23 @@ pub struct BakedPrimitiveAnim {
 /// a leader-follower pair entry for quick lookup
 #[derive(Clone)]
 pub struct LeaderEntry {
+    /// declared variable name
+    pub name: String,
     /// the RcValue containing Value::Leader
-    pub leader_rc: RcValue,
+    pub leader_cell_rc: RcValue,
+    /// the code-visible leader value
+    pub leader_value_rc: RcValue,
+    /// the live follower value
+    pub follower_value_rc: RcValue,
     pub kind: LeaderKind,
+}
+
+#[derive(Clone)]
+pub struct ActiveParam {
+    pub name: String,
+    pub leader_cell_rc: RcValue,
+    pub leader_value_rc: RcValue,
+    pub follower_value_rc: RcValue,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -141,6 +155,8 @@ pub struct ExecutionState {
 
     /// all leader-follower pairs registered during execution
     pub leaders: Vec<LeaderEntry>,
+    /// all active parameters, kept explicitly for snapshotting and UI updates
+    pub active_params: Vec<ActiveParam>,
 
     /// strong refs for force_ephemeral lvalues (captured variables that may outlive
     /// their var_stack slot). cleared at section boundaries.
@@ -175,6 +191,7 @@ impl ExecutionState {
             execution_heads: BTreeSet::new(),
             primitive_anims: Vec::new(),
             leaders: Vec::new(),
+            active_params: Vec::new(),
             ephemeral_pool: Vec::new(),
             errors: Vec::new(),
             #[cfg(feature = "capture_tos")]
@@ -247,7 +264,7 @@ impl ExecutionState {
     }
 
     /// promote TOS to a leader-follower variable (mesh/state/param).
-    pub fn promote_to_leader(&mut self, stack_idx: usize, kind: LeaderKind) {
+    pub fn promote_to_leader(&mut self, stack_idx: usize, kind: LeaderKind, name: String) {
         let stack = self.stack_mut(stack_idx);
         let init_val = stack.pop();
 
@@ -268,9 +285,21 @@ impl ExecutionState {
         let leader_cell = rc_value(leader_val);
 
         self.leaders.push(LeaderEntry {
-            leader_rc: leader_cell.clone(),
+            name: name.clone(),
+            leader_cell_rc: leader_cell.clone(),
+            leader_value_rc: leader_rc.clone(),
+            follower_value_rc: follower_rc.clone(),
             kind,
         });
+
+        if kind == LeaderKind::Param {
+            self.active_params.push(ActiveParam {
+                name,
+                leader_cell_rc: leader_cell.clone(),
+                leader_value_rc: leader_rc,
+                follower_value_rc: follower_rc,
+            });
+        }
 
         self.stack_mut(stack_idx).push(Value::Lvalue(leader_cell));
     }
@@ -289,5 +318,37 @@ impl ExecutionState {
 
     pub fn follower_value(leader: &Leader) -> Value {
         leader.follower_rc.borrow().clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn promote_to_param_tracks_leader_metadata_and_active_params() {
+        let mut state = ExecutionState::new();
+        state
+            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .push(Value::Integer(7));
+
+        state.promote_to_leader(
+            ExecutionState::ROOT_STACK_ID,
+            LeaderKind::Param,
+            "speed".into(),
+        );
+
+        assert_eq!(state.leaders.len(), 1);
+        assert_eq!(state.active_params.len(), 1);
+        assert_eq!(state.leaders[0].name, "speed");
+        assert_eq!(state.active_params[0].name, "speed");
+        assert!(Rc::ptr_eq(
+            &state.leaders[0].leader_value_rc,
+            &state.active_params[0].leader_value_rc
+        ));
+        assert!(Rc::ptr_eq(
+            &state.leaders[0].follower_value_rc,
+            &state.active_params[0].follower_value_rc
+        ));
     }
 }

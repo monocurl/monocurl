@@ -312,7 +312,7 @@ fn collect_anim_result(
         .leaders
         .iter()
         .map(|entry| {
-            let leader_val = entry.leader_rc.borrow();
+            let leader_val = entry.leader_cell_rc.borrow();
             let Value::Leader(leader) = &*leader_val else {
                 panic!("leader entry is not a Leader value");
             };

@@ -893,6 +893,24 @@ impl Compiler {
             }
             _ => {}
         }
+        let name = &d.identifier.1.0;
+        let existing_param = self
+            .frame()
+            .scopes
+            .iter()
+            .any(|s| s.symbols.get(name).is_some_and(|sym| sym.var_type == VariableType::Param));
+        if existing_param && vt != VariableType::Param {
+            self.error(span.clone(), &format!("cannot shadow 'param' variable '{name}'"));
+        } else if vt == VariableType::Param {
+            let shadows_existing = self
+                .frame()
+                .scopes
+                .iter()
+                .any(|s| s.symbols.contains_key(name));
+            if shadows_existing {
+                self.error(span.clone(), &format!("'param' variable '{name}' cannot shadow an existing variable"));
+            }
+        }
         match vt {
             VariableType::Mesh => {
                 let ni = self.intern_string(&d.identifier.1.0);

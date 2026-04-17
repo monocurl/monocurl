@@ -174,6 +174,25 @@ impl Executor {
         }
     }
 
+    pub fn update_parameter(&mut self, name: &str, value: Value) -> Result<(), ExecutorError> {
+        let param = self
+            .state
+            .active_params
+            .iter()
+            .find(|param| param.name == name)
+            .ok_or_else(|| ExecutorError::Other(format!("unknown parameter '{}'", name)))?;
+
+        if let Value::Leader(leader) = &*param.leader_cell_rc.borrow()
+            && leader.locked_by_anim.is_some()
+        {
+            return Err(ExecutorError::ConcurrentAnimation);
+        }
+
+        *param.leader_value_rc.borrow_mut() = value.clone();
+        *param.follower_value_rc.borrow_mut() = value;
+        Ok(())
+    }
+
     pub async fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
 
@@ -260,14 +279,23 @@ impl Executor {
             Instruction::ConvertVar {} => {
                 self.state.promote_to_var(stack_idx);
             }
-            Instruction::ConvertMesh { .. } => {
-                self.state.promote_to_leader(stack_idx, LeaderKind::Mesh);
+            Instruction::ConvertMesh { name_index } => {
+                let name =
+                    self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
+                self.state
+                    .promote_to_leader(stack_idx, LeaderKind::Mesh, name);
             }
-            Instruction::ConvertState { .. } => {
-                self.state.promote_to_leader(stack_idx, LeaderKind::State);
+            Instruction::ConvertState { name_index } => {
+                let name =
+                    self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
+                self.state
+                    .promote_to_leader(stack_idx, LeaderKind::State, name);
             }
-            Instruction::ConvertParam { .. } => {
-                self.state.promote_to_leader(stack_idx, LeaderKind::Param);
+            Instruction::ConvertParam { name_index } => {
+                let name =
+                    self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
+                self.state
+                    .promote_to_leader(stack_idx, LeaderKind::Param, name);
             }
 
             // ----- stack reads -----
@@ -627,6 +655,63 @@ fn resolve_dereference(val: &Value) -> Value {
     match rc {
         Value::Leader(leader) => leader.follower_rc.borrow().clone(),
         other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bytecode::{Bytecode, SectionBytecode, SectionFlags};
+
+    use super::Executor;
+    use crate::{error::ExecutorError, state::LeaderKind, value::Value};
+
+    fn empty_executor() -> Executor {
+        Executor::new(
+            Bytecode::new(vec![Arc::new(SectionBytecode::new(SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: false,
+                is_root_module: true,
+            }))]),
+            Vec::new(),
+        )
+    }
+
+    #[test]
+    fn update_parameter_syncs_leader_and_follower() {
+        let mut executor = empty_executor();
+        executor
+            .state
+            .stack_mut(crate::state::ExecutionState::ROOT_STACK_ID)
+            .push(Value::Integer(5));
+        executor.state.promote_to_leader(
+            crate::state::ExecutionState::ROOT_STACK_ID,
+            LeaderKind::Param,
+            "speed".into(),
+        );
+
+        executor
+            .update_parameter("speed", Value::Float(2.5))
+            .unwrap();
+
+        let param = &executor.state.active_params[0];
+        match &*param.leader_value_rc.borrow() {
+            Value::Float(value) => assert_eq!(*value, 2.5),
+            other => panic!("expected float leader value, got {}", other.type_name()),
+        }
+        match &*param.follower_value_rc.borrow() {
+            Value::Float(value) => assert_eq!(*value, 2.5),
+            other => panic!("expected float follower value, got {}", other.type_name()),
+        }
+    }
+
+    #[test]
+    fn update_parameter_errors_for_missing_name() {
+        let mut executor = empty_executor();
+        let error = executor.update_parameter("missing", Value::Integer(1));
+        assert!(matches!(error, Err(ExecutorError::Other(_))));
     }
 }
 

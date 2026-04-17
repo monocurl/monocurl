@@ -469,12 +469,12 @@ impl Executor {
                 self.flatten_candidate_tree(candidates, &mut targets)?;
                 if targets.is_empty() {
                     for entry in &self.state.leaders {
-                        let leader_cell = entry.leader_rc.borrow();
+                        let leader_cell = entry.leader_cell_rc.borrow();
                         let Value::Leader(leader) = &*leader_cell else {
                             continue;
                         };
                         if leader.last_modified_stack.is_some() {
-                            targets.push(entry.leader_rc.clone());
+                            targets.push(entry.leader_cell_rc.clone());
                         }
                     }
                 }
@@ -556,13 +556,13 @@ impl Executor {
 
     fn find_leader_cell(&self, needle: &Leader) -> Option<RcValue> {
         self.state.leaders.iter().find_map(|entry| {
-            let leader_cell = entry.leader_rc.borrow();
+            let leader_cell = entry.leader_cell_rc.borrow();
             let Value::Leader(existing) = &*leader_cell else {
                 return None;
             };
             (Rc::ptr_eq(&existing.leader_rc, &needle.leader_rc)
                 && Rc::ptr_eq(&existing.follower_rc, &needle.follower_rc))
-            .then(|| entry.leader_rc.clone())
+            .then(|| entry.leader_cell_rc.clone())
         })
     }
 

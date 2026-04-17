@@ -1,4 +1,4 @@
-use crate::services::{ExecutionSnapshot, ExecutionStatus};
+use crate::services::{ExecutionSnapshot, ExecutionStatus, ParameterSnapshot};
 use executor::time::Timestamp;
 
 // Any state that's necessary for actual execution
@@ -16,6 +16,7 @@ pub struct ExecutionState {
     /// cached duration of each slide; None if the slide hasn't been fully executed yet
     pub slide_durations: Vec<Option<f64>>,
     pub minimum_slide_durations: Vec<Option<f64>>,
+    pub parameters: Option<ParameterSnapshot>,
     pub slide_count: usize,
 }
 
@@ -31,6 +32,7 @@ impl Default for ExecutionState {
             status: ExecutionStatus::Paused,
             slide_durations: Vec::new(),
             minimum_slide_durations: Vec::new(),
+            parameters: None,
             slide_count: 0,
         }
     }
@@ -53,6 +55,7 @@ impl ExecutionState {
         self.status = snapshot.status;
         self.slide_durations = snapshot.slide_durations;
         self.minimum_slide_durations = snapshot.minimum_slide_durations;
+        self.parameters = snapshot.parameters;
         self.slide_count = snapshot.slide_count;
     }
 }
