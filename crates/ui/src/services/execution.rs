@@ -26,9 +26,9 @@ use crate::{services::ServiceManagerMessage, state::diagnostics::Diagnostic};
 #[derive(Clone, Debug, PartialEq)]
 pub enum ParameterValue {
     Int(i64),
-    SmallVectorInt(Vec<i64>),
+    VectorInt(Vec<i64>),
     Float(f64),
-    SmallVectorFloat(Vec<f64>),
+    VectorFloat(Vec<f64>),
     Complex { re: f64, im: f64 },
     Other,
 }
@@ -48,6 +48,7 @@ pub struct ExecutionSnapshot {
     pub parameters: Option<ParameterSnapshot>,
 }
 
+#[derive(Clone, Copy, PartialEq)]
 pub enum PlaybackMode {
     Presentation,
     Preview,
@@ -120,7 +121,7 @@ impl ExecutionService {
                     })
                     .collect::<Option<Vec<_>>>();
                 if let Some(ints) = ints {
-                    return ParameterValue::SmallVectorInt(ints);
+                    return ParameterValue::VectorInt(ints);
                 }
 
                 let floats = list
@@ -132,7 +133,7 @@ impl ExecutionService {
                         _ => None,
                     })
                     .collect::<Option<Vec<_>>>();
-                floats.map_or(ParameterValue::Other, ParameterValue::SmallVectorFloat)
+                floats.map_or(ParameterValue::Other, ParameterValue::VectorFloat)
             }
             _ => ParameterValue::Other,
         }
@@ -141,7 +142,7 @@ impl ExecutionService {
     fn runtime_value_from_parameter(value: &ParameterValue) -> Option<Value> {
         Some(match value {
             ParameterValue::Int(n) => Value::Integer(*n),
-            ParameterValue::SmallVectorInt(values) => {
+            ParameterValue::VectorInt(values) => {
                 Value::List(std::rc::Rc::new(executor::value::container::List {
                     elements: values
                         .iter()
@@ -150,7 +151,7 @@ impl ExecutionService {
                 }))
             }
             ParameterValue::Float(f) => Value::Float(*f),
-            ParameterValue::SmallVectorFloat(values) => {
+            ParameterValue::VectorFloat(values) => {
                 Value::List(std::rc::Rc::new(executor::value::container::List {
                     elements: values
                         .iter()
@@ -163,7 +164,7 @@ impl ExecutionService {
         })
     }
 
-    fn parameter_snapshot(executor: &Executor) -> Option<ParameterSnapshot> {
+    fn parameter_snapshot(executor: &Executor) -> ParameterSnapshot {
         let parameters = executor
             .state
             .active_params
@@ -175,7 +176,7 @@ impl ExecutionService {
                 )
             })
             .collect::<HashMap<_, _>>();
-        (!parameters.is_empty()).then_some(ParameterSnapshot { parameters })
+        ParameterSnapshot { parameters }
     }
 
     pub fn new(
@@ -279,6 +280,7 @@ impl ExecutionService {
                         has_compiler_error,
                         is_playing,
                         true,
+                        playback_mode,
                         version,
                     );
 
@@ -300,6 +302,7 @@ impl ExecutionService {
                         has_compiler_error,
                         is_playing,
                         false,
+                        playback_mode,
                         version,
                     );
                 }
@@ -348,6 +351,7 @@ impl ExecutionService {
                             has_compiler_error,
                             is_playing,
                             false,
+                            playback_mode,
                             version,
                         );
 
@@ -365,6 +369,7 @@ impl ExecutionService {
                             has_compiler_error,
                             is_playing,
                             false,
+                            playback_mode,
                             version,
                         );
                     }
@@ -393,6 +398,7 @@ impl ExecutionService {
         has_compiler_error: bool,
         is_playing: bool,
         is_loading: bool,
+        playback_mode: PlaybackMode,
         version: usize,
     ) {
         let status = if has_compiler_error {
@@ -407,13 +413,15 @@ impl ExecutionService {
             ExecutionStatus::Paused
         };
 
+        let parameters = Self::parameter_snapshot(&executor);
+
         let snapshot = ExecutionSnapshot {
             current_timestamp: executor.internal_to_user_timestamp(executor.state.timestamp),
             status,
             slide_count: executor.real_slide_count(),
             slide_durations: executor.real_slide_durations(),
             minimum_slide_durations: executor.real_minimum_slide_durations(),
-            parameters: Self::parameter_snapshot(executor),
+            parameters: (playback_mode == PlaybackMode::Presentation).then_some(parameters),
         };
 
         sm_tx
