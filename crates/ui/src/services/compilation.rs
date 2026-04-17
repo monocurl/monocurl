@@ -305,7 +305,13 @@ impl CompilationService {
             .await;
         self.emit_diagnostics(&parse_artifacts, &compile_result, version)
             .await;
-        self.emit_parameter_hint(latest_cursor, &compile_result, text_rope, lex_rope, version)
+        self.emit_parameter_hint(
+            latest_cursor,
+            &compile_result,
+            text_rope.clone(),
+            lex_rope,
+            version,
+        )
             .await;
 
         let okay_bytecode =
@@ -313,6 +319,7 @@ impl CompilationService {
         self.execution_tx
             .send(ExecutionMessage::UpdateBytecode {
                 bytecode: okay_bytecode.then_some(compile_result.bytecode.clone()),
+                root_text_rope: text_rope.clone(),
                 version,
             })
             .await

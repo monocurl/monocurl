@@ -159,6 +159,8 @@ fn ident_ref_name(ir: &IdentifierReference) -> &str {
 
 pub(crate) struct CompileBundle {
     path: Option<PathBuf>,
+    is_root_bundle: bool,
+    import_display_index: Option<usize>,
     exports: HashMap<String, Arc<Symbol>>,
     errors: Vec<CompileError>,
     bytecode: Vec<Arc<SectionBytecode>>,
@@ -271,6 +273,8 @@ impl Compiler {
     fn compile_prelude(&mut self) {
         self.current_bundle = Some(CompileBundle {
             path: None,
+            is_root_bundle: true,
+            import_display_index: None,
             exports: HashMap::default(),
             errors: Vec::default(),
             bytecode: vec![],
@@ -387,6 +391,14 @@ impl Compiler {
 
         self.current_bundle = Some(CompileBundle {
             path: bundle.file_path.clone(),
+            is_root_bundle: bundle.root_import_span.is_none(),
+            import_display_index: bundle.root_import_span.as_ref().map(|_| {
+                self.compile_bundles
+                    .iter()
+                    .filter(|bundle| !bundle.is_root_bundle)
+                    .count()
+                    + 1
+            }),
             exports: HashMap::default(),
             errors: Vec::default(),
             bytecode: Vec::default(),
@@ -407,16 +419,22 @@ impl Compiler {
             return;
         }
 
-        self.current_bundle.as_mut().unwrap().current_bytecode =
-            Some(SectionBytecode::new(SectionFlags {
-                is_stdlib: section.section_type == SectionType::StandardLibrary,
-                is_library: matches!(
-                    section.section_type,
-                    SectionType::UserLibrary | SectionType::StandardLibrary
-                ),
-                is_init: section.section_type == SectionType::Init,
-                is_root_module: self.bundle_root_import_span.is_none(),
-            }));
+        let current_bundle = self.current_bundle.as_ref().unwrap();
+        let mut bytecode = SectionBytecode::new(SectionFlags {
+            is_stdlib: section.section_type == SectionType::StandardLibrary,
+            is_library: matches!(
+                section.section_type,
+                SectionType::UserLibrary | SectionType::StandardLibrary
+            ),
+            is_init: section.section_type == SectionType::Init,
+            is_root_module: self.bundle_root_import_span.is_none(),
+        });
+        bytecode.source_file_name = current_bundle.path.as_ref().and_then(|path| {
+            path.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        });
+        bytecode.import_display_index = current_bundle.import_display_index;
+        self.current_bundle.as_mut().unwrap().current_bytecode = Some(bytecode);
 
         // symbols declared here land in the current top scope (no push/pop)
         self.compile_statements(&section.body);

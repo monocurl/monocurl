@@ -4,6 +4,7 @@ use smallvec::SmallVec;
 use structs::text::Span8;
 
 use crate::{
+    error::RuntimeError,
     time::Timestamp,
     value::{
         InstructionPointer, RcValue, Value, container::List, leader::Leader,
@@ -146,7 +147,7 @@ pub struct ExecutionState {
     pub ephemeral_pool: Vec<RcValue>,
 
     /// accumulated error messages
-    pub errors: Vec<(String, Span8)>,
+    pub errors: Vec<RuntimeError>,
 
     /// values captured from the top of root execution stacks when they finish.
     /// used primarily for testing: the final TOS of each completed root head
@@ -274,8 +275,8 @@ impl ExecutionState {
         self.stack_mut(stack_idx).push(Value::Lvalue(leader_cell));
     }
 
-    pub fn error(&mut self, msg: impl Into<String>, span: Span8) {
-        self.errors.push((msg.into(), span));
+    pub fn error(&mut self, error: RuntimeError) {
+        self.errors.push(error);
     }
 
     pub fn has_errors(&self) -> bool {

@@ -1,15 +1,16 @@
 - bytecode: contains the enum of the Monocurl VM bytecode
+  - src/lib.rs: Instruction / prototype definitions plus SectionBytecode metadata (flags, instruction annotations, source file name, imported-bundle display index)
 - cli: binary crate that contains the gluing logic for the monocurl cli
 - compiler: converts AST into bytecode, performs static analysis
 - executor: takes bytecode and scene state and executes it
-  - src/error.rs: ExecutorError enum (TypeError, IndexOutOfBounds, AnimPlayedTwice, ConcurrentAnimation, etc.) with Display impl
-  - src/executor/mod.rs: Executor struct, async execute_one dispatch with direct IP mutation, runtime call-chain recovery for error attribution, NativeFunc/NativeFuture types
+  - src/error.rs: ExecutorError enum plus RuntimeError / RuntimeCallFrame (raw execution error, selected span, bounded recovered callstack)
+  - src/executor/mod.rs: Executor struct, async execute_one dispatch with direct IP mutation, recovered runtime call-chain building, NativeFunc/NativeFuture types
   - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion
   - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, isolated eager lambda execution with trace-parent stack links, exec_convert_to_live_operator (extracts live value from operator result list)
   - src/executor/lerp.rs: general lerp(a, b, t) for Monocurl values — handles numbers, InvokedFunction (same-lambda arg-wise lerp), InvokedOperator (rules 4/5 via unmodified embed)
   - src/executor/anim.rs: seek_primitive_anim (async, yields between instructions), step_primitive_anims, seek_to (event-driven), play/spawn/bake, primitive target flattening/deduction, leader lock handling, double-play guard via AnimBlock.already_played
   - src/executor/access.rs: subscript/attribute (mutable + immutable), assign, append, Rc-based COW at element level, WeakLvalue handling; uses Map helper methods for ordered iteration
-  - src/state.rs: ExecutionState (execution stacks, leaders, primitive anims, ephemeral_pool), ExecutionStack (var stack, IP, call stack, labels, control parent + trace parent), BakedPrimitiveAnim (target leaders + starting followers), LeaderEntry. Monotonic stack IDs and primitive animation IDs.
+  - src/state.rs: ExecutionState (execution stacks, leaders, primitive anims, ephemeral_pool, structured runtime errors), ExecutionStack (var stack, IP, call stack, labels, control parent + trace parent), BakedPrimitiveAnim (target leaders + starting followers), LeaderEntry. Monotonic stack IDs and primitive animation IDs.
   - src/value.rs: Value enum, RcValue = Rc<RefCell<Value>> (owning), WeakValue = Weak<RefCell<Value>> (non-owning), Value::Lvalue (owning), Value::WeakLvalue (pushed refs — breaks reference cycles), helpers for truthiness, resolve, elide_lvalues, as_lvalue_rc; Value::values_equal for general structural equality (Rc fast-path, InvokedFunction/Operator compared by args+labels not computed result)
   - src/value/container.rs: List (Vec<RcValue>) and Map (HashMap + insertion_order Vec for deterministic iteration) with insert/get/get_mut/contains_key/iter helpers
   - src/value/lambda.rs: Lambda (captures, defaults, IP) and Operator wrapper
@@ -49,7 +50,7 @@
     - wrapped_line.rs: The text editor is implemented to always soft wrap, so this contains the code for rendering a single logical line onto the screen as possibly many lines, with styling. It also allows for e.g. querying the on screen position given a character location.
     - line_shaper.rs: given the lexing data, static analysis data, and diagnostics associated with a single logical line, it applies styling and splits that into the text runs where within each run all characters are styled the same. This effectively creates the data necessary for a wrapped line.
     - line_map.rs: given a bunch of wrapped lines representing the content, it computes the height each line takes up as well as the y position of any logical line number. This allows for various different coordinate system conversions.
-  - src/services/{mod.rs,lexing.rs,compilation.rs,execution.rs}: background services that run off the main thread. mod.rs contains ServiceManager and ServiceManagerMessage (including ExecutionSnapshot re-export). execution.rs spawns a dedicated OS thread that owns the Executor (Rc-based, !Send), handles UpdateBytecode/SeekTo/TogglePlay, and sends ExecutionSnapshot back via ServiceManagerMessage::ExecutionStateUpdated
+  - src/services/{mod.rs,lexing.rs,compilation.rs,execution.rs}: background services that run off the main thread. mod.rs contains ServiceManager and ServiceManagerMessage (including ExecutionSnapshot re-export). execution.rs spawns a dedicated OS thread that owns the Executor (Rc-based, !Send), handles UpdateBytecode/SeekTo/TogglePlay, formats runtime diagnostics with recovered callstacks and root line numbers, and sends ExecutionSnapshot back via ServiceManagerMessage::ExecutionStateUpdated
   - src/state: code related to global, document, text editor, and similar state
     - diagnostics.rs: errors, warnings, suggestions that are present in the text editor
     - document_state.rs: for a given document, this is just the textual state and the execution state 
@@ -66,5 +67,5 @@
   - src/window.rs: root GPUI element that owns the global state and muxes between the home and editor views 
 - integration_tests: cross-crate integration tests covering the full lex→parse→compile→execute pipeline
   - tests/basic_executor_tests.rs: `run(src)` helper + basic executor tests (literal values, arithmetic, strings, lambdas, if/else, error detection)
-  - tests/anim_tests.rs: animation test framework + tests; `AnimResult` (timestamp, leaders, errors, error spans), `LeaderInfo` (kind, target, current); runners: `run_anim`, `run_anim_at`, `run_anim_with_stdlib`, `run_multi_anim`, etc.; covers Wait/Set/Lerp behavior, anim block timing, seek mid-animation, state/param leaders, multi-slide, lock/error cases, and imported-runtime error attribution
+  - tests/anim_tests.rs: animation test framework + tests; `AnimResult` (timestamp, leaders, errors, error spans), `LeaderInfo` (kind, target, current); runners: `run_anim`, `run_anim_at`, `run_anim_with_stdlib`, `run_multi_anim`, etc.; covers Wait/Set/Lerp behavior, anim block timing, seek mid-animation, state/param leaders, multi-slide, lock/error cases, and runtime-error span attribution across imported/root call chains
 - ui_cli_shared: a collection of structs and utilities that are necessary for the user facing interface, but not really execution

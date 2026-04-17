@@ -173,6 +173,8 @@ pub struct SectionFlags {
 #[derive(Clone, PartialEq)]
 pub struct SectionBytecode {
     pub flags: SectionFlags,
+    pub source_file_name: Option<String>,
+    pub import_display_index: Option<usize>,
     pub instructions: Vec<Instruction>,
     pub annotations: Vec<InstructionAnnotation>,
     pub int_pool: Vec<i64>,
@@ -186,6 +188,8 @@ impl SectionBytecode {
     pub fn new(flags: SectionFlags) -> Self {
         Self {
             flags,
+            source_file_name: None,
+            import_display_index: None,
             instructions: Vec::new(),
             annotations: Vec::new(),
             int_pool: Vec::new(),

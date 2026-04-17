@@ -188,17 +188,7 @@ fn parse_section(src: &str, section_type: SectionType) -> (Section, Vec<String>)
 }
 
 fn load_stdlib_bundle(path: impl AsRef<Path>) -> Arc<SectionBundle> {
-    let src = fs::read_to_string(path).expect("failed to read stdlib file");
-    let (section, errors) = parse_section(&src, SectionType::StandardLibrary);
-    assert!(errors.is_empty(), "stdlib parse errors: {:?}", errors);
-    Arc::new(SectionBundle {
-        file_path: None,
-        file_index: 0,
-        imported_files: vec![],
-        sections: vec![section],
-        root_import_span: None,
-        was_cached: false,
-    })
+    load_stdlib_bundle_with_import_span(path, 0..0)
 }
 
 fn load_stdlib_bundle_with_import_span(
@@ -303,12 +293,18 @@ fn collect_anim_result(
     user_slide_count: usize,
     mut runtime_errors: Vec<String>,
 ) -> AnimResult {
-    runtime_errors.extend(executor.state.errors.iter().map(|(msg, _)| msg.clone()));
+    runtime_errors.extend(
+        executor
+            .state
+            .errors
+            .iter()
+            .map(|runtime_error| runtime_error.error.to_string()),
+    );
     let error_spans = executor
         .state
         .errors
         .iter()
-        .map(|(_, span)| span.clone())
+        .map(|runtime_error| runtime_error.span.clone())
         .collect();
 
     let leaders = executor
@@ -855,6 +851,22 @@ fn test_imported_stdlib_runtime_error_uses_root_callsite_span() {
         "expected callsite span inside root source, got {:?}",
         r.error_spans[0]
     );
+}
+
+#[test]
+fn test_runtime_error_prefers_innermost_root_callsite_span() {
+    let src = "
+        let create = || Wait(-1)
+        play create()
+    ";
+    let r = run_anim_with_stdlib(src);
+    r.assert_error("non-negative");
+    let wait_start = src
+        .find("Wait(-1)")
+        .expect("missing Wait(-1) in test source");
+    let expected = wait_start..wait_start + "Wait(-1)".len();
+    assert!(!r.error_spans.is_empty(), "expected runtime error span");
+    assert_eq!(r.error_spans[0], expected);
 }
 
 #[test]

@@ -1,4 +1,4 @@
-let len = |container| __monocurl__native__ vector_len(4)
+let len = |vector| __monocurl__native__ vector_len(4)
 let bad = 3
 let g = bad + bad
 let trans = 4

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use structs::text::Span8;
+
 #[derive(Debug, Clone)]
 pub enum ExecutorError {
     TypeError {
@@ -54,6 +56,19 @@ pub enum ExecutorError {
         message: &'static str,
     },
     Other(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeCallFrame {
+    pub section: u16,
+    pub span: Span8,
+}
+
+#[derive(Debug, Clone)]
+pub struct RuntimeError {
+    pub error: ExecutorError,
+    pub span: Span8,
+    pub callstack: Vec<RuntimeCallFrame>,
 }
 
 impl ExecutorError {
@@ -202,3 +217,11 @@ impl fmt::Display for ExecutorError {
 }
 
 impl std::error::Error for ExecutorError {}
+
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl std::error::Error for RuntimeError {}

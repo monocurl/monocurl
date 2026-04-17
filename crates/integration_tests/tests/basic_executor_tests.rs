@@ -24,6 +24,7 @@ struct ExecResult {
     value: Option<Value>,
     /// compile-time or runtime error messages
     errors: Vec<String>,
+    error_spans: Vec<Span8>,
 }
 
 impl ExecResult {
@@ -152,6 +153,7 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         return ExecResult {
             value: None,
             errors: parse_errors,
+            error_spans: vec![],
         };
     }
 
@@ -175,6 +177,7 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         return ExecResult {
             value: None,
             errors: compile_errors,
+            error_spans: vec![],
         };
     }
 
@@ -183,6 +186,7 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         return ExecResult {
             value: None,
             errors: vec!["no user section was compiled".into()],
+            error_spans: vec![],
         };
     }
 
@@ -205,12 +209,25 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         }
     });
 
-    runtime_errors.extend(executor.state.errors.iter().map(|err| err.0.clone()));
+    runtime_errors.extend(
+        executor
+            .state
+            .errors
+            .iter()
+            .map(|err| err.error.to_string()),
+    );
+    let error_spans = executor
+        .state
+        .errors
+        .iter()
+        .map(|err| err.span.clone())
+        .collect();
 
     let value = executor.state.captured_output.into_iter().last();
     ExecResult {
         value,
         errors: runtime_errors,
+        error_spans,
     }
 }
 

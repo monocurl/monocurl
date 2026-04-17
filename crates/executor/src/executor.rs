@@ -7,7 +7,7 @@ pub mod ops;
 
 use std::collections::BTreeSet;
 use std::pin::Pin;
-use std::{future::Future, rc::Rc};
+use std::{future::Future, rc::Rc, sync::Arc};
 
 use bytecode::{Bytecode, Instruction};
 use structs::futures::PeriodicYielder;
@@ -17,7 +17,7 @@ use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
 use crate::executor::cacheing::ExecutionCache;
 use crate::time::Timestamp;
 use crate::{
-    error::ExecutorError,
+    error::{ExecutorError, RuntimeCallFrame, RuntimeError},
     state::{ExecutionState, LeaderKind},
     value::{
         InstructionPointer, RcValue, Value,
@@ -58,6 +58,7 @@ pub(crate) enum ExecSingle {
 
 const EXECUTOR_MEMORY_LIMIT_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 const MEMORY_CHECK_PERIOD: u32 = 8_192;
+const RUNTIME_ERROR_CALLSTACK_LIMIT: usize = 5;
 
 struct PeriodicMemoryChecker {
     count: u32,
@@ -147,6 +148,14 @@ impl Executor {
 
     pub fn total_sections(&self) -> usize {
         self.bytecode.sections.len()
+    }
+
+    pub fn section_bytecode(&self, section_idx: usize) -> &bytecode::SectionBytecode {
+        &self.bytecode.sections[section_idx]
+    }
+
+    pub fn sections(&self) -> &[Arc<bytecode::SectionBytecode>] {
+        &self.bytecode.sections
     }
 
     pub fn user_to_internal_timestamp(&self, user_ts: Timestamp) -> Timestamp {
@@ -496,24 +505,40 @@ impl Executor {
             .unwrap_or(fallback_stack_idx)
     }
 
-    pub(crate) fn runtime_error_span(&self, stack_idx: usize) -> Span8 {
+    pub(crate) fn build_runtime_error(
+        &self,
+        error: ExecutorError,
+        stack_idx: usize,
+    ) -> RuntimeError {
         let mut fallback_span = self.current_instruction_span(stack_idx);
         let mut root_span = None;
+        let mut callstack = Vec::new();
 
         for frame in self.recover_call_stack(stack_idx) {
-            let Some(span) = self.span_for_next_ip(frame.next_ip) else {
-                continue;
-            };
+            let span = self
+                .span_for_next_ip(frame.next_ip)
+                .unwrap_or_else(|| self.current_instruction_span(frame.stack_idx));
             fallback_span = span.clone();
-            if self.bytecode.sections[frame.next_ip.0 as usize]
-                .flags
-                .is_root_module
+            if root_span.is_none()
+                && self.bytecode.sections[frame.next_ip.0 as usize]
+                    .flags
+                    .is_root_module
             {
-                root_span = Some(span);
+                root_span = Some(span.clone());
+            }
+            if callstack.len() < RUNTIME_ERROR_CALLSTACK_LIMIT {
+                callstack.push(RuntimeCallFrame {
+                    section: frame.next_ip.0,
+                    span: span.clone(),
+                });
             }
         }
 
-        root_span.unwrap_or(fallback_span)
+        RuntimeError {
+            error,
+            span: root_span.unwrap_or(fallback_span),
+            callstack,
+        }
     }
 
     fn current_instruction_span(&self, stack_idx: usize) -> Span8 {

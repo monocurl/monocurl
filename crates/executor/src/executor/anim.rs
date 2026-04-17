@@ -32,8 +32,8 @@ impl Executor {
                 ExecSingle::EndOfHead => {}
                 ExecSingle::Error(e) => {
                     let error_stack_idx = self.take_error_stack_idx(stack_idx);
-                    let span = self.runtime_error_span(error_stack_idx);
-                    self.state.error(e.to_string(), span);
+                    let runtime_error = self.build_runtime_error(e.clone(), error_stack_idx);
+                    self.state.error(runtime_error);
                     return SeekPrimitiveResult::Error(e);
                 }
                 ExecSingle::Continue => unreachable!(),
@@ -100,8 +100,8 @@ impl Executor {
 
         for (baked, t) in &in_progress {
             if let Err(err) = self.apply_primitive_anim_step(baked, *t).await {
-                let span = self.runtime_error_span(baked.parent_stack_idx);
-                self.state.error(err.to_string(), span);
+                let runtime_error = self.build_runtime_error(err.clone(), baked.parent_stack_idx);
+                self.state.error(runtime_error);
                 return Err(err);
             }
         }
@@ -111,8 +111,8 @@ impl Executor {
             let baked = self.state.primitive_anims.remove(i);
             if let Err(err) = self.apply_primitive_anim_step(&baked, 1.0).await {
                 self.release_primitive_anim_locks(&baked);
-                let span = self.runtime_error_span(baked.parent_stack_idx);
-                self.state.error(err.to_string(), span);
+                let runtime_error = self.build_runtime_error(err.clone(), baked.parent_stack_idx);
+                self.state.error(runtime_error);
                 return Err(err);
             }
             self.release_primitive_anim_locks(&baked);
