@@ -40,6 +40,7 @@ pub struct ExecutionSnapshot {
     pub status: ExecutionStatus,
     pub slide_count: usize,
     pub slide_durations: Vec<Option<f64>>,
+    pub minimum_slide_durations: Vec<Option<f64>>,
 
     pub parameters: Option<ParameterSnapshot>,
 }
@@ -324,6 +325,7 @@ impl ExecutionService {
             status,
             slide_count: executor.real_slide_count(),
             slide_durations: executor.real_slide_durations(),
+            minimum_slide_durations: executor.real_minimum_slide_durations(),
             parameters: None,
         };
 

@@ -30,6 +30,30 @@ fn gap_w(duration: Option<f64>, zoom: f32) -> f32 {
     duration.map_or(MIN_GAP, |d| (d as f32 * PX_PER_SEC * zoom).max(MIN_GAP))
 }
 
+fn effective_durations(
+    slide_count: usize,
+    durations: &[Option<f64>],
+    minimum_durations: &[Option<f64>],
+    current_slide: usize,
+    current_time: f64,
+) -> Vec<Option<f64>> {
+    (0..slide_count)
+        .map(|i| {
+            let cached = durations.get(i).and_then(|d| *d);
+            let minimum = minimum_durations.get(i).and_then(|d| *d);
+            let inferred = if i == current_slide && current_time > 0.0 {
+                Some(current_time)
+            } else {
+                None
+            };
+            cached
+                .or(minimum)
+                .map(|d| inferred.map_or(d, |t| d.max(t)))
+                .or(inferred)
+        })
+        .collect()
+}
+
 fn compute_slide_xs(slide_count: usize, durations: &[Option<f64>], zoom: f32) -> Vec<f32> {
     let mut xs = Vec::with_capacity(slide_count);
     let mut x = PADDING_H;
@@ -285,41 +309,33 @@ impl Timeline {
         current_time: f64,
         slide_count: usize,
         durations: Vec<Option<f64>>,
+        minimum_durations: Vec<Option<f64>>,
         zoom: f32,
         theme: crate::theme::Theme,
     ) -> impl IntoElement {
-        // use inferred duration for the current slide when computing track width
-        let effective_for_width: Vec<Option<f64>> = durations
-            .iter()
-            .enumerate()
-            .map(|(i, &d)| {
-                if d.is_none() && i == current_slide && current_time > 0.0 {
-                    Some(current_time)
-                } else {
-                    d
-                }
-            })
-            .collect();
+        let effective_for_width = effective_durations(
+            slide_count,
+            &durations,
+            &minimum_durations,
+            current_slide,
+            current_time,
+        );
         let track_w = compute_track_width(slide_count, &effective_for_width, zoom);
         let font = font(FontSet::UI);
 
         let track = canvas(
             {
                 let durations = durations.clone();
+                let minimum_durations = minimum_durations.clone();
                 let font = font.clone();
                 move |bounds, window, _cx| {
-                    // fill in current_time for the current slide if its duration is unknown
-                    let effective: Vec<Option<f64>> = durations
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &d)| {
-                            if d.is_none() && i == current_slide && current_time > 0.0 {
-                                Some(current_time)
-                            } else {
-                                d
-                            }
-                        })
-                        .collect();
+                    let effective = effective_durations(
+                        slide_count,
+                        &durations,
+                        &minimum_durations,
+                        current_slide,
+                        current_time,
+                    );
                     let explicit: Vec<bool> = durations.iter().map(|d| d.is_some()).collect();
 
                     let slide_xs = compute_slide_xs(slide_count, &effective, zoom);
@@ -544,6 +560,7 @@ impl Render for Timeline {
         let is_playing = exec.is_playing();
         let slide_count = exec.slide_count;
         let durations = exec.slide_durations.clone();
+        let minimum_durations = exec.minimum_slide_durations.clone();
         let has_error = exec.has_error();
         let theme = ThemeSettings::theme(cx);
 
@@ -561,6 +578,7 @@ impl Render for Timeline {
             current_time,
             slide_count,
             durations,
+            minimum_durations,
             self.zoom_factor(),
             theme,
         );

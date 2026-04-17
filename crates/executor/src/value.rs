@@ -137,11 +137,14 @@ impl Value {
     }
 
     pub async fn elide_wrappers(self, executor: &mut Executor) -> Result<Value, ExecutorError> {
-        let base = self.elide_lvalue();
-        match base {
-            Value::InvokedOperator(op) => InvokedOperator::value(&op, executor).await,
-            Value::InvokedFunction(func) => InvokedFunction::value(&func, executor).await,
-            other => Ok(other),
+        let mut base = self.elide_lvalue();
+        loop {
+            base = match base {
+                Value::Leader(leader) => leader.leader_rc.borrow().clone(),
+                Value::InvokedOperator(op) => InvokedOperator::value(&op, executor).await?,
+                Value::InvokedFunction(func) => InvokedFunction::value(&func, executor).await?,
+                other => return Ok(other),
+            };
         }
     }
 

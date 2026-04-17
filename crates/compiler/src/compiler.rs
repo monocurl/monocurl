@@ -944,11 +944,12 @@ impl Compiler {
     fn compile_for(&mut self, f: &For, span: &Span8) {
         // desugars for v in container  ->  while idx < len(container)
         self.push_scope();
+        let container_span = f.container.0.clone();
 
         self.compile_val(&f.container.1, &f.container.0);
         let iter_pos = self.stack_depth() - 1;
         // anonymous names (null byte) can't collide with user identifiers
-        self.emit(Instruction::ConvertVar, span.clone());
+        self.emit(Instruction::ConvertVar, container_span.clone());
         self.define_symbol("\x00iter", VariableType::Let, SymbolFunctionInfo::None);
 
         self.emit_push_int(0, span.clone());
@@ -963,7 +964,7 @@ impl Compiler {
         let d = self.stack_delta(idx_pos);
         self.emit_copy(d, span.clone());
         let d = self.stack_delta(iter_pos);
-        self.emit_copy(d, span.clone());
+        self.emit_copy(d, container_span.clone());
 
         let len_idx = registry().index_of("vector_len") as u16;
         self.emit(
@@ -971,7 +972,7 @@ impl Compiler {
                 index: len_idx,
                 arg_count: 1,
             },
-            span.clone(),
+            container_span.clone(),
         );
 
         self.emit(Instruction::Lt, span.clone());
@@ -990,10 +991,13 @@ impl Compiler {
         // body scope with the for variable
         self.push_scope();
         let d = self.stack_delta(iter_pos);
-        self.emit_copy(d, span.clone());
+        self.emit_copy(d, container_span.clone());
         let d = self.stack_delta(idx_pos);
         self.emit_copy(d, span.clone());
-        self.emit(Instruction::Subscript { mutable: false }, span.clone());
+        self.emit(
+            Instruction::Subscript { mutable: false },
+            container_span.clone(),
+        );
         self.dec_stack(1);
         self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
         self.emit(Instruction::ConvertVar, span.clone());

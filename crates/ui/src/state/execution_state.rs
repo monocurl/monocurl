@@ -15,6 +15,7 @@ pub struct ExecutionState {
     pub status: ExecutionStatus,
     /// cached duration of each slide; None if the slide hasn't been fully executed yet
     pub slide_durations: Vec<Option<f64>>,
+    pub minimum_slide_durations: Vec<Option<f64>>,
     pub slide_count: usize,
 }
 
@@ -29,6 +30,7 @@ impl Default for ExecutionState {
             current_timestamp: Timestamp::default(),
             status: ExecutionStatus::Paused,
             slide_durations: Vec::new(),
+            minimum_slide_durations: Vec::new(),
             slide_count: 0,
         }
     }
@@ -50,6 +52,7 @@ impl ExecutionState {
         self.current_timestamp = snapshot.current_timestamp;
         self.status = snapshot.status;
         self.slide_durations = snapshot.slide_durations;
+        self.minimum_slide_durations = snapshot.minimum_slide_durations;
         self.slide_count = snapshot.slide_count;
     }
 }

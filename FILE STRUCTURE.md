@@ -5,6 +5,7 @@
 - executor: takes bytecode and scene state and executes it
   - src/error.rs: ExecutorError enum plus RuntimeError / RuntimeCallFrame (raw execution error, selected span, bounded recovered callstack)
   - src/executor/mod.rs: Executor struct, async execute_one dispatch with direct IP mutation, recovered runtime call-chain building, NativeFunc/NativeFuture types
+  - src/executor/cacheing.rs: per-section execution cache used for rebasing seeks plus user-visible slide duration metadata, including exact cached slide durations and invalidation-aware minimum duration lower bounds
   - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion plus recursive list linear ops (scalar multiply, elementwise add, negate)
   - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, isolated eager lambda execution with trace-parent stack links, exec_convert_to_live_operator (extracts live value from operator result list)
   - src/executor/lerp.rs: general lerp(a, b, t) for Monocurl values — handles numbers, InvokedFunction (same-lambda arg-wise lerp), InvokedOperator (rules 4/5 via unmodified embed)
@@ -64,10 +65,10 @@
   - src/state: code related to global, document, text editor, and similar state
     - diagnostics.rs: errors, warnings, suggestions that are present in the text editor
     - document_state.rs: for a given document, this is just the textual state and the execution state 
-    - execution_state.rs: UI-side execution state (current_timestamp, runtime_errors, slide_durations, slide_count, is_playing) updated via ExecutionSnapshot from the executor thread
+    - execution_state.rs: UI-side execution state (current_timestamp, runtime_errors, slide_durations, executor-reported minimum duration hints, slide_count, is_playing) updated via ExecutionSnapshot from the executor thread
     - textual_state.rs: this is not only the current text of the document, but also any part of the state of the text editor that might be queryable / editable by other entities in the system (like the current diagnostics, autocomplete). Some other state is owned fully by the text editor instead, in the editor directory. The line is a bit blurry 
     - window_state.rs: global application state, consisting of the active document, open tabs, recently opened projects, and navbar scroll state; owns open/close-tab flows including unsaved-change prompts, discard handling, and forgetting pathless scratch tabs by deleting their internal files
-  - src/timeline: a module related to timeline rendering
+  - src/timeline: a module related to timeline rendering; timeline_view uses exact slide cache durations when available and otherwise falls back to executor-reported minimum duration hints
   - src/viewport: a module related to viewport rendering
   - src/document_view.rs: code related to rendering the document view (in either presentation mode or not). Sets up keyboard shortcuts. Owns the state of the document, handles save actions but proxies most other actions. Layouts the timeline, viewport, and editor based on presentation mode. The actual code for rendering those components is present in separate files.
   - src/home_view.rs: code related to the actual home element (list of projects, creating and deleting); now themed from `theme.rs`

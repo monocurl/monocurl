@@ -81,6 +81,7 @@ impl Executor {
     pub async fn step_primitive_anims(&mut self, dt: f64) -> Result<(), ExecutorError> {
         debug_assert!(self.state.execution_heads.is_empty());
         self.state.timestamp.time += dt;
+        self.note_current_timestamp_in_cache();
 
         let mut finished_indices = Vec::new();
         let mut in_progress = Vec::new();

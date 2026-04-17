@@ -134,6 +134,14 @@ impl ExecResult {
         );
     }
 
+    fn assert_first_error_span(&self, expected: Span8) {
+        assert!(
+            !self._error_spans.is_empty(),
+            "expected at least one runtime error span"
+        );
+        assert_eq!(self._error_spans[0], expected);
+    }
+
     #[allow(dead_code)]
     fn assert_no_value(&self) {
         self.assert_ok();
@@ -962,6 +970,19 @@ fn test_exec_mesh_leader_labeled_attribute_mutable() {
 }
 
 #[test]
+fn test_exec_mesh_leader_labeled_attribute_binary_ops_elide_leader() {
+    let r = run_section(
+        "
+        let hello = |origin, radius| origin + radius
+        mesh base = hello(origin: 10, radius: 2)
+        let result = base.origin + 5
+    ",
+        SectionType::Slide,
+    );
+    r.assert_int(15);
+}
+
+#[test]
 fn test_exec_labeled_operator_mutation_updates_downstream_value() {
     let r = run("
         let add = operator |target, amount| {
@@ -1302,6 +1323,20 @@ fn test_exec_runtime_error_index_out_of_bounds() {
         let result = xs[5]
     ");
     r.assert_error("out of bounds");
+}
+
+#[test]
+fn test_exec_for_non_list_runtime_error_uses_container_span() {
+    let src = "
+        for (i in 7 + 8) {
+            let result = i
+        }
+    ";
+    let r = run(src);
+    r.assert_error("list");
+
+    let start = src.find("7 + 8").expect("missing container expression");
+    r.assert_first_error_span(start..start + "7 + 8".len());
 }
 
 #[test]
