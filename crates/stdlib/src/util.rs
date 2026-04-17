@@ -4,8 +4,9 @@ use executor::{
     error::ExecutorError,
     executor::Executor,
     value::{
-        Value, rc_value,
+        Value,
         container::{HashableKey, List, Map},
+        rc_value,
     },
 };
 use smallvec::smallvec;
@@ -124,7 +125,10 @@ pub async fn len(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         Value::Map(map) => map.len(),
         Value::String(s) => s.chars().count(),
         other => {
-            return Err(ExecutorError::type_error("list / map / string", other.type_name()));
+            return Err(ExecutorError::type_error(
+                "list / map / string",
+                other.type_name(),
+            ));
         }
     };
     Ok(Value::Integer(n as i64))
@@ -179,7 +183,10 @@ pub async fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value,
             Ok(Value::List(Rc::new(List { elements })))
         }
         Value::String(s) => Ok(Value::String(s.chars().rev().collect())),
-        other => Err(ExecutorError::type_error("list / string", other.type_name())),
+        other => Err(ExecutorError::type_error(
+            "list / string",
+            other.type_name(),
+        )),
     }
 }
 
@@ -238,6 +245,48 @@ pub async fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 }
 
 #[stdlib_func]
+pub async fn list_subset(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let src = read_rc_list(executor, stack_idx, -2, "src")?;
+    let indexes = read_rc_list(executor, stack_idx, -1, "indexes")?;
+
+    let mut elements = smallvec![];
+    for index in &indexes.elements {
+        let idx = match &*index.borrow() {
+            Value::Integer(n) => *n,
+            other => {
+                return Err(ExecutorError::type_error_for(
+                    "int",
+                    other.type_name(),
+                    "index",
+                ));
+            }
+        };
+
+        if idx < 0 {
+            return Err(ExecutorError::InvalidArgument {
+                arg: "index",
+                message: "must be non-negative",
+            });
+        }
+
+        let idx = idx as usize;
+        if idx >= src.elements.len() {
+            return Err(ExecutorError::IndexOutOfBounds {
+                index: idx,
+                len: src.elements.len(),
+            });
+        }
+
+        elements.push(src.elements[idx].clone());
+    }
+
+    Ok(Value::List(Rc::new(List { elements })))
+}
+
+#[stdlib_func]
 pub async fn min_of(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
     todo!("min over a list with custom key lambda")
 }
@@ -257,11 +306,7 @@ fn key_to_value(k: &HashableKey) -> Value {
     }
 }
 
-fn map_from(
-    executor: &Executor,
-    stack_idx: usize,
-    index: i32,
-) -> Result<Rc<Map>, ExecutorError> {
+fn map_from(executor: &Executor, stack_idx: usize, index: i32) -> Result<Rc<Map>, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)
@@ -396,7 +441,10 @@ pub async fn to_int(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
                 message: "cannot parse as int",
             }
         }),
-        other => Err(ExecutorError::type_error("number / string", other.type_name())),
+        other => Err(ExecutorError::type_error(
+            "number / string",
+            other.type_name(),
+        )),
     }
 }
 
@@ -411,12 +459,18 @@ pub async fn to_float(executor: &mut Executor, stack_idx: usize) -> Result<Value
     {
         Value::Integer(n) => Ok(Value::Float(n as f64)),
         Value::Float(f) => Ok(Value::Float(f)),
-        Value::String(s) => s.trim().parse::<f64>().map(Value::Float).map_err(|_| {
-            ExecutorError::InvalidArgument {
-                arg: "x",
-                message: "cannot parse as float",
-            }
-        }),
-        other => Err(ExecutorError::type_error("number / string", other.type_name())),
+        Value::String(s) => {
+            s.trim()
+                .parse::<f64>()
+                .map(Value::Float)
+                .map_err(|_| ExecutorError::InvalidArgument {
+                    arg: "x",
+                    message: "cannot parse as float",
+                })
+        }
+        other => Err(ExecutorError::type_error(
+            "number / string",
+            other.type_name(),
+        )),
     }
 }

@@ -83,15 +83,18 @@ let max_of = |v, key = identity| __monocurl__native__ max_of(v, key)
 let min_of = |v, key = identity| __monocurl__native__ min_of(v, key)
 
 # map helpers
-let keys   = |m| __monocurl__native__ map_keys(m)
-let values = |m| __monocurl__native__ map_values(m)
-let items  = |m| __monocurl__native__ map_items(m)
+let map_keys   = |m| __monocurl__native__ map_keys(m)
+let map_values = |m| __monocurl__native__ map_values(m)
+let map_items  = |m| __monocurl__native__ map_items(m)
 
 # first n elements of a list.
 let take = |v, n| __monocurl__native__ take(v, n)
 
 # list with the first n elements removed.
 let drop = |v, n| __monocurl__native__ drop(v, n)
+
+# subset by index list: ret[i] = src[indexes[i]]
+let list_subset = |src, indexes| __monocurl__native__ list_subset(src, indexes)
 
 # concatenate one level of nesting.
 let flatten = |v| {

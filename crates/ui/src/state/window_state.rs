@@ -335,19 +335,16 @@ impl WindowState {
 
         fn actually_close(
             this: &mut WindowState,
+            document_view: &Entity<DocumentView>,
             user_path: &Option<PathBuf>,
             internal_path: &PathBuf,
+            cx: &mut App,
         ) {
-            if let Some(path) = &user_path {
-                // if user path exists, copy it to internal path (resetting any progress)
+            let _ = document_view.update(cx, |view, cx| {
+                view.discard_unsaved_changes(cx);
+            });
 
-                match std::fs::copy(path, internal_path) {
-                    Ok(_) => {}
-                    Err(err) => {
-                        log::warn!("Could not copy user file to internal path: {}", err);
-                    }
-                }
-
+            if user_path.is_some() {
                 this.close_project(internal_path);
             } else {
                 // otherwise, completely forget project (nothing to save)
@@ -357,6 +354,7 @@ impl WindowState {
 
         let user_path = document.user_path.clone();
         let internal_path = internal_path.clone();
+        let document_view = document.view.clone();
 
         if diff {
             let confirm = window.prompt(
@@ -377,15 +375,15 @@ impl WindowState {
 
                 if confirm.await == Ok(1) {
                     let _ = app.update(move |cx| {
-                        let _ = this.update(cx, move |this, _cx| {
-                            actually_close(this, &user_path, &internal_path);
+                        let _ = this.update(cx, move |this, cx| {
+                            actually_close(this, &document_view, &user_path, &internal_path, cx);
                         });
                     });
                 }
             })
             .detach();
         } else {
-            actually_close(self, &user_path, &internal_path);
+            actually_close(self, &document_view, &user_path, &internal_path, cx);
         }
     }
 

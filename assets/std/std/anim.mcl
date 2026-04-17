@@ -40,9 +40,6 @@ let bounce = |t| __monocurl__native__ rate_bounce(t)
 # elastic-out — overshoots then rings in.
 let elastic = |t| __monocurl__native__ rate_elastic(t)
 
-# reverse a rate function.
-let reversed = operator |target| [target, |t| target(1 - t)]
-
 # primitive animations
 # these are the leaf animations the executor knows how to step. All higher
 # animations eventually decompose into one of these.

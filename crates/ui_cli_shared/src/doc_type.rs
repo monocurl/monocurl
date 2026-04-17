@@ -16,8 +16,12 @@ impl DocumentType {
 
     pub const fn default_file(&self) -> &'static str {
         match self {
-            DocumentType::Scene => "import std.util\nimport std.mesh\nimport std.anim\n\n",
-            DocumentType::Library => "import std.util\nimport std.mesh\nimport std.anim\n\n",
+            DocumentType::Scene => {
+                "import std.util\nimport std.math\nimport std.color\nimport std.mesh\nimport std.anim\nimport std.scene\n\n"
+            }
+            DocumentType::Library => {
+                "import std.util\nimport std.math\nimport std.color\nimport std.mesh\nimport std.anim\nimport std.scene\n\n"
+            }
         }
     }
 }

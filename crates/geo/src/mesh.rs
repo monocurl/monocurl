@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::simd::{Float2, Float3, Float4};
 
 #[derive(Debug, Clone, Copy)]
@@ -55,7 +57,20 @@ pub struct Tri {
 #[derive(Debug, Clone)]
 pub struct Uniforms {
     pub alpha: f64,
-    pub img: Option<String>,
+    pub img: Option<PathBuf>,
+    pub z_index: i32,
+    pub fixed_in_frame: bool,
+}
+
+impl Default for Uniforms {
+    fn default() -> Self {
+        Self {
+            alpha: 1.0,
+            img: None,
+            z_index: 0,
+            fixed_in_frame: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

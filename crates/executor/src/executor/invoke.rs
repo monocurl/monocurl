@@ -437,6 +437,20 @@ impl Executor {
         }) // Box::pin
     }
 
+    /// eagerly invoke a pure lambda with defaults filled in.
+    /// exposed for stdlib helpers that need predicate-style callbacks.
+    pub fn invoke_lambda<'a>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        args: Vec<Value>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
+    {
+        Box::pin(async move {
+            let full_args = fill_defaults(args, lambda);
+            self.eagerly_invoke_lambda(lambda, &full_args, None).await
+        })
+    }
+
     /// drain label buffer and resolve label names from string pool
     fn drain_labels(
         &mut self,

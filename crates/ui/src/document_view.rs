@@ -295,6 +295,20 @@ impl DocumentView {
 }
 
 impl DocumentView {
+    pub fn discard_unsaved_changes(&mut self, cx: &mut App) {
+        let user_path = self.user_path.clone();
+
+        self.editor.update(cx, |editor, cx| {
+            if let Some(user_path) = &user_path {
+                editor.discard_unsaved_changes(user_path, cx);
+            } else {
+                editor.abandon_unsaved_changes(cx);
+            }
+        });
+
+        self.dirty.update(cx, |dirty, _| *dirty = false);
+    }
+
     fn get_live_ropes(
         &self,
         window_state: &WindowState,

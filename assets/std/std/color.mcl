@@ -28,7 +28,7 @@ let CLEAR      = [0.0, 0.0, 0.0, 0]
 # r, g, b in [0, 1]; alpha defaults to fully opaque.
 let rgb  = |r, g, b, a = 1| [r, g, b, a]
 
-# h in [0, 1] (or 360 if degrees=1), s, v, a in [0, 1].
+# h in [0, 1], s, v, a in [0, 1].
 let hsv  = |h, s, v, a = 1| __monocurl__native__ hsv(h, s, v, a)
 
 # grayscale shade at given luminance.

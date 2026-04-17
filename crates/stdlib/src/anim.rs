@@ -7,11 +7,7 @@ use stdlib_macros::stdlib_func;
 
 use crate::read_float;
 
-fn read_time(
-    executor: &Executor,
-    stack_idx: usize,
-    index: i32,
-) -> Result<f64, ExecutorError> {
+fn read_time(executor: &Executor, stack_idx: usize, index: i32) -> Result<f64, ExecutorError> {
     let time = read_float(executor, stack_idx, index, "time")?;
     if time < 0.0 {
         return Err(ExecutorError::InvalidArgument {
@@ -180,7 +176,10 @@ pub async fn anim_with_rate(
 // ── rate-function natives (heavy ease curves) ────────────────────────────────
 
 #[stdlib_func]
-pub async fn rate_bounce(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn rate_bounce(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let t = read_float(executor, stack_idx, -1, "t")?;
     // stolen from the d3-ease / css easing "easeOutBounce" schedule.
     let out = if t < 1.0 / 2.75 {

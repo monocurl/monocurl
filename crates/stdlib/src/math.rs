@@ -49,7 +49,13 @@ fn read_list(
     index: i32,
     name: &'static str,
 ) -> Result<Vec<f64>, ExecutorError> {
-    match executor.state.stack(stack).read_at(index).clone().elide_lvalue_rec() {
+    match executor
+        .state
+        .stack(stack)
+        .read_at(index)
+        .clone()
+        .elide_lvalue_rec()
+    {
         Value::List(list) => list
             .elements
             .iter()
@@ -203,7 +209,7 @@ pub async fn trunc(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
 }
 
 #[stdlib_func]
-pub async fn r#mod(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mod_func(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let n = read_float(executor, stack_idx, -2, "n")?;
     let m = read_float(executor, stack_idx, -1, "m")?;
     if m == 0.0 {
@@ -393,12 +399,14 @@ pub async fn dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
             rhs_len: v.len(),
         });
     }
-    Ok(Value::Float(u.iter().zip(v.iter()).map(|(a, b)| a * b).sum()))
+    Ok(Value::Float(
+        u.iter().zip(v.iter()).map(|(a, b)| a * b).sum(),
+    ))
 }
 
 #[stdlib_func]
 pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    use executor::value::{rc_value, container::List};
+    use executor::value::{container::List, rc_value};
     use smallvec::smallvec;
 
     let u = read_list(executor, stack_idx, -2, "u")?;

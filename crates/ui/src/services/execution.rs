@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -21,11 +22,26 @@ use structs::rope::{Rope, TextAggregate};
 
 use crate::{services::ServiceManagerMessage, state::diagnostics::Diagnostic};
 
+pub enum ParameterValue {
+    Int(usize),
+    SmallVectorInt(Vec<usize>),
+    Float(f64),
+    SmallVectorFloat(Vec<f64>),
+    Complex(),
+    Other,
+}
+
+pub struct ParameterSnapshot {
+    pub parameters: HashMap<String, ParameterValue>,
+}
+
 pub struct ExecutionSnapshot {
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,
     pub slide_count: usize,
     pub slide_durations: Vec<Option<f64>>,
+
+    pub parameters: Option<ParameterSnapshot>,
 }
 
 pub enum PlaybackMode {
@@ -308,6 +324,7 @@ impl ExecutionService {
             status,
             slide_count: executor.real_slide_count(),
             slide_durations: executor.real_slide_durations(),
+            parameters: None,
         };
 
         sm_tx

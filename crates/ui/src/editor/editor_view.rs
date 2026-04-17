@@ -100,6 +100,23 @@ impl Editor {
         self.write_to_internal_path(cx);
         self.write_to_path(path, cx);
     }
+
+    pub fn abandon_unsaved_changes(&self, cx: &mut App) {
+        self.internal_dirty.update(cx, |dirty, _| *dirty = false);
+    }
+
+    pub fn discard_unsaved_changes(&self, source: &std::path::Path, cx: &mut App) {
+        self.abandon_unsaved_changes(cx);
+
+        let _ = std::fs::copy(source, &self.internal_path).inspect_err(|err| {
+            log::warn!(
+                "Could not copy user file {:?} to internal path {:?}: {}",
+                source,
+                self.internal_path,
+                err
+            );
+        });
+    }
 }
 
 impl Render for Editor {

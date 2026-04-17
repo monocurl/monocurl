@@ -4,20 +4,16 @@ use executor::{
     error::ExecutorError,
     executor::Executor,
     value::{
-        Value, rc_value,
+        Value,
         container::{HashableKey, List, Map},
+        rc_value,
     },
 };
 use stdlib_macros::stdlib_func;
 
 use crate::read_float;
 
-fn read_value(
-    executor: &Executor,
-    stack_idx: usize,
-    index: i32,
-    _name: &'static str,
-) -> Value {
+fn read_value(executor: &Executor, stack_idx: usize, index: i32, _name: &'static str) -> Value {
     executor
         .state
         .stack(stack_idx)
@@ -49,7 +45,10 @@ fn value_list(values: impl IntoIterator<Item = Value>) -> Value {
     }))
 }
 
-fn tagged_map(kind: &'static str, fields: impl IntoIterator<Item = (&'static str, Value)>) -> Value {
+fn tagged_map(
+    kind: &'static str,
+    fields: impl IntoIterator<Item = (&'static str, Value)>,
+) -> Value {
     let mut map = Map::new();
     map.insert(
         HashableKey::String("kind".to_string()),
@@ -69,9 +68,18 @@ pub async fn initial_camera(
     Ok(tagged_map(
         "camera",
         [
-            ("position", value_list([Value::Integer(0), Value::Integer(0), Value::Integer(-10)])),
-            ("look_at", value_list([Value::Integer(0), Value::Integer(0), Value::Integer(0)])),
-            ("up", value_list([Value::Integer(0), Value::Integer(1), Value::Integer(0)])),
+            (
+                "position",
+                value_list([Value::Integer(0), Value::Integer(0), Value::Integer(-10)]),
+            ),
+            (
+                "look_at",
+                value_list([Value::Integer(0), Value::Integer(0), Value::Integer(0)]),
+            ),
+            (
+                "up",
+                value_list([Value::Integer(0), Value::Integer(1), Value::Integer(0)]),
+            ),
             ("fov", Value::Float(0.6981317007977318)),
             ("near", Value::Float(0.1)),
             ("far", Value::Integer(100)),
@@ -100,45 +108,29 @@ pub async fn initial_background(
 }
 
 #[stdlib_func]
-pub async fn mk_camera(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub async fn mk_camera(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     Ok(tagged_map(
         "camera",
         [
             ("position", read_value(executor, stack_idx, -7, "position")),
             ("look_at", read_value(executor, stack_idx, -6, "look_at")),
             ("up", read_value(executor, stack_idx, -5, "up")),
-            ("fov", Value::Float(read_float(executor, stack_idx, -4, "fov")?)),
-            ("near", Value::Float(read_float(executor, stack_idx, -3, "near")?)),
-            ("far", Value::Float(read_float(executor, stack_idx, -2, "far")?)),
-            ("ortho", Value::Integer(read_int_flag(executor, stack_idx, -1, "ortho")?)),
-        ],
-    ))
-}
-
-#[stdlib_func]
-pub async fn mk_solid_background(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
-    Ok(tagged_map(
-        "solid_background",
-        [("color", read_value(executor, stack_idx, -1, "color"))],
-    ))
-}
-
-#[stdlib_func]
-pub async fn mk_gradient_background(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
-    Ok(tagged_map(
-        "gradient_background",
-        [
-            ("top", read_value(executor, stack_idx, -2, "top")),
-            ("bottom", read_value(executor, stack_idx, -1, "bottom")),
+            (
+                "fov",
+                Value::Float(read_float(executor, stack_idx, -4, "fov")?),
+            ),
+            (
+                "near",
+                Value::Float(read_float(executor, stack_idx, -3, "near")?),
+            ),
+            (
+                "far",
+                Value::Float(read_float(executor, stack_idx, -2, "far")?),
+            ),
+            (
+                "ortho",
+                Value::Integer(read_int_flag(executor, stack_idx, -1, "ortho")?),
+            ),
         ],
     ))
 }

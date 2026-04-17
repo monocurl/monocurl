@@ -23,6 +23,7 @@
   - src/time.rs: Timestamp (slide + time offset)
 - exporter: coordinates process of exporting a scene into a video
 - geo: helper routines for execution (a lot of lib monocurl will reference these routines).
+  - src/mesh.rs: core mesh structs (`Dot`, `Lin`, `Tri`, `Mesh`, `Uniforms`) and lightweight per-mesh render metadata such as alpha, texture, z-order, and fixed-in-frame flags
 - libtess2: safe Rust wrapper over a vendored copy of the upstream libtess2 tessellator
   - src/lib.rs: `Float3`-based contour input, tessellation options/error types, safe triangle output extraction from `TESStesselator`
   - build.rs: compiles the vendored upstream C sources from `upstream/Source` and links them into the Rust crate
@@ -39,9 +40,9 @@
   - src/anim.rs: native primitive animation constructors for `Set`, `Lerp`, and `Wait`
   - src/color.rs: color-related native helpers such as `hsv`
   - src/math.rs: scalar math/statistics/vector native helpers used by `std.math`
-  - src/mesh.rs: native mesh constructors, mesh operators, and mesh query hooks backing `std.mesh` (many are still placeholders)
-  - src/scene.rs: scene/camera/background native helpers backing `std.scene`; currently returns structured placeholder values for the default prelude scene state
-  - src/util.rs: general collection/string/conversion helpers used by `std.util`
+  - src/mesh.rs: native mesh constructors, mesh operators, and mesh query hooks backing `std.mesh`; includes normalized mesh-tree traversal helpers/iterators plus leafwise styling, fixed-in-frame/z-order metadata ops, and simple bounds/tag/topology/filter queries
+  - src/scene.rs: scene/camera helpers backing `std.scene`; currently returns structured placeholder values for the default prelude scene state
+  - src/util.rs: general collection/string/conversion helpers used by `std.util`, including list slicing/subsetting helpers
 - stdlib-macros: proc-macro crate providing the `#[stdlib_func]` attribute; generates a `NativeFunc`-compatible wrapper and submits it to the `inventory` collector used by `stdlib::registry`
 - structs: helper structs and utilities.
   - src/assets.rs: contains code for location where assets (say fonts) are located
@@ -52,6 +53,7 @@
   - src/components/buttons.rs: contains a button styled like a link
   - src/components/split_pane.rs: gpui element that implements vertical and horizontal split pane
   - src/editor: code related to the text editor. 
+    - editor_view.rs: wrapper around `TextEditor`; bootstraps editor content from the internal file, handles periodic internal autosave, writes user saves, and suppresses the pending internal flush when a tab explicitly discards unsaved changes (including pathless scratch tabs that are about to be forgotten)
     - text_editor/mod.rs: contains most of the code related to the actual text editor, which include input handling, trait implementation, action handling, delegating to line reshpaing. Rendering is delegated to other files though.
     - text_editor/popover_element.rs: this is the element that shows editor popovers for diagnostics, autocomplete, and parameter hints; diagnostic popovers also include a clipboard copy action
     - text_editor/text_element: this contains the rendering logic for the actual text editor (including scroll bar and everything on the base layer).
@@ -64,7 +66,7 @@
     - document_state.rs: for a given document, this is just the textual state and the execution state 
     - execution_state.rs: UI-side execution state (current_timestamp, runtime_errors, slide_durations, slide_count, is_playing) updated via ExecutionSnapshot from the executor thread
     - textual_state.rs: this is not only the current text of the document, but also any part of the state of the text editor that might be queryable / editable by other entities in the system (like the current diagnostics, autocomplete). Some other state is owned fully by the text editor instead, in the editor directory. The line is a bit blurry 
-    - window_state.rs: global application state, consisting of the active document, open tabs, recently opened projects, and navbar scroll state
+    - window_state.rs: global application state, consisting of the active document, open tabs, recently opened projects, and navbar scroll state; owns open/close-tab flows including unsaved-change prompts, discard handling, and forgetting pathless scratch tabs by deleting their internal files
   - src/timeline: a module related to timeline rendering
   - src/viewport: a module related to viewport rendering
   - src/document_view.rs: code related to rendering the document view (in either presentation mode or not). Sets up keyboard shortcuts. Owns the state of the document, handles save actions but proxies most other actions. Layouts the timeline, viewport, and editor based on presentation mode. The actual code for rendering those components is present in separate files.
@@ -77,3 +79,4 @@
   - tests/basic_executor_tests.rs: `run(src)` helper + basic executor tests (literal values, arithmetic, strings, lambdas, if/else, error detection)
   - tests/anim_tests.rs: animation test framework + tests; `AnimResult` (timestamp, leaders, errors, error spans), `LeaderInfo` (kind, target, current); runners: `run_anim`, `run_anim_at`, `run_anim_with_stdlib`, `run_multi_anim`, etc.; covers Wait/Set/Lerp behavior, anim block timing, seek mid-animation, state/param leaders, multi-slide, lock/error cases, and runtime-error span attribution across imported/root call chains
 - ui_cli_shared: a collection of structs and utilities that are necessary for the user facing interface, but not really execution
+  - src/doc_type.rs: scene/library document type metadata, including file extensions and starter file contents with the default stdlib imports

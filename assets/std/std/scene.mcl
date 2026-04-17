@@ -21,12 +21,6 @@ let OrthographicCamera = |position = [0, 0, -10], look_at = [0, 0, 0], up = 1u, 
 let DEFAULT_CAMERA     = __monocurl__native__ initial_camera()
 let DEFAULT_BACKGROUND = __monocurl__native__ initial_background()
 
-# solid-color background (RGBA).
-let SolidBackground = |color = [0, 0, 0, 1]| __monocurl__native__ mk_solid_background(color)
-
-# vertical gradient between two colors.
-let GradientBackground = |top = [0, 0, 0, 1], bottom = [0.1, 0.1, 0.2, 1]| __monocurl__native__ mk_gradient_background(top, bottom)
-
 # viewport hints
 # canonical aspect ratios — useful when setting up orthographic bounds.
 let ASPECT_16_9 = 16 / 9

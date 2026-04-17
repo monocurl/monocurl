@@ -9,7 +9,6 @@ let E   = 2.7182818284590452
 let PI  = 3.1415926535897932
 let TAU = 6.2831853071795864
 let INF = 1.0 / 0.0
-let NAN = 0.0 / 0.0
 
 # canonical 3-vectors. Direction-suffix literals (1l, 1r, 1u, 1d, 1f, 1b)
 # produce the same values; these names read more naturally in expressions.
@@ -59,7 +58,7 @@ let floor  = |x| __monocurl__native__ floor(x)
 let ceil   = |x| __monocurl__native__ ceil(x)
 let round  = |x| __monocurl__native__ round(x)
 let trunc  = |x| __monocurl__native__ trunc(x)
-let mod    = |n, m| __monocurl__native__ mod(n, m)
+let mod    = |n, m| __monocurl__native__ mod_func(n, m)
 
 # pairwise min / max of numbers.
 let min = |a, b| __monocurl__native__ min(a, b)

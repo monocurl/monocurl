@@ -2475,7 +2475,10 @@ mod test {
                     op_type: BinaryOperatorType::Add,
                     ..
                 }) => {}
-                other => panic!("expected inline add body, got {:?}", std::mem::discriminant(&other)),
+                other => panic!(
+                    "expected inline add body, got {:?}",
+                    std::mem::discriminant(&other)
+                ),
             },
             _ => panic!("expected inline lambda body"),
         }
