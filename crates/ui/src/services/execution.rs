@@ -264,8 +264,15 @@ impl ExecutionService {
             })
             .collect();
 
-        sm_tx
-            .unbounded_send(ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics, version })
-            .ok();
+        if has_compiler_error {
+            sm_tx
+                 .unbounded_send(ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics: Vec::new(), version })
+                 .ok();
+        }
+        else {
+            sm_tx
+                .unbounded_send(ServiceManagerMessage::UpdateRuntimeDiagnostics { diagnostics, version })
+                .ok();
+        }
     }
 }
