@@ -86,6 +86,13 @@ impl Executor {
         }
     }
 
+    /// clear all cached state and reset executor to the initial position
+    pub fn clear_cache(&mut self) {
+        self.cache.entries.iter_mut().for_each(|e| *e = None);
+        self.cache.minimum_durations.iter_mut().for_each(|e| *e = None);
+        self.state = ExecutionState::new();
+    }
+
     // given a target, find the first cache point that we can base off of
     pub(crate) async fn rebase_at_cache_point(&mut self, target: Timestamp) {
         let valid_state = !self.state.has_errors();

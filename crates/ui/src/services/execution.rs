@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -36,6 +36,10 @@ pub enum ParameterValue {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ParameterSnapshot {
     pub parameters: HashMap<String, ParameterValue>,
+    /// parameter names currently locked by an active animation
+    pub locked_params: HashSet<String>,
+    /// names in order of first registration (oldest first)
+    pub param_order: Vec<String>,
 }
 
 pub struct ExecutionSnapshot {
@@ -165,18 +169,20 @@ impl ExecutionService {
     }
 
     fn parameter_snapshot(executor: &Executor) -> ParameterSnapshot {
-        let parameters = executor
-            .state
-            .active_params
-            .iter()
-            .map(|param| {
-                (
-                    param.name.clone(),
-                    Self::parameter_value_from_runtime(param.follower_value_rc.borrow().clone()),
-                )
-            })
-            .collect::<HashMap<_, _>>();
-        ParameterSnapshot { parameters }
+        let mut parameters = HashMap::new();
+        let mut locked_params = HashSet::new();
+        let mut param_order = Vec::new();
+        for param in &executor.state.active_params {
+            let value =
+                Self::parameter_value_from_runtime(param.follower_value_rc.borrow().clone());
+            if matches!(&*param.leader_cell_rc.borrow(), Value::Leader(l) if l.locked_by_anim.is_some())
+            {
+                locked_params.insert(param.name.clone());
+            }
+            parameters.insert(param.name.clone(), value);
+            param_order.push(param.name.clone());
+        }
+        ParameterSnapshot { parameters, locked_params, param_order }
     }
 
     pub fn new(
@@ -241,6 +247,9 @@ impl ExecutionService {
                     );
                     is_playing = false;
                     playback_mode = ctx;
+                    executor.clear_cache();
+                    target = executor.user_to_internal_timestamp(Timestamp::default());
+                    has_seeked_for_play = false;
                 }
                 ExecutionMessage::SeekTo { target: t } => {
                     log::info!("seek_to {:?}", t);
