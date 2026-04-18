@@ -36,6 +36,28 @@ pub struct ExecutionStack {
     pub trace_parent_idx: Option<usize>,
 }
 
+/// metadata retained after a stack finishes.
+/// keeps lineage and debugging context without preserving locals.
+#[derive(Clone)]
+pub struct ExecutionStackGhost {
+    /// unique id for tracking which stack last touched a leader
+    pub stack_id: usize,
+    /// last instruction pointer reached by the stack
+    pub ip: InstructionPointer,
+    /// preserved for runtime error call stacks
+    pub call_stack: Vec<InstructionPointer>,
+    /// index of the parent execution stack (None for the root)
+    pub parent_idx: Option<usize>,
+    /// stack to use when reconstructing runtime call chains
+    pub trace_parent_idx: Option<usize>,
+}
+
+#[derive(Clone)]
+pub enum ExecutionStackSlot {
+    Alive(ExecutionStack),
+    Ghost(ExecutionStackGhost),
+}
+
 impl ExecutionStack {
     pub fn new(
         stack_id: usize,
@@ -83,6 +105,57 @@ impl ExecutionStack {
     pub fn pop_n(&mut self, n: usize) {
         let new_len = self.var_stack.len() - n;
         self.var_stack.truncate(new_len);
+    }
+}
+
+impl ExecutionStackSlot {
+    fn as_alive(&self) -> Option<&ExecutionStack> {
+        match self {
+            Self::Alive(stack) => Some(stack),
+            Self::Ghost(_) => None,
+        }
+    }
+
+    fn as_alive_mut(&mut self) -> Option<&mut ExecutionStack> {
+        match self {
+            Self::Alive(stack) => Some(stack),
+            Self::Ghost(_) => None,
+        }
+    }
+
+    fn stack_id(&self) -> usize {
+        match self {
+            Self::Alive(stack) => stack.stack_id,
+            Self::Ghost(stack) => stack.stack_id,
+        }
+    }
+
+    fn ip(&self) -> InstructionPointer {
+        match self {
+            Self::Alive(stack) => stack.ip,
+            Self::Ghost(stack) => stack.ip,
+        }
+    }
+
+    fn call_stack(&self) -> &[InstructionPointer] {
+        match self {
+            Self::Alive(stack) => &stack.call_stack,
+            Self::Ghost(stack) => &stack.call_stack,
+        }
+    }
+
+    fn parent_idx(&self) -> Option<usize> {
+        match self {
+            Self::Alive(stack) => stack.parent_idx,
+            Self::Ghost(stack) => stack.parent_idx,
+        }
+    }
+
+    fn trace_parent_idx(&self) -> Option<usize> {
+        match self {
+            Self::Alive(stack) => stack.trace_parent_idx,
+            Self::Ghost(stack) => stack.trace_parent_idx,
+        }
     }
 }
 
@@ -145,8 +218,9 @@ pub struct ExecutionState {
     global_primitive_anim_counter: usize,
     // execution stacks that have not finished yet
     pub alive_stack_count: usize,
-    /// execution stacks always appended, never reused, None = finished.
-    pub execution_stacks: Vec<Option<ExecutionStack>>,
+    /// execution stacks always appended, never reused.
+    /// finished stacks become ghosts so ancestry still exists.
+    pub execution_stacks: Vec<ExecutionStackSlot>,
     /// indices of currently active execution heads (stacks awaiting a Play)
     pub execution_heads: BTreeSet<usize>,
     /// currently running primitive animations
@@ -227,7 +301,7 @@ impl ExecutionState {
         self.global_stack_counter += 1;
         let stack = ExecutionStack::new(id, ip, parent_idx, trace_parent_idx);
         let idx = self.execution_stacks.len();
-        self.execution_stacks.push(Some(stack));
+        self.execution_stacks.push(ExecutionStackSlot::Alive(stack));
 
         Ok(idx)
     }
@@ -240,17 +314,66 @@ impl ExecutionState {
 
     /// free an execution stack slot
     pub fn free_stack(&mut self, idx: usize) {
-        debug_assert!(self.execution_stacks[idx].is_some());
+        let ghost = match &mut self.execution_stacks[idx] {
+            ExecutionStackSlot::Alive(stack) => ExecutionStackGhost {
+                stack_id: stack.stack_id,
+                ip: stack.ip,
+                call_stack: std::mem::take(&mut stack.call_stack),
+                parent_idx: stack.parent_idx,
+                trace_parent_idx: stack.trace_parent_idx,
+            },
+            ExecutionStackSlot::Ghost(_) => panic!("free_stack called on ghost stack"),
+        };
         self.alive_stack_count -= 1;
-        self.execution_stacks[idx] = None;
+        self.execution_stacks[idx] = ExecutionStackSlot::Ghost(ghost);
     }
 
     pub fn stack(&self, idx: usize) -> &ExecutionStack {
-        self.execution_stacks[idx].as_ref().expect("dead stack")
+        self.execution_stacks[idx]
+            .as_alive()
+            .expect("ghost stack has no live frame")
     }
 
     pub fn stack_mut(&mut self, idx: usize) -> &mut ExecutionStack {
-        self.execution_stacks[idx].as_mut().expect("dead stack")
+        self.execution_stacks[idx]
+            .as_alive_mut()
+            .expect("ghost stack has no live frame")
+    }
+
+    pub fn stack_id(&self, idx: usize) -> usize {
+        self.execution_stacks[idx].stack_id()
+    }
+
+    pub fn stack_ip(&self, idx: usize) -> InstructionPointer {
+        self.execution_stacks[idx].ip()
+    }
+
+    pub fn stack_call_stack(&self, idx: usize) -> &[InstructionPointer] {
+        self.execution_stacks[idx].call_stack()
+    }
+
+    pub fn stack_trace_parent_idx(&self, idx: usize) -> Option<usize> {
+        self.execution_stacks[idx].trace_parent_idx()
+    }
+
+    pub fn stack_parent_idx(&self, idx: usize) -> Option<usize> {
+        self.execution_stacks[idx].parent_idx()
+    }
+
+    pub fn is_stack_id_ancestor_of_stack(
+        &self,
+        ancestor_stack_id: usize,
+        descendant_stack_idx: usize,
+    ) -> bool {
+        let mut cursor = Some(descendant_stack_idx);
+        while let Some(idx) = cursor {
+            let slot = &self.execution_stacks[idx];
+            if slot.stack_id() == ancestor_stack_id {
+                return true;
+            }
+            cursor = slot.parent_idx().or(slot.trace_parent_idx());
+        }
+        false
     }
 
     /// promote TOS to a heap variable: wrap in RcValue, keep the strong ref on the
@@ -366,6 +489,31 @@ mod tests {
         assert!(Rc::ptr_eq(
             &state.leaders[0].follower_value_rc,
             &state.active_params[0].follower_value_rc
+        ));
+    }
+
+    #[test]
+    fn freed_stack_ghosts_preserve_ancestry() {
+        let mut state = ExecutionState::new();
+        let child_idx = state.alloc_stack(
+            (0, 1),
+            Some(ExecutionState::ROOT_STACK_ID),
+            Some(ExecutionState::ROOT_STACK_ID),
+        );
+        let child_idx = child_idx.expect("child alloc should succeed");
+        let child_stack_id = state.stack_id(child_idx);
+
+        let trace_idx = state.alloc_stack((0, 2), None, Some(child_idx));
+        let trace_idx = trace_idx.expect("trace alloc should succeed");
+        let trace_stack_id = state.stack_id(trace_idx);
+
+        state.free_stack(trace_idx);
+
+        assert!(state.is_stack_id_ancestor_of_stack(trace_stack_id, trace_idx));
+        assert!(state.is_stack_id_ancestor_of_stack(child_stack_id, trace_idx));
+        assert!(state.is_stack_id_ancestor_of_stack(
+            ExecutionState::ROOT_STACK_ID,
+            trace_idx
         ));
     }
 }

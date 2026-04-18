@@ -763,6 +763,90 @@ fn test_lerp_flattens_nested_candidate_tree() {
 }
 
 #[test]
+fn test_parallel_anim_blocks_auto_target_only_own_stack_lineage() {
+    let r = run_anim_with_stdlib_at(
+        "
+        param a = 0
+        param b = 0
+        let a_anim = anim {
+            a = 4
+            play Lerp()
+        }
+        let b_anim = anim {
+            b = 4
+            play Set()
+        }
+        play [a_anim, b_anim]
+    ",
+        0.5,
+    );
+    r.assert_ok();
+    let params = r.param_leaders();
+    params[2]
+        .assert_target_int(4)
+        .assert_current_float(2.0, 1e-9);
+    params[3].assert_target_int(4).assert_current_int(4);
+}
+
+#[test]
+fn test_parallel_anim_blocks_with_shared_root_changes_leave_later_implicit_anim_empty() {
+    let r = run_anim_with_stdlib_at(
+        "
+        param a = 0
+        param b = 0
+
+        a = 4
+        b = 4
+
+        let a_anim = anim {
+            play Lerp()
+        }
+        let b_anim = anim {
+            play Set()
+        }
+        play [a_anim, b_anim]
+    ",
+        0.5,
+    );
+    r.assert_ok();
+    let params = r.param_leaders();
+    params[2]
+        .assert_target_int(4)
+        .assert_current_float(2.0, 1e-9);
+    params[3]
+        .assert_target_int(4)
+        .assert_current_float(2.0, 1e-9);
+}
+
+#[test]
+fn test_anim_block_auto_targets_ancestor_and_local_changes() {
+    let r = run_anim_with_stdlib_at(
+        "
+        param a = 0
+        param b = 0
+
+        a = 4
+
+        let child = anim {
+            b = 6
+            play Lerp(2)
+        }
+
+        play child
+    ",
+        1.0,
+    );
+    r.assert_ok();
+    let params = r.param_leaders();
+    params[2]
+        .assert_target_int(4)
+        .assert_current_float(2.0, 1e-9);
+    params[3]
+        .assert_target_int(6)
+        .assert_current_float(3.0, 1e-9);
+}
+
+#[test]
 fn test_concurrent_primitive_animation_lock_error() {
     let r = run_anim_with_stdlib(
         "

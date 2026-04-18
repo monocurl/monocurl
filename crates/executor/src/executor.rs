@@ -569,11 +569,9 @@ impl Executor {
     }
 
     fn current_instruction_span(&self, stack_idx: usize) -> Span8 {
-        self.span_for_next_ip(self.state.stack(stack_idx).ip)
-            .unwrap_or_else(|| {
-                let ip = self.state.stack(stack_idx).ip;
-                self.annotation_span(ip)
-            })
+        let ip = self.state.stack_ip(stack_idx);
+        self.span_for_next_ip(ip)
+            .unwrap_or_else(|| self.annotation_span(ip))
     }
 
     fn annotation_span(&self, ip: InstructionPointer) -> Span8 {
@@ -598,14 +596,13 @@ impl Executor {
         let mut cursor = Some(stack_idx);
 
         while let Some(idx) = cursor {
-            let stack = self.state.stack(idx);
             frames.push(RecoveredFrame {
                 stack_idx: idx,
-                next_ip: stack.ip,
+                next_ip: self.state.stack_ip(idx),
             });
             frames.extend(
-                stack
-                    .call_stack
+                self.state
+                    .stack_call_stack(idx)
                     .iter()
                     .rev()
                     .copied()
@@ -614,7 +611,7 @@ impl Executor {
                         next_ip,
                     }),
             );
-            cursor = stack.trace_parent_idx;
+            cursor = self.state.stack_trace_parent_idx(idx);
         }
 
         frames.into_iter()

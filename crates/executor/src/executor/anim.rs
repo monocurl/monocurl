@@ -261,7 +261,7 @@ impl Executor {
     }
 
     pub(super) fn finish_execution_head(&mut self, stack_idx: usize) {
-        let parent_idx = self.state.stack(stack_idx).parent_idx;
+        let parent_idx = self.state.stack_parent_idx(stack_idx);
 
         // capture TOS for root stacks so tests can inspect results.
         // peek (clone without pop) so that variables remain on the stack for
@@ -418,8 +418,8 @@ impl Executor {
         };
 
         let start = self.state.timestamp.time;
-        let stack_id = self.state.stack(parent_stack_idx).stack_id;
-        let targets = self.resolve_primitive_anim_targets(&prim, reserved)?;
+        let stack_id = self.state.stack_id(parent_stack_idx);
+        let targets = self.resolve_primitive_anim_targets(parent_stack_idx, &prim, reserved)?;
         let start_followers = targets
             .iter()
             .map(|target| {
@@ -459,21 +459,29 @@ impl Executor {
 
     fn resolve_primitive_anim_targets(
         &self,
+        spawning_stack_idx: usize,
         prim: &PrimitiveAnim,
         reserved: &[RcValue],
     ) -> Result<Vec<RcValue>, ExecutorError> {
         let mut targets = Vec::new();
+        let mut implicit_targets = false;
 
         match prim {
             PrimitiveAnim::Lerp { candidates, .. } | PrimitiveAnim::Set { candidates } => {
                 self.flatten_candidate_tree(candidates, &mut targets)?;
                 if targets.is_empty() {
+                    implicit_targets = true;
                     for entry in &self.state.leaders {
                         let leader_cell = entry.leader_cell_rc.borrow();
                         let Value::Leader(leader) = &*leader_cell else {
                             continue;
                         };
-                        if leader.last_modified_stack.is_some() {
+                        if leader.last_modified_stack.is_some_and(|last_modified_stack_id| {
+                            self.state.is_stack_id_ancestor_of_stack(
+                                last_modified_stack_id,
+                                spawning_stack_idx,
+                            )
+                        }) {
                             targets.push(entry.leader_cell_rc.clone());
                         }
                     }
@@ -483,6 +491,21 @@ impl Executor {
         }
 
         dedup_rc_values(&mut targets);
+        if implicit_targets {
+            targets.retain(|target| {
+                if reserved.iter().any(|reserved| Rc::ptr_eq(reserved, target)) {
+                    return false;
+                }
+
+                let leader_cell = target.borrow();
+                let Value::Leader(leader) = &*leader_cell else {
+                    return false;
+                };
+
+                leader.locked_by_anim.is_none()
+            });
+        }
+
         for target in &targets {
             if reserved.iter().any(|reserved| Rc::ptr_eq(reserved, target)) {
                 return Err(ExecutorError::ConcurrentAnimation);
