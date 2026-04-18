@@ -153,14 +153,38 @@ active.radius = 2
 play lerp(3)
 ```
 
-### Parameters and State
-`state` and `param` both work like `mesh` — they have a leader value (what your code sees) and a follower value (the live on-screen value), and are synced via the same animation primitives. The difference is that `param` values are also exposed as interactive sliders during presentation mode, so the viewer can adjust them in real time. Parameters must be declared at the top level. The `$` sigil (e.g. `$x`) refers to the live follower value of a state or param variable, rather than the leader. This is used when you want a mesh to react dynamically to the current on-screen value rather than the ahead-of-time leader value.
+### Parameters and Stateful Values
+`param` works like `mesh` — it has a leader value (what your code sees) and a follower value (the live on-screen value), synced via the same animation primitives. `param` values are also exposed as interactive sliders during presentation mode so the viewer can adjust them in real time. Parameters must be declared at the top level.
+
+The `$` sigil (e.g. `$x`) creates a **stateful reference** to the live follower value of a param variable. A stateful reference can only appear as an argument to a labeled function or operator call; the resulting value is called a **stateful value**. A stateful value continuously re-evaluates its expression using the current follower values of all params it depends on.
+
+Stateful values may only be stored in `mesh` leaders — assigning one to a `let`, `var`, or `param` variable is a runtime error. You can use the dereference operator `*` on a mesh variable whose leader is a stateful expression to evaluate it immediately and obtain a concrete value. Attribute access on a stateful value works the same way as on a live operator (destructures the labeled call node).
+
+Arithmetic on `$` references is valid as a sub-expression inside a labeled call (e.g. `Circle(r: $radius * 2)`), but the outermost expression must always be a labeled call.
+
 ```
-state x = 4
-# mesh that depends on x's live value
-mesh t = Circle(0l, $x)
+param radius = 0
+# mesh that depends on radius's live follower value
+mesh target = Circle(center: 0l, radius: $radius)
 play Set()
-x = 20
-play lerp()
-# the on screen circle expands to a large radius as the follower for x expands, so the follower for t reacts live to the follower of x.
+# get the current concrete value of target's leader expression
+let current = *target
+radius = 5
+play Lerp(3)
+# as the follower of radius increases, the follower of target reacts live
+
+# live operator example
+param delta = 0l
+mesh target2 = shift{delta: $delta} Circle(center: 0l)
+# can still access labeled arguments on stateful operators
+let c = target2.center   # returns the center arg of the Circle
+target2.center = 1l      # mutates the center arg in place
+delta = 3l
+play Lerp(1)
+# target2 is now updated to respect the new value of delta
+
+# *target gives the evaluated leader value (concrete); plain mesh_center(target) errors
+let current2 = *target2
 ```
+
+When followers are synced to leaders (via Set or at the end of a Lerp), stateful leader expressions propagate to the follower, keeping it reactive.

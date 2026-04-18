@@ -1,16 +1,17 @@
 use crate::{
     error::ExecutorError,
     value::{
-        Value,
+        RcValue, Value,
         container::{HashableKey, List},
         rc_value,
+        stateful::{Stateful, StatefulNode, collect_roots_from_value, dedup_roots_by_ptr},
     },
 };
 
 use super::{ExecSingle, Executor};
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum BinOp {
+pub(crate) enum BinOp {
     Add,
     Sub,
     Mul,
@@ -32,23 +33,22 @@ impl Executor {
         let rhs = stack.pop();
         let lhs = stack.pop();
 
-        // equality ops use structural comparison — no wrapper resolution
-        match op {
-            BinOp::Eq => {
-                let result = Value::values_equal(&lhs, &rhs);
-                self.state
-                    .stack_mut(stack_idx)
-                    .push(Value::Integer(result as i64));
-                return ExecSingle::Continue;
-            }
-            BinOp::Ne => {
-                let result = !Value::values_equal(&lhs, &rhs);
-                self.state
-                    .stack_mut(stack_idx)
-                    .push(Value::Integer(result as i64));
-                return ExecSingle::Continue;
-            }
-            _ => {}
+        // lift over stateful operands (except equality which compares structurally)
+        if matches!(op, BinOp::Eq | BinOp::Ne) {
+            let result = match op {
+                BinOp::Eq => Value::values_equal(&lhs, &rhs),
+                _ => !Value::values_equal(&lhs, &rhs),
+            };
+            self.state
+                .stack_mut(stack_idx)
+                .push(Value::Integer(result as i64));
+            return ExecSingle::Continue;
+        }
+
+        if matches!(lhs, Value::Stateful(_)) || matches!(rhs, Value::Stateful(_)) {
+            let stateful = lift_binary_op(lhs, rhs, op);
+            self.state.stack_mut(stack_idx).push(Value::Stateful(stateful));
+            return ExecSingle::Continue;
         }
 
         let lhs = match lhs.elide_wrappers(self).await {
@@ -73,6 +73,14 @@ impl Executor {
         &mut self,
         val: Value,
     ) -> Result<Value, ExecutorError> {
+        if let Value::Stateful(s) = val {
+            let mut roots = s.roots.clone();
+            let val_rc = rc_value(Value::Stateful(s));
+            collect_roots_from_value(&val_rc.borrow(), &mut roots);
+            dedup_roots_by_ptr(&mut roots);
+            return Ok(Value::Stateful(Stateful::new(roots, StatefulNode::UnaryNeg(val_rc))));
+        }
+
         let val = val.elide_wrappers(self).await?;
 
         match &val {
@@ -111,7 +119,7 @@ fn promote_pair(lhs: Value, rhs: Value) -> (Value, Value) {
     }
 }
 
-fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorError> {
+pub(crate) fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorError> {
     match (lhs, rhs, op) {
         (Value::List(lhs_list), Value::List(rhs_list), BinOp::Add) => {
             return add_lists(lhs_list, rhs_list);
@@ -333,8 +341,18 @@ fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> 
     })
 }
 
+fn lift_binary_op(lhs: Value, rhs: Value, op: BinOp) -> Stateful {
+    let mut roots: Vec<RcValue> = Vec::new();
+    collect_roots_from_value(&lhs, &mut roots);
+    collect_roots_from_value(&rhs, &mut roots);
+    dedup_roots_by_ptr(&mut roots);
+    let lhs_rc = rc_value(lhs);
+    let rhs_rc = rc_value(rhs);
+    Stateful::new(roots, StatefulNode::BinaryOp { lhs: lhs_rc, rhs: rhs_rc, op })
+}
+
 impl BinOp {
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             BinOp::Add => "+",
             BinOp::Sub => "-",

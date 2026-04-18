@@ -105,47 +105,38 @@ g.point.radius = "test"
 g.point = Circle(0, [])
 ```
 
-## State
-conceptually, instead of thinking about stuff as showing meshes, we show funtions that map from state/parameters to meshes.
+## Params and Stateful Values
+params are the only leader kind that can be referenced via `$`. a stateful value continuously re-evaluates using the current follower values of all depended params.
 
-in the leader follower pattern, after any animation, all leaders and all followers will become synchronized. state also "subscribes" to the leader / follower pattern.
+`$x` — stateful reference to param `x`'s follower; only valid as an argument to a labeled call  
+`*x` — evaluate a mesh variable's leader expression to a concrete value  
 
-camera will actually be state, but you will be allowed to just move the camera entirely, without the meshes moving in response. Theoretically this can be changed if we set camera to a parameter though.
-
-```monocurl
-state x = 1
-play Set()
-let y = $x + 5 # live value
-let gamma = f($x, 5) # live value = f(x, 5) at any time
-let z = *x # current / dereferenced value
-# this must be a non stateful value
-mesh tree = Circle(2, $x)
-play Write()
-x = 2
-// lerps x over one second, 
-play Lerp
-
-# equivalent to 
-mesh tree = Circle(2, r: 1)
-play Write()
-tree.r = 2
-play Lerp()
-```
+stateful values can only be stored in `mesh` leaders. assigning to `let`/`var`/`param` is a runtime error.
 
 ```monocurl
-## must be declared on the top level, unlike state
+# must be declared at the top level
 param x = 2
-mesh g = Circle($x, 2)
+mesh g = Circle(center: 0l, radius: $x)
 play Set()
 play Wait(5)
-# user can change x on the gui slider if they want to, and it will react live
+# user can adjust x via the gui slider; g reacts live
+
+# arithmetic in sub-expressions is allowed
+mesh h = Circle(center: 0l, radius: $x * 2)
+play Set()
+
+# dereference to get current concrete value
+let current = *g
 
 # change x in code
 x = 5
-# trying to change x while the animation is running will inevitably lead to weird results
-# we can honestly disable changing it while an animation owns it, in the same way that we disable
-# parallel animations from acting
-play Lerp
+play Lerp(1)
+
+# attribute access on stateful operators
+param delta = 0l
+mesh shifted = shift{delta: $delta} Circle(center: 0l)
+shifted.center = 1l   # mutate the center arg directly
+let snap = *shifted   # evaluate leader to concrete
 ```
 
 ## Mesh

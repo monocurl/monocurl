@@ -262,6 +262,9 @@ impl Executor {
                         };
                         let lerped = self.lerp(start.clone(), leader_value, t).await?;
                         *follower_rc.borrow_mut() = lerped;
+                        if let Value::Leader(l) = &mut *target.borrow_mut() {
+                            l.follower_version += 1;
+                        }
                     }
                 }
             }
@@ -636,6 +639,7 @@ fn sync_leader_to_follower(leader_cell_rc: &RcValue) {
         last_modified_stack,
         leader_rc,
         follower_rc,
+        follower_version,
         ..
     }) = &mut *leader_cell
     else {
@@ -644,4 +648,5 @@ fn sync_leader_to_follower(leader_cell_rc: &RcValue) {
     let value = leader_rc.borrow().clone();
     *follower_rc.borrow_mut() = value;
     *last_modified_stack = None;
+    *follower_version += 1;
 }

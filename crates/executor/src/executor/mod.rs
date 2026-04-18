@@ -7,7 +7,7 @@ mod anim;
 mod cacheing;
 mod invoke;
 mod lerp;
-mod ops;
+pub(crate) mod ops;
 
 use std::pin::Pin;
 use std::{future::Future, sync::Arc};

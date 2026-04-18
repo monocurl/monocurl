@@ -1,29 +1,50 @@
 use smallvec::SmallVec;
-use std::rc::Rc;
+use std::{
+    cell::RefCell,
+    rc::Rc,
+};
 
 use super::{RcValue, Value};
+use crate::executor::ops::BinOp;
 
 /// a stateful value node that tracks reactive dependencies.
 /// only labeled lambda/operator calls (including 0-label calls) build stateful trees;
-/// arithmetic is handled eagerly on the evaluated result.
+/// arithmetic sub-expressions containing $-refs are also valid as args.
 #[derive(Clone)]
 pub enum StatefulNode {
-    /// reads the follower value of a state/param leader
+    /// reads the follower value of a param leader
     LeaderRef(RcValue),
     /// a constant value embedded in the graph
     Constant(Box<Value>),
-    /// labeled lambda invocation (labels may be empty for 0-label calls)
+    /// labeled lambda invocation whose args are stored as RcValues (may contain Value::Stateful)
     LabeledCall {
         func: Box<StatefulNode>,
-        args: Vec<StatefulNode>,
+        /// each element is an RcValue whose cell holds the current arg value (possibly Stateful)
+        args: Vec<RcValue>,
         labels: SmallVec<[(usize, String); 4]>,
     },
     /// labeled operator invocation
     LabeledOperatorCall {
         operator: Box<StatefulNode>,
-        operand: Box<StatefulNode>,
-        extra_args: Vec<StatefulNode>,
+        /// RcValue so the operand can be reached via mutable attribute access
+        operand: RcValue,
+        extra_args: Vec<RcValue>,
         labels: SmallVec<[(usize, String); 4]>,
+    },
+    /// binary operation lifted over stateful operands
+    BinaryOp {
+        lhs: RcValue,
+        rhs: RcValue,
+        op: BinOp,
+    },
+    /// unary negation lifted over a stateful operand
+    UnaryNeg(RcValue),
+    /// logical not lifted over a stateful operand
+    Not(RcValue),
+    /// immutable subscript lifted over a stateful base
+    Subscript {
+        base: RcValue,
+        index: RcValue,
     },
 }
 
@@ -32,17 +53,48 @@ pub struct Stateful {
     /// leader cells (RcValues containing Value::Leader) this expression depends on
     pub roots: Vec<RcValue>,
     pub root: StatefulNode,
+    /// cached (versions_at_eval_time, result); versions parallel roots; boxed to break Value recursion
+    cached: RefCell<Option<(Vec<u64>, Box<Value>)>>,
 }
 
 impl Stateful {
-    /// evaluate the stateful expression using current follower values.
-    /// returns None for LabeledCall/LabeledOperatorCall nodes (require async via Executor).
+    pub fn new(roots: Vec<RcValue>, root: StatefulNode) -> Self {
+        Self { roots, root, cached: RefCell::new(None) }
+    }
+
+    /// fast synchronous evaluation — only works for LeaderRef/Constant leaves.
+    /// returns None when a lambda/operator call is needed (use Executor::eval_stateful instead).
     pub fn evaluate(&self) -> Option<Value> {
-        eval_node(&self.root)
+        eval_node_sync(&self.root)
+    }
+
+    /// check if all root versions match the cached snapshot
+    pub fn cache_valid(&self) -> Option<Value> {
+        let borrow = self.cached.borrow();
+        let (versions, val) = borrow.as_ref()?;
+        let still_valid = self.roots.iter().zip(versions.iter()).all(|(root, cached_ver)| {
+            if let Value::Leader(leader) = &*root.borrow() {
+                leader.follower_version == *cached_ver
+            } else {
+                false
+            }
+        });
+        if still_valid { Some(*val.clone()) } else { None }
+    }
+
+    pub fn update_cache(&self, val: Value) {
+        let versions: Vec<u64> = self.roots.iter().map(|root| {
+            if let Value::Leader(leader) = &*root.borrow() {
+                leader.follower_version
+            } else {
+                0
+            }
+        }).collect();
+        *self.cached.borrow_mut() = Some((versions, Box::new(val)));
     }
 }
 
-fn eval_node(node: &StatefulNode) -> Option<Value> {
+fn eval_node_sync(node: &StatefulNode) -> Option<Value> {
     match node {
         StatefulNode::LeaderRef(rc) => {
             let inner = rc.borrow().clone();
@@ -52,8 +104,13 @@ fn eval_node(node: &StatefulNode) -> Option<Value> {
             }
         }
         StatefulNode::Constant(val) => Some(*val.clone()),
-        // function/operator calls need async evaluation via Executor
-        StatefulNode::LabeledCall { .. } | StatefulNode::LabeledOperatorCall { .. } => None,
+        // function/operator calls and lifted ops need async evaluation
+        StatefulNode::LabeledCall { .. }
+        | StatefulNode::LabeledOperatorCall { .. }
+        | StatefulNode::BinaryOp { .. }
+        | StatefulNode::UnaryNeg(_)
+        | StatefulNode::Not(_)
+        | StatefulNode::Subscript { .. } => None,
     }
 }
 
@@ -61,12 +118,25 @@ fn eval_node(node: &StatefulNode) -> Option<Value> {
 // tree-building helpers used by invoke.rs
 // ---------------------------------------------------------------------------
 
-/// decompose a value into (StatefulNode, roots) for inserting into a stateful tree
-pub fn value_into_stateful_parts(val: Value) -> (StatefulNode, Vec<RcValue>) {
+/// decompose a value into (StatefulNode, roots) — used for func/operator nodes only.
+/// args are now passed as RcValues directly, not converted to StatefulNode.
+pub fn value_into_stateful_node(val: Value) -> (StatefulNode, Vec<RcValue>) {
     match val {
         Value::Stateful(s) => (s.root, s.roots),
         other => (StatefulNode::Constant(Box::new(other)), vec![]),
     }
+}
+
+/// collect stateful roots from a value, if it is stateful
+pub fn collect_roots_from_value(val: &Value, roots: &mut Vec<RcValue>) {
+    if let Value::Stateful(s) = val {
+        roots.extend(s.roots.iter().cloned());
+    }
+}
+
+/// collect roots from an RcValue cell
+pub fn collect_roots_from_rc(rc: &RcValue, roots: &mut Vec<RcValue>) {
+    collect_roots_from_value(&rc.borrow(), roots);
 }
 
 /// remove duplicate roots (by Rc pointer identity) in-place

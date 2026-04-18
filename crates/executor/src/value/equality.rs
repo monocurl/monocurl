@@ -158,7 +158,9 @@ fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
             al == bl
                 && stateful_equal(af, bf)
                 && aa.len() == ba.len()
-                && aa.iter().zip(ba.iter()).all(|(a, b)| stateful_equal(a, b))
+                && aa.iter()
+                    .zip(ba.iter())
+                    .all(|(a, b)| Value::values_equal(&a.borrow(), &b.borrow()))
         }
         (
             StatefulNode::LabeledOperatorCall {
@@ -176,9 +178,30 @@ fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
         ) => {
             al == bl
                 && stateful_equal(ao, bo)
-                && stateful_equal(aop, bop)
+                && Value::values_equal(&aop.borrow(), &bop.borrow())
                 && aa.len() == ba.len()
-                && aa.iter().zip(ba.iter()).all(|(a, b)| stateful_equal(a, b))
+                && aa.iter()
+                    .zip(ba.iter())
+                    .all(|(a, b)| Value::values_equal(&a.borrow(), &b.borrow()))
+        }
+        (
+            StatefulNode::BinaryOp { lhs: al, rhs: ar, op: aop },
+            StatefulNode::BinaryOp { lhs: bl, rhs: br, op: bop },
+        ) => {
+            (*aop as u8) == (*bop as u8)
+                && Value::values_equal(&al.borrow(), &bl.borrow())
+                && Value::values_equal(&ar.borrow(), &br.borrow())
+        }
+        (StatefulNode::UnaryNeg(a), StatefulNode::UnaryNeg(b))
+        | (StatefulNode::Not(a), StatefulNode::Not(b)) => {
+            Value::values_equal(&a.borrow(), &b.borrow())
+        }
+        (
+            StatefulNode::Subscript { base: ab, index: ai },
+            StatefulNode::Subscript { base: bb, index: bi },
+        ) => {
+            Value::values_equal(&ab.borrow(), &bb.borrow())
+                && Value::values_equal(&ai.borrow(), &bi.borrow())
         }
         _ => false,
     }

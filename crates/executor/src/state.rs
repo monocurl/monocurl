@@ -402,10 +402,12 @@ impl ExecutionState {
         let follower_rc = rc_value(follower_init);
 
         let leader_val = Value::Leader(Leader {
+            kind,
             last_modified_stack: None,
             locked_by_anim: None,
             leader_rc: leader_rc.clone(),
             follower_rc: follower_rc.clone(),
+            follower_version: 0,
         });
         let leader_cell = rc_value(leader_val);
 

@@ -9,11 +9,11 @@
   - src/executor/memory.rs: periodic process memory guard for executor instruction stepping
   - src/executor/runtime_error.rs: recovered runtime error span/callstack construction from stack ancestry and saved call frames
   - src/executor/cacheing.rs: per-section execution cache used for rebasing seeks plus user-visible slide duration metadata, including exact cached slide durations and invalidation-aware minimum duration lower bounds
-  - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion plus recursive list linear ops (scalar multiply, elementwise add, negate); owns the internal binary-op enum
+  - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion plus recursive list linear ops (scalar multiply, elementwise add, negate); owns BinOp enum (pub(crate)); intercepts Value::Stateful operands to build StatefulNode::BinaryOp/UnaryNeg/Not lifted nodes instead of evaluating eagerly
   - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, isolated eager lambda execution with trace-parent stack links, exec_convert_to_live_operator (extracts live value from operator result list)
   - src/executor/lerp.rs: general lerp(a, b, t) for Monocurl values — handles numbers, InvokedFunction (same-lambda arg-wise lerp), InvokedOperator (rules 4/5 via unmodified embed)
   - src/executor/anim.rs: section advancement, seek_primitive_anim (async, yields between instructions), playback stepping/seek_to, play/spawn/bake, primitive target flattening/deduction with ancestor-based implicit leader selection, leader lock handling, double-play guard via AnimBlock.already_played
-  - src/executor/access.rs: subscript/attribute (mutable + immutable), assign, append, Rc-based COW at element level, WeakLvalue handling, leader passthrough for nested subscript/attribute mutation; uses Map helper methods for ordered iteration
+  - src/executor/access.rs: subscript/attribute (mutable + immutable), assign, append, Rc-based COW at element level, WeakLvalue handling, leader passthrough for nested subscript/attribute mutation; Value::Stateful attribute access destructures LabeledCall/LabeledOperatorCall nodes; stateful assignment to non-mesh-leader is a runtime error
   - src/state.rs: ExecutionState (execution stacks, ghost stack lineage metadata, leaders, explicit active params, primitive anims, ephemeral_pool, structured runtime errors, last runtime-error stack context), ExecutionStack (var stack, IP, call stack, labels, control parent + trace parent), BakedPrimitiveAnim (target leaders + starting followers), LeaderEntry/ActiveParam metadata (declared name plus leader/follower refs). Monotonic stack IDs and primitive animation IDs; finished stacks remain as ghosts so ancestry checks still work after free.
   - src/value/mod.rs: Value enum plus shared RcValue/WeakValue/InstructionPointer aliases and value submodule wiring
   - src/value/helpers.rs: Value helper methods for truthiness, lvalue/wrapper elision, lvalue access, and runtime type naming
@@ -21,11 +21,11 @@
   - src/value/container.rs: List (Vec<RcValue>) and Map (HashMap + insertion_order Vec for deterministic iteration) with insert/get/get_mut/contains_key/iter helpers
   - src/value/lambda.rs: Lambda (captures, defaults, IP) and Operator wrapper
   - src/value/anim_block.rs: AnimBlock (captures + IP for coroutine-style animation blocks, already_played: Rc<Cell<bool>> to prevent double-play)
-  - src/value/leader.rs: Leader struct (leader_rc, follower_rc as RcValues, detached status via last_modified_stack, active animation lock) for mesh/state/param variables
+  - src/value/leader.rs: Leader struct (kind: LeaderKind, leader_rc, follower_rc as RcValues, detached status via last_modified_stack, active animation lock, follower_version u64 for stateful cache invalidation) for mesh/param variables
   - src/value/invoked_function.rs: InvokedFunction (Labeled with recomputation info, or Unlabeled)
   - src/value/invoked_operator.rs: InvokedOperator (operator + operand + labels + unmodified identity embed + cached modified value); extract_operator_result and build_invoked_operator helpers
   - src/value/primitive_anim.rs: PrimitiveAnim enum (Lerp, Set, Wait) with explicit candidate-tree support for targeted sync animations
-  - src/value/stateful.rs: Stateful (roots: Vec<RcValue> + root: StatefulNode + evaluate()) and StatefulNode enum for reactive dependency graphs; StatefulOp for arithmetic
+  - src/value/stateful.rs: Stateful (roots: Vec<RcValue> + root: StatefulNode + version-based cache) and StatefulNode enum for reactive dependency graphs; variants: LeaderRef, Constant, LabeledCall, LabeledOperatorCall, BinaryOp, UnaryNeg, Not, Subscript; LabeledCall/LabeledOperatorCall args are Vec<RcValue> enabling mutable attribute access; async Executor::eval_stateful evaluates the full node tree with follower-version caching
   - src/time.rs: Timestamp (slide + time offset)
 - exporter: coordinates process of exporting a scene into a video
 - geo: helper routines for execution (a lot of lib monocurl will reference these routines).
