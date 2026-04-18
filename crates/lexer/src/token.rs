@@ -55,7 +55,6 @@ pub enum Token {
     Let,
     Var,
     Mesh,
-    State,
     Param,
     Anim,
     Play,
@@ -87,7 +86,7 @@ impl Token {
             }
             Block | Operator | Anim | Play | Break | Continue | Return | If | Else | For
             | While => TokenCategory::ControlFlow,
-            Import | Let | Var | Mesh | State | Param | Slide | Native => {
+            Import | Let | Var | Mesh | Param | Slide | Native => {
                 TokenCategory::NonControlFlowKeyword
             }
             IntegerLiteral | FloatLiteral => TokenCategory::NumericLiteral,
@@ -149,7 +148,6 @@ impl Token {
             Token::Let => "'let'",
             Token::Var => "'var'",
             Token::Mesh => "'mesh'",
-            Token::State => "'state'",
             Token::Param => "'param'",
             Token::Anim => "'anim'",
             Token::Play => "'play'",
@@ -214,7 +212,6 @@ impl Token {
             Token::Let => Some("let"),
             Token::Var => Some("var"),
             Token::Mesh => Some("mesh"),
-            Token::State => Some("state"),
             Token::Param => Some("param"),
             Token::Anim => Some("anim"),
             Token::Play => Some("play"),

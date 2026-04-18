@@ -283,7 +283,6 @@ pub enum VariableType {
     Let,
     Var,
     Mesh,
-    State,
     Param,
 }
 

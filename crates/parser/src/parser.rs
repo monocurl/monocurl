@@ -394,7 +394,6 @@ mod predicate {
                 Token::Let => Some(VariableType::Let),
                 Token::Var => Some(VariableType::Var),
                 Token::Mesh => Some(VariableType::Mesh),
-                Token::State => Some(VariableType::State),
                 Token::Param => Some(VariableType::Param),
                 _ => None,
             }
@@ -408,7 +407,6 @@ mod predicate {
             dump.cursor_possibilities.insert(Token::Let);
             dump.cursor_possibilities.insert(Token::Var);
             dump.cursor_possibilities.insert(Token::Mesh);
-            dump.cursor_possibilities.insert(Token::State);
             dump.cursor_possibilities.insert(Token::Param);
         }
     }

@@ -438,6 +438,9 @@ impl Compiler {
 
         // symbols declared here land in the current top scope (no push/pop)
         self.compile_statements(&section.body);
+        if self.current_section().flags.is_init {
+            self.emit(Instruction::SyncAllLeaders, 0..0);
+        }
         self.emit(Instruction::EndOfExecutionHead, 0..0);
 
         self.emit_current_section();
@@ -871,15 +874,13 @@ impl Compiler {
             AstVariableType::Let => VariableType::Let,
             AstVariableType::Var => VariableType::Var,
             AstVariableType::Mesh => VariableType::Mesh,
-            AstVariableType::State => VariableType::State,
             AstVariableType::Param => VariableType::Param,
         };
         let is_library = self.current_section().flags.is_library;
         match vt {
-            VariableType::Param | VariableType::State | VariableType::Mesh if is_library => {
+            VariableType::Param | VariableType::Mesh if is_library => {
                 let kind = match vt {
                     VariableType::Param => "param",
-                    VariableType::State => "state",
                     VariableType::Mesh => "mesh",
                     _ => unreachable!(),
                 };
@@ -916,10 +917,6 @@ impl Compiler {
                 let ni = self.intern_string(&d.identifier.1.0);
                 self.emit(Instruction::ConvertMesh { name_index: ni }, span.clone());
             }
-            VariableType::State => {
-                let ni = self.intern_string(&d.identifier.1.0);
-                self.emit(Instruction::ConvertState { name_index: ni }, span.clone());
-            }
             VariableType::Param => {
                 let ni = self.intern_string(&d.identifier.1.0);
                 self.emit(Instruction::ConvertParam { name_index: ni }, span.clone());
@@ -927,6 +924,7 @@ impl Compiler {
             VariableType::Let | VariableType::Var | VariableType::Reference => {
                 self.emit(Instruction::ConvertVar, span.clone());
             }
+            VariableType::State => unreachable!("state is not a user-facing keyword"),
         }
         self.define_symbol(&d.identifier.1.0, vt, SymbolFunctionInfo::from(&d.value.1));
     }

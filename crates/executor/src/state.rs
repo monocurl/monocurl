@@ -304,6 +304,24 @@ impl ExecutionState {
         self.stack_mut(stack_idx).push(Value::Lvalue(leader_cell));
     }
 
+    pub fn sync_all_leaders(&self) {
+        for entry in &self.leaders {
+            let mut cell = entry.leader_cell_rc.borrow_mut();
+            let Value::Leader(Leader {
+                last_modified_stack,
+                leader_rc,
+                follower_rc,
+                ..
+            }) = &mut *cell
+            else {
+                continue;
+            };
+            let value = leader_rc.borrow().clone();
+            *follower_rc.borrow_mut() = value;
+            *last_modified_stack = None;
+        }
+    }
+
     pub fn error(&mut self, error: RuntimeError) {
         self.errors.push(error);
     }

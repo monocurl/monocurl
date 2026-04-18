@@ -164,7 +164,6 @@ where
             "let" => Token::Let,
             "var" => Token::Var,
             "mesh" => Token::Mesh,
-            "state" => Token::State,
             "param" => Token::Param,
             "anim" => Token::Anim,
             "play" => Token::Play,

@@ -276,6 +276,10 @@ impl Executor {
                     .push(Value::List(Rc::new(List::new())));
             }
 
+            Instruction::SyncAllLeaders => {
+                self.state.sync_all_leaders();
+            }
+
             // ----- variable promotion -----
             Instruction::ConvertVar {} => {
                 self.state.promote_to_var(stack_idx);

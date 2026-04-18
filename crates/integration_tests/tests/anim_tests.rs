@@ -682,11 +682,10 @@ fn test_state_leader_count_prelude_only() {
 
 #[test]
 fn test_state_leader_initial_value() {
-    // state x = N declares a state variable (no 'var' keyword for mesh/state/param)
-    let r = run_anim("state score = 42");
+    let r = run_anim("param score = 42");
     r.assert_ok();
-    let state = r.state_leaders();
-    let user_leader = state.last().expect("no state leaders found");
+    let params = r.param_leaders();
+    let user_leader = params.last().expect("no param leaders found");
     user_leader.assert_target_int(42).assert_current_int(42);
 }
 
@@ -694,16 +693,15 @@ fn test_state_leader_initial_value() {
 fn test_multiple_state_leaders() {
     let r = run_anim(
         "
-        state a = 10
-        state b = 20
+        param a = 10
+        param b = 20
     ",
     );
     r.assert_ok();
-    // prelude (2 state) + user (2 state)
-    assert_eq!(r.state_leaders().len(), 4);
-    let state = r.state_leaders();
-    state[2].assert_target_int(10);
-    state[3].assert_target_int(20);
+    assert_eq!(r.param_leaders().len(), 2);
+    let params = r.param_leaders();
+    params[0].assert_target_int(10);
+    params[1].assert_target_int(20);
 }
 
 #[test]
@@ -722,32 +720,32 @@ fn test_param_leader() {
 fn test_set_syncs_only_explicit_candidates() {
     let r = run_anim_with_stdlib(
         "
-        state a = 1
-        state b = 2
+        param a = 1
+        param b = 2
         a = 10
         b = 20
         play Set([&a])
     ",
     );
     r.assert_ok();
-    let state = r.state_leaders();
-    state[2].assert_target_int(10).assert_current_int(10);
-    state[3].assert_target_int(20).assert_current_int(2);
+    let params = r.param_leaders();
+    params[0].assert_target_int(10).assert_current_int(10);
+    params[1].assert_target_int(20).assert_current_int(2);
 }
 
 #[test]
 fn test_lerp_auto_deduces_detached_followers() {
     let r = run_anim_with_stdlib_at(
         "
-        state x = 0
+        param x = 0
         x = 10
         play Lerp(2)
     ",
         1.0,
     );
     r.assert_ok();
-    let state = r.state_leaders();
-    state[2]
+    let params = r.param_leaders();
+    params[0]
         .assert_target_int(10)
         .assert_current_float(5.0, 1e-9);
 }
@@ -756,8 +754,8 @@ fn test_lerp_auto_deduces_detached_followers() {
 fn test_lerp_flattens_nested_candidate_tree() {
     let r = run_anim_with_stdlib_at(
         "
-        state a = 0
-        state b = 2
+        param a = 0
+        param b = 2
         a = 10
         b = 20
         play Lerp(2, [[&a], []])
@@ -765,18 +763,18 @@ fn test_lerp_flattens_nested_candidate_tree() {
         1.0,
     );
     r.assert_ok();
-    let state = r.state_leaders();
-    state[2]
+    let params = r.param_leaders();
+    params[0]
         .assert_target_int(10)
         .assert_current_float(5.0, 1e-9);
-    state[3].assert_target_int(20).assert_current_int(2);
+    params[1].assert_target_int(20).assert_current_int(2);
 }
 
 #[test]
 fn test_concurrent_primitive_animation_lock_error() {
     let r = run_anim_with_stdlib(
         "
-        state x = 0
+        param x = 0
         x = 10
         play [Lerp(1, [&x]), Set([&x])]
     ",
@@ -810,16 +808,15 @@ fn test_multi_slide_seek_second_slide() {
 
 #[test]
 fn test_multi_slide_state_persists_across_slides() {
-    // state variables declared in slide 0 remain visible in slide 1
-    let r = run_multi_anim(&["state counter = 99", "let check = 1"], 1, f64::INFINITY);
+    // param variables declared in slide 0 remain visible in slide 1
+    let r = run_multi_anim(&["param counter = 99", "let check = 1"], 1, f64::INFINITY);
     r.assert_ok();
-    let user_states = r.state_leaders();
-    // prelude (2) + counter (1)
+    let params = r.param_leaders();
     assert!(
-        user_states.len() >= 3,
-        "expected user state leader to persist"
+        !params.is_empty(),
+        "expected param leader to persist across slides"
     );
-    user_states[2].assert_target_int(99);
+    params[0].assert_target_int(99);
 }
 
 // -- error cases --

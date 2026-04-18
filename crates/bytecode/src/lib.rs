@@ -49,6 +49,8 @@ pub enum Instruction {
         name_index: u32,
     },
     ConvertVar,
+    // sync all leader followers to their leader values; emitted at end of init section
+    SyncAllLeaders,
 
     // pops old tos if flag is true
     // used for map
