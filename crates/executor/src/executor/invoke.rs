@@ -91,7 +91,7 @@ impl Executor {
         let lambda = match lambda_val {
             Value::Lambda(rc) => rc,
             _ => {
-                return ExecSingle::Error(ExecutorError::type_error(
+                return ExecSingle::error(stack_idx, ExecutorError::type_error(
                     "lambda",
                     lambda_val.type_name(),
                 ));
@@ -102,7 +102,7 @@ impl Executor {
         let max_args = min_args + lambda.defaults.len();
 
         if num_args < min_args as u32 {
-            return ExecSingle::Error(ExecutorError::TooFewArguments {
+            return ExecSingle::error(stack_idx, ExecutorError::TooFewArguments {
                 minimum: min_args,
                 got: num_args as usize,
                 operator: false,
@@ -110,7 +110,7 @@ impl Executor {
         }
 
         if num_args > max_args as u32 {
-            return ExecSingle::Error(ExecutorError::TooManyArguments {
+            return ExecSingle::error(stack_idx, ExecutorError::TooManyArguments {
                 maximum: max_args,
                 got: num_args as usize,
                 operator: false,
@@ -203,7 +203,7 @@ impl Executor {
         let operator = match op_val {
             Value::Operator(o) => o,
             _ => {
-                return ExecSingle::Error(ExecutorError::type_error(
+                return ExecSingle::error(stack_idx, ExecutorError::type_error(
                     "operator",
                     op_val.type_name(),
                 ));
@@ -215,7 +215,7 @@ impl Executor {
         let max_args = min_args + lambda.defaults.len();
 
         if num_args + 1 < min_args as u32 {
-            return ExecSingle::Error(ExecutorError::TooFewArguments {
+            return ExecSingle::error(stack_idx, ExecutorError::TooFewArguments {
                 minimum: min_args,
                 got: num_args as usize + 1,
                 operator: true,
@@ -223,7 +223,7 @@ impl Executor {
         }
 
         if num_args + 1 > max_args as u32 {
-            return ExecSingle::Error(ExecutorError::TooManyArguments {
+            return ExecSingle::error(stack_idx, ExecutorError::TooManyArguments {
                 maximum: max_args,
                 got: num_args as usize + 1,
                 operator: true,
@@ -304,7 +304,7 @@ impl Executor {
                             .push(Value::InvokedOperator(inv));
                         ExecSingle::Continue
                     }
-                    Err(e) => ExecSingle::Error(e),
+                    Err(e) => ExecSingle::error(stack_idx, e),
                 },
                 Err(e) => ExecSingle::Error(e),
             }
@@ -326,7 +326,7 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(val);
                 ExecSingle::Continue
             }
-            Err(e) => ExecSingle::Error(e),
+            Err(e) => ExecSingle::error(stack_idx, e),
         }
     }
 
@@ -356,7 +356,7 @@ impl Executor {
         lambda: &Lambda,
     ) -> ExecSingle {
         if self.state.stack(stack_idx).call_stack.len() >= MAX_CALL_DEPTH {
-            return ExecSingle::Error(ExecutorError::StackOverflow);
+            return ExecSingle::error(stack_idx, ExecutorError::StackOverflow);
         }
 
         {
@@ -390,6 +390,8 @@ impl Executor {
     {
         Box::pin(async move {
             if self.state.call_depth >= MAX_CALL_DEPTH {
+                self.state.last_stack_idx =
+                    trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
                 return Err(ExecutorError::StackOverflow);
             }
             self.state.call_depth += 1;
@@ -397,7 +399,11 @@ impl Executor {
             let temp_idx = self
                 .state
                 .alloc_stack(lambda.ip, None, trace_parent_idx)
-                .map_err(|_| ExecutorError::TooManyActiveAnimations)?;
+                .map_err(|_| {
+                    self.state.last_stack_idx =
+                        trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                    ExecutorError::TooManyActiveAnimations
+                })?;
             let stack = self.state.stack_mut(temp_idx);
             for arg in args {
                 stack.push(arg.clone());
@@ -493,13 +499,13 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(live);
             }
             Value::List(ref list) => {
-                return ExecSingle::Error(ExecutorError::Other(format!(
+                return ExecSingle::error(stack_idx, ExecutorError::Other(format!(
                     "operator must return a 2-element list, got {}",
                     list.elements.len()
                 )));
             }
             other => {
-                return ExecSingle::Error(ExecutorError::type_error(
+                return ExecSingle::error(stack_idx, ExecutorError::type_error(
                     "[initial, modified] list",
                     other.type_name(),
                 ));

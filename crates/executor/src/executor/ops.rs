@@ -7,7 +7,24 @@ use crate::{
     },
 };
 
-use super::{BinOp, ExecSingle, Executor};
+use super::{ExecSingle, Executor};
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Power,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    Eq,
+    Ne,
+    IntDiv,
+    In,
+}
 
 impl Executor {
     pub(super) async fn exec_binary_op(&mut self, stack_idx: usize, op: BinOp) -> ExecSingle {
@@ -36,11 +53,11 @@ impl Executor {
 
         let lhs = match lhs.elide_wrappers(self).await {
             Ok(val) => val,
-            Err(e) => return ExecSingle::Error(e),
+            Err(e) => return ExecSingle::error(stack_idx, e),
         };
         let rhs = match rhs.elide_wrappers(self).await {
             Ok(val) => val,
-            Err(e) => return ExecSingle::Error(e),
+            Err(e) => return ExecSingle::error(stack_idx, e),
         };
 
         match eval_binary(&lhs, &rhs, op) {
@@ -48,15 +65,15 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(val);
                 ExecSingle::Continue
             }
-            Err(e) => ExecSingle::Error(e),
+            Err(e) => ExecSingle::error(stack_idx, e),
         }
     }
 
-    pub(super) async fn exec_negate(&mut self, val: Value) -> Result<Value, ExecutorError> {
-        let val = match val.elide_wrappers(self).await {
-            Ok(val) => val,
-            Err(e) => return Err(e),
-        };
+    pub(super) async fn exec_negate(
+        &mut self,
+        val: Value,
+    ) -> Result<Value, ExecutorError> {
+        let val = val.elide_wrappers(self).await?;
 
         match &val {
             Value::Integer(n) => Ok(Value::Integer(-n)),

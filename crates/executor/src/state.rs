@@ -213,6 +213,8 @@ pub struct ExecutionState {
     pub timestamp: Timestamp,
     /// playback time budget that still needs to be consumed after resuming heads
     pub pending_playback_time: f64,
+    /// stack used to recover spans/callstack for the latest runtime error
+    pub last_stack_idx: usize,
 
     global_stack_counter: usize,
     global_primitive_anim_counter: usize,
@@ -257,6 +259,7 @@ impl ExecutionState {
         let mut ret = Self {
             timestamp: Timestamp::default(),
             pending_playback_time: 0.0,
+            last_stack_idx: Self::ROOT_STACK_ID,
             global_stack_counter: 0,
             global_primitive_anim_counter: 0,
             alive_stack_count: 0,

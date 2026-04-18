@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::rc::Rc;
 
 use crate::{
@@ -11,6 +12,22 @@ use crate::{
 use super::{ExecSingle, Executor, SeekPrimitiveResult};
 
 impl Executor {
+    pub async fn advance_section(&mut self) {
+        debug_assert!(self.state.execution_heads.is_empty());
+
+        self.save_cache();
+
+        let mut heads = BTreeSet::new();
+        heads.insert(ExecutionState::ROOT_STACK_ID);
+
+        self.state.execution_heads = heads;
+
+        let ip = ((self.state.timestamp.slide + 1) as u16, 0);
+        self.state.stack_mut(ExecutionState::ROOT_STACK_ID).ip = ip;
+        self.state.timestamp.slide += 1;
+        self.state.timestamp.time = 0.0;
+    }
+
     /// run all execution heads until each hits a Play instruction or ends.
     /// yields between iterations so the async executor can interrupt if needed.
     async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
@@ -31,8 +48,7 @@ impl Executor {
                 ExecSingle::Play => {}
                 ExecSingle::EndOfHead => {}
                 ExecSingle::Error(e) => {
-                    let error_stack_idx = self.take_error_stack_idx(stack_idx);
-                    let runtime_error = self.build_runtime_error(e.clone(), error_stack_idx);
+                    let runtime_error = self.build_runtime_error(e.clone());
                     self.state.error(runtime_error);
                     return SeekPrimitiveResult::Error(e);
                 }
@@ -78,7 +94,7 @@ impl Executor {
     }
 
     /// step all active primitive animations by dt seconds
-    pub async fn step_primitive_anims(&mut self, dt: f64) -> Result<(), ExecutorError> {
+    async fn step_primitive_anims(&mut self, dt: f64) -> Result<(), ExecutorError> {
         debug_assert!(self.state.execution_heads.is_empty());
         self.state.timestamp.time += dt;
         self.note_current_timestamp_in_cache();
@@ -100,8 +116,9 @@ impl Executor {
         }
 
         for (baked, t) in &in_progress {
+            self.state.last_stack_idx = baked.parent_stack_idx;
             if let Err(err) = self.apply_primitive_anim_step(baked, *t).await {
-                let runtime_error = self.build_runtime_error(err.clone(), baked.parent_stack_idx);
+                let runtime_error = self.build_runtime_error(err.clone());
                 self.state.error(runtime_error);
                 return Err(err);
             }
@@ -110,9 +127,10 @@ impl Executor {
         // finalize finished anims (snap to final state), reverse to preserve indices
         for &i in finished_indices.iter().rev() {
             let baked = self.state.primitive_anims.remove(i);
+            self.state.last_stack_idx = baked.parent_stack_idx;
             if let Err(err) = self.apply_primitive_anim_step(&baked, 1.0).await {
                 self.release_primitive_anim_locks(&baked);
-                let runtime_error = self.build_runtime_error(err.clone(), baked.parent_stack_idx);
+                let runtime_error = self.build_runtime_error(err.clone());
                 self.state.error(runtime_error);
                 return Err(err);
             }
@@ -304,14 +322,14 @@ impl Executor {
                     self.state.execution_heads.remove(&stack_idx);
                     ExecSingle::Play
                 }
-                Err(e) => ExecSingle::Error(e),
+                Err(e) => ExecSingle::error(stack_idx, e),
             },
             Value::PrimitiveAnim(prim) => match self.bake_primitive_anim(stack_idx, prim, &[]) {
                 Ok(()) => {
                     self.state.execution_heads.remove(&stack_idx);
                     ExecSingle::Play
                 }
-                Err(e) => ExecSingle::Error(e),
+                Err(e) => ExecSingle::error(stack_idx, e),
             },
             Value::List(list) => {
                 let values: Vec<Value> = list
@@ -326,7 +344,7 @@ impl Executor {
                         let baked = match self.plan_primitive_anim(stack_idx, pa.clone(), &reserved)
                         {
                             Ok(baked) => baked,
-                            Err(e) => return ExecSingle::Error(e),
+                            Err(e) => return ExecSingle::error(stack_idx, e),
                         };
                         reserved.extend(baked.targets.iter().cloned());
                         planned_primitives.push(baked);
@@ -338,11 +356,11 @@ impl Executor {
                     match elem {
                         Value::AnimBlock(ab) => match self.spawn_anim_block(stack_idx, ab) {
                             Ok(()) => count += 1,
-                            Err(e) => return ExecSingle::Error(e),
+                            Err(e) => return ExecSingle::error(stack_idx, e),
                         },
                         Value::PrimitiveAnim(_) => {}
                         _ => {
-                            return ExecSingle::Error(ExecutorError::type_error(
+                            return ExecSingle::error(stack_idx, ExecutorError::type_error(
                                 "anim_block or primitive_anim",
                                 elem.type_name(),
                             ));
@@ -360,7 +378,7 @@ impl Executor {
                     ExecSingle::Play
                 }
             }
-            _ => ExecSingle::Error(ExecutorError::type_error(
+            _ => ExecSingle::error(stack_idx, ExecutorError::type_error(
                 "anim_block, primitive_anim, or list",
                 val.type_name(),
             )),

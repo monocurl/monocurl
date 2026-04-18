@@ -4,15 +4,20 @@
 - compiler: converts AST into bytecode, performs static analysis
 - executor: takes bytecode and scene state and executes it
   - src/error.rs: ExecutorError enum plus RuntimeError / RuntimeCallFrame (raw execution error, selected span, bounded recovered callstack)
-  - src/executor/mod.rs: Executor struct, async execute_one dispatch with direct IP mutation, recovered runtime call-chain building, NativeFunc/NativeFuture types
+  - src/executor/mod.rs: Executor struct and public executor API entrypoints, plus seek/result enums and NativeFunc/NativeFuture types
+  - src/executor/dispatch.rs: main instruction dispatch loop for bytecode op execution, including stack reads/writes, invocation dispatch, control flow, and dereference helper logic
+  - src/executor/memory.rs: periodic process memory guard for executor instruction stepping
+  - src/executor/runtime_error.rs: recovered runtime error span/callstack construction from stack ancestry and saved call frames
   - src/executor/cacheing.rs: per-section execution cache used for rebasing seeks plus user-visible slide duration metadata, including exact cached slide durations and invalidation-aware minimum duration lower bounds
-  - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion plus recursive list linear ops (scalar multiply, elementwise add, negate)
+  - src/executor/ops.rs: binary/unary operations with int→float→complex type promotion plus recursive list linear ops (scalar multiply, elementwise add, negate); owns the internal binary-op enum
   - src/executor/invoke.rs: async lambda/operator/native invocation, call frame setup, labeled invocations, isolated eager lambda execution with trace-parent stack links, exec_convert_to_live_operator (extracts live value from operator result list)
   - src/executor/lerp.rs: general lerp(a, b, t) for Monocurl values — handles numbers, InvokedFunction (same-lambda arg-wise lerp), InvokedOperator (rules 4/5 via unmodified embed)
-  - src/executor/anim.rs: seek_primitive_anim (async, yields between instructions), step_primitive_anims, seek_to (event-driven), play/spawn/bake, primitive target flattening/deduction with ancestor-based implicit leader selection, leader lock handling, double-play guard via AnimBlock.already_played
+  - src/executor/anim.rs: section advancement, seek_primitive_anim (async, yields between instructions), playback stepping/seek_to, play/spawn/bake, primitive target flattening/deduction with ancestor-based implicit leader selection, leader lock handling, double-play guard via AnimBlock.already_played
   - src/executor/access.rs: subscript/attribute (mutable + immutable), assign, append, Rc-based COW at element level, WeakLvalue handling, leader passthrough for nested subscript/attribute mutation; uses Map helper methods for ordered iteration
-  - src/state.rs: ExecutionState (execution stacks, ghost stack lineage metadata, leaders, explicit active params, primitive anims, ephemeral_pool, structured runtime errors), ExecutionStack (var stack, IP, call stack, labels, control parent + trace parent), BakedPrimitiveAnim (target leaders + starting followers), LeaderEntry/ActiveParam metadata (declared name plus leader/follower refs). Monotonic stack IDs and primitive animation IDs; finished stacks remain as ghosts so ancestry checks still work after free.
-  - src/value.rs: Value enum, RcValue = Rc<RefCell<Value>> (owning), WeakValue = Weak<RefCell<Value>> (non-owning), Value::Lvalue (owning), Value::WeakLvalue (pushed refs — breaks reference cycles), helpers for truthiness, resolve, elide_lvalues, as_lvalue_rc; Value::values_equal for general structural equality (Rc fast-path, InvokedFunction/Operator compared by args+labels not computed result)
+  - src/state.rs: ExecutionState (execution stacks, ghost stack lineage metadata, leaders, explicit active params, primitive anims, ephemeral_pool, structured runtime errors, last runtime-error stack context), ExecutionStack (var stack, IP, call stack, labels, control parent + trace parent), BakedPrimitiveAnim (target leaders + starting followers), LeaderEntry/ActiveParam metadata (declared name plus leader/follower refs). Monotonic stack IDs and primitive animation IDs; finished stacks remain as ghosts so ancestry checks still work after free.
+  - src/value/mod.rs: Value enum plus shared RcValue/WeakValue/InstructionPointer aliases and value submodule wiring
+  - src/value/helpers.rs: Value helper methods for truthiness, lvalue/wrapper elision, lvalue access, and runtime type naming
+  - src/value/equality.rs: structural equality for values, primitive anim candidates, and reactive stateful trees
   - src/value/container.rs: List (Vec<RcValue>) and Map (HashMap + insertion_order Vec for deterministic iteration) with insert/get/get_mut/contains_key/iter helpers
   - src/value/lambda.rs: Lambda (captures, defaults, IP) and Operator wrapper
   - src/value/anim_block.rs: AnimBlock (captures + IP for coroutine-style animation blocks, already_played: Rc<Cell<bool>> to prevent double-play)
