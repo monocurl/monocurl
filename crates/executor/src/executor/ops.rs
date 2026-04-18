@@ -11,7 +11,7 @@ use crate::{
 use super::{ExecSingle, Executor};
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum BinOp {
+pub enum BinOp {
     Add,
     Sub,
     Mul,

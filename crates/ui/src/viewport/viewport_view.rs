@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use gpui::*;
 
 use crate::{
-    services::{ParameterValue, ServiceManager},
-    theme::ThemeSettings,
+    services::{MeshDebugSnapshot, ParameterValue, ServiceManager},
+    theme::{FontSet, ThemeSettings},
 };
 
 // presentation overlay colors (always dark, independent of theme)
@@ -189,6 +189,49 @@ fn compute_2d_drag(
 
 fn format_bound(v: f64) -> String {
     if v.fract() == 0.0 && v.abs() < 1e9 { format!("{}", v as i64) } else { format!("{:.1}", v) }
+}
+
+fn render_debug_block(title: &'static str, text: &str) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(4.0))
+        .child(
+            div()
+                .text_color(PRES_MUTED)
+                .text_size(px(10.0))
+                .child(title.to_ascii_uppercase()),
+        )
+        .child(
+            div()
+                .bg(PRES_PANEL_BG)
+                .border(px(1.0))
+                .border_color(PRES_BORDER)
+                .rounded(px(4.0))
+                .p(px(8.0))
+                .font_family(FontSet::MONOSPACE)
+                .text_color(PRES_TEXT)
+                .text_size(px(10.0))
+                .child(text.to_string()),
+        )
+}
+
+fn render_mesh_debug(mesh: &MeshDebugSnapshot) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .py(px(8.0))
+        .border_t(px(1.0))
+        .border_color(PRES_BORDER)
+        .child(
+            div()
+                .text_color(PRES_TEXT)
+                .text_size(px(12.0))
+                .child(mesh.name.clone()),
+        )
+        .child(render_debug_block("leader", &mesh.leader_value))
+        .child(render_debug_block("follower", &mesh.follower_value))
 }
 
 // --- slider helpers ---
@@ -738,11 +781,12 @@ impl Render for Viewport {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
-        let (ring_color, params, timestamp, slide_count) = {
+        let (ring_color, params, mesh_debug, timestamp, slide_count) = {
             let exec = self.services.read(cx).execution_state().read(cx);
             (
                 theme.viewport_status_ring(exec.status),
                 exec.parameters.clone(),
+                exec.mesh_debug.clone(),
                 exec.current_timestamp,
                 exec.slide_count,
             )
@@ -817,6 +861,8 @@ impl Render for Viewport {
                 )
             })
             .collect();
+        let mesh_debug_controls: Vec<AnyElement> =
+            mesh_debug.iter().map(render_mesh_debug).map(IntoElement::into_any_element).collect();
 
         let params_btn = div()
             .id("pres-params-btn")
@@ -850,7 +896,7 @@ impl Render for Viewport {
                 .child(div().text_color(PRES_TEXT).text_size(px(12.0)).child(slide_label))
                 .child(div().text_color(PRES_MUTED).text_size(px(11.0)).child(time_label));
 
-            let params_body = if controls.is_empty() {
+            let params_body = if controls.is_empty() && mesh_debug_controls.is_empty() {
                 div()
                     .id("pres-params-list")
                     .flex_1()
@@ -861,9 +907,24 @@ impl Render for Viewport {
                         div()
                             .text_color(PRES_MUTED)
                             .text_size(px(12.0))
-                            .child("No active parameters"),
+                            .child("No active parameters or mesh debug data"),
                     )
             } else {
+                let mut body = Vec::new();
+                body.extend(controls);
+                if !mesh_debug_controls.is_empty() {
+                    body.push(
+                        div()
+                            .pt(px(12.0))
+                            .pb(px(4.0))
+                            .text_color(PRES_MUTED)
+                            .text_size(px(10.0))
+                            .child("MESH DEBUG")
+                            .into_any_element(),
+                    );
+                    body.extend(mesh_debug_controls);
+                }
+
                 div()
                     .id("pres-params-list")
                     .flex_1()
@@ -871,7 +932,7 @@ impl Render for Viewport {
                     .track_scroll(&scroll_handle)
                     .px(px(12.0))
                     .py(px(8.0))
-                    .children(controls)
+                    .children(body)
             };
 
             let sidebar = div()
