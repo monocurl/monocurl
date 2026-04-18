@@ -1,14 +1,20 @@
-use crate::services::{ExecutionSnapshot, ExecutionStatus, ParameterSnapshot};
+use std::collections::HashMap;
+
+use crate::services::{ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue};
 use executor::time::Timestamp;
+
+#[derive(Clone, Default)]
+pub struct Camera {
+    position: (f32, f32, f32),
+
+}
 
 // Any state that's necessary for actual execution
 pub struct ExecutionState {
-    pub background_color: (f32, f32, f32),
-    pub camera_position: (f32, f32, f32),
+    pub background_color: (f64, f64, f64, f64),
+    pub camera: Camera,
     pub mesh_state: Vec<u8>,
-    pub parameter_state: Vec<u8>,
-
-    pub frames: Vec<Vec<u8>>,
+    pub parameter_state: HashMap<String, ParameterValue>,
 
     // runtime info reported by the executor thread
     pub current_timestamp: Timestamp,
@@ -23,11 +29,10 @@ pub struct ExecutionState {
 impl Default for ExecutionState {
     fn default() -> Self {
         Self {
-            background_color: (0.0, 0.0, 0.0),
-            camera_position: (0.0, 0.0, 0.0),
+            background_color: (0.0, 0.0, 0.0, 0.0),
+            camera: Camera::default(),
             mesh_state: Vec::new(),
-            parameter_state: Vec::new(),
-            frames: Vec::new(),
+            parameter_state: HashMap::new(),
             current_timestamp: Timestamp::default(),
             status: ExecutionStatus::Paused,
             slide_durations: Vec::new(),
@@ -55,7 +60,10 @@ impl ExecutionState {
         self.status = snapshot.status;
         self.slide_durations = snapshot.slide_durations;
         self.minimum_slide_durations = snapshot.minimum_slide_durations;
-        self.parameters = snapshot.parameters;
         self.slide_count = snapshot.slide_count;
+        if let Some(ref params) = snapshot.parameters {
+            self.parameter_state = params.parameters.clone();
+        }
+        self.parameters = snapshot.parameters;
     }
 }

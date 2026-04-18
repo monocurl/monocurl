@@ -321,7 +321,7 @@ impl ExecutionService {
                         SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                         SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
                             // even in presentation mode, actually advance
-                            if executor.state.timestamp.slide + 1 < max_slide {
+                            if executor.state.timestamp.slide + 1 < executor.total_sections() {
                                 executor.advance_section().await;
                             }
                             is_playing = false;
@@ -336,6 +336,11 @@ impl ExecutionService {
                         match executor.advance_playback(max_slide, target_dt).await {
                             Ok(still_has_work) => {
                                 if !still_has_work {
+                                    if executor.state.timestamp.slide + 1 < executor.total_sections() {
+                                        executor.advance_section().await;
+                                        // this brings parameters into scope
+                                        let _ = executor.seek_primitive_anim_skip(max_slide).await;
+                                    }
                                     is_playing = false;
                                 }
                             }

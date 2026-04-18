@@ -101,7 +101,7 @@ impl Executor {
                     en.is_some() && en.as_ref().unwrap().state_after.timestamp <= target
                 });
 
-            if let Some(en) = latest {
+            if let Some(en) = latest && false {
                 self.state = en.as_ref().unwrap().state_after.clone();
             } else {
                 self.state = ExecutionState::new();

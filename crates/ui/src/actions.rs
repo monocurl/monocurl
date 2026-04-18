@@ -46,6 +46,7 @@ actions!(
         Redo,
         UnfocusEditor,
         TogglePresentationMode,
+        ToggleParamsPanel,
         TogglePlaying,
         SceneStart,
         SceneEnd,

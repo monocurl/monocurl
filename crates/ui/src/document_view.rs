@@ -8,8 +8,8 @@ use ui_cli_shared::doc_type::DocumentType;
 use crate::{
     actions::{
         CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo,
-        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying,
-        TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut,
+        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleParamsPanel,
+        TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut,
     },
     components::split_pane::Split,
     editor::editor_view::Editor,
@@ -33,6 +33,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-z", Undo, None),
         KeyBinding::new("secondary-shift-z", Redo, None),
         KeyBinding::new("secondary-p", TogglePresentationMode, None),
+        KeyBinding::new("secondary-t", ToggleParamsPanel, Some("presenter")),
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
         KeyBinding::new("escape", UnfocusEditor, Some("!presenter")),
         KeyBinding::new("space", TogglePlaying, Some("!editor")),
@@ -112,20 +113,34 @@ impl DocumentView {
                 w.toggle_fullscreen();
             }
             self.is_presenting = false;
+            self.viewport
+                .update(cx, |vp, cx| vp.set_presenting(false, cx));
             self.services.update(cx, |services, _| {
-                services.set_playback_mode(PlaybackMode::Presentation);
+                services.set_playback_mode(PlaybackMode::Preview);
             });
         } else {
+            self.is_presenting = true;
             self.was_fullscreen_before_presenting = w.is_fullscreen();
             if !w.is_fullscreen() {
                 w.toggle_fullscreen();
             }
+            self.viewport
+                .update(cx, |vp, cx| vp.set_presenting(true, cx));
             self.services.update(cx, |services, _| {
-                services.set_playback_mode(PlaybackMode::Preview);
+                services.set_playback_mode(PlaybackMode::Presentation);
             });
         }
         log::info!("Toggled presentation mode to {}", self.is_presenting);
         cx.notify();
+    }
+
+    fn toggle_params_panel(
+        &mut self,
+        _: &ToggleParamsPanel,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.viewport.update(cx, |vp, cx| vp.toggle_params(cx));
     }
 
     fn unfocus_editor(&mut self, _: &UnfocusEditor, w: &mut Window, _cx: &mut Context<Self>) {
@@ -416,15 +431,12 @@ impl DocumentView {
     }
 
     fn render_presentation(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let theme = ThemeSettings::theme(cx);
-
         div()
-            .child("Presenting")
-            .text_color(theme.text_primary)
-            .bg(theme.document_background)
+            .size_full()
             .key_context("document presenter")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_presentation))
+            .on_action(cx.listener(Self::toggle_params_panel))
             .on_action(cx.listener(Self::toggle_playing))
             .on_action(cx.listener(Self::prev_slide))
             .on_action(cx.listener(Self::next_slide))
@@ -432,6 +444,7 @@ impl DocumentView {
             .on_action(cx.listener(Self::scene_end))
             .on_action(cx.listener(Self::epsilon_forward))
             .on_action(cx.listener(Self::epsilon_backward))
+            .child(self.viewport.clone())
     }
 
     fn viewport_timeline(&self, divider_color: impl Into<Hsla>) -> Split {

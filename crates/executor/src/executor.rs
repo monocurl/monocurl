@@ -182,6 +182,7 @@ impl Executor {
             .find(|param| param.name == name)
             .ok_or_else(|| ExecutorError::Other(format!("unknown parameter '{}'", name)))?;
 
+        // allow setting even during animatino
         if let Value::Leader(leader) = &*param.leader_cell_rc.borrow()
             && leader.locked_by_anim.is_some()
         {
