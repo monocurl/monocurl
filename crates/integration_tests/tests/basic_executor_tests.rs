@@ -253,7 +253,14 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         .map(|err| err.span.clone())
         .collect();
 
-    let value = executor.state.captured_output.into_iter().last();
+    let value = executor.state.captured_output.into_iter().last()
+        .map(|v| {
+            match v {
+                Value::Leader(leader) => leader.leader_rc.borrow().clone(),
+                other => other,
+            }
+        });
+
     ExecResult {
         value,
         errors: runtime_errors,
@@ -726,6 +733,81 @@ fn test_exec_lambda_default_arg_overridden() {
         let result = add(5, 20)
     ");
     r.assert_int(25);
+}
+
+// -- default value free-variable restrictions --
+
+#[test]
+fn test_default_lvalue_ref_param_is_error() {
+    // &y in a default is always banned, even when y is param
+    let r = run("
+        param y = 4
+        let gamma = |x = &y| x
+        let result = gamma()
+    ");
+    r.assert_error("lvalue reference");
+}
+
+#[test]
+fn test_default_lvalue_ref_let_is_error() {
+    let r = run("
+        let base = 10
+        let f = |x = &base| x
+        let result = f()
+    ");
+    r.assert_error("lvalue reference");
+}
+
+#[test]
+fn test_default_references_let_is_error() {
+    // plain let variable in a default is not mesh or param
+    let r = run("
+        let base = 10
+        let f = |x = &base| x
+        let result = f()
+    ");
+    r.assert_error("mesh or param");
+}
+
+#[test]
+fn test_default_references_var_is_error() {
+    let r = run("
+        var count = 5
+        let f = |x = &count| x
+        let result = f()
+    ");
+    r.assert_error("mesh or param");
+}
+
+#[test]
+fn test_default_references_param_is_ok() {
+    let r = run("
+        param scale = 3
+        let f = |x = scale| x * 2
+        let result = f()
+    ");
+    r.assert_int(6);
+}
+
+#[test]
+fn test_default_references_mesh_is_ok() {
+    let r = run("
+        let make = |v| v
+        mesh m = make(v: 7)
+        let f = |x = m.v| x + 1
+        let result = f()
+    ");
+    r.assert_int(8);
+}
+
+#[test]
+fn test_default_literal_only_is_ok() {
+    // no free variables at all — always fine
+    let r = run("
+        let f = |x = 42| x
+        let result = f()
+    ");
+    r.assert_int(42);
 }
 
 #[test]
@@ -1696,7 +1778,7 @@ fn test_compile_error_return_at_top_level() {
 fn test_ref_basic_mutation() {
     // mutate increments its reference argument; x should be 1 after the call
     let r = run("
-        var x = 0
+        param x = 0
         let mutate = |&y| {
             y = y + 1
         }
@@ -1709,8 +1791,8 @@ fn test_ref_basic_mutation() {
 #[test]
 fn test_ref_mutation_does_not_affect_unrelated_var() {
     let r = run("
-        var x = 10
-        var z = 99
+        param x = 10
+        param z = 99
         let inc = |&y| {
             y = y + 1
         }
@@ -1723,7 +1805,7 @@ fn test_ref_mutation_does_not_affect_unrelated_var() {
 #[test]
 fn test_ref_called_multiple_times() {
     let r = run("
-        var x = 0
+        param x = 0
         let inc = |&y| {
             y = y + 1
         }
@@ -1739,7 +1821,7 @@ fn test_ref_called_multiple_times() {
 fn test_ref_chain_of_lambdas() {
     // inner passes its reference argument straight through to another lambda
     let r = run("
-        var x = 0
+        param x = 0
         let add_two = |&y| {
             y = y + 2
         }
@@ -1756,8 +1838,8 @@ fn test_ref_chain_of_lambdas() {
 #[test]
 fn test_ref_two_distinct_references() {
     let r = run("
-        var a = 1
-        var b = 10
+        param a = 1
+        param b = 10
         let modify_both = |&x, &y| {
             x = x + 1
             y = y + 1
@@ -1773,7 +1855,7 @@ fn test_ref_two_distinct_references() {
 fn test_ref_reference_to_list_via_ref() {
     // pass the whole list by reference; subscript-assign inside the lambda
     let r = run("
-        var arr = [0, 0, 0]
+        param arr = [0, 0, 0]
         let set_first = |&a| {
             a[0] = 42
         }
@@ -1787,8 +1869,8 @@ fn test_ref_reference_to_list_via_ref() {
 fn test_ref_destructure_list_references() {
     // pass a list of references using list destructure assignment inside the lambda
     let r = run("
-        var a = 0
-        var b = 0
+        param a = 0
+        param b = 0
         let set_both = |&x, &y| {
             x = 7
             y = 13
@@ -1804,7 +1886,7 @@ fn test_ref_reference_in_closure_capture() {
     // lambda captures a var by value; separate reference arg must not alias the capture
     let r = run("
         let captured = 5
-        var target = 0
+        param target = 0
         let f = |&r| {
             r = captured + 1
         }

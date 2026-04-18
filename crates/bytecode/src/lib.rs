@@ -42,9 +42,6 @@ pub enum Instruction {
     ConvertParam {
         name_index: u32,
     },
-    ConvertState {
-        name_index: u32,
-    },
     ConvertMesh {
         name_index: u32,
     },

@@ -290,12 +290,6 @@ impl Executor {
                 self.state
                     .promote_to_leader(stack_idx, LeaderKind::Mesh, name);
             }
-            Instruction::ConvertState { name_index } => {
-                let name =
-                    self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
-                self.state
-                    .promote_to_leader(stack_idx, LeaderKind::State, name);
-            }
             Instruction::ConvertParam { name_index } => {
                 let name =
                     self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();

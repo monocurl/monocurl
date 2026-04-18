@@ -127,7 +127,6 @@ pub struct ActiveParam {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum LeaderKind {
     Mesh,
-    State,
     Param,
 }
 
@@ -272,7 +271,7 @@ impl ExecutionState {
         // mesh follower starts as []; state/param follower starts as initial value
         let follower_init = match kind {
             LeaderKind::Mesh => Value::List(Rc::new(List::new())),
-            LeaderKind::State | LeaderKind::Param => init_val,
+            LeaderKind::Param => init_val,
         };
         let follower_rc = rc_value(follower_init);
 

@@ -9,7 +9,7 @@ use bytecode::{
     AnimPrototype, Bytecode, Instruction, InstructionAnnotation, LambdaPrototype, SectionBytecode,
     SectionFlags,
 };
-use free_vars::{free_vars_expr, free_vars_stmts};
+use free_vars::{free_lvalue_refs_expr, free_vars_expr, free_vars_stmts};
 use parser::ast::{
     Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression,
     For, IdentifierDeclaration, IdentifierReference, If, InvocationArguments, LambdaBody,
@@ -38,7 +38,6 @@ pub enum CursorIdentifierType {
     Var,
     Mesh,
     Param,
-    State,
 }
 
 // autocomplete suggetion effectively
@@ -71,7 +70,6 @@ pub enum VariableType {
     Let,
     Var,
     Reference,
-    State,
     Param,
     Mesh,
 }
@@ -300,8 +298,8 @@ impl Compiler {
                 0..0,
             );
             let name_index = self.intern_string(var);
-            self.emit(Instruction::ConvertState { name_index }, 0..0);
-            self.define_symbol(var, VariableType::State, SymbolFunctionInfo::None);
+            self.emit(Instruction::ConvertParam { name_index }, 0..0);
+            self.define_symbol(var, VariableType::Param, SymbolFunctionInfo::None);
         }
 
         self.emit(Instruction::EndOfExecutionHead, 0..0);
@@ -809,7 +807,6 @@ impl Compiler {
                                         VariableType::Let => CursorIdentifierType::Let,
                                         VariableType::Var => CursorIdentifierType::Var,
                                         VariableType::Mesh => CursorIdentifierType::Mesh,
-                                        VariableType::State => CursorIdentifierType::State,
                                         VariableType::Param => CursorIdentifierType::Param,
                                         VariableType::Reference => CursorIdentifierType::Var,
                                     }
@@ -924,7 +921,6 @@ impl Compiler {
             VariableType::Let | VariableType::Var | VariableType::Reference => {
                 self.emit(Instruction::ConvertVar, span.clone());
             }
-            VariableType::State => unreachable!("state is not a user-facing keyword"),
         }
         self.define_symbol(&d.identifier.1.0, vt, SymbolFunctionInfo::from(&d.value.1));
     }
@@ -1216,11 +1212,11 @@ impl Compiler {
 
         match ir {
             IdentifierReference::Reference(_) => {
-                if sym.var_type == VariableType::Let {
+                if !matches!(sym.var_type,  VariableType::Reference | VariableType::Param | VariableType::Mesh)  {
                     self.error(
                         span.clone(),
                         format!(
-                            "cannot mutably reference '{}', consider declaring it as a 'var'",
+                            "cannot reference '{}' as it is not a mesh or param variable",
                             name
                         ),
                     );
@@ -1616,6 +1612,17 @@ impl Compiler {
 
         for arg in &l.args {
             if let Some(ref default) = arg.default_value {
+                let lvalue_refs = free_lvalue_refs_expr(&default.1, HashSet::new());
+                for name in &lvalue_refs {
+                    self.error(
+                        default.0.clone(),
+                        format!(
+                            "default value for '{}' cannot take a lvalue reference to '{}'",
+                            arg.identifier.1.0, name
+                        ),
+                    );
+                }
+
                 self.compile_val(&default.1, &default.0);
             }
         }

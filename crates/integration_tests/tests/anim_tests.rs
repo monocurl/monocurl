@@ -136,13 +136,6 @@ impl AnimResult {
         self
     }
 
-    pub fn state_leaders(&self) -> Vec<&LeaderInfo> {
-        self.leaders
-            .iter()
-            .filter(|l| l.kind == LeaderKind::State)
-            .collect()
-    }
-
     pub fn mesh_leaders(&self) -> Vec<&LeaderInfo> {
         self.leaders
             .iter()
@@ -672,12 +665,11 @@ fn test_state_leader_count_prelude_only() {
     let r = run_anim("let x = 1");
     r.assert_ok();
     assert_eq!(
-        r.state_leaders().len(),
+        r.param_leaders().len(),
         2,
         "expected camera and background from prelude"
     );
     assert_eq!(r.mesh_leaders().len(), 0);
-    assert_eq!(r.param_leaders().len(), 0);
 }
 
 #[test]
@@ -698,18 +690,18 @@ fn test_multiple_state_leaders() {
     ",
     );
     r.assert_ok();
-    assert_eq!(r.param_leaders().len(), 2);
+    assert_eq!(r.param_leaders().len(), 4);
     let params = r.param_leaders();
-    params[0].assert_target_int(10);
-    params[1].assert_target_int(20);
+    params[2].assert_target_int(10);
+    params[3].assert_target_int(20);
 }
 
 #[test]
 fn test_param_leader() {
     let r = run_anim("param speed = 5");
     r.assert_ok();
-    assert_eq!(r.param_leaders().len(), 1);
-    r.param_leaders()[0]
+    assert_eq!(r.param_leaders().len(), 3);
+    r.param_leaders()[2]
         .assert_target_int(5)
         .assert_current_int(5);
 }
@@ -729,8 +721,8 @@ fn test_set_syncs_only_explicit_candidates() {
     );
     r.assert_ok();
     let params = r.param_leaders();
-    params[0].assert_target_int(10).assert_current_int(10);
-    params[1].assert_target_int(20).assert_current_int(2);
+    params[2].assert_target_int(10).assert_current_int(10);
+    params[3].assert_target_int(20).assert_current_int(2);
 }
 
 #[test]
@@ -745,7 +737,7 @@ fn test_lerp_auto_deduces_detached_followers() {
     );
     r.assert_ok();
     let params = r.param_leaders();
-    params[0]
+    params[2]
         .assert_target_int(10)
         .assert_current_float(5.0, 1e-9);
 }
@@ -764,10 +756,10 @@ fn test_lerp_flattens_nested_candidate_tree() {
     );
     r.assert_ok();
     let params = r.param_leaders();
-    params[0]
+    params[2]
         .assert_target_int(10)
         .assert_current_float(5.0, 1e-9);
-    params[1].assert_target_int(20).assert_current_int(2);
+    params[3].assert_target_int(20).assert_current_int(2);
 }
 
 #[test]
@@ -812,11 +804,7 @@ fn test_multi_slide_state_persists_across_slides() {
     let r = run_multi_anim(&["param counter = 99", "let check = 1"], 1, f64::INFINITY);
     r.assert_ok();
     let params = r.param_leaders();
-    assert!(
-        !params.is_empty(),
-        "expected param leader to persist across slides"
-    );
-    params[0].assert_target_int(99);
+    params[2].assert_target_int(99);
 }
 
 // -- error cases --
