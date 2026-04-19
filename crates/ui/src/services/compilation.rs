@@ -274,6 +274,15 @@ impl CompilationService {
             });
         }
 
+        for compile_warning in &compile.warnings {
+            diagnostics.push(Diagnostic {
+                message: compile_warning.message.clone(),
+                span: compile_warning.span.clone(),
+                dtype: DiagnosticType::CompileTimeWarning,
+                title: "Compile Warning".into(),
+            });
+        }
+
         self.sm_tx
             .send(ServiceManagerMessage::UpdateCompileDiagnostics {
                 diagnostics,

@@ -1,7 +1,7 @@
 use structs::text::Span8;
 
 use crate::{
-    error::{RuntimeCallFrame, RuntimeError},
+    error::{ExecutorError, RuntimeCallFrame, RuntimeError},
     value::InstructionPointer,
 };
 
@@ -10,6 +10,11 @@ use super::Executor;
 const RUNTIME_ERROR_CALLSTACK_LIMIT: usize = 5;
 
 impl Executor {
+    pub fn record_runtime_error(&mut self, error: ExecutorError) {
+        let runtime_error = self.build_runtime_error(error);
+        self.state.error(runtime_error);
+    }
+
     pub(crate) fn build_runtime_error(&self, error: crate::error::ExecutorError) -> RuntimeError {
         let stack_idx = self.state.last_stack_idx;
         let mut fallback_span = self.current_instruction_span(stack_idx);

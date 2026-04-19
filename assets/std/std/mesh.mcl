@@ -148,52 +148,52 @@ let BoundingBox = |target, buffer = 0.1|
 
 let shift = operator |target, delta = [0, 0, 0]| {
     let go = |d| __monocurl__native__ op_shift(target, d)
-    [go([0, 0, 0]), go(delta)]
+    return [go(d: [0, 0, 0]), go(d: delta)]
 }
 
 let scale = operator |target, factor = 1| {
     let go = |s| __monocurl__native__ op_scale(target, s)
-    [go(1), go(factor)]
+    return [go(s: 1), go(s: factor)]
 }
 
 let scale_xyz = operator |target, factors = [1, 1, 1]| {
-    let go = |s| __monocurl__native__ op_scale_xyz(target, s)
-    [go([1, 1, 1]), go(factors)]
+    let go = |s| __monocurl__native__ op_scale(target, s)
+    return [go(s: [1, 1, 1]), go(s: factors)]
 }
 
 let rotate = operator |target, rotation = [0, 0, 0]| {
     let go = |r| __monocurl__native__ op_rotate(target, r)
-    [go([0, 0, 0]), go(rotation)]
+    return [go(r: [0, 0, 0]), go(r: rotation)]
 }
 
 let rotate_around = operator |target, pivot = [0, 0, 0], rotation = [0, 0, 0]| {
     let go = |r| __monocurl__native__ op_rotate_around(target, pivot, r)
-    [go([0, 0, 0]), go(rotation)]
+    return [go(r: [0, 0, 0]), go(r: rotation)]
 }
 
 let fade = operator |target, opacity = 0| {
     let go = |o| __monocurl__native__ op_fade(target, o)
-    [go(1), go(opacity)]
+    return [go(o: 1), go(o: opacity)]
 }
 
 let stroke = operator |target, color = [1, 1, 1, 1]| {
     let go = |c| __monocurl__native__ op_restroke(target, c)
-    [target, go(color)]
+    return [target, go(c: color)]
 }
 
 let fill = operator |target, color = [1, 1, 1, 1]| {
     let go = |c| __monocurl__native__ op_refill(target, c)
-    [target, go(color)]
+    return [target, go(c: color)]
 }
 
 let dotted = operator |target, color = [1, 1, 1, 1]| {
     let go = |c| __monocurl__native__ op_redot(target, c)
-    [target, go(color)]
+    return [target, go(c: color)]
 }
 
 let normal_hint = operator |target, normal = 1f| {
     let go = |n| __monocurl__native__ op_normal_hint(target, n)
-    [target, go(normal)]
+    return [target, go(n: normal)]
 }
 
 let retag = operator |target, tag = 0| [target, __monocurl__native__ op_retagged(target, |old| tag)]

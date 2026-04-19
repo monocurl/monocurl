@@ -1,5 +1,6 @@
 mod free_vars;
 mod stateful;
+mod warnings;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -21,11 +22,18 @@ use parser::ast::{
 use stateful::is_stateful;
 use stdlib::registry::registry;
 use structs::text::{Count8, Span8};
+use warnings::expression_statement_has_no_effect;
 
 use crate::cache::CompilerCache;
 
 #[derive(Clone)]
 pub struct CompileError {
+    pub span: Span8,
+    pub message: String,
+}
+
+#[derive(Clone)]
+pub struct CompileWarning {
     pub span: Span8,
     pub message: String,
 }
@@ -60,6 +68,7 @@ pub struct Reference {
 pub struct CompileResult {
     pub bytecode: Bytecode,
     pub errors: Vec<CompileError>,
+    pub warnings: Vec<CompileWarning>,
     // it is guaranteed these will be emitted in deepest first order
     pub root_references: Vec<Reference>,
     pub possible_cursor_identifiers: Vec<CursorIdentifier>,
@@ -161,6 +170,7 @@ pub(crate) struct CompileBundle {
     import_display_index: Option<usize>,
     exports: HashMap<String, Arc<Symbol>>,
     errors: Vec<CompileError>,
+    warnings: Vec<CompileWarning>,
     bytecode: Vec<Arc<SectionBytecode>>,
     current_bytecode: Option<SectionBytecode>,
     final_stack_depth: usize,
@@ -176,7 +186,8 @@ struct Compiler {
 
     // output
     compile_bundles: Vec<Arc<CompileBundle>>,
-    errors: Vec<CompileError>, // mounted onto root bundle
+    errors: Vec<CompileError>,     // mounted onto root bundle
+    warnings: Vec<CompileWarning>, // mounted onto root bundle
     // only applicable to root bundle
     references: Vec<Reference>,
     cursor_identifier_set: HashSet<String>,
@@ -201,6 +212,7 @@ impl Compiler {
             current_bundle: None,
             compile_bundles: Vec::new(),
             errors: Vec::new(),
+            warnings: Vec::new(),
             bundle_root_import_span: None,
             cursor_pos,
             cursor_identifier_set: HashSet::new(),
@@ -228,6 +240,7 @@ impl Compiler {
         let result = CompileResult {
             bytecode: Bytecode::new(bytecode_sections),
             errors: self.errors,
+            warnings: self.warnings,
             possible_cursor_identifiers,
             root_references: self.references,
         };
@@ -275,6 +288,7 @@ impl Compiler {
             import_display_index: None,
             exports: HashMap::default(),
             errors: Vec::default(),
+            warnings: Vec::default(),
             bytecode: vec![],
             final_stack_depth: 0,
             current_bytecode: Some(SectionBytecode::new(SectionFlags {
@@ -346,6 +360,16 @@ impl Compiler {
                 message: error.message.clone(),
             });
         }
+        for warning in &cached_bundle.warnings {
+            let updated_span = self
+                .bundle_root_import_span
+                .clone()
+                .unwrap_or(warning.span.clone());
+            self.warnings.push(CompileWarning {
+                span: updated_span,
+                message: warning.message.clone(),
+            });
+        }
 
         self.compile_bundles.push(cached_bundle);
     }
@@ -399,6 +423,7 @@ impl Compiler {
             }),
             exports: HashMap::default(),
             errors: Vec::default(),
+            warnings: Vec::default(),
             bytecode: Vec::default(),
             current_bytecode: None,
             final_stack_depth: 0,
@@ -778,6 +803,17 @@ impl Compiler {
         self.errors.push(error.clone());
         self.current_bundle.as_mut().unwrap().errors.push(error);
     }
+
+    fn warning(&mut self, span: Span8, msg: impl Into<String>) {
+        let real_span = self.bundle_root_import_span.clone().unwrap_or(span);
+
+        let warning = CompileWarning {
+            span: real_span.clone(),
+            message: msg.into(),
+        };
+        self.warnings.push(warning.clone());
+        self.current_bundle.as_mut().unwrap().warnings.push(warning);
+    }
 }
 
 impl Compiler {
@@ -855,6 +891,9 @@ impl Compiler {
             }
             Statement::Expression(e) => {
                 self.infer_possible_cursor_identifiers(span.clone());
+                if expression_statement_has_no_effect(e) {
+                    self.warning(span.clone(), "expression statement has no effect");
+                }
                 self.compile_val(e, span);
                 self.emit_pops(1, span.clone());
             }
@@ -1991,6 +2030,10 @@ mod test {
         result.errors.iter().any(|e| e.message.contains(fragment))
     }
 
+    fn has_warning(result: &CompileResult, fragment: &str) -> bool {
+        result.warnings.iter().any(|w| w.message.contains(fragment))
+    }
+
     fn no_errors(result: &CompileResult) {
         if !result.errors.is_empty() {
             let msgs: Vec<_> = result.errors.iter().map(|e| e.message.as_str()).collect();
@@ -2331,6 +2374,33 @@ mod test {
                 "required arguments must come before default arguments"
             ),
             "expected default-arg suffix error from parser-produced AST"
+        );
+    }
+
+    #[test]
+    fn test_warns_for_useless_expression_statement() {
+        let result = compile_src("1 + 2");
+        assert!(
+            has_warning(&result, "expression statement has no effect"),
+            "expected useless-expression warning"
+        );
+    }
+
+    #[test]
+    fn test_no_warning_for_expression_statement_with_assignment() {
+        let result = compile_src("var x = 0\nx = 1");
+        assert!(
+            !has_warning(&result, "expression statement has no effect"),
+            "did not expect useless-expression warning"
+        );
+    }
+
+    #[test]
+    fn test_no_warning_for_expression_statement_with_lvalue_reference() {
+        let result = compile_src("let poke = |slot| slot\npoke(&camera)");
+        assert!(
+            !has_warning(&result, "expression statement has no effect"),
+            "did not expect useless-expression warning"
         );
     }
 

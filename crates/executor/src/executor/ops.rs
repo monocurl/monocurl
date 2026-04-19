@@ -197,14 +197,10 @@ fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, Ex
         }
         (Value::Complex { re: ar, im: ai }, Value::Complex { re: br, im: bi }, BinOp::Div) => {
             let denom = br * br + bi * bi;
-            if denom == 0.0 {
-                Err(ExecutorError::DivisionByZero)
-            } else {
-                Ok(Value::Complex {
-                    re: (ar * br + ai * bi) / denom,
-                    im: (ai * br - ar * bi) / denom,
-                })
-            }
+            Ok(Value::Complex {
+                re: (ar * br + ai * bi) / denom,
+                im: (ai * br - ar * bi) / denom,
+            })
         }
 
         // string concatenation
@@ -333,9 +329,6 @@ fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> 
         BinOp::Sub => Value::Float(a - b),
         BinOp::Mul => Value::Float(a * b),
         BinOp::Div => {
-            if b == 0.0 {
-                return Err(ExecutorError::DivisionByZero);
-            }
             Value::Float(a / b)
         }
         BinOp::IntDiv => Value::Float((a / b).floor()),

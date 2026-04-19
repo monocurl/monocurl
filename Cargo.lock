@@ -5333,6 +5333,7 @@ dependencies = [
  "executor",
  "exporter",
  "futures",
+ "geo",
  "gpui",
  "lexer",
  "log",

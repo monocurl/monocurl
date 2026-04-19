@@ -5,6 +5,7 @@ use gpui::*;
 use crate::{
     services::{ParameterValue, ServiceManager},
     theme::ThemeSettings,
+    viewport::debug_scene_view::DebugSceneView,
 };
 
 // presentation overlay colors (always dark, independent of theme)
@@ -124,6 +125,7 @@ enum Slider2dKind {
 
 pub struct Viewport {
     services: Entity<ServiceManager>,
+    scene: Entity<DebugSceneView>,
     is_presenting: bool,
     show_params: bool,
     dragging_param: Option<String>,
@@ -138,9 +140,12 @@ impl Viewport {
             cx.notify();
         })
         .detach();
+        let execution_state = services.read(cx).execution_state().clone();
+        let scene = cx.new(|cx| DebugSceneView::new(execution_state, cx));
 
         Self {
             services,
+            scene,
             is_presenting: false,
             show_params: false,
             dragging_param: None,
@@ -877,7 +882,12 @@ impl Render for Viewport {
             .size_full()
             .bg(ring_color)
             .p(px(1.0))
-            .child(div().size_full().bg(theme.viewport_stage_background));
+            .child(
+                div()
+                    .size_full()
+                    .bg(theme.viewport_stage_background)
+                    .child(self.scene.clone()),
+            );
 
         if !self.is_presenting {
             return div()

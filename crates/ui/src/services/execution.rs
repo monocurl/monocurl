@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -7,17 +8,22 @@ use std::{
 
 use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
-    error::RuntimeError,
+    error::{ExecutorError, RuntimeError},
     executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
     heap::{VRc, with_heap},
+    state::LeaderKind,
     time::Timestamp,
-    value::{Value, container::List},
+    value::{
+        Value,
+        container::{HashableKey, List, Map},
+    },
 };
 use futures::{
     StreamExt,
     channel::mpsc::{UnboundedReceiver, UnboundedSender},
     future,
 };
+use geo::{mesh::Mesh, simd::Float3};
 use smol::Timer;
 use stdlib::registry::registry;
 use structs::rope::{Rope, TextAggregate};
@@ -43,7 +49,34 @@ pub struct ParameterSnapshot {
     pub param_order: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ViewportCameraSnapshot {
+    pub position: Float3,
+    pub look_at: Float3,
+    pub up: Float3,
+    pub fov: f32,
+    pub near: f32,
+    pub far: f32,
+    pub ortho: bool,
+}
+
+impl Default for ViewportCameraSnapshot {
+    fn default() -> Self {
+        Self {
+            position: Float3::new(0.0, 0.0, -10.0),
+            look_at: Float3::ZERO,
+            up: Float3::Y,
+            fov: 0.698_131_7,
+            near: 0.1,
+            far: 100.0,
+            ortho: false,
+        }
+    }
+}
+
 pub struct ExecutionSnapshot {
+    pub camera: ViewportCameraSnapshot,
+    pub meshes: Vec<Arc<Mesh>>,
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,
     pub slide_count: usize,
@@ -111,6 +144,124 @@ fn default_bytecode() -> Bytecode {
 }
 
 impl ExecutionService {
+    fn collect_scene_meshes<'a>(
+        executor: &'a mut Executor,
+        value: Value,
+        target_name: &'a str,
+        out: &'a mut Vec<Arc<Mesh>>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), ExecutorError>> + 'a>> {
+        Box::pin(async move {
+            let value = value.elide_wrappers(executor).await?;
+            match value {
+                Value::Mesh(mesh) => {
+                    out.push(mesh);
+                    Ok(())
+                }
+                Value::List(list) => {
+                    for item in list.elements() {
+                        let item = with_heap(|h| h.get(item.key()).clone());
+                        Self::collect_scene_meshes(executor, item, target_name, out).await?;
+                    }
+                    Ok(())
+                }
+                other => Err(ExecutorError::Other(format!(
+                    "on-screen mesh '{}' must resolve to a mesh tree, got {}",
+                    target_name,
+                    other.type_name()
+                ))),
+            }
+        })
+    }
+
+    async fn scene_meshes(executor: &mut Executor) -> Result<Vec<Arc<Mesh>>, ExecutorError> {
+        let mut meshes = Vec::new();
+        let leaders = executor
+            .state
+            .leaders
+            .iter()
+            .filter(|entry| entry.kind == LeaderKind::Mesh)
+            .map(|entry| (entry.name.clone(), entry.follower_value))
+            .collect::<Vec<_>>();
+
+        for (name, follower_value) in leaders {
+            let follower = with_heap(|h| h.get(follower_value).clone());
+            Self::collect_scene_meshes(executor, follower, &name, &mut meshes).await?;
+        }
+        Ok(meshes)
+    }
+
+    fn map_field_value(map: &Map, name: &str) -> Option<Value> {
+        map.get(&HashableKey::String(name.to_string()))
+            .map(|value| with_heap(|h| h.get(value.key()).clone()).elide_lvalue_leader_rec())
+    }
+
+    fn read_f32(value: &Value) -> Option<f32> {
+        match value {
+            Value::Integer(n) => Some(*n as f32),
+            Value::Float(f) => Some(*f as f32),
+            _ => None,
+        }
+    }
+
+    fn read_bool_flag(value: &Value) -> Option<bool> {
+        match value {
+            Value::Integer(n) => Some(*n != 0),
+            Value::Float(f) => Some(*f != 0.0),
+            _ => None,
+        }
+    }
+
+    fn read_float3(value: &Value) -> Option<Float3> {
+        let Value::List(list) = value else {
+            return None;
+        };
+        if list.len() != 3 {
+            return None;
+        }
+
+        let mut components = [0.0; 3];
+        for (slot, component) in components.iter_mut().zip(list.elements()) {
+            *slot = Self::read_f32(&with_heap(|h| h.get(component.key()).clone()))?;
+        }
+        Some(Float3::from_array(components))
+    }
+
+    fn camera_snapshot_from_value(value: &Value) -> Option<ViewportCameraSnapshot> {
+        let Value::Map(map) = value else {
+            return None;
+        };
+        let kind = Self::map_field_value(map, "kind")?;
+        if !matches!(kind, Value::String(ref kind) if kind == "camera") {
+            return None;
+        }
+
+        Some(ViewportCameraSnapshot {
+            position: Self::read_float3(&Self::map_field_value(map, "position")?)?,
+            look_at: Self::read_float3(&Self::map_field_value(map, "look_at")?)?,
+            up: Self::read_float3(&Self::map_field_value(map, "up")?)?,
+            fov: Self::read_f32(&Self::map_field_value(map, "fov")?)?,
+            near: Self::read_f32(&Self::map_field_value(map, "near")?)?,
+            far: Self::read_f32(&Self::map_field_value(map, "far")?)?,
+            ortho: Self::read_bool_flag(&Self::map_field_value(map, "ortho")?)?,
+        })
+    }
+
+    fn camera_snapshot(executor: &Executor) -> ViewportCameraSnapshot {
+        executor
+            .state
+            .leaders
+            .iter()
+            .rev()
+            .find_map(|entry| {
+                (entry.name == "camera")
+                    .then(|| {
+                        with_heap(|h| h.get(entry.follower_value).clone()).elide_lvalue_leader_rec()
+                    })
+                    .and_then(|value| Self::camera_snapshot_from_value(&value))
+            })
+            .unwrap_or_default()
+    }
+
     fn parameter_value_from_runtime(value: Value) -> ParameterValue {
         match value {
             Value::Integer(n) => ParameterValue::Int(n),
@@ -147,23 +298,19 @@ impl ExecutionService {
     fn runtime_value_from_parameter(value: &ParameterValue) -> Option<Value> {
         Some(match value {
             ParameterValue::Int(n) => Value::Integer(*n),
-            ParameterValue::VectorInt(values) => {
-                Value::List(std::rc::Rc::new(List::new_with(
-                    values
-                        .iter()
-                        .map(|&value| VRc::new(Value::Integer(value)))
-                        .collect(),
-                )))
-            }
+            ParameterValue::VectorInt(values) => Value::List(std::rc::Rc::new(List::new_with(
+                values
+                    .iter()
+                    .map(|&value| VRc::new(Value::Integer(value)))
+                    .collect(),
+            ))),
             ParameterValue::Float(f) => Value::Float(*f),
-            ParameterValue::VectorFloat(values) => {
-                Value::List(std::rc::Rc::new(List::new_with(
-                    values
-                        .iter()
-                        .map(|&value| VRc::new(Value::Float(value)))
-                        .collect()
-                )))
-            }
+            ParameterValue::VectorFloat(values) => Value::List(std::rc::Rc::new(List::new_with(
+                values
+                    .iter()
+                    .map(|&value| VRc::new(Value::Float(value)))
+                    .collect(),
+            ))),
             ParameterValue::Complex { re, im } => Value::Complex { re: *re, im: *im },
             ParameterValue::Other => return None,
         })
@@ -289,14 +436,15 @@ impl ExecutionService {
                 if !is_playing || !has_seeked_for_play {
                     Self::emit_snapshot(
                         &self.sm_tx,
-                        &executor,
+                        &mut executor,
                         &root_text_rope,
                         has_compiler_error,
                         is_playing,
                         true,
                         playback_mode,
                         version,
-                    );
+                    )
+                    .await;
 
                     has_seeked_for_play = true;
                     match executor.seek_to(target).await {
@@ -311,14 +459,15 @@ impl ExecutionService {
 
                     Self::emit_snapshot(
                         &self.sm_tx,
-                        &executor,
+                        &mut executor,
                         &root_text_rope,
                         has_compiler_error,
                         is_playing,
                         false,
                         playback_mode,
                         version,
-                    );
+                    )
+                    .await;
                 }
 
                 while is_playing {
@@ -367,14 +516,15 @@ impl ExecutionService {
 
                         Self::emit_snapshot(
                             &self.sm_tx,
-                            &executor,
+                            &mut executor,
                             &root_text_rope,
                             has_compiler_error,
                             is_playing,
                             false,
                             playback_mode,
                             version,
-                        );
+                        )
+                        .await;
 
                         let full_elapsed =
                             Instant::now().duration_since(last_update_at).as_secs_f64();
@@ -385,14 +535,15 @@ impl ExecutionService {
                     } else {
                         Self::emit_snapshot(
                             &self.sm_tx,
-                            &executor,
+                            &mut executor,
                             &root_text_rope,
                             has_compiler_error,
                             is_playing,
                             false,
                             playback_mode,
                             version,
-                        );
+                        )
+                        .await;
                     }
                 }
             };
@@ -412,9 +563,9 @@ impl ExecutionService {
         }
     }
 
-    fn emit_snapshot(
+    async fn emit_snapshot(
         sm_tx: &UnboundedSender<ServiceManagerMessage>,
-        executor: &Executor,
+        executor: &mut Executor,
         root_text_rope: &Rope<TextAggregate>,
         has_compiler_error: bool,
         is_playing: bool,
@@ -422,9 +573,22 @@ impl ExecutionService {
         playback_mode: PlaybackMode,
         version: usize,
     ) {
+        let parameters = Self::parameter_snapshot(executor);
+        let camera = Self::camera_snapshot(executor);
+        let meshes = if has_compiler_error || executor.state.has_errors() {
+            Vec::new()
+        } else {
+            match Self::scene_meshes(executor).await {
+                Ok(meshes) => meshes,
+                Err(error) => {
+                    executor.record_runtime_error(error);
+                    Vec::new()
+                }
+            }
+        };
         let status = if has_compiler_error {
             ExecutionStatus::CompileError
-        } else if !executor.state.errors.is_empty() {
+        } else if executor.state.has_errors() {
             ExecutionStatus::RuntimeError
         } else if is_loading {
             ExecutionStatus::Seeking
@@ -434,9 +598,9 @@ impl ExecutionService {
             ExecutionStatus::Paused
         };
 
-        let parameters = Self::parameter_snapshot(executor);
-
         let snapshot = ExecutionSnapshot {
+            camera,
+            meshes,
             current_timestamp: executor.internal_to_user_timestamp(executor.state.timestamp),
             status,
             slide_count: executor.real_slide_count(),

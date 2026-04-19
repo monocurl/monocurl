@@ -1,18 +1,15 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
+use crate::services::ViewportCameraSnapshot;
 use crate::services::{ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue};
 use executor::time::Timestamp;
-
-#[derive(Clone, Default)]
-pub struct Camera {
-    position: (f32, f32, f32),
-}
+use geo::mesh::Mesh;
 
 // Any state that's necessary for actual execution
 pub struct ExecutionState {
     pub background_color: (f64, f64, f64, f64),
-    pub camera: Camera,
-    pub mesh_state: Vec<u8>,
+    pub camera: ViewportCameraSnapshot,
+    pub meshes: Vec<Arc<Mesh>>,
     pub parameter_state: HashMap<String, ParameterValue>,
 
     // runtime info reported by the executor thread
@@ -29,8 +26,8 @@ impl Default for ExecutionState {
     fn default() -> Self {
         Self {
             background_color: (0.0, 0.0, 0.0, 0.0),
-            camera: Camera::default(),
-            mesh_state: Vec::new(),
+            camera: ViewportCameraSnapshot::default(),
+            meshes: Vec::new(),
             parameter_state: HashMap::new(),
             current_timestamp: Timestamp::default(),
             status: ExecutionStatus::Paused,
@@ -55,6 +52,8 @@ impl ExecutionState {
     }
 
     pub fn apply_snapshot(&mut self, snapshot: ExecutionSnapshot) {
+        self.camera = snapshot.camera;
+        self.meshes = snapshot.meshes;
         self.current_timestamp = snapshot.current_timestamp;
         self.status = snapshot.status;
         self.slide_durations = snapshot.slide_durations;

@@ -10,6 +10,7 @@ compiler.workspace = true
 parser.workspace = true
 executor.workspace = true
 exporter.workspace = true
+geo.workspace = true
 stdlib.workspace = true
 structs.workspace = true
 bytecode.workspace = true
