@@ -168,6 +168,7 @@ where
             "anim" => Token::Anim,
             "play" => Token::Play,
             "slide" => Token::Slide,
+            "nil" => Token::Nil,
             "__monocurl__native__" => Token::Native,
             "and" => Token::And,
             "or" => Token::Or,
@@ -342,5 +343,13 @@ mod tests {
 
         assert_eq!(tokens[0].0, Token::StringLiteral);
         assert_eq!(tokens[0].1, input.len());
+    }
+
+    #[test]
+    fn test_nil_keyword() {
+        let input = "nil";
+        let tokens: Vec<(Token, Count8)> = Lexer::new(input.chars()).collect();
+
+        assert_eq!(tokens, vec![(Token::Nil, 3)]);
     }
 }

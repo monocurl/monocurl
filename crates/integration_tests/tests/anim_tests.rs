@@ -764,6 +764,23 @@ fn test_lerp_flattens_nested_candidate_tree() {
 }
 
 #[test]
+fn test_lerp_rate_lambda_shapes_progression() {
+    let r = run_anim_with_stdlib_at(
+        "
+        param x = 0
+        x = 10
+        play Lerp(2, [&x], |t| t * t)
+    ",
+        1.0,
+    );
+    r.assert_ok();
+    let params = r.param_leaders();
+    params[2]
+        .assert_target_int(10)
+        .assert_current_float(2.5, 1e-9);
+}
+
+#[test]
 fn test_parallel_anim_blocks_auto_target_only_own_stack_lineage() {
     let r = run_anim_with_stdlib_at(
         "

@@ -59,6 +59,7 @@ pub enum Token {
     Anim,
     Play,
     Slide,
+    Nil,
     Native,
 
     IntegerLiteral,
@@ -86,7 +87,7 @@ impl Token {
             }
             Block | Operator | Anim | Play | Break | Continue | Return | If | Else | For
             | While => TokenCategory::ControlFlow,
-            Import | Let | Var | Mesh | Param | Slide | Native => {
+            Import | Let | Var | Mesh | Param | Slide | Nil | Native => {
                 TokenCategory::NonControlFlowKeyword
             }
             IntegerLiteral | FloatLiteral => TokenCategory::NumericLiteral,
@@ -152,6 +153,7 @@ impl Token {
             Token::Anim => "'anim'",
             Token::Play => "'play'",
             Token::Slide => "'slide'",
+            Token::Nil => "'nil'",
             Token::Native => "'__monocurl__native__'",
             Token::IntegerLiteral => "<integer>",
             Token::FloatLiteral => "<float>",
@@ -216,6 +218,7 @@ impl Token {
             Token::Anim => Some("anim"),
             Token::Play => Some("play"),
             Token::Slide => Some("slide"),
+            Token::Nil => Some("nil"),
             Token::Native => None,
             Token::IntegerLiteral => None,
             Token::FloatLiteral => None,

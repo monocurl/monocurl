@@ -49,6 +49,17 @@ impl ExecResult {
         }
     }
 
+    fn assert_nil(&self) {
+        self.assert_ok();
+        match &self.value {
+            Some(Value::Nil) => {}
+            other => panic!(
+                "expected Nil, got {}",
+                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+            ),
+        }
+    }
+
     #[allow(dead_code)]
     fn assert_float(&self, expected: f64) {
         self.assert_ok();
@@ -277,6 +288,12 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
 fn test_exec_literal_int() {
     let r = run("let x = 42");
     r.assert_int(42);
+}
+
+#[test]
+fn test_exec_literal_nil() {
+    let r = run("let x = nil");
+    r.assert_nil();
 }
 
 #[test]

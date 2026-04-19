@@ -1107,6 +1107,9 @@ impl SectionParser {
                 self.parse_anim()
             },
             /* literals */
+            ExactPred(Token::Nil) => {
+                self.parse_nil_literal()
+            },
             ExactPred(Token::IntegerLiteral) => {
                 self.parse_int_literal()
             },
@@ -1492,6 +1495,20 @@ impl SectionParser {
                 return Err("Malformed string literal");
             },
             Literal::String(String::new()),
+        )
+    }
+
+    fn parse_nil_literal(&mut self) -> SpanTagged<Expression> {
+        self.parse_basic_literal(
+            Token::Nil,
+            |string| {
+                if string == "nil" {
+                    Ok(Literal::Nil)
+                } else {
+                    Err("Malformed nil literal")
+                }
+            },
+            Literal::Nil,
         )
     }
 
@@ -2024,6 +2041,13 @@ mod test {
     fn test_integer_literal() {
         let result = parse_expr_test("42");
         let expected = Expression::Literal(Literal::Int(42));
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_nil_literal() {
+        let result = parse_expr_test("nil");
+        let expected = Expression::Literal(Literal::Nil);
         assert_eq!(result.1, expected);
     }
 

@@ -9,7 +9,7 @@ use crate::{
     value::{Value, anim_block::AnimBlock, leader::Leader, primitive_anim::PrimitiveAnim},
 };
 
-use super::{ExecSingle, Executor, SeekPrimitiveResult};
+use super::{ExecSingle, Executor, SeekPrimitiveResult, fill_defaults};
 
 impl Executor {
     pub async fn advance_section(&mut self) {
@@ -232,6 +232,7 @@ impl Executor {
                         sync_leader_to_follower(target);
                     }
                 } else {
+                    let t = self.eval_lerp_t(baked, t).await?;
                     for (target, start) in baked.targets.iter().zip(&baked.start_followers) {
                         let cell_key = target.key();
                         let (leader_value, follower_key) = {
@@ -258,6 +259,49 @@ impl Executor {
         }
 
         Ok(())
+    }
+
+    async fn eval_lerp_t(
+        &mut self,
+        baked: &BakedPrimitiveAnim,
+        linear_t: f64,
+    ) -> Result<f64, ExecutorError> {
+        let PrimitiveAnim::Lerp { progression, .. } = &baked.anim else {
+            return Ok(linear_t);
+        };
+        let Some(progression) = progression else {
+            return Ok(linear_t);
+        };
+
+        let raw = match progression.as_ref().clone().elide_lvalue() {
+            Value::Nil => return Ok(linear_t),
+            Value::Lambda(lambda) => {
+                let args = fill_defaults(vec![Value::Float(linear_t)], &lambda);
+                self.eagerly_invoke_lambda(&lambda, &args, Some(baked.parent_stack_idx))
+                    .await?
+            }
+            Value::Operator(operator) => {
+                let args = fill_defaults(vec![Value::Float(linear_t)], &operator.0);
+                self.eagerly_invoke_lambda(&operator.0, &args, Some(baked.parent_stack_idx))
+                    .await?
+            }
+            other => {
+                return Err(ExecutorError::Other(format!(
+                    "lerp rate must be a lambda or nil, got {}",
+                    other.type_name()
+                )));
+            }
+        };
+
+        match raw.elide_lvalue() {
+            Value::Float(t) => Ok(t),
+            Value::Integer(t) => Ok(t as f64),
+            other => Err(ExecutorError::type_error_for(
+                "float",
+                other.type_name(),
+                "rate",
+            )),
+        }
     }
 
     fn resume_parent_after_anim(&mut self, parent_stack_idx: usize) {

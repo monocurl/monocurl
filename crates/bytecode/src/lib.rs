@@ -19,6 +19,7 @@ pub struct AnimPrototype {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Instruction {
     /* push constants */
+    PushNil,
     PushInt {
         index: u32,
     },

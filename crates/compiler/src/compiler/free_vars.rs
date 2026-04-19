@@ -75,6 +75,7 @@ impl FreeVarCollector {
             }
             Expression::UnaryPreOperator(u) => self.visit_expr(&u.operand.1),
             Expression::Literal(l) => match l {
+                Literal::Nil => {}
                 Literal::Vector(v) => {
                     for e in v {
                         self.visit_expr(&e.1);
@@ -237,6 +238,7 @@ impl LvalueRefCollector {
             }
             Expression::UnaryPreOperator(u) => self.visit_expr(&u.operand.1),
             Expression::Literal(l) => match l {
+                Literal::Nil => {}
                 Literal::Vector(v) => {
                     for e in v {
                         self.visit_expr(&e.1);

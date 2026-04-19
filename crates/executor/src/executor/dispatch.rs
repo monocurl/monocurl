@@ -25,6 +25,9 @@ impl Executor {
         instr: Instruction,
     ) -> ExecSingle {
         match instr {
+            Instruction::PushNil => {
+                self.state.stack_mut(stack_idx).push(Value::Nil);
+            }
             Instruction::PushInt { index } => {
                 let val = self.bytecode.sections[section_idx].int_pool[index as usize];
                 self.state.stack_mut(stack_idx).push(Value::Integer(val));

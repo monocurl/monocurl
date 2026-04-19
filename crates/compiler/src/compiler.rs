@@ -1308,6 +1308,9 @@ impl Compiler {
 impl Compiler {
     fn compile_literal(&mut self, mutable: bool, l: &Literal, span: &Span8) {
         match l {
+            Literal::Nil => {
+                self.emit_push(Instruction::PushNil, span.clone());
+            }
             Literal::Int(val) => {
                 let idx = self.intern_int(*val);
                 self.emit_push(Instruction::PushInt { index: idx }, span.clone());
@@ -2017,6 +2020,24 @@ mod test {
     }
 
     #[test]
+    fn test_nil_decl_emits_push_nil() {
+        let stmts = vec![s(Statement::Declaration(Declaration {
+            var_type: VariableType::Let,
+            identifier: s(IdentifierDeclaration("x".into())),
+            value: s(Expression::Literal(Literal::Nil)),
+        }))];
+        let result = compile_stmts(stmts);
+        no_errors(&result);
+        let section = &result.bytecode.sections[1];
+        assert!(
+            section
+                .instructions
+                .iter()
+                .any(|i| matches!(i, Instruction::PushNil))
+        );
+    }
+
+    #[test]
     fn test_let_mutation_error() {
         // let x = 1; x = 2  — should error
         let stmts = vec![
@@ -2337,6 +2358,27 @@ mod test {
         );
         assert_eq!(sec.int_pool, vec![42i64]);
         assert!(sec.lambda_prototypes.is_empty());
+    }
+
+    #[test]
+    fn test_bytecode_single_let_nil() {
+        let result = compile_stmts(vec![s(Statement::Declaration(Declaration {
+            var_type: VariableType::Let,
+            identifier: s(IdentifierDeclaration("x".into())),
+            value: s(Expression::Literal(Literal::Nil)),
+        }))]);
+        no_errors(&result);
+        let sec = &result.bytecode.sections[1];
+        assert_eq!(
+            sec.instructions,
+            vec![
+                Instruction::PushNil,
+                Instruction::ConvertVar {
+                    allow_stateful: false
+                },
+                Instruction::EndOfExecutionHead
+            ],
+        );
     }
 
     // `var x = 0\nx = 1` — covers PushLvalue, Assign, and Pop for expression statements.

@@ -92,6 +92,7 @@ pub enum DirectionalLiteral {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
+    Nil,
     String(String),
     Int(i64),
     Float(f64),
