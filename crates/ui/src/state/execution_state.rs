@@ -52,9 +52,15 @@ impl ExecutionState {
     }
 
     pub fn apply_snapshot(&mut self, snapshot: ExecutionSnapshot) {
-        self.background = snapshot.background;
-        self.camera = snapshot.camera;
-        self.meshes = snapshot.meshes;
+        if let Some(background) = snapshot.background {
+            self.background = background;
+        }
+        if let Some(camera) = snapshot.camera {
+            self.camera = camera;
+        }
+        if let Some(meshes) = snapshot.meshes {
+            self.meshes = meshes;
+        }
         self.current_timestamp = snapshot.current_timestamp;
         self.status = snapshot.status;
         self.slide_durations = snapshot.slide_durations;

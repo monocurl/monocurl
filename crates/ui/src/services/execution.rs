@@ -88,9 +88,9 @@ impl Default for ViewportBackgroundSnapshot {
 }
 
 pub struct ExecutionSnapshot {
-    pub background: ViewportBackgroundSnapshot,
-    pub camera: ViewportCameraSnapshot,
-    pub meshes: Vec<Arc<Mesh>>,
+    pub background: Option<ViewportBackgroundSnapshot>,
+    pub camera: Option<ViewportCameraSnapshot>,
+    pub meshes: Option<Vec<Arc<Mesh>>>,
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,
     pub slide_count: usize,
@@ -118,8 +118,8 @@ pub enum ExecutionStatus {
 impl PlaybackMode {
     pub fn default_time_interval(&self) -> f64 {
         match self {
-            PlaybackMode::Presentation => 1.0 / 60.0,
-            PlaybackMode::Preview => 1.0 / 30.0,
+            PlaybackMode::Presentation => 1.0 / 120.0,
+            PlaybackMode::Preview => 1.0 / 60.0,
         }
     }
 }
@@ -638,20 +638,7 @@ impl ExecutionService {
         version: usize,
     ) {
         let parameters = Self::parameter_snapshot(executor);
-        let background = Self::background_snapshot(executor);
-        let camera = Self::camera_snapshot(executor);
-        let meshes = if has_compiler_error || executor.state.has_errors() {
-            Vec::new()
-        } else {
-            match Self::scene_meshes(executor).await {
-                Ok(meshes) => meshes,
-                Err(error) => {
-                    executor.record_runtime_error(error);
-                    Vec::new()
-                }
-            }
-        };
-        let status = if has_compiler_error {
+        let mut status = if has_compiler_error {
             ExecutionStatus::CompileError
         } else if executor.state.has_errors() {
             ExecutionStatus::RuntimeError
@@ -662,6 +649,24 @@ impl ExecutionService {
         } else {
             ExecutionStatus::Paused
         };
+
+        let (background, camera, meshes) =
+            if matches!(status, ExecutionStatus::Playing | ExecutionStatus::Paused) {
+                match Self::scene_meshes(executor).await {
+                    Ok(meshes) => (
+                        Some(Self::background_snapshot(executor)),
+                        Some(Self::camera_snapshot(executor)),
+                        Some(meshes),
+                    ),
+                    Err(error) => {
+                        executor.record_runtime_error(error);
+                        status = ExecutionStatus::RuntimeError;
+                        (None, None, None)
+                    }
+                }
+            } else {
+                (None, None, None)
+            };
 
         let snapshot = ExecutionSnapshot {
             background,
