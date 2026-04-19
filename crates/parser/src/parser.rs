@@ -1150,7 +1150,27 @@ impl SectionParser {
         let mut expr = Some(base);
 
         loop {
-            self.advance_newlines();
+            let newline_start = self.token_index;
+            let mut saw_newline = false;
+            while self
+                .tokens
+                .get(self.token_index)
+                .is_some_and(|(tok, _)| *tok == Token::Newline)
+            {
+                saw_newline = true;
+                self.token_index += 1;
+            }
+
+            if saw_newline
+                && self
+                    .tokens
+                    .get(self.token_index)
+                    .is_some_and(|(tok, _)| *tok == Token::Dot)
+            {
+                self.token_index = newline_start;
+                return expr.unwrap();
+            }
+
             let mut is_finished = false;
 
             let mut take_expr = || expr.take().unwrap();
@@ -3343,6 +3363,26 @@ mod test {
         };
         assert_eq!(decl.identifier.1.0, "x");
         assert!(matches!(decl.value.1, Expression::OperatorInvocation(_)));
+    }
+
+    #[test]
+    fn test_newline_before_dot_starts_new_statement() {
+        let content = "block {\n    let x = 1\n    . x\n}";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
+        let result = parser.parse_expr_best_effort();
+
+        let Expression::Block(block) = result.1 else {
+            panic!("expected block");
+        };
+
+        assert_eq!(block.body.len(), 2);
+        assert!(matches!(block.body[0].1, Statement::Declaration(_)));
+        assert!(matches!(block.body[1].1, Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+            op_type: BinaryOperatorType::DotAssign,
+            ..
+        }))));
     }
 
     #[test]
