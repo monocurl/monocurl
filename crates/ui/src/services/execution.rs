@@ -74,7 +74,21 @@ impl Default for ViewportCameraSnapshot {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ViewportBackgroundSnapshot {
+    pub color: (f32, f32, f32, f32),
+}
+
+impl Default for ViewportBackgroundSnapshot {
+    fn default() -> Self {
+        Self {
+            color: (0.0, 0.0, 0.0, 1.0),
+        }
+    }
+}
+
 pub struct ExecutionSnapshot {
+    pub background: ViewportBackgroundSnapshot,
     pub camera: ViewportCameraSnapshot,
     pub meshes: Vec<Arc<Mesh>>,
     pub current_timestamp: Timestamp,
@@ -226,6 +240,26 @@ impl ExecutionService {
         Some(Float3::from_array(components))
     }
 
+    fn read_float4(value: &Value) -> Option<(f32, f32, f32, f32)> {
+        let Value::List(list) = value else {
+            return None;
+        };
+        if list.len() != 4 {
+            return None;
+        }
+
+        let mut components = [0.0; 4];
+        for (slot, component) in components.iter_mut().zip(list.elements()) {
+            *slot = Self::read_f32(&with_heap(|h| h.get(component.key()).clone()))?;
+        }
+        Some((
+            components[0],
+            components[1],
+            components[2],
+            components[3],
+        ))
+    }
+
     fn camera_snapshot_from_value(value: &Value) -> Option<ViewportCameraSnapshot> {
         let Value::Map(map) = value else {
             return None;
@@ -258,6 +292,36 @@ impl ExecutionService {
                         with_heap(|h| h.get(entry.follower_value).clone()).elide_lvalue_leader_rec()
                     })
                     .and_then(|value| Self::camera_snapshot_from_value(&value))
+            })
+            .unwrap_or_default()
+    }
+
+    fn background_snapshot_from_value(value: &Value) -> Option<ViewportBackgroundSnapshot> {
+        let Value::Map(map) = value else {
+            return None;
+        };
+        let kind = Self::map_field_value(map, "kind")?;
+        if !matches!(kind, Value::String(ref kind) if kind == "solid_background") {
+            return None;
+        }
+
+        Some(ViewportBackgroundSnapshot {
+            color: Self::read_float4(&Self::map_field_value(map, "color")?)?,
+        })
+    }
+
+    fn background_snapshot(executor: &Executor) -> ViewportBackgroundSnapshot {
+        executor
+            .state
+            .leaders
+            .iter()
+            .rev()
+            .find_map(|entry| {
+                (entry.name == "background")
+                    .then(|| {
+                        with_heap(|h| h.get(entry.follower_value).clone()).elide_lvalue_leader_rec()
+                    })
+                    .and_then(|value| Self::background_snapshot_from_value(&value))
             })
             .unwrap_or_default()
     }
@@ -574,6 +638,7 @@ impl ExecutionService {
         version: usize,
     ) {
         let parameters = Self::parameter_snapshot(executor);
+        let background = Self::background_snapshot(executor);
         let camera = Self::camera_snapshot(executor);
         let meshes = if has_compiler_error || executor.state.has_errors() {
             Vec::new()
@@ -599,6 +664,7 @@ impl ExecutionService {
         };
 
         let snapshot = ExecutionSnapshot {
+            background,
             camera,
             meshes,
             current_timestamp: executor.internal_to_user_timestamp(executor.state.timestamp),

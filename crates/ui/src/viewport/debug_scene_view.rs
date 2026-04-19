@@ -29,6 +29,7 @@ pub struct DebugSceneView {
 
 #[derive(Clone)]
 struct SceneRenderData {
+    background_color: Rgba,
     camera: ViewportCameraSnapshot,
     meshes: Vec<Arc<Mesh>>,
 }
@@ -93,6 +94,7 @@ impl Render for DebugSceneView {
         let scene = {
             let execution_state = self.execution_state.read(cx);
             SceneRenderData {
+                background_color: rgba_from_tuple(execution_state.background.color),
                 camera: execution_state.camera.clone(),
                 meshes: execution_state.meshes.clone(),
             }
@@ -111,6 +113,8 @@ impl Render for DebugSceneView {
 }
 
 fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Window) {
+    window.paint_quad(fill(bounds, scene.background_color));
+
     let basis = camera_basis(&scene.camera);
     let mut items = Vec::new();
     for mesh in &scene.meshes {
@@ -379,5 +383,14 @@ fn rgba_from_color(color: Float4, alpha_scale: f32) -> Rgba {
         g: color.y.clamp(0.0, 1.0),
         b: color.z.clamp(0.0, 1.0),
         a: (color.w * alpha_scale).clamp(0.0, 1.0),
+    }
+}
+
+fn rgba_from_tuple(color: (f32, f32, f32, f32)) -> Rgba {
+    Rgba {
+        r: color.0.clamp(0.0, 1.0),
+        g: color.1.clamp(0.0, 1.0),
+        b: color.2.clamp(0.0, 1.0),
+        a: color.3.clamp(0.0, 1.0),
     }
 }

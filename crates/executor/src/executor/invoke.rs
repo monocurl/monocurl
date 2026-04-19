@@ -330,7 +330,40 @@ impl Executor {
                 Err(e) => ExecSingle::Error(e),
             }
         } else {
-            self.setup_lambda_call(stack_idx, 1 + num_args as usize, lambda)
+            let n = num_args as usize;
+            let stack = self.state.stack_mut(stack_idx);
+            let stack_len = stack.stack_len();
+            let args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
+            stack.pop_n(n);
+            let operand = stack.pop();
+
+            let mut full_args = vec![operand.clone()];
+            full_args.extend(args.iter().cloned());
+            let full_args = fill_defaults(full_args, &operator.0);
+
+            match self
+                .eagerly_invoke_lambda(&operator.0, &full_args, Some(stack_idx))
+                .await
+            {
+                Ok(raw) => match extract_operator_result(raw) {
+                    Ok((initial, modified)) => {
+                        let inv = make_invoked_operator(
+                            Value::Operator(operator),
+                            operand,
+                            args.into(),
+                            SmallVec::new(),
+                            initial,
+                            modified,
+                        );
+                        self.state
+                            .stack_mut(stack_idx)
+                            .push(Value::InvokedOperator(inv));
+                        ExecSingle::Continue
+                    }
+                    Err(e) => ExecSingle::Error(e),
+                },
+                Err(e) => ExecSingle::Error(e),
+            }
         }
     }
 

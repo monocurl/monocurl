@@ -1127,6 +1127,19 @@ fn test_exec_labeled_operator_delegates_read_to_operand_attribute() {
 }
 
 #[test]
+fn test_exec_unlabeled_operator_delegates_read_to_operand_attribute() {
+    let r = run("
+        let f = |origin = 10, radius = 2| origin + radius
+        let passthrough = operator |target, amount| {
+            return [target, target]
+        }
+        let inv = passthrough{2} f(origin: 40, radius: 2)
+        let result = inv.origin
+    ");
+    r.assert_int(40);
+}
+
+#[test]
 fn test_exec_labeled_operator_delegates_mutation_to_operand_attribute() {
     let r = run("
         let f = |x, y| x + y

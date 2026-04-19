@@ -1639,8 +1639,8 @@ impl Compiler {
             invoke_span.clone(),
         );
         self.dec_stack(num_args as usize + 1);
-        // convert lambda result ([initial, modified]) into a live value;
-        // for labeled invocations the InvokedOperator is already on stack (no-op).
+        // operator invocations leave an InvokedOperator on stack, so this is
+        // effectively a no-op kept for bytecode compatibility.
         self.emit(Instruction::ConvertToLiveOperator, invoke_span);
     }
 

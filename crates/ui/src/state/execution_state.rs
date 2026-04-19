@@ -1,13 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
-use crate::services::ViewportCameraSnapshot;
 use crate::services::{ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue};
+use crate::services::{ViewportBackgroundSnapshot, ViewportCameraSnapshot};
 use executor::time::Timestamp;
 use geo::mesh::Mesh;
 
 // Any state that's necessary for actual execution
 pub struct ExecutionState {
-    pub background_color: (f64, f64, f64, f64),
+    pub background: ViewportBackgroundSnapshot,
     pub camera: ViewportCameraSnapshot,
     pub meshes: Vec<Arc<Mesh>>,
     pub parameter_state: HashMap<String, ParameterValue>,
@@ -25,7 +25,7 @@ pub struct ExecutionState {
 impl Default for ExecutionState {
     fn default() -> Self {
         Self {
-            background_color: (0.0, 0.0, 0.0, 0.0),
+            background: ViewportBackgroundSnapshot::default(),
             camera: ViewportCameraSnapshot::default(),
             meshes: Vec::new(),
             parameter_state: HashMap::new(),
@@ -52,6 +52,7 @@ impl ExecutionState {
     }
 
     pub fn apply_snapshot(&mut self, snapshot: ExecutionSnapshot) {
+        self.background = snapshot.background;
         self.camera = snapshot.camera;
         self.meshes = snapshot.meshes;
         self.current_timestamp = snapshot.current_timestamp;
