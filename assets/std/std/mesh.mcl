@@ -221,13 +221,6 @@ let next_to = operator |target, ref, dir = 1r| [target, __monocurl__native__ op_
 let projected = operator |target, screen, ray = 1b| [target, __monocurl__native__ op_projected(target, screen, ray)]
 let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1f| [target, __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit)]
 
-# boolean mesh ops
-
-let masked = operator |target, mask| [target, __monocurl__native__ op_masked(target, mask)]
-let joined = operator |target, additional| [target, __monocurl__native__ op_joined(target, additional)]
-let set_diff = operator |target, subtraction| [target, __monocurl__native__ op_set_diff(target, subtraction)]
-let sym_diff = operator |target, subtraction| [target, __monocurl__native__ op_sym_diff(target, subtraction)]
-let minkowski_sum = operator |target, adder| [target, __monocurl__native__ op_minkowski_sum(target, adder)]
 let tag_filter = |target, filter| __monocurl__native__ tag_filter(target, filter)
 
 # queries
