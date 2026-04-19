@@ -1,6 +1,5 @@
 use std::{
     collections::{HashMap, HashSet},
-    fmt::Write,
     pin::pin,
     sync::Arc,
     time::{Duration, Instant},
@@ -10,9 +9,8 @@ use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
     error::RuntimeError,
     executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
-    state::LeaderKind,
     time::Timestamp,
-    value::{Value, container::HashableKey},
+    value::Value,
 };
 use futures::{
     StreamExt,
@@ -44,13 +42,6 @@ pub struct ParameterSnapshot {
     pub param_order: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct MeshDebugSnapshot {
-    pub name: String,
-    pub leader_value: String,
-    pub follower_value: String,
-}
-
 pub struct ExecutionSnapshot {
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,
@@ -59,7 +50,6 @@ pub struct ExecutionSnapshot {
     pub minimum_slide_durations: Vec<Option<f64>>,
 
     pub parameters: Option<ParameterSnapshot>,
-    pub mesh_debug: Vec<MeshDebugSnapshot>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -120,21 +110,6 @@ fn default_bytecode() -> Bytecode {
 }
 
 impl ExecutionService {
-    fn format_hashable_key(key: &HashableKey) -> String {
-        match key {
-            HashableKey::Integer(value) => format!("{value}"),
-            HashableKey::String(value) => format!("{value:?}"),
-            HashableKey::Vector(values) => {
-                let values = values
-                    .iter()
-                    .map(Self::format_hashable_key)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("[{values}]")
-            }
-        }
-    }
-
     fn parameter_value_from_runtime(value: Value) -> ParameterValue {
         match value {
             Value::Integer(n) => ParameterValue::Int(n),
@@ -211,129 +186,6 @@ impl ExecutionService {
             parameters,
             locked_params,
             param_order,
-        }
-    }
-
-    async fn mesh_debug_snapshot(executor: &mut Executor) -> Vec<MeshDebugSnapshot> {
-        let entries: Vec<_> = executor
-            .state
-            .leaders
-            .iter()
-            .filter(|entry| entry.kind == LeaderKind::Mesh)
-            .map(|entry| {
-                (
-                    entry.name.clone(),
-                    entry.leader_value_rc.borrow().clone(),
-                    entry.follower_value_rc.borrow().clone(),
-                )
-            })
-            .collect();
-
-        let mut snapshot = Vec::with_capacity(entries.len());
-        for (name, leader_value, follower_value) in entries {
-            let leader_value = executor
-                .debug_resolve_value(leader_value)
-                .await
-                .map(|value| Self::format_debug_value(&value, 0))
-                .unwrap_or_else(|error| format!("<error: {error}>"));
-            let follower_value = executor
-                .debug_resolve_value(follower_value)
-                .await
-                .map(|value| Self::format_debug_value(&value, 0))
-                .unwrap_or_else(|error| format!("<error: {error}>"));
-            snapshot.push(MeshDebugSnapshot {
-                name,
-                leader_value,
-                follower_value,
-            });
-        }
-        snapshot
-    }
-
-    fn format_debug_value(value: &Value, depth: usize) -> String {
-        const MAX_DEPTH: usize = 6;
-
-        if depth >= MAX_DEPTH {
-            return "...".into();
-        }
-
-        match value {
-            Value::Nil => "nil".into(),
-            Value::Float(value) => format!("{value}"),
-            Value::Integer(value) => format!("{value}"),
-            Value::Complex { re, im } => format!("{re} + {im}i"),
-            Value::String(value) => format!("{value:?}"),
-            Value::Mesh(mesh) => format!("{mesh:#?}"),
-            Value::PrimitiveAnim(_) => "<primitive_anim>".into(),
-            Value::Lambda(_) => "<lambda>".into(),
-            Value::Operator(_) => "<operator>".into(),
-            Value::AnimBlock(_) => "<anim_block>".into(),
-            Value::Map(map) => {
-                if map.is_empty() {
-                    return "{}".into();
-                }
-
-                let indent = "  ".repeat(depth + 1);
-                let close_indent = "  ".repeat(depth);
-                let entries = map
-                    .iter()
-                    .map(|(key, value)| {
-                        format!(
-                            "{indent}{}: {}",
-                            Self::format_hashable_key(key),
-                            Self::format_debug_value(&value.borrow(), depth + 1)
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",\n");
-                format!("{{\n{entries}\n{close_indent}}}")
-            }
-            Value::List(list) => {
-                if list.elements.is_empty() {
-                    return "[]".into();
-                }
-
-                let indent = "  ".repeat(depth + 1);
-                let close_indent = "  ".repeat(depth);
-                let entries = list
-                    .elements
-                    .iter()
-                    .map(|value| {
-                        let mut line = String::new();
-                        let _ = write!(
-                            &mut line,
-                            "{indent}{}",
-                            Self::format_debug_value(&value.borrow(), depth + 1)
-                        );
-                        line
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",\n");
-                format!("[\n{entries}\n{close_indent}]")
-            }
-            Value::Stateful(stateful) => {
-                if let Some(cached) = stateful.cache_valid() {
-                    return format!(
-                        "stateful(roots: {}, cached: {})",
-                        stateful.roots.len(),
-                        Self::format_debug_value(&cached, depth + 1)
-                    );
-                }
-                format!("stateful(roots: {})", stateful.roots.len())
-            }
-            Value::Leader(leader) => {
-                let leader_value = Self::format_debug_value(&leader.leader_rc.borrow(), depth + 1);
-                let follower_value =
-                    Self::format_debug_value(&leader.follower_rc.borrow(), depth + 1);
-                format!("leader {{ leader: {leader_value}, follower: {follower_value} }}")
-            }
-            Value::InvokedOperator(_) => "<live operator>".into(),
-            Value::InvokedFunction(_) => "<live function>".into(),
-            Value::Lvalue(value) => Self::format_debug_value(&value.borrow(), depth),
-            Value::WeakLvalue(value) => value.upgrade().map_or_else(
-                || "<dangling lvalue>".into(),
-                |value| Self::format_debug_value(&value.borrow(), depth),
-            ),
         }
     }
 
@@ -436,15 +288,14 @@ impl ExecutionService {
                 if !is_playing || !has_seeked_for_play {
                     Self::emit_snapshot(
                         &self.sm_tx,
-                        &mut executor,
+                        &executor,
                         &root_text_rope,
                         has_compiler_error,
                         is_playing,
                         true,
                         playback_mode,
                         version,
-                    )
-                    .await;
+                    );
 
                     has_seeked_for_play = true;
                     match executor.seek_to(target).await {
@@ -459,15 +310,14 @@ impl ExecutionService {
 
                     Self::emit_snapshot(
                         &self.sm_tx,
-                        &mut executor,
+                        &executor,
                         &root_text_rope,
                         has_compiler_error,
                         is_playing,
                         false,
                         playback_mode,
                         version,
-                    )
-                    .await;
+                    );
                 }
 
                 while is_playing {
@@ -516,15 +366,14 @@ impl ExecutionService {
 
                         Self::emit_snapshot(
                             &self.sm_tx,
-                            &mut executor,
+                            &executor,
                             &root_text_rope,
                             has_compiler_error,
                             is_playing,
                             false,
                             playback_mode,
                             version,
-                        )
-                        .await;
+                        );
 
                         let full_elapsed =
                             Instant::now().duration_since(last_update_at).as_secs_f64();
@@ -535,15 +384,14 @@ impl ExecutionService {
                     } else {
                         Self::emit_snapshot(
                             &self.sm_tx,
-                            &mut executor,
+                            &executor,
                             &root_text_rope,
                             has_compiler_error,
                             is_playing,
                             false,
                             playback_mode,
                             version,
-                        )
-                        .await;
+                        );
                     }
                 }
             };
@@ -563,9 +411,9 @@ impl ExecutionService {
         }
     }
 
-    async fn emit_snapshot(
+    fn emit_snapshot(
         sm_tx: &UnboundedSender<ServiceManagerMessage>,
-        executor: &mut Executor,
+        executor: &Executor,
         root_text_rope: &Rope<TextAggregate>,
         has_compiler_error: bool,
         is_playing: bool,
@@ -586,11 +434,6 @@ impl ExecutionService {
         };
 
         let parameters = Self::parameter_snapshot(executor);
-        let mesh_debug = if playback_mode == PlaybackMode::Presentation {
-            Self::mesh_debug_snapshot(executor).await
-        } else {
-            Vec::new()
-        };
 
         let snapshot = ExecutionSnapshot {
             current_timestamp: executor.internal_to_user_timestamp(executor.state.timestamp),
@@ -599,7 +442,6 @@ impl ExecutionService {
             slide_durations: executor.real_slide_durations(),
             minimum_slide_durations: executor.real_minimum_slide_durations(),
             parameters: (playback_mode == PlaybackMode::Presentation).then_some(parameters),
-            mesh_debug,
         };
 
         sm_tx

@@ -27,8 +27,7 @@ mod execution;
 mod lexing;
 
 pub(crate) use execution::{
-    ExecutionSnapshot, ExecutionStatus, MeshDebugSnapshot, ParameterSnapshot, ParameterValue,
-    PlaybackMode,
+    ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue, PlaybackMode,
 };
 
 pub struct ServiceManager {

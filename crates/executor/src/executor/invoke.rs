@@ -6,11 +6,9 @@ use crate::{
     value::{
         RcValue, Value,
         anim_block::AnimBlock,
-        container::{List, Map},
         invoked_function::InvokedFunction,
         invoked_operator::{InvokedOperator, build_invoked_operator, extract_operator_result},
         lambda::Lambda,
-        leader::Leader,
         rc_value,
         stateful::{
             Stateful, StatefulNode, StatefulReadKind, collect_roots_from_value,
@@ -23,61 +21,6 @@ use smallvec::SmallVec;
 use super::{ExecSingle, Executor};
 
 impl Executor {
-    pub fn debug_resolve_value<'a>(
-        &'a mut self,
-        value: Value,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
-    {
-        Box::pin(async move {
-            match value.elide_lvalue() {
-                Value::Stateful(stateful) => {
-                    println!("STATEFUL KIND {:?}", stateful.read_kind);
-                    self.eval_stateful(&stateful).await
-                },
-                Value::InvokedFunction(invoked) => InvokedFunction::value(&invoked, self).await,
-                Value::InvokedOperator(invoked) => InvokedOperator::value(&invoked, self).await,
-                Value::Leader(leader) => {
-                    let leader_value = self
-                        .debug_resolve_value(leader.leader_rc.borrow().clone())
-                        .await?;
-                    let follower_value = self
-                        .debug_resolve_value(leader.follower_rc.borrow().clone())
-                        .await?;
-
-                    Ok(Value::Leader(Leader {
-                        kind: leader.kind,
-                        last_modified_stack: leader.last_modified_stack,
-                        locked_by_anim: leader.locked_by_anim,
-                        leader_rc: rc_value(leader_value),
-                        leader_version: leader.leader_version,
-                        follower_rc: rc_value(follower_value),
-                        follower_version: leader.follower_version,
-                    }))
-                }
-                Value::List(list) => {
-                    let mut resolved = SmallVec::with_capacity(list.elements.len());
-                    for value in &list.elements {
-                        resolved.push(rc_value(
-                            self.debug_resolve_value(value.borrow().clone()).await?,
-                        ));
-                    }
-                    Ok(Value::List(Rc::new(List { elements: resolved })))
-                }
-                Value::Map(map) => {
-                    let mut resolved = Map::new();
-                    for (key, value) in map.iter() {
-                        resolved.insert(
-                            key.clone(),
-                            rc_value(self.debug_resolve_value(value.borrow().clone()).await?),
-                        );
-                    }
-                    Ok(Value::Map(Rc::new(resolved)))
-                }
-                other => Ok(other),
-            }
-        })
-    }
-
     pub(super) fn exec_make_lambda(
         &mut self,
         stack_idx: usize,

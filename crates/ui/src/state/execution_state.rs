@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use crate::services::{
-    ExecutionSnapshot, ExecutionStatus, MeshDebugSnapshot, ParameterSnapshot, ParameterValue,
-};
+use crate::services::{ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue};
 use executor::time::Timestamp;
 
 #[derive(Clone, Default)]
@@ -14,7 +12,7 @@ pub struct Camera {
 pub struct ExecutionState {
     pub background_color: (f64, f64, f64, f64),
     pub camera: Camera,
-    pub mesh_debug: Vec<MeshDebugSnapshot>,
+    pub mesh_state: Vec<u8>,
     pub parameter_state: HashMap<String, ParameterValue>,
 
     // runtime info reported by the executor thread
@@ -32,7 +30,7 @@ impl Default for ExecutionState {
         Self {
             background_color: (0.0, 0.0, 0.0, 0.0),
             camera: Camera::default(),
-            mesh_debug: Vec::new(),
+            mesh_state: Vec::new(),
             parameter_state: HashMap::new(),
             current_timestamp: Timestamp::default(),
             status: ExecutionStatus::Paused,
@@ -66,6 +64,5 @@ impl ExecutionState {
             self.parameter_state = params.parameters.clone();
         }
         self.parameters = snapshot.parameters;
-        self.mesh_debug = snapshot.mesh_debug;
     }
 }
