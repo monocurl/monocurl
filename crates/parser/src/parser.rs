@@ -1058,6 +1058,8 @@ impl SectionParser {
     }
 
     fn parse_unary(&mut self) -> SpanTagged<Expression> {
+        self.advance_newlines();
+
         // parse base expression
         let expr = try_all!(self, expected = Some("<unary expression>"), {
             /* unary operators */
@@ -1148,6 +1150,7 @@ impl SectionParser {
         let mut expr = Some(base);
 
         loop {
+            self.advance_newlines();
             let mut is_finished = false;
 
             let mut take_expr = || expr.take().unwrap();
@@ -1178,6 +1181,7 @@ impl SectionParser {
                     // subscript
                     self.advance_token();
                     let index = self.parse_expr_best_effort();
+                    self.advance_newlines();
                     let end_span = self.read_token_best_effort(Token::RBracket);
                     let old = boxify(take_expr());
                     (old.0.start..end_span.end, Expression::Subscript(Subscript {
@@ -1240,6 +1244,9 @@ impl SectionParser {
             if self.peek_token().is_none() {
                 break;
             }
+            if matches!(self.peek_token(), Some((token, _)) if *token == end) {
+                break;
+            }
 
             let pre_token_index = self.token_index;
             let mut read = || {
@@ -1292,6 +1299,9 @@ impl SectionParser {
         }
         self.state.pop_frame();
 
+        if allow_newlines {
+            self.advance_newlines();
+        }
         let end_span = self.read_token_best_effort(end);
 
         (base_span.start..end_span.end, arguments)
@@ -1323,6 +1333,7 @@ impl SectionParser {
         let result = self.parse_expr_best_effort();
         self.state.pop_frame();
 
+        self.advance_newlines();
         let terminal_span = self.read_token_best_effort(Token::RParen);
 
         (base_span.start..terminal_span.end, result.1)
@@ -2310,6 +2321,27 @@ mod test {
     }
 
     #[test]
+    fn test_binary_operator_allows_newline_before_rhs() {
+        let result = parse_expr_test("1 +\n2");
+        let expected = Expression::BinaryOperator(BinaryOperator {
+            lhs: (0..1, Box::new(Expression::Literal(Literal::Int(1)))),
+            op_type: BinaryOperatorType::Add,
+            rhs: (4..5, Box::new(Expression::Literal(Literal::Int(2)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_unary_operator_allows_newline_before_operand() {
+        let result = parse_expr_test("-\n5");
+        let expected = Expression::UnaryPreOperator(UnaryPreOperator {
+            op_type: UnaryOperatorType::Negative,
+            operand: (2..3, Box::new(Expression::Literal(Literal::Int(5)))),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
     fn test_double_negation() {
         let result = parse_expr_test("--5");
         let expected = Expression::UnaryPreOperator(UnaryPreOperator {
@@ -2626,6 +2658,18 @@ mod test {
             ),
         });
         assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_operator_invocation_allows_newline_before_operand() {
+        let result = parse_expr_test("fill{CLEAR}\nstroke{RED}\nCircle(ORIGIN, radius: 1)");
+        assert!(matches!(result.1, Expression::OperatorInvocation(_)));
+    }
+
+    #[test]
+    fn test_function_invocation_allows_newline_before_paren() {
+        let result = parse_expr_test("foo\n(1)");
+        assert!(matches!(result.1, Expression::LambdaInvocation(_)));
     }
 
     #[test]
@@ -3285,6 +3329,45 @@ mod test {
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_statement_list();
         assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_multiline_operator_chain_in_declaration() {
+        let result = parse_stmt_test(
+            "mesh x = \n    fill{CLEAR}\n    stroke{RED}\n    Circle(ORIGIN, radius: 1)",
+        )
+        .unwrap();
+
+        let Statement::Declaration(decl) = result.1 else {
+            panic!("expected declaration");
+        };
+        assert_eq!(decl.identifier.1.0, "x");
+        assert!(matches!(decl.value.1, Expression::OperatorInvocation(_)));
+    }
+
+    #[test]
+    fn test_multiline_grouped_expression_allows_newline_before_close_paren() {
+        let result = parse_stmt_test("let x = (\n    1\n)").unwrap();
+
+        let Statement::Declaration(decl) = result.1 else {
+            panic!("expected declaration");
+        };
+        assert_eq!(decl.identifier.1.0, "x");
+        assert!(matches!(decl.value.1, Expression::Literal(Literal::Int(1))));
+    }
+
+    #[test]
+    fn test_multiline_grouped_operator_chain_allows_newline_before_close_paren() {
+        let result = parse_stmt_test(
+            "mesh x = (\n    fill{CLEAR}\n    stroke{RED}\n    Circle(ORIGIN, radius: 1)\n)",
+        )
+        .unwrap();
+
+        let Statement::Declaration(decl) = result.1 else {
+            panic!("expected declaration");
+        };
+        assert_eq!(decl.identifier.1.0, "x");
+        assert!(matches!(decl.value.1, Expression::OperatorInvocation(_)));
     }
 
     // Edge cases

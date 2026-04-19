@@ -715,8 +715,8 @@ pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value>
 pub(crate) fn prepare_eager_call_args(
     args: impl IntoIterator<Item = Value>,
     lambda: &Lambda,
-) -> SmallVec<[Value; 8]> {
-    let mut prepared = SmallVec::<[Value; 8]>::new();
+) -> SmallVec<[Value; 4]> {
+    let mut prepared = SmallVec::<[Value; 4]>::new();
     prepared.extend(args.into_iter().map(|arg| {
         if arg.is_lvalue() {
             arg
