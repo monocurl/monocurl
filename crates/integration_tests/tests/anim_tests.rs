@@ -778,6 +778,140 @@ fn test_set_slide_can_seek_back_to_zero_after_finishing() {
 }
 
 #[test]
+fn test_mesh_label_mutation_after_set_then_lerp() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+    let src = "
+            mesh x = fill{CLEAR} stroke{RED} Circle(label: ORIGIN, 1)
+
+            play Set()
+
+            x.label = 2l
+
+            play Lerp()
+        ";
+    let r = run_anim_impl(
+        &[(
+            src,
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let src = "
+        mesh x = fill{CLEAR} stroke{RED} Circle(label: ORIGIN, 1)
+
+        play Set()
+
+        x.label = 2l
+
+        play Lerp()
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    smol::block_on(async {
+        let end = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(end).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+
+        let entry = executor
+            .state
+            .leaders
+            .iter()
+            .find(|entry| entry.kind == executor::state::LeaderKind::Mesh)
+            .expect("expected mesh leader");
+        let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
+        let Value::Leader(leader) = cell_val else {
+            panic!("mesh leader entry is not a Leader value");
+        };
+
+        let _ = with_heap(|h| h.get(leader.leader_rc.key()).clone())
+            .elide_wrappers(&mut executor)
+            .await
+            .expect("leader wrapper elision should succeed");
+        let _ = with_heap(|h| h.get(leader.follower_rc.key()).clone())
+            .elide_wrappers(&mut executor)
+            .await
+            .expect("follower wrapper elision should succeed");
+    });
+}
+
+#[test]
+fn test_ref_mutation_of_live_function_argument_does_not_panic() {
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[(
+            "
+            let mutate = |&y| {
+                y.label = 2l
+            }
+
+            mutate(Circle(label: ORIGIN, 1))
+        ",
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &[color_mcl, math_mcl, mesh_mcl],
+    );
+    assert!(
+        r.errors.iter().all(|error| !error.contains("Expected Lvalue")),
+        "executor should not panic with force_elide_lvalue: {:?}",
+        r.errors
+    );
+}
+
+#[test]
+fn test_lerp_of_mesh_operator_variants_after_label_mutation() {
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[(
+            "
+            let x = fill{CLEAR} stroke{RED} Circle(label: ORIGIN, 1)
+
+            var y = x
+            y.label = 2l
+
+            let z = lerp(x, y, 0.5)
+        ",
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &[color_mcl, math_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+}
+
+#[test]
 fn test_lerp_auto_deduces_detached_followers() {
     let r = run_anim_with_stdlib_at(
         "

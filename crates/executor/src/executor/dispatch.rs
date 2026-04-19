@@ -106,7 +106,7 @@ impl Executor {
                 let lvalue_resolved = if mutable {
                     val.force_elide_lvalue()
                 } else {
-                    val.elide_lvalue().elide_leader()
+                    val.force_elide_lvalue().elide_leader()
                 };
 
                 if let Value::Stateful(_) = lvalue_resolved {

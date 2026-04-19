@@ -1929,6 +1929,17 @@ fn test_ref_reference_in_closure_capture() {
     r.assert_int(6);
 }
 
+#[test]
+fn test_ref_lambda_called_with_value_reports_runtime_error_instead_of_panicking() {
+    let r = run("
+        let overwrite = |&y| {
+            y = 2
+        }
+        overwrite(1)
+    ");
+    r.assert_error("cannot assign");
+}
+
 // -- map: hashable key validation --
 
 #[test]

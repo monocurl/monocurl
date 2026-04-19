@@ -503,7 +503,7 @@ impl Executor {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
         Box::pin(async move {
-            let full_args = fill_defaults(args, lambda);
+            let full_args = prepare_eager_call_args(args, lambda);
             self.eagerly_invoke_lambda(lambda, &full_args, None).await
         })
     }
@@ -641,7 +641,7 @@ impl Executor {
                         };
                         evaled.push(resolved);
                     }
-                    let full_args = fill_defaults(evaled, &lambda);
+                    let full_args = prepare_eager_call_args(evaled, &lambda);
                     let result = self
                         .eagerly_invoke_lambda(&lambda, &full_args, None)
                         .await?;
@@ -682,7 +682,7 @@ impl Executor {
                         };
                         evaled.push(resolved);
                     }
-                    let full_args = fill_defaults(evaled, &operator_inner.0);
+                    let full_args = prepare_eager_call_args(evaled, &operator_inner.0);
                     let raw = self
                         .eagerly_invoke_lambda(&operator_inner.0, &full_args, None)
                         .await?;
@@ -710,4 +710,25 @@ pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value>
         args.extend(lambda.defaults[default_start..].iter().cloned());
     }
     args
+}
+
+pub(crate) fn prepare_eager_call_args(
+    args: impl IntoIterator<Item = Value>,
+    lambda: &Lambda,
+) -> SmallVec<[Value; 8]> {
+    let mut prepared = SmallVec::<[Value; 8]>::new();
+    prepared.extend(args.into_iter().map(|arg| {
+        if arg.is_lvalue() {
+            arg
+        } else {
+            Value::Lvalue(VRc::new(arg))
+        }
+    }));
+    let total = lambda.required_args as usize + lambda.defaults.len();
+    if prepared.len() < total {
+        let missing = total - prepared.len();
+        let default_start = lambda.defaults.len().saturating_sub(missing);
+        prepared.extend(lambda.defaults[default_start..].iter().cloned());
+    }
+    prepared
 }

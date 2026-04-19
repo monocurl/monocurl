@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use crate::{
     error::ExecutorError,
-    executor::fill_defaults,
+    executor::prepare_eager_call_args,
     heap::with_heap,
     value::{
         InstructionPointer, Value,
@@ -125,7 +125,7 @@ impl Executor {
                 Value::Lambda(rc) => rc,
                 other => return Err(ExecutorError::type_error("lambda", other.type_name())),
             };
-            let full_args = fill_defaults(lerped_args.iter().cloned().collect(), &lambda);
+            let full_args = prepare_eager_call_args(lerped_args.iter().cloned(), &lambda);
             let result = self
                 .eagerly_invoke_lambda(&lambda, &full_args, None)
                 .await?;
@@ -208,9 +208,10 @@ impl Executor {
                 other => return Err(ExecutorError::type_error("operator", other.type_name())),
             };
 
-            let mut full_args: Vec<Value> = vec![lerped_operand.clone()];
-            full_args.extend(lerped_args.iter().cloned());
-            let full_args = fill_defaults(full_args, &operator.0);
+            let full_args = prepare_eager_call_args(
+                std::iter::once(lerped_operand.clone()).chain(lerped_args.iter().cloned()),
+                &operator.0,
+            );
 
             let raw = self
                 .eagerly_invoke_lambda(&operator.0, &full_args, None)
@@ -267,9 +268,10 @@ impl Executor {
                 Value::Operator(op) => op,
                 other => return Err(ExecutorError::type_error("operator", other.type_name())),
             };
-            let mut full_args: Vec<Value> = vec![mid];
-            full_args.extend(inv.body.arguments.iter().map(|b| b.clone().elide_lvalue()));
-            let full_args = fill_defaults(full_args, &operator.0);
+            let full_args = prepare_eager_call_args(
+                std::iter::once(mid).chain(inv.body.arguments.iter().map(|b| b.clone().elide_lvalue())),
+                &operator.0,
+            );
 
             let raw = self
                 .eagerly_invoke_lambda(&operator.0, &full_args, None)

@@ -20,7 +20,7 @@ use crate::heap::{heap_replace, with_heap, with_heap_mut};
 use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
-pub(crate) use self::invoke::fill_defaults;
+pub(crate) use self::invoke::{fill_defaults, prepare_eager_call_args};
 use self::memory::{EXECUTOR_MEMORY_LIMIT_BYTES, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker};
 
 pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;

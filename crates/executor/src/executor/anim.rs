@@ -9,7 +9,7 @@ use crate::{
     value::{Value, anim_block::AnimBlock, leader::Leader, primitive_anim::PrimitiveAnim},
 };
 
-use super::{ExecSingle, Executor, SeekPrimitiveResult, fill_defaults};
+use super::{ExecSingle, Executor, SeekPrimitiveResult, prepare_eager_call_args};
 
 impl Executor {
     fn primitive_anim_duration(prim: &PrimitiveAnim) -> f64 {
@@ -285,12 +285,15 @@ impl Executor {
         let raw = match progression.as_ref().clone().elide_lvalue() {
             Value::Nil => return Ok(linear_t),
             Value::Lambda(lambda) => {
-                let args = fill_defaults(vec![Value::Float(linear_t)], &lambda);
+                let args = prepare_eager_call_args(std::iter::once(Value::Float(linear_t)), &lambda);
                 self.eagerly_invoke_lambda(&lambda, &args, Some(baked.parent_stack_idx))
                     .await?
             }
             Value::Operator(operator) => {
-                let args = fill_defaults(vec![Value::Float(linear_t)], &operator.0);
+                let args = prepare_eager_call_args(
+                    std::iter::once(Value::Float(linear_t)),
+                    &operator.0,
+                );
                 self.eagerly_invoke_lambda(&operator.0, &args, Some(baked.parent_stack_idx))
                     .await?
             }
