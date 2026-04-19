@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use gpui::*;
 
 use crate::{
-    services::{ParameterValue, ServiceManager},
+    services::{ExecutionStatus, ParameterValue, ServiceManager},
     theme::ThemeSettings,
     viewport::debug_scene_view::DebugSceneView,
 };
@@ -866,10 +866,16 @@ impl Render for Viewport {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
-        let (ring_color, params, timestamp, slide_count) = {
+        let (ring_color, ring_width, params, timestamp, slide_count) = {
             let exec = self.services.read(cx).execution_state().read(cx);
+            let ring_width = if matches!(exec.status, ExecutionStatus::Playing | ExecutionStatus::Paused) {
+                px(1.0)
+            } else {
+                px(4.0)
+            };
             (
                 theme.viewport_status_ring(exec.status),
+                ring_width,
                 exec.parameters.clone(),
                 exec.current_timestamp,
                 exec.slide_count,
@@ -881,7 +887,7 @@ impl Render for Viewport {
             .flex_1()
             .size_full()
             .bg(ring_color)
-            .p(px(1.0))
+            .p(ring_width)
             .child(
                 div()
                     .size_full()
