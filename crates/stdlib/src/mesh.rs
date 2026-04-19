@@ -199,7 +199,7 @@ fn read_float3(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue_rec()
+        .elide_lvalue_leader_rec()
     {
         Value::List(list) if list.elements.len() == 3 => {
             let mut components = [0.0; 3];
@@ -242,7 +242,7 @@ fn read_float4(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue_rec()
+        .elide_lvalue_leader_rec()
     {
         Value::List(list) if list.elements.len() == 4 => {
             let mut components = [0.0; 4];
@@ -324,7 +324,7 @@ fn read_tag_filter(
 
     match value {
         Value::Lambda(lambda) => Ok(TagFilter::Predicate(lambda)),
-        value => Ok(TagFilter::Exact(match value.elide_lvalue_rec() {
+        value => Ok(TagFilter::Exact(match value.elide_lvalue_leader_rec() {
             Value::List(list) => list
                 .elements
                 .iter()
@@ -1263,7 +1263,10 @@ mod tests {
     fn mesh_tree_iter_mut_updates_all_leaves() {
         let mut tree = MeshTree::List(vec![
             MeshTree::Mesh(Arc::new(dot_mesh([0.0, 0.0, 0.0], &[1]))),
-            MeshTree::List(vec![MeshTree::Mesh(Arc::new(dot_mesh([1.0, 0.0, 0.0], &[2])))]),
+            MeshTree::List(vec![MeshTree::Mesh(Arc::new(dot_mesh(
+                [1.0, 0.0, 0.0],
+                &[2],
+            )))]),
         ]);
 
         tree.for_each_mut(&mut |mesh| {

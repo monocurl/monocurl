@@ -88,7 +88,7 @@ impl CompilationService {
 
                     let first_ending_after = argument_spans
                         .iter()
-                        .position(|span| span.end >= cursor_pos);
+                        .position(|span| span.end > cursor_pos);
 
                     // if any range contains it, then clearly its that one
                     // otherwise, look for comma separating the two
@@ -97,7 +97,6 @@ impl CompilationService {
                             if u == v {
                                 u
                             } else {
-                                debug_assert!(v == u + 1);
                                 let mut pos = argument_spans[u].end;
                                 let mut comma_pos = argument_spans[v].start;
                                 for (chunk, tok) in lex_rope.iterator(pos) {

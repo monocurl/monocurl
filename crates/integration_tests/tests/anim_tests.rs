@@ -41,7 +41,7 @@ impl LeaderInfo {
         self
     }
 
-    pub fn assert_target_float(&self, expected: f64, eps: f64) -> &Self {
+    pub fn _assert_target_float(&self, expected: f64, eps: f64) -> &Self {
         match &self.target {
             Value::Float(f) => assert!(
                 (f - expected).abs() < eps,

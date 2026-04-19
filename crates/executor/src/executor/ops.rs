@@ -1,10 +1,9 @@
 use crate::{
     error::ExecutorError,
     value::{
-        RcValue, Value,
+        Value,
         container::{HashableKey, List},
         rc_value,
-        stateful::{Stateful, StatefulNode, collect_roots_from_value, dedup_roots_by_ptr},
     },
 };
 
@@ -33,7 +32,14 @@ impl Executor {
         let rhs = stack.pop();
         let lhs = stack.pop();
 
-        // lift over stateful operands (except equality which compares structurally)
+        if matches!(lhs, Value::Stateful(_)) || matches!(rhs, Value::Stateful(_)) {
+            return ExecSingle::Error(
+                ExecutorError::Other(
+                    "binary operators cannot be applied to stateful values".into(),
+                ),
+            );
+        }
+
         if matches!(op, BinOp::Eq | BinOp::Ne) {
             let result = match op {
                 BinOp::Eq => Value::values_equal(&lhs, &rhs),
@@ -45,19 +51,13 @@ impl Executor {
             return ExecSingle::Continue;
         }
 
-        if matches!(lhs, Value::Stateful(_)) || matches!(rhs, Value::Stateful(_)) {
-            let stateful = lift_binary_op(lhs, rhs, op);
-            self.state.stack_mut(stack_idx).push(Value::Stateful(stateful));
-            return ExecSingle::Continue;
-        }
-
         let lhs = match lhs.elide_wrappers(self).await {
             Ok(val) => val,
-            Err(e) => return ExecSingle::error(stack_idx, e),
+            Err(e) => return ExecSingle::Error(e),
         };
         let rhs = match rhs.elide_wrappers(self).await {
             Ok(val) => val,
-            Err(e) => return ExecSingle::error(stack_idx, e),
+            Err(e) => return ExecSingle::Error(e),
         };
 
         match eval_binary(&lhs, &rhs, op) {
@@ -65,20 +65,15 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(val);
                 ExecSingle::Continue
             }
-            Err(e) => ExecSingle::error(stack_idx, e),
+            Err(e) => ExecSingle::Error(e),
         }
     }
 
-    pub(super) async fn exec_negate(
-        &mut self,
-        val: Value,
-    ) -> Result<Value, ExecutorError> {
-        if let Value::Stateful(s) = val {
-            let mut roots = s.roots.clone();
-            let val_rc = rc_value(Value::Stateful(s));
-            collect_roots_from_value(&val_rc.borrow(), &mut roots);
-            dedup_roots_by_ptr(&mut roots);
-            return Ok(Value::Stateful(Stateful::new(roots, StatefulNode::UnaryNeg(val_rc))));
+    pub(super) async fn exec_negate(&mut self, val: Value) -> Result<Value, ExecutorError> {
+        if matches!(val, Value::Stateful(_)) {
+            return Err(ExecutorError::Other(
+                "unary operators cannot be applied to stateful values".into(),
+            ));
         }
 
         let val = val.elide_wrappers(self).await?;
@@ -90,6 +85,18 @@ impl Executor {
             Value::List(list) => negate_list(list),
             _ => Err(ExecutorError::UnsupportedNegate(val.type_name())),
         }
+    }
+
+    pub(super) async fn exec_not(&mut self, val: Value) -> Result<Value, ExecutorError> {
+        if matches!(val, Value::Stateful(_)) {
+            return Err(ExecutorError::Other(
+                "operators cannot be applied to stateful values".into(),
+            ));
+        }
+
+        let val = val.elide_wrappers(self).await?;
+        val.check_truthy()
+            .map(|truthy| Value::Integer(!truthy as i64))
     }
 }
 
@@ -337,18 +344,10 @@ fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> 
         BinOp::Le => Value::Integer((a <= b) as i64),
         BinOp::Gt => Value::Integer((a > b) as i64),
         BinOp::Ge => Value::Integer((a >= b) as i64),
-        BinOp::Eq | BinOp::Ne | BinOp::In => unreachable!("handled before promotion"),
+        BinOp::Eq | BinOp::Ne | BinOp::In => {
+            unreachable!("handled before promotion")
+        }
     })
-}
-
-fn lift_binary_op(lhs: Value, rhs: Value, op: BinOp) -> Stateful {
-    let mut roots: Vec<RcValue> = Vec::new();
-    collect_roots_from_value(&lhs, &mut roots);
-    collect_roots_from_value(&rhs, &mut roots);
-    dedup_roots_by_ptr(&mut roots);
-    let lhs_rc = rc_value(lhs);
-    let rhs_rc = rc_value(rhs);
-    Stateful::new(roots, StatefulNode::BinaryOp { lhs: lhs_rc, rhs: rhs_rc, op })
 }
 
 impl BinOp {

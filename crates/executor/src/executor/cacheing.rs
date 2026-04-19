@@ -89,7 +89,10 @@ impl Executor {
     /// clear all cached state and reset executor to the initial position
     pub fn clear_cache(&mut self) {
         self.cache.entries.iter_mut().for_each(|e| *e = None);
-        self.cache.minimum_durations.iter_mut().for_each(|e| *e = None);
+        self.cache
+            .minimum_durations
+            .iter_mut()
+            .for_each(|e| *e = None);
         self.state = ExecutionState::new();
     }
 
@@ -108,7 +111,9 @@ impl Executor {
                     en.is_some() && en.as_ref().unwrap().state_after.timestamp <= target
                 });
 
-            if let Some(en) = latest && false {
+            if let Some(en) = latest
+                && false
+            {
                 self.state = en.as_ref().unwrap().state_after.clone();
             } else {
                 self.state = ExecutionState::new();

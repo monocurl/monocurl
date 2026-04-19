@@ -19,7 +19,7 @@ fn read_value(executor: &Executor, stack_idx: usize, index: i32, _name: &'static
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue_rec()
+        .elide_lvalue_leader_rec()
 }
 
 fn read_int_flag(

@@ -61,7 +61,9 @@ impl InvokedOperator {
                 None => {
                     let operator = match this.operator.as_ref().clone().elide_lvalue() {
                         Value::Operator(op) => op,
-                        other => return Err(ExecutorError::type_error("operator", other.type_name())),
+                        other => {
+                            return Err(ExecutorError::type_error("operator", other.type_name()));
+                        }
                     };
 
                     let mut full_args = Vec::with_capacity(this.arguments.len() + 1);

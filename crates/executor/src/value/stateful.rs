@@ -1,11 +1,13 @@
 use smallvec::SmallVec;
-use std::{
-    cell::RefCell,
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 
 use super::{RcValue, Value};
-use crate::executor::ops::BinOp;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum StatefulReadKind {
+    Leader,
+    Follower,
+}
 
 /// a stateful value node that tracks reactive dependencies.
 /// only labeled lambda/operator calls (including 0-label calls) build stateful trees;
@@ -31,21 +33,6 @@ pub enum StatefulNode {
         extra_args: Vec<RcValue>,
         labels: SmallVec<[(usize, String); 4]>,
     },
-    /// binary operation lifted over stateful operands
-    BinaryOp {
-        lhs: RcValue,
-        rhs: RcValue,
-        op: BinOp,
-    },
-    /// unary negation lifted over a stateful operand
-    UnaryNeg(RcValue),
-    /// logical not lifted over a stateful operand
-    Not(RcValue),
-    /// immutable subscript lifted over a stateful base
-    Subscript {
-        base: RcValue,
-        index: RcValue,
-    },
 }
 
 #[derive(Clone)]
@@ -53,68 +40,80 @@ pub struct Stateful {
     /// leader cells (RcValues containing Value::Leader) this expression depends on
     pub roots: Vec<RcValue>,
     pub root: StatefulNode,
+    /// whether stateful leader refs read code-side leaders or on-screen followers
+    pub read_kind: StatefulReadKind,
     /// cached (versions_at_eval_time, result); versions parallel roots; boxed to break Value recursion
     cached: RefCell<Option<(Vec<u64>, Box<Value>)>>,
 }
 
 impl Stateful {
-    pub fn new(roots: Vec<RcValue>, root: StatefulNode) -> Self {
-        Self { roots, root, cached: RefCell::new(None) }
+    pub fn new(mut roots: Vec<RcValue>, root: StatefulNode, read_kind: StatefulReadKind) -> Self {
+        dedup_roots_by_ptr(&mut roots);
+        Self {
+            roots,
+            root,
+            read_kind,
+            cached: RefCell::new(None),
+        }
     }
 
-    /// fast synchronous evaluation — only works for LeaderRef/Constant leaves.
-    /// returns None when a lambda/operator call is needed (use Executor::eval_stateful instead).
-    pub fn evaluate(&self) -> Option<Value> {
-        eval_node_sync(&self.root)
+    pub fn to_follower_read(&self) -> Self {
+        let mut ret = self.clone();
+        if ret.read_kind != StatefulReadKind::Follower {
+            ret.read_kind = StatefulReadKind::Follower;
+            ret.reset_cache();
+        }
+        ret
+    }
+
+    pub fn reset_cache(&self) {
+        self.cached.borrow_mut().take();
     }
 
     /// check if all root versions match the cached snapshot
     pub fn cache_valid(&self) -> Option<Value> {
         let borrow = self.cached.borrow();
         let (versions, val) = borrow.as_ref()?;
-        let still_valid = self.roots.iter().zip(versions.iter()).all(|(root, cached_ver)| {
-            if let Value::Leader(leader) = &*root.borrow() {
-                leader.follower_version == *cached_ver
-            } else {
-                false
-            }
-        });
-        if still_valid { Some(*val.clone()) } else { None }
+        let still_valid = self
+            .roots
+            .iter()
+            .zip(versions.iter())
+            .all(|(root, cached_ver)| {
+                if let Value::Leader(leader) = &*root.borrow() {
+                    match self.read_kind {
+                        StatefulReadKind::Leader => leader.leader_version == *cached_ver,
+                        StatefulReadKind::Follower => leader.follower_version == *cached_ver,
+                    }
+                } else {
+                    false
+                }
+            });
+        if still_valid {
+            Some(*val.clone())
+        } else {
+            None
+        }
     }
 
     pub fn update_cache(&self, val: Value) {
-        let versions: Vec<u64> = self.roots.iter().map(|root| {
-            if let Value::Leader(leader) = &*root.borrow() {
-                leader.follower_version
-            } else {
-                0
-            }
-        }).collect();
+        let versions: Vec<u64> = self
+            .roots
+            .iter()
+            .map(|root| {
+                if let Value::Leader(leader) = &*root.borrow() {
+                    match self.read_kind {
+                        StatefulReadKind::Leader => leader.leader_version,
+                        StatefulReadKind::Follower => leader.follower_version,
+                    }
+                } else {
+                    0
+                }
+            })
+            .collect();
         *self.cached.borrow_mut() = Some((versions, Box::new(val)));
     }
 }
 
-fn eval_node_sync(node: &StatefulNode) -> Option<Value> {
-    match node {
-        StatefulNode::LeaderRef(rc) => {
-            let inner = rc.borrow().clone();
-            match inner {
-                Value::Leader(leader) => Some(leader.follower_rc.borrow().clone()),
-                other => Some(other),
-            }
-        }
-        StatefulNode::Constant(val) => Some(*val.clone()),
-        // function/operator calls and lifted ops need async evaluation
-        StatefulNode::LabeledCall { .. }
-        | StatefulNode::LabeledOperatorCall { .. }
-        | StatefulNode::BinaryOp { .. }
-        | StatefulNode::UnaryNeg(_)
-        | StatefulNode::Not(_)
-        | StatefulNode::Subscript { .. } => None,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // tree-building helpers used by invoke.rs
 // ---------------------------------------------------------------------------
 
@@ -140,7 +139,7 @@ pub fn collect_roots_from_rc(rc: &RcValue, roots: &mut Vec<RcValue>) {
 }
 
 /// remove duplicate roots (by Rc pointer identity) in-place
-pub fn dedup_roots_by_ptr(roots: &mut Vec<RcValue>) {
+fn dedup_roots_by_ptr(roots: &mut Vec<RcValue>) {
     let mut seen: Vec<RcValue> = vec![];
     roots.retain(|r| {
         if seen.iter().any(|s| Rc::ptr_eq(s, r)) {

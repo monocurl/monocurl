@@ -1,14 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    error::ExecutorError,
-    state::LeaderKind,
-    value::{
-        RcValue, Value,
-        container::HashableKey,
-        rc_value,
-        stateful::{Stateful, StatefulNode, collect_roots_from_value, dedup_roots_by_ptr},
-    },
+    error::ExecutorError, state::LeaderKind, value::{RcValue, Value, container::HashableKey, rc_value, stateful::StatefulNode}
 };
 
 use super::{ExecSingle, Executor};
@@ -28,16 +21,14 @@ impl Executor {
                     }
                     ExecSingle::Continue
                 }
-                Value::List(lrhs) => ExecSingle::error(
-                    stack_idx,
+                Value::List(lrhs) => ExecSingle::Error(
                     ExecutorError::DestructuringError {
                         lhs_size: llhs.len(),
                         rhs_size: Some(lrhs.len()),
                         rhs_type: rhs.type_name(),
                     },
                 ),
-                _ => ExecSingle::error(
-                    stack_idx,
+                _ => ExecSingle::Error(
                     ExecutorError::DestructuringError {
                         lhs_size: llhs.len(),
                         rhs_size: None,
@@ -49,7 +40,11 @@ impl Executor {
 
         let rc = match lhs.as_lvalue_rc() {
             Some(rc) => rc,
-            None => return ExecSingle::error(stack_idx, ExecutorError::CannotAssignTo(lhs.type_name())),
+            None => {
+                return ExecSingle::Error(
+                    ExecutorError::CannotAssignTo(lhs.type_name()),
+                );
+            }
         };
 
         let target = rc.borrow().clone();
@@ -57,8 +52,7 @@ impl Executor {
         match target {
             Value::Leader(leader) => {
                 if matches!(rhs, Value::Stateful(_)) && leader.kind != LeaderKind::Mesh {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::Other(
                             "stateful values can only be assigned to mesh variables".into(),
                         ),
@@ -68,12 +62,12 @@ impl Executor {
                 *leader.leader_rc.borrow_mut() = rhs;
                 if let Value::Leader(l) = &mut *rc.borrow_mut() {
                     l.last_modified_stack = Some(stack_id);
+                    l.leader_version += 1;
                 }
             }
             _ => {
                 if matches!(rhs, Value::Stateful(_)) {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::Other(
                             "stateful values can only be assigned to mesh variables".into(),
                         ),
@@ -103,13 +97,19 @@ impl Executor {
         let rhs = stack.pop();
         let lhs = stack.pop();
 
+        if matches!(rhs, Value::Stateful(_)) {
+            return ExecSingle::Error(
+                ExecutorError::Other("stateful values cannot be appended to lists".into())
+            );
+        }
+
         match lhs {
             Value::List(mut list) => {
                 Rc::make_mut(&mut list).elements.push(rc_value(rhs));
                 self.state.stack_mut(stack_idx).push(Value::List(list));
                 ExecSingle::Continue
             }
-            _ => ExecSingle::error(stack_idx, ExecutorError::CannotSubscript(lhs.type_name())),
+            _ => ExecSingle::Error(ExecutorError::CannotSubscript(lhs.type_name())),
         }
     }
 
@@ -121,11 +121,18 @@ impl Executor {
         let rc = match lhs.as_lvalue_rc() {
             Some(rc) => rc,
             None => {
-                return ExecSingle::error(stack_idx, ExecutorError::Other(
-                    "append-assign: lhs is not an lvalue".into(),
-                ));
+                return ExecSingle::Error(
+                    ExecutorError::Other("append-assign: lhs is not an lvalue".into()),
+                );
             }
         };
+
+        // cannot append a stateful value
+        if matches!(rhs, Value::Stateful(_)) {
+            return ExecSingle::Error(
+                ExecutorError::Other("stateful values cannot be appended to lists".into())
+            );
+        }
 
         let mut borrowed = rc.borrow_mut();
         match &mut *borrowed {
@@ -133,8 +140,7 @@ impl Executor {
                 Rc::make_mut(list).elements.push(rc_value(rhs));
             }
             _ => {
-                return ExecSingle::error(
-                    stack_idx,
+                return ExecSingle::Error(
                     ExecutorError::type_error("list", borrowed.type_name()),
                 );
             }
@@ -157,8 +163,7 @@ impl Executor {
             let base_rc = match base.as_lvalue_rc() {
                 Some(rc) => rc,
                 None => {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::CannotSubscript(base.type_name()),
                     );
                 }
@@ -172,6 +177,7 @@ impl Executor {
                     drop(base_val);
                     if let Value::Leader(l) = &mut *base_rc.borrow_mut() {
                         l.last_modified_stack = Some(stack_id);
+                        l.leader_version += 1;
                     }
                 }
             }
@@ -180,17 +186,18 @@ impl Executor {
             match &*base_val {
                 Value::List(list) => {
                     let Value::Integer(idx) = index else {
-                        return ExecSingle::error(stack_idx, ExecutorError::type_error(
-                            "int",
-                            index.type_name(),
-                        ));
+                        return ExecSingle::Error(
+                            ExecutorError::type_error("int", index.type_name()),
+                        );
                     };
                     let idx = idx as usize;
                     if idx >= list.elements.len() {
-                        return ExecSingle::error(stack_idx, ExecutorError::IndexOutOfBounds {
-                            index: idx,
-                            len: list.elements.len(),
-                        });
+                        return ExecSingle::Error(
+                            ExecutorError::IndexOutOfBounds {
+                                index: idx,
+                                len: list.elements.len(),
+                            },
+                        );
                     }
                     let elem_rc = list.elements[idx].clone();
                     // COW: if element is shared, replace with a fresh clone
@@ -213,7 +220,7 @@ impl Executor {
                 Value::Map(map) => {
                     let key = match HashableKey::try_from_value(&index) {
                         Ok(k) => k,
-                        Err(e) => return ExecSingle::error(stack_idx, e),
+                        Err(e) => return ExecSingle::Error(e),
                     };
                     match map.get(&key) {
                         Some(val_rc) => {
@@ -256,43 +263,34 @@ impl Executor {
                     return self.exec_subscript(stack_idx, true);
                 }
                 _ => {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::CannotSubscript(base_val.type_name()),
                     );
                 }
             }
         } else {
-            // lift subscript over stateful base
-            if matches!(base, Value::Stateful(_)) {
-                let mut roots = Vec::new();
-                collect_roots_from_value(&base, &mut roots);
-                collect_roots_from_value(&index, &mut roots);
-                dedup_roots_by_ptr(&mut roots);
-                let base_rc = rc_value(base);
-                let index_rc = rc_value(index);
-                self.state.stack_mut(stack_idx).push(Value::Stateful(Stateful::new(
-                    roots,
-                    StatefulNode::Subscript { base: base_rc, index: index_rc },
-                )));
-                return ExecSingle::Continue;
+            if matches!(base, Value::Stateful(_)) || matches!(index, Value::Stateful(_)) {
+                return ExecSingle::Error(
+                    ExecutorError::Other("subscript cannot be applied to stateful values".into()),
+                );
             }
 
             let base = base.elide_lvalue();
             match &base {
                 Value::List(list) => {
                     let Value::Integer(idx) = index else {
-                        return ExecSingle::error(stack_idx, ExecutorError::type_error(
-                            "int",
-                            index.type_name(),
-                        ));
+                        return ExecSingle::Error(
+                            ExecutorError::type_error("int", index.type_name()),
+                        );
                     };
                     let idx = idx as usize;
                     if idx >= list.elements.len() {
-                        return ExecSingle::error(stack_idx, ExecutorError::IndexOutOfBounds {
-                            index: idx,
-                            len: list.elements.len(),
-                        });
+                        return ExecSingle::Error(
+                            ExecutorError::IndexOutOfBounds {
+                                index: idx,
+                                len: list.elements.len(),
+                            },
+                        );
                     }
                     let val = list.elements[idx].borrow().clone();
                     self.state.stack_mut(stack_idx).push(val);
@@ -300,7 +298,7 @@ impl Executor {
                 Value::Map(map) => {
                     let key = match HashableKey::try_from_value(&index) {
                         Ok(k) => k,
-                        Err(e) => return ExecSingle::error(stack_idx, e),
+                        Err(e) => return ExecSingle::Error(e),
                     };
                     let val = map
                         .get(&key)
@@ -310,10 +308,9 @@ impl Executor {
                 }
                 Value::String(s) => {
                     let Value::Integer(idx) = index else {
-                        return ExecSingle::error(stack_idx, ExecutorError::type_error(
-                            "int",
-                            index.type_name(),
-                        ));
+                        return ExecSingle::Error(
+                            ExecutorError::type_error("int", index.type_name()),
+                        );
                     };
                     let idx = idx as usize;
                     let ch = s.chars().nth(idx).unwrap_or('\0');
@@ -328,8 +325,7 @@ impl Executor {
                     return self.exec_subscript(stack_idx, false);
                 }
                 _ => {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::CannotSubscript(base.type_name()),
                     );
                 }
@@ -355,8 +351,7 @@ impl Executor {
             let base_rc = match base.as_lvalue_rc() {
                 Some(rc) => rc,
                 None => {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::CannotAttribute(base.type_name()),
                     );
                 }
@@ -370,6 +365,7 @@ impl Executor {
                     drop(base_val);
                     if let Value::Leader(l) = &mut *base_rc.borrow_mut() {
                         l.last_modified_stack = Some(stack_id);
+                        l.leader_version += 1;
                     }
                 }
             }
@@ -400,10 +396,9 @@ impl Executor {
                             .stack_mut(stack_idx)
                             .push(Value::WeakLvalue(RcValue::downgrade(&arg_rc)));
                     } else {
-                        return ExecSingle::error(stack_idx, ExecutorError::Other(format!(
-                            "no labeled argument '{}'",
-                            attr_name
-                        )));
+                        return ExecSingle::Error(
+                            ExecutorError::Other(format!("no labeled argument '{}'", attr_name)),
+                        );
                     }
                 }
                 Value::InvokedOperator(inv_rc) => {
@@ -439,8 +434,7 @@ impl Executor {
                 Value::Stateful(stateful) => {
                     match &stateful.root {
                         StatefulNode::LabeledCall { labels, args, .. } => {
-                            let label_idx =
-                                labels.iter().find(|(_, name)| name == &attr_name);
+                            let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                             if let Some(&(arg_idx, _)) = label_idx {
                                 // args[arg_idx] is already an RcValue — return a weak lvalue to it
                                 let arg_rc = args[arg_idx].clone();
@@ -449,8 +443,7 @@ impl Executor {
                                     .stack_mut(stack_idx)
                                     .push(Value::WeakLvalue(RcValue::downgrade(&arg_rc)));
                             } else {
-                                return ExecSingle::error(
-                                    stack_idx,
+                                return ExecSingle::Error(
                                     ExecutorError::Other(format!(
                                         "no labeled argument '{attr_name}'"
                                     )),
@@ -463,8 +456,7 @@ impl Executor {
                             extra_args,
                             ..
                         } => {
-                            let label_idx =
-                                labels.iter().find(|(_, name)| name == &attr_name);
+                            let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                             if let Some(&(arg_idx, _)) = label_idx {
                                 let arg_rc = extra_args[arg_idx].clone();
                                 drop(base_val);
@@ -487,16 +479,14 @@ impl Executor {
                             }
                         }
                         _ => {
-                            return ExecSingle::error(
-                                stack_idx,
+                            return ExecSingle::Error(
                                 ExecutorError::CannotAttribute("stateful expression".into()),
                             );
                         }
                     }
                 }
                 _ => {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::CannotAttribute(base_val.type_name()),
                     );
                 }
@@ -515,10 +505,9 @@ impl Executor {
                         let val = inv_rc.arguments[arg_idx].clone().elide_lvalue();
                         self.state.stack_mut(stack_idx).push(val);
                     } else {
-                        return ExecSingle::error(stack_idx, ExecutorError::Other(format!(
-                            "no labeled argument '{}'",
-                            attr_name
-                        )));
+                        return ExecSingle::Error(
+                            ExecutorError::Other(format!("no labeled argument '{}'", attr_name)),
+                        );
                     }
                 }
                 Value::InvokedOperator(inv_rc) => {
@@ -536,14 +525,12 @@ impl Executor {
                 Value::Stateful(stateful) => {
                     match &stateful.root {
                         StatefulNode::LabeledCall { labels, args, .. } => {
-                            let label_idx =
-                                labels.iter().find(|(_, name)| name == &attr_name);
+                            let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                             if let Some(&(arg_idx, _)) = label_idx {
                                 let val = args[arg_idx].borrow().clone().elide_lvalue();
                                 self.state.stack_mut(stack_idx).push(val);
                             } else {
-                                return ExecSingle::error(
-                                    stack_idx,
+                                return ExecSingle::Error(
                                     ExecutorError::Other(format!(
                                         "no labeled argument '{attr_name}'"
                                     )),
@@ -556,8 +543,7 @@ impl Executor {
                             extra_args,
                             ..
                         } => {
-                            let label_idx =
-                                labels.iter().find(|(_, name)| name == &attr_name);
+                            let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                             if let Some(&(arg_idx, _)) = label_idx {
                                 let val = extra_args[arg_idx].borrow().clone().elide_lvalue();
                                 self.state.stack_mut(stack_idx).push(val);
@@ -574,16 +560,14 @@ impl Executor {
                             }
                         }
                         _ => {
-                            return ExecSingle::error(
-                                stack_idx,
+                            return ExecSingle::Error(
                                 ExecutorError::CannotAttribute("stateful expression".into()),
                             );
                         }
                     }
                 }
                 _ => {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::CannotAttribute(base.type_name()),
                     );
                 }

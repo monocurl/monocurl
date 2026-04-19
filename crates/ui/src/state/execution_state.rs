@@ -8,7 +8,6 @@ use executor::time::Timestamp;
 #[derive(Clone, Default)]
 pub struct Camera {
     position: (f32, f32, f32),
-
 }
 
 // Any state that's necessary for actual execution

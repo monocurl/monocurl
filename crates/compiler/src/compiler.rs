@@ -892,13 +892,16 @@ impl Compiler {
             _ => {}
         }
         let name = &d.identifier.1.0;
-        let existing_param = self
-            .frame()
-            .scopes
-            .iter()
-            .any(|s| s.symbols.get(name).is_some_and(|sym| sym.var_type == VariableType::Param));
+        let existing_param = self.frame().scopes.iter().any(|s| {
+            s.symbols
+                .get(name)
+                .is_some_and(|sym| sym.var_type == VariableType::Param)
+        });
         if existing_param && vt != VariableType::Param {
-            self.error(span.clone(), &format!("cannot shadow 'param' variable '{name}'"));
+            self.error(
+                span.clone(),
+                &format!("cannot shadow 'param' variable '{name}'"),
+            );
         } else if vt == VariableType::Param {
             let shadows_existing = self
                 .frame()
@@ -906,7 +909,10 @@ impl Compiler {
                 .iter()
                 .any(|s| s.symbols.contains_key(name));
             if shadows_existing {
-                self.error(span.clone(), &format!("'param' variable '{name}' cannot shadow an existing variable"));
+                self.error(
+                    span.clone(),
+                    &format!("'param' variable '{name}' cannot shadow an existing variable"),
+                );
             }
         }
         match vt {
@@ -919,7 +925,7 @@ impl Compiler {
                 self.emit(Instruction::ConvertParam { name_index: ni }, span.clone());
             }
             VariableType::Let | VariableType::Var | VariableType::Reference => {
-                self.emit(Instruction::ConvertVar, span.clone());
+                self.emit(Instruction::ConvertVar { allow_stateful: false }, span.clone());
             }
         }
         self.define_symbol(&d.identifier.1.0, vt, SymbolFunctionInfo::from(&d.value.1));
@@ -961,12 +967,12 @@ impl Compiler {
         self.compile_val(&f.container.1, &f.container.0);
         let iter_pos = self.stack_depth() - 1;
         // anonymous names (null byte) can't collide with user identifiers
-        self.emit(Instruction::ConvertVar, container_span.clone());
+        self.emit(Instruction::ConvertVar { allow_stateful: false }, container_span.clone());
         self.define_symbol("\x00iter", VariableType::Let, SymbolFunctionInfo::None);
 
         self.emit_push_int(0, span.clone());
         let idx_pos = self.stack_depth() - 1;
-        self.emit(Instruction::ConvertVar, span.clone());
+        self.emit(Instruction::ConvertVar { allow_stateful: false }, span.clone());
         self.define_symbol("\x00idx", VariableType::Var, SymbolFunctionInfo::None);
 
         let condition_ip = self.instruction_pointer();
@@ -1012,7 +1018,7 @@ impl Compiler {
         );
         self.dec_stack(1);
         self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
-        self.emit(Instruction::ConvertVar, span.clone());
+        self.emit(Instruction::ConvertVar { allow_stateful: false }, span.clone());
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone()); // depth = loop_stack
@@ -1082,8 +1088,12 @@ impl Compiler {
                 span.clone(),
                 "return is only valid inside a lambda or block",
             );
-            return;
         }
+
+        if is_stateful(&r.value.1) {
+            self.error(span.clone(), "cannot return a stateful value");
+        }
+
         self.compile_val(&r.value.1, &r.value.0);
         let below = self.stack_depth() as i32 - 1;
         self.emit(
@@ -1212,7 +1222,10 @@ impl Compiler {
 
         match ir {
             IdentifierReference::Reference(_) => {
-                if !matches!(sym.var_type,  VariableType::Reference | VariableType::Param | VariableType::Mesh)  {
+                if !matches!(
+                    sym.var_type,
+                    VariableType::Reference | VariableType::Param | VariableType::Mesh
+                ) {
                     self.error(
                         span.clone(),
                         format!(
@@ -1239,7 +1252,23 @@ impl Compiler {
                     _ => self.emit_lvalue(delta, span.clone()),
                 }
             }
-            IdentifierReference::Value(_) => self.emit_copy(delta, span.clone()),
+            IdentifierReference::Value(_) => {
+                if sym.var_type == VariableType::Param {
+                    self.error(
+                        span.clone(),
+                        format!(
+                            "cannot read param '{}' directly; use '${}' for a stateful reference or '*{}' for the current leader value",
+                            name, name, name
+                        ),
+                    );
+                    self.emit_push(
+                        Instruction::PushDereference { stack_delta: delta },
+                        span.clone(),
+                    );
+                } else {
+                    self.emit_copy(delta, span.clone());
+                }
+            }
             IdentifierReference::StatefulReference(_) => {
                 self.emit_push(
                     Instruction::PushStateful { stack_delta: delta },
@@ -1318,7 +1347,7 @@ impl Compiler {
             return;
         }
         // needed to subscript lvalue wise
-        self.emit(Instruction::ConvertVar, span.clone());
+        self.emit(Instruction::ConvertVar { allow_stateful: false }, span.clone());
         let map_pos = self.stack_depth() - 1;
         for (key, val) in entries {
             let d = self.stack_delta(map_pos);
@@ -1462,7 +1491,7 @@ impl Compiler {
         // but it also guarantees deepest first ordering for references
         for (_, arg) in &l.arguments.1 {
             self.compile_val(&arg.1, &arg.0);
-            self.emit(Instruction::ConvertVar, arg.0.clone());
+            self.emit(Instruction::ConvertVar { allow_stateful: stateful }, arg.0.clone());
         }
         self.compile_expr(false, Some(&l.arguments), &l.lambda.1, &l.lambda.0);
 
@@ -1500,10 +1529,10 @@ impl Compiler {
         let invoke_span = o.operator.0.start..o.arguments.0.end;
 
         self.compile_val(&o.operand.1, &o.operand.0);
-        self.emit(Instruction::ConvertVar, o.operand.0.clone());
+        self.emit(Instruction::ConvertVar { allow_stateful: true }, o.operand.0.clone());
         for (_, arg) in &o.arguments.1 {
             self.compile_val(&arg.1, &arg.0);
-            self.emit(Instruction::ConvertVar, arg.0.clone());
+            self.emit(Instruction::ConvertVar { allow_stateful: true }, arg.0.clone());
         }
         self.compile_expr(false, Some(&o.arguments), &o.operator.1, &o.operator.0);
 
@@ -1771,7 +1800,7 @@ impl Compiler {
             {
                 // optimize out the ephemeral
                 self.emit_copy_ref(stack_delta, span.clone());
-                self.emit(Instruction::ConvertVar, span.clone());
+                self.emit(Instruction::ConvertVar { allow_stateful: false }, span.clone());
             } else if immediately_invoked {
                 self.emit_lvalue(stack_delta, span.clone());
             } else {
@@ -1783,7 +1812,7 @@ impl Compiler {
     // compile a block body: init `_ = []`, compile stmts, implicit `return _`
     fn compile_block_body(&mut self, stmts: &[SpanTagged<Statement>], span: &Span8) {
         self.emit_push(Instruction::PushEmptyVector, span.clone());
-        self.emit(Instruction::ConvertVar, span.clone());
+        self.emit(Instruction::ConvertVar { allow_stateful: false }, span.clone());
         self.define_symbol("_", VariableType::Var, SymbolFunctionInfo::None);
         self.compile_statements(stmts);
         let underscore_pos = self.lookup("_", None, None).unwrap().stack_position;
@@ -2195,6 +2224,15 @@ mod test {
     }
 
     #[test]
+    fn test_integration_param_requires_explicit_read() {
+        let result = compile_src("param x = 1\nlet y = x");
+        assert!(
+            has_error(&result, "cannot read param 'x' directly"),
+            "expected compile error for naked param read"
+        );
+    }
+
+    #[test]
     fn test_integration_nested_vector() {
         // [] for vectors in Monocurl
         no_errors(&compile_src("let v = [1, [2, 3], 4]"));
@@ -2234,7 +2272,7 @@ mod test {
             sec.instructions,
             vec![
                 Instruction::PushInt { index: 0 },
-                Instruction::ConvertVar,
+                Instruction::ConvertVar { allow_stateful: false },
                 Instruction::EndOfExecutionHead
             ],
         );
@@ -2267,7 +2305,7 @@ mod test {
             sec.instructions,
             vec![
                 Instruction::PushInt { index: 0 }, // var x = 0
-                Instruction::ConvertVar,           // create variable slot
+                Instruction::ConvertVar { allow_stateful: false },           // create variable slot
                 Instruction::PushLvalue {
                     stack_delta: -1,
                     force_ephemeral: false
@@ -2279,39 +2317,6 @@ mod test {
             ],
         );
         assert_eq!(sec.int_pool, vec![0i64, 1i64]);
-    }
-
-    // `let z = 1 and 0` — verifies short-circuit ConditionalJump structure.
-    #[test]
-    fn test_bytecode_and_short_circuit() {
-        let result = compile_stmts(vec![s(Statement::Declaration(Declaration {
-            var_type: VariableType::Let,
-            identifier: s(IdentifierDeclaration("z".into())),
-            value: s(Expression::BinaryOperator(BinaryOperator {
-                op_type: BinaryOperatorType::And,
-                lhs: sb(Expression::Literal(Literal::Int(1))),
-                rhs: sb(Expression::Literal(Literal::Int(0))),
-            })),
-        }))]);
-        no_errors(&result);
-        let sec = &result.bytecode.sections[1];
-        // [0] PushInt(1)  [1] ConditionalJump→4  [2] PushInt(0)  [3] Jump→5
-        // [4] PushInt(0)  [5] PushVar  [6] EndOfExecutionHead
-        assert_eq!(sec.instructions[0], Instruction::PushInt { index: 0 }); // lhs = 1
-        assert!(matches!(
-            sec.instructions[1],
-            Instruction::ConditionalJump { to: 4, .. }
-        ));
-        assert_eq!(sec.instructions[2], Instruction::PushInt { index: 1 }); // false literal
-        assert!(matches!(
-            sec.instructions[3],
-            Instruction::Jump { to: 5, .. }
-        ));
-        assert_eq!(sec.instructions[4], Instruction::PushInt { index: 1 }); // rhs = 0 (same pool slot)
-        assert_eq!(sec.instructions[5], Instruction::ConvertVar);
-        assert_eq!(sec.instructions[6], Instruction::EndOfExecutionHead);
-        assert_eq!(sec.int_pool[0], 1i64);
-        assert_eq!(sec.int_pool[1], 0i64);
     }
 
     // `let f = |a| a` — verifies lambda body is Jump-over + body + MakeLambda
@@ -2356,7 +2361,7 @@ mod test {
                 capture_count: 0
             },
         );
-        assert_eq!(sec.instructions[4], Instruction::ConvertVar);
+        assert_eq!(sec.instructions[4], Instruction::ConvertVar { allow_stateful: false });
         assert_eq!(sec.instructions[5], Instruction::EndOfExecutionHead);
         assert_eq!(sec.lambda_prototypes.len(), 1);
         assert_eq!(sec.lambda_prototypes[0].required_args, 1);

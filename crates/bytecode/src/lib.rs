@@ -45,7 +45,9 @@ pub enum Instruction {
     ConvertMesh {
         name_index: u32,
     },
-    ConvertVar,
+    ConvertVar {
+        allow_stateful: bool,
+    },
     // sync all leader followers to their leader values; emitted at end of init section
     SyncAllLeaders,
 

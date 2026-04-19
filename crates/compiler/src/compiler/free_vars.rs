@@ -175,7 +175,11 @@ struct LvalueRefCollector {
 
 impl LvalueRefCollector {
     fn new(pre: HashSet<String>) -> Self {
-        Self { defined: pre, lvalue_refs: Vec::new(), seen: HashSet::new() }
+        Self {
+            defined: pre,
+            lvalue_refs: Vec::new(),
+            seen: HashSet::new(),
+        }
     }
 
     fn define(&mut self, name: &str) {

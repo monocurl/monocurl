@@ -54,7 +54,7 @@ fn read_list(
         .stack(stack)
         .read_at(index)
         .clone()
-        .elide_lvalue_rec()
+        .elide_lvalue_leader_rec()
     {
         Value::List(list) => list
             .elements

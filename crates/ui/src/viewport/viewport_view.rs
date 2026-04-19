@@ -8,20 +8,90 @@ use crate::{
 };
 
 // presentation overlay colors (always dark, independent of theme)
-const PRES_BG: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
-const PRES_TOOLBAR_BG: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.8 };
-const PRES_PANEL_BG: Rgba = Rgba { r: 0.10, g: 0.10, b: 0.10, a: 1.0 };
-const PRES_BORDER: Rgba = Rgba { r: 0.22, g: 0.22, b: 0.22, a: 1.0 };
-const PRES_TEXT: Rgba = Rgba { r: 0.85, g: 0.85, b: 0.85, a: 1.0 };
-const PRES_MUTED: Rgba = Rgba { r: 0.50, g: 0.50, b: 0.50, a: 1.0 };
-const PRES_ACCENT: Rgba = Rgba { r: 0.47, g: 0.63, b: 0.87, a: 1.0 };
-const SLIDER_TRACK_BG: Rgba = Rgba { r: 0.28, g: 0.28, b: 0.28, a: 1.0 };
-const SLIDER_THUMB: Rgba = Rgba { r: 0.90, g: 0.90, b: 0.90, a: 1.0 };
-const SLIDER_THUMB_LOCKED: Rgba = Rgba { r: 0.45, g: 0.45, b: 0.45, a: 1.0 };
-const SLIDER_FILL_LOCKED: Rgba = Rgba { r: 0.30, g: 0.30, b: 0.38, a: 1.0 };
-const SLIDER_2D_BG: Rgba = Rgba { r: 0.18, g: 0.18, b: 0.18, a: 1.0 };
-const SLIDER_2D_AXIS: Rgba = Rgba { r: 0.32, g: 0.32, b: 0.32, a: 1.0 };
-const TRANSPARENT: Rgba = Rgba { r: 0.0, g: 0.0, b: 0.0, a: 0.0 };
+const PRES_BG: Rgba = Rgba {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 1.0,
+};
+const PRES_TOOLBAR_BG: Rgba = Rgba {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 0.8,
+};
+const PRES_PANEL_BG: Rgba = Rgba {
+    r: 0.10,
+    g: 0.10,
+    b: 0.10,
+    a: 1.0,
+};
+const PRES_BORDER: Rgba = Rgba {
+    r: 0.22,
+    g: 0.22,
+    b: 0.22,
+    a: 1.0,
+};
+const PRES_TEXT: Rgba = Rgba {
+    r: 0.85,
+    g: 0.85,
+    b: 0.85,
+    a: 1.0,
+};
+const PRES_MUTED: Rgba = Rgba {
+    r: 0.50,
+    g: 0.50,
+    b: 0.50,
+    a: 1.0,
+};
+const PRES_ACCENT: Rgba = Rgba {
+    r: 0.47,
+    g: 0.63,
+    b: 0.87,
+    a: 1.0,
+};
+const SLIDER_TRACK_BG: Rgba = Rgba {
+    r: 0.28,
+    g: 0.28,
+    b: 0.28,
+    a: 1.0,
+};
+const SLIDER_THUMB: Rgba = Rgba {
+    r: 0.90,
+    g: 0.90,
+    b: 0.90,
+    a: 1.0,
+};
+const SLIDER_THUMB_LOCKED: Rgba = Rgba {
+    r: 0.45,
+    g: 0.45,
+    b: 0.45,
+    a: 1.0,
+};
+const SLIDER_FILL_LOCKED: Rgba = Rgba {
+    r: 0.30,
+    g: 0.30,
+    b: 0.38,
+    a: 1.0,
+};
+const SLIDER_2D_BG: Rgba = Rgba {
+    r: 0.18,
+    g: 0.18,
+    b: 0.18,
+    a: 1.0,
+};
+const SLIDER_2D_AXIS: Rgba = Rgba {
+    r: 0.32,
+    g: 0.32,
+    b: 0.32,
+    a: 1.0,
+};
+const TRANSPARENT: Rgba = Rgba {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 0.0,
+};
 
 const PRES_TOOLBAR_H: f32 = 32.0;
 const PARAM_PANEL_W: f32 = 260.0;
@@ -114,21 +184,33 @@ fn compute_1d_drag(
         min + raw_p * (max - min)
     };
     let val = if is_int { val_raw.round() } else { val_raw };
-    let pv = if is_int { ParameterValue::Int(val as i64) } else { ParameterValue::Float(val) };
+    let pv = if is_int {
+        ParameterValue::Int(val as i64)
+    } else {
+        ParameterValue::Float(val)
+    };
 
     let range = max - min;
-    let mut new_min =
-        if val_raw < min - BOUNDS_EXPAND_THRESH_1D { val_raw - BOUNDS_EXPAND_PAD * range }
-        else { min };
-    let mut new_max =
-        if val_raw > max + BOUNDS_EXPAND_THRESH_1D { val_raw + BOUNDS_EXPAND_PAD * range }
-        else { max };
+    let mut new_min = if val_raw < min - BOUNDS_EXPAND_THRESH_1D {
+        val_raw - BOUNDS_EXPAND_PAD * range
+    } else {
+        min
+    };
+    let mut new_max = if val_raw > max + BOUNDS_EXPAND_THRESH_1D {
+        val_raw + BOUNDS_EXPAND_PAD * range
+    } else {
+        max
+    };
     // integer sliders keep integer-valued bounds
     if is_int {
         new_min = new_min.floor();
         new_max = new_max.ceil();
     }
-    let new_bounds = if new_min != min || new_max != max { Some((new_min, new_max)) } else { None };
+    let new_bounds = if new_min != min || new_max != max {
+        Some((new_min, new_max))
+    } else {
+        None
+    };
     (pv, new_bounds)
 }
 
@@ -169,14 +251,26 @@ fn compute_2d_drag(
 
     let x_range = x_max - x_min;
     let y_range = y_max - y_min;
-    let new_x_min =
-        if xv < x_min - BOUNDS_EXPAND_THRESH_2D { xv - BOUNDS_EXPAND_PAD * x_range } else { x_min };
-    let new_x_max =
-        if xv > x_max + BOUNDS_EXPAND_THRESH_2D { xv + BOUNDS_EXPAND_PAD * x_range } else { x_max };
-    let new_y_min =
-        if yv < y_min - BOUNDS_EXPAND_THRESH_2D { yv - BOUNDS_EXPAND_PAD * y_range } else { y_min };
-    let new_y_max =
-        if yv > y_max + BOUNDS_EXPAND_THRESH_2D { yv + BOUNDS_EXPAND_PAD * y_range } else { y_max };
+    let new_x_min = if xv < x_min - BOUNDS_EXPAND_THRESH_2D {
+        xv - BOUNDS_EXPAND_PAD * x_range
+    } else {
+        x_min
+    };
+    let new_x_max = if xv > x_max + BOUNDS_EXPAND_THRESH_2D {
+        xv + BOUNDS_EXPAND_PAD * x_range
+    } else {
+        x_max
+    };
+    let new_y_min = if yv < y_min - BOUNDS_EXPAND_THRESH_2D {
+        yv - BOUNDS_EXPAND_PAD * y_range
+    } else {
+        y_min
+    };
+    let new_y_max = if yv > y_max + BOUNDS_EXPAND_THRESH_2D {
+        yv + BOUNDS_EXPAND_PAD * y_range
+    } else {
+        y_max
+    };
 
     let new_bounds =
         if new_x_min != x_min || new_x_max != x_max || new_y_min != y_min || new_y_max != y_max {
@@ -188,7 +282,11 @@ fn compute_2d_drag(
 }
 
 fn format_bound(v: f64) -> String {
-    if v.fract() == 0.0 && v.abs() < 1e9 { format!("{}", v as i64) } else { format!("{:.1}", v) }
+    if v.fract() == 0.0 && v.abs() < 1e9 {
+        format!("{}", v as i64)
+    } else {
+        format!("{:.1}", v)
+    }
 }
 
 fn render_debug_block(title: &'static str, text: &str) -> impl IntoElement {
@@ -247,12 +345,28 @@ fn render_slider_1d(
 ) -> impl IntoElement {
     let (min, max) = bounds;
     let pct = ((value - min) / (max - min)).clamp(0.0, 1.0) as f32;
-    let base_value = if is_int { format!("{}", value as i64) } else { format!("{:.2}", value) };
-    let value_text = if is_locked { format!("{} (locked)", base_value) } else { base_value };
+    let base_value = if is_int {
+        format!("{}", value as i64)
+    } else {
+        format!("{:.2}", value)
+    };
+    let value_text = if is_locked {
+        format!("{} (locked)", base_value)
+    } else {
+        base_value
+    };
     let min_text = format_bound(min);
     let max_text = format_bound(max);
-    let fill_color = if is_locked { SLIDER_FILL_LOCKED } else { PRES_ACCENT };
-    let thumb_color = if is_locked { SLIDER_THUMB_LOCKED } else { SLIDER_THUMB };
+    let fill_color = if is_locked {
+        SLIDER_FILL_LOCKED
+    } else {
+        PRES_ACCENT
+    };
+    let thumb_color = if is_locked {
+        SLIDER_THUMB_LOCKED
+    } else {
+        SLIDER_THUMB
+    };
     let label_color = if is_locked { PRES_MUTED } else { PRES_TEXT };
     let name_for_canvas = name.clone();
 
@@ -303,161 +417,152 @@ fn render_slider_1d(
                 )
                 .child(
                     div().w(px(SLIDER_1D_W)).h_full().child(
-                        canvas(
-                            move |bounds, _, _| bounds,
-                            {
-                                let name = name_for_canvas.clone();
-                                let services = services.clone();
-                                let weak_vp = weak_vp.clone();
-                                move |_, bounds: Bounds<Pixels>, window, _cx| {
-                                    let w = f32::from(bounds.size.width);
-                                    let h = f32::from(bounds.size.height);
-                                    let ox = bounds.origin.x;
-                                    let oy = bounds.origin.y;
-                                    let track_y = h / 2.0 - SLIDER_TRACK_H / 2.0;
+                        canvas(move |bounds, _, _| bounds, {
+                            let name = name_for_canvas.clone();
+                            let services = services.clone();
+                            let weak_vp = weak_vp.clone();
+                            move |_, bounds: Bounds<Pixels>, window, _cx| {
+                                let w = f32::from(bounds.size.width);
+                                let h = f32::from(bounds.size.height);
+                                let ox = bounds.origin.x;
+                                let oy = bounds.origin.y;
+                                let track_y = h / 2.0 - SLIDER_TRACK_H / 2.0;
 
+                                window.paint_quad(fill(
+                                    Bounds::new(
+                                        point(ox, oy + px(track_y)),
+                                        size(px(w), px(SLIDER_TRACK_H)),
+                                    ),
+                                    SLIDER_TRACK_BG,
+                                ));
+                                if pct > 0.0 {
                                     window.paint_quad(fill(
                                         Bounds::new(
                                             point(ox, oy + px(track_y)),
-                                            size(px(w), px(SLIDER_TRACK_H)),
+                                            size(px(w * pct), px(SLIDER_TRACK_H)),
                                         ),
-                                        SLIDER_TRACK_BG,
+                                        fill_color,
                                     ));
-                                    if pct > 0.0 {
-                                        window.paint_quad(fill(
-                                            Bounds::new(
-                                                point(ox, oy + px(track_y)),
-                                                size(px(w * pct), px(SLIDER_TRACK_H)),
-                                            ),
-                                            fill_color,
-                                        ));
-                                    }
-                                    window.paint_quad(quad(
-                                        Bounds::new(
-                                            point(
-                                                ox + px(w * pct - SLIDER_THUMB_R),
-                                                oy + px(h / 2.0 - SLIDER_THUMB_R),
-                                            ),
-                                            size(
-                                                px(SLIDER_THUMB_R * 2.0),
-                                                px(SLIDER_THUMB_R * 2.0),
-                                            ),
-                                        ),
-                                        px(SLIDER_THUMB_R),
-                                        thumb_color,
-                                        px(0.0),
-                                        TRANSPARENT,
-                                        BorderStyle::Solid,
-                                    ));
-
-                                    if is_locked {
-                                        return;
-                                    }
-
-                                    {
-                                        let name = name.clone();
-                                        let services = services.clone();
-                                        let weak_vp = weak_vp.clone();
-                                        window.on_mouse_event(
-                                            move |ev: &MouseDownEvent, phase, _, cx| {
-                                                if phase != DispatchPhase::Bubble
-                                                    || !bounds.contains(&ev.position)
-                                                {
-                                                    return;
-                                                }
-                                                let local_x =
-                                                    f32::from(ev.position.x - bounds.origin.x);
-                                                let (pv, new_bounds) =
-                                                    compute_1d_drag(local_x, w, min, max, is_int);
-                                                weak_vp
-                                                    .update(cx, |vp, cx| {
-                                                        if let Some((new_min, new_max)) = new_bounds
-                                                        {
-                                                            vp.slider_bounds.insert(
-                                                                name.clone(),
-                                                                [new_min, new_max, 0.0, 0.0],
-                                                            );
-                                                        }
-                                                        vp.dragging_param = Some(name.clone());
-                                                        cx.notify();
-                                                    })
-                                                    .ok();
-                                                services
-                                                    .update(cx, |s, _| {
-                                                        s.update_parameters(HashMap::from([(
-                                                            name.clone(),
-                                                            pv,
-                                                        )]))
-                                                    })
-                                                    .ok();
-                                            },
-                                        );
-                                    }
-                                    {
-                                        let name = name.clone();
-                                        let services = services.clone();
-                                        let weak_vp = weak_vp.clone();
-                                        window.on_mouse_event(
-                                            move |ev: &MouseMoveEvent, phase, _, cx| {
-                                                if phase != DispatchPhase::Bubble {
-                                                    return;
-                                                }
-                                                let dragging = weak_vp
-                                                    .upgrade()
-                                                    .map(|e| {
-                                                        e.read(cx).dragging_param.as_deref()
-                                                            == Some(name.as_str())
-                                                    })
-                                                    .unwrap_or(false);
-                                                if !dragging {
-                                                    return;
-                                                }
-                                                let local_x =
-                                                    f32::from(ev.position.x - bounds.origin.x);
-                                                let (pv, new_bounds) =
-                                                    compute_1d_drag(local_x, w, min, max, is_int);
-                                                if let Some((new_min, new_max)) = new_bounds {
-                                                    let name = name.clone();
-                                                    weak_vp
-                                                        .update(cx, |vp, cx| {
-                                                            vp.slider_bounds.insert(
-                                                                name,
-                                                                [new_min, new_max, 0.0, 0.0],
-                                                            );
-                                                            cx.notify();
-                                                        })
-                                                        .ok();
-                                                }
-                                                services
-                                                    .update(cx, |s, _| {
-                                                        s.update_parameters(HashMap::from([(
-                                                            name.clone(),
-                                                            pv,
-                                                        )]))
-                                                    })
-                                                    .ok();
-                                            },
-                                        );
-                                    }
-                                    {
-                                        let weak_vp = weak_vp.clone();
-                                        window.on_mouse_event(
-                                            move |_: &MouseUpEvent, phase, _, cx| {
-                                                if phase != DispatchPhase::Bubble {
-                                                    return;
-                                                }
-                                                weak_vp
-                                                    .update(cx, |vp, cx| {
-                                                        vp.dragging_param = None;
-                                                        cx.notify();
-                                                    })
-                                                    .ok();
-                                            },
-                                        );
-                                    }
                                 }
-                            },
-                        )
+                                window.paint_quad(quad(
+                                    Bounds::new(
+                                        point(
+                                            ox + px(w * pct - SLIDER_THUMB_R),
+                                            oy + px(h / 2.0 - SLIDER_THUMB_R),
+                                        ),
+                                        size(px(SLIDER_THUMB_R * 2.0), px(SLIDER_THUMB_R * 2.0)),
+                                    ),
+                                    px(SLIDER_THUMB_R),
+                                    thumb_color,
+                                    px(0.0),
+                                    TRANSPARENT,
+                                    BorderStyle::Solid,
+                                ));
+
+                                if is_locked {
+                                    return;
+                                }
+
+                                {
+                                    let name = name.clone();
+                                    let services = services.clone();
+                                    let weak_vp = weak_vp.clone();
+                                    window.on_mouse_event(
+                                        move |ev: &MouseDownEvent, phase, _, cx| {
+                                            if phase != DispatchPhase::Bubble
+                                                || !bounds.contains(&ev.position)
+                                            {
+                                                return;
+                                            }
+                                            let local_x =
+                                                f32::from(ev.position.x - bounds.origin.x);
+                                            let (pv, new_bounds) =
+                                                compute_1d_drag(local_x, w, min, max, is_int);
+                                            weak_vp
+                                                .update(cx, |vp, cx| {
+                                                    if let Some((new_min, new_max)) = new_bounds {
+                                                        vp.slider_bounds.insert(
+                                                            name.clone(),
+                                                            [new_min, new_max, 0.0, 0.0],
+                                                        );
+                                                    }
+                                                    vp.dragging_param = Some(name.clone());
+                                                    cx.notify();
+                                                })
+                                                .ok();
+                                            services
+                                                .update(cx, |s, _| {
+                                                    s.update_parameters(HashMap::from([(
+                                                        name.clone(),
+                                                        pv,
+                                                    )]))
+                                                })
+                                                .ok();
+                                        },
+                                    );
+                                }
+                                {
+                                    let name = name.clone();
+                                    let services = services.clone();
+                                    let weak_vp = weak_vp.clone();
+                                    window.on_mouse_event(
+                                        move |ev: &MouseMoveEvent, phase, _, cx| {
+                                            if phase != DispatchPhase::Bubble {
+                                                return;
+                                            }
+                                            let dragging = weak_vp
+                                                .upgrade()
+                                                .map(|e| {
+                                                    e.read(cx).dragging_param.as_deref()
+                                                        == Some(name.as_str())
+                                                })
+                                                .unwrap_or(false);
+                                            if !dragging {
+                                                return;
+                                            }
+                                            let local_x =
+                                                f32::from(ev.position.x - bounds.origin.x);
+                                            let (pv, new_bounds) =
+                                                compute_1d_drag(local_x, w, min, max, is_int);
+                                            if let Some((new_min, new_max)) = new_bounds {
+                                                let name = name.clone();
+                                                weak_vp
+                                                    .update(cx, |vp, cx| {
+                                                        vp.slider_bounds.insert(
+                                                            name,
+                                                            [new_min, new_max, 0.0, 0.0],
+                                                        );
+                                                        cx.notify();
+                                                    })
+                                                    .ok();
+                                            }
+                                            services
+                                                .update(cx, |s, _| {
+                                                    s.update_parameters(HashMap::from([(
+                                                        name.clone(),
+                                                        pv,
+                                                    )]))
+                                                })
+                                                .ok();
+                                        },
+                                    );
+                                }
+                                {
+                                    let weak_vp = weak_vp.clone();
+                                    window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                                        if phase != DispatchPhase::Bubble {
+                                            return;
+                                        }
+                                        weak_vp
+                                            .update(cx, |vp, cx| {
+                                                vp.dragging_param = None;
+                                                cx.notify();
+                                            })
+                                            .ok();
+                                    });
+                                }
+                            }
+                        })
                         .w(px(SLIDER_1D_W))
                         .h(px(SLIDER_1D_CANVAS_H)),
                     ),
@@ -492,12 +597,19 @@ fn render_slider_2d(
     let y_zero = 1.0 - ((-y_min) / (y_max - y_min)).clamp(0.0, 1.0) as f32;
     let value_text = match kind {
         Slider2dKind::Complex => {
-            if y < 0.0 { format!("{:.2} - {:.2}i", x, y.abs()) }
-            else { format!("{:.2} + {:.2}i", x, y) }
+            if y < 0.0 {
+                format!("{:.2} - {:.2}i", x, y.abs())
+            } else {
+                format!("{:.2} + {:.2}i", x, y)
+            }
         }
         Slider2dKind::VectorFloat => format!("({:.2}, {:.2})", x, y),
     };
-    let dot_color = if is_locked { SLIDER_THUMB_LOCKED } else { PRES_ACCENT };
+    let dot_color = if is_locked {
+        SLIDER_THUMB_LOCKED
+    } else {
+        PRES_ACCENT
+    };
     let label_color = if is_locked { PRES_MUTED } else { PRES_TEXT };
     let name_for_canvas = name.clone();
 
@@ -517,7 +629,12 @@ fn render_slider_2d(
                 .items_baseline()
                 .gap(px(8.0))
                 .mb(px(6.0))
-                .child(div().text_color(label_color).text_size(px(12.0)).child(name.clone()))
+                .child(
+                    div()
+                        .text_color(label_color)
+                        .text_size(px(12.0))
+                        .child(name.clone()),
+                )
                 .child(
                     div()
                         .w(px(120.0))
@@ -529,18 +646,13 @@ fn render_slider_2d(
         )
         // canvas centered horizontally
         .child(
-            div()
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .w(px(SLIDER_2D_SIZE))
-                        .h(px(SLIDER_2D_SIZE))
-                        .flex_shrink_0()
-                        .child(
-                    canvas(
-                        move |bounds, _, _| bounds,
-                        {
+            div().flex().justify_center().child(
+                div()
+                    .w(px(SLIDER_2D_SIZE))
+                    .h(px(SLIDER_2D_SIZE))
+                    .flex_shrink_0()
+                    .child(
+                        canvas(move |bounds, _, _| bounds, {
                             let name = name_for_canvas.clone();
                             let services = services.clone();
                             let weak_vp = weak_vp.clone();
@@ -574,10 +686,7 @@ fn render_slider_2d(
                                             ox + px(w * px_pct - SLIDER_2D_DOT_R),
                                             oy + px(h * py_pct - SLIDER_2D_DOT_R),
                                         ),
-                                        size(
-                                            px(SLIDER_2D_DOT_R * 2.0),
-                                            px(SLIDER_2D_DOT_R * 2.0),
-                                        ),
+                                        size(px(SLIDER_2D_DOT_R * 2.0), px(SLIDER_2D_DOT_R * 2.0)),
                                     ),
                                     px(SLIDER_2D_DOT_R),
                                     dot_color,
@@ -602,13 +711,20 @@ fn render_slider_2d(
                                                 return;
                                             }
                                             let (pv, new_bounds) = compute_2d_drag(
-                                                ev.position, bounds, x_min, x_max, y_min, y_max,
+                                                ev.position,
+                                                bounds,
+                                                x_min,
+                                                x_max,
+                                                y_min,
+                                                y_max,
                                                 kind,
                                             );
                                             weak_vp
                                                 .update(cx, |vp, cx| {
-                                                    if let Some(((nx_min, nx_max), (ny_min, ny_max))) =
-                                                        new_bounds
+                                                    if let Some((
+                                                        (nx_min, nx_max),
+                                                        (ny_min, ny_max),
+                                                    )) = new_bounds
                                                     {
                                                         vp.slider_bounds.insert(
                                                             name.clone(),
@@ -650,7 +766,12 @@ fn render_slider_2d(
                                                 return;
                                             }
                                             let (pv, new_bounds) = compute_2d_drag(
-                                                ev.position, bounds, x_min, x_max, y_min, y_max,
+                                                ev.position,
+                                                bounds,
+                                                x_min,
+                                                x_max,
+                                                y_min,
+                                                y_max,
                                                 kind,
                                             );
                                             if let Some(((nx_min, nx_max), (ny_min, ny_max))) =
@@ -680,27 +801,24 @@ fn render_slider_2d(
                                 }
                                 {
                                     let weak_vp = weak_vp.clone();
-                                    window.on_mouse_event(
-                                        move |_: &MouseUpEvent, phase, _, cx| {
-                                            if phase != DispatchPhase::Bubble {
-                                                return;
-                                            }
-                                            weak_vp
-                                                .update(cx, |vp, cx| {
-                                                    vp.dragging_param = None;
-                                                    cx.notify();
-                                                })
-                                                .ok();
-                                        },
-                                    );
+                                    window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                                        if phase != DispatchPhase::Bubble {
+                                            return;
+                                        }
+                                        weak_vp
+                                            .update(cx, |vp, cx| {
+                                                vp.dragging_param = None;
+                                                cx.notify();
+                                            })
+                                            .ok();
+                                    });
                                 }
                             }
-                        },
-                    )
-                    .w(px(SLIDER_2D_SIZE))
-                    .h(px(SLIDER_2D_SIZE)),
+                        })
+                        .w(px(SLIDER_2D_SIZE))
+                        .h(px(SLIDER_2D_SIZE)),
                     ),
-                ),
+            ),
         )
 }
 
@@ -763,7 +881,12 @@ fn render_param_control(
             .items_center()
             .justify_between()
             .py(px(4.0))
-            .child(div().text_color(PRES_MUTED).text_size(px(12.0)).child(name.to_string()))
+            .child(
+                div()
+                    .text_color(PRES_MUTED)
+                    .text_size(px(12.0))
+                    .child(name.to_string()),
+            )
             .child(
                 div()
                     .text_color(PRES_MUTED)
@@ -834,7 +957,9 @@ impl Render for Viewport {
                     .rev()
                     .filter_map(|name| {
                         let is_locked = p.locked_params.contains(name);
-                        p.parameters.get(name).map(|v| (name.clone(), v.clone(), is_locked))
+                        p.parameters
+                            .get(name)
+                            .map(|v| (name.clone(), v.clone(), is_locked))
                     })
                     .collect()
             })
@@ -843,14 +968,16 @@ impl Render for Viewport {
         let controls: Vec<AnyElement> = sorted
             .iter()
             .map(|(name, value, is_locked)| {
-                let bounds = slider_bounds.get(name.as_str()).copied().unwrap_or_else(|| {
-                    match value {
-                        ParameterValue::Float(_) | ParameterValue::Int(_) => {
-                            [SLIDER_1D_MIN, SLIDER_1D_MAX, 0.0, 0.0]
-                        }
-                        _ => [SLIDER_2D_MIN, SLIDER_2D_MAX, SLIDER_2D_MIN, SLIDER_2D_MAX],
-                    }
-                });
+                let bounds =
+                    slider_bounds
+                        .get(name.as_str())
+                        .copied()
+                        .unwrap_or_else(|| match value {
+                            ParameterValue::Float(_) | ParameterValue::Int(_) => {
+                                [SLIDER_1D_MIN, SLIDER_1D_MAX, 0.0, 0.0]
+                            }
+                            _ => [SLIDER_2D_MIN, SLIDER_2D_MAX, SLIDER_2D_MIN, SLIDER_2D_MAX],
+                        });
                 render_param_control(
                     name,
                     value,
@@ -861,8 +988,11 @@ impl Render for Viewport {
                 )
             })
             .collect();
-        let mesh_debug_controls: Vec<AnyElement> =
-            mesh_debug.iter().map(render_mesh_debug).map(IntoElement::into_any_element).collect();
+        let mesh_debug_controls: Vec<AnyElement> = mesh_debug
+            .iter()
+            .map(render_mesh_debug)
+            .map(IntoElement::into_any_element)
+            .collect();
 
         let params_btn = div()
             .id("pres-params-btn")
@@ -893,8 +1023,18 @@ impl Render for Viewport {
                 .border_b(px(1.0))
                 .border_color(PRES_BORDER)
                 .child(params_btn)
-                .child(div().text_color(PRES_TEXT).text_size(px(12.0)).child(slide_label))
-                .child(div().text_color(PRES_MUTED).text_size(px(11.0)).child(time_label));
+                .child(
+                    div()
+                        .text_color(PRES_TEXT)
+                        .text_size(px(12.0))
+                        .child(slide_label),
+                )
+                .child(
+                    div()
+                        .text_color(PRES_MUTED)
+                        .text_size(px(11.0))
+                        .child(time_label),
+                );
 
             let params_body = if controls.is_empty() && mesh_debug_controls.is_empty() {
                 div()
@@ -976,8 +1116,18 @@ impl Render for Viewport {
                 .flex_shrink_0()
                 .bg(PRES_TOOLBAR_BG)
                 .child(params_btn)
-                .child(div().text_color(PRES_TEXT).text_size(px(12.0)).child(slide_label))
-                .child(div().text_color(PRES_MUTED).text_size(px(11.0)).child(time_label));
+                .child(
+                    div()
+                        .text_color(PRES_TEXT)
+                        .text_size(px(12.0))
+                        .child(slide_label),
+                )
+                .child(
+                    div()
+                        .text_color(PRES_MUTED)
+                        .text_size(px(11.0))
+                        .child(time_label),
+                );
 
             div()
                 .flex()

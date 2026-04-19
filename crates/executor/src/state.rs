@@ -388,7 +388,7 @@ impl ExecutionState {
         stack.push(Value::Lvalue(rc));
     }
 
-    /// promote TOS to a leader-follower variable (mesh/state/param).
+    /// promote TOS to a leader-follower variable (mesh/param).
     pub fn promote_to_leader(&mut self, stack_idx: usize, kind: LeaderKind, name: String) {
         let stack = self.stack_mut(stack_idx);
         let init_val = stack.pop();
@@ -403,9 +403,15 @@ impl ExecutionState {
 
         let leader_val = Value::Leader(Leader {
             kind,
-            last_modified_stack: None,
+            // meshes implicitly modified even upon assignment
+            last_modified_stack: if kind == LeaderKind::Mesh {
+                Some(self.stack_id(stack_idx))
+            } else {
+                None
+            },
             locked_by_anim: None,
             leader_rc: leader_rc.clone(),
+            leader_version: 0,
             follower_rc: follower_rc.clone(),
             follower_version: 0,
         });
@@ -438,14 +444,16 @@ impl ExecutionState {
                 last_modified_stack,
                 leader_rc,
                 follower_rc,
+                follower_version,
                 ..
             }) = &mut *cell
             else {
                 continue;
             };
-            let value = leader_rc.borrow().clone();
+            let value = leader_rc.borrow().to_follower_stateful();
             *follower_rc.borrow_mut() = value;
             *last_modified_stack = None;
+            *follower_version += 1;
         }
     }
 
@@ -516,9 +524,6 @@ mod tests {
 
         assert!(state.is_stack_id_ancestor_of_stack(trace_stack_id, trace_idx));
         assert!(state.is_stack_id_ancestor_of_stack(child_stack_id, trace_idx));
-        assert!(state.is_stack_id_ancestor_of_stack(
-            ExecutionState::ROOT_STACK_ID,
-            trace_idx
-        ));
+        assert!(state.is_stack_id_ancestor_of_stack(ExecutionState::ROOT_STACK_ID, trace_idx));
     }
 }

@@ -17,14 +17,10 @@ use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
 use crate::time::Timestamp;
-use crate::{
-    error::ExecutorError,
-    state::ExecutionState,
-    value::Value,
-};
+use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
-use self::memory::{EXECUTOR_MEMORY_LIMIT_BYTES, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker};
 pub(crate) use self::invoke::fill_defaults;
+use self::memory::{EXECUTOR_MEMORY_LIMIT_BYTES, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker};
 
 pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
 
@@ -53,13 +49,6 @@ pub(crate) enum ExecSingle {
     Play,
     EndOfHead,
     Error(ExecutorError),
-}
-
-impl ExecSingle {
-    pub(crate) fn error(stack_idx: usize, error: ExecutorError) -> Self {
-        let _ = stack_idx;
-        Self::Error(error)
-    }
 }
 
 pub struct Executor {
@@ -136,6 +125,10 @@ impl Executor {
 
         *param.leader_value_rc.borrow_mut() = value.clone();
         *param.follower_value_rc.borrow_mut() = value;
+        if let Value::Leader(leader) = &mut *param.leader_cell_rc.borrow_mut() {
+            leader.leader_version += 1;
+            leader.follower_version += 1;
+        }
         Ok(())
     }
 
@@ -143,7 +136,7 @@ impl Executor {
         self.state.last_stack_idx = stack_idx;
 
         if let Err(err) = self.memory_checker.tick() {
-            return ExecSingle::error(stack_idx, err);
+            return ExecSingle::Error(err);
         }
 
         let ip = self.state.stack(stack_idx).ip;

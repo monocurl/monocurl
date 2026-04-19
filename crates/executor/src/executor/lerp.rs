@@ -169,7 +169,11 @@ impl Executor {
             }
 
             let lerped_operand = self
-                .lerp(a_inv.operand.as_ref().clone(), b_inv.operand.as_ref().clone(), t)
+                .lerp(
+                    a_inv.operand.as_ref().clone(),
+                    b_inv.operand.as_ref().clone(),
+                    t,
+                )
                 .await
                 .map_err(|err| lerp_context("cannot lerp operator operands".into(), err))?;
 

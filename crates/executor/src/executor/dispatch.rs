@@ -6,11 +6,7 @@ use crate::{
     error::ExecutorError,
     state::LeaderKind,
     value::{
-        RcValue, Value,
-        container::{List, Map},
-        lambda::Operator,
-        rc_value,
-        stateful::{Stateful, StatefulNode, collect_roots_from_value, dedup_roots_by_ptr},
+        RcValue, Value, container::{List, Map}, lambda::Operator, stateful::{Stateful, StatefulNode, StatefulReadKind}
     },
 };
 
@@ -65,15 +61,14 @@ impl Executor {
             }
 
             // ----- variable promotion -----
-            Instruction::ConvertVar {} => {
-                if matches!(
-                    self.state.stack(stack_idx).peek().clone().elide_lvalue(),
+            Instruction::ConvertVar { allow_stateful } => {
+                if !allow_stateful && matches!(
+                    self.state.stack(stack_idx).peek(),
                     Value::Stateful(_)
                 ) {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::Other(
-                            "stateful values can only be assigned to mesh variables".into(),
+                            "illegal assignment of stateful value. Stateful values must only be assigned to meshes".into(),
                         ),
                     );
                 }
@@ -90,8 +85,7 @@ impl Executor {
                     self.state.stack(stack_idx).peek().clone().elide_lvalue(),
                     Value::Stateful(_)
                 ) {
-                    return ExecSingle::error(
-                        stack_idx,
+                    return ExecSingle::Error(
                         ExecutorError::Other(
                             "stateful values can only be assigned to mesh variables".into(),
                         ),
@@ -110,16 +104,28 @@ impl Executor {
                 pop_tos,
             } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let resolved = if mutable {
+                let lvalue_resolved = if mutable {
                     // want to keep the nested layers of lvalue
                     val.force_elide_lvalue()
                 } else {
-                    val.elide_lvalue_rec()
+                    // strip leader away
+                    // in theory, this should be a force elision but when setting up the stack yourself (for e.g. functions), it is sometimes convenient to avoid wrapping in lvalue
+                    // I don't believe this causes problems elsewhere so it's fine to just make elision optional here
+                    val.elide_lvalue().elide_leader()
                 };
+
+                if let Value::Stateful(_) = lvalue_resolved {
+                    return ExecSingle::Error(
+                        ExecutorError::Other(
+                            "attempt to copy a stateful value directly. Use $<ident> to use the live value, and *ident to read the current value".into(),
+                        ),
+                    );
+                }
+
                 if pop_tos {
                     self.state.stack_mut(stack_idx).pop();
                 }
-                self.state.stack_mut(stack_idx).push(resolved);
+                self.state.stack_mut(stack_idx).push(lvalue_resolved);
             }
             Instruction::PushLvalue {
                 stack_delta,
@@ -146,14 +152,9 @@ impl Executor {
                 let inner = resolve_leader_value(&val);
                 let resolved = match inner {
                     Value::Stateful(ref s) => {
-                        // try sync fast path first
-                        if let Some(v) = s.evaluate() {
-                            v
-                        } else {
-                            match self.eval_stateful(s).await {
-                                Ok(v) => v,
-                                Err(e) => return ExecSingle::error(stack_idx, e),
-                            }
+                        match self.eval_stateful(s).await {
+                            Ok(v) => v,
+                            Err(e) => return ExecSingle::Error(e),
                         }
                     }
                     other => other,
@@ -162,38 +163,47 @@ impl Executor {
             }
             Instruction::PushStateful { stack_delta } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
+
                 let leader_cell_rc = match val.as_lvalue_rc() {
                     Some(rc) => rc,
                     None => {
-                        return ExecSingle::error(
-                            stack_idx,
+                        return ExecSingle::Error(
                             ExecutorError::type_error("param variable", val.type_name()),
                         );
                     }
                 };
-                let kind = match &*leader_cell_rc.borrow() {
-                    Value::Leader(leader) => leader.kind,
+                match &*leader_cell_rc.borrow() {
+                    Value::Leader(leader) => {
+                        if leader.kind != LeaderKind::Param {
+                            // if it's wrapping a stateful, allow it
+                            if let Value::Stateful(stateful) = &*leader.leader_rc.borrow() {
+                                self.state
+                                    .stack_mut(stack_idx)
+                                    .push(Value::Stateful(stateful.clone()));
+                                return ExecSingle::Continue;
+                            }
+
+                            return ExecSingle::Error(
+                                ExecutorError::Other(
+                                    "$ can only be used with 'param' variables, not 'mesh' (unless the mesh contains a stateful value)  ".into(),
+                                ),
+                            );
+                        }
+                    }
                     _ => {
-                        return ExecSingle::error(
-                            stack_idx,
+                        return ExecSingle::Error(
                             ExecutorError::type_error(
                                 "param leader",
                                 leader_cell_rc.borrow().type_name(),
                             ),
                         );
                     }
-                };
-                if kind != LeaderKind::Param {
-                    return ExecSingle::error(
-                        stack_idx,
-                        ExecutorError::Other(
-                            "$ can only be used with 'param' variables, not 'mesh'".into(),
-                        ),
-                    );
                 }
+
                 let stateful = Stateful::new(
                     vec![leader_cell_rc.clone()],
                     StatefulNode::LeaderRef(leader_cell_rc),
+                    StatefulReadKind::Leader,
                 );
                 self.state
                     .stack_mut(stack_idx)
@@ -228,10 +238,9 @@ impl Executor {
                     // lambda is Rc<Lambda>, so Operator(rc) is a cheap pointer copy
                     Value::Lambda(rc) => stack.push(Value::Operator(Operator(rc))),
                     _ => {
-                        return ExecSingle::error(stack_idx, ExecutorError::type_error(
-                            "lambda",
-                            val.type_name(),
-                        ));
+                        return ExecSingle::Error(
+                            ExecutorError::type_error("lambda", val.type_name()),
+                        );
                     }
                 }
             }
@@ -267,14 +276,14 @@ impl Executor {
                 let val = self.state.stack_mut(stack_idx).pop();
                 let val = match val.elide_wrappers(self).await {
                     Ok(v) => v,
-                    Err(e) => return ExecSingle::error(stack_idx, e),
+                    Err(e) => return ExecSingle::Error(e),
                 };
                 match val.check_truthy() {
                     Ok(true) => {
                         self.state.stack_mut(stack_idx).ip = (section, to);
                     }
                     Ok(false) => {}
-                    Err(e) => return ExecSingle::error(stack_idx, e),
+                    Err(e) => return ExecSingle::Error(e),
                 }
             }
             Instruction::Return { stack_delta } => {
@@ -299,32 +308,14 @@ impl Executor {
                 let val = self.state.stack_mut(stack_idx).pop();
                 match self.exec_negate(val).await {
                     Ok(v) => self.state.stack_mut(stack_idx).push(v),
-                    Err(e) => return ExecSingle::error(stack_idx, e),
+                    Err(e) => return ExecSingle::Error(e),
                 }
             }
             Instruction::Not => {
                 let val = self.state.stack_mut(stack_idx).pop();
-                if let Value::Stateful(s) = val {
-                    let mut roots = s.roots.clone();
-                    let val_rc = rc_value(Value::Stateful(s));
-                    collect_roots_from_value(&val_rc.borrow(), &mut roots);
-                    dedup_roots_by_ptr(&mut roots);
-                    self.state
-                        .stack_mut(stack_idx)
-                        .push(Value::Stateful(Stateful::new(roots, StatefulNode::Not(val_rc))));
-                } else {
-                    let val = match val.elide_wrappers(self).await {
-                        Ok(val) => val,
-                        Err(e) => return ExecSingle::error(stack_idx, e),
-                    };
-                    match val.check_truthy() {
-                        Ok(truthy) => {
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::Integer(!truthy as i64));
-                        }
-                        Err(e) => return ExecSingle::error(stack_idx, e),
-                    }
+                match self.exec_not(val).await {
+                    Ok(v) => self.state.stack_mut(stack_idx).push(v),
+                    Err(e) => return ExecSingle::Error(e),
                 }
             }
 

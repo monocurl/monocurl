@@ -207,7 +207,11 @@ impl ExecutionService {
             parameters.insert(param.name.clone(), value);
             param_order.push(param.name.clone());
         }
-        ParameterSnapshot { parameters, locked_params, param_order }
+        ParameterSnapshot {
+            parameters,
+            locked_params,
+            param_order,
+        }
     }
 
     async fn mesh_debug_snapshot(executor: &mut Executor) -> Vec<MeshDebugSnapshot> {
@@ -237,7 +241,11 @@ impl ExecutionService {
                 .await
                 .map(|value| Self::format_debug_value(&value, 0))
                 .unwrap_or_else(|error| format!("<error: {error}>"));
-            snapshot.push(MeshDebugSnapshot { name, leader_value, follower_value });
+            snapshot.push(MeshDebugSnapshot {
+                name,
+                leader_value,
+                follower_value,
+            });
         }
         snapshot
     }
@@ -311,22 +319,13 @@ impl ExecutionService {
                         Self::format_debug_value(&cached, depth + 1)
                     );
                 }
-                if let Some(value) = stateful.evaluate() {
-                    return format!(
-                        "stateful(roots: {}, value: {})",
-                        stateful.roots.len(),
-                        Self::format_debug_value(&value, depth + 1)
-                    );
-                }
                 format!("stateful(roots: {})", stateful.roots.len())
             }
             Value::Leader(leader) => {
                 let leader_value = Self::format_debug_value(&leader.leader_rc.borrow(), depth + 1);
                 let follower_value =
                     Self::format_debug_value(&leader.follower_rc.borrow(), depth + 1);
-                format!(
-                    "leader {{ leader: {leader_value}, follower: {follower_value} }}"
-                )
+                format!("leader {{ leader: {leader_value}, follower: {follower_value} }}")
             }
             Value::InvokedOperator(_) => "<live operator>".into(),
             Value::InvokedFunction(_) => "<live function>".into(),
@@ -500,7 +499,9 @@ impl ExecutionService {
                         match executor.advance_playback(max_slide, target_dt).await {
                             Ok(still_has_work) => {
                                 if !still_has_work {
-                                    if executor.state.timestamp.slide + 1 < executor.total_sections() {
+                                    if executor.state.timestamp.slide + 1
+                                        < executor.total_sections()
+                                    {
                                         executor.advance_section().await;
                                         // this brings parameters into scope
                                         let _ = executor.seek_primitive_anim_skip(max_slide).await;

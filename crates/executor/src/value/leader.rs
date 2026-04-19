@@ -15,6 +15,8 @@ pub struct Leader {
     pub locked_by_anim: Option<usize>,
     /// the leader value (what code sees)
     pub leader_rc: RcValue,
+    /// incremented each time leader_rc is written; used for leader-side stateful cache invalidation
+    pub leader_version: u64,
     /// the follower value (what's on screen)
     pub follower_rc: RcValue,
     /// incremented each time follower_rc is written; used for stateful cache invalidation

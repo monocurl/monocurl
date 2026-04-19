@@ -253,12 +253,14 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         .map(|err| err.span.clone())
         .collect();
 
-    let value = executor.state.captured_output.into_iter().last()
-        .map(|v| {
-            match v {
-                Value::Leader(leader) => leader.leader_rc.borrow().clone(),
-                other => other,
-            }
+    let value = executor
+        .state
+        .captured_output
+        .into_iter()
+        .last()
+        .map(|v| match v {
+            Value::Leader(leader) => leader.leader_rc.borrow().clone(),
+            other => other,
         });
 
     ExecResult {
@@ -783,7 +785,7 @@ fn test_default_references_var_is_error() {
 fn test_default_references_param_is_ok() {
     let r = run("
         param scale = 3
-        let f = |x = scale| x * 2
+        let f = |x = *scale| x * 2
         let result = f()
     ");
     r.assert_int(6);
@@ -1783,7 +1785,7 @@ fn test_ref_basic_mutation() {
             y = y + 1
         }
         mutate(&x)
-        let result = x
+        let result = *x
     ");
     r.assert_int(1);
 }
@@ -1797,7 +1799,7 @@ fn test_ref_mutation_does_not_affect_unrelated_var() {
             y = y + 1
         }
         inc(&x)
-        let result = z
+        let result = *z
     ");
     r.assert_int(99);
 }
@@ -1812,7 +1814,7 @@ fn test_ref_called_multiple_times() {
         inc(&x)
         inc(&x)
         inc(&x)
-        let result = x
+        let result = *x
     ");
     r.assert_int(3);
 }
@@ -1830,7 +1832,7 @@ fn test_ref_chain_of_lambdas() {
             add_two(&z)
         }
         double_add(&x)
-        let result = x
+        let result = *x
     ");
     r.assert_int(4);
 }
@@ -1845,7 +1847,7 @@ fn test_ref_two_distinct_references() {
             y = y + 1
         }
         modify_both(&a, &b)
-        let result = a + b
+        let result = *a + *b
     ");
     // a=2, b=11, result=13
     r.assert_int(13);
@@ -1860,7 +1862,7 @@ fn test_ref_reference_to_list_via_ref() {
             a[0] = 42
         }
         set_first(&arr)
-        let result = arr[0]
+        let result = (*arr)[0]
     ");
     r.assert_int(42);
 }
@@ -1876,7 +1878,7 @@ fn test_ref_destructure_list_references() {
             y = 13
         }
         set_both(&a, &b)
-        let result = a + b
+        let result = *a + *b
     ");
     r.assert_int(20);
 }
@@ -1891,7 +1893,7 @@ fn test_ref_reference_in_closure_capture() {
             r = captured + 1
         }
         f(&target)
-        let result = target
+        let result = *target
     ");
     r.assert_int(6);
 }

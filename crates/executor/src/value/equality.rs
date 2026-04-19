@@ -1,11 +1,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use super::{
-    Value,
-    primitive_anim::PrimitiveAnim,
-    stateful::StatefulNode,
-};
+use super::{Value, primitive_anim::PrimitiveAnim, stateful::StatefulNode};
 
 impl Value {
     /// structural equality for all value types.
@@ -73,7 +69,9 @@ impl Value {
                         }))
             }
 
-            (Value::Stateful(a), Value::Stateful(b)) => stateful_equal(&a.root, &b.root),
+            (Value::Stateful(a), Value::Stateful(b)) => {
+                a.read_kind == b.read_kind && stateful_equal(&a.root, &b.root)
+            }
 
             // leaders compared by identity of the leader cell
             (Value::Leader(a), Value::Leader(b)) => {
@@ -158,7 +156,8 @@ fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
             al == bl
                 && stateful_equal(af, bf)
                 && aa.len() == ba.len()
-                && aa.iter()
+                && aa
+                    .iter()
                     .zip(ba.iter())
                     .all(|(a, b)| Value::values_equal(&a.borrow(), &b.borrow()))
         }
@@ -180,28 +179,10 @@ fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
                 && stateful_equal(ao, bo)
                 && Value::values_equal(&aop.borrow(), &bop.borrow())
                 && aa.len() == ba.len()
-                && aa.iter()
+                && aa
+                    .iter()
                     .zip(ba.iter())
                     .all(|(a, b)| Value::values_equal(&a.borrow(), &b.borrow()))
-        }
-        (
-            StatefulNode::BinaryOp { lhs: al, rhs: ar, op: aop },
-            StatefulNode::BinaryOp { lhs: bl, rhs: br, op: bop },
-        ) => {
-            (*aop as u8) == (*bop as u8)
-                && Value::values_equal(&al.borrow(), &bl.borrow())
-                && Value::values_equal(&ar.borrow(), &br.borrow())
-        }
-        (StatefulNode::UnaryNeg(a), StatefulNode::UnaryNeg(b))
-        | (StatefulNode::Not(a), StatefulNode::Not(b)) => {
-            Value::values_equal(&a.borrow(), &b.borrow())
-        }
-        (
-            StatefulNode::Subscript { base: ab, index: ai },
-            StatefulNode::Subscript { base: bb, index: bi },
-        ) => {
-            Value::values_equal(&ab.borrow(), &bb.borrow())
-                && Value::values_equal(&ai.borrow(), &bi.borrow())
         }
         _ => false,
     }

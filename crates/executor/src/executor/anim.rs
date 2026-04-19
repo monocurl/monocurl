@@ -256,7 +256,7 @@ impl Executor {
                                 continue;
                             };
                             (
-                                leader.leader_rc.borrow().clone(),
+                                leader.leader_rc.borrow().to_follower_stateful(),
                                 leader.follower_rc.clone(),
                             )
                         };
@@ -325,14 +325,14 @@ impl Executor {
                     self.state.execution_heads.remove(&stack_idx);
                     ExecSingle::Play
                 }
-                Err(e) => ExecSingle::error(stack_idx, e),
+                Err(e) => ExecSingle::Error(e),
             },
             Value::PrimitiveAnim(prim) => match self.bake_primitive_anim(stack_idx, prim, &[]) {
                 Ok(()) => {
                     self.state.execution_heads.remove(&stack_idx);
                     ExecSingle::Play
                 }
-                Err(e) => ExecSingle::error(stack_idx, e),
+                Err(e) => ExecSingle::Error(e),
             },
             Value::List(list) => {
                 let values: Vec<Value> = list
@@ -347,7 +347,7 @@ impl Executor {
                         let baked = match self.plan_primitive_anim(stack_idx, pa.clone(), &reserved)
                         {
                             Ok(baked) => baked,
-                            Err(e) => return ExecSingle::error(stack_idx, e),
+                            Err(e) => return ExecSingle::Error(e),
                         };
                         reserved.extend(baked.targets.iter().cloned());
                         planned_primitives.push(baked);
@@ -359,14 +359,16 @@ impl Executor {
                     match elem {
                         Value::AnimBlock(ab) => match self.spawn_anim_block(stack_idx, ab) {
                             Ok(()) => count += 1,
-                            Err(e) => return ExecSingle::error(stack_idx, e),
+                            Err(e) => return ExecSingle::Error(e),
                         },
                         Value::PrimitiveAnim(_) => {}
                         _ => {
-                            return ExecSingle::error(stack_idx, ExecutorError::type_error(
-                                "anim_block or primitive_anim",
-                                elem.type_name(),
-                            ));
+                            return ExecSingle::Error(
+                                ExecutorError::type_error(
+                                    "anim_block or primitive_anim",
+                                    elem.type_name(),
+                                ),
+                            );
                         }
                     }
                 }
@@ -381,10 +383,9 @@ impl Executor {
                     ExecSingle::Play
                 }
             }
-            _ => ExecSingle::error(stack_idx, ExecutorError::type_error(
-                "anim_block, primitive_anim, or list",
-                val.type_name(),
-            )),
+            _ => ExecSingle::Error(
+                ExecutorError::type_error("anim_block, primitive_anim, or list", val.type_name()),
+            ),
         }
     }
 
@@ -497,12 +498,15 @@ impl Executor {
                         let Value::Leader(leader) = &*leader_cell else {
                             continue;
                         };
-                        if leader.last_modified_stack.is_some_and(|last_modified_stack_id| {
-                            self.state.is_stack_id_ancestor_of_stack(
-                                last_modified_stack_id,
-                                spawning_stack_idx,
-                            )
-                        }) {
+                        if leader
+                            .last_modified_stack
+                            .is_some_and(|last_modified_stack_id| {
+                                self.state.is_stack_id_ancestor_of_stack(
+                                    last_modified_stack_id,
+                                    spawning_stack_idx,
+                                )
+                            })
+                        {
                             targets.push(entry.leader_cell_rc.clone());
                         }
                     }
@@ -558,12 +562,7 @@ impl Executor {
             }
             Value::Lvalue(rc) => self.push_leader_candidate(rc, out),
             Value::WeakLvalue(weak) => {
-                let Some(rc) = weak.upgrade() else {
-                    return Err(ExecutorError::Other(
-                        "animation variable reference expired".into(),
-                    ));
-                };
-                self.push_leader_candidate(&rc, out)
+                let rc = weak.upgrade().unwrap();                self.push_leader_candidate(&rc, out)
             }
             Value::Leader(leader) => {
                 let Some(cell) = self.find_leader_cell(leader) else {
@@ -645,7 +644,7 @@ fn sync_leader_to_follower(leader_cell_rc: &RcValue) {
     else {
         return;
     };
-    let value = leader_rc.borrow().clone();
+    let value = leader_rc.borrow().to_follower_stateful();
     *follower_rc.borrow_mut() = value;
     *last_modified_stack = None;
     *follower_version += 1;

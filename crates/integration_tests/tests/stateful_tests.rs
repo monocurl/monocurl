@@ -1,10 +1,8 @@
 // stateful value tests
-// covers: $param creation, *mesh dereference, binary/unary/subscript lifting,
-// caching, error cases, and interaction with animations.
+// covers: $param creation, *mesh dereference, runtime validation for invalid
+// stateful operators/subscripts, caching, error cases, and interaction with animations.
 
-use anim_tests::{
-    LeaderInfo, run_anim, run_anim_at, run_anim_with_stdlib, run_anim_with_stdlib_at,
-};
+use anim_tests::{LeaderInfo, run_anim, run_anim_with_stdlib, run_anim_with_stdlib_at};
 use executor::value::Value;
 
 // anim_tests helpers are in a sibling test file; re-export by including it
@@ -23,29 +21,6 @@ fn assert_mesh_target_int(leaders: &[LeaderInfo], mesh_idx: usize, expected: i64
         Value::Integer(n) => assert_eq!(*n, expected, "mesh[{}] target int mismatch", mesh_idx),
         other => panic!(
             "mesh[{}]: expected Integer({}), got {}",
-            mesh_idx,
-            expected,
-            other.type_name()
-        ),
-    }
-}
-
-fn assert_mesh_target_float(leaders: &[LeaderInfo], mesh_idx: usize, expected: f64, eps: f64) {
-    use executor::state::LeaderKind;
-    let meshes: Vec<&LeaderInfo> = leaders
-        .iter()
-        .filter(|l| l.kind == LeaderKind::Mesh)
-        .collect();
-    match &meshes[mesh_idx].target {
-        Value::Float(f) => assert!(
-            (f - expected).abs() < eps,
-            "mesh[{}] target float mismatch: expected {}, got {}",
-            mesh_idx,
-            expected,
-            f
-        ),
-        other => panic!(
-            "mesh[{}]: expected Float({}), got {}",
             mesh_idx,
             expected,
             other.type_name()
@@ -97,23 +72,21 @@ fn test_stateful_dereference_reflects_param_leader_value() {
     r.param_leaders()[2].assert_target_int(99);
 }
 
-// ── binary op lifting ─────────────────────────────────────────────────────────
+// ── stateful operator runtime errors ─────────────────────────────────────────
 
 #[test]
 fn test_stateful_add_constant_stored_in_mesh() {
-    // $x + 2 should build a stateful BinaryOp node
     let r = run_anim(
         "
         param x = 10
         mesh m = $x + 2
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 #[test]
 fn test_stateful_dereference_add_evaluates_correctly() {
-    // *m with m = $x + 2, x = 5 → should evaluate to 7
     let r = run_anim(
         "
         param x = 5
@@ -122,7 +95,7 @@ fn test_stateful_dereference_add_evaluates_correctly() {
         let check = result == 7
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 #[test]
@@ -135,7 +108,7 @@ fn test_stateful_sub() {
         let check = result == 7
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 #[test]
@@ -148,12 +121,11 @@ fn test_stateful_mul() {
         let check = result == 24
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 #[test]
 fn test_stateful_two_param_add() {
-    // $x + $y lifts both params into the node
     let r = run_anim(
         "
         param x = 3
@@ -163,7 +135,7 @@ fn test_stateful_two_param_add() {
         let check = result == 7
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 #[test]
@@ -176,10 +148,10 @@ fn test_stateful_comparison_lt() {
         let check = result == 1
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
-// ── unary neg lifting ─────────────────────────────────────────────────────────
+// ── stateful unary runtime errors ────────────────────────────────────────────
 
 #[test]
 fn test_stateful_negate() {
@@ -191,7 +163,7 @@ fn test_stateful_negate() {
         let check = result == -5
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 #[test]
@@ -204,14 +176,13 @@ fn test_stateful_double_negate() {
         let check = result == 8
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
-// ── subscript lifting ─────────────────────────────────────────────────────────
+// ── subscript runtime errors ─────────────────────────────────────────────────
 
 #[test]
 fn test_stateful_subscript_list_param() {
-    // param can hold a list; $list[1] builds a Subscript stateful node
     let r = run_anim(
         "
         param xs = [10, 20, 30]
@@ -220,10 +191,10 @@ fn test_stateful_subscript_list_param() {
         let check = result == 20
     ",
     );
-    r.assert_ok();
+    r.assert_error("subscript cannot be applied to stateful values");
 }
 
-// ── not lifting ───────────────────────────────────────────────────────────────
+// ── stateful not runtime errors ──────────────────────────────────────────────
 
 #[test]
 fn test_stateful_not_false() {
@@ -235,7 +206,7 @@ fn test_stateful_not_false() {
         let check = result == 1
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 #[test]
@@ -248,7 +219,7 @@ fn test_stateful_not_truthy() {
         let check = result == 0
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 // ── error cases ───────────────────────────────────────────────────────────────
@@ -261,7 +232,7 @@ fn test_stateful_assigned_to_var_is_error() {
         var v = $x
     ",
     );
-    r.assert_error("stateful values can only be assigned to mesh variables");
+    r.assert_error("illegal assignment of stateful value");
 }
 
 #[test]
@@ -272,7 +243,7 @@ fn test_stateful_assigned_to_let_is_error() {
         let v = $x
     ",
     );
-    r.assert_error("stateful values can only be assigned to mesh variables");
+    r.assert_error("illegal assignment of stateful value. Stateful values must only be assigned to meshes");
 }
 
 #[test]
@@ -313,30 +284,61 @@ fn test_stateful_dereference_after_set_animation() {
     ",
     );
     r.assert_ok();
-    r.param_leaders()[2].assert_target_int(20).assert_current_int(20);
+    r.param_leaders()[2]
+        .assert_target_int(20)
+        .assert_current_int(20);
 }
 
 #[test]
-fn test_stateful_dereference_after_lerp_uses_follower() {
-    // mid-lerp the follower is interpolated, so *m should return ~2.5 (halfway between 0 and 5)
+fn test_stateful_dereference_after_lerp_uses_param_leader() {
+    // code-side dereference should read param leaders, even while the follower is mid-lerp
     let r = run_anim_with_stdlib_at(
         "
         param x = 0
-        mesh m = $x
+        mesh m = 0
+        mesh leader_value = 0
+        play Set()
+        m = $x
+        play Set()
         x = 5
+        leader_value = *m
         play Lerp(2)
     ",
         1.0,
     );
     r.assert_ok();
-    // the param follower is at 2.5 at t=1 of a 2s lerp
     let params = r.param_leaders();
-    params[2].assert_target_int(5).assert_current_float(2.5, 1e-9);
+    params[2]
+        .assert_target_int(5)
+        .assert_current_float(2.5, 1e-9);
+    assert_mesh_target_int(&r.leaders, 1, 5);
+}
+
+#[test]
+fn test_stateful_function() {
+    // code-side dereference should read param leaders, even while the follower is mid-lerp
+    let r = run_anim_with_stdlib_at(
+        "
+        param x = 0
+        mesh m = $x
+        mesh leader_value = 0
+        play Set()
+        x = 5
+        leader_value = *m
+        play Lerp(2)
+    ",
+        1.0,
+    );
+    r.assert_ok();
+    let params = r.param_leaders();
+    params[2]
+        .assert_target_int(5)
+        .assert_current_float(2.5, 1e-9);
+    assert_mesh_target_int(&r.leaders, 1, 5);
 }
 
 #[test]
 fn test_stateful_add_after_set_animation() {
-    // m = $x + 10; after Set, x = 20; *m = 30
     let r = run_anim_with_stdlib(
         "
         param x = 5
@@ -345,14 +347,13 @@ fn test_stateful_add_after_set_animation() {
         play Set([&x])
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
-// ── compound expressions ──────────────────────────────────────────────────────
+// ── compound stateful runtime errors ─────────────────────────────────────────
 
 #[test]
 fn test_stateful_arithmetic_chain() {
-    // ($x + 1) * 2 — both binary ops are lifted
     let r = run_anim(
         "
         param x = 3
@@ -361,12 +362,48 @@ fn test_stateful_arithmetic_chain() {
         let check = result == 8
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
+}
+
+#[test]
+fn test_stateful_logical_and() {
+    let r = run_anim(
+        "
+        param x = 1
+        param y = 0
+        mesh m = $x and $y
+        let result = *m
+    ",
+    );
+    r.assert_error("stateful has no truthiness");
+}
+
+#[test]
+fn test_stateful_logical_or() {
+    let r = run_anim(
+        "
+        param x = 0
+        param y = 4
+        mesh m = $x or $y
+        let result = *m
+    ",
+    );
+    r.assert_error("stateful has no truthiness");
+}
+
+#[test]
+fn test_naked_param_read_is_compile_error() {
+    let r = run_anim(
+        "
+        param x = 1
+        let y = x
+    ",
+    );
+    r.assert_error("cannot read param 'x' directly");
 }
 
 #[test]
 fn test_stateful_mixed_constant_and_param() {
-    // 100 - $x
     let r = run_anim(
         "
         param x = 30
@@ -375,12 +412,11 @@ fn test_stateful_mixed_constant_and_param() {
         let check = result == 70
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }
 
 #[test]
 fn test_stateful_two_params_arithmetic() {
-    // ($a * $b) + $c
     let r = run_anim(
         "
         param a = 3
@@ -391,5 +427,5 @@ fn test_stateful_two_params_arithmetic() {
         let check = result == 17
     ",
     );
-    r.assert_ok();
+    r.assert_error("operators cannot be applied to stateful values");
 }

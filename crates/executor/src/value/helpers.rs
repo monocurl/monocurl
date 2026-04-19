@@ -3,11 +3,7 @@ use std::rc::Rc;
 use crate::error::ExecutorError;
 use crate::executor::Executor;
 
-use super::{
-    RcValue, Value,
-    invoked_function::InvokedFunction,
-    invoked_operator::InvokedOperator,
-};
+use super::{RcValue, Value, invoked_function::InvokedFunction, invoked_operator::InvokedOperator};
 
 impl Value {
     pub fn check_truthy(&self) -> Result<bool, ExecutorError> {
@@ -21,17 +17,19 @@ impl Value {
 
     // an element might contain lvalues if it is itself an lvalue or a nested list
     fn may_need_lvalue_elision(&self) -> bool {
-        self.is_lvalue() || matches!(self, Value::List(_))
+        self.is_lvalue() || matches!(self, Value::List(_) | Value::Leader(_))
     }
 
-    // creates owned copy of self which elides all lvalues, recursing on lists and maps
-    pub fn elide_lvalue_rec(self) -> Value {
+    // creates owned copy of self which elides all lvalues, recursing on lists
+    // once it encounters an lvalue, it elides that, and does not recurse any further
+    pub fn elide_lvalue_leader_rec(self) -> Value {
         match self {
-            Value::Lvalue(rc) => rc.borrow().clone().elide_lvalue_rec(),
+            Value::Lvalue(rc) => rc.borrow().clone().elide_lvalue_leader_rec(),
             Value::WeakLvalue(weak) => weak
                 .upgrade()
-                .map(|rc| rc.borrow().clone().elide_lvalue_rec())
+                .map(|rc| rc.borrow().clone().elide_lvalue_leader_rec())
                 .unwrap(),
+            Value::Leader(leader) => leader.leader_rc.borrow().clone().elide_lvalue_leader_rec(),
             Value::List(mut list) => {
                 if !list
                     .elements
@@ -46,7 +44,7 @@ impl Value {
                     if !elem.borrow().may_need_lvalue_elision() {
                         continue;
                     }
-                    let elided = elem.borrow().clone().elide_lvalue_rec();
+                    let elided = elem.borrow().clone().elide_lvalue_leader_rec();
                     // reuse the existing allocation when exclusively owned; COW otherwise
                     if Rc::strong_count(elem) == 1 {
                         *elem.borrow_mut() = elided;
@@ -82,11 +80,25 @@ impl Value {
         }
     }
 
+    pub fn to_follower_stateful(&self) -> Value {
+        match self {
+            Value::Stateful(stateful) => Value::Stateful(stateful.to_follower_read()),
+            other => other.clone(),
+        }
+    }
+
+    pub fn elide_leader(self) -> Value {
+        match self {
+            Value::Leader(leader) => leader.leader_rc.borrow().clone(),
+            other => other,
+        }
+    }
+
     pub fn force_elide_lvalue(&self) -> Value {
         match self {
             Value::Lvalue(rc) => rc.borrow().clone(),
             Value::WeakLvalue(weak) => weak.upgrade().map(|rc| rc.borrow().clone()).unwrap(),
-            _ => panic!("Expected Lvalue"),
+            _ => panic!("Expected Lvalue, got {}", self.type_name()),
         }
     }
 

@@ -48,7 +48,9 @@ impl InvokedFunction {
                 None => {
                     let lambda = match this.lambda.as_ref().clone().elide_lvalue() {
                         Value::Lambda(lambda) => lambda,
-                        other => return Err(ExecutorError::type_error("lambda", other.type_name())),
+                        other => {
+                            return Err(ExecutorError::type_error("lambda", other.type_name()));
+                        }
                     };
 
                     let full_args =

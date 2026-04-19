@@ -6,20 +6,18 @@ use crate::{
     value::{
         RcValue, Value,
         anim_block::AnimBlock,
-        container::{HashableKey, List, Map},
+        container::{List, Map},
         invoked_function::InvokedFunction,
         invoked_operator::{InvokedOperator, build_invoked_operator, extract_operator_result},
-        leader::Leader,
         lambda::Lambda,
+        leader::Leader,
         rc_value,
         stateful::{
-            Stateful, StatefulNode, collect_roots_from_value, dedup_roots_by_ptr,
+            Stateful, StatefulNode, StatefulReadKind, collect_roots_from_value,
             value_into_stateful_node,
         },
     },
 };
-
-use super::ops::eval_binary;
 use smallvec::SmallVec;
 
 use super::{ExecSingle, Executor};
@@ -32,20 +30,26 @@ impl Executor {
     {
         Box::pin(async move {
             match value.elide_lvalue() {
-                Value::Stateful(stateful) => self.eval_stateful(&stateful).await,
+                Value::Stateful(stateful) => {
+                    println!("STATEFUL KIND {:?}", stateful.read_kind);
+                    self.eval_stateful(&stateful).await
+                },
                 Value::InvokedFunction(invoked) => InvokedFunction::value(&invoked, self).await,
                 Value::InvokedOperator(invoked) => InvokedOperator::value(&invoked, self).await,
                 Value::Leader(leader) => {
-                    let leader_value =
-                        self.debug_resolve_value(leader.leader_rc.borrow().clone()).await?;
-                    let follower_value =
-                        self.debug_resolve_value(leader.follower_rc.borrow().clone()).await?;
+                    let leader_value = self
+                        .debug_resolve_value(leader.leader_rc.borrow().clone())
+                        .await?;
+                    let follower_value = self
+                        .debug_resolve_value(leader.follower_rc.borrow().clone())
+                        .await?;
 
                     Ok(Value::Leader(Leader {
                         kind: leader.kind,
                         last_modified_stack: leader.last_modified_stack,
                         locked_by_anim: leader.locked_by_anim,
                         leader_rc: rc_value(leader_value),
+                        leader_version: leader.leader_version,
                         follower_rc: rc_value(follower_value),
                         follower_version: leader.follower_version,
                     }))
@@ -147,10 +151,9 @@ impl Executor {
         let lambda = match lambda_val {
             Value::Lambda(rc) => rc,
             _ => {
-                return ExecSingle::error(stack_idx, ExecutorError::type_error(
-                    "lambda",
-                    lambda_val.type_name(),
-                ));
+                return ExecSingle::Error(
+                    ExecutorError::type_error("lambda", lambda_val.type_name()),
+                );
             }
         };
 
@@ -158,19 +161,23 @@ impl Executor {
         let max_args = min_args + lambda.defaults.len();
 
         if num_args < min_args as u32 {
-            return ExecSingle::error(stack_idx, ExecutorError::TooFewArguments {
-                minimum: min_args,
-                got: num_args as usize,
-                operator: false,
-            });
+            return ExecSingle::Error(
+                ExecutorError::TooFewArguments {
+                    minimum: min_args,
+                    got: num_args as usize,
+                    operator: false,
+                },
+            );
         }
 
         if num_args > max_args as u32 {
-            return ExecSingle::error(stack_idx, ExecutorError::TooManyArguments {
-                maximum: max_args,
-                got: num_args as usize,
-                operator: false,
-            });
+            return ExecSingle::Error(
+                ExecutorError::TooManyArguments {
+                    maximum: max_args,
+                    got: num_args as usize,
+                    operator: false,
+                },
+            );
         }
 
         if stateful {
@@ -194,7 +201,16 @@ impl Executor {
                     rc_value(a)
                 })
                 .collect();
-            dedup_roots_by_ptr(&mut roots);
+            let read_kind = arg_rcs
+                .iter()
+                .find_map(|arg| match arg.borrow().force_elide_lvalue() {
+                    Value::Stateful(stateful) => Some(stateful.read_kind),
+                    other => {
+                        println!("Type {:?}", other.type_name());
+                        None
+                    }
+                })
+                .expect("No stateful argument despite marked stateful invocation");
 
             self.state
                 .stack_mut(stack_idx)
@@ -205,6 +221,7 @@ impl Executor {
                         args: arg_rcs,
                         labels,
                     },
+                    read_kind,
                 )));
             return ExecSingle::Continue;
         } else if labeled {
@@ -257,10 +274,9 @@ impl Executor {
         let operator = match op_val {
             Value::Operator(o) => o,
             _ => {
-                return ExecSingle::error(stack_idx, ExecutorError::type_error(
-                    "operator",
-                    op_val.type_name(),
-                ));
+                return ExecSingle::Error(
+                    ExecutorError::type_error("operator", op_val.type_name()),
+                );
             }
         };
         let lambda = &operator.0;
@@ -269,22 +285,27 @@ impl Executor {
         let max_args = min_args + lambda.defaults.len();
 
         if num_args + 1 < min_args as u32 {
-            return ExecSingle::error(stack_idx, ExecutorError::TooFewArguments {
-                minimum: min_args,
-                got: num_args as usize + 1,
-                operator: true,
-            });
+            return ExecSingle::Error(
+                ExecutorError::TooFewArguments {
+                    minimum: min_args,
+                    got: num_args as usize + 1,
+                    operator: true,
+                },
+            );
         }
 
         if num_args + 1 > max_args as u32 {
-            return ExecSingle::error(stack_idx, ExecutorError::TooManyArguments {
-                maximum: max_args,
-                got: num_args as usize + 1,
-                operator: true,
-            });
+            return ExecSingle::Error(
+                ExecutorError::TooManyArguments {
+                    maximum: max_args,
+                    got: num_args as usize + 1,
+                    operator: true,
+                },
+            );
         }
 
         if stateful {
+            println!("Operator Stateful Invoke");
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
@@ -308,7 +329,13 @@ impl Executor {
                     rc_value(a)
                 })
                 .collect();
-            dedup_roots_by_ptr(&mut roots);
+            let read_kind = std::iter::once(&operand_rc)
+                .chain(extra_arg_rcs.iter())
+                .find_map(|value| match &*value.borrow() {
+                    Value::Stateful(stateful) => Some(stateful.read_kind),
+                    _ => None,
+                })
+                .expect("No stateful argument despite marked stateful invocation");
 
             self.state
                 .stack_mut(stack_idx)
@@ -320,7 +347,14 @@ impl Executor {
                         extra_args: extra_arg_rcs,
                         labels,
                     },
+                    read_kind,
                 )));
+
+            // skip next instruction (operator invoke, which is not necessary)
+            self.state
+                .stack_mut(stack_idx)
+                .ip.1 += 1;
+
             return ExecSingle::Continue;
         } else if labeled {
             let n = num_args as usize;
@@ -356,7 +390,7 @@ impl Executor {
                             .push(Value::InvokedOperator(inv));
                         ExecSingle::Continue
                     }
-                    Err(e) => ExecSingle::error(stack_idx, e),
+                    Err(e) => ExecSingle::Error(e),
                 },
                 Err(e) => ExecSingle::Error(e),
             }
@@ -378,12 +412,16 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(val);
                 ExecSingle::Continue
             }
-            Err(e) => ExecSingle::error(stack_idx, e),
+            Err(e) => ExecSingle::Error(e),
         }
     }
 
     pub(super) fn exec_return(&mut self, stack_idx: usize, stack_delta: i32) -> ExecSingle {
         let ret_val = self.state.stack_mut(stack_idx).pop();
+
+        if matches!(ret_val, Value::Stateful(_)) {
+            return ExecSingle::Error(ExecutorError::Other("Cannot return a stateful value".into()));
+        }
 
         let to_pop = (-stack_delta) as usize;
         let stack = self.state.stack_mut(stack_idx);
@@ -408,7 +446,7 @@ impl Executor {
         lambda: &Lambda,
     ) -> ExecSingle {
         if self.state.stack(stack_idx).call_stack.len() >= MAX_CALL_DEPTH {
-            return ExecSingle::error(stack_idx, ExecutorError::StackOverflow);
+            return ExecSingle::Error(ExecutorError::StackOverflow);
         }
 
         {
@@ -551,16 +589,17 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(live);
             }
             Value::List(ref list) => {
-                return ExecSingle::error(stack_idx, ExecutorError::Other(format!(
-                    "operator must return a 2-element list, got {}",
-                    list.elements.len()
-                )));
+                return ExecSingle::Error(
+                    ExecutorError::Other(format!(
+                        "operator must return a 2-element list, got {}",
+                        list.elements.len()
+                    )),
+                );
             }
             other => {
-                return ExecSingle::error(stack_idx, ExecutorError::type_error(
-                    "[initial, modified] list",
-                    other.type_name(),
-                ));
+                return ExecSingle::Error(
+                    ExecutorError::type_error("[initial, modified] list", other.type_name()),
+                );
             }
         }
         ExecSingle::Continue
@@ -572,6 +611,23 @@ impl Executor {
 // ---------------------------------------------------------------------------
 
 impl Executor {
+    pub(crate) fn eval_stateful_read_kind<'a>(
+        &'a mut self,
+        stateful: &'a Stateful,
+        override_read_kind: StatefulReadKind,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>> {
+        Box::pin(async move {
+            if let Some(cached) = stateful.cache_valid() {
+                return Ok(cached);
+            }
+            let result = self
+                .eval_stateful_node(&stateful.root, override_read_kind)
+                .await?;
+            stateful.update_cache(result.clone());
+            Ok(result)
+        })
+    }
+
     /// evaluate a stateful expression using current param follower values.
     /// checks version-based cache first; falls back to full tree evaluation.
     pub(crate) fn eval_stateful<'a>(
@@ -580,18 +636,14 @@ impl Executor {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
         Box::pin(async move {
-            if let Some(cached) = stateful.cache_valid() {
-                return Ok(cached);
-            }
-            let result = self.eval_stateful_node(&stateful.root).await?;
-            stateful.update_cache(result.clone());
-            Ok(result)
+            self.eval_stateful_read_kind(stateful, stateful.read_kind).await
         })
     }
 
     fn eval_stateful_node<'a>(
         &'a mut self,
         node: &'a StatefulNode,
+        read_kind: StatefulReadKind,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
         Box::pin(async move {
@@ -599,17 +651,28 @@ impl Executor {
                 StatefulNode::LeaderRef(rc) => {
                     let inner = rc.borrow().clone();
                     match inner {
-                        Value::Leader(leader) => Ok(leader.follower_rc.borrow().clone()),
+                        Value::Leader(leader) => Ok(match read_kind {
+                            StatefulReadKind::Leader => {
+                                leader.leader_rc.borrow().clone()
+                            },
+                            StatefulReadKind::Follower => {
+                                leader.follower_rc.borrow().clone()
+                            },
+                        }),
                         other => Ok(other),
                     }
                 }
                 StatefulNode::Constant(val) => Ok(*val.clone()),
-                StatefulNode::LabeledCall { func, args, labels: _ } => {
-                    let func_val = self.eval_stateful_node(func).await?;
+                StatefulNode::LabeledCall {
+                    func,
+                    args,
+                    labels: _,
+                } => {
+                    let func_val = self.eval_stateful_node(func, read_kind).await?;
                     let lambda = match func_val.elide_lvalue() {
                         Value::Lambda(rc) => rc,
                         other => {
-                            return Err(ExecutorError::type_error("lambda", other.type_name()))
+                            return Err(ExecutorError::type_error("lambda", other.type_name()));
                         }
                     };
 
@@ -617,7 +680,7 @@ impl Executor {
                     for arg_rc in args {
                         let arg_val = arg_rc.borrow().clone().elide_lvalue();
                         let resolved = match arg_val {
-                            Value::Stateful(ref s) => self.eval_stateful(s).await?,
+                            Value::Stateful(ref s) => self.eval_stateful_read_kind(s, read_kind).await?,
                             other => other,
                         };
                         evaled.push(resolved);
@@ -634,18 +697,18 @@ impl Executor {
                     extra_args,
                     ..
                 } => {
-                    let op_val = self.eval_stateful_node(operator).await?;
+                    let op_val = self.eval_stateful_node(operator, read_kind).await?;
                     let operator_inner = match op_val.elide_lvalue() {
                         Value::Operator(op) => op,
                         other => {
-                            return Err(ExecutorError::type_error("operator", other.type_name()))
+                            return Err(ExecutorError::type_error("operator", other.type_name()));
                         }
                     };
 
                     let operand_val = {
                         let v = operand.borrow().clone().elide_lvalue();
                         match v {
-                            Value::Stateful(ref s) => self.eval_stateful(s).await?,
+                            Value::Stateful(ref s) => self.eval_stateful_read_kind(s, read_kind).await?,
                             other => other,
                         }
                     };
@@ -666,35 +729,8 @@ impl Executor {
                     let (_, modified) = extract_operator_result(raw)?;
                     self.resolve_live_value(modified).await
                 }
-                StatefulNode::BinaryOp { lhs, rhs, op } => {
-                    let lhs_val = self.resolve_stateful_rc(lhs).await?;
-                    let rhs_val = self.resolve_stateful_rc(rhs).await?;
-                    eval_binary(&lhs_val, &rhs_val, *op).map_err(Into::into)
-                }
-                StatefulNode::UnaryNeg(val_rc) => {
-                    let val = self.resolve_stateful_rc(val_rc).await?;
-                    self.exec_negate(val).await
-                }
-                StatefulNode::Not(val_rc) => {
-                    let val = self.resolve_stateful_rc(val_rc).await?;
-                    val.check_truthy().map(|truthy| Value::Integer(!truthy as i64))
-                }
-                StatefulNode::Subscript { base, index } => {
-                    let base_val = self.resolve_stateful_rc(base).await?;
-                    let index_val = self.resolve_stateful_rc(index).await?;
-                    eval_subscript(base_val, index_val)
-                }
             }
         })
-    }
-
-    /// resolve an RcValue cell, evaluating stateful values if needed
-    async fn resolve_stateful_rc(&mut self, rc: &RcValue) -> Result<Value, ExecutorError> {
-        let val = rc.borrow().clone().elide_lvalue();
-        match val {
-            Value::Stateful(ref s) => self.eval_stateful(s).await,
-            other => Ok(other),
-        }
     }
 
     /// resolve an InvokedFunction/InvokedOperator to its live concrete value.
@@ -704,33 +740,6 @@ impl Executor {
             Value::InvokedOperator(inv) => InvokedOperator::value(&inv, self).await,
             other => Ok(other),
         }
-    }
-}
-
-fn eval_subscript(base: Value, index: Value) -> Result<Value, ExecutorError> {
-    match base {
-        Value::List(list) => {
-            let Value::Integer(idx) = index else {
-                return Err(ExecutorError::type_error("int", index.type_name()));
-            };
-            let idx = idx as usize;
-            list.elements
-                .get(idx)
-                .map(|rc| rc.borrow().clone())
-                .ok_or(ExecutorError::IndexOutOfBounds { index: idx, len: list.elements.len() })
-        }
-        Value::Map(map) => {
-            let key = HashableKey::try_from_value(&index)?;
-            Ok(map.get(&key).map(|rc| rc.borrow().clone()).unwrap_or(Value::Nil))
-        }
-        Value::String(s) => {
-            let Value::Integer(idx) = index else {
-                return Err(ExecutorError::type_error("int", index.type_name()));
-            };
-            let ch = s.chars().nth(idx as usize).unwrap_or('\0');
-            Ok(Value::String(ch.to_string()))
-        }
-        other => Err(ExecutorError::CannotSubscript(other.type_name())),
     }
 }
 
