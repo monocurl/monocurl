@@ -62,7 +62,7 @@ fn read_list(
         .elide_lvalue_leader_rec()
     {
         Value::List(list) => list
-            .elements
+            .elements()
             .iter()
             .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
                 Value::Float(f) => Ok(f),
@@ -427,13 +427,11 @@ pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
         u[2] * v[0] - u[0] * v[2],
         u[0] * v[1] - u[1] * v[0],
     ];
-    Ok(Value::List(std::rc::Rc::new(List {
-        elements: smallvec![
+    Ok(Value::List(std::rc::Rc::new(List::new_with(smallvec![
             VRc::new(Value::Float(out[0])),
             VRc::new(Value::Float(out[1])),
             VRc::new(Value::Float(out[2])),
-        ],
-    })))
+        ]))))
 }
 
 // ── interpolation ────────────────────────────────────────────────────────────

@@ -40,9 +40,9 @@ fn read_int_flag(
 }
 
 fn value_list(values: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(Rc::new(List {
-        elements: values.into_iter().map(VRc::new).collect(),
-    }))
+    Value::List(Rc::new(List::new_with(
+        values.into_iter().map(VRc::new).collect(),
+    )))
 }
 
 fn tagged_map(

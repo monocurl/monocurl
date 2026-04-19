@@ -91,9 +91,9 @@ impl<'a> Iterator for MeshTreeIter<'a> {
 }
 
 fn list_value(values: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(Rc::new(List {
-        elements: values.into_iter().map(VRc::new).collect(),
-    }))
+    Value::List(Rc::new(List::new_with(
+        values.into_iter().map(VRc::new).collect(),
+    )))
 }
 
 fn float_to_value(value: f64) -> Value {
@@ -202,9 +202,9 @@ fn read_float3(
         .clone()
         .elide_lvalue_leader_rec()
     {
-        Value::List(list) if list.elements.len() == 3 => {
+        Value::List(list) if list.elements().len() == 3 => {
             let mut components = [0.0; 3];
-            for (slot, key) in components.iter_mut().zip(&list.elements) {
+            for (slot, key) in components.iter_mut().zip(list.elements().iter()) {
                 *slot = match with_heap(|h| h.get(key.key()).clone()) {
                     Value::Integer(n) => n as f32,
                     Value::Float(f) => f as f32,
@@ -222,7 +222,7 @@ fn read_float3(
         Value::List(list) => Err(ExecutorError::Other(format!(
             "{}: expected 3-vector, got list of length {}",
             name,
-            list.elements.len()
+            list.elements().len()
         ))),
         other => Err(ExecutorError::type_error_for(
             "3-vector",
@@ -245,9 +245,9 @@ fn read_float4(
         .clone()
         .elide_lvalue_leader_rec()
     {
-        Value::List(list) if list.elements.len() == 4 => {
+        Value::List(list) if list.elements().len() == 4 => {
             let mut components = [0.0; 4];
-            for (slot, key) in components.iter_mut().zip(&list.elements) {
+            for (slot, key) in components.iter_mut().zip(list.elements().iter()) {
                 *slot = match with_heap(|h| h.get(key.key()).clone()) {
                     Value::Integer(n) => n as f32,
                     Value::Float(f) => f as f32,
@@ -265,7 +265,7 @@ fn read_float4(
         Value::List(list) => Err(ExecutorError::Other(format!(
             "{}: expected 4-vector, got list of length {}",
             name,
-            list.elements.len()
+            list.elements().len()
         ))),
         other => Err(ExecutorError::type_error_for(
             "4-vector",
@@ -285,8 +285,8 @@ fn read_mesh_tree<'a>(
         match value {
             Value::Mesh(arc) => Ok(MeshTree::Mesh(arc)),
             Value::List(list) => {
-                let mut children = Vec::with_capacity(list.elements.len());
-                for key in &list.elements {
+                let mut children = Vec::with_capacity(list.elements().len());
+                for key in list.elements() {
                     let val = with_heap(|h| h.get(key.key()).clone());
                     children.push(read_mesh_tree(executor, val, name).await?);
                 }
@@ -328,7 +328,7 @@ fn read_tag_filter(
         Value::Lambda(lambda) => Ok(TagFilter::Predicate(lambda)),
         value => Ok(TagFilter::Exact(match value.elide_lvalue_leader_rec() {
             Value::List(list) => list
-                .elements
+                .elements()
                 .iter()
                 .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
                     Value::Integer(tag) => Ok(tag as isize),

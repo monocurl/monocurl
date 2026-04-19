@@ -9,9 +9,9 @@ use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
     error::RuntimeError,
     executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
-    heap::{heap_alloc, with_heap},
+    heap::{VRc, with_heap},
     time::Timestamp,
-    value::Value,
+    value::{Value, container::List},
 };
 use futures::{
     StreamExt,
@@ -118,9 +118,9 @@ impl ExecutionService {
             Value::Complex { re, im } => ParameterValue::Complex { re, im },
             Value::List(list) => {
                 let ints = list
-                    .elements
+                    .elements()
                     .iter()
-                    .map(|&key| match with_heap(|h| h.get(key).clone()) {
+                    .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
                         Value::Integer(n) => Some(n),
                         _ => None,
                     })
@@ -130,9 +130,9 @@ impl ExecutionService {
                 }
 
                 let floats = list
-                    .elements
+                    .elements()
                     .iter()
-                    .map(|&key| match with_heap(|h| h.get(key).clone()) {
+                    .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
                         Value::Integer(n) => Some(n as f64),
                         Value::Float(f) => Some(f),
                         _ => None,
@@ -148,21 +148,21 @@ impl ExecutionService {
         Some(match value {
             ParameterValue::Int(n) => Value::Integer(*n),
             ParameterValue::VectorInt(values) => {
-                Value::List(std::rc::Rc::new(executor::value::container::List {
-                    elements: values
+                Value::List(std::rc::Rc::new(List::new_with(
+                    values
                         .iter()
-                        .map(|&value| heap_alloc(Value::Integer(value)))
+                        .map(|&value| VRc::new(Value::Integer(value)))
                         .collect(),
-                }))
+                )))
             }
             ParameterValue::Float(f) => Value::Float(*f),
             ParameterValue::VectorFloat(values) => {
-                Value::List(std::rc::Rc::new(executor::value::container::List {
-                    elements: values
+                Value::List(std::rc::Rc::new(List::new_with(
+                    values
                         .iter()
-                        .map(|&value| heap_alloc(Value::Float(value)))
-                        .collect(),
-                }))
+                        .map(|&value| VRc::new(Value::Float(value)))
+                        .collect()
+                )))
             }
             ParameterValue::Complex { re, im } => Value::Complex { re: *re, im: *im },
             ParameterValue::Other => return None,

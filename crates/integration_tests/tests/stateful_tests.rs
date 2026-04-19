@@ -462,7 +462,7 @@ fn test_mesh_list_copy_no_alias() {
         .unwrap()
         .target
     {
-        Value::List(list) => match with_heap(|h| h.get(list.elements[0].key()).clone()) {
+        Value::List(list) => match with_heap(|h| h.get(list.elements()[0].key()).clone()) {
             Value::Integer(n) => assert_eq!(n, 1, "mesh list element 0 should be unchanged"),
             other => panic!("expected integer, got {}", other.type_name()),
         },

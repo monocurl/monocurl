@@ -71,12 +71,12 @@ impl ExecResult {
         self.assert_ok();
         match &self.value {
             Some(Value::List(list)) => {
-                assert_eq!(list.elements.len(), expected.len(), "list length mismatch");
+                assert_eq!(list.elements().len(), expected.len(), "list length mismatch");
 
-                for (actual, expected) in list.elements.iter().zip(expected.iter()) {
+                for (actual, expected) in list.elements().iter().zip(expected.iter()) {
                     match with_heap(|h| h.get(actual.key()).clone()) {
                         Value::Float(f) => assert!(
-                            (f - expected).abs() < 1e-9,
+                            (f - *expected).abs() < 1e-9,
                             "float mismatch: expected {}, got {}",
                             expected,
                             f
@@ -96,9 +96,9 @@ impl ExecResult {
         self.assert_ok();
         match &self.value {
             Some(Value::List(list)) => {
-                assert_eq!(list.elements.len(), expected.len(), "list length mismatch");
+                assert_eq!(list.elements().len(), expected.len(), "list length mismatch");
 
-                for (actual, expected) in list.elements.iter().zip(expected.iter()) {
+                for (actual, expected) in list.elements().iter().zip(expected.iter()) {
                     match with_heap(|h| h.get(actual.key()).clone()) {
                         Value::Integer(n) => {
                             assert_eq!(n, *expected, "integer mismatch");

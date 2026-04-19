@@ -12,7 +12,7 @@ use super::Value;
 #[derive(Clone)]
 /// list whose elements are heap-allocated values accessed via owning heap refs.
 pub struct List {
-    pub elements: SmallVec<[VRc; 4]>,
+    pub(crate) elements: SmallVec<[VRc; 4]>,
 }
 
 impl List {
@@ -20,6 +20,16 @@ impl List {
         Self {
             elements: SmallVec::new(),
         }
+    }
+
+    pub fn new_with(elements: SmallVec<[VRc; 4]>) -> Self {
+        Self {
+            elements
+        }
+    }
+
+    pub fn elements(&self) -> &[VRc] {
+        &self.elements
     }
 
     pub fn len(&self) -> usize {
