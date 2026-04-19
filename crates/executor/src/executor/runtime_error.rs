@@ -2,6 +2,7 @@ use structs::text::Span8;
 
 use crate::{
     error::{ExecutorError, RuntimeCallFrame, RuntimeError},
+    state::ExecutionState,
     value::InstructionPointer,
 };
 
@@ -11,20 +12,30 @@ const RUNTIME_ERROR_CALLSTACK_LIMIT: usize = 5;
 
 impl Executor {
     pub fn record_runtime_error(&mut self, error: ExecutorError) {
-        let runtime_error = self.build_runtime_error(error);
+        let runtime_error = self.build_runtime_error_at_stack(error, self.state.last_stack_idx);
+        self.state.error(runtime_error);
+    }
+
+    pub fn record_runtime_error_at_root(&mut self, error: ExecutorError) {
+        let runtime_error = self.build_runtime_error_at_stack(error, ExecutionState::ROOT_STACK_ID);
         self.state.error(runtime_error);
     }
 
     pub(crate) fn build_runtime_error(&self, error: crate::error::ExecutorError) -> RuntimeError {
-        let stack_idx = self.state.last_stack_idx;
+        self.build_runtime_error_at_stack(error, self.state.last_stack_idx)
+    }
+
+    fn build_runtime_error_at_stack(
+        &self,
+        error: crate::error::ExecutorError,
+        stack_idx: usize,
+    ) -> RuntimeError {
         let mut fallback_span = self.current_instruction_span(stack_idx);
         let mut root_span = None;
         let mut callstack = Vec::new();
 
         for frame in self.recover_call_stack(stack_idx) {
-            let span = self
-                .span_for_next_ip(frame.next_ip)
-                .unwrap_or_else(|| self.current_instruction_span(frame.stack_idx));
+            let span = self.best_effort_span(frame.stack_idx, frame.next_ip);
             fallback_span = span.clone();
             if root_span.is_none()
                 && self.bytecode.sections[frame.next_ip.0 as usize]
@@ -50,15 +61,25 @@ impl Executor {
 
     pub(super) fn current_instruction_span(&self, stack_idx: usize) -> Span8 {
         let ip = self.state.stack_ip(stack_idx);
-        self.span_for_next_ip(ip)
-            .unwrap_or_else(|| self.annotation_span(ip))
+        self.best_effort_span(stack_idx, ip)
     }
 
-    fn annotation_span(&self, ip: InstructionPointer) -> Span8 {
-        let raw = self.bytecode.sections[ip.0 as usize].annotations[ip.1 as usize]
-            .source_loc
-            .clone();
-        nondegenerate_span(raw)
+    fn best_effort_span(&self, _stack_idx: usize, ip: InstructionPointer) -> Span8 {
+        self.span_for_next_ip(ip)
+            .or_else(|| self.annotation_span(ip))
+            .or_else(|| self.first_root_annotation_span())
+            .unwrap_or_else(|| nondegenerate_span(0..1))
+    }
+
+    fn annotation_span(&self, ip: InstructionPointer) -> Option<Span8> {
+        let section = self.bytecode.sections.get(ip.0 as usize)?;
+        let annotations = &section.annotations;
+        if annotations.is_empty() {
+            return None;
+        }
+
+        let idx = (ip.1 as usize).min(annotations.len().saturating_sub(1));
+        Some(nondegenerate_span(annotations[idx].source_loc.clone()))
     }
 
     fn span_for_next_ip(&self, next_ip: InstructionPointer) -> Option<Span8> {
@@ -69,6 +90,15 @@ impl Executor {
             .source_loc
             .clone();
         Some(nondegenerate_span(raw))
+    }
+
+    fn first_root_annotation_span(&self) -> Option<Span8> {
+        self.bytecode
+            .sections
+            .iter()
+            .find(|section| section.flags.is_root_module)
+            .and_then(|section| section.annotations.first())
+            .map(|annotation| nondegenerate_span(annotation.source_loc.clone()))
     }
 
     fn recover_call_stack(&self, stack_idx: usize) -> std::vec::IntoIter<RecoveredFrame> {

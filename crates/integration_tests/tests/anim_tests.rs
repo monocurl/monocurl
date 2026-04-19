@@ -727,6 +727,57 @@ fn test_set_syncs_only_explicit_candidates() {
 }
 
 #[test]
+fn test_set_has_minimum_positive_duration() {
+    let r = run_anim_with_stdlib(
+        "
+        param x = 0
+        x = 10
+        play Set([&x])
+    ",
+    );
+    r.assert_ok()
+        .assert_slide_time_approx(f64::MIN_POSITIVE, f64::MIN_POSITIVE);
+}
+
+#[test]
+fn test_set_slide_can_seek_back_to_zero_after_finishing() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let (mut executor, user_slide_count) = match build_anim_executor(
+        &[(
+            "
+            param x = 0
+            x = 10
+            play Set([&x])
+        ",
+            SectionType::Slide,
+        )],
+        &[anim_mcl],
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    smol::block_on(async {
+        let end = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(end).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+
+        let start = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0));
+        match executor.seek_to(start).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+    });
+
+    let r = collect_anim_result(executor, user_slide_count, vec![]);
+    r.assert_ok()
+        .assert_slide_time_approx(0.0, f64::MIN_POSITIVE);
+    r.param_leaders()[2].assert_target_int(10).assert_current_int(0);
+}
+
+#[test]
 fn test_lerp_auto_deduces_detached_followers() {
     let r = run_anim_with_stdlib_at(
         "

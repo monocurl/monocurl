@@ -12,6 +12,15 @@ use crate::{
 use super::{ExecSingle, Executor, SeekPrimitiveResult, fill_defaults};
 
 impl Executor {
+    fn primitive_anim_duration(prim: &PrimitiveAnim) -> f64 {
+        let duration = match prim {
+            PrimitiveAnim::Lerp { time, .. } => *time,
+            PrimitiveAnim::Set { .. } => 0.0,
+            PrimitiveAnim::Wait { time } => *time,
+        };
+        duration.max(f64::MIN_POSITIVE)
+    }
+
     pub async fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
 
@@ -456,11 +465,7 @@ impl Executor {
         prim: PrimitiveAnim,
         reserved: &[VRc],
     ) -> Result<BakedPrimitiveAnim, ExecutorError> {
-        let duration = match &prim {
-            PrimitiveAnim::Lerp { time, .. } => *time,
-            PrimitiveAnim::Set { .. } => 0.0,
-            PrimitiveAnim::Wait { time } => *time,
-        };
+        let duration = Self::primitive_anim_duration(&prim);
 
         let start = self.state.timestamp.time;
         let stack_id = self.state.stack_id(parent_stack_idx);

@@ -211,7 +211,7 @@ pub(super) fn read_float3(
             Ok(Float3::from_array(components))
         }
         Value::List(list) => Err(ExecutorError::Other(format!(
-            "{}: expected 3-vector, got list of length {}",
+            "{}: expected list of length 3, got list of length {}",
             name,
             list.elements().len()
         ))),
@@ -362,7 +362,7 @@ pub(super) fn read_float3_list(
                     Ok(Float3::from_array(components))
                 }
                 other => Err(ExecutorError::Other(format!(
-                    "{}[{}]: expected 3-vector, got {}",
+                    "{}[{}]: expected list of length 3, got {}",
                     name,
                     i,
                     other.type_name()
@@ -403,7 +403,7 @@ pub(super) fn read_float4(
             Ok(Float4::from_array(components))
         }
         Value::List(list) => Err(ExecutorError::Other(format!(
-            "{}: expected 4-vector, got list of length {}",
+            "{}: expected list of length 4, got list of length {}",
             name,
             list.elements().len()
         ))),
