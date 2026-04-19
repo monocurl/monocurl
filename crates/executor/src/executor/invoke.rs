@@ -305,7 +305,6 @@ impl Executor {
         }
 
         if stateful {
-            println!("Operator Stateful Invoke");
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
@@ -329,9 +328,12 @@ impl Executor {
                     rc_value(a)
                 })
                 .collect();
-            let read_kind = std::iter::once(&operand_rc)
-                .chain(extra_arg_rcs.iter())
-                .find_map(|value| match &*value.borrow() {
+            let read_kind = std::iter::once(operand_rc.borrow().clone())
+                .chain(
+                    extra_arg_rcs.iter()
+                        .map(|arg| arg.borrow().force_elide_lvalue())
+                )
+                .find_map(|value| match value {
                     Value::Stateful(stateful) => Some(stateful.read_kind),
                     _ => None,
                 })

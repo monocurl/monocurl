@@ -1621,6 +1621,13 @@ impl Compiler {
 
         match &l.body.1 {
             LambdaBody::Inline(expr) => {
+                if is_stateful(expr) {
+                    self.error(
+                        span.clone(),
+                        "cannot return a stateful value from an inline lambda",
+                    );
+                }
+
                 self.compile_val(expr, &l.body.0);
                 let below = self.stack_depth() as i32 - 1;
                 self.emit(
