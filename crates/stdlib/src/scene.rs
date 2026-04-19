@@ -3,10 +3,10 @@ use std::rc::Rc;
 use executor::{
     error::ExecutorError,
     executor::Executor,
+    heap::VRc,
     value::{
         Value,
         container::{HashableKey, List, Map},
-        rc_value,
     },
 };
 use stdlib_macros::stdlib_func;
@@ -41,7 +41,7 @@ fn read_int_flag(
 
 fn value_list(values: impl IntoIterator<Item = Value>) -> Value {
     Value::List(Rc::new(List {
-        elements: values.into_iter().map(rc_value).collect(),
+        elements: values.into_iter().map(VRc::new).collect(),
     }))
 }
 
@@ -52,10 +52,10 @@ fn tagged_map(
     let mut map = Map::new();
     map.insert(
         HashableKey::String("kind".to_string()),
-        rc_value(Value::String(kind.to_string())),
+        VRc::new(Value::String(kind.to_string())),
     );
     for (key, value) in fields {
-        map.insert(HashableKey::String(key.to_string()), rc_value(value));
+        map.insert(HashableKey::String(key.to_string()), VRc::new(value));
     }
     Value::Map(Rc::new(map))
 }

@@ -3,7 +3,8 @@ use std::rc::Rc;
 use executor::{
     error::ExecutorError,
     executor::Executor,
-    value::{Value, container::List, rc_value},
+    heap::VRc,
+    value::{Value, container::List},
 };
 use smallvec::smallvec;
 use stdlib_macros::stdlib_func;
@@ -33,10 +34,10 @@ pub async fn hsv(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 
     Ok(Value::List(Rc::new(List {
         elements: smallvec![
-            rc_value(Value::Float(r + m)),
-            rc_value(Value::Float(g + m)),
-            rc_value(Value::Float(b + m)),
-            rc_value(Value::Float(a)),
+            VRc::new(Value::Float(r + m)),
+            VRc::new(Value::Float(g + m)),
+            VRc::new(Value::Float(b + m)),
+            VRc::new(Value::Float(a)),
         ],
     })))
 }

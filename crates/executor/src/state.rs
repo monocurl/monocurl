@@ -5,50 +5,33 @@ use structs::text::Span8;
 
 use crate::{
     error::RuntimeError,
+    heap::{HeapKey, VRc, heap_alloc, with_heap, heap_replace},
     time::Timestamp,
     value::{
-        InstructionPointer, RcValue, Value, container::List, leader::Leader,
-        primitive_anim::PrimitiveAnim, rc_value,
+        InstructionPointer, Value, container::List, leader::Leader, primitive_anim::PrimitiveAnim,
     },
 };
 
 /// a single execution context (analogous to a thread / coroutine).
-/// each anim block spawns a new execution stack.
 #[derive(Clone)]
 pub struct ExecutionStack {
-    /// unique id for tracking which stack last touched a leader
     pub stack_id: usize,
-    /// operand / variable stack
     pub var_stack: Vec<Value>,
-    /// current instruction pointer
     pub ip: InstructionPointer,
-    /// call return addresses (pushed on LambdaInvoke, popped on Return)
     pub call_stack: Vec<InstructionPointer>,
-    /// buffered label string-pool indices for labeled invocations
     pub label_buffer: SmallVec<[u32; 8]>,
-    /// set by comparison instructions, consumed by ConditionalJump
     pub conditional_flag: bool,
-    /// number of child execution stacks (or primitive animations) still running
     pub active_child_count: usize,
-    /// index of the parent execution stack (None for the root)
     pub parent_idx: Option<usize>,
-    /// stack to use when reconstructing runtime call chains
     pub trace_parent_idx: Option<usize>,
 }
 
-/// metadata retained after a stack finishes.
-/// keeps lineage and debugging context without preserving locals.
 #[derive(Clone)]
 pub struct ExecutionStackGhost {
-    /// unique id for tracking which stack last touched a leader
     pub stack_id: usize,
-    /// last instruction pointer reached by the stack
     pub ip: InstructionPointer,
-    /// preserved for runtime error call stacks
     pub call_stack: Vec<InstructionPointer>,
-    /// index of the parent execution stack (None for the root)
     pub parent_idx: Option<usize>,
-    /// stack to use when reconstructing runtime call chains
     pub trace_parent_idx: Option<usize>,
 }
 
@@ -90,9 +73,6 @@ impl ExecutionStack {
         self.var_stack.last().expect("stack underflow")
     }
 
-    /// read a value at an offset from the current stack top.
-    /// stack_delta is typically negative (pointing below TOS).
-    /// the compiler computes delta as (target_position - current_stack_depth).
     pub fn read_at(&self, stack_delta: i32) -> &Value {
         let idx = (self.var_stack.len() as i32 + stack_delta) as usize;
         &self.var_stack[idx]
@@ -159,42 +139,38 @@ impl ExecutionStackSlot {
     }
 }
 
-/// a primitive animation that has been "baked" with timing info
 #[derive(Clone)]
 pub struct BakedPrimitiveAnim {
     pub anim_id: usize,
     pub anim: PrimitiveAnim,
     pub start_time: f64,
     pub end_time: f64,
-    pub targets: Vec<RcValue>,
+    /// owning VRcs to leader cell slots
+    pub targets: Vec<VRc>,
     pub start_followers: Vec<Value>,
-    /// which execution stack spawned this (to resume when finished)
     pub parent_stack_idx: usize,
-    /// which stack id for leader tracking
     pub stack_id: usize,
     pub span: Span8,
 }
 
-/// a leader-follower pair entry for quick lookup
 #[derive(Clone)]
 pub struct LeaderEntry {
-    /// declared variable name
     pub name: String,
-    /// the RcValue containing Value::Leader
-    pub leader_cell_rc: RcValue,
-    /// the code-visible leader value
-    pub leader_value_rc: RcValue,
-    /// the live follower value
-    pub follower_value_rc: RcValue,
+    /// owning VRc to the slot containing Value::Leader
+    pub leader_cell: VRc,
+    /// non-owning HeapKey for the leader value slot (owned by Leader inside leader_cell)
+    pub leader_value: HeapKey,
+    /// non-owning HeapKey for the follower value slot (owned by Leader inside leader_cell)
+    pub follower_value: HeapKey,
     pub kind: LeaderKind,
 }
 
 #[derive(Clone)]
 pub struct ActiveParam {
     pub name: String,
-    pub leader_cell_rc: RcValue,
-    pub leader_value_rc: RcValue,
-    pub follower_value_rc: RcValue,
+    pub leader_cell: VRc,
+    pub leader_value: HeapKey,
+    pub follower_value: HeapKey,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -203,52 +179,33 @@ pub enum LeaderKind {
     Param,
 }
 
-/// max sum of call_stack depths across all active stacks before we report overflow.
 pub const MAX_CALL_DEPTH: usize = 2000;
-// max number of concurrent execution heads
 pub const MAX_EXECUTION_HEADS: usize = 1000;
 
 #[derive(Clone)]
 pub struct ExecutionState {
     pub timestamp: Timestamp,
-    /// playback time budget that still needs to be consumed after resuming heads
     pub pending_playback_time: f64,
-    /// stack used to recover spans/callstack for the latest runtime error
     pub last_stack_idx: usize,
 
     global_stack_counter: usize,
     global_primitive_anim_counter: usize,
-    // execution stacks that have not finished yet
     pub alive_stack_count: usize,
-    /// execution stacks always appended, never reused.
-    /// finished stacks become ghosts so ancestry still exists.
     pub execution_stacks: Vec<ExecutionStackSlot>,
-    /// indices of currently active execution heads (stacks awaiting a Play)
     pub execution_heads: BTreeSet<usize>,
-    /// currently running primitive animations
     pub primitive_anims: Vec<BakedPrimitiveAnim>,
 
-    /// all leader-follower pairs registered during execution
     pub leaders: Vec<LeaderEntry>,
-    /// all active parameters, kept explicitly for snapshotting and UI updates
     pub active_params: Vec<ActiveParam>,
 
-    /// strong refs for force_ephemeral lvalues (captured variables that may outlive
-    /// their var_stack slot). cleared at section boundaries.
-    pub ephemeral_pool: Vec<RcValue>,
+    /// strong VRc refs for stateful args; keeps them alive across the section
+    pub ephemeral_pool: Vec<VRc>,
 
-    /// accumulated error messages
     pub errors: Vec<RuntimeError>,
 
-    /// values captured from the top of root execution stacks when they finish.
-    /// used primarily for testing: the final TOS of each completed root head
-    /// is pushed here so callers can inspect results after execution.
     #[cfg(feature = "capture_tos")]
     pub captured_output: Vec<Value>,
 
-    /// sum of call_stack depths across all active stacks.
-    /// incremented on every lambda call, decremented on every return.
-    /// checked before each invocation to detect stack overflows.
     pub call_depth: usize,
 }
 
@@ -281,14 +238,11 @@ impl ExecutionState {
 
         let mut heads = BTreeSet::new();
         heads.insert(stack_idx);
-
         ret.execution_heads = heads;
 
         ret
     }
 
-    /// allocate a fresh execution stack and return its index.
-    /// always appends — indices are never reused.
     pub fn alloc_stack(
         &mut self,
         ip: InstructionPointer,
@@ -315,7 +269,6 @@ impl ExecutionState {
         id
     }
 
-    /// free an execution stack slot
     pub fn free_stack(&mut self, idx: usize) {
         let ghost = match &mut self.execution_stacks[idx] {
             ExecutionStackSlot::Alive(stack) => ExecutionStackGhost {
@@ -379,13 +332,13 @@ impl ExecutionState {
         false
     }
 
-    /// promote TOS to a heap variable: wrap in RcValue, keep the strong ref on the
+    /// promote TOS to a heap variable: wrap in VRc, keep the strong ref on the
     /// var_stack (as Value::Lvalue). the push_lvalue instruction will create weak refs.
     pub fn promote_to_var(&mut self, stack_idx: usize) {
         let stack = self.stack_mut(stack_idx);
         let val = stack.pop();
-        let rc = rc_value(val);
-        stack.push(Value::Lvalue(rc));
+        let vrc = VRc::new(val);
+        stack.push(Value::Lvalue(vrc));
     }
 
     /// promote TOS to a leader-follower variable (mesh/param).
@@ -393,67 +346,63 @@ impl ExecutionState {
         let stack = self.stack_mut(stack_idx);
         let init_val = stack.pop();
 
-        let leader_rc = rc_value(init_val.clone());
-        // mesh follower starts as []; state/param follower starts as initial value
+        let leader_key = heap_alloc(init_val.clone());
         let follower_init = match kind {
             LeaderKind::Mesh => Value::List(Rc::new(List::new())),
             LeaderKind::Param => init_val,
         };
-        let follower_rc = rc_value(follower_init);
+        let follower_key = heap_alloc(follower_init);
 
         let leader_val = Value::Leader(Leader {
             kind,
-            // meshes implicitly modified even upon assignment
             last_modified_stack: if kind == LeaderKind::Mesh {
                 Some(self.stack_id(stack_idx))
             } else {
                 None
             },
             locked_by_anim: None,
-            leader_rc: leader_rc.clone(),
+            leader_rc: VRc::from_retained(leader_key),
             leader_version: 0,
-            follower_rc: follower_rc.clone(),
+            follower_rc: VRc::from_retained(follower_key),
             follower_version: 0,
         });
-        let leader_cell = rc_value(leader_val);
+        let cell_vrc = VRc::new(leader_val);
+        let cell_key = cell_vrc.key();
 
         self.leaders.push(LeaderEntry {
             name: name.clone(),
-            leader_cell_rc: leader_cell.clone(),
-            leader_value_rc: leader_rc.clone(),
-            follower_value_rc: follower_rc.clone(),
+            leader_cell: cell_vrc.clone(),
+            leader_value: leader_key,
+            follower_value: follower_key,
             kind,
         });
 
         if kind == LeaderKind::Param {
             self.active_params.push(ActiveParam {
                 name,
-                leader_cell_rc: leader_cell.clone(),
-                leader_value_rc: leader_rc,
-                follower_value_rc: follower_rc,
+                leader_cell: cell_vrc.clone(),
+                leader_value: leader_key,
+                follower_value: follower_key,
             });
         }
 
-        self.stack_mut(stack_idx).push(Value::Lvalue(leader_cell));
+        self.stack_mut(stack_idx).push(Value::Lvalue(cell_vrc));
     }
 
     pub fn sync_all_leaders(&self) {
         for entry in &self.leaders {
-            let mut cell = entry.leader_cell_rc.borrow_mut();
-            let Value::Leader(Leader {
-                last_modified_stack,
-                leader_rc,
-                follower_rc,
-                follower_version,
-                ..
-            }) = &mut *cell
-            else {
-                continue;
-            };
-            let value = leader_rc.borrow().to_follower_stateful();
-            *follower_rc.borrow_mut() = value;
-            *last_modified_stack = None;
-            *follower_version += 1;
+            let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
+            if let Value::Leader(leader) = cell_val {
+                let value = with_heap(|h| h.get(leader.leader_rc.key()).clone()).to_follower_stateful();
+                heap_replace(leader.follower_rc.key(), value);
+                // update last_modified_stack and follower_version in the slot
+                crate::heap::with_heap_mut(|h| {
+                    if let Value::Leader(l) = &mut *h.get_mut(entry.leader_cell.key()) {
+                        l.last_modified_stack = None;
+                        l.follower_version += 1;
+                    }
+                });
+            }
         }
     }
 
@@ -466,11 +415,11 @@ impl ExecutionState {
     }
 
     pub fn leader_value(leader: &Leader) -> Value {
-        leader.leader_rc.borrow().clone()
+        with_heap(|h| h.get(leader.leader_rc.key()).clone())
     }
 
     pub fn follower_value(leader: &Leader) -> Value {
-        leader.follower_rc.borrow().clone()
+        with_heap(|h| h.get(leader.follower_rc.key()).clone())
     }
 }
 
@@ -495,14 +444,18 @@ mod tests {
         assert_eq!(state.active_params.len(), 1);
         assert_eq!(state.leaders[0].name, "speed");
         assert_eq!(state.active_params[0].name, "speed");
-        assert!(Rc::ptr_eq(
-            &state.leaders[0].leader_value_rc,
-            &state.active_params[0].leader_value_rc
-        ));
-        assert!(Rc::ptr_eq(
-            &state.leaders[0].follower_value_rc,
-            &state.active_params[0].follower_value_rc
-        ));
+        assert_eq!(
+            state.leaders[0].leader_cell.key(),
+            state.active_params[0].leader_cell.key()
+        );
+        assert_eq!(
+            state.leaders[0].leader_value,
+            state.active_params[0].leader_value
+        );
+        assert_eq!(
+            state.leaders[0].follower_value,
+            state.active_params[0].follower_value
+        );
     }
 
     #[test]

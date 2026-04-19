@@ -3,7 +3,7 @@
 // stateful operators/subscripts, caching, error cases, and interaction with animations.
 
 use anim_tests::{LeaderInfo, run_anim, run_anim_with_stdlib, run_anim_with_stdlib_at};
-use executor::value::Value;
+use executor::{heap::with_heap, value::Value};
 
 // anim_tests helpers are in a sibling test file; re-export by including it
 #[path = "anim_tests.rs"]
@@ -455,8 +455,8 @@ fn test_mesh_list_copy_no_alias() {
     // x's leader value should still have 1 at index 0
     match &r.leaders.iter().find(|l| l.kind == executor::state::LeaderKind::Mesh).unwrap().target {
         Value::List(list) => {
-            match &*list.elements[0].borrow() {
-                Value::Integer(n) => assert_eq!(*n, 1, "mesh list element 0 should be unchanged"),
+            match with_heap(|h| h.get(list.elements[0].key()).clone()) {
+                Value::Integer(n) => assert_eq!(n, 1, "mesh list element 0 should be unchanged"),
                 other => panic!("expected integer, got {}", other.type_name()),
             }
         }

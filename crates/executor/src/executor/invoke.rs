@@ -1,17 +1,18 @@
-use std::{cell::Cell, rc::Rc};
+use std::cell::Cell;
+use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
+    heap::{VRc, heap_alloc, with_heap},
     state::MAX_CALL_DEPTH,
     value::{
-        RcValue, Value,
+        Value,
         anim_block::AnimBlock,
-        invoked_function::InvokedFunction,
-        invoked_operator::{InvokedOperator, build_invoked_operator, extract_operator_result},
+        invoked_function::{InvokedFunction, make_invoked_function},
+        invoked_operator::{InvokedOperator, extract_operator_result, make_invoked_operator},
         lambda::Lambda,
-        rc_value,
         stateful::{
-            Stateful, StatefulNode, StatefulReadKind, collect_roots_from_value,
+            StatefulNode, StatefulReadKind, collect_roots_from_value, make_stateful,
             value_into_stateful_node,
         },
     },
@@ -43,7 +44,7 @@ impl Executor {
         let defaults: SmallVec<[Value; 1]> = stack.var_stack
             [start + capture_count as usize..stack_len]
             .iter()
-            .map(|def| Value::Lvalue(rc_value(def.clone())))
+            .map(|def| Value::Lvalue(VRc::new(def.clone())))
             .collect();
         stack.pop_n(total_pop);
 
@@ -89,14 +90,14 @@ impl Executor {
     ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
-        // stack layout: [arg0, arg1, ..., argN-1, lambda]
         let lambda_val = stack.pop().elide_lvalue();
         let lambda = match lambda_val {
-            Value::Lambda(rc) => rc,
+            Value::Lambda(ref rc) => rc.clone(),
             _ => {
-                return ExecSingle::Error(
-                    ExecutorError::type_error("lambda", lambda_val.type_name()),
-                );
+                return ExecSingle::Error(ExecutorError::type_error(
+                    "lambda",
+                    lambda_val.type_name(),
+                ));
             }
         };
 
@@ -104,23 +105,18 @@ impl Executor {
         let max_args = min_args + lambda.defaults.len();
 
         if num_args < min_args as u32 {
-            return ExecSingle::Error(
-                ExecutorError::TooFewArguments {
-                    minimum: min_args,
-                    got: num_args as usize,
-                    operator: false,
-                },
-            );
+            return ExecSingle::Error(ExecutorError::TooFewArguments {
+                minimum: min_args,
+                got: num_args as usize,
+                operator: false,
+            });
         }
-
         if num_args > max_args as u32 {
-            return ExecSingle::Error(
-                ExecutorError::TooManyArguments {
-                    maximum: max_args,
-                    got: num_args as usize,
-                    operator: false,
-                },
-            );
+            return ExecSingle::Error(ExecutorError::TooManyArguments {
+                maximum: max_args,
+                got: num_args as usize,
+                operator: false,
+            });
         }
 
         if stateful {
@@ -137,19 +133,21 @@ impl Executor {
             stack.pop_n(n);
 
             let (func_node, mut roots) = value_into_stateful_node(Value::Lambda(lambda));
-            let arg_rcs: Vec<RcValue> = args
+            let arg_refs: Vec<VRc> = args
                 .into_iter()
                 .map(|a| {
                     collect_roots_from_value(&a, &mut roots);
-                    rc_value(a)
+                    VRc::new(a)
                 })
                 .collect();
-            let read_kind = arg_rcs
+
+            let read_kind = arg_refs
                 .iter()
-                .find_map(|arg| match arg.borrow().force_elide_lvalue() {
-                    Value::Stateful(stateful) => Some(stateful.read_kind),
-                    other => {
-                        println!("Type {:?}", other.type_name());
+                .find_map(|arg_ref| {
+                    let val = with_heap(|h| h.get(arg_ref.key()).clone()).elide_lvalue();
+                    if let Value::Stateful(s) = val {
+                        Some(s.cache.read_kind)
+                    } else {
                         None
                     }
                 })
@@ -157,11 +155,11 @@ impl Executor {
 
             self.state
                 .stack_mut(stack_idx)
-                .push(Value::Stateful(Stateful::new(
+                .push(Value::Stateful(make_stateful(
                     roots,
                     StatefulNode::LabeledCall {
                         func: Box::new(func_node),
-                        args: arg_rcs,
+                        args: arg_refs,
                         labels,
                     },
                     read_kind,
@@ -183,16 +181,15 @@ impl Executor {
                 .await
             {
                 Ok(result_val) => {
-                    let inv = InvokedFunction {
-                        lambda: Box::new(Value::Lambda(lambda)),
-                        arguments: full_args.into(),
+                    let inv = make_invoked_function(
+                        Value::Lambda(lambda),
+                        full_args.into(),
                         labels,
-                        cached_result: Cell::new(Some(Box::new(result_val))),
-                    };
+                        Some(result_val),
+                    );
                     self.state
                         .stack_mut(stack_idx)
-                        .push(Value::InvokedFunction(Rc::new(inv)));
-
+                        .push(Value::InvokedFunction(inv));
                     ExecSingle::Continue
                 }
                 Err(e) => ExecSingle::Error(e),
@@ -212,14 +209,14 @@ impl Executor {
     ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
-        // stack layout: [operand, arg0, ..., argN-1, operator]
         let op_val = stack.pop().elide_lvalue();
         let operator = match op_val {
-            Value::Operator(o) => o,
+            Value::Operator(ref o) => o.clone(),
             _ => {
-                return ExecSingle::Error(
-                    ExecutorError::type_error("operator", op_val.type_name()),
-                );
+                return ExecSingle::Error(ExecutorError::type_error(
+                    "operator",
+                    op_val.type_name(),
+                ));
             }
         };
         let lambda = &operator.0;
@@ -228,23 +225,18 @@ impl Executor {
         let max_args = min_args + lambda.defaults.len();
 
         if num_args + 1 < min_args as u32 {
-            return ExecSingle::Error(
-                ExecutorError::TooFewArguments {
-                    minimum: min_args,
-                    got: num_args as usize + 1,
-                    operator: true,
-                },
-            );
+            return ExecSingle::Error(ExecutorError::TooFewArguments {
+                minimum: min_args,
+                got: num_args as usize + 1,
+                operator: true,
+            });
         }
-
         if num_args + 1 > max_args as u32 {
-            return ExecSingle::Error(
-                ExecutorError::TooManyArguments {
-                    maximum: max_args,
-                    got: num_args as usize + 1,
-                    operator: true,
-                },
-            );
+            return ExecSingle::Error(ExecutorError::TooManyArguments {
+                maximum: max_args,
+                got: num_args as usize + 1,
+                operator: true,
+            });
         }
 
         if stateful {
@@ -263,43 +255,43 @@ impl Executor {
 
             let (op_node, mut roots) = value_into_stateful_node(Value::Operator(operator));
             collect_roots_from_value(&operand, &mut roots);
-            let operand_rc = rc_value(operand);
-            let extra_arg_rcs: Vec<RcValue> = extra_args
+
+            let operand_ref = VRc::new(operand);
+
+            let extra_arg_refs: Vec<VRc> = extra_args
                 .into_iter()
                 .map(|a| {
                     collect_roots_from_value(&a, &mut roots);
-                    rc_value(a)
+                    VRc::new(a)
                 })
                 .collect();
-            let read_kind = std::iter::once(operand_rc.borrow().clone())
-                .chain(
-                    extra_arg_rcs.iter()
-                        .map(|arg| arg.borrow().force_elide_lvalue())
-                )
-                .find_map(|value| match value {
-                    Value::Stateful(stateful) => Some(stateful.read_kind),
-                    _ => None,
+
+            let read_kind = std::iter::once(&operand_ref)
+                .chain(extra_arg_refs.iter())
+                .find_map(|value_ref| {
+                    let val = with_heap(|h| h.get(value_ref.key()).clone()).elide_lvalue();
+                    if let Value::Stateful(s) = val {
+                        Some(s.cache.read_kind)
+                    } else {
+                        None
+                    }
                 })
                 .expect("No stateful argument despite marked stateful invocation");
 
             self.state
                 .stack_mut(stack_idx)
-                .push(Value::Stateful(Stateful::new(
+                .push(Value::Stateful(make_stateful(
                     roots,
                     StatefulNode::LabeledOperatorCall {
                         operator: Box::new(op_node),
-                        operand: operand_rc,
-                        extra_args: extra_arg_rcs,
+                        operand: operand_ref,
+                        extra_args: extra_arg_refs,
                         labels,
                     },
                     read_kind,
                 )));
 
-            // skip next instruction (operator invoke, which is not necessary)
-            self.state
-                .stack_mut(stack_idx)
-                .ip.1 += 1;
-
+            self.state.stack_mut(stack_idx).ip.1 += 1;
             return ExecSingle::Continue;
         } else if labeled {
             let n = num_args as usize;
@@ -311,7 +303,6 @@ impl Executor {
 
             let labels = self.drain_labels(stack_idx, section_idx);
 
-            // lambda takes (target, ...extra_args)
             let mut full_args = vec![operand.clone()];
             full_args.extend(args.iter().cloned());
             let full_args = fill_defaults(full_args, &operator.0);
@@ -322,14 +313,14 @@ impl Executor {
             {
                 Ok(raw) => match extract_operator_result(raw) {
                     Ok((initial, modified)) => {
-                        let inv = Rc::new(build_invoked_operator(
+                        let inv = make_invoked_operator(
                             Value::Operator(operator),
                             operand,
                             args.into(),
                             labels,
                             initial,
                             modified,
-                        ));
+                        );
                         self.state
                             .stack_mut(stack_idx)
                             .push(Value::InvokedOperator(inv));
@@ -365,7 +356,9 @@ impl Executor {
         let ret_val = self.state.stack_mut(stack_idx).pop();
 
         if matches!(ret_val, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::Other("Cannot return a stateful value".into()));
+            return ExecSingle::Error(ExecutorError::Other(
+                "Cannot return a stateful value".into(),
+            ));
         }
 
         let to_pop = (-stack_delta) as usize;
@@ -379,7 +372,6 @@ impl Executor {
             self.state.stack_mut(stack_idx).ip = ip;
             ExecSingle::Continue
         } else {
-            // running on isolated head
             ExecSingle::EndOfHead
         }
     }
@@ -403,7 +395,6 @@ impl Executor {
                 stack.push(cap.clone());
             }
 
-            // stack.ip is already the instruction after the call site — use it as return address
             stack.call_stack.push(stack.ip);
             stack.ip = lambda.ip;
         }
@@ -412,10 +403,6 @@ impl Executor {
         ExecSingle::Continue
     }
 
-    /// eagerly call a lambda body and return its result.
-    /// used for labeled/stateful invocations.
-    /// yields between instructions so the async executor can interrupt if needed.
-    /// boxed to break the execute_one ↔ call_lambda_body async recursion cycle.
     pub(crate) fn eagerly_invoke_lambda<'a>(
         &'a mut self,
         lambda: &'a Lambda,
@@ -443,7 +430,6 @@ impl Executor {
             for arg in args {
                 stack.push(arg.clone());
             }
-
             for cap in &lambda.captures {
                 stack.push(cap.clone());
             }
@@ -475,11 +461,9 @@ impl Executor {
                     }
                 }
             }
-        }) // Box::pin
+        })
     }
 
-    /// eagerly invoke a pure lambda with defaults filled in.
-    /// exposed for stdlib helpers that need predicate-style callbacks.
     pub fn invoke_lambda<'a>(
         &'a mut self,
         lambda: &'a Lambda,
@@ -492,7 +476,6 @@ impl Executor {
         })
     }
 
-    /// drain label buffer and resolve label names from string pool
     fn drain_labels(
         &mut self,
         stack_idx: usize,
@@ -518,33 +501,27 @@ impl Executor {
             .collect()
     }
 
-    /// convert the result of a non-labeled operator invoke into a live value.
-    /// the operator lambda returns `[initial, modified]`; we push `modified`.
-    /// for labeled invocations the stack already has an InvokedOperator — pass through.
     pub(super) fn exec_convert_to_live_operator(&mut self, stack_idx: usize) -> ExecSingle {
         let val = self.state.stack_mut(stack_idx).pop().elide_lvalue();
         match val {
             Value::InvokedOperator(_) => {
-                // either labeled path, or the implicit assumption that we are just using that operator result
                 self.state.stack_mut(stack_idx).push(val);
             }
             Value::List(ref list) if list.elements.len() == 2 => {
-                // non-labeled path: lambda returned [initial, modified]; take modified
-                let live = list.elements[1].borrow().clone();
+                let live = with_heap(|h| h.get(list.elements[1].key()).clone());
                 self.state.stack_mut(stack_idx).push(live);
             }
             Value::List(ref list) => {
-                return ExecSingle::Error(
-                    ExecutorError::Other(format!(
-                        "operator must return a 2-element list, got {}",
-                        list.elements.len()
-                    )),
-                );
+                return ExecSingle::Error(ExecutorError::Other(format!(
+                    "operator must return a 2-element list, got {}",
+                    list.elements.len()
+                )));
             }
             other => {
-                return ExecSingle::Error(
-                    ExecutorError::type_error("[initial, modified] list", other.type_name()),
-                );
+                return ExecSingle::Error(ExecutorError::type_error(
+                    "[initial, modified] list",
+                    other.type_name(),
+                ));
             }
         }
         ExecSingle::Continue
@@ -558,30 +535,29 @@ impl Executor {
 impl Executor {
     pub(crate) fn eval_stateful_read_kind<'a>(
         &'a mut self,
-        stateful: &'a Stateful,
+        stateful: &'a crate::value::stateful::Stateful,
         override_read_kind: StatefulReadKind,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            if let Some(cached) = stateful.cache_valid() {
+            if let Some(cached) = crate::value::stateful::stateful_cache_valid(stateful) {
                 return Ok(cached);
             }
             let result = self
-                .eval_stateful_node(&stateful.root, override_read_kind)
+                .eval_stateful_node(&stateful.body.root, override_read_kind)
                 .await?;
-            stateful.update_cache(result.clone());
+            crate::value::stateful::stateful_update_cache(stateful, result.clone());
             Ok(result)
         })
     }
 
-    /// evaluate a stateful expression using current param follower values.
-    /// checks version-based cache first; falls back to full tree evaluation.
     pub(crate) fn eval_stateful<'a>(
         &'a mut self,
-        stateful: &'a Stateful,
+        stateful: &'a crate::value::stateful::Stateful,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
         Box::pin(async move {
-            self.eval_stateful_read_kind(stateful, stateful.read_kind).await
+            let read_kind = stateful.cache.read_kind;
+            self.eval_stateful_read_kind(stateful, read_kind).await
         })
     }
 
@@ -593,16 +569,16 @@ impl Executor {
     {
         Box::pin(async move {
             match node {
-                StatefulNode::LeaderRef(rc) => {
-                    let inner = rc.borrow().clone();
+                StatefulNode::LeaderRef(key) => {
+                    let inner = with_heap(|h| h.get(*key).clone());
                     match inner {
                         Value::Leader(leader) => Ok(match read_kind {
                             StatefulReadKind::Leader => {
-                                leader.leader_rc.borrow().clone()
-                            },
+                                with_heap(|h| h.get(leader.leader_rc.key()).clone())
+                            }
                             StatefulReadKind::Follower => {
-                                leader.follower_rc.borrow().clone()
-                            },
+                                with_heap(|h| h.get(leader.follower_rc.key()).clone())
+                            }
                         }),
                         other => Ok(other),
                     }
@@ -622,10 +598,13 @@ impl Executor {
                     };
 
                     let mut evaled: Vec<Value> = Vec::with_capacity(args.len());
-                    for arg_rc in args {
-                        let arg_val = arg_rc.borrow().clone().elide_lvalue();
+                    for arg_key in args {
+                        let arg_val =
+                            with_heap(|h| h.get(arg_key.key()).clone()).elide_lvalue();
                         let resolved = match arg_val {
-                            Value::Stateful(ref s) => self.eval_stateful_read_kind(s, read_kind).await?,
+                            Value::Stateful(ref s) => {
+                                self.eval_stateful_read_kind(s, read_kind).await?
+                            }
                             other => other,
                         };
                         evaled.push(resolved);
@@ -651,18 +630,23 @@ impl Executor {
                     };
 
                     let operand_val = {
-                        let v = operand.borrow().clone().elide_lvalue();
+                        let v = with_heap(|h| h.get(operand.key()).clone()).elide_lvalue();
                         match v {
-                            Value::Stateful(ref s) => self.eval_stateful_read_kind(s, read_kind).await?,
+                            Value::Stateful(ref s) => {
+                                self.eval_stateful_read_kind(s, read_kind).await?
+                            }
                             other => other,
                         }
                     };
 
                     let mut evaled: Vec<Value> = vec![operand_val];
-                    for arg_rc in extra_args {
-                        let arg_val = arg_rc.borrow().clone().elide_lvalue();
+                    for arg_key in extra_args {
+                        let arg_val =
+                            with_heap(|h| h.get(arg_key.key()).clone()).elide_lvalue();
                         let resolved = match arg_val {
-                            Value::Stateful(ref s) => self.eval_stateful(s).await?,
+                            Value::Stateful(ref s) => {
+                                self.eval_stateful_read_kind(s, read_kind).await?
+                            }
                             other => other,
                         };
                         evaled.push(resolved);
@@ -678,17 +662,15 @@ impl Executor {
         })
     }
 
-    /// resolve an InvokedFunction/InvokedOperator to its live concrete value.
     async fn resolve_live_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
         match val {
-            Value::InvokedFunction(inv) => InvokedFunction::value(&inv, self).await,
-            Value::InvokedOperator(inv) => InvokedOperator::value(&inv, self).await,
+            Value::InvokedFunction(ref inv) => InvokedFunction::value(inv, self).await,
+            Value::InvokedOperator(ref inv) => InvokedOperator::value(inv, self).await,
             other => Ok(other),
         }
     }
 }
 
-/// fill default arguments if fewer args were provided
 pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value> {
     let total = lambda.required_args as usize + lambda.defaults.len();
     if args.len() < total {

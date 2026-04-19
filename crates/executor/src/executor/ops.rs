@@ -1,9 +1,11 @@
+use std::rc::Rc;
+
 use crate::{
     error::ExecutorError,
+    heap::{heap_alloc, with_heap},
     value::{
         Value,
         container::{HashableKey, List},
-        rc_value,
     },
 };
 
@@ -214,10 +216,10 @@ fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, Ex
 
         // in operator: resolved rhs must be a list or map
         (_, Value::List(list), BinOp::In) => {
-            let found = list
-                .elements
-                .iter()
-                .any(|rc| Value::values_equal(lhs, &rc.borrow()));
+            let found = list.elements.iter().any(|key| {
+                let elem = with_heap(|h| h.get(key.key()).clone());
+                Value::values_equal(lhs, &elem)
+            });
             Ok(Value::Integer(found as i64))
         }
         (_, Value::Map(map), BinOp::In) => {
@@ -236,8 +238,8 @@ fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, Ex
 fn negate_list(list: &List) -> Result<Value, ExecutorError> {
     let mut elements = Vec::with_capacity(list.elements.len());
 
-    for (idx, elem) in list.elements.iter().enumerate() {
-        let value = elem.borrow().clone();
+    for (idx, key) in list.elements.iter().enumerate() {
+        let value = with_heap(|h| h.get(key.key()).clone());
         let negated = match value {
             Value::Integer(n) => Value::Integer(-n),
             Value::Float(f) => Value::Float(-f),
@@ -253,10 +255,10 @@ fn negate_list(list: &List) -> Result<Value, ExecutorError> {
                 ));
             }
         };
-        elements.push(rc_value(negated));
+        elements.push(crate::heap::VRc::new(negated));
     }
 
-    Ok(Value::List(std::rc::Rc::new(List {
+    Ok(Value::List(Rc::new(List {
         elements: elements.into(),
     })))
 }
@@ -271,21 +273,21 @@ fn add_lists(lhs: &List, rhs: &List) -> Result<Value, ExecutorError> {
     }
 
     let mut elements = Vec::with_capacity(lhs.len());
-    for (idx, (lhs_elem, rhs_elem)) in lhs.elements.iter().zip(rhs.elements.iter()).enumerate() {
-        let lhs_value = lhs_elem.borrow().clone();
-        let rhs_value = rhs_elem.borrow().clone();
-        let sum = match (lhs_value, rhs_value) {
+    for (idx, (lhs_key, rhs_key)) in lhs.elements.iter().zip(rhs.elements.iter()).enumerate() {
+        let lhs_val = with_heap(|h| h.get(lhs_key.key()).clone());
+        let rhs_val = with_heap(|h| h.get(rhs_key.key()).clone());
+        let sum = match (lhs_val, rhs_val) {
             (Value::List(lhs_inner), Value::List(rhs_inner)) => {
                 add_lists(&lhs_inner, &rhs_inner)
                     .map_err(|err| list_index_err(BinOp::Add.name(), idx, err))?
             }
-            (lhs_value, rhs_value) => eval_binary(&lhs_value, &rhs_value, BinOp::Add)
+            (lhs_val, rhs_val) => eval_binary(&lhs_val, &rhs_val, BinOp::Add)
                 .map_err(|err| list_index_err(BinOp::Add.name(), idx, err))?,
         };
-        elements.push(rc_value(sum));
+        elements.push(crate::heap::VRc::new(sum));
     }
 
-    Ok(Value::List(std::rc::Rc::new(List {
+    Ok(Value::List(Rc::new(List {
         elements: elements.into(),
     })))
 }
@@ -293,8 +295,8 @@ fn add_lists(lhs: &List, rhs: &List) -> Result<Value, ExecutorError> {
 fn multiply_list(list: &List, scalar: &Value, scalar_on_lhs: bool) -> Result<Value, ExecutorError> {
     let mut elements = Vec::with_capacity(list.len());
 
-    for (idx, elem) in list.elements.iter().enumerate() {
-        let elem_value = elem.borrow().clone();
+    for (idx, key) in list.elements.iter().enumerate() {
+        let elem_value = with_heap(|h| h.get(key.key()).clone());
         let product = match elem_value {
             Value::List(inner) => multiply_list(&inner, scalar, scalar_on_lhs)
                 .map_err(|err| list_index_err(BinOp::Mul.name(), idx, err))?,
@@ -308,10 +310,10 @@ fn multiply_list(list: &List, scalar: &Value, scalar_on_lhs: bool) -> Result<Val
                     .map_err(|err| list_index_err(BinOp::Mul.name(), idx, err))?
             }
         };
-        elements.push(rc_value(product));
+        elements.push(crate::heap::VRc::new(product));
     }
 
-    Ok(Value::List(std::rc::Rc::new(List {
+    Ok(Value::List(Rc::new(List {
         elements: elements.into(),
     })))
 }

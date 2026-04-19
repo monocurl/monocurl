@@ -7,7 +7,8 @@ use std::{collections::HashSet, future::Future, pin::Pin, rc::Rc, sync::Arc};
 use executor::{
     error::ExecutorError,
     executor::Executor,
-    value::{Value, container::List, lambda::Lambda, rc_value},
+    heap::{VRc, with_heap},
+    value::{Value, container::List, lambda::Lambda},
 };
 use geo::{
     mesh::Mesh,
@@ -91,7 +92,7 @@ impl<'a> Iterator for MeshTreeIter<'a> {
 
 fn list_value(values: impl IntoIterator<Item = Value>) -> Value {
     Value::List(Rc::new(List {
-        elements: values.into_iter().map(rc_value).collect(),
+        elements: values.into_iter().map(VRc::new).collect(),
     }))
 }
 
@@ -203,10 +204,10 @@ fn read_float3(
     {
         Value::List(list) if list.elements.len() == 3 => {
             let mut components = [0.0; 3];
-            for (slot, value) in components.iter_mut().zip(&list.elements) {
-                *slot = match &*value.borrow() {
-                    Value::Integer(n) => *n as f32,
-                    Value::Float(f) => *f as f32,
+            for (slot, key) in components.iter_mut().zip(&list.elements) {
+                *slot = match with_heap(|h| h.get(key.key()).clone()) {
+                    Value::Integer(n) => n as f32,
+                    Value::Float(f) => f as f32,
                     other => {
                         return Err(ExecutorError::type_error_for(
                             "number",
@@ -246,10 +247,10 @@ fn read_float4(
     {
         Value::List(list) if list.elements.len() == 4 => {
             let mut components = [0.0; 4];
-            for (slot, value) in components.iter_mut().zip(&list.elements) {
-                *slot = match &*value.borrow() {
-                    Value::Integer(n) => *n as f32,
-                    Value::Float(f) => *f as f32,
+            for (slot, key) in components.iter_mut().zip(&list.elements) {
+                *slot = match with_heap(|h| h.get(key.key()).clone()) {
+                    Value::Integer(n) => n as f32,
+                    Value::Float(f) => f as f32,
                     other => {
                         return Err(ExecutorError::type_error_for(
                             "number",
@@ -285,8 +286,9 @@ fn read_mesh_tree<'a>(
             Value::Mesh(arc) => Ok(MeshTree::Mesh(arc)),
             Value::List(list) => {
                 let mut children = Vec::with_capacity(list.elements.len());
-                for child in &list.elements {
-                    children.push(read_mesh_tree(executor, child.borrow().clone(), name).await?);
+                for key in &list.elements {
+                    let val = with_heap(|h| h.get(key.key()).clone());
+                    children.push(read_mesh_tree(executor, val, name).await?);
                 }
                 Ok(MeshTree::List(children))
             }
@@ -328,9 +330,9 @@ fn read_tag_filter(
             Value::List(list) => list
                 .elements
                 .iter()
-                .map(|value| match &*value.borrow() {
-                    Value::Integer(tag) => Ok(*tag as isize),
-                    Value::Float(tag) if tag.fract() == 0.0 => Ok(*tag as isize),
+                .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
+                    Value::Integer(tag) => Ok(tag as isize),
+                    Value::Float(tag) if tag.fract() == 0.0 => Ok(tag as isize),
                     other => Err(ExecutorError::type_error_for(
                         "int",
                         other.type_name(),

@@ -1,9 +1,10 @@
-use std::rc::Rc;
+use crate::{
+    error::ExecutorError,
+    executor::Executor,
+    heap::{HeapKey, VRc, VWeak, with_heap},
+};
 
-use crate::error::ExecutorError;
-use crate::executor::Executor;
-
-use super::{RcValue, Value, invoked_function::InvokedFunction, invoked_operator::InvokedOperator};
+use super::{Value, invoked_function::InvokedFunction, invoked_operator::InvokedOperator, stateful::to_follower_stateful};
 
 impl Value {
     pub fn check_truthy(&self) -> Result<bool, ExecutorError> {
@@ -15,41 +16,44 @@ impl Value {
         }
     }
 
-    // an element might contain lvalues if it is itself an lvalue or a nested list
     fn may_need_lvalue_elision(&self) -> bool {
         self.is_lvalue() || matches!(self, Value::List(_) | Value::Leader(_))
     }
 
-    // creates owned copy of self which elides all lvalues, recursing on lists
-    // once it encounters an lvalue, it elides that, and does not recurse any further
+    /// creates owned copy of self which elides all lvalues, recursing on lists
     pub fn elide_lvalue_leader_rec(self) -> Value {
         match self {
-            Value::Lvalue(rc) => rc.borrow().clone().elide_lvalue_leader_rec(),
-            Value::WeakLvalue(weak) => weak
-                .upgrade()
-                .map(|rc| rc.borrow().clone().elide_lvalue_leader_rec())
-                .unwrap(),
-            Value::Leader(leader) => leader.leader_rc.borrow().clone().elide_lvalue_leader_rec(),
+            Value::Lvalue(vrc) => {
+                with_heap(|h| h.get(vrc.key()).clone()).elide_lvalue_leader_rec()
+            }
+            Value::WeakLvalue(vweak) => {
+                with_heap(|h| h.get(vweak.key()).clone()).elide_lvalue_leader_rec()
+            }
+            Value::Leader(ref leader) => {
+                with_heap(|h| h.get(leader.leader_rc.key()).clone()).elide_lvalue_leader_rec()
+            }
             Value::List(mut list) => {
-                if !list
+                let needs_work = list
                     .elements
                     .iter()
-                    .any(|e| e.borrow().may_need_lvalue_elision())
-                {
+                    .any(|key| with_heap(|h| h.get(key.key()).may_need_lvalue_elision()));
+                if !needs_work {
                     return Value::List(list);
                 }
 
-                let list_mut = Rc::make_mut(&mut list);
-                for elem in &mut list_mut.elements {
-                    if !elem.borrow().may_need_lvalue_elision() {
+                let list_mut = std::rc::Rc::make_mut(&mut list);
+                for i in 0..list_mut.elements.len() {
+                    let key = list_mut.elements[i].clone();
+                    let val = with_heap(|h| h.get(key.key()).clone());
+                    if !val.may_need_lvalue_elision() {
                         continue;
                     }
-                    let elided = elem.borrow().clone().elide_lvalue_leader_rec();
-                    // reuse the existing allocation when exclusively owned; COW otherwise
-                    if Rc::strong_count(elem) == 1 {
-                        *elem.borrow_mut() = elided;
+                    let elided = val.elide_lvalue_leader_rec();
+                    if crate::heap::heap_ref_count(key.key()) == 1 {
+                        crate::heap::heap_replace(key.key(), elided);
                     } else {
-                        *elem = super::rc_value(elided);
+                        let new_key = crate::heap::VRc::new(elided);
+                        list_mut.elements[i] = new_key;
                     }
                 }
                 Value::List(list)
@@ -59,11 +63,10 @@ impl Value {
     }
 
     /// read through an lvalue or weak lvalue
-    /// if not an lvalue, returns self.
     pub fn elide_lvalue(self) -> Value {
         match self {
-            Value::Lvalue(rc) => rc.borrow().clone(),
-            Value::WeakLvalue(weak) => weak.upgrade().map(|rc| rc.borrow().clone()).unwrap(),
+            Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()),
+            Value::WeakLvalue(vweak) => with_heap(|h| h.get(vweak.key()).clone()),
             other => other,
         }
     }
@@ -72,9 +75,11 @@ impl Value {
         let mut base = self.elide_lvalue();
         loop {
             base = match base {
-                Value::Leader(leader) => leader.leader_rc.borrow().clone(),
-                Value::InvokedOperator(op) => InvokedOperator::value(&op, executor).await?,
-                Value::InvokedFunction(func) => InvokedFunction::value(&func, executor).await?,
+                Value::Leader(ref leader) => {
+                    with_heap(|h| h.get(leader.leader_rc.key()).clone())
+                }
+                Value::InvokedOperator(ref op) => InvokedOperator::value(op, executor).await?,
+                Value::InvokedFunction(ref func) => InvokedFunction::value(func, executor).await?,
                 other => return Ok(other),
             };
         }
@@ -82,32 +87,31 @@ impl Value {
 
     pub fn to_follower_stateful(&self) -> Value {
         match self {
-            Value::Stateful(stateful) => Value::Stateful(stateful.to_follower_read()),
+            Value::Stateful(stateful) => Value::Stateful(to_follower_stateful(stateful)),
             other => other.clone(),
         }
     }
 
     pub fn elide_leader(self) -> Value {
         match self {
-            Value::Leader(leader) => leader.leader_rc.borrow().clone(),
+            Value::Leader(ref leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
             other => other,
         }
     }
 
     pub fn force_elide_lvalue(&self) -> Value {
         match self {
-            Value::Lvalue(rc) => rc.borrow().clone(),
-            Value::WeakLvalue(weak) => weak.upgrade().map(|rc| rc.borrow().clone()).unwrap(),
+            Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()),
+            Value::WeakLvalue(vweak) => with_heap(|h| h.get(vweak.key()).clone()),
             _ => panic!("Expected Lvalue, got {}", self.type_name()),
         }
     }
 
-    /// try to get the underlying RcValue (upgrading weak refs).
-    /// returns None if this isn't an lvalue variant
-    pub fn as_lvalue_rc(&self) -> Option<RcValue> {
+    /// try to get the underlying HeapKey (upgrading weak refs).
+    pub fn as_lvalue_key(&self) -> Option<HeapKey> {
         match self {
-            Value::Lvalue(rc) => Some(rc.clone()),
-            Value::WeakLvalue(weak) => Some(weak.upgrade().unwrap()),
+            Value::Lvalue(vrc) => Some(vrc.key()),
+            Value::WeakLvalue(vweak) => Some(vweak.key()),
             _ => None,
         }
     }

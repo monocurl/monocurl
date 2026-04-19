@@ -8,21 +8,24 @@ use crate::{
     value::{Value, invoked_function::InvokedFunction},
 };
 
-/// result of applying an operator to an operand, possibly with labeled arguments.
-/// stores enough information to recompute when labels change.
-pub struct InvokedOperator {
+use super::rc_cached::RcCached;
+
+#[derive(Clone)]
+pub struct InvokedOperatorBody {
     pub operator: Box<Value>,
-    pub arguments: SmallVec<[Value; 8]>,
     pub operand: Box<Value>,
-    /// (argument_index, label_name) pairs
+    pub arguments: SmallVec<[Value; 8]>,
     pub labels: SmallVec<[(usize, String); 4]>,
+}
+
+pub struct InvOpCache {
     /// operator(operand, args)[0]: the identity embed (needed for lerp rule 5)
     pub unmodified: Cell<Option<Box<Value>>>,
     /// operator(operand, args)[1]: the live transformed value
     pub cached_result: Cell<Option<Box<Value>>>,
 }
 
-impl Clone for InvokedOperator {
+impl Clone for InvOpCache {
     fn clone(&self) -> Self {
         let cached_result = self.cached_result.take();
         let cloned_cached_result = cached_result.as_ref().map(|v| Box::new((**v).clone()));
@@ -32,50 +35,70 @@ impl Clone for InvokedOperator {
         let cloned_unmodified = unmodified.as_ref().map(|v| Box::new((**v).clone()));
         self.unmodified.set(unmodified);
 
-        Self {
-            operator: self.operator.clone(),
-            arguments: self.arguments.clone(),
-            operand: self.operand.clone(),
-            labels: self.labels.clone(),
-            unmodified: Cell::new(cloned_unmodified),
+        InvOpCache {
             cached_result: Cell::new(cloned_cached_result),
+            unmodified: Cell::new(cloned_unmodified),
         }
     }
 }
 
-impl InvokedOperator {
-    /// invalidate both cached values; call when a labeled argument changes.
-    pub fn invalidate_cache(&self) {
-        self.cached_result.take();
-        self.unmodified.take();
-    }
+pub type InvokedOperator = RcCached<InvokedOperatorBody, InvOpCache>;
 
+pub fn make_invoked_operator(
+    operator: Value,
+    operand: Value,
+    arguments: SmallVec<[Value; 8]>,
+    labels: SmallVec<[(usize, String); 4]>,
+    initial: Value,
+    modified: Value,
+) -> InvokedOperator {
+    RcCached {
+        body: Rc::new(InvokedOperatorBody {
+            operator: Box::new(operator),
+            operand: Box::new(operand),
+            arguments,
+            labels,
+        }),
+        cache: InvOpCache {
+            unmodified: Cell::new(Some(Box::new(initial))),
+            cached_result: Cell::new(Some(Box::new(modified))),
+        },
+    }
+}
+
+/// invalidate both cached values; call when a labeled argument changes.
+pub fn invalidate_invoked_operator_cache(inv: &InvokedOperator) {
+    inv.cache.cached_result.take();
+    inv.cache.unmodified.take();
+}
+
+impl InvokedOperator {
     pub fn value<'a>(
-        this: &'a Rc<Self>,
+        this: &'a InvokedOperator,
         executor: &'a mut Executor,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            let cached = this.cached_result.take();
+            let cached = this.cache.cached_result.take();
             let result = match cached {
                 Some(result) => result,
                 None => {
-                    let operator = match this.operator.as_ref().clone().elide_lvalue() {
+                    let operator = match this.body.operator.as_ref().clone().elide_lvalue() {
                         Value::Operator(op) => op,
                         other => {
                             return Err(ExecutorError::type_error("operator", other.type_name()));
                         }
                     };
 
-                    let mut full_args = Vec::with_capacity(this.arguments.len() + 1);
-                    full_args.push(this.operand.as_ref().clone());
-                    full_args.extend(this.arguments.iter().cloned());
+                    let mut full_args = Vec::with_capacity(this.body.arguments.len() + 1);
+                    full_args.push(this.body.operand.as_ref().clone());
+                    full_args.extend(this.body.arguments.iter().cloned());
                     let full_args = fill_defaults(full_args, &operator.0);
 
                     let raw = executor
                         .eagerly_invoke_lambda(&operator.0, &full_args, None)
                         .await?;
                     let (initial, modified) = extract_operator_result(raw)?;
-                    this.unmodified.set(Some(Box::new(initial)));
+                    this.cache.unmodified.set(Some(Box::new(initial)));
                     Box::new(modified)
                 }
             };
@@ -86,7 +109,7 @@ impl InvokedOperator {
                 other => other.clone(),
             };
 
-            this.cached_result.set(Some(result));
+            this.cache.cached_result.set(Some(result));
             Ok(live)
         })
     }
@@ -96,8 +119,9 @@ impl InvokedOperator {
 pub fn extract_operator_result(result: Value) -> Result<(Value, Value), ExecutorError> {
     match result {
         Value::List(list) if list.elements.len() == 2 => {
-            let initial = list.elements[0].borrow().clone();
-            let modified = list.elements[1].borrow().clone();
+            use crate::heap::with_heap;
+            let initial = with_heap(|h| h.get(list.elements[0].key()).clone());
+            let modified = with_heap(|h| h.get(list.elements[1].key()).clone());
             Ok((initial, modified))
         }
         Value::List(ref list) => Err(ExecutorError::Other(format!(
@@ -108,24 +132,5 @@ pub fn extract_operator_result(result: Value) -> Result<(Value, Value), Executor
             "[initial, modified] list",
             other.type_name(),
         )),
-    }
-}
-
-/// build an InvokedOperator with already-computed initial/modified values.
-pub fn build_invoked_operator(
-    operator: Value,
-    operand: Value,
-    arguments: SmallVec<[Value; 8]>,
-    labels: SmallVec<[(usize, String); 4]>,
-    initial: Value,
-    modified: Value,
-) -> InvokedOperator {
-    InvokedOperator {
-        operator: Box::new(operator),
-        operand: Box::new(operand),
-        arguments,
-        labels,
-        unmodified: Cell::new(Some(Box::new(initial))),
-        cached_result: Cell::new(Some(Box::new(modified))),
     }
 }

@@ -3,10 +3,10 @@ use std::rc::Rc;
 use executor::{
     error::ExecutorError,
     executor::Executor,
+    heap::{VRc, with_heap},
     value::{
         Value,
         container::{HashableKey, List, Map},
-        rc_value,
     },
 };
 use smallvec::smallvec;
@@ -56,7 +56,7 @@ fn read_int(
 
 fn list_from<I: IntoIterator<Item = Value>>(values: I) -> Value {
     Value::List(Rc::new(List {
-        elements: values.into_iter().map(rc_value).collect(),
+        elements: values.into_iter().map(VRc::new).collect(),
     }))
 }
 
@@ -158,7 +158,7 @@ pub async fn range(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
     let mut elements = smallvec![];
     let mut x = start;
     while (step > 0.0 && x < stop) || (step < 0.0 && x > stop) {
-        elements.push(rc_value(if all_ints {
+        elements.push(VRc::new(if all_ints {
             Value::Integer(x as i64)
         } else {
             Value::Float(x)
@@ -203,12 +203,12 @@ pub async fn zip(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         .elements
         .iter()
         .zip(v.elements.iter())
-        .map(|(a, b)| {
-            rc_value(Value::List(Rc::new(List {
-                elements: smallvec![a.clone(), b.clone()],
+        .map(|(a_key, b_key)| {
+            VRc::new(Value::List(Rc::new(List {
+                elements: smallvec![a_key.clone(), b_key.clone()],
             })))
         })
-        .collect();
+        .collect::<smallvec::SmallVec<[VRc; 4]>>();
     Ok(Value::List(Rc::new(List { elements })))
 }
 
@@ -219,12 +219,12 @@ pub async fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         .elements
         .iter()
         .enumerate()
-        .map(|(i, elem)| {
-            rc_value(Value::List(Rc::new(List {
-                elements: smallvec![rc_value(Value::Integer(i as i64)), elem.clone()],
+        .map(|(i, elem_key)| {
+            VRc::new(Value::List(Rc::new(List {
+                elements: smallvec![VRc::new(Value::Integer(i as i64)), elem_key.clone()],
             })))
         })
-        .collect();
+        .collect::<smallvec::SmallVec<[VRc; 4]>>();
     Ok(Value::List(Rc::new(List { elements })))
 }
 
@@ -232,7 +232,12 @@ pub async fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 pub async fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
-    let elements = list.elements.iter().take(n).cloned().collect();
+    let elements = list
+        .elements
+        .iter()
+        .take(n)
+        .cloned()
+        .collect::<smallvec::SmallVec<[VRc; 4]>>();
     Ok(Value::List(Rc::new(List { elements })))
 }
 
@@ -240,7 +245,12 @@ pub async fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 pub async fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
-    let elements = list.elements.iter().skip(n).cloned().collect();
+    let elements = list
+        .elements
+        .iter()
+        .skip(n)
+        .cloned()
+        .collect::<smallvec::SmallVec<[VRc; 4]>>();
     Ok(Value::List(Rc::new(List { elements })))
 }
 
@@ -253,9 +263,9 @@ pub async fn list_subset(
     let indexes = read_rc_list(executor, stack_idx, -1, "indexes")?;
 
     let mut elements = smallvec![];
-    for index in &indexes.elements {
-        let idx = match &*index.borrow() {
-            Value::Integer(n) => *n,
+    for index_key in &indexes.elements {
+        let idx = match with_heap(|h| h.get(index_key.key()).clone()) {
+            Value::Integer(n) => n,
             other => {
                 return Err(ExecutorError::type_error_for(
                     "int",
@@ -328,7 +338,10 @@ pub async fn map_keys(executor: &mut Executor, stack_idx: usize) -> Result<Value
 #[stdlib_func]
 pub async fn map_values(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let m = map_from(executor, stack_idx, -1)?;
-    let elements = m.iter().map(|(_, v)| v.clone()).collect();
+    let elements = m
+        .iter()
+        .map(|(_, v)| v.clone())
+        .collect::<smallvec::SmallVec<[VRc; 4]>>();
     Ok(Value::List(Rc::new(List { elements })))
 }
 
@@ -338,11 +351,11 @@ pub async fn map_items(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let elements = m
         .iter()
         .map(|(k, v)| {
-            rc_value(Value::List(Rc::new(List {
-                elements: smallvec![rc_value(key_to_value(k)), v.clone()],
+            VRc::new(Value::List(Rc::new(List {
+                elements: smallvec![VRc::new(key_to_value(k)), v.clone()],
             })))
         })
-        .collect();
+        .collect::<smallvec::SmallVec<[VRc; 4]>>();
     Ok(Value::List(Rc::new(List { elements })))
 }
 
@@ -393,8 +406,8 @@ pub async fn str_join(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let strings = parts
         .elements
         .iter()
-        .map(|rc| match &*rc.borrow() {
-            Value::String(s) => Ok(s.clone()),
+        .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
+            Value::String(s) => Ok(s),
             other => Err(ExecutorError::type_error("string", other.type_name())),
         })
         .collect::<Result<Vec<_>, _>>()?;

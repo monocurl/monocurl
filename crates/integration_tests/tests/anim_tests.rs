@@ -6,6 +6,7 @@ use std::{f64, fs, path::Path, sync::Arc};
 use compiler::cache::CompilerCache;
 use executor::{
     executor::{Executor, SeekToResult},
+    heap::with_heap,
     state::LeaderKind,
     time::Timestamp,
     value::Value,
@@ -305,14 +306,14 @@ fn collect_anim_result(
         .leaders
         .iter()
         .map(|entry| {
-            let leader_val = entry.leader_cell_rc.borrow();
-            let Value::Leader(leader) = &*leader_val else {
+            let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
+            let Value::Leader(leader) = cell_val else {
                 panic!("leader entry is not a Leader value");
             };
             LeaderInfo {
                 kind: entry.kind,
-                target: leader.leader_rc.borrow().clone(),
-                current: leader.follower_rc.borrow().clone(),
+                target: with_heap(|h| h.get(leader.leader_rc.key()).clone()),
+                current: with_heap(|h| h.get(leader.follower_rc.key()).clone()),
             }
         })
         .collect();

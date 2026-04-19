@@ -9,6 +9,7 @@ use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
     error::RuntimeError,
     executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
+    heap::{heap_alloc, with_heap},
     time::Timestamp,
     value::Value,
 };
@@ -119,8 +120,8 @@ impl ExecutionService {
                 let ints = list
                     .elements
                     .iter()
-                    .map(|value| match &*value.borrow() {
-                        Value::Integer(n) => Some(*n),
+                    .map(|&key| match with_heap(|h| h.get(key).clone()) {
+                        Value::Integer(n) => Some(n),
                         _ => None,
                     })
                     .collect::<Option<Vec<_>>>();
@@ -131,9 +132,9 @@ impl ExecutionService {
                 let floats = list
                     .elements
                     .iter()
-                    .map(|value| match &*value.borrow() {
-                        Value::Integer(n) => Some(*n as f64),
-                        Value::Float(f) => Some(*f),
+                    .map(|&key| match with_heap(|h| h.get(key).clone()) {
+                        Value::Integer(n) => Some(n as f64),
+                        Value::Float(f) => Some(f),
                         _ => None,
                     })
                     .collect::<Option<Vec<_>>>();
@@ -150,7 +151,7 @@ impl ExecutionService {
                 Value::List(std::rc::Rc::new(executor::value::container::List {
                     elements: values
                         .iter()
-                        .map(|value| executor::value::rc_value(Value::Integer(*value)))
+                        .map(|&value| heap_alloc(Value::Integer(value)))
                         .collect(),
                 }))
             }
@@ -159,7 +160,7 @@ impl ExecutionService {
                 Value::List(std::rc::Rc::new(executor::value::container::List {
                     elements: values
                         .iter()
-                        .map(|value| executor::value::rc_value(Value::Float(*value)))
+                        .map(|&value| heap_alloc(Value::Float(value)))
                         .collect(),
                 }))
             }
@@ -173,10 +174,10 @@ impl ExecutionService {
         let mut locked_params = HashSet::new();
         let mut param_order = Vec::new();
         for param in &executor.state.active_params {
-            let value =
-                Self::parameter_value_from_runtime(param.follower_value_rc.borrow().clone());
-            if matches!(&*param.leader_cell_rc.borrow(), Value::Leader(l) if l.locked_by_anim.is_some())
-            {
+            let follower_val = with_heap(|h| h.get(param.follower_value).clone());
+            let value = Self::parameter_value_from_runtime(follower_val);
+            let cell_val = with_heap(|h| h.get(param.leader_cell.key()).clone());
+            if matches!(&cell_val, Value::Leader(l) if l.locked_by_anim.is_some()) {
                 locked_params.insert(param.name.clone());
             }
             parameters.insert(param.name.clone(), value);

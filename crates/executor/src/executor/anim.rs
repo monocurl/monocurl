@@ -4,9 +4,10 @@ use std::rc::Rc;
 use crate::{
     error::ExecutorError,
     executor::{SeekPrimitiveAnimSkipResult, SeekToResult},
+    heap::{VRc, VWeak, with_heap, with_heap_mut, heap_replace},
     state::{BakedPrimitiveAnim, ExecutionState},
     time::Timestamp,
-    value::{RcValue, Value, anim_block::AnimBlock, leader::Leader, primitive_anim::PrimitiveAnim},
+    value::{Value, anim_block::AnimBlock, leader::Leader, primitive_anim::PrimitiveAnim},
 };
 
 use super::{ExecSingle, Executor, SeekPrimitiveResult};
@@ -28,11 +29,8 @@ impl Executor {
         self.state.timestamp.time = 0.0;
     }
 
-    /// run all execution heads until each hits a Play instruction or ends.
-    /// yields between iterations so the async executor can interrupt if needed.
     async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
         while let Some(&stack_idx) = self.state.execution_heads.first() {
-            // run this head until it yields or ends
             let result = loop {
                 self.tick_yielder().await;
 
@@ -44,7 +42,6 @@ impl Executor {
             };
 
             match result {
-                // in either of the two cases, this execution head gets removed
                 ExecSingle::Play => {}
                 ExecSingle::EndOfHead => {}
                 ExecSingle::Error(e) => {
@@ -57,13 +54,12 @@ impl Executor {
         }
 
         if self.state.primitive_anims.is_empty() {
-            return SeekPrimitiveResult::EndOfSection;
+            SeekPrimitiveResult::EndOfSection
         } else {
-            return SeekPrimitiveResult::PrimitiveAnim;
+            SeekPrimitiveResult::PrimitiveAnim
         }
     }
 
-    // seek primitive anim, possibly skipping slides
     pub async fn seek_primitive_anim_skip(
         &mut self,
         max_slide: usize,
@@ -79,7 +75,6 @@ impl Executor {
                         self.advance_section().await;
                     } else {
                         self.save_cache();
-
                         return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
                     }
                 }
@@ -93,7 +88,6 @@ impl Executor {
         SeekPrimitiveAnimSkipResult::PrimitiveAnim
     }
 
-    /// step all active primitive animations by dt seconds
     async fn step_primitive_anims(&mut self, dt: f64) -> Result<(), ExecutorError> {
         debug_assert!(self.state.execution_heads.is_empty());
         self.state.timestamp.time += dt;
@@ -124,7 +118,6 @@ impl Executor {
             }
         }
 
-        // finalize finished anims (snap to final state), reverse to preserve indices
         for &i in finished_indices.iter().rev() {
             let baked = self.state.primitive_anims.remove(i);
             self.state.last_stack_idx = baked.parent_stack_idx;
@@ -141,7 +134,6 @@ impl Executor {
         Ok(())
     }
 
-    /// consume playback time continuously, carrying leftover dt across resumed heads
     pub async fn advance_playback(
         &mut self,
         max_slide: usize,
@@ -185,13 +177,10 @@ impl Executor {
         Ok(true)
     }
 
-    /// seek to a target timestamp by stepping to the next event (animation end)
-    /// rather than fixed dt steps.
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
         self.rebase_at_cache_point(target).await;
 
         loop {
-            // find first primitive anim that happens before target
             match self.seek_primitive_anim_skip(target.slide).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
@@ -206,7 +195,6 @@ impl Executor {
                 return SeekToResult::SeekedTo(self.state.timestamp);
             }
 
-            // keep going until we finish this group or hit the target
             let next_end = self
                 .state
                 .primitive_anims
@@ -221,11 +209,8 @@ impl Executor {
             });
             let dt = step_target - self.state.timestamp.time;
 
-            match self.step_primitive_anims(dt).await {
-                Ok(_) => {}
-                Err(e) => {
-                    return SeekToResult::Error(e);
-                }
+            if let Err(e) = self.step_primitive_anims(dt).await {
+                return SeekToResult::Error(e);
             }
         }
     }
@@ -243,28 +228,29 @@ impl Executor {
             }
             PrimitiveAnim::Wait { .. } => {}
             PrimitiveAnim::Lerp { .. } => {
-                // TODO: apply progression lambda to remap t
                 if t >= 1.0 {
                     for target in &baked.targets {
                         sync_leader_to_follower(target);
                     }
                 } else {
                     for (target, start) in baked.targets.iter().zip(&baked.start_followers) {
-                        let (leader_value, follower_rc) = {
-                            let leader_cell = target.borrow();
-                            let Value::Leader(leader) = &*leader_cell else {
-                                continue;
-                            };
+                        let cell_key = target.key();
+                        let (leader_value, follower_key) = {
+                            let cell_val = with_heap(|h| h.get(cell_key).clone());
+                            let Value::Leader(leader) = cell_val else { continue };
                             (
-                                leader.leader_rc.borrow().to_follower_stateful(),
+                                with_heap(|h| h.get(leader.leader_rc.key()).clone())
+                                    .to_follower_stateful(),
                                 leader.follower_rc.clone(),
                             )
                         };
                         let lerped = self.lerp(start.clone(), leader_value, t).await?;
-                        *follower_rc.borrow_mut() = lerped;
-                        if let Value::Leader(l) = &mut *target.borrow_mut() {
-                            l.follower_version += 1;
-                        }
+                        heap_replace(follower_key.key(), lerped);
+                        with_heap_mut(|h| {
+                            if let Value::Leader(l) = &mut *h.get_mut(cell_key) {
+                                l.follower_version += 1;
+                            }
+                        });
                     }
                 }
             }
@@ -284,11 +270,6 @@ impl Executor {
     pub(super) fn finish_execution_head(&mut self, stack_idx: usize) {
         let parent_idx = self.state.stack_parent_idx(stack_idx);
 
-        // capture TOS for root stacks so tests can inspect results.
-        // peek (clone without pop) so that variables remain on the stack for
-        // subsequent sections to access by position — necessary for cross-section
-        // imports (e.g. stdlib symbols defined in a library section then used in
-        // user slides).
         #[cfg(feature = "capture_tos")]
         if parent_idx.is_none() {
             let stack = self.state.stack(stack_idx);
@@ -300,8 +281,6 @@ impl Executor {
 
         self.state.execution_heads.remove(&stack_idx);
 
-        // never free the root stack, even on section end
-        // this is more reliable check than checking parent index due to dedicated lambda stacks
         if stack_idx != ExecutionState::ROOT_STACK_ID {
             self.state.free_stack(stack_idx);
         }
@@ -338,7 +317,7 @@ impl Executor {
                 let values: Vec<Value> = list
                     .elements
                     .iter()
-                    .map(|elem| elem.borrow().clone())
+                    .map(|k| with_heap(|h| h.get(k.key()).clone()))
                     .collect();
                 let mut reserved = Vec::new();
                 let mut planned_primitives = Vec::new();
@@ -363,12 +342,10 @@ impl Executor {
                         },
                         Value::PrimitiveAnim(_) => {}
                         _ => {
-                            return ExecSingle::Error(
-                                ExecutorError::type_error(
-                                    "anim_block or primitive_anim",
-                                    elem.type_name(),
-                                ),
-                            );
+                            return ExecSingle::Error(ExecutorError::type_error(
+                                "anim_block or primitive_anim",
+                                elem.type_name(),
+                            ));
                         }
                     }
                 }
@@ -383,9 +360,10 @@ impl Executor {
                     ExecSingle::Play
                 }
             }
-            _ => ExecSingle::Error(
-                ExecutorError::type_error("anim_block, primitive_anim, or list", val.type_name()),
-            ),
+            _ => ExecSingle::Error(ExecutorError::type_error(
+                "anim_block, primitive_anim, or list",
+                val.type_name(),
+            )),
         }
     }
 
@@ -420,7 +398,7 @@ impl Executor {
         &mut self,
         parent_stack_idx: usize,
         prim: PrimitiveAnim,
-        reserved: &[RcValue],
+        reserved: &[VRc],
     ) -> Result<(), ExecutorError> {
         let baked = self.plan_primitive_anim(parent_stack_idx, prim, reserved)?;
         self.install_baked_primitive_anim(parent_stack_idx, baked);
@@ -431,7 +409,7 @@ impl Executor {
         &mut self,
         parent_stack_idx: usize,
         prim: PrimitiveAnim,
-        reserved: &[RcValue],
+        reserved: &[VRc],
     ) -> Result<BakedPrimitiveAnim, ExecutorError> {
         let duration = match &prim {
             PrimitiveAnim::Lerp { time, .. } => *time,
@@ -445,11 +423,11 @@ impl Executor {
         let start_followers = targets
             .iter()
             .map(|target| {
-                let leader_cell = target.borrow();
-                let Value::Leader(leader) = &*leader_cell else {
+                let cell_val = with_heap(|h| h.get(target.key()).clone());
+                let Value::Leader(leader) = cell_val else {
                     unreachable!("planned primitive target must be a leader")
                 };
-                leader.follower_rc.borrow().clone()
+                with_heap(|h| h.get(leader.follower_rc.key()).clone())
             })
             .collect();
 
@@ -468,11 +446,11 @@ impl Executor {
 
     fn install_baked_primitive_anim(&mut self, parent_stack_idx: usize, baked: BakedPrimitiveAnim) {
         for target in &baked.targets {
-            let mut leader_cell = target.borrow_mut();
-            let Value::Leader(leader) = &mut *leader_cell else {
-                continue;
-            };
-            leader.locked_by_anim = Some(baked.anim_id);
+            with_heap_mut(|h| {
+                if let Value::Leader(leader) = &mut *h.get_mut(target.key()) {
+                    leader.locked_by_anim = Some(baked.anim_id);
+                }
+            });
         }
 
         self.state.primitive_anims.push(baked);
@@ -483,8 +461,8 @@ impl Executor {
         &self,
         spawning_stack_idx: usize,
         prim: &PrimitiveAnim,
-        reserved: &[RcValue],
-    ) -> Result<Vec<RcValue>, ExecutorError> {
+        reserved: &[VRc],
+    ) -> Result<Vec<VRc>, ExecutorError> {
         let mut targets = Vec::new();
         let mut implicit_targets = false;
 
@@ -494,10 +472,8 @@ impl Executor {
                 if targets.is_empty() {
                     implicit_targets = true;
                     for entry in &self.state.leaders {
-                        let leader_cell = entry.leader_cell_rc.borrow();
-                        let Value::Leader(leader) = &*leader_cell else {
-                            continue;
-                        };
+                        let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
+                        let Value::Leader(leader) = cell_val else { continue };
                         if leader
                             .last_modified_stack
                             .is_some_and(|last_modified_stack_id| {
@@ -507,7 +483,7 @@ impl Executor {
                                 )
                             })
                         {
-                            targets.push(entry.leader_cell_rc.clone());
+                            targets.push(entry.leader_cell.clone());
                         }
                     }
                 }
@@ -515,30 +491,26 @@ impl Executor {
             PrimitiveAnim::Wait { .. } => {}
         }
 
-        dedup_rc_values(&mut targets);
+        dedup_vrc_targets(&mut targets);
         if implicit_targets {
             targets.retain(|target| {
-                if reserved.iter().any(|reserved| Rc::ptr_eq(reserved, target)) {
+                if reserved.iter().any(|r| r.key() == target.key()) {
                     return false;
                 }
-
-                let leader_cell = target.borrow();
-                let Value::Leader(leader) = &*leader_cell else {
-                    return false;
-                };
-
+                let cell_val = with_heap(|h| h.get(target.key()).clone());
+                let Value::Leader(leader) = cell_val else { return false };
                 leader.locked_by_anim.is_none()
             });
         }
 
         for target in &targets {
-            if reserved.iter().any(|reserved| Rc::ptr_eq(reserved, target)) {
+            if reserved.iter().any(|r| r.key() == target.key()) {
                 return Err(ExecutorError::ConcurrentAnimation);
             }
 
-            let leader_cell = target.borrow();
-            let Value::Leader(leader) = &*leader_cell else {
-                return Err(ExecutorError::type_error("leader", leader_cell.type_name()));
+            let cell_val = with_heap(|h| h.get(target.key()).clone());
+            let Value::Leader(leader) = cell_val else {
+                return Err(ExecutorError::type_error("leader", cell_val.type_name()));
             };
             if leader.locked_by_anim.is_some() {
                 return Err(ExecutorError::ConcurrentAnimation);
@@ -551,19 +523,18 @@ impl Executor {
     fn flatten_candidate_tree(
         &self,
         value: &Value,
-        out: &mut Vec<RcValue>,
+        out: &mut Vec<VRc>,
     ) -> Result<(), ExecutorError> {
         match value {
             Value::List(list) => {
-                for element in &list.elements {
-                    self.flatten_candidate_tree(&element.borrow(), out)?;
+                for elem_key in &list.elements {
+                    let elem_val = with_heap(|h| h.get(elem_key.key()).clone());
+                    self.flatten_candidate_tree(&elem_val, out)?;
                 }
                 Ok(())
             }
-            Value::Lvalue(rc) => self.push_leader_candidate(rc, out),
-            Value::WeakLvalue(weak) => {
-                let rc = weak.upgrade().unwrap();                self.push_leader_candidate(&rc, out)
-            }
+            Value::Lvalue(vrc) => self.push_leader_candidate(vrc.key(), out),
+            Value::WeakLvalue(vweak) => self.push_leader_candidate(vweak.key(), out),
             Value::Leader(leader) => {
                 let Some(cell) = self.find_leader_cell(leader) else {
                     return Err(ExecutorError::Other(
@@ -582,12 +553,13 @@ impl Executor {
 
     fn push_leader_candidate(
         &self,
-        rc: &RcValue,
-        out: &mut Vec<RcValue>,
+        key: crate::heap::HeapKey,
+        out: &mut Vec<VRc>,
     ) -> Result<(), ExecutorError> {
-        match &*rc.borrow() {
+        let val = with_heap(|h| h.get(key).clone());
+        match val {
             Value::Leader(_) => {
-                out.push(rc.clone());
+                out.push(VRc::retain_key(key));
                 Ok(())
             }
             other => Err(ExecutorError::type_error(
@@ -597,55 +569,48 @@ impl Executor {
         }
     }
 
-    fn find_leader_cell(&self, needle: &Leader) -> Option<RcValue> {
+    fn find_leader_cell(&self, needle: &Leader) -> Option<VRc> {
         self.state.leaders.iter().find_map(|entry| {
-            let leader_cell = entry.leader_cell_rc.borrow();
-            let Value::Leader(existing) = &*leader_cell else {
-                return None;
-            };
-            (Rc::ptr_eq(&existing.leader_rc, &needle.leader_rc)
-                && Rc::ptr_eq(&existing.follower_rc, &needle.follower_rc))
-            .then(|| entry.leader_cell_rc.clone())
+            let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
+            let Value::Leader(existing) = cell_val else { return None };
+            (existing.leader_rc == needle.leader_rc && existing.follower_rc == needle.follower_rc)
+                .then(|| entry.leader_cell.clone())
         })
     }
 
     fn release_primitive_anim_locks(&self, baked: &BakedPrimitiveAnim) {
         for target in &baked.targets {
-            let mut leader_cell = target.borrow_mut();
-            let Value::Leader(leader) = &mut *leader_cell else {
-                continue;
-            };
-            if leader.locked_by_anim == Some(baked.anim_id) {
-                leader.locked_by_anim = None;
-            }
+            with_heap_mut(|h| {
+                if let Value::Leader(leader) = &mut *h.get_mut(target.key()) {
+                    if leader.locked_by_anim == Some(baked.anim_id) {
+                        leader.locked_by_anim = None;
+                    }
+                }
+            });
         }
     }
 }
 
-fn dedup_rc_values(values: &mut Vec<RcValue>) {
+fn dedup_vrc_targets(values: &mut Vec<VRc>) {
     let mut deduped = Vec::with_capacity(values.len());
     for value in values.drain(..) {
-        if !deduped.iter().any(|existing| Rc::ptr_eq(existing, &value)) {
+        if !deduped.iter().any(|existing: &VRc| existing.key() == value.key()) {
             deduped.push(value);
         }
     }
     *values = deduped;
 }
 
-fn sync_leader_to_follower(leader_cell_rc: &RcValue) {
-    let mut leader_cell = leader_cell_rc.borrow_mut();
-    let Value::Leader(Leader {
-        last_modified_stack,
-        leader_rc,
-        follower_rc,
-        follower_version,
-        ..
-    }) = &mut *leader_cell
-    else {
-        return;
-    };
-    let value = leader_rc.borrow().to_follower_stateful();
-    *follower_rc.borrow_mut() = value;
-    *last_modified_stack = None;
-    *follower_version += 1;
+fn sync_leader_to_follower(leader_cell: &VRc) {
+    let cell_key = leader_cell.key();
+    let cell_val = with_heap(|h| h.get(cell_key).clone());
+    let Value::Leader(leader) = cell_val else { return };
+    let value = with_heap(|h| h.get(leader.leader_rc.key()).clone()).to_follower_stateful();
+    heap_replace(leader.follower_rc.key(), value);
+    with_heap_mut(|h| {
+        if let Value::Leader(l) = &mut *h.get_mut(cell_key) {
+            l.last_modified_stack = None;
+            l.follower_version += 1;
+        }
+    });
 }

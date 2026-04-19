@@ -1,16 +1,18 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 
 use smallvec::SmallVec;
 
-use crate::error::ExecutorError;
+use crate::{
+    error::ExecutorError,
+    heap::{VRc, with_heap},
+};
 
-use super::{RcValue, Value};
+use super::Value;
 
-/// list whose elements are reference-counted / COW for lvalue semantics.
 #[derive(Clone)]
+/// list whose elements are heap-allocated values accessed via owning heap refs.
 pub struct List {
-    pub elements: SmallVec<[RcValue; 4]>,
+    pub elements: SmallVec<[VRc; 4]>,
 }
 
 impl List {
@@ -30,7 +32,6 @@ impl List {
 }
 
 /// key types that can be used in a map.
-/// allowed: integers, strings, and vectors of hashable types.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum HashableKey {
     Integer(i64),
@@ -47,7 +48,10 @@ impl HashableKey {
                 let keys = list
                     .elements
                     .iter()
-                    .map(|rc| HashableKey::try_from_value(&rc.borrow()))
+                    .map(|key| {
+                        HashableKey::try_from_value(&with_heap(|h| h.get(key.key()).clone()))
+                            .map_err(|e| e)
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(HashableKey::Vector(keys))
             }
@@ -56,13 +60,12 @@ impl HashableKey {
     }
 }
 
-/// map whose values are reference-counted for lvalue semantics.
+#[derive(Clone)]
+/// map whose values are heap-allocated and accessed via owning heap refs.
 /// keys must be hashable (integers, strings, or vectors of hashable types).
 /// insertion_order tracks the order keys were first inserted so iteration is deterministic.
-#[derive(Clone)]
 pub struct Map {
-    pub entries: HashMap<HashableKey, RcValue>,
-    /// keys in their original insertion order (no duplicates)
+    pub entries: HashMap<HashableKey, VRc>,
     pub insertion_order: Vec<HashableKey>,
 }
 
@@ -82,19 +85,18 @@ impl Map {
         self.entries.is_empty()
     }
 
-    /// insert or overwrite a key; records insertion order on first insert.
-    pub fn insert(&mut self, key: HashableKey, value: RcValue) {
+    pub fn insert(&mut self, key: HashableKey, value: VRc) {
         if !self.entries.contains_key(&key) {
             self.insertion_order.push(key.clone());
         }
         self.entries.insert(key, value);
     }
 
-    pub fn get(&self, key: &HashableKey) -> Option<&RcValue> {
+    pub fn get(&self, key: &HashableKey) -> Option<&VRc> {
         self.entries.get(key)
     }
 
-    pub fn get_mut(&mut self, key: &HashableKey) -> Option<&mut RcValue> {
+    pub fn get_mut(&mut self, key: &HashableKey) -> Option<&mut VRc> {
         self.entries.get_mut(key)
     }
 
@@ -102,8 +104,7 @@ impl Map {
         self.entries.contains_key(key)
     }
 
-    /// iterate in insertion order
-    pub fn iter(&self) -> impl Iterator<Item = (&HashableKey, &RcValue)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&HashableKey, &VRc)> {
         self.insertion_order
             .iter()
             .filter_map(|k| self.entries.get(k).map(|v| (k, v)))

@@ -5,6 +5,7 @@ use std::{f64, sync::Arc};
 use compiler::cache::CompilerCache;
 use executor::{
     executor::{Executor, SeekToResult},
+    heap::with_heap,
     time::Timestamp,
     value::Value,
 };
@@ -73,7 +74,7 @@ impl ExecResult {
                 assert_eq!(list.elements.len(), expected.len(), "list length mismatch");
 
                 for (actual, expected) in list.elements.iter().zip(expected.iter()) {
-                    match &*actual.borrow() {
+                    match with_heap(|h| h.get(actual.key()).clone()) {
                         Value::Float(f) => assert!(
                             (f - expected).abs() < 1e-9,
                             "float mismatch: expected {}, got {}",
@@ -98,9 +99,9 @@ impl ExecResult {
                 assert_eq!(list.elements.len(), expected.len(), "list length mismatch");
 
                 for (actual, expected) in list.elements.iter().zip(expected.iter()) {
-                    match &*actual.borrow() {
+                    match with_heap(|h| h.get(actual.key()).clone()) {
                         Value::Integer(n) => {
-                            assert_eq!(*n, *expected, "integer mismatch");
+                            assert_eq!(n, *expected, "integer mismatch");
                         }
                         other => panic!("expected int list element, got {}", other.type_name()),
                     }
@@ -259,7 +260,7 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         .into_iter()
         .last()
         .map(|v| match v {
-            Value::Leader(leader) => leader.leader_rc.borrow().clone(),
+            Value::Leader(leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
             other => other,
         });
 

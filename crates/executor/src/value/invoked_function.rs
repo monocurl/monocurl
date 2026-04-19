@@ -8,45 +8,55 @@ use crate::{
     value::Value,
 };
 
-/// result of calling a function, possibly with labeled arguments.
-/// labeled invocations store enough information to recompute the result
-/// when a labeled argument changes (e.g. `f(a: 2, 1).a = 3`).
-pub struct InvokedFunction {
+use super::rc_cached::RcCached;
+
+#[derive(Clone)]
+pub struct InvokedFunctionBody {
     pub lambda: Box<Value>,
     pub arguments: SmallVec<[Value; 8]>,
-    /// (argument_index, label_name) pairs for labeled args
     pub labels: SmallVec<[(usize, String); 4]>,
-    pub cached_result: Cell<Option<Box<Value>>>,
 }
 
-impl Clone for InvokedFunction {
-    fn clone(&self) -> Self {
-        let cached_result = self.cached_result.take();
-        let cloned_cached_result = cached_result
-            .as_ref()
-            .map(|result| Box::new((**result).clone()));
-        self.cached_result.set(cached_result);
+pub struct InvFuncCache(pub Cell<Option<Box<Value>>>);
 
-        Self {
-            lambda: self.lambda.clone(),
-            arguments: self.arguments.clone(),
-            labels: self.labels.clone(),
-            cached_result: Cell::new(cloned_cached_result),
-        }
+impl Clone for InvFuncCache {
+    fn clone(&self) -> Self {
+        let cached = self.0.take();
+        let cloned = cached.as_ref().map(|v| Box::new((**v).clone()));
+        self.0.set(cached);
+        InvFuncCache(Cell::new(cloned))
+    }
+}
+
+pub type InvokedFunction = RcCached<InvokedFunctionBody, InvFuncCache>;
+
+pub fn make_invoked_function(
+    lambda: Value,
+    arguments: SmallVec<[Value; 8]>,
+    labels: SmallVec<[(usize, String); 4]>,
+    cached_result: Option<Value>,
+) -> InvokedFunction {
+    RcCached {
+        body: Rc::new(InvokedFunctionBody {
+            lambda: Box::new(lambda),
+            arguments,
+            labels,
+        }),
+        cache: InvFuncCache(Cell::new(cached_result.map(Box::new))),
     }
 }
 
 impl InvokedFunction {
     pub fn value<'a>(
-        this: &'a Rc<Self>,
+        this: &'a InvokedFunction,
         executor: &'a mut Executor,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            let cached = this.cached_result.take();
+            let cached = this.cache.0.take();
             let result = match cached {
                 Some(result) => result,
                 None => {
-                    let lambda = match this.lambda.as_ref().clone().elide_lvalue() {
+                    let lambda = match this.body.lambda.as_ref().clone().elide_lvalue() {
                         Value::Lambda(lambda) => lambda,
                         other => {
                             return Err(ExecutorError::type_error("lambda", other.type_name()));
@@ -54,7 +64,7 @@ impl InvokedFunction {
                     };
 
                     let full_args =
-                        fill_defaults(this.arguments.iter().cloned().collect(), &lambda);
+                        fill_defaults(this.body.arguments.iter().cloned().collect(), &lambda);
                     Box::new(
                         executor
                             .eagerly_invoke_lambda(&lambda, &full_args, None)
@@ -71,7 +81,7 @@ impl InvokedFunction {
                 other => other.clone(),
             };
 
-            this.cached_result.set(Some(result));
+            this.cache.0.set(Some(result));
             Ok(live)
         })
     }

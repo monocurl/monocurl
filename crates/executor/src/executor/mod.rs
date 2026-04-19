@@ -16,6 +16,7 @@ use bytecode::Bytecode;
 use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
+use crate::heap::{heap_replace, with_heap, with_heap_mut};
 use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
@@ -116,19 +117,26 @@ impl Executor {
             .find(|param| param.name == name)
             .ok_or_else(|| ExecutorError::Other(format!("unknown parameter '{}'", name)))?;
 
-        // allow setting even during animatino
-        if let Value::Leader(leader) = &*param.leader_cell_rc.borrow()
-            && leader.locked_by_anim.is_some()
-        {
-            return Err(ExecutorError::ConcurrentAnimation);
+        let leader_cell_key = param.leader_cell.key();
+        let leader_value_key = param.leader_value;
+        let follower_value_key = param.follower_value;
+
+        // allow setting even during animation
+        let cell_val = with_heap(|h| h.get(leader_cell_key).clone());
+        if let Value::Leader(leader) = &cell_val {
+            if leader.locked_by_anim.is_some() {
+                return Err(ExecutorError::ConcurrentAnimation);
+            }
         }
 
-        *param.leader_value_rc.borrow_mut() = value.clone();
-        *param.follower_value_rc.borrow_mut() = value;
-        if let Value::Leader(leader) = &mut *param.leader_cell_rc.borrow_mut() {
-            leader.leader_version += 1;
-            leader.follower_version += 1;
-        }
+        heap_replace(leader_value_key, value.clone());
+        heap_replace(follower_value_key, value);
+        with_heap_mut(|h| {
+            if let Value::Leader(l) = &mut *h.get_mut(leader_cell_key) {
+                l.leader_version += 1;
+                l.follower_version += 1;
+            }
+        });
         Ok(())
     }
 
@@ -158,7 +166,7 @@ mod tests {
     use bytecode::{Bytecode, SectionBytecode, SectionFlags};
 
     use super::Executor;
-    use crate::{error::ExecutorError, state::LeaderKind, value::Value};
+    use crate::{error::ExecutorError, heap::with_heap, state::LeaderKind, value::Value};
 
     fn empty_executor() -> Executor {
         Executor::new(
@@ -190,12 +198,14 @@ mod tests {
             .unwrap();
 
         let param = &executor.state.active_params[0];
-        match &*param.leader_value_rc.borrow() {
-            Value::Float(value) => assert_eq!(*value, 2.5),
+        let leader_val = with_heap(|h| h.get(param.leader_value).clone());
+        match leader_val {
+            Value::Float(value) => assert_eq!(value, 2.5),
             other => panic!("expected float leader value, got {}", other.type_name()),
         }
-        match &*param.follower_value_rc.borrow() {
-            Value::Float(value) => assert_eq!(*value, 2.5),
+        let follower_val = with_heap(|h| h.get(param.follower_value).clone());
+        match follower_val {
+            Value::Float(value) => assert_eq!(value, 2.5),
             other => panic!("expected float follower value, got {}", other.type_name()),
         }
     }

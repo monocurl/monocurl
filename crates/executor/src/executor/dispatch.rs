@@ -4,9 +4,11 @@ use bytecode::Instruction;
 
 use crate::{
     error::ExecutorError,
+    heap::{VRc, VWeak, with_heap},
     state::LeaderKind,
     value::{
-        RcValue, Value, container::{List, Map}, lambda::Operator, stateful::{Stateful, StatefulNode, StatefulReadKind}
+        Value, container::{List, Map}, lambda::Operator,
+        stateful::{StatefulNode, StatefulReadKind, make_stateful},
     },
 };
 
@@ -21,7 +23,6 @@ impl Executor {
         instr: Instruction,
     ) -> ExecSingle {
         match instr {
-            // ----- push constants -----
             Instruction::PushInt { index } => {
                 let val = self.bytecode.sections[section_idx].int_pool[index as usize];
                 self.state.stack_mut(stack_idx).push(Value::Integer(val));
@@ -60,17 +61,13 @@ impl Executor {
                 self.state.sync_all_leaders();
             }
 
-            // ----- variable promotion -----
             Instruction::ConvertVar { allow_stateful } => {
-                if !allow_stateful && matches!(
-                    self.state.stack(stack_idx).peek(),
-                    Value::Stateful(_)
-                ) {
-                    return ExecSingle::Error(
-                        ExecutorError::Other(
-                            "illegal assignment of stateful value. Stateful values must only be assigned to meshes".into(),
-                        ),
-                    );
+                if !allow_stateful
+                    && matches!(self.state.stack(stack_idx).peek(), Value::Stateful(_))
+                {
+                    return ExecSingle::Error(ExecutorError::Other(
+                        "illegal assignment of stateful value. Stateful values must only be assigned to meshes".into(),
+                    ));
                 }
                 self.state.promote_to_var(stack_idx);
             }
@@ -85,11 +82,9 @@ impl Executor {
                     self.state.stack(stack_idx).peek().clone().elide_lvalue(),
                     Value::Stateful(_)
                 ) {
-                    return ExecSingle::Error(
-                        ExecutorError::Other(
-                            "stateful values can only be assigned to mesh variables".into(),
-                        ),
-                    );
+                    return ExecSingle::Error(ExecutorError::Other(
+                        "stateful values can only be assigned to mesh variables".into(),
+                    ));
                 }
                 let name =
                     self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
@@ -97,7 +92,6 @@ impl Executor {
                     .promote_to_leader(stack_idx, LeaderKind::Param, name);
             }
 
-            // ----- stack reads -----
             Instruction::PushCopy {
                 stack_delta,
                 mutable,
@@ -105,21 +99,15 @@ impl Executor {
             } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let lvalue_resolved = if mutable {
-                    // want to keep the nested layers of lvalue
                     val.force_elide_lvalue()
                 } else {
-                    // strip leader away
-                    // in theory, this should be a force elision but when setting up the stack yourself (for e.g. functions), it is sometimes convenient to avoid wrapping in lvalue
-                    // I don't believe this causes problems elsewhere so it's fine to just make elision optional here
                     val.elide_lvalue().elide_leader()
                 };
 
                 if let Value::Stateful(_) = lvalue_resolved {
-                    return ExecSingle::Error(
-                        ExecutorError::Other(
-                            "attempt to copy a stateful value directly. Use $<ident> to use the live value, and *ident to read the current value".into(),
-                        ),
-                    );
+                    return ExecSingle::Error(ExecutorError::Other(
+                        "attempt to copy a stateful value directly. Use $<ident> to use the live value, and *ident to read the current value".into(),
+                    ));
                 }
 
                 if pop_tos {
@@ -132,31 +120,26 @@ impl Executor {
                 force_ephemeral,
             } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let rc = match val {
-                    Value::Lvalue(rc) => rc,
-                    Value::WeakLvalue(weak) => weak.upgrade().unwrap(),
+                let vrc = match val {
+                    Value::Lvalue(vrc) => vrc,
+                    Value::WeakLvalue(vweak) => vweak.upgrade(),
                     _ => panic!("PushLvalue: not an lvalue at delta {}", stack_delta),
                 };
                 if force_ephemeral {
-                    // keep a strong ref alive for the duration of the section
-                    self.state.ephemeral_pool.push(rc.clone());
+                    self.state.ephemeral_pool.push(vrc.clone());
                 }
-                // always push a non-owning weak ref
                 self.state
                     .stack_mut(stack_idx)
-                    .push(Value::WeakLvalue(RcValue::downgrade(&rc)));
+                    .push(Value::WeakLvalue(vrc.downgrade()));
             }
             Instruction::PushDereference { stack_delta } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                // resolve lvalue/leader chains to get the leader's value (not follower)
                 let inner = resolve_leader_value(&val);
                 let resolved = match inner {
-                    Value::Stateful(ref s) => {
-                        match self.eval_stateful(s).await {
-                            Ok(v) => v,
-                            Err(e) => return ExecSingle::Error(e),
-                        }
-                    }
+                    Value::Stateful(ref s) => match self.eval_stateful(s).await {
+                        Ok(v) => v,
+                        Err(e) => return ExecSingle::Error(e),
+                    },
                     other => other,
                 };
                 self.state.stack_mut(stack_idx).push(resolved);
@@ -164,45 +147,45 @@ impl Executor {
             Instruction::PushStateful { stack_delta } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
 
-                let leader_cell_rc = match val.as_lvalue_rc() {
-                    Some(rc) => rc,
+                let leader_cell_key = match val.as_lvalue_key() {
+                    Some(k) => k,
                     None => {
-                        return ExecSingle::Error(
-                            ExecutorError::type_error("param variable", val.type_name()),
-                        );
+                        return ExecSingle::Error(ExecutorError::type_error(
+                            "param variable",
+                            val.type_name(),
+                        ));
                     }
                 };
-                match &*leader_cell_rc.borrow() {
-                    Value::Leader(leader) => {
+
+                let cell_val = with_heap(|h| h.get(leader_cell_key).clone());
+                match cell_val {
+                    Value::Leader(ref leader) => {
                         if leader.kind != LeaderKind::Param {
-                            // if it's wrapping a stateful, allow it
-                            if let Value::Stateful(stateful) = &*leader.leader_rc.borrow() {
+                            // if wrapping a stateful, allow it
+                            let inner = with_heap(|h| h.get(leader.leader_rc.key()).clone());
+                            if let Value::Stateful(stateful) = inner {
                                 self.state
                                     .stack_mut(stack_idx)
-                                    .push(Value::Stateful(stateful.clone()));
+                                    .push(Value::Stateful(stateful));
                                 return ExecSingle::Continue;
                             }
 
-                            return ExecSingle::Error(
-                                ExecutorError::Other(
-                                    "$ can only be used with 'param' variables, not 'mesh' (unless the mesh contains a stateful value)  ".into(),
-                                ),
-                            );
+                            return ExecSingle::Error(ExecutorError::Other(
+                                "$ can only be used with 'param' variables, not 'mesh' (unless the mesh contains a stateful value)  ".into(),
+                            ));
                         }
                     }
                     _ => {
-                        return ExecSingle::Error(
-                            ExecutorError::type_error(
-                                "param leader",
-                                leader_cell_rc.borrow().type_name(),
-                            ),
-                        );
+                        return ExecSingle::Error(ExecutorError::type_error(
+                            "param leader",
+                            cell_val.type_name(),
+                        ));
                     }
                 }
 
-                let stateful = Stateful::new(
-                    vec![leader_cell_rc.clone()],
-                    StatefulNode::LeaderRef(leader_cell_rc),
+                let stateful = make_stateful(
+                    vec![leader_cell_key],
+                    StatefulNode::LeaderRef(leader_cell_key),
                     StatefulReadKind::Leader,
                 );
                 self.state
@@ -210,7 +193,6 @@ impl Executor {
                     .push(Value::Stateful(stateful));
             }
 
-            // ----- labels -----
             Instruction::BufferLabelOrAttribute { string_index } => {
                 self.state
                     .stack_mut(stack_idx)
@@ -218,7 +200,6 @@ impl Executor {
                     .push(string_index);
             }
 
-            // ----- closures -----
             Instruction::MakeLambda {
                 capture_count,
                 prototype_index,
@@ -235,17 +216,16 @@ impl Executor {
                 let stack = self.state.stack_mut(stack_idx);
                 let val = stack.pop();
                 match val {
-                    // lambda is Rc<Lambda>, so Operator(rc) is a cheap pointer copy
                     Value::Lambda(rc) => stack.push(Value::Operator(Operator(rc))),
                     _ => {
-                        return ExecSingle::Error(
-                            ExecutorError::type_error("lambda", val.type_name()),
-                        );
+                        return ExecSingle::Error(ExecutorError::type_error(
+                            "lambda",
+                            val.type_name(),
+                        ));
                     }
                 }
             }
 
-            // ----- invocation -----
             Instruction::LambdaInvoke {
                 stateful,
                 labeled,
@@ -268,7 +248,6 @@ impl Executor {
                 return self.exec_convert_to_live_operator(stack_idx);
             }
 
-            // ----- control flow -----
             Instruction::Jump { section, to } => {
                 self.state.stack_mut(stack_idx).ip = (section, to);
             }
@@ -293,17 +272,14 @@ impl Executor {
                 self.state.stack_mut(stack_idx).pop_n(count as usize);
             }
 
-            // ----- native -----
             Instruction::NativeInvoke { index, arg_count } => {
                 return self.exec_native_invoke(stack_idx, index, arg_count).await;
             }
 
-            // ----- play -----
             Instruction::Play => {
                 return self.exec_play(stack_idx);
             }
 
-            // ----- unary -----
             Instruction::Negate => {
                 let val = self.state.stack_mut(stack_idx).pop();
                 match self.exec_negate(val).await {
@@ -319,7 +295,6 @@ impl Executor {
                 }
             }
 
-            // ----- subscript / attribute -----
             Instruction::Subscript { mutable } => {
                 return self.exec_subscript(stack_idx, mutable);
             }
@@ -330,7 +305,6 @@ impl Executor {
                 return self.exec_attribute(stack_idx, section_idx, mutable, string_index);
             }
 
-            // ----- binary -----
             Instruction::Add => return self.exec_binary_op(stack_idx, BinOp::Add).await,
             Instruction::Sub => return self.exec_binary_op(stack_idx, BinOp::Sub).await,
             Instruction::Mul => return self.exec_binary_op(stack_idx, BinOp::Mul).await,
@@ -358,19 +332,15 @@ impl Executor {
     }
 }
 
-/// dereference: follow lvalue/leader chains and return the leader's stored value.
-/// for stateful leader values the caller handles async evaluation.
 fn resolve_leader_value(val: &Value) -> Value {
-    let rc = match val {
-        Value::Lvalue(rc) => rc.borrow().clone(),
-        Value::WeakLvalue(weak) => match weak.upgrade() {
-            Some(rc) => rc.borrow().clone(),
-            None => return Value::Nil,
-        },
+    let key = match val {
+        Value::Lvalue(vrc) => vrc.key(),
+        Value::WeakLvalue(vweak) => vweak.key(),
         other => return other.clone(),
     };
-    match rc {
-        Value::Leader(leader) => leader.leader_rc.borrow().clone(),
+    let inner = with_heap(|h| h.get(key).clone());
+    match inner {
+        Value::Leader(leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
         other => other,
     }
 }

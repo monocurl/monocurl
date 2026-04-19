@@ -1620,6 +1620,7 @@ dependencies = [
  "bytecode",
  "geo",
  "smallvec",
+ "smol",
  "structs",
  "sysinfo",
 ]

@@ -8,13 +8,15 @@ pub mod invoked_operator;
 pub mod lambda;
 pub mod leader;
 pub mod primitive_anim;
+pub mod rc_cached;
 pub mod stateful;
 
-use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use geo::mesh::Mesh;
+
+use crate::heap::{VRc, VWeak};
 
 use self::{
     anim_block::AnimBlock,
@@ -29,18 +31,6 @@ use self::{
 
 /// (section_index, instruction_offset)
 pub type InstructionPointer = (u16, u32);
-
-/// owning reference to a mutable value cell.
-/// containers (List, Map) and promoted variables hold these.
-pub type RcValue = Rc<RefCell<Value>>;
-
-/// non-owning reference used for pushed lvalue refs to break reference cycles.
-pub type WeakValue = Weak<RefCell<Value>>;
-
-/// create a new RcValue wrapping the given value
-pub fn rc_value(val: Value) -> RcValue {
-    Rc::new(RefCell::new(val))
-}
 
 #[derive(Clone)]
 pub enum Value {
@@ -65,12 +55,11 @@ pub enum Value {
     Stateful(Stateful),
     Leader(Leader),
 
-    InvokedOperator(Rc<InvokedOperator>),
-    InvokedFunction(Rc<InvokedFunction>),
+    InvokedOperator(InvokedOperator),
+    InvokedFunction(InvokedFunction),
 
-    /// owning lvalue — the strong Rc lives on the var_stack at the promoted slot.
-    Lvalue(RcValue),
+    /// owning lvalue — the strong VRc lives on the var_stack at the promoted slot.
+    Lvalue(VRc),
     /// non-owning lvalue reference — pushed via PushLvalue.
-    /// upgrading can fail if the owning variable was freed.
-    WeakLvalue(WeakValue),
+    WeakLvalue(VWeak),
 }

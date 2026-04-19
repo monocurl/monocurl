@@ -1,7 +1,10 @@
-use smallvec::SmallVec;
 use std::{cell::RefCell, rc::Rc};
 
-use super::{RcValue, Value};
+use smallvec::SmallVec;
+
+use crate::heap::{HeapKey, VRc, with_heap};
+
+use super::{Value, rc_cached::RcCached};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StatefulReadKind {
@@ -10,98 +13,110 @@ pub enum StatefulReadKind {
 }
 
 /// a stateful value node that tracks reactive dependencies.
-/// only labeled lambda/operator calls (including 0-label calls) build stateful trees;
-/// arithmetic sub-expressions containing $-refs are also valid as args.
+/// roots are non-owning leader-cell keys — owned by LeaderEntry VRcs.
+/// args/operands own their heap slots directly.
 #[derive(Clone)]
 pub enum StatefulNode {
-    /// reads the follower value of a param leader
-    LeaderRef(RcValue),
-    /// a constant value embedded in the graph
+    /// reads a leader cell (HeapKey → Value::Leader)
+    LeaderRef(HeapKey),
     Constant(Box<Value>),
-    /// labeled lambda invocation whose args are stored as RcValues (may contain Value::Stateful)
     LabeledCall {
         func: Box<StatefulNode>,
-        /// each element is an RcValue whose cell holds the current arg value (possibly Stateful)
-        args: Vec<RcValue>,
+        /// owning refs to slots holding the arg values
+        args: Vec<VRc>,
         labels: SmallVec<[(usize, String); 4]>,
     },
-    /// labeled operator invocation
     LabeledOperatorCall {
         operator: Box<StatefulNode>,
-        /// RcValue so the operand can be reached via mutable attribute access
-        operand: RcValue,
-        extra_args: Vec<RcValue>,
+        operand: VRc,
+        extra_args: Vec<VRc>,
         labels: SmallVec<[(usize, String); 4]>,
     },
 }
 
-#[derive(Clone)]
-pub struct Stateful {
-    /// leader cells (RcValues containing Value::Leader) this expression depends on
-    pub roots: Vec<RcValue>,
+pub struct StatefulBody {
+    /// non-owning HeapKeys to leader cells (LeaderEntry owns the VRc)
+    pub roots: Vec<HeapKey>,
     pub root: StatefulNode,
-    /// whether stateful leader refs read code-side leaders or on-screen followers
-    pub read_kind: StatefulReadKind,
-    /// cached (versions_at_eval_time, result); versions parallel roots; boxed to break Value recursion
-    cached: RefCell<Option<(Vec<u64>, Box<Value>)>>,
 }
 
-impl Stateful {
-    pub fn new(mut roots: Vec<RcValue>, root: StatefulNode, read_kind: StatefulReadKind) -> Self {
-        dedup_roots_by_ptr(&mut roots);
+pub struct StatefulCache {
+    pub read_kind: StatefulReadKind,
+    pub cached: RefCell<Option<(Vec<u64>, Box<Value>)>>,
+}
+
+impl Clone for StatefulCache {
+    fn clone(&self) -> Self {
+        let cached = self.cached.borrow().clone();
         Self {
-            roots,
-            root,
+            read_kind: self.read_kind,
+            cached: RefCell::new(cached),
+        }
+    }
+}
+
+pub type Stateful = RcCached<StatefulBody, StatefulCache>;
+
+pub fn make_stateful(
+    roots: Vec<HeapKey>,
+    root: StatefulNode,
+    read_kind: StatefulReadKind,
+) -> Stateful {
+    let mut deduped = Vec::<HeapKey>::new();
+    for key in roots {
+        if !deduped.contains(&key) {
+            deduped.push(key);
+        }
+    }
+    RcCached {
+        body: Rc::new(StatefulBody { roots: deduped, root }),
+        cache: StatefulCache {
             read_kind,
             cached: RefCell::new(None),
-        }
+        },
     }
+}
 
-    pub fn to_follower_read(&self) -> Self {
-        let mut ret = self.clone();
-        if ret.read_kind != StatefulReadKind::Follower {
-            ret.read_kind = StatefulReadKind::Follower;
-            ret.reset_cache();
-        }
-        ret
+pub fn to_follower_stateful(s: &Stateful) -> Stateful {
+    if s.cache.read_kind == StatefulReadKind::Follower {
+        return s.clone();
     }
-
-    pub fn reset_cache(&self) {
-        self.cached.borrow_mut().take();
+    RcCached {
+        body: Rc::clone(&s.body),
+        cache: StatefulCache {
+            read_kind: StatefulReadKind::Follower,
+            cached: RefCell::new(None),
+        },
     }
+}
 
-    /// check if all root versions match the cached snapshot
-    pub fn cache_valid(&self) -> Option<Value> {
-        let borrow = self.cached.borrow();
-        let (versions, val) = borrow.as_ref()?;
-        let still_valid = self
-            .roots
-            .iter()
-            .zip(versions.iter())
-            .all(|(root, cached_ver)| {
-                if let Value::Leader(leader) = &*root.borrow() {
-                    match self.read_kind {
-                        StatefulReadKind::Leader => leader.leader_version == *cached_ver,
-                        StatefulReadKind::Follower => leader.follower_version == *cached_ver,
-                    }
-                } else {
-                    false
+pub fn stateful_cache_valid(s: &Stateful) -> Option<Value> {
+    let borrow = s.cache.cached.borrow();
+    let (versions, val) = borrow.as_ref()?;
+    let still_valid = s.body.roots.iter().zip(versions.iter()).all(|(&key, &cached_ver)| {
+        with_heap(|h| {
+            if let Value::Leader(leader) = &*h.get(key) {
+                match s.cache.read_kind {
+                    StatefulReadKind::Leader => leader.leader_version == cached_ver,
+                    StatefulReadKind::Follower => leader.follower_version == cached_ver,
                 }
-            });
-        if still_valid {
-            Some(*val.clone())
-        } else {
-            None
-        }
-    }
+            } else {
+                false
+            }
+        })
+    });
+    if still_valid { Some(*val.clone()) } else { None }
+}
 
-    pub fn update_cache(&self, val: Value) {
-        let versions: Vec<u64> = self
-            .roots
-            .iter()
-            .map(|root| {
-                if let Value::Leader(leader) = &*root.borrow() {
-                    match self.read_kind {
+pub fn stateful_update_cache(s: &Stateful, val: Value) {
+    let versions: Vec<u64> = s
+        .body
+        .roots
+        .iter()
+        .map(|&key| {
+            with_heap(|h| {
+                if let Value::Leader(leader) = &*h.get(key) {
+                    match s.cache.read_kind {
                         StatefulReadKind::Leader => leader.leader_version,
                         StatefulReadKind::Follower => leader.follower_version,
                     }
@@ -109,44 +124,28 @@ impl Stateful {
                     0
                 }
             })
-            .collect();
-        *self.cached.borrow_mut() = Some((versions, Box::new(val)));
-    }
+        })
+        .collect();
+    *s.cache.cached.borrow_mut() = Some((versions, Box::new(val)));
 }
 
-// tree-building helpers used by invoke.rs
-// ---------------------------------------------------------------------------
+pub fn reset_stateful_cache(s: &Stateful) {
+    s.cache.cached.borrow_mut().take();
+}
 
-/// decompose a value into (StatefulNode, roots) — used for func/operator nodes only.
-/// args are now passed as RcValues directly, not converted to StatefulNode.
-pub fn value_into_stateful_node(val: Value) -> (StatefulNode, Vec<RcValue>) {
+// tree-building helpers
+
+/// decompose a value into (StatefulNode, roots)
+pub fn value_into_stateful_node(val: Value) -> (StatefulNode, Vec<HeapKey>) {
     match val {
-        Value::Stateful(s) => (s.root, s.roots),
+        Value::Stateful(s) => (s.body.root.clone(), s.body.roots.clone()),
         other => (StatefulNode::Constant(Box::new(other)), vec![]),
     }
 }
 
-/// collect stateful roots from a value, if it is stateful
-pub fn collect_roots_from_value(val: &Value, roots: &mut Vec<RcValue>) {
+/// collect stateful roots from a value
+pub fn collect_roots_from_value(val: &Value, roots: &mut Vec<HeapKey>) {
     if let Value::Stateful(s) = val {
-        roots.extend(s.roots.iter().cloned());
+        roots.extend(s.body.roots.iter().copied());
     }
-}
-
-/// collect roots from an RcValue cell
-pub fn collect_roots_from_rc(rc: &RcValue, roots: &mut Vec<RcValue>) {
-    collect_roots_from_value(&rc.borrow(), roots);
-}
-
-/// remove duplicate roots (by Rc pointer identity) in-place
-fn dedup_roots_by_ptr(roots: &mut Vec<RcValue>) {
-    let mut seen: Vec<RcValue> = vec![];
-    roots.retain(|r| {
-        if seen.iter().any(|s| Rc::ptr_eq(s, r)) {
-            false
-        } else {
-            seen.push(r.clone());
-            true
-        }
-    });
 }

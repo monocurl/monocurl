@@ -1,4 +1,4 @@
-use executor::{error::ExecutorError, executor::Executor, value::Value};
+use executor::{error::ExecutorError, executor::Executor, heap::{VRc, with_heap}, value::Value};
 use stdlib_macros::stdlib_func;
 
 use crate::read_float;
@@ -59,9 +59,9 @@ fn read_list(
         Value::List(list) => list
             .elements
             .iter()
-            .map(|rc| match &*rc.borrow() {
-                Value::Float(f) => Ok(*f),
-                Value::Integer(n) => Ok(*n as f64),
+            .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
+                Value::Float(f) => Ok(f),
+                Value::Integer(n) => Ok(n as f64),
                 other => Err(ExecutorError::type_error_for(
                     "number",
                     other.type_name(),
@@ -406,7 +406,7 @@ pub async fn dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 
 #[stdlib_func]
 pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    use executor::value::{container::List, rc_value};
+    use executor::{value::container::List};
     use smallvec::smallvec;
 
     let u = read_list(executor, stack_idx, -2, "u")?;
@@ -424,9 +424,9 @@ pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
     ];
     Ok(Value::List(std::rc::Rc::new(List {
         elements: smallvec![
-            rc_value(Value::Float(out[0])),
-            rc_value(Value::Float(out[1])),
-            rc_value(Value::Float(out[2])),
+            VRc::new(Value::Float(out[0])),
+            VRc::new(Value::Float(out[1])),
+            VRc::new(Value::Float(out[2])),
         ],
     })))
 }
