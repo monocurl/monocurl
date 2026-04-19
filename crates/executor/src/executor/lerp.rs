@@ -1,9 +1,5 @@
-use std::{future::Future, pin::Pin, rc::Rc, sync::Arc};
+use std::{future::Future, pin::Pin, rc::Rc};
 
-use geo::{
-    mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
-    simd::{Float2, Float3, Float4},
-};
 use smallvec::SmallVec;
 
 use crate::{
@@ -73,10 +69,6 @@ impl Executor {
 
             let a = a.elide_wrappers(self).await?;
             let b = b.elide_wrappers(self).await?;
-
-            if let Some(lerped) = lerp_meshes(&a, &b, t)? {
-                return Ok(lerped);
-            }
 
             if let Some(lerped) = self.lerp_containers(&a, &b, t).await? {
                 return Ok(lerped);
@@ -409,118 +401,6 @@ fn lerp_numbers(a: Value, b: Value, t: f64) -> Result<Value, ExecutorError> {
             b.type_name()
         ))),
     }
-}
-
-fn lerp_meshes(a: &Value, b: &Value, t: f64) -> Result<Option<Value>, ExecutorError> {
-    let (Value::Mesh(a), Value::Mesh(b)) = (a, b) else {
-        return Ok(None);
-    };
-
-    if a.dots.len() != b.dots.len() || a.lins.len() != b.lins.len() || a.tris.len() != b.tris.len()
-    {
-        return Err(ExecutorError::Other(format!(
-            "cannot lerp meshes with different topology counts: dots {} vs {}, lins {} vs {}, tris {} vs {}",
-            a.dots.len(),
-            b.dots.len(),
-            a.lins.len(),
-            b.lins.len(),
-            a.tris.len(),
-            b.tris.len()
-        )));
-    }
-
-    let mesh = Mesh {
-        dots: a
-            .dots
-            .iter()
-            .zip(&b.dots)
-            .map(|(a, b)| Dot {
-                pos: lerp_float3(a.pos, b.pos, t),
-                norm: lerp_float3(a.norm, b.norm, t),
-                col: lerp_float4(a.col, b.col, t),
-                inv: b.inv,
-                anti: b.anti,
-                is_dom_sib: b.is_dom_sib,
-            })
-            .collect(),
-        lins: a
-            .lins
-            .iter()
-            .zip(&b.lins)
-            .map(|(a, b)| Lin {
-                a: LinVertex {
-                    pos: lerp_float3(a.a.pos, b.a.pos, t),
-                    col: lerp_float4(a.a.col, b.a.col, t),
-                },
-                b: LinVertex {
-                    pos: lerp_float3(a.b.pos, b.b.pos, t),
-                    col: lerp_float4(a.b.col, b.b.col, t),
-                },
-                norm: lerp_float3(a.norm, b.norm, t),
-                prev: b.prev,
-                next: b.next,
-                inv: b.inv,
-                anti: b.anti,
-                is_dom_sib: b.is_dom_sib,
-            })
-            .collect(),
-        tris: a
-            .tris
-            .iter()
-            .zip(&b.tris)
-            .map(|(a, b)| Tri {
-                a: TriVertex {
-                    pos: lerp_float3(a.a.pos, b.a.pos, t),
-                    col: lerp_float4(a.a.col, b.a.col, t),
-                    uv: lerp_float2(a.a.uv, b.a.uv, t),
-                },
-                b: TriVertex {
-                    pos: lerp_float3(a.b.pos, b.b.pos, t),
-                    col: lerp_float4(a.b.col, b.b.col, t),
-                    uv: lerp_float2(a.b.uv, b.b.uv, t),
-                },
-                c: TriVertex {
-                    pos: lerp_float3(a.c.pos, b.c.pos, t),
-                    col: lerp_float4(a.c.col, b.c.col, t),
-                    uv: lerp_float2(a.c.uv, b.c.uv, t),
-                },
-                ab: b.ab,
-                bc: b.bc,
-                ca: b.ca,
-                anti: b.anti,
-                is_dom_sib: b.is_dom_sib,
-            })
-            .collect(),
-        uniform: lerp_uniforms(&a.uniform, &b.uniform, t),
-        tag: if t < 0.5 { a.tag.clone() } else { b.tag.clone() },
-    };
-
-    Ok(Some(Value::Mesh(Arc::new(mesh))))
-}
-
-fn lerp_uniforms(a: &Uniforms, b: &Uniforms, t: f64) -> Uniforms {
-    Uniforms {
-        alpha: (1.0 - t) * a.alpha + t * b.alpha,
-        img: if t < 0.5 { a.img.clone() } else { b.img.clone() },
-        z_index: if t < 0.5 { a.z_index } else { b.z_index },
-        fixed_in_frame: if t < 0.5 {
-            a.fixed_in_frame
-        } else {
-            b.fixed_in_frame
-        },
-    }
-}
-
-fn lerp_float2(a: Float2, b: Float2, t: f64) -> Float2 {
-    a + (b - a) * t as f32
-}
-
-fn lerp_float3(a: Float3, b: Float3, t: f64) -> Float3 {
-    a + (b - a) * t as f32
-}
-
-fn lerp_float4(a: Float4, b: Float4, t: f64) -> Float4 {
-    a + (b - a) * t as f32
 }
 
 fn lerp_context(context: String, err: ExecutorError) -> ExecutorError {
