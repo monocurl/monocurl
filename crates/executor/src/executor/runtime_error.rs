@@ -32,7 +32,7 @@ impl Executor {
     ) -> RuntimeError {
         let mut fallback_span = self.current_instruction_span(stack_idx);
         let mut root_span = None;
-        let mut callstack = Vec::new();
+        let mut recovered_callstack = Vec::new();
 
         for frame in self.recover_call_stack(stack_idx) {
             let span = self.best_effort_span(frame.stack_idx, frame.next_ip);
@@ -44,18 +44,19 @@ impl Executor {
             {
                 root_span = Some(span.clone());
             }
-            if callstack.len() < RUNTIME_ERROR_CALLSTACK_LIMIT {
-                callstack.push(RuntimeCallFrame {
-                    section: frame.next_ip.0,
-                    span: span.clone(),
-                });
-            }
+            recovered_callstack.push(RuntimeCallFrame {
+                section: frame.next_ip.0,
+                span: span.clone(),
+            });
         }
+
+        recovered_callstack.reverse();
+        recovered_callstack.truncate(RUNTIME_ERROR_CALLSTACK_LIMIT);
 
         RuntimeError {
             error,
             span: root_span.unwrap_or(fallback_span),
-            callstack,
+            callstack: recovered_callstack,
         }
     }
 
@@ -104,12 +105,27 @@ impl Executor {
     fn recover_call_stack(&self, stack_idx: usize) -> std::vec::IntoIter<RecoveredFrame> {
         let mut frames = Vec::new();
         let mut cursor = Some(stack_idx);
+        let mut skip_current_ip = false;
 
         while let Some(idx) = cursor {
-            frames.push(RecoveredFrame {
-                stack_idx: idx,
-                next_ip: self.state.stack_ip(idx),
-            });
+            let parent_idx = self
+                .state
+                .stack_trace_parent_idx(idx)
+                .or_else(|| self.state.stack_parent_idx(idx));
+
+            if let Some(parent_idx) = parent_idx {
+                frames.push(RecoveredFrame {
+                    stack_idx: parent_idx,
+                    next_ip: self.state.stack_ip(parent_idx),
+                });
+            }
+
+            if !skip_current_ip {
+                frames.push(RecoveredFrame {
+                    stack_idx: idx,
+                    next_ip: self.state.stack_ip(idx),
+                });
+            }
             frames.extend(
                 self.state
                     .stack_call_stack(idx)
@@ -121,7 +137,8 @@ impl Executor {
                         next_ip,
                     }),
             );
-            cursor = self.state.stack_trace_parent_idx(idx);
+            cursor = parent_idx;
+            skip_current_ip = true;
         }
 
         frames.into_iter()
@@ -140,5 +157,55 @@ fn nondegenerate_span(raw: Span8) -> Span8 {
         raw.start..raw.end + 1
     } else {
         raw
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bytecode::{Bytecode, InstructionAnnotation, SectionBytecode, SectionFlags};
+
+    use crate::executor::Executor;
+
+    fn executor_with_root_annotations(spans: &[(usize, usize)]) -> Executor {
+        let mut section = SectionBytecode::new(SectionFlags {
+            is_stdlib: false,
+            is_library: false,
+            is_init: false,
+            is_root_module: true,
+        });
+        section.annotations = spans
+            .iter()
+            .map(|(start, end)| InstructionAnnotation {
+                source_loc: *start..*end,
+            })
+            .collect();
+        section.instructions = vec![bytecode::Instruction::PushNil; spans.len()];
+
+        Executor::new(Bytecode::new(vec![Arc::new(section)]), Vec::new())
+    }
+
+    #[test]
+    fn recover_call_stack_prioritizes_spawning_play_frame() {
+        let mut executor =
+            executor_with_root_annotations(&[(10, 14), (20, 24), (30, 34), (40, 44)]);
+
+        let root_idx = crate::state::ExecutionState::ROOT_STACK_ID;
+        executor.state.stack_mut(root_idx).ip = (0, 1);
+        executor.state.stack_mut(root_idx).call_stack.push((0, 3));
+
+        let child_idx = executor
+            .state
+            .alloc_stack((0, 2), Some(root_idx), Some(root_idx))
+            .expect("failed to allocate child stack");
+        executor.state.stack_mut(child_idx).call_stack.push((0, 4));
+
+        let spans: Vec<_> = executor
+            .recover_call_stack(child_idx)
+            .map(|frame| executor.best_effort_span(frame.stack_idx, frame.next_ip))
+            .collect();
+
+        assert_eq!(spans, vec![10..14, 20..24, 40..44, 30..34]);
     }
 }

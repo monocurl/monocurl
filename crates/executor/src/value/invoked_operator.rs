@@ -93,9 +93,10 @@ impl InvokedOperator {
                     full_args.push(this.body.operand.as_ref().clone());
                     full_args.extend(this.body.arguments.iter().cloned());
                     let full_args = fill_defaults(full_args, &operator.0);
+                    let trace_parent_idx = Some(executor.state.last_stack_idx);
 
                     let raw = executor
-                        .eagerly_invoke_lambda(&operator.0, &full_args, None)
+                        .eagerly_invoke_lambda(&operator.0, &full_args, trace_parent_idx)
                         .await?;
                     let (initial, modified) = extract_operator_result(raw)?;
                     this.cache.unmodified.set(Some(Box::new(initial)));

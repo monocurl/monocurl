@@ -478,6 +478,8 @@ impl Executor {
                             Value::Nil
                         };
                         self.state.free_stack(temp_idx);
+                        self.state.last_stack_idx = trace_parent_idx
+                            .unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
                         self.state.call_depth -= 1;
                         return Ok(result);
                     }
@@ -642,8 +644,9 @@ impl Executor {
                         evaled.push(resolved);
                     }
                     let full_args = prepare_eager_call_args(evaled, &lambda);
+                    let trace_parent_idx = Some(self.state.last_stack_idx);
                     let result = self
-                        .eagerly_invoke_lambda(&lambda, &full_args, None)
+                        .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
                         .await?;
                     self.resolve_live_value(result).await
                 }
@@ -683,8 +686,9 @@ impl Executor {
                         evaled.push(resolved);
                     }
                     let full_args = prepare_eager_call_args(evaled, &operator_inner.0);
+                    let trace_parent_idx = Some(self.state.last_stack_idx);
                     let raw = self
-                        .eagerly_invoke_lambda(&operator_inner.0, &full_args, None)
+                        .eagerly_invoke_lambda(&operator_inner.0, &full_args, trace_parent_idx)
                         .await?;
                     let (_, modified) = extract_operator_result(raw)?;
                     self.resolve_live_value(modified).await

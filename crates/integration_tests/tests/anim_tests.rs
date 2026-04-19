@@ -1169,6 +1169,155 @@ fn test_anim_played_twice_error() {
     r.assert_error("already played");
 }
 
+#[test]
+fn test_lerp_of_live_mesh_lambda_survives_assignment_chain() {
+    let util_mcl = load_stdlib_bundle(Assets::std_lib().join("std/util.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+
+    let src = r#"
+        let entity = |center, theta| {
+            . stroke{WHITE} fill{CLEAR} Circle(center, 2)
+
+            let r = 0.25
+            let y = r * sin(theta)
+            let x = r * cos(theta)
+
+            . fill{WHITE} Circle(center + [x, y, 0], 0.05)
+        }
+
+        mesh left = entity(2l, theta: 0)
+        mesh right = entity(2r, theta: 0)
+
+        let duration = 10
+        # was causing issues before
+        left.theta = right.theta = duration * 4
+
+        play Lerp(duration, [], identity)
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        f64::INFINITY,
+        &[util_mcl, math_mcl, mesh_mcl, color_mcl, anim_mcl],
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
+    let util_mcl = load_stdlib_bundle(Assets::std_lib().join("std/util.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+
+    let src = r#"
+        let entity = |center, theta| {
+            . stroke{WHITE} fill{CLEAR} Circle(center, 2)
+
+            if (theta >= 0.5) {
+                let bad = sin("bad")
+            }
+
+            let r = 0.25
+            let y = r * sin(theta)
+            let x = r * cos(theta)
+
+            . fill{WHITE} Circle(center + [x, y, 0], 0.05)
+        }
+
+        mesh left = entity(2l, theta: 0)
+        left.theta = 1
+
+        play Lerp(1, [], identity)
+    "#;
+
+    let (mut executor, _user_slide_count) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &[util_mcl, math_mcl, mesh_mcl, color_mcl, anim_mcl],
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("failed to build executor: {:?}", result.errors),
+    };
+
+    let internal_target = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0));
+    smol::block_on(async {
+        let _ = executor.seek_to(internal_target).await;
+        let _ = executor.advance_playback(executor.total_sections(), 0.5).await;
+    });
+
+    let runtime_error = executor
+        .state
+        .errors
+        .first()
+        .expect("expected runtime error");
+    let play_start = src.find("play Lerp").expect("missing play Lerp");
+    let expected = play_start..play_start + "play Lerp(1, [], identity)".len();
+
+    assert!(
+        !runtime_error.callstack.is_empty(),
+        "expected recovered callstack"
+    );
+    assert!(
+        runtime_error
+            .callstack
+            .iter()
+            .any(|frame| frame.span == expected),
+        "expected play site in recovered callstack, got {:?}",
+        runtime_error
+            .callstack
+            .iter()
+            .map(|frame| frame.span.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
+    let util_mcl = load_stdlib_bundle(Assets::std_lib().join("std/util.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+
+    let src = r#"
+        let entity = |center, theta| {
+            . stroke{WHITE} fill{CLEAR} Circle(center, 2)
+
+            let r = 0.25
+            let y = r * sin(theta)
+            let x = r * cos(theta)
+
+            . fill{WHITE} Circle(center + [x, y, 0], 0.05)
+        }
+
+        mesh left = entity(2l, theta: 0)
+        mesh right = entity(2r, theta: 0)
+
+        let duration = 10
+        left.theta = right.theta = duration * 4
+
+        play Lerp(duration, [], identity)
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        5.0,
+        &[util_mcl, math_mcl, mesh_mcl, color_mcl, anim_mcl],
+    );
+
+    let play_start = src.find("play Lerp").expect("missing play Lerp");
+    let expected = play_start..play_start + "play Lerp(duration, [], identity)".len();
+    r.assert_error("cannot lerp vectors of different lengths");
+    assert!(!r.error_spans.is_empty(), "expected runtime error span");
+    assert_eq!(r.error_spans[0], expected);
+}
+
 // -- regression: while loop before play --
 
 #[test]

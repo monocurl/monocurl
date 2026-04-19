@@ -65,9 +65,10 @@ impl InvokedFunction {
 
                     let full_args =
                         fill_defaults(this.body.arguments.iter().cloned().collect(), &lambda);
+                    let trace_parent_idx = Some(executor.state.last_stack_idx);
                     Box::new(
                         executor
-                            .eagerly_invoke_lambda(&lambda, &full_args, None)
+                            .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
                             .await?,
                     )
                 }

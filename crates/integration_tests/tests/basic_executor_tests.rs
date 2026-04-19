@@ -763,6 +763,17 @@ fn test_exec_lambda_default_arg_overridden() {
     r.assert_int(25);
 }
 
+#[test]
+fn test_exec_assignment_chain_uses_assigned_value() {
+    let r = run("
+        var a = 0
+        var b = 0
+        a = b = 3
+        let result = [a, b]
+    ");
+    r.assert_int_list(&[3, 3]);
+}
+
 // -- default value free-variable restrictions --
 
 #[test]

@@ -77,9 +77,10 @@ impl Executor {
         let stack = self.state.stack_mut(stack_idx);
         let rhs = stack.pop();
         let lhs = stack.pop();
+        let assigned = rhs.clone();
 
-        let ret = self.exec_assign_dfs(lhs.clone(), rhs, stack_idx);
-        self.state.stack_mut(stack_idx).push(lhs);
+        let ret = self.exec_assign_dfs(lhs, rhs, stack_idx);
+        self.state.stack_mut(stack_idx).push(assigned);
         ret
     }
 

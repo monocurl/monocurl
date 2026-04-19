@@ -126,8 +126,9 @@ impl Executor {
                 other => return Err(ExecutorError::type_error("lambda", other.type_name())),
             };
             let full_args = prepare_eager_call_args(lerped_args.iter().cloned(), &lambda);
+            let trace_parent_idx = Some(self.state.last_stack_idx);
             let result = self
-                .eagerly_invoke_lambda(&lambda, &full_args, None)
+                .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
                 .await?;
 
             Ok(Value::InvokedFunction(make_invoked_function(
@@ -212,9 +213,10 @@ impl Executor {
                 std::iter::once(lerped_operand.clone()).chain(lerped_args.iter().cloned()),
                 &operator.0,
             );
+            let trace_parent_idx = Some(self.state.last_stack_idx);
 
             let raw = self
-                .eagerly_invoke_lambda(&operator.0, &full_args, None)
+                .eagerly_invoke_lambda(&operator.0, &full_args, trace_parent_idx)
                 .await?;
             let (initial, modified) = extract_operator_result(raw)?;
 
@@ -273,9 +275,10 @@ impl Executor {
                     .chain(inv.body.arguments.iter().map(|b| b.clone().elide_lvalue())),
                 &operator.0,
             );
+            let trace_parent_idx = Some(self.state.last_stack_idx);
 
             let raw = self
-                .eagerly_invoke_lambda(&operator.0, &full_args, None)
+                .eagerly_invoke_lambda(&operator.0, &full_args, trace_parent_idx)
                 .await?;
             let (embed0, embed1) = extract_operator_result(raw)?;
             self.lerp(embed0, embed1, t).await

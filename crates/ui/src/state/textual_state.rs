@@ -79,7 +79,20 @@ impl AutoCompleteState {
         ch.is_alphanumeric() || ch == '_' || ch == ':'
     }
 
+    fn token_starts_with_number(&self) -> bool {
+        self.cursor_token
+            .chars()
+            .next()
+            .is_some_and(|ch| ch.is_ascii_digit())
+    }
+
     fn refilter(&mut self, can_only_shrink: bool) {
+        if self.token_starts_with_number() {
+            self.filtered_items.clear();
+            self.selected_index = 0;
+            return;
+        }
+
         let base_indices: Vec<_> = if can_only_shrink {
             self.filtered_items.iter().map(|(i, _)| *i).collect()
         } else {
@@ -242,7 +255,9 @@ impl AutoCompleteState {
             return false;
         }
 
-        !self.forcefully_disabled && !self.filtered_items.is_empty()
+        !self.forcefully_disabled
+            && !self.token_starts_with_number()
+            && !self.filtered_items.is_empty()
     }
 }
 
@@ -1001,6 +1016,16 @@ mod tests {
         }
     }
 
+    fn autocomplete_item(head: &str) -> AutoCompleteItem {
+        AutoCompleteItem {
+            head: head.to_string(),
+            replacement: head.to_string(),
+            cursor_anchor_delta: Location8 { row: 0, col: 0 },
+            cursor_head_delta: Location8 { row: 0, col: 0 },
+            category: AutoCompleteCategory::Keyword,
+        }
+    }
+
     #[test]
     fn grapheme_ascii() {
         assert_grapheme_boundaries("hello world");
@@ -1064,5 +1089,33 @@ mod tests {
         .concat();
 
         assert_grapheme_boundaries(&s);
+    }
+
+    #[test]
+    fn autocomplete_hidden_when_token_starts_with_digit() {
+        let mut state = AutoCompleteState {
+            cursor_at: Location8 { row: 0, col: 2 },
+            cursor_token: "10".to_string(),
+            ..Default::default()
+        };
+        state.set_items(vec![autocomplete_item("log10")]);
+
+        assert!(state.filtered_items.is_empty());
+        assert!(!state.recheck_should_display(Cursor::collapsed(
+            state.cursor_at
+        )));
+    }
+
+    #[test]
+    fn autocomplete_still_shows_for_identifier_prefixes() {
+        let mut state = AutoCompleteState {
+            cursor_at: Location8 { row: 0, col: 2 },
+            cursor_token: "lo".to_string(),
+            ..Default::default()
+        };
+        state.set_items(vec![autocomplete_item("log10")]);
+
+        assert_eq!(state.filtered_items.len(), 1);
+        assert!(state.recheck_should_display(Cursor::collapsed(state.cursor_at)));
     }
 }
