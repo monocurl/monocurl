@@ -1,10 +1,13 @@
 use crate::{
     error::ExecutorError,
     executor::Executor,
-    heap::{HeapKey, VRc, VWeak, with_heap},
+    heap::{HeapKey, with_heap},
 };
 
-use super::{Value, invoked_function::InvokedFunction, invoked_operator::InvokedOperator, stateful::to_follower_stateful};
+use super::{
+    Value, invoked_function::InvokedFunction, invoked_operator::InvokedOperator,
+    stateful::to_follower_stateful,
+};
 
 impl Value {
     pub fn check_truthy(&self) -> Result<bool, ExecutorError> {
@@ -23,9 +26,7 @@ impl Value {
     /// creates owned copy of self which elides all lvalues, recursing on lists
     pub fn elide_lvalue_leader_rec(self) -> Value {
         match self {
-            Value::Lvalue(vrc) => {
-                with_heap(|h| h.get(vrc.key()).clone()).elide_lvalue_leader_rec()
-            }
+            Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()).elide_lvalue_leader_rec(),
             Value::WeakLvalue(vweak) => {
                 with_heap(|h| h.get(vweak.key()).clone()).elide_lvalue_leader_rec()
             }
@@ -75,9 +76,7 @@ impl Value {
         let mut base = self.elide_lvalue();
         loop {
             base = match base {
-                Value::Leader(ref leader) => {
-                    with_heap(|h| h.get(leader.leader_rc.key()).clone())
-                }
+                Value::Leader(ref leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
                 Value::InvokedOperator(ref op) => InvokedOperator::value(op, executor).await?,
                 Value::InvokedFunction(ref func) => InvokedFunction::value(func, executor).await?,
                 other => return Ok(other),

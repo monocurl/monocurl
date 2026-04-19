@@ -243,7 +243,9 @@ fn test_stateful_assigned_to_let_is_error() {
         let v = $x
     ",
     );
-    r.assert_error("illegal assignment of stateful value. Stateful values must only be assigned to meshes");
+    r.assert_error(
+        "illegal assignment of stateful value. Stateful values must only be assigned to meshes",
+    );
 }
 
 #[test]
@@ -453,13 +455,17 @@ fn test_mesh_list_copy_no_alias() {
     );
     r.assert_ok();
     // x's leader value should still have 1 at index 0
-    match &r.leaders.iter().find(|l| l.kind == executor::state::LeaderKind::Mesh).unwrap().target {
-        Value::List(list) => {
-            match with_heap(|h| h.get(list.elements[0].key()).clone()) {
-                Value::Integer(n) => assert_eq!(n, 1, "mesh list element 0 should be unchanged"),
-                other => panic!("expected integer, got {}", other.type_name()),
-            }
-        }
+    match &r
+        .leaders
+        .iter()
+        .find(|l| l.kind == executor::state::LeaderKind::Mesh)
+        .unwrap()
+        .target
+    {
+        Value::List(list) => match with_heap(|h| h.get(list.elements[0].key()).clone()) {
+            Value::Integer(n) => assert_eq!(n, 1, "mesh list element 0 should be unchanged"),
+            other => panic!("expected integer, got {}", other.type_name()),
+        },
         other => panic!("expected list, got {}", other.type_name()),
     }
 }

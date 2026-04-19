@@ -66,17 +66,15 @@ impl VirtualHeap {
     }
 
     pub fn get(&self, key: HeapKey) -> Ref<'_, Value> {
-        Ref::map(
-            self.slots[key as usize].borrow(),
-            |opt| opt.as_ref().expect("HeapKey points to free slot"),
-        )
+        Ref::map(self.slots[key as usize].borrow(), |opt| {
+            opt.as_ref().expect("HeapKey points to free slot")
+        })
     }
 
     pub fn get_mut(&self, key: HeapKey) -> RefMut<'_, Value> {
-        RefMut::map(
-            self.slots[key as usize].borrow_mut(),
-            |opt| opt.as_mut().expect("HeapKey points to free slot"),
-        )
+        RefMut::map(self.slots[key as usize].borrow_mut(), |opt| {
+            opt.as_mut().expect("HeapKey points to free slot")
+        })
     }
 }
 

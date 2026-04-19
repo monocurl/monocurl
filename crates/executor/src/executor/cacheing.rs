@@ -128,10 +128,9 @@ impl Executor {
             self.state.pending_playback_time = 0.0;
             return;
         } else {
-            let latest =
-                self.cache.entries.iter().rfind(|en| {
-                    en.is_some() && en.as_ref().unwrap().state_after.as_ref().timestamp <= target
-                });
+            let latest = self.cache.entries.iter().rfind(|en| {
+                en.is_some() && en.as_ref().unwrap().state_after.as_ref().timestamp <= target
+            });
 
             if let Some(en) = latest {
                 let entry = en.as_ref().unwrap();
@@ -342,7 +341,10 @@ mod tests {
         };
         match with_heap(|h| h.get(restored.elements[0].key()).clone()).elide_lvalue() {
             Value::Integer(1) => {}
-            other => panic!("expected restored first element to be 1, got {}", other.type_name()),
+            other => panic!(
+                "expected restored first element to be 1, got {}",
+                other.type_name()
+            ),
         }
     }
 
@@ -400,11 +402,17 @@ mod tests {
         };
         match with_heap(|h| h.get(restored.leader_rc.key()).clone()).elide_lvalue() {
             Value::Integer(10) => {}
-            other => panic!("expected restored leader to be 10, got {}", other.type_name()),
+            other => panic!(
+                "expected restored leader to be 10, got {}",
+                other.type_name()
+            ),
         }
         match with_heap(|h| h.get(restored.follower_rc.key()).clone()).elide_lvalue() {
             Value::Integer(10) => {}
-            other => panic!("expected restored follower to be 10, got {}", other.type_name()),
+            other => panic!(
+                "expected restored follower to be 10, got {}",
+                other.type_name()
+            ),
         }
     }
 
@@ -474,7 +482,10 @@ mod tests {
         };
         match with_heap(|h| h.get(nested.elements[0].key()).clone()).elide_lvalue() {
             Value::Integer(3) => {}
-            other => panic!("expected restored nested element to remain 3, got {}", other.type_name()),
+            other => panic!(
+                "expected restored nested element to remain 3, got {}",
+                other.type_name()
+            ),
         }
     }
 }

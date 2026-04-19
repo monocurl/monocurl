@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
-    heap::{heap_alloc, with_heap},
+    heap::with_heap,
     value::{
         Value,
         container::{HashableKey, List},
@@ -35,11 +35,9 @@ impl Executor {
         let lhs = stack.pop();
 
         if matches!(lhs, Value::Stateful(_)) || matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(
-                ExecutorError::Other(
-                    "binary operators cannot be applied to stateful values".into(),
-                ),
-            );
+            return ExecSingle::Error(ExecutorError::Other(
+                "binary operators cannot be applied to stateful values".into(),
+            ));
         }
 
         if matches!(op, BinOp::Eq | BinOp::Ne) {

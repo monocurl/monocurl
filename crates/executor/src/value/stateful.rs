@@ -69,7 +69,10 @@ pub fn make_stateful(
         }
     }
     RcCached {
-        body: Rc::new(StatefulBody { roots: deduped, root }),
+        body: Rc::new(StatefulBody {
+            roots: deduped,
+            root,
+        }),
         cache: StatefulCache {
             read_kind,
             cached: RefCell::new(None),
@@ -93,19 +96,28 @@ pub fn to_follower_stateful(s: &Stateful) -> Stateful {
 pub fn stateful_cache_valid(s: &Stateful) -> Option<Value> {
     let borrow = s.cache.cached.borrow();
     let (versions, val) = borrow.as_ref()?;
-    let still_valid = s.body.roots.iter().zip(versions.iter()).all(|(&key, &cached_ver)| {
-        with_heap(|h| {
-            if let Value::Leader(leader) = &*h.get(key) {
-                match s.cache.read_kind {
-                    StatefulReadKind::Leader => leader.leader_version == cached_ver,
-                    StatefulReadKind::Follower => leader.follower_version == cached_ver,
+    let still_valid = s
+        .body
+        .roots
+        .iter()
+        .zip(versions.iter())
+        .all(|(&key, &cached_ver)| {
+            with_heap(|h| {
+                if let Value::Leader(leader) = &*h.get(key) {
+                    match s.cache.read_kind {
+                        StatefulReadKind::Leader => leader.leader_version == cached_ver,
+                        StatefulReadKind::Follower => leader.follower_version == cached_ver,
+                    }
+                } else {
+                    false
                 }
-            } else {
-                false
-            }
-        })
-    });
-    if still_valid { Some(*val.clone()) } else { None }
+            })
+        });
+    if still_valid {
+        Some(*val.clone())
+    } else {
+        None
+    }
 }
 
 pub fn stateful_update_cache(s: &Stateful, val: Value) {

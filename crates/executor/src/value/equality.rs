@@ -74,12 +74,10 @@ impl Value {
                 a.cache.read_kind == b.cache.read_kind && stateful_equal(&a.body.root, &b.body.root)
             }
 
-            (Value::Leader(a), Value::Leader(b)) => {
-                Value::values_equal(
-                    &with_heap(|h| h.get(a.leader_rc.key()).clone()),
-                    &with_heap(|h| h.get(b.leader_rc.key()).clone()),
-                )
-            }
+            (Value::Leader(a), Value::Leader(b)) => Value::values_equal(
+                &with_heap(|h| h.get(a.leader_rc.key()).clone()),
+                &with_heap(|h| h.get(b.leader_rc.key()).clone()),
+            ),
 
             (Value::InvokedFunction(a), Value::InvokedFunction(b)) => {
                 Rc::ptr_eq(&a.body, &b.body)

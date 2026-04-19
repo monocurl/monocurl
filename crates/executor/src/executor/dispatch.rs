@@ -4,10 +4,12 @@ use bytecode::Instruction;
 
 use crate::{
     error::ExecutorError,
-    heap::{VRc, VWeak, with_heap},
+    heap::with_heap,
     state::LeaderKind,
     value::{
-        Value, container::{List, Map}, lambda::Operator,
+        Value,
+        container::{List, Map},
+        lambda::Operator,
         stateful::{StatefulNode, StatefulReadKind, make_stateful},
     },
 };

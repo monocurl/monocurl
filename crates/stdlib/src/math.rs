@@ -1,4 +1,9 @@
-use executor::{error::ExecutorError, executor::Executor, heap::{VRc, with_heap}, value::Value};
+use executor::{
+    error::ExecutorError,
+    executor::Executor,
+    heap::{VRc, with_heap},
+    value::Value,
+};
 use stdlib_macros::stdlib_func;
 
 use crate::read_float;
@@ -406,7 +411,7 @@ pub async fn dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 
 #[stdlib_func]
 pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    use executor::{value::container::List};
+    use executor::value::container::List;
     use smallvec::smallvec;
 
     let u = read_list(executor, stack_idx, -2, "u")?;

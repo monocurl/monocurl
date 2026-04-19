@@ -86,9 +86,8 @@ impl CompilationService {
                         .iter()
                         .rposition(|span| span.start <= cursor_pos);
 
-                    let first_ending_after = argument_spans
-                        .iter()
-                        .position(|span| span.end > cursor_pos);
+                    let first_ending_after =
+                        argument_spans.iter().position(|span| span.end > cursor_pos);
 
                     // if any range contains it, then clearly its that one
                     // otherwise, look for comma separating the two

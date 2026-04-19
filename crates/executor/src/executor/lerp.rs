@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 use crate::{
     error::ExecutorError,
     executor::fill_defaults,
-    heap::{heap_alloc, with_heap},
+    heap::with_heap,
     value::{
         InstructionPointer, Value,
         container::{HashableKey, List, Map},
@@ -235,7 +235,9 @@ impl Executor {
         t: f64,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            let mid = self.lerp(inv.body.operand.as_ref().clone(), other, t).await?;
+            let mid = self
+                .lerp(inv.body.operand.as_ref().clone(), other, t)
+                .await?;
             self.lerp_operator_embeds(inv, mid, t).await
         })
     }
@@ -247,7 +249,9 @@ impl Executor {
         t: f64,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            let mid = self.lerp(other, inv.body.operand.as_ref().clone(), t).await?;
+            let mid = self
+                .lerp(other, inv.body.operand.as_ref().clone(), t)
+                .await?;
             self.lerp_operator_embeds(inv, mid, t).await
         })
     }
@@ -298,15 +302,12 @@ impl Executor {
                     {
                         let a_val = with_heap(|h| h.get(a_key.key()).clone());
                         let b_val = with_heap(|h| h.get(b_key.key()).clone());
-                        let lerped = self
-                            .lerp(a_val, b_val, t)
-                            .await
-                            .map_err(|err| {
-                                lerp_context(
-                                    format!("cannot lerp vector element at index {}", index),
-                                    err,
-                                )
-                            })?;
+                        let lerped = self.lerp(a_val, b_val, t).await.map_err(|err| {
+                            lerp_context(
+                                format!("cannot lerp vector element at index {}", index),
+                                err,
+                            )
+                        })?;
                         elements.push(crate::heap::VRc::new(lerped));
                     }
                     Ok(Some(Value::List(Rc::new(List { elements }))))
@@ -335,18 +336,15 @@ impl Executor {
                         let b_key = b_map.get(key).unwrap();
                         let a_val = with_heap(|h| h.get(a_key.key()).clone());
                         let b_val = with_heap(|h| h.get(b_key.key()).clone());
-                        let lerped = self
-                            .lerp(a_val, b_val, t)
-                            .await
-                            .map_err(|err| {
-                                lerp_context(
-                                    format!(
-                                        "cannot lerp map value at key {}",
-                                        format_hashable_key(key)
-                                    ),
-                                    err,
-                                )
-                            })?;
+                        let lerped = self.lerp(a_val, b_val, t).await.map_err(|err| {
+                            lerp_context(
+                                format!(
+                                    "cannot lerp map value at key {}",
+                                    format_hashable_key(key)
+                                ),
+                                err,
+                            )
+                        })?;
                         map.insert(key.clone(), crate::heap::VRc::new(lerped));
                     }
                     Ok(Some(Value::Map(Rc::new(map))))

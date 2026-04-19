@@ -1,9 +1,8 @@
-use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
-    heap::{VRc, heap_alloc, with_heap},
+    heap::{VRc, with_heap},
     state::MAX_CALL_DEPTH,
     value::{
         Value,
@@ -537,7 +536,8 @@ impl Executor {
         &'a mut self,
         stateful: &'a crate::value::stateful::Stateful,
         override_read_kind: StatefulReadKind,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
+    {
         Box::pin(async move {
             if let Some(cached) = crate::value::stateful::stateful_cache_valid(stateful) {
                 return Ok(cached);
@@ -599,8 +599,7 @@ impl Executor {
 
                     let mut evaled: Vec<Value> = Vec::with_capacity(args.len());
                     for arg_key in args {
-                        let arg_val =
-                            with_heap(|h| h.get(arg_key.key()).clone()).elide_lvalue();
+                        let arg_val = with_heap(|h| h.get(arg_key.key()).clone()).elide_lvalue();
                         let resolved = match arg_val {
                             Value::Stateful(ref s) => {
                                 self.eval_stateful_read_kind(s, read_kind).await?
@@ -641,8 +640,7 @@ impl Executor {
 
                     let mut evaled: Vec<Value> = vec![operand_val];
                     for arg_key in extra_args {
-                        let arg_val =
-                            with_heap(|h| h.get(arg_key.key()).clone()).elide_lvalue();
+                        let arg_val = with_heap(|h| h.get(arg_key.key()).clone()).elide_lvalue();
                         let resolved = match arg_val {
                             Value::Stateful(ref s) => {
                                 self.eval_stateful_read_kind(s, read_kind).await?

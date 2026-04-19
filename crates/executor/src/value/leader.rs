@@ -1,7 +1,4 @@
-use crate::{
-    heap::VRc,
-    state::LeaderKind,
-};
+use crate::{heap::VRc, state::LeaderKind};
 
 #[derive(Clone)]
 /// a leader-follower pair for mesh/param variables.

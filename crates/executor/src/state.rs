@@ -5,7 +5,7 @@ use structs::text::Span8;
 
 use crate::{
     error::RuntimeError,
-    heap::{HeapKey, VRc, heap_alloc, with_heap, heap_replace},
+    heap::{HeapKey, VRc, heap_alloc, heap_replace, with_heap},
     time::Timestamp,
     value::{
         InstructionPointer, Value, container::List, leader::Leader, primitive_anim::PrimitiveAnim,
@@ -367,7 +367,6 @@ impl ExecutionState {
             follower_version: 0,
         });
         let cell_vrc = VRc::new(leader_val);
-        let cell_key = cell_vrc.key();
 
         self.leaders.push(LeaderEntry {
             name: name.clone(),
@@ -393,7 +392,8 @@ impl ExecutionState {
         for entry in &self.leaders {
             let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
             if let Value::Leader(leader) = cell_val {
-                let value = with_heap(|h| h.get(leader.leader_rc.key()).clone()).to_follower_stateful();
+                let value =
+                    with_heap(|h| h.get(leader.leader_rc.key()).clone()).to_follower_stateful();
                 heap_replace(leader.follower_rc.key(), value);
                 // update last_modified_stack and follower_version in the slot
                 crate::heap::with_heap_mut(|h| {

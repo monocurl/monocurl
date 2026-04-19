@@ -1,10 +1,9 @@
 use std::collections::BTreeSet;
-use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
     executor::{SeekPrimitiveAnimSkipResult, SeekToResult},
-    heap::{VRc, VWeak, with_heap, with_heap_mut, heap_replace},
+    heap::{VRc, heap_replace, with_heap, with_heap_mut},
     state::{BakedPrimitiveAnim, ExecutionState},
     time::Timestamp,
     value::{Value, anim_block::AnimBlock, leader::Leader, primitive_anim::PrimitiveAnim},
@@ -237,7 +236,9 @@ impl Executor {
                         let cell_key = target.key();
                         let (leader_value, follower_key) = {
                             let cell_val = with_heap(|h| h.get(cell_key).clone());
-                            let Value::Leader(leader) = cell_val else { continue };
+                            let Value::Leader(leader) = cell_val else {
+                                continue;
+                            };
                             (
                                 with_heap(|h| h.get(leader.leader_rc.key()).clone())
                                     .to_follower_stateful(),
@@ -473,7 +474,9 @@ impl Executor {
                     implicit_targets = true;
                     for entry in &self.state.leaders {
                         let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
-                        let Value::Leader(leader) = cell_val else { continue };
+                        let Value::Leader(leader) = cell_val else {
+                            continue;
+                        };
                         if leader
                             .last_modified_stack
                             .is_some_and(|last_modified_stack_id| {
@@ -498,7 +501,9 @@ impl Executor {
                     return false;
                 }
                 let cell_val = with_heap(|h| h.get(target.key()).clone());
-                let Value::Leader(leader) = cell_val else { return false };
+                let Value::Leader(leader) = cell_val else {
+                    return false;
+                };
                 leader.locked_by_anim.is_none()
             });
         }
@@ -572,7 +577,9 @@ impl Executor {
     fn find_leader_cell(&self, needle: &Leader) -> Option<VRc> {
         self.state.leaders.iter().find_map(|entry| {
             let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
-            let Value::Leader(existing) = cell_val else { return None };
+            let Value::Leader(existing) = cell_val else {
+                return None;
+            };
             (existing.leader_rc == needle.leader_rc && existing.follower_rc == needle.follower_rc)
                 .then(|| entry.leader_cell.clone())
         })
@@ -594,7 +601,10 @@ impl Executor {
 fn dedup_vrc_targets(values: &mut Vec<VRc>) {
     let mut deduped = Vec::with_capacity(values.len());
     for value in values.drain(..) {
-        if !deduped.iter().any(|existing: &VRc| existing.key() == value.key()) {
+        if !deduped
+            .iter()
+            .any(|existing: &VRc| existing.key() == value.key())
+        {
             deduped.push(value);
         }
     }
@@ -604,7 +614,9 @@ fn dedup_vrc_targets(values: &mut Vec<VRc>) {
 fn sync_leader_to_follower(leader_cell: &VRc) {
     let cell_key = leader_cell.key();
     let cell_val = with_heap(|h| h.get(cell_key).clone());
-    let Value::Leader(leader) = cell_val else { return };
+    let Value::Leader(leader) = cell_val else {
+        return;
+    };
     let value = with_heap(|h| h.get(leader.leader_rc.key()).clone()).to_follower_stateful();
     heap_replace(leader.follower_rc.key(), value);
     with_heap_mut(|h| {
