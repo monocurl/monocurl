@@ -8,9 +8,12 @@ use std::{
 };
 
 use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
-use executor::time::Timestamp;
+use executor::{
+    scene_snapshot::{BackgroundSnapshot, CameraSnapshot},
+    time::Timestamp,
+};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
-use geo::{mesh::Mesh, simd::Float3};
+use geo::mesh::Mesh;
 use structs::rope::{Rope, TextAggregate};
 
 use crate::services::ServiceManagerMessage;
@@ -32,47 +35,9 @@ pub struct ParameterSnapshot {
     pub param_order: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct ViewportCameraSnapshot {
-    pub position: Float3,
-    pub look_at: Float3,
-    pub up: Float3,
-    pub fov: f32,
-    pub near: f32,
-    pub far: f32,
-    pub ortho: bool,
-}
-
-impl Default for ViewportCameraSnapshot {
-    fn default() -> Self {
-        Self {
-            position: Float3::new(0.0, 0.0, -10.0),
-            look_at: Float3::ZERO,
-            up: Float3::Y,
-            fov: 0.698_131_7,
-            near: 0.1,
-            far: 100.0,
-            ortho: false,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ViewportBackgroundSnapshot {
-    pub color: (f32, f32, f32, f32),
-}
-
-impl Default for ViewportBackgroundSnapshot {
-    fn default() -> Self {
-        Self {
-            color: (0.0, 0.0, 0.0, 1.0),
-        }
-    }
-}
-
 pub struct ExecutionSnapshot {
-    pub background: Option<ViewportBackgroundSnapshot>,
-    pub camera: Option<ViewportCameraSnapshot>,
+    pub background: Option<BackgroundSnapshot>,
+    pub camera: Option<CameraSnapshot>,
     pub meshes: Option<Vec<Arc<Mesh>>>,
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,

@@ -82,7 +82,11 @@ impl ExecResult {
         self.assert_ok();
         match &self.value {
             Some(Value::List(list)) => {
-                assert_eq!(list.elements().len(), expected.len(), "list length mismatch");
+                assert_eq!(
+                    list.elements().len(),
+                    expected.len(),
+                    "list length mismatch"
+                );
 
                 for (actual, expected) in list.elements().iter().zip(expected.iter()) {
                     match with_heap(|h| h.get(actual.key()).clone()) {
@@ -107,7 +111,11 @@ impl ExecResult {
         self.assert_ok();
         match &self.value {
             Some(Value::List(list)) => {
-                assert_eq!(list.elements().len(), expected.len(), "list length mismatch");
+                assert_eq!(
+                    list.elements().len(),
+                    expected.len(),
+                    "list length mismatch"
+                );
 
                 for (actual, expected) in list.elements().iter().zip(expected.iter()) {
                     match with_heap(|h| h.get(actual.key()).clone()) {

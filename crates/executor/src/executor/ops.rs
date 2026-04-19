@@ -328,9 +328,7 @@ fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> 
         BinOp::Add => Value::Float(a + b),
         BinOp::Sub => Value::Float(a - b),
         BinOp::Mul => Value::Float(a * b),
-        BinOp::Div => {
-            Value::Float(a / b)
-        }
+        BinOp::Div => Value::Float(a / b),
         BinOp::IntDiv => Value::Float((a / b).floor()),
         BinOp::Power => Value::Float(a.powf(b)),
         BinOp::Lt => Value::Integer((a < b) as i64),

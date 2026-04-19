@@ -269,7 +269,8 @@ impl Executor {
                 other => return Err(ExecutorError::type_error("operator", other.type_name())),
             };
             let full_args = prepare_eager_call_args(
-                std::iter::once(mid).chain(inv.body.arguments.iter().map(|b| b.clone().elide_lvalue())),
+                std::iter::once(mid)
+                    .chain(inv.body.arguments.iter().map(|b| b.clone().elide_lvalue())),
                 &operator.0,
             );
 

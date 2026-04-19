@@ -28,7 +28,6 @@ mod lexing;
 
 pub(crate) use execution::{
     ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue, PlaybackMode,
-    ViewportBackgroundSnapshot, ViewportCameraSnapshot,
 };
 
 pub struct ServiceManager {

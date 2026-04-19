@@ -1,9 +1,4 @@
-use executor::{
-    error::ExecutorError,
-    executor::Executor,
-    heap::with_heap,
-    value::Value,
-};
+use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
 
 pub(super) fn unary_f64(
     executor: &Executor,

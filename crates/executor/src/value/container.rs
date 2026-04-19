@@ -23,9 +23,7 @@ impl List {
     }
 
     pub fn new_with(elements: SmallVec<[VRc; 4]>) -> Self {
-        Self {
-            elements
-        }
+        Self { elements }
     }
 
     pub fn elements(&self) -> &[VRc] {

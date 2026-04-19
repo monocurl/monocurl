@@ -27,8 +27,14 @@ pub async fn grow_anim(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             let mut max = None::<Float3>;
             for leaf in leaves {
                 let c = mesh_center(&leaf);
-                min = Some(min.map(|m| Float3::new(m.x.min(c.x), m.y.min(c.y), m.z.min(c.z))).unwrap_or(c));
-                max = Some(max.map(|m| Float3::new(m.x.max(c.x), m.y.max(c.y), m.z.max(c.z))).unwrap_or(c));
+                min = Some(
+                    min.map(|m| Float3::new(m.x.min(c.x), m.y.min(c.y), m.z.min(c.z)))
+                        .unwrap_or(c),
+                );
+                max = Some(
+                    max.map(|m| Float3::new(m.x.max(c.x), m.y.max(c.y), m.z.max(c.z)))
+                        .unwrap_or(c),
+                );
             }
             (min.unwrap_or(Float3::ZERO) + max.unwrap_or(Float3::ZERO)) / 2.0
         };
@@ -55,11 +61,13 @@ pub async fn fade_anim(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             let comps = list
                 .elements()
                 .iter()
-                .map(|key| match executor::heap::with_heap(|h| h.get(key.key()).clone()) {
-                    Value::Integer(n) => Ok(n as f32),
-                    Value::Float(f) => Ok(f as f32),
-                    other => Err(ExecutorError::type_error("number", other.type_name())),
-                })
+                .map(
+                    |key| match executor::heap::with_heap(|h| h.get(key.key()).clone()) {
+                        Value::Integer(n) => Ok(n as f32),
+                        Value::Float(f) => Ok(f as f32),
+                        other => Err(ExecutorError::type_error("number", other.type_name())),
+                    },
+                )
                 .collect::<Result<Vec<_>, _>>()?;
             Float3::new(comps[0], comps[1], comps[2])
         }
@@ -99,7 +107,10 @@ pub async fn write_anim(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn transform_anim(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn transform_anim(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let candidates = executor.state.stack(stack_idx).read_at(-4).clone();
     let time = read_time(executor, stack_idx, -3)?;
     let rate = executor.state.stack(stack_idx).read_at(-2).clone();

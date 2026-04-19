@@ -7,7 +7,11 @@ use super::helpers::*;
 fn closed_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
     let mut out = Vec::new();
     for i in 0..points.len() {
-        out.push(default_lin(points[i], points[(i + 1) % points.len()], normal));
+        out.push(default_lin(
+            points[i],
+            points[(i + 1) % points.len()],
+            normal,
+        ));
     }
     out
 }
@@ -32,7 +36,11 @@ fn fan_tris(points: &[Float3]) -> Vec<geo::mesh::Tri> {
 #[stdlib_func]
 pub async fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let point = read_float3(executor, stack_idx, -1, "point")?;
-    Ok(mesh_from_parts(vec![default_dot(point, Float3::Z)], vec![], vec![]))
+    Ok(mesh_from_parts(
+        vec![default_dot(point, Float3::Z)],
+        vec![],
+        vec![],
+    ))
 }
 
 #[stdlib_func]
@@ -127,7 +135,10 @@ pub async fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 }
 
 #[stdlib_func]
-pub async fn mk_regular_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_regular_polygon(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let center = read_float3(executor, stack_idx, -4, "center")?;
     let n = read_int(executor, stack_idx, -3, "n")?.max(3) as usize;
     let radius = crate::read_float(executor, stack_idx, -2, "circumradius")? as f32;
@@ -158,10 +169,17 @@ pub async fn mk_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn mk_polyline(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_polyline(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let vertices = read_float3_list(executor, stack_idx, -2, "vertices")?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
-    Ok(mesh_from_parts(vec![], open_polyline(&vertices, normal), vec![]))
+    Ok(mesh_from_parts(
+        vec![],
+        open_polyline(&vertices, normal),
+        vec![],
+    ))
 }
 
 #[stdlib_func]
@@ -169,7 +187,11 @@ pub async fn mk_line(executor: &mut Executor, stack_idx: usize) -> Result<Value,
     let start = read_float3(executor, stack_idx, -3, "start")?;
     let end = read_float3(executor, stack_idx, -2, "end")?;
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    Ok(mesh_from_parts(vec![], vec![default_lin(start, end, normal)], vec![]))
+    Ok(mesh_from_parts(
+        vec![],
+        vec![default_lin(start, end, normal)],
+        vec![],
+    ))
 }
 
 #[stdlib_func]
@@ -181,7 +203,11 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let delta = end - start;
     let len = delta.len();
     if len <= 1e-6 {
-        return Ok(mesh_from_parts(vec![default_dot(start, normal)], vec![], vec![]));
+        return Ok(mesh_from_parts(
+            vec![default_dot(start, normal)],
+            vec![],
+            vec![],
+        ));
     }
     let tangent = delta / len;
     let side = normal.cross(tangent).normalize();
@@ -193,7 +219,11 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
         default_lin(base + side * head_width, end, normal),
         default_lin(end, base - side * head_width, normal),
     ];
-    let tris = vec![default_tri(base + side * head_width, end, base - side * head_width)];
+    let tris = vec![default_tri(
+        base + side * head_width,
+        end,
+        base - side * head_width,
+    )];
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -213,7 +243,11 @@ pub async fn mk_arc(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
             center + x * (radius * theta.cos()) + y * (radius * theta.sin())
         })
         .collect();
-    Ok(mesh_from_parts(vec![], open_polyline(&points, normal), vec![]))
+    Ok(mesh_from_parts(
+        vec![],
+        open_polyline(&points, normal),
+        vec![],
+    ))
 }
 
 #[stdlib_func]
@@ -229,11 +263,17 @@ pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Val
     let mut points = Vec::with_capacity((steps + 1) * 2);
     for i in 0..=steps {
         let theta = std::f32::consts::PI * (0.5 + i as f32 / steps as f32);
-        points.push(start_center + axis * (start_radius * theta.cos()) + side * (start_radius * theta.sin()));
+        points.push(
+            start_center
+                + axis * (start_radius * theta.cos())
+                + side * (start_radius * theta.sin()),
+        );
     }
     for i in 0..=steps {
         let theta = std::f32::consts::PI * (1.5 + i as f32 / steps as f32);
-        points.push(end_center + axis * (end_radius * theta.cos()) + side * (end_radius * theta.sin()));
+        points.push(
+            end_center + axis * (end_radius * theta.cos()) + side * (end_radius * theta.sin()),
+        );
     }
     Ok(mesh_from_parts(
         vec![],
@@ -243,14 +283,21 @@ pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn mk_triangle(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_triangle(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let p = read_float3(executor, stack_idx, -4, "p")?;
     let q = read_float3(executor, stack_idx, -3, "q")?;
     let r = read_float3(executor, stack_idx, -2, "r")?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
     Ok(mesh_from_parts(
         vec![],
-        vec![default_lin(p, q, normal), default_lin(q, r, normal), default_lin(r, p, normal)],
+        vec![
+            default_lin(p, q, normal),
+            default_lin(q, r, normal),
+            default_lin(r, p, normal),
+        ],
         vec![default_tri(p, q, r)],
     ))
 }
@@ -309,7 +356,10 @@ pub async fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mk_rect_prism(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_rect_prism(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let center = read_float3(executor, stack_idx, -2, "center")?;
     let dims = read_float3(executor, stack_idx, -1, "dimensions")?;
     let hx = dims.x / 2.0;
@@ -342,13 +392,20 @@ pub async fn mk_rect_prism(executor: &mut Executor, stack_idx: usize) -> Result<
 }
 
 #[stdlib_func]
-pub async fn mk_cylinder(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_cylinder(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let center = read_float3(executor, stack_idx, -5, "center")?;
     let radius = crate::read_float(executor, stack_idx, -4, "radius")? as f32;
     let height = crate::read_float(executor, stack_idx, -3, "height")? as f32;
     let direction = read_float3(executor, stack_idx, -2, "direction")?;
     let samples = read_int(executor, stack_idx, -1, "sample_count")?.max(3) as usize;
-    let axis = if direction.len_sq() <= 1e-12 { Float3::Y } else { direction.normalize() };
+    let axis = if direction.len_sq() <= 1e-12 {
+        Float3::Y
+    } else {
+        direction.normalize()
+    };
     let (x, z, _) = polygon_basis(axis);
     let half = axis * (height / 2.0);
     let top_center = center + half;
@@ -452,7 +509,11 @@ pub async fn mk_plane(executor: &mut Executor, stack_idx: usize) -> Result<Value
         center + x * (width / 2.0) + y * (height / 2.0),
         center - x * (width / 2.0) + y * (height / 2.0),
     ];
-    Ok(mesh_from_parts(vec![], closed_polyline(&corners, n), fan_tris(&corners)))
+    Ok(mesh_from_parts(
+        vec![],
+        closed_polyline(&corners, n),
+        fan_tris(&corners),
+    ))
 }
 
 #[stdlib_func]
@@ -475,11 +536,19 @@ pub async fn mk_bezier(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         let a = control_points[1] - control_points[0];
         let b = control_points[2] - control_points[1];
         let cross = a.cross(b);
-        if cross.len_sq() > 1e-6 { cross.normalize() } else { Float3::Z }
+        if cross.len_sq() > 1e-6 {
+            cross.normalize()
+        } else {
+            Float3::Z
+        }
     } else {
         Float3::Z
     };
-    Ok(mesh_from_parts(vec![], open_polyline(&points, normal), vec![]))
+    Ok(mesh_from_parts(
+        vec![],
+        open_polyline(&points, normal),
+        vec![],
+    ))
 }
 
 #[stdlib_func]
@@ -490,7 +559,11 @@ pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let end = tail + delta;
     let len = delta.len();
     if len <= 1e-6 {
-        return Ok(mesh_from_parts(vec![default_dot(tail, normal)], vec![], vec![]));
+        return Ok(mesh_from_parts(
+            vec![default_dot(tail, normal)],
+            vec![],
+            vec![],
+        ));
     }
     let tangent = delta / len;
     let side = normal.cross(tangent).normalize();
@@ -504,16 +577,27 @@ pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             default_lin(base + side * head_width, end, normal),
             default_lin(end, base - side * head_width, normal),
         ],
-        vec![default_tri(base + side * head_width, end, base - side * head_width)],
+        vec![default_tri(
+            base + side * head_width,
+            end,
+            base - side * head_width,
+        )],
     ))
 }
 
 #[stdlib_func]
-pub async fn mk_half_vector(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_half_vector(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tail = read_float3(executor, stack_idx, -3, "tail")?;
     let delta = read_float3(executor, stack_idx, -2, "delta")?;
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    Ok(mesh_from_parts(vec![], vec![default_lin(tail, tail + delta, normal)], vec![]))
+    Ok(mesh_from_parts(
+        vec![],
+        vec![default_lin(tail, tail + delta, normal)],
+        vec![],
+    ))
 }
 
 #[stdlib_func]
@@ -544,15 +628,32 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn mk_color_grid(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_color_grid(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let x0 = crate::read_float(executor, stack_idx, -8, "x0")? as f32;
     let x1 = crate::read_float(executor, stack_idx, -7, "x1")? as f32;
     let y0 = crate::read_float(executor, stack_idx, -6, "y0")? as f32;
     let y1 = crate::read_float(executor, stack_idx, -5, "y1")? as f32;
-    let dx = crate::read_float(executor, stack_idx, -4, "dx")?.abs().max(1e-3) as f32;
-    let dy = crate::read_float(executor, stack_idx, -3, "dy")?.abs().max(1e-3) as f32;
-    let mask = executor.state.stack(stack_idx).read_at(-2).clone().elide_lvalue();
-    let color_at = executor.state.stack(stack_idx).read_at(-1).clone().elide_lvalue();
+    let dx = crate::read_float(executor, stack_idx, -4, "dx")?
+        .abs()
+        .max(1e-3) as f32;
+    let dy = crate::read_float(executor, stack_idx, -3, "dy")?
+        .abs()
+        .max(1e-3) as f32;
+    let mask = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-2)
+        .clone()
+        .elide_lvalue();
+    let color_at = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_lvalue();
 
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
@@ -565,7 +666,10 @@ pub async fn mk_color_grid(executor: &mut Executor, stack_idx: usize) -> Result<
             let ya = y0 + (y1 - y0) * iy as f32 / ny as f32;
             let yb = y0 + (y1 - y0) * (iy + 1) as f32 / ny as f32;
             let center = Float3::new((xa + xb) / 2.0, (ya + yb) / 2.0, 0.0);
-            if !invoke_callable(executor, &mask, vec![point_value(center)], "mask").await?.check_truthy()? {
+            if !invoke_callable(executor, &mask, vec![point_value(center)], "mask")
+                .await?
+                .check_truthy()?
+            {
                 continue;
             }
 
@@ -579,12 +683,48 @@ pub async fn mk_color_grid(executor: &mut Executor, stack_idx: usize) -> Result<
                 Float3::new(xb, yb, 0.0),
                 Float3::new(xa, yb, 0.0),
             );
-            tri0.a.col = float4_from_value(invoke_callable(executor, &color_at, vec![point_value(tri0.a.pos)], "color_at").await?, "color_at")?;
-            tri0.b.col = float4_from_value(invoke_callable(executor, &color_at, vec![point_value(tri0.b.pos)], "color_at").await?, "color_at")?;
-            tri0.c.col = float4_from_value(invoke_callable(executor, &color_at, vec![point_value(tri0.c.pos)], "color_at").await?, "color_at")?;
+            tri0.a.col = float4_from_value(
+                invoke_callable(
+                    executor,
+                    &color_at,
+                    vec![point_value(tri0.a.pos)],
+                    "color_at",
+                )
+                .await?,
+                "color_at",
+            )?;
+            tri0.b.col = float4_from_value(
+                invoke_callable(
+                    executor,
+                    &color_at,
+                    vec![point_value(tri0.b.pos)],
+                    "color_at",
+                )
+                .await?,
+                "color_at",
+            )?;
+            tri0.c.col = float4_from_value(
+                invoke_callable(
+                    executor,
+                    &color_at,
+                    vec![point_value(tri0.c.pos)],
+                    "color_at",
+                )
+                .await?,
+                "color_at",
+            )?;
             tri1.a.col = tri0.a.col;
             tri1.b.col = tri0.c.col;
-            tri1.c.col = float4_from_value(invoke_callable(executor, &color_at, vec![point_value(tri1.c.pos)], "color_at").await?, "color_at")?;
+            tri1.c.col = float4_from_value(
+                invoke_callable(
+                    executor,
+                    &color_at,
+                    vec![point_value(tri1.c.pos)],
+                    "color_at",
+                )
+                .await?,
+                "color_at",
+            )?;
             tris.push(tri0);
             tris.push(tri1);
         }
@@ -599,10 +739,24 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let x1 = crate::read_float(executor, stack_idx, -7, "x1")? as f32;
     let y0 = crate::read_float(executor, stack_idx, -6, "y0")? as f32;
     let y1 = crate::read_float(executor, stack_idx, -5, "y1")? as f32;
-    let dx = crate::read_float(executor, stack_idx, -4, "dx")?.abs().max(1e-3) as f32;
-    let dy = crate::read_float(executor, stack_idx, -3, "dy")?.abs().max(1e-3) as f32;
-    let mask = executor.state.stack(stack_idx).read_at(-2).clone().elide_lvalue();
-    let mesh_at = executor.state.stack(stack_idx).read_at(-1).clone().elide_lvalue();
+    let dx = crate::read_float(executor, stack_idx, -4, "dx")?
+        .abs()
+        .max(1e-3) as f32;
+    let dy = crate::read_float(executor, stack_idx, -3, "dy")?
+        .abs()
+        .max(1e-3) as f32;
+    let mask = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-2)
+        .clone()
+        .elide_lvalue();
+    let mesh_at = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_lvalue();
 
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
@@ -613,7 +767,10 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             let pos = Float3::new(x, y, 0.0);
-            if !invoke_callable(executor, &mask, vec![point_value(pos)], "mask").await?.check_truthy()? {
+            if !invoke_callable(executor, &mask, vec![point_value(pos)], "mask")
+                .await?
+                .check_truthy()?
+            {
                 continue;
             }
             out.push(invoke_callable(executor, &mesh_at, vec![point_value(pos)], "mesh_at").await?);
@@ -667,8 +824,12 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
             message: "mesh tree must contain at least one vertex",
         })?
         .dot(direction);
-    let right_d = extremal_point(&tree, right).unwrap_or(Float3::ZERO).dot(right);
-    let left_d = extremal_point(&tree, left).unwrap_or(Float3::ZERO).dot(left);
+    let right_d = extremal_point(&tree, right)
+        .unwrap_or(Float3::ZERO)
+        .dot(right);
+    let left_d = extremal_point(&tree, left)
+        .unwrap_or(Float3::ZERO)
+        .dot(left);
 
     let forward_delta = direction * (cutoff + MEASURE_BUFFER - MEASURE_EXTRUSION);
     let pivot_delta = direction * (cutoff + MEASURE_BUFFER);
@@ -721,17 +882,31 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let min = crate::read_float(executor, stack_idx, -6, "min")? as f32;
     let max = crate::read_float(executor, stack_idx, -5, "max")? as f32;
     let unit = crate::read_float(executor, stack_idx, -4, "unit")? as f32;
-    let tick_step = crate::read_float(executor, stack_idx, -3, "tick_step")?.abs().max(1e-3) as f32;
+    let tick_step = crate::read_float(executor, stack_idx, -3, "tick_step")?
+        .abs()
+        .max(1e-3) as f32;
     let tick_dir = {
         let dir = normal.cross(axis);
-        if dir.len_sq() > 1e-6 { dir.normalize() } else { polygon_basis(axis).1 }
+        if dir.len_sq() > 1e-6 {
+            dir.normalize()
+        } else {
+            polygon_basis(axis).1
+        }
     };
     let tick_half = 0.08 * unit.max(0.2);
-    let mut lins = vec![default_lin(center + axis * (min * unit), center + axis * (max * unit), normal)];
+    let mut lins = vec![default_lin(
+        center + axis * (min * unit),
+        center + axis * (max * unit),
+        normal,
+    )];
     let mut v = (min / tick_step).ceil() * tick_step;
     while v <= max + 1e-4 {
         let p = center + axis * (v * unit);
-        lins.push(default_lin(p - tick_dir * tick_half, p + tick_dir * tick_half, normal));
+        lins.push(default_lin(
+            p - tick_dir * tick_half,
+            p + tick_dir * tick_half,
+            normal,
+        ));
         v += tick_step;
     }
     Ok(mesh_from_parts(vec![], lins, vec![]))
@@ -745,22 +920,38 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let x_min = crate::read_float(executor, stack_idx, -13, "x_min")? as f32;
     let x_max = crate::read_float(executor, stack_idx, -12, "x_max")? as f32;
     let x_unit = crate::read_float(executor, stack_idx, -11, "x_unit")? as f32;
-    let x_tick = crate::read_float(executor, stack_idx, -10, "x_tick")?.abs().max(1e-3) as f32;
+    let x_tick = crate::read_float(executor, stack_idx, -10, "x_tick")?
+        .abs()
+        .max(1e-3) as f32;
     let y_min = crate::read_float(executor, stack_idx, -9, "y_min")? as f32;
     let y_max = crate::read_float(executor, stack_idx, -8, "y_max")? as f32;
     let y_unit = crate::read_float(executor, stack_idx, -7, "y_unit")? as f32;
-    let y_tick = crate::read_float(executor, stack_idx, -6, "y_tick")?.abs().max(1e-3) as f32;
+    let y_tick = crate::read_float(executor, stack_idx, -6, "y_tick")?
+        .abs()
+        .max(1e-3) as f32;
     let grid = read_flag(executor, stack_idx, -1, "grid")?;
     let normal = x_axis.cross(y_axis).normalize();
     let tick_half = 0.06 * x_unit.min(y_unit).max(0.2);
     let mut lins = vec![
-        default_lin(center + x_axis * (x_min * x_unit), center + x_axis * (x_max * x_unit), normal),
-        default_lin(center + y_axis * (y_min * y_unit), center + y_axis * (y_max * y_unit), normal),
+        default_lin(
+            center + x_axis * (x_min * x_unit),
+            center + x_axis * (x_max * x_unit),
+            normal,
+        ),
+        default_lin(
+            center + y_axis * (y_min * y_unit),
+            center + y_axis * (y_max * y_unit),
+            normal,
+        ),
     ];
     let mut x = (x_min / x_tick).ceil() * x_tick;
     while x <= x_max + 1e-4 {
         let p = center + x_axis * (x * x_unit);
-        lins.push(default_lin(p - y_axis * tick_half, p + y_axis * tick_half, normal));
+        lins.push(default_lin(
+            p - y_axis * tick_half,
+            p + y_axis * tick_half,
+            normal,
+        ));
         if grid && x.abs() > 1e-4 {
             lins.push(default_lin(
                 p + y_axis * (y_min * y_unit),
@@ -773,7 +964,11 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let mut y = (y_min / y_tick).ceil() * y_tick;
     while y <= y_max + 1e-4 {
         let p = center + y_axis * (y * y_unit);
-        lins.push(default_lin(p - x_axis * tick_half, p + x_axis * tick_half, normal));
+        lins.push(default_lin(
+            p - x_axis * tick_half,
+            p + x_axis * tick_half,
+            normal,
+        ));
         if grid && y.abs() > 1e-4 {
             lins.push(default_lin(
                 p + x_axis * (x_min * x_unit),
@@ -803,28 +998,60 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let z_unit = crate::read_float(executor, stack_idx, -4, "z_unit")? as f32;
     let grid = read_flag(executor, stack_idx, -1, "grid")?;
     let mut lins = vec![
-        default_lin(center + x_axis * (x_min * x_unit), center + x_axis * (x_max * x_unit), Float3::Z),
-        default_lin(center + y_axis * (y_min * y_unit), center + y_axis * (y_max * y_unit), Float3::Z),
-        default_lin(center + z_axis * (z_min * z_unit), center + z_axis * (z_max * z_unit), Float3::Z),
+        default_lin(
+            center + x_axis * (x_min * x_unit),
+            center + x_axis * (x_max * x_unit),
+            Float3::Z,
+        ),
+        default_lin(
+            center + y_axis * (y_min * y_unit),
+            center + y_axis * (y_max * y_unit),
+            Float3::Z,
+        ),
+        default_lin(
+            center + z_axis * (z_min * z_unit),
+            center + z_axis * (z_max * z_unit),
+            Float3::Z,
+        ),
     ];
     if grid {
-        lins.push(default_lin(center + x_axis * (x_min * x_unit), center + x_axis * (x_max * x_unit) + y_axis * (y_max * y_unit), Float3::Z));
-        lins.push(default_lin(center + y_axis * (y_min * y_unit), center + y_axis * (y_max * y_unit) + z_axis * (z_max * z_unit), Float3::Z));
-        lins.push(default_lin(center + z_axis * (z_min * z_unit), center + z_axis * (z_max * z_unit) + x_axis * (x_max * x_unit), Float3::Z));
+        lins.push(default_lin(
+            center + x_axis * (x_min * x_unit),
+            center + x_axis * (x_max * x_unit) + y_axis * (y_max * y_unit),
+            Float3::Z,
+        ));
+        lins.push(default_lin(
+            center + y_axis * (y_min * y_unit),
+            center + y_axis * (y_max * y_unit) + z_axis * (z_max * z_unit),
+            Float3::Z,
+        ));
+        lins.push(default_lin(
+            center + z_axis * (z_min * z_unit),
+            center + z_axis * (z_max * z_unit) + x_axis * (x_max * x_unit),
+            Float3::Z,
+        ));
     }
     Ok(mesh_from_parts(vec![], lins, vec![]))
 }
 
 #[stdlib_func]
-pub async fn mk_polar_axis(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_polar_axis(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let center = read_float3(executor, stack_idx, -10, "center")?;
     let normal = read_float3(executor, stack_idx, -9, "normal")?;
     let theta_min = crate::read_float(executor, stack_idx, -8, "theta_min")? as f32;
     let theta_max = crate::read_float(executor, stack_idx, -7, "theta_max")? as f32;
-    let theta_step = crate::read_float(executor, stack_idx, -6, "theta_step")?.abs().max(1e-3) as f32;
+    let theta_step = crate::read_float(executor, stack_idx, -6, "theta_step")?
+        .abs()
+        .max(1e-3) as f32;
     let radius_min = crate::read_float(executor, stack_idx, -4, "radius_min")?.max(0.0) as f32;
-    let radius_max = crate::read_float(executor, stack_idx, -3, "radius_max")?.max(radius_min as f64) as f32;
-    let radius_step = crate::read_float(executor, stack_idx, -2, "radius_step")?.abs().max(1e-3) as f32;
+    let radius_max =
+        crate::read_float(executor, stack_idx, -3, "radius_max")?.max(radius_min as f64) as f32;
+    let radius_step = crate::read_float(executor, stack_idx, -2, "radius_step")?
+        .abs()
+        .max(1e-3) as f32;
     let (x, y, normal) = polygon_basis(normal);
     let mut lins = Vec::new();
 
@@ -844,15 +1071,27 @@ pub async fn mk_polar_axis(executor: &mut Executor, stack_idx: usize) -> Result<
     let mut theta = theta_min;
     while theta <= theta_max + 1e-4 {
         let end = center + x * (radius_max * theta.cos()) + y * (radius_max * theta.sin());
-        lins.push(default_lin(center + x * (radius_min * theta.cos()) + y * (radius_min * theta.sin()), end, normal));
+        lins.push(default_lin(
+            center + x * (radius_min * theta.cos()) + y * (radius_min * theta.sin()),
+            end,
+            normal,
+        ));
         theta += theta_step;
     }
     Ok(mesh_from_parts(vec![], lins, vec![]))
 }
 
 #[stdlib_func]
-pub async fn mk_parametric(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let f = executor.state.stack(stack_idx).read_at(-4).clone().elide_lvalue();
+pub async fn mk_parametric(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let f = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-4)
+        .clone()
+        .elide_lvalue();
     let t0 = crate::read_float(executor, stack_idx, -3, "t0")?;
     let t1 = crate::read_float(executor, stack_idx, -2, "t1")?;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(2) as usize;
@@ -863,7 +1102,10 @@ pub async fn mk_parametric(executor: &mut Executor, stack_idx: usize) -> Result<
         } else {
             t0 + (t1 - t0) * i as f64 / (samples - 1) as f64
         };
-        points.push(float3_from_value(invoke_callable(executor, &f, vec![Value::Float(t)], "f").await?, "f")?);
+        points.push(float3_from_value(
+            invoke_callable(executor, &f, vec![Value::Float(t)], "f").await?,
+            "f",
+        )?);
     }
     let normal = points
         .windows(3)
@@ -872,12 +1114,24 @@ pub async fn mk_parametric(executor: &mut Executor, stack_idx: usize) -> Result<
             (cross.len_sq() > 1e-6).then(|| cross.normalize())
         })
         .unwrap_or(Float3::Z);
-    Ok(mesh_from_parts(vec![], open_polyline(&points, normal), vec![]))
+    Ok(mesh_from_parts(
+        vec![],
+        open_polyline(&points, normal),
+        vec![],
+    ))
 }
 
 #[stdlib_func]
-pub async fn mk_explicit(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let f = executor.state.stack(stack_idx).read_at(-4).clone().elide_lvalue();
+pub async fn mk_explicit(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let f = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-4)
+        .clone()
+        .elide_lvalue();
     let x0 = crate::read_float(executor, stack_idx, -3, "x0")?;
     let x1 = crate::read_float(executor, stack_idx, -2, "x1")?;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(2) as usize;
@@ -887,22 +1141,44 @@ pub async fn mk_explicit(executor: &mut Executor, stack_idx: usize) -> Result<Va
         let y = match invoke_callable(executor, &f, vec![Value::Float(x)], "f").await? {
             Value::Float(v) => v as f32,
             Value::Integer(v) => v as f32,
-            other => return Err(ExecutorError::type_error_for("float", other.type_name(), "f")),
+            other => {
+                return Err(ExecutorError::type_error_for(
+                    "float",
+                    other.type_name(),
+                    "f",
+                ));
+            }
         };
         points.push(Float3::new(x as f32, y, 0.0));
     }
-    Ok(mesh_from_parts(vec![], open_polyline(&points, Float3::Z), vec![]))
+    Ok(mesh_from_parts(
+        vec![],
+        open_polyline(&points, Float3::Z),
+        vec![],
+    ))
 }
 
 #[stdlib_func]
-pub async fn mk_explicit2d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let f = executor.state.stack(stack_idx).read_at(-7).clone().elide_lvalue();
+pub async fn mk_explicit2d(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let f = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-7)
+        .clone()
+        .elide_lvalue();
     let x0 = crate::read_float(executor, stack_idx, -6, "x0")? as f32;
     let x1 = crate::read_float(executor, stack_idx, -5, "x1")? as f32;
     let y0 = crate::read_float(executor, stack_idx, -4, "y0")? as f32;
     let y1 = crate::read_float(executor, stack_idx, -3, "y1")? as f32;
-    let dx = crate::read_float(executor, stack_idx, -2, "dx")?.abs().max(1e-3) as f32;
-    let dy = crate::read_float(executor, stack_idx, -1, "dy")?.abs().max(1e-3) as f32;
+    let dx = crate::read_float(executor, stack_idx, -2, "dx")?
+        .abs()
+        .max(1e-3) as f32;
+    let dy = crate::read_float(executor, stack_idx, -1, "dy")?
+        .abs()
+        .max(1e-3) as f32;
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
     let mut grid = vec![vec![Float3::ZERO; ny + 1]; nx + 1];
@@ -920,7 +1196,13 @@ pub async fn mk_explicit2d(executor: &mut Executor, stack_idx: usize) -> Result<
             {
                 Value::Float(v) => v as f32,
                 Value::Integer(v) => v as f32,
-                other => return Err(ExecutorError::type_error_for("float", other.type_name(), "f")),
+                other => {
+                    return Err(ExecutorError::type_error_for(
+                        "float",
+                        other.type_name(),
+                        "f",
+                    ));
+                }
             };
             *point = Float3::new(x, y, z);
         }
@@ -940,14 +1222,26 @@ pub async fn mk_explicit2d(executor: &mut Executor, stack_idx: usize) -> Result<
 }
 
 #[stdlib_func]
-pub async fn mk_implicit2d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let f = executor.state.stack(stack_idx).read_at(-7).clone().elide_lvalue();
+pub async fn mk_implicit2d(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let f = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-7)
+        .clone()
+        .elide_lvalue();
     let x0 = crate::read_float(executor, stack_idx, -6, "x0")? as f32;
     let x1 = crate::read_float(executor, stack_idx, -5, "x1")? as f32;
     let y0 = crate::read_float(executor, stack_idx, -4, "y0")? as f32;
     let y1 = crate::read_float(executor, stack_idx, -3, "y1")? as f32;
-    let dx = crate::read_float(executor, stack_idx, -2, "dx")?.abs().max(1e-3) as f32;
-    let dy = crate::read_float(executor, stack_idx, -1, "dy")?.abs().max(1e-3) as f32;
+    let dx = crate::read_float(executor, stack_idx, -2, "dx")?
+        .abs()
+        .max(1e-3) as f32;
+    let dy = crate::read_float(executor, stack_idx, -1, "dy")?
+        .abs()
+        .max(1e-3) as f32;
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
     let mut vals = vec![vec![0.0f32; ny + 1]; nx + 1];
@@ -955,10 +1249,23 @@ pub async fn mk_implicit2d(executor: &mut Executor, stack_idx: usize) -> Result<
         for (iy, val) in col.iter_mut().enumerate() {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
-            *val = match invoke_callable(executor, &f, vec![Value::Float(x as f64), Value::Float(y as f64)], "f").await? {
+            *val = match invoke_callable(
+                executor,
+                &f,
+                vec![Value::Float(x as f64), Value::Float(y as f64)],
+                "f",
+            )
+            .await?
+            {
                 Value::Float(v) => v as f32,
                 Value::Integer(v) => v as f32,
-                other => return Err(ExecutorError::type_error_for("float", other.type_name(), "f")),
+                other => {
+                    return Err(ExecutorError::type_error_for(
+                        "float",
+                        other.type_name(),
+                        "f",
+                    ));
+                }
             };
         }
     }
@@ -998,9 +1305,22 @@ pub async fn mk_implicit2d(executor: &mut Executor, stack_idx: usize) -> Result<
 }
 
 #[stdlib_func]
-pub async fn mk_explicit_diff(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let f = executor.state.stack(stack_idx).read_at(-7).clone().elide_lvalue();
-    let g = executor.state.stack(stack_idx).read_at(-6).clone().elide_lvalue();
+pub async fn mk_explicit_diff(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let f = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-7)
+        .clone()
+        .elide_lvalue();
+    let g = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-6)
+        .clone()
+        .elide_lvalue();
     let x0 = crate::read_float(executor, stack_idx, -5, "x0")?;
     let x1 = crate::read_float(executor, stack_idx, -4, "x1")?;
     let samples = read_int(executor, stack_idx, -3, "samples")?.max(2) as usize;
@@ -1014,12 +1334,24 @@ pub async fn mk_explicit_diff(executor: &mut Executor, stack_idx: usize) -> Resu
         let yf = match invoke_callable(executor, &f, vec![Value::Float(x)], "f").await? {
             Value::Float(v) => v as f32,
             Value::Integer(v) => v as f32,
-            other => return Err(ExecutorError::type_error_for("float", other.type_name(), "f")),
+            other => {
+                return Err(ExecutorError::type_error_for(
+                    "float",
+                    other.type_name(),
+                    "f",
+                ));
+            }
         };
         let yg = match invoke_callable(executor, &g, vec![Value::Float(x)], "g").await? {
             Value::Float(v) => v as f32,
             Value::Integer(v) => v as f32,
-            other => return Err(ExecutorError::type_error_for("float", other.type_name(), "g")),
+            other => {
+                return Err(ExecutorError::type_error_for(
+                    "float",
+                    other.type_name(),
+                    "g",
+                ));
+            }
         };
         upper.push(Float3::new(x as f32, yf, 0.0));
         lower.push(Float3::new(x as f32, yg, 0.0));
@@ -1056,11 +1388,17 @@ pub async fn mk_stack(executor: &mut Executor, stack_idx: usize) -> Result<Value
         let backward = extremal_point(item, -dir).unwrap_or(center).dot(dir);
         let forward = extremal_point(item, dir).unwrap_or(center).dot(dir);
         let align = if align_dir.len_sq() > 0.0 {
-            extremal_point(item, align_dir).unwrap_or(center).dot(align_dir)
+            extremal_point(item, align_dir)
+                .unwrap_or(center)
+                .dot(align_dir)
         } else {
             0.0
         };
-        let target = if i == 0 { -backward } else { cursor - backward + 0.1 };
+        let target = if i == 0 {
+            -backward
+        } else {
+            cursor - backward + 0.1
+        };
         let align_shift = if align_dir.len_sq() > 0.0 {
             align_dir.normalize() * -align
         } else {
@@ -1085,7 +1423,10 @@ pub async fn mk_table(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn mk_bounding_box(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mk_bounding_box(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
     let buffer = crate::read_float(executor, stack_idx, -1, "buffer")? as f32;
     let (min, max) = bounds_of(&tree).ok_or(ExecutorError::InvalidArgument {
@@ -1100,5 +1441,9 @@ pub async fn mk_bounding_box(executor: &mut Executor, stack_idx: usize) -> Resul
         Float3::new(center.x + size.x / 2.0, center.y + size.y / 2.0, center.z),
         Float3::new(center.x - size.x / 2.0, center.y + size.y / 2.0, center.z),
     ];
-    Ok(mesh_from_parts(vec![], closed_polyline(&corners, Float3::Z), vec![]))
+    Ok(mesh_from_parts(
+        vec![],
+        closed_polyline(&corners, Float3::Z),
+        vec![],
+    ))
 }

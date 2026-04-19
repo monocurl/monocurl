@@ -308,7 +308,11 @@ pub(super) fn int_from_value(value: Value, name: &'static str) -> Result<i64, Ex
     match value.elide_lvalue_leader_rec() {
         Value::Integer(n) => Ok(n),
         Value::Float(f) if f.fract() == 0.0 => Ok(f as i64),
-        other => Err(ExecutorError::type_error_for("int", other.type_name(), name)),
+        other => Err(ExecutorError::type_error_for(
+            "int",
+            other.type_name(),
+            name,
+        )),
     }
 }
 
@@ -504,7 +508,11 @@ pub(super) fn mesh_vertices(mesh: &Mesh) -> impl Iterator<Item = Float3> + '_ {
         .iter()
         .map(|dot| dot.pos)
         .chain(mesh.lins.iter().flat_map(|lin| [lin.a.pos, lin.b.pos]))
-        .chain(mesh.tris.iter().flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]))
+        .chain(
+            mesh.tris
+                .iter()
+                .flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]),
+        )
 }
 
 pub(super) fn read_mesh_tree<'a>(
@@ -552,7 +560,11 @@ pub(super) async fn read_mesh_tree_list_arg(
     let value = executor.state.stack(stack_idx).read_at(index).clone();
     let value = value.elide_wrappers(executor).await?;
     let Value::List(list) = value else {
-        return Err(ExecutorError::type_error_for("list", value.type_name(), name));
+        return Err(ExecutorError::type_error_for(
+            "list",
+            value.type_name(),
+            name,
+        ));
     };
     let mut out = Vec::with_capacity(list.len());
     for key in list.elements() {
@@ -666,7 +678,10 @@ pub(super) fn tree_center(tree: &MeshTree) -> Option<Float3> {
     bounds_of(tree).map(|(min, max)| (min + max) / 2.0)
 }
 
-pub(super) fn require_point(point: Option<Float3>, name: &'static str) -> Result<Value, ExecutorError> {
+pub(super) fn require_point(
+    point: Option<Float3>,
+    name: &'static str,
+) -> Result<Value, ExecutorError> {
     point
         .map(point_value)
         .ok_or_else(|| ExecutorError::InvalidArgument {
@@ -723,7 +738,13 @@ pub(super) async fn invoke_callable(
     let raw = match callable.clone().elide_lvalue() {
         Value::Lambda(lambda) => executor.invoke_lambda(&lambda, args).await?,
         Value::Operator(operator) => executor.invoke_lambda(&operator.0, args).await?,
-        other => return Err(ExecutorError::type_error_for("lambda / operator", other.type_name(), name)),
+        other => {
+            return Err(ExecutorError::type_error_for(
+                "lambda / operator",
+                other.type_name(),
+                name,
+            ));
+        }
     };
     raw.elide_wrappers(executor).await
 }
@@ -803,9 +824,8 @@ pub(super) fn transform_mesh_positions(mesh: &mut Mesh, mut f: impl FnMut(Float3
 
 pub(super) fn mesh_center(mesh: &Mesh) -> Option<Float3> {
     let first = mesh_vertices(mesh).next()?;
-    let (sum, count) = mesh_vertices(mesh).fold((first, 1usize), |(sum, count), p| {
-        (sum + p, count + 1)
-    });
+    let (sum, count) =
+        mesh_vertices(mesh).fold((first, 1usize), |(sum, count), p| (sum + p, count + 1));
     Some(sum / count as f32)
 }
 
@@ -857,7 +877,13 @@ pub(super) fn ray_triangle_intersection(
     (t >= 0.0).then_some(t)
 }
 
-pub(super) fn set_triangle_uv_rect(mesh: &mut Mesh, min: Float3, max: Float3, basis_x: Float3, basis_y: Float3) {
+pub(super) fn set_triangle_uv_rect(
+    mesh: &mut Mesh,
+    min: Float3,
+    max: Float3,
+    basis_x: Float3,
+    basis_y: Float3,
+) {
     let dx = (max - min).dot(basis_x).abs().max(1e-6);
     let dy = (max - min).dot(basis_y).abs().max(1e-6);
     for tri in &mut mesh.tris {

@@ -41,13 +41,19 @@ pub async fn mesh_down(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mesh_forward(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_forward(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     require_point(extremal_point(&tree, Float3::new(0.0, 0.0, 1.0)), "mesh")
 }
 
 #[stdlib_func]
-pub async fn mesh_backward(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_backward(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     require_point(extremal_point(&tree, Float3::new(0.0, 0.0, -1.0)), "mesh")
 }
@@ -70,7 +76,10 @@ pub async fn mesh_width(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn mesh_height(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_height(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     let (min, max) = bounds_of(&tree).ok_or(ExecutorError::InvalidArgument {
         arg: "mesh",
@@ -80,7 +89,10 @@ pub async fn mesh_height(executor: &mut Executor, stack_idx: usize) -> Result<Va
 }
 
 #[stdlib_func]
-pub async fn mesh_center(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_center(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     let (min, max) = bounds_of(&tree).ok_or(ExecutorError::InvalidArgument {
         arg: "mesh",
@@ -92,7 +104,9 @@ pub async fn mesh_center(executor: &mut Executor, stack_idx: usize) -> Result<Va
 #[stdlib_func]
 pub async fn mesh_rank(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
-    Ok(Value::Integer(tree.iter().map(axis_aligned_rank).max().unwrap_or(-1)))
+    Ok(Value::Integer(
+        tree.iter().map(axis_aligned_rank).max().unwrap_or(-1),
+    ))
 }
 
 #[stdlib_func]
@@ -111,7 +125,10 @@ pub async fn mesh_tags(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mesh_sample(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_sample(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -2, "mesh").await?;
     let t = crate::read_float(executor, stack_idx, -1, "t")?.clamp(0.0, 1.0) as f32;
 
@@ -121,7 +138,11 @@ pub async fn mesh_sample(executor: &mut Executor, stack_idx: usize) -> Result<Va
     for mesh in tree.iter() {
         dots.extend(mesh.dots.iter().map(|dot| dot.pos));
         lines.extend(mesh.lins.iter().map(|lin| (lin.a.pos, lin.b.pos)));
-        tris.extend(mesh.tris.iter().map(|tri| (tri.a.pos, tri.b.pos, tri.c.pos)));
+        tris.extend(
+            mesh.tris
+                .iter()
+                .map(|tri| (tri.a.pos, tri.b.pos, tri.c.pos)),
+        );
     }
 
     if !lines.is_empty() {
@@ -154,7 +175,10 @@ pub async fn mesh_sample(executor: &mut Executor, stack_idx: usize) -> Result<Va
 }
 
 #[stdlib_func]
-pub async fn mesh_normal(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_normal(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -2, "mesh").await?;
     let t = crate::read_float(executor, stack_idx, -1, "t")?.clamp(0.0, 1.0) as f32;
     let mut line_normals = Vec::new();
@@ -163,7 +187,11 @@ pub async fn mesh_normal(executor: &mut Executor, stack_idx: usize) -> Result<Va
     for mesh in tree.iter() {
         dot_normals.extend(mesh.dots.iter().map(|dot| dot.norm));
         line_normals.extend(mesh.lins.iter().map(|lin| lin.norm));
-        tri_normals.extend(mesh.tris.iter().map(|tri| triangle_normal(tri.a.pos, tri.b.pos, tri.c.pos)));
+        tri_normals.extend(
+            mesh.tris
+                .iter()
+                .map(|tri| triangle_normal(tri.a.pos, tri.b.pos, tri.c.pos)),
+        );
     }
     let normal = if !line_normals.is_empty() {
         line_normals[((line_normals.len() - 1) as f32 * t).round() as usize]
@@ -181,7 +209,10 @@ pub async fn mesh_normal(executor: &mut Executor, stack_idx: usize) -> Result<Va
 }
 
 #[stdlib_func]
-pub async fn mesh_tangent(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_tangent(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -2, "mesh").await?;
     let t = crate::read_float(executor, stack_idx, -1, "t")?.clamp(0.0, 1.0) as f32;
     let mut tangents = Vec::new();
@@ -209,18 +240,32 @@ pub async fn mesh_tangent(executor: &mut Executor, stack_idx: usize) -> Result<V
 }
 
 #[stdlib_func]
-pub async fn mesh_contains(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_contains(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -2, "mesh").await?;
     let point = read_float3(executor, stack_idx, -1, "point")?;
     let contains = tree.iter().any(|mesh| {
         mesh.tris.iter().any(|tri| {
             let normal = triangle_normal(tri.a.pos, tri.b.pos, tri.c.pos);
-            let area = normal.dot((tri.b.pos - tri.a.pos).cross(tri.c.pos - tri.a.pos)).abs();
-            let a = normal.dot((tri.c.pos - tri.b.pos).cross(point - tri.b.pos)).abs();
-            let b = normal.dot((tri.a.pos - tri.c.pos).cross(point - tri.c.pos)).abs();
-            let c = normal.dot((tri.b.pos - tri.a.pos).cross(point - tri.a.pos)).abs();
+            let area = normal
+                .dot((tri.b.pos - tri.a.pos).cross(tri.c.pos - tri.a.pos))
+                .abs();
+            let a = normal
+                .dot((tri.c.pos - tri.b.pos).cross(point - tri.b.pos))
+                .abs();
+            let b = normal
+                .dot((tri.a.pos - tri.c.pos).cross(point - tri.c.pos))
+                .abs();
+            let c = normal
+                .dot((tri.b.pos - tri.a.pos).cross(point - tri.a.pos))
+                .abs();
             (a + b + c - area).abs() < 1e-3
-        }) || mesh.lins.iter().any(|lin| segment_distance(lin.a.pos, lin.b.pos, point) < 1e-4)
+        }) || mesh
+            .lins
+            .iter()
+            .any(|lin| segment_distance(lin.a.pos, lin.b.pos, point) < 1e-4)
             || mesh.dots.iter().any(|dot| (dot.pos - point).len() < 1e-4)
     });
     Ok(Value::Integer(contains as i64))
@@ -263,7 +308,10 @@ pub async fn mesh_dist(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mesh_raycast(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_raycast(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -3, "mesh").await?;
     let src = read_float3(executor, stack_idx, -2, "src")?;
     let direction = read_float3(executor, stack_idx, -1, "direction")?;
@@ -281,7 +329,10 @@ pub async fn mesh_raycast(executor: &mut Executor, stack_idx: usize) -> Result<V
 }
 
 #[stdlib_func]
-pub async fn mesh_vertex_set(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_vertex_set(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     let mut seen = HashSet::new();
     let mut vertices = Vec::new();
@@ -296,7 +347,10 @@ pub async fn mesh_vertex_set(executor: &mut Executor, stack_idx: usize) -> Resul
 }
 
 #[stdlib_func]
-pub async fn mesh_edge_set(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_edge_set(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     let mut seen = HashSet::new();
     let mut edges = Vec::new();
@@ -308,7 +362,11 @@ pub async fn mesh_edge_set(executor: &mut Executor, stack_idx: usize) -> Result<
             }
         }
         for tri in &mesh.tris {
-            for (a, b) in [(tri.a.pos, tri.b.pos), (tri.b.pos, tri.c.pos), (tri.c.pos, tri.a.pos)] {
+            for (a, b) in [
+                (tri.a.pos, tri.b.pos),
+                (tri.b.pos, tri.c.pos),
+                (tri.c.pos, tri.a.pos),
+            ] {
                 let key = canonical_edge_key(a, b);
                 if seen.insert(key) {
                     edges.push(edge_value(a, b));
@@ -320,7 +378,10 @@ pub async fn mesh_edge_set(executor: &mut Executor, stack_idx: usize) -> Result<
 }
 
 #[stdlib_func]
-pub async fn mesh_triangle_set(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_triangle_set(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     let mut seen = HashSet::new();
     let mut triangles = Vec::new();
@@ -336,13 +397,19 @@ pub async fn mesh_triangle_set(executor: &mut Executor, stack_idx: usize) -> Res
 }
 
 #[stdlib_func]
-pub async fn mesh_contour_count(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_contour_count(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     Ok(Value::Integer(tree.iter().count() as i64))
 }
 
 #[stdlib_func]
-pub async fn mesh_contour_separate(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn mesh_contour_separate(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
     Ok(list_value(tree.flatten().into_iter().map(Value::Mesh)))
 }

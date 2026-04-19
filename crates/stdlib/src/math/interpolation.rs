@@ -1,9 +1,4 @@
-use executor::{
-    error::ExecutorError,
-    executor::Executor,
-    heap::with_heap,
-    value::Value,
-};
+use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
 use stdlib_macros::stdlib_func;
 
 #[stdlib_func]
@@ -46,7 +41,11 @@ pub async fn keyframe_lerp(
     for keyframe in keyframes.elements() {
         let pair = with_heap(|h| h.get(keyframe.key()).clone()).elide_lvalue_leader_rec();
         let Value::List(pair) = pair else {
-            return Err(ExecutorError::type_error_for("list", pair.type_name(), "keyframe"));
+            return Err(ExecutorError::type_error_for(
+                "list",
+                pair.type_name(),
+                "keyframe",
+            ));
         };
         if pair.len() != 2 {
             return Err(ExecutorError::InvalidArgument {

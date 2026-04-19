@@ -44,9 +44,6 @@ pub async fn transfer_anim(
 }
 
 #[stdlib_func]
-pub async fn copy_anim(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub async fn copy_anim(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     transfer_impl(executor, stack_idx, true).await
 }

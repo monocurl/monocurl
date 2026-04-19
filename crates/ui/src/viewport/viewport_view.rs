@@ -868,7 +868,10 @@ impl Render for Viewport {
         let theme = ThemeSettings::theme(cx);
         let (ring_color, ring_width, params, timestamp, slide_count) = {
             let exec = self.services.read(cx).execution_state().read(cx);
-            let ring_width = if matches!(exec.status, ExecutionStatus::Playing | ExecutionStatus::Paused) {
+            let ring_width = if matches!(
+                exec.status,
+                ExecutionStatus::Playing | ExecutionStatus::Paused
+            ) {
                 px(1.0)
             } else {
                 px(4.0)

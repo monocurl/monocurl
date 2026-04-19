@@ -774,7 +774,9 @@ fn test_set_slide_can_seek_back_to_zero_after_finishing() {
     let r = collect_anim_result(executor, user_slide_count, vec![]);
     r.assert_ok()
         .assert_slide_time_approx(0.0, f64::MIN_POSITIVE);
-    r.param_leaders()[2].assert_target_int(10).assert_current_int(0);
+    r.param_leaders()[2]
+        .assert_target_int(10)
+        .assert_current_int(0);
 }
 
 #[test]
@@ -793,10 +795,7 @@ fn test_mesh_label_mutation_after_set_then_lerp() {
             play Lerp()
         ";
     let r = run_anim_impl(
-        &[(
-            src,
-            SectionType::Slide,
-        )],
+        &[(src, SectionType::Slide)],
         0,
         f64::INFINITY,
         &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
@@ -880,7 +879,9 @@ fn test_ref_mutation_of_live_function_argument_does_not_panic() {
         &[color_mcl, math_mcl, mesh_mcl],
     );
     assert!(
-        r.errors.iter().all(|error| !error.contains("Expected Lvalue")),
+        r.errors
+            .iter()
+            .all(|error| !error.contains("Expected Lvalue")),
         "executor should not panic with force_elide_lvalue: {:?}",
         r.errors
     );

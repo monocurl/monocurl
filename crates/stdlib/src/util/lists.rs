@@ -11,9 +11,7 @@ use stdlib_macros::stdlib_func;
 
 use crate::read_float;
 
-use super::helpers::{
-    compare_values, invoke_key_lambda, list_depth, read_int, read_rc_list,
-};
+use super::helpers::{compare_values, invoke_key_lambda, list_depth, read_int, read_rc_list};
 
 #[stdlib_func]
 pub async fn vector_len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
@@ -53,7 +51,12 @@ pub async fn len(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 
 #[stdlib_func]
 pub async fn depth(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let value = executor.state.stack(stack_idx).peek().clone().elide_lvalue();
+    let value = executor
+        .state
+        .stack(stack_idx)
+        .peek()
+        .clone()
+        .elide_lvalue();
     Ok(Value::Integer(list_depth(&value) as i64))
 }
 
@@ -81,7 +84,9 @@ pub async fn range(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
         }));
         x += step;
     }
-    Ok(Value::List(Rc::new(executor::value::container::List::new_with(elements))))
+    Ok(Value::List(Rc::new(
+        executor::value::container::List::new_with(elements),
+    )))
 }
 
 #[stdlib_func]
@@ -100,9 +105,9 @@ pub async fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value,
                 .cloned()
                 .collect::<SmallVec<[VRc; 4]>>();
             elements.reverse();
-            Ok(Value::List(Rc::new(executor::value::container::List::new_with(
-                elements,
-            ))))
+            Ok(Value::List(Rc::new(
+                executor::value::container::List::new_with(elements),
+            )))
         }
         Value::String(s) => Ok(Value::String(s.chars().rev().collect())),
         other => Err(ExecutorError::type_error(
@@ -122,7 +127,11 @@ pub async fn sort(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
         .clone()
         .elide_lvalue();
     let Value::Lambda(lambda) = key else {
-        return Err(ExecutorError::type_error_for("lambda", key.type_name(), "key"));
+        return Err(ExecutorError::type_error_for(
+            "lambda",
+            key.type_name(),
+            "key",
+        ));
     };
 
     let mut keyed = Vec::with_capacity(list.len());
@@ -158,14 +167,14 @@ pub async fn zip(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         .iter()
         .zip(v.elements().iter())
         .map(|(a_key, b_key)| {
-            VRc::new(Value::List(Rc::new(executor::value::container::List::new_with(
-                smallvec![a_key.clone(), b_key.clone()],
-            ))))
+            VRc::new(Value::List(Rc::new(
+                executor::value::container::List::new_with(smallvec![a_key.clone(), b_key.clone()]),
+            )))
         })
         .collect::<SmallVec<[VRc; 4]>>();
-    Ok(Value::List(Rc::new(executor::value::container::List::new_with(
-        elements,
-    ))))
+    Ok(Value::List(Rc::new(
+        executor::value::container::List::new_with(elements),
+    )))
 }
 
 #[stdlib_func]
@@ -176,40 +185,47 @@ pub async fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         .iter()
         .enumerate()
         .map(|(i, elem_key)| {
-            VRc::new(Value::List(Rc::new(executor::value::container::List::new_with(
-                smallvec![VRc::new(Value::Integer(i as i64)), elem_key.clone()],
-            ))))
+            VRc::new(Value::List(Rc::new(
+                executor::value::container::List::new_with(smallvec![
+                    VRc::new(Value::Integer(i as i64)),
+                    elem_key.clone()
+                ]),
+            )))
         })
         .collect::<SmallVec<[VRc; 4]>>();
-    Ok(Value::List(Rc::new(executor::value::container::List::new_with(
-        elements,
-    ))))
+    Ok(Value::List(Rc::new(
+        executor::value::container::List::new_with(elements),
+    )))
 }
 
 #[stdlib_func]
 pub async fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
-    Ok(Value::List(Rc::new(executor::value::container::List::new_with(
-        list.elements()
-            .iter()
-            .take(n)
-            .cloned()
-            .collect::<SmallVec<[VRc; 4]>>(),
-    ))))
+    Ok(Value::List(Rc::new(
+        executor::value::container::List::new_with(
+            list.elements()
+                .iter()
+                .take(n)
+                .cloned()
+                .collect::<SmallVec<[VRc; 4]>>(),
+        ),
+    )))
 }
 
 #[stdlib_func]
 pub async fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
-    Ok(Value::List(Rc::new(executor::value::container::List::new_with(
-        list.elements()
-            .iter()
-            .skip(n)
-            .cloned()
-            .collect::<SmallVec<[VRc; 4]>>(),
-    ))))
+    Ok(Value::List(Rc::new(
+        executor::value::container::List::new_with(
+            list.elements()
+                .iter()
+                .skip(n)
+                .cloned()
+                .collect::<SmallVec<[VRc; 4]>>(),
+        ),
+    )))
 }
 
 #[stdlib_func]
@@ -251,9 +267,9 @@ pub async fn list_subset(
         elements.push(src.elements()[idx].clone());
     }
 
-    Ok(Value::List(Rc::new(executor::value::container::List::new_with(
-        elements,
-    ))))
+    Ok(Value::List(Rc::new(
+        executor::value::container::List::new_with(elements),
+    )))
 }
 
 async fn extremum_of(
@@ -276,7 +292,11 @@ async fn extremum_of(
         .clone()
         .elide_lvalue();
     let Value::Lambda(lambda) = key else {
-        return Err(ExecutorError::type_error_for("lambda", key.type_name(), "key"));
+        return Err(ExecutorError::type_error_for(
+            "lambda",
+            key.type_name(),
+            "key",
+        ));
     };
 
     let first = with_heap(|h| h.get(list.elements()[0].key()).clone());

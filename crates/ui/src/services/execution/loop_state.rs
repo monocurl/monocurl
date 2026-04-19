@@ -5,6 +5,7 @@ use std::{
 
 use executor::{
     executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
+    scene_snapshot::SceneSnapshot,
     time::Timestamp,
 };
 use futures::channel::mpsc::UnboundedSender;
@@ -15,10 +16,7 @@ use structs::rope::{Rope, TextAggregate};
 
 use crate::services::ServiceManagerMessage;
 
-use super::{
-    ExecutionMessage, ExecutionService, PlaybackMode, default_bytecode,
-    snapshot::StableSceneSnapshot,
-};
+use super::{ExecutionMessage, ExecutionService, PlaybackMode, default_bytecode};
 
 struct RuntimeState {
     version: usize,
@@ -77,7 +75,9 @@ impl RuntimeState {
                 self.is_playing = false;
                 self.playback_mode = playback_mode;
                 self.executor.clear_cache();
-                self.target = self.executor.user_to_internal_timestamp(Timestamp::default());
+                self.target = self
+                    .executor
+                    .user_to_internal_timestamp(Timestamp::default());
                 self.has_seeked_for_play = false;
             }
             ExecutionMessage::SeekTo { target } => {
@@ -185,7 +185,9 @@ impl RuntimeState {
         };
         self.emit_snapshot(sm_tx, false, scene_snapshot).await;
 
-        let full_elapsed = Instant::now().duration_since(self.last_update_at).as_secs_f64();
+        let full_elapsed = Instant::now()
+            .duration_since(self.last_update_at)
+            .as_secs_f64();
         self.last_update_at = Instant::now();
         if self.is_playing && target_dt > full_elapsed {
             Timer::after(Duration::from_secs_f64(target_dt - full_elapsed)).await;
@@ -219,7 +221,7 @@ impl RuntimeState {
         self.target = self.executor.state.timestamp;
     }
 
-    async fn capture_scene_snapshot(&mut self) -> Option<StableSceneSnapshot> {
+    async fn capture_scene_snapshot(&mut self) -> Option<SceneSnapshot> {
         if self.has_compiler_error || self.executor.state.has_errors() {
             return None;
         }
@@ -231,7 +233,7 @@ impl RuntimeState {
         &mut self,
         sm_tx: &UnboundedSender<ServiceManagerMessage>,
         is_loading: bool,
-        scene_snapshot: Option<StableSceneSnapshot>,
+        scene_snapshot: Option<SceneSnapshot>,
     ) {
         ExecutionService::emit_snapshot(
             sm_tx,

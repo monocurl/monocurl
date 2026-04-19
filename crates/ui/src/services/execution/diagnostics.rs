@@ -32,7 +32,10 @@ fn format_runtime_call_frame(
     let section = executor.section_bytecode(section_idx);
 
     if section.flags.is_root_module {
-        let line = root_text_rope.utf8_prefix_summary(frame.span.start).newlines + 1;
+        let line = root_text_rope
+            .utf8_prefix_summary(frame.span.start)
+            .newlines
+            + 1;
         format!("{}:{}", root_section_label(executor, section_idx), line)
     } else if let Some(name) = &section.source_file_name {
         format!("<{}>", name)

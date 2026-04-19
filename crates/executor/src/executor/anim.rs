@@ -285,15 +285,14 @@ impl Executor {
         let raw = match progression.as_ref().clone().elide_lvalue() {
             Value::Nil => return Ok(linear_t),
             Value::Lambda(lambda) => {
-                let args = prepare_eager_call_args(std::iter::once(Value::Float(linear_t)), &lambda);
+                let args =
+                    prepare_eager_call_args(std::iter::once(Value::Float(linear_t)), &lambda);
                 self.eagerly_invoke_lambda(&lambda, &args, Some(baked.parent_stack_idx))
                     .await?
             }
             Value::Operator(operator) => {
-                let args = prepare_eager_call_args(
-                    std::iter::once(Value::Float(linear_t)),
-                    &operator.0,
-                );
+                let args =
+                    prepare_eager_call_args(std::iter::once(Value::Float(linear_t)), &operator.0);
                 self.eagerly_invoke_lambda(&operator.0, &args, Some(baked.parent_stack_idx))
                     .await?
             }

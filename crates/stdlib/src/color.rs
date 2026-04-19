@@ -33,9 +33,9 @@ pub async fn hsv(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
     };
 
     Ok(Value::List(Rc::new(List::new_with(smallvec![
-            VRc::new(Value::Float(r + m)),
-            VRc::new(Value::Float(g + m)),
-            VRc::new(Value::Float(b + m)),
-            VRc::new(Value::Float(a)),
-        ]))))
+        VRc::new(Value::Float(r + m)),
+        VRc::new(Value::Float(g + m)),
+        VRc::new(Value::Float(b + m)),
+        VRc::new(Value::Float(a)),
+    ]))))
 }

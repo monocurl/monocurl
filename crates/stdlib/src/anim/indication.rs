@@ -2,8 +2,8 @@ use executor::{error::ExecutorError, executor::Executor, state::LeaderKind, valu
 use stdlib_macros::stdlib_func;
 
 use super::helpers::{
-    build_lerp, map_mesh_tree, progression_from, read_float4_value, read_time, replace_follower,
-    resolve_targets, write_start_mesh, leader_value,
+    build_lerp, leader_value, map_mesh_tree, progression_from, read_float4_value, read_time,
+    replace_follower, resolve_targets, write_start_mesh,
 };
 
 #[stdlib_func]
@@ -42,10 +42,7 @@ pub async fn highlight_anim(
 }
 
 #[stdlib_func]
-pub async fn flash_anim(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub async fn flash_anim(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let candidates = executor.state.stack(stack_idx).read_at(-4).clone();
     let time = read_time(executor, stack_idx, -3)?;
     let _lead = executor.state.stack(stack_idx).read_at(-2).clone();

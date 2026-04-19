@@ -11,10 +11,7 @@ use super::helpers::{
 };
 
 #[stdlib_func]
-pub async fn lagged_map(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub async fn lagged_map(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let anims = executor
         .state
         .stack(stack_idx)
@@ -22,10 +19,19 @@ pub async fn lagged_map(
         .clone()
         .elide_lvalue_leader_rec();
     let average_offset = read_time(executor, stack_idx, -2)?;
-    let unit_map = executor.state.stack(stack_idx).read_at(-1).clone().elide_lvalue();
+    let unit_map = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_lvalue();
 
     let Value::List(anims) = anims else {
-        return Err(ExecutorError::type_error_for("list", anims.type_name(), "anims"));
+        return Err(ExecutorError::type_error_for(
+            "list",
+            anims.type_name(),
+            "anims",
+        ));
     };
 
     let count = anims.len();
@@ -59,7 +65,12 @@ pub async fn anim_time_scale(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let anim = executor.state.stack(stack_idx).read_at(-2).clone().elide_lvalue();
+    let anim = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-2)
+        .clone()
+        .elide_lvalue();
     let factor = read_time(executor, stack_idx, -1)?;
     scale_primitive_time(anim, factor)
 }
@@ -69,7 +80,12 @@ pub async fn anim_delayed(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let anim = executor.state.stack(stack_idx).read_at(-2).clone().elide_lvalue();
+    let anim = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-2)
+        .clone()
+        .elide_lvalue();
     let delay = read_time(executor, stack_idx, -1)?;
     delay_primitive(anim, delay)
 }
@@ -79,8 +95,18 @@ pub async fn anim_with_rate(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let anim = executor.state.stack(stack_idx).read_at(-2).clone().elide_lvalue();
-    let rate = executor.state.stack(stack_idx).read_at(-1).clone().elide_lvalue();
+    let anim = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-2)
+        .clone()
+        .elide_lvalue();
+    let rate = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_lvalue();
     let rate_ty = rate.type_name();
     let Some(rate) = progression_from(rate) else {
         return Err(ExecutorError::type_error_for(
@@ -98,13 +124,13 @@ pub async fn anim_with_rate(
             time,
             progression: Some(rate),
         })),
-        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => Ok(Value::PrimitiveAnim(
-            PrimitiveAnim::Lerp {
+        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => {
+            Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
                 candidates,
                 time: 0.0,
                 progression: Some(rate),
-            },
-        )),
+            }))
+        }
         Value::PrimitiveAnim(PrimitiveAnim::Wait { time }) => {
             Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait { time }))
         }

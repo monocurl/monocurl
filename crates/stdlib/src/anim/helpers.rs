@@ -73,7 +73,10 @@ pub(super) fn targets_to_value(targets: &[VRc]) -> Value {
 fn dedup_targets(values: &mut Vec<VRc>) {
     let mut out = Vec::with_capacity(values.len());
     for value in values.drain(..) {
-        if !out.iter().any(|existing: &VRc| existing.key() == value.key()) {
+        if !out
+            .iter()
+            .any(|existing: &VRc| existing.key() == value.key())
+        {
             out.push(value);
         }
     }
@@ -89,9 +92,13 @@ fn push_leader_candidate(
     match value {
         Value::Leader(leader) => {
             if kind.is_none_or(|kind| leader.kind == kind) {
-                out.push(find_leader_cell_from_value(executor, leader).ok_or_else(|| {
-                    ExecutorError::Other("animation variable does not belong to executor state".into())
-                })?);
+                out.push(
+                    find_leader_cell_from_value(executor, leader).ok_or_else(|| {
+                        ExecutorError::Other(
+                            "animation variable does not belong to executor state".into(),
+                        )
+                    })?,
+                );
             }
             Ok(())
         }
@@ -140,7 +147,7 @@ fn find_leader_cell_from_value(executor: &Executor, needle: &Leader) -> Option<V
         };
         ((leader.leader_rc.key(), leader.follower_rc.key())
             == (needle.leader_rc.key(), needle.follower_rc.key()))
-        .then(|| entry.leader_cell.clone())
+            .then(|| entry.leader_cell.clone())
     })
 }
 
@@ -181,10 +188,11 @@ pub(super) fn resolve_targets(
             let Value::Leader(leader) = cell_val else {
                 continue;
             };
-            if leader
-                .last_modified_stack
-                .is_some_and(|modified| executor.state.is_stack_id_ancestor_of_stack(modified, stack_idx))
-            {
+            if leader.last_modified_stack.is_some_and(|modified| {
+                executor
+                    .state
+                    .is_stack_id_ancestor_of_stack(modified, stack_idx)
+            }) {
                 out.push(entry.leader_cell.clone());
             }
         }
@@ -245,11 +253,7 @@ pub(super) fn replace_leader_and_follower(
     Ok(())
 }
 
-pub(super) fn build_lerp(
-    targets: &[VRc],
-    time: f64,
-    progression: Option<Box<Value>>,
-) -> Value {
+pub(super) fn build_lerp(targets: &[VRc], time: f64, progression: Option<Box<Value>>) -> Value {
     Value::PrimitiveAnim(PrimitiveAnim::Lerp {
         candidates: Box::new(targets_to_value(targets)),
         time,
@@ -300,15 +304,17 @@ pub(super) fn delay_primitive(anim: Value, delay: f64) -> Result<Value, Executor
             progression,
         })),
         Value::PrimitiveAnim(PrimitiveAnim::Wait { time }) => {
-            Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait { time: time + delay }))
+            Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait {
+                time: time + delay,
+            }))
         }
-        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => Ok(Value::PrimitiveAnim(
-            PrimitiveAnim::Lerp {
+        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => {
+            Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
                 candidates,
                 time: delay,
                 progression: None,
-            },
-        )),
+            }))
+        }
         other => Err(ExecutorError::type_error_for(
             "primitive_anim",
             other.type_name(),
@@ -323,9 +329,22 @@ pub(super) async fn eval_unit_map(
     t: f64,
 ) -> Result<f64, ExecutorError> {
     let raw = match map.clone().elide_lvalue() {
-        Value::Lambda(lambda) => executor.invoke_lambda(&lambda, vec![Value::Float(t)]).await?,
-        Value::Operator(operator) => executor.invoke_lambda(&operator.0, vec![Value::Float(t)]).await?,
-        other => return Err(ExecutorError::type_error("lambda / operator", other.type_name())),
+        Value::Lambda(lambda) => {
+            executor
+                .invoke_lambda(&lambda, vec![Value::Float(t)])
+                .await?
+        }
+        Value::Operator(operator) => {
+            executor
+                .invoke_lambda(&operator.0, vec![Value::Float(t)])
+                .await?
+        }
+        other => {
+            return Err(ExecutorError::type_error(
+                "lambda / operator",
+                other.type_name(),
+            ));
+        }
     }
     .elide_wrappers(executor)
     .await?;
@@ -346,7 +365,11 @@ fn mesh_vertices(mesh: &Mesh) -> impl Iterator<Item = Float3> + '_ {
         .iter()
         .map(|dot| dot.pos)
         .chain(mesh.lins.iter().flat_map(|lin| [lin.a.pos, lin.b.pos]))
-        .chain(mesh.tris.iter().flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]))
+        .chain(
+            mesh.tris
+                .iter()
+                .flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]),
+        )
 }
 
 fn mesh_bounds(mesh: &Mesh) -> Option<(Float3, Float3)> {
@@ -369,7 +392,10 @@ pub(super) fn mesh_center(mesh: &Mesh) -> Float3 {
         .unwrap_or(Float3::ZERO)
 }
 
-pub(super) fn flatten_mesh_leaves(value: &Value, out: &mut Vec<Arc<Mesh>>) -> Result<(), ExecutorError> {
+pub(super) fn flatten_mesh_leaves(
+    value: &Value,
+    out: &mut Vec<Arc<Mesh>>,
+) -> Result<(), ExecutorError> {
     match value {
         Value::Mesh(mesh) => {
             out.push(mesh.clone());
@@ -476,7 +502,9 @@ pub(super) fn collapse_mesh(mesh: &Mesh, center: Float3) -> Mesh {
         tris: mesh
             .tris
             .iter()
-            .map(|tri| copy_tri_template(tri, center, center, center, tri.a.col, tri.b.col, tri.c.col))
+            .map(|tri| {
+                copy_tri_template(tri, center, center, center, tri.a.col, tri.b.col, tri.c.col)
+            })
             .collect(),
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
@@ -524,7 +552,11 @@ fn sample_colors(mesh: &Mesh) -> Vec<Float4> {
         .iter()
         .map(|dot| dot.col)
         .chain(mesh.lins.iter().flat_map(|lin| [lin.a.col, lin.b.col]))
-        .chain(mesh.tris.iter().flat_map(|tri| [tri.a.col, tri.b.col, tri.c.col]))
+        .chain(
+            mesh.tris
+                .iter()
+                .flat_map(|tri| [tri.a.col, tri.b.col, tri.c.col]),
+        )
         .collect()
 }
 
@@ -538,7 +570,9 @@ pub(super) fn conform_mesh_to_target(source: Option<&Mesh>, target: &Mesh) -> Me
         }
     }
 
-    let src_center = source.map(mesh_center).unwrap_or_else(|| mesh_center(target));
+    let src_center = source
+        .map(mesh_center)
+        .unwrap_or_else(|| mesh_center(target));
     let src_positions = source.map(sample_positions).unwrap_or_default();
     let src_colors = source.map(sample_colors).unwrap_or_default();
     let src_alpha = source.map(|mesh| mesh.uniform.alpha).unwrap_or(0.0);
@@ -561,7 +595,8 @@ pub(super) fn conform_mesh_to_target(source: Option<&Mesh>, target: &Mesh) -> Me
         .dots
         .iter()
         .map(|dot| {
-            let out = copy_dot_template(dot, pick_pos(vertex_index), pick_col(vertex_index, dot.col));
+            let out =
+                copy_dot_template(dot, pick_pos(vertex_index), pick_col(vertex_index, dot.col));
             vertex_index += 1;
             out
         })
@@ -664,16 +699,13 @@ pub(super) fn rebuild_mesh_value_like_by_tag(
     ) -> Result<Value, ExecutorError> {
         match target {
             Value::Mesh(target_mesh) => {
-                let source = source_by_tag
-                    .get(&target_mesh.tag)
-                    .cloned()
-                    .or_else(|| {
-                        if source_fallback.is_empty() {
-                            None
-                        } else {
-                            Some(source_fallback[*cursor % source_fallback.len()].clone())
-                        }
-                    });
+                let source = source_by_tag.get(&target_mesh.tag).cloned().or_else(|| {
+                    if source_fallback.is_empty() {
+                        None
+                    } else {
+                        Some(source_fallback[*cursor % source_fallback.len()].clone())
+                    }
+                });
                 *cursor += 1;
                 Ok(Value::Mesh(Arc::new(conform_mesh_to_target(
                     source.as_deref(),

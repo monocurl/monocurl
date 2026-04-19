@@ -1,14 +1,13 @@
 use std::{cmp::Ordering, sync::Arc};
 
+use executor::scene_snapshot::CameraSnapshot;
 use geo::{
     mesh::{Dot, Lin, Mesh, Tri},
     simd::{Float3, Float4},
 };
 use gpui::*;
 
-use crate::{
-    services::ViewportCameraSnapshot, state::execution_state::ExecutionState, theme::ThemeSettings,
-};
+use crate::{state::execution_state::ExecutionState, theme::ThemeSettings};
 
 const DOT_RADIUS: f32 = 3.5;
 const EDGE_WIDTH: f32 = 1.0;
@@ -30,7 +29,7 @@ pub struct DebugSceneView {
 #[derive(Clone)]
 struct SceneRenderData {
     background_color: Rgba,
-    camera: ViewportCameraSnapshot,
+    camera: CameraSnapshot,
     meshes: Vec<Arc<Mesh>>,
 }
 
@@ -132,7 +131,7 @@ fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Win
     }
 }
 
-fn camera_basis(camera: &ViewportCameraSnapshot) -> CameraBasis {
+fn camera_basis(camera: &CameraSnapshot) -> CameraBasis {
     let mut forward = camera.look_at - camera.position;
     if forward.len_sq() <= 1e-6 {
         forward = Float3::Z;
