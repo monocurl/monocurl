@@ -29,6 +29,7 @@ const AUTO_SCROLL_MIN_THRESHOLD: f32 = -15.0;
 const AUTO_SCROLL_MAX_THRESHOLD: f32 = 70.0;
 const BOTTOM_SCROLL_PADDING: f32 = 400.0;
 const MAX_UNDO_GROUPS: usize = 4096;
+const LINE_COMMENT_PREFIX: &str = "# ";
 
 mod popover_element;
 mod text_element;
@@ -50,6 +51,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("enter", Enter, None),
         KeyBinding::new("tab", Tab, None),
         KeyBinding::new("shift-tab", Untab, None),
+        KeyBinding::new("secondary-/", ToggleComment, None),
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-up", SelectUp, None),
@@ -67,6 +69,16 @@ pub fn init(cx: &mut App) {
 fn point_dist(p: Point<Pixels>) -> Pixels {
     let hypot = (p.x.to_f64() * p.x.to_f64() + p.y.to_f64() * p.y.to_f64()).sqrt();
     px(hypot as f32)
+}
+
+fn adjust_cursor_after_uncomment(cursor_col: usize, comment_col: usize, removed_len: usize) -> usize {
+    if cursor_col <= comment_col {
+        cursor_col
+    } else if cursor_col < comment_col + removed_len {
+        comment_col
+    } else {
+        cursor_col - removed_len
+    }
 }
 
 struct HistoryItem {
@@ -1222,6 +1234,97 @@ impl TextEditor {
         self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
+    fn selected_row_range(&self, cx: &App) -> Range<usize> {
+        let cursor = self.cursor(cx);
+        let start_row = cursor.anchor.min(cursor.head).row;
+        let end_row = cursor.anchor.max(cursor.head).row;
+        start_row..end_row + 1
+    }
+
+    fn line_comment_prefix_len(line_text: &str) -> Option<(usize, usize)> {
+        if let Some(rest) = line_text.strip_prefix('#') {
+            let removed = if rest.starts_with(' ') { 2 } else { 1 };
+            Some((0, removed))
+        } else {
+            None
+        }
+    }
+
+    fn toggle_comment(&mut self, _: &ToggleComment, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.update(cx, |state, _| state.start_transaction());
+        self.undo_group_boundary(cx);
+
+        let row_range = self.selected_row_range(cx);
+        let should_uncomment = row_range.clone().all(|row| {
+            let state = self.state.read(cx);
+            let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
+            let line_end = state
+                .loc8_to_offset8(Location8 { row: row + 1, col: 0 })
+                .min(state.len());
+            let line_text = state.read(line_start..line_end);
+            Self::line_comment_prefix_len(&line_text).is_some()
+        });
+
+        let mut cursor = self.cursor(cx);
+        for row in row_range.rev() {
+            let state = self.state.read(cx);
+            let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
+            let line_end = state
+                .loc8_to_offset8(Location8 { row: row + 1, col: 0 })
+                .min(state.len());
+            let line_text = state.read(line_start..line_end);
+
+            if should_uncomment {
+                let Some((comment_col, removed_len)) = Self::line_comment_prefix_len(&line_text)
+                else {
+                    continue;
+                };
+
+                self.replace(
+                    line_start + comment_col..line_start + comment_col + removed_len,
+                    "",
+                    window,
+                    cx,
+                );
+
+                if row == cursor.anchor.row {
+                    cursor.anchor.col = adjust_cursor_after_uncomment(
+                        cursor.anchor.col,
+                        comment_col,
+                        removed_len,
+                    );
+                }
+                if row == cursor.head.row {
+                    cursor.head.col = adjust_cursor_after_uncomment(
+                        cursor.head.col,
+                        comment_col,
+                        removed_len,
+                    );
+                }
+            } else {
+                let comment_col = 0;
+                self.replace(
+                    line_start + comment_col..line_start + comment_col,
+                    LINE_COMMENT_PREFIX,
+                    window,
+                    cx,
+                );
+
+                if row == cursor.anchor.row && cursor.anchor.col >= comment_col {
+                    cursor.anchor.col += LINE_COMMENT_PREFIX.len();
+                }
+                if row == cursor.head.row && cursor.head.col >= comment_col {
+                    cursor.head.col += LINE_COMMENT_PREFIX.len();
+                }
+            }
+        }
+
+        self.set_cursor(cursor, cx);
+        self.reset_cursor_blink(cx);
+        self.undo_group_boundary(cx);
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
+    }
+
     fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
         self.state.update(cx, |state, _| state.start_transaction());
         if self.do_autocomplete_action(cx) {
@@ -1670,6 +1773,7 @@ impl Render for TextEditor {
             .on_action(cx.listener(Self::enter))
             .on_action(cx.listener(Self::tab))
             .on_action(cx.listener(Self::untab))
+            .on_action(cx.listener(Self::toggle_comment))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::left))
             .on_action(cx.listener(Self::right))

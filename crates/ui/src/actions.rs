@@ -21,6 +21,7 @@ actions!(
         Enter,
         Tab,
         Untab,
+        ToggleComment,
         Up,
         Left,
         Right,

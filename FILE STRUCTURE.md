@@ -66,7 +66,7 @@
   - src/components/split_pane.rs: gpui element that implements vertical and horizontal split pane
   - src/editor: code related to the text editor. 
     - editor_view.rs: wrapper around `TextEditor`; bootstraps editor content from the internal file, handles periodic internal autosave, writes user saves, and suppresses the pending internal flush when a tab explicitly discards unsaved changes (including pathless scratch tabs that are about to be forgotten)
-    - text_editor/mod.rs: contains most of the code related to the actual text editor, which include input handling, trait implementation, action handling, delegating to line reshpaing. Rendering is delegated to other files though.
+    - text_editor/mod.rs: contains most of the code related to the actual text editor, which include input handling, trait implementation, action handling, delegating to line reshpaing, and editor-side line transforms such as indent/outdent and command-/ comment toggling across selected rows. Rendering is delegated to other files though.
     - text_editor/popover_element.rs: this is the element that shows editor popovers for diagnostics, autocomplete, and parameter hints; diagnostic popovers also include a clipboard copy action
     - text_editor/text_element: this contains the rendering logic for the actual text editor (including scroll bar and everything on the base layer).
     - wrapped_line.rs: The text editor is implemented to always soft wrap, so this contains the code for rendering a single logical line onto the screen as possibly many lines, with styling. It also allows for e.g. querying the on screen position given a character location.
