@@ -343,12 +343,12 @@ impl Executor {
     ) -> Result<Value, ExecutorError> {
         match callable.clone().elide_lvalue() {
             Value::Lambda(lambda) => {
-                let args = prepare_eager_call_args(args, &lambda);
+                let args = prepare_eager_call_args(args, &lambda)?;
                 self.eagerly_invoke_lambda(&lambda, &args, Some(parent_stack_idx))
                     .await
             }
             Value::Operator(operator) => {
-                let args = prepare_eager_call_args(args, &operator.0);
+                let args = prepare_eager_call_args(args, &operator.0)?;
                 self.eagerly_invoke_lambda(&operator.0, &args, Some(parent_stack_idx))
                     .await
             }

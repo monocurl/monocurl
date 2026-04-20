@@ -4682,6 +4682,7 @@ dependencies = [
  "executor",
  "geo",
  "inventory",
+ "libtess2",
  "smallvec",
  "stdlib-macros",
 ]

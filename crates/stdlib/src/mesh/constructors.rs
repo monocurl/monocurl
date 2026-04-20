@@ -1,42 +1,27 @@
 use executor::{error::ExecutorError, executor::Executor, value::Value};
-use geo::{mesh::Lin, simd::Float3};
+use geo::simd::Float3;
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
 
 fn closed_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
     let mut out = Vec::with_capacity(points.len());
-    for i in 0..points.len() {
-        let mut lin = default_lin(points[i], points[(i + 1) % points.len()], normal);
-        lin.prev = ((i + points.len() - 1) % points.len()) as i32;
-        lin.next = ((i + 1) % points.len()) as i32;
-        out.push(lin);
-    }
+    push_closed_polyline(&mut out, points, normal);
     out
 }
 
 fn open_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
-    points
-        .windows(2)
-        .enumerate()
-        .map(|(i, w)| {
-            let mut lin = default_lin(w[0], w[1], normal);
-            lin.prev = if i == 0 { -1 } else { i as i32 - 1 };
-            lin.next = if i + 1 == points.len() - 1 {
-                -1
-            } else {
-                i as i32 + 1
-            };
-            lin
-        })
-        .collect()
+    let mut out = Vec::with_capacity(points.len().saturating_sub(1));
+    push_open_polyline(&mut out, points, normal);
+    out
 }
 
 fn mesh_ref(idx: usize) -> i32 {
-    -2 - idx as i32
+    super::helpers::mesh_ref(idx)
 }
 
-fn fan_tris(points: &[Float3], boundary_lins: &mut [Lin]) -> Vec<geo::mesh::Tri> {
+#[cfg(test)]
+fn fan_tris(points: &[Float3], boundary_lins: &mut [geo::mesh::Lin]) -> Vec<geo::mesh::Tri> {
     let mut out = Vec::new();
     if points.len() >= 3 {
         for i in 1..points.len() - 1 {
@@ -132,8 +117,7 @@ pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             center + x * (radius * theta.cos()) + y * (radius * theta.sin())
         })
         .collect();
-    let mut lins = closed_polyline(&points, normal);
-    let tris = fan_tris(&points, &mut lins);
+    let (lins, tris) = tessellate_planar_loops(&[points], normal)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -157,14 +141,9 @@ pub async fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Val
             center + x * (outer * theta.cos()) + y * (outer * theta.sin())
         })
         .collect();
-    let mut tris = Vec::with_capacity(samples * 2);
-    for i in 0..samples {
-        let next = (i + 1) % samples;
-        tris.push(default_tri(outer_pts[i], inner_pts[i], inner_pts[next]));
-        tris.push(default_tri(outer_pts[i], inner_pts[next], outer_pts[next]));
-    }
-    let mut lins = closed_polyline(&outer_pts, normal);
-    lins.extend(closed_polyline(&inner_pts, normal));
+    let mut inner_pts = inner_pts;
+    inner_pts.reverse();
+    let (lins, tris) = tessellate_planar_loops(&[outer_pts, inner_pts], normal)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -181,8 +160,7 @@ pub async fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         center + x * half + y * half,
         center - x * half + y * half,
     ];
-    let mut lins = closed_polyline(&corners, normal);
-    let tris = fan_tris(&corners, &mut lins);
+    let (lins, tris) = tessellate_planar_loops(&[corners], normal)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -199,8 +177,7 @@ pub async fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         center + x * (width / 2.0) + y * (height / 2.0),
         center - x * (width / 2.0) + y * (height / 2.0),
     ];
-    let mut lins = closed_polyline(&corners, normal);
-    let tris = fan_tris(&corners, &mut lins);
+    let (lins, tris) = tessellate_planar_loops(&[corners], normal)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -220,8 +197,7 @@ pub async fn mk_regular_polygon(
             center + x * (radius * theta.cos()) + y * (radius * theta.sin())
         })
         .collect();
-    let mut lins = closed_polyline(&points, normal);
-    let tris = fan_tris(&points, &mut lins);
+    let (lins, tris) = tessellate_planar_loops(&[points], normal)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -229,8 +205,7 @@ pub async fn mk_regular_polygon(
 pub async fn mk_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let vertices = read_float3_list(executor, stack_idx, -2, "vertices")?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
-    let mut lins = closed_polyline(&vertices, normal);
-    let tris = fan_tris(&vertices, &mut lins);
+    let (lins, tris) = tessellate_planar_loops(&[vertices], normal)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -346,8 +321,7 @@ pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Val
             end_center + axis * (end_radius * theta.cos()) + side * (end_radius * theta.sin()),
         );
     }
-    let mut lins = closed_polyline(&points, normal);
-    let tris = fan_tris(&points, &mut lins);
+    let (lins, tris) = tessellate_planar_loops(&[points], normal)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -449,18 +423,20 @@ pub async fn mk_rect_prism(
         center + Float3::new(-hx, hy, hz),
     ];
     let faces = [
-        (0, 1, 2, 3),
-        (4, 5, 6, 7),
-        (0, 1, 5, 4),
-        (1, 2, 6, 5),
-        (2, 3, 7, 6),
-        (3, 0, 4, 7),
+        [0, 1, 2],
+        [0, 2, 3],
+        [4, 5, 6],
+        [4, 6, 7],
+        [0, 1, 5],
+        [0, 5, 4],
+        [1, 2, 6],
+        [1, 6, 5],
+        [2, 3, 7],
+        [2, 7, 6],
+        [3, 0, 4],
+        [3, 4, 7],
     ];
-    let mut tris = Vec::new();
-    for (a, b, c, d) in faces {
-        tris.push(default_tri(pts[a], pts[b], pts[c]));
-        tris.push(default_tri(pts[a], pts[c], pts[d]));
-    }
+    let tris = build_indexed_tris(&pts, &faces);
     Ok(mesh_from_parts(vec![], vec![], tris))
 }
 
@@ -496,15 +472,24 @@ pub async fn mk_cylinder(
         })
         .collect();
 
-    let mut tris = Vec::with_capacity(samples * 4);
+    let mut vertices = Vec::with_capacity(samples * 2 + 2);
+    vertices.extend(bottom.iter().copied());
+    vertices.extend(top.iter().copied());
+    let top_center_idx = vertices.len();
+    vertices.push(top_center);
+    let bottom_center_idx = vertices.len();
+    vertices.push(bottom_center);
+
+    let mut faces = Vec::with_capacity(samples * 4);
     for i in 0..samples {
         let next = (i + 1) % samples;
-        tris.push(default_tri(bottom[i], bottom[next], top[next]));
-        tris.push(default_tri(bottom[i], top[next], top[i]));
-        tris.push(default_tri(top_center, top[i], top[next]));
-        tris.push(default_tri(bottom_center, bottom[next], bottom[i]));
+        faces.push([i, next, samples + next]);
+        faces.push([i, samples + next, samples + i]);
+        faces.push([top_center_idx, samples + i, samples + next]);
+        faces.push([bottom_center_idx, next, i]);
     }
 
+    let tris = build_indexed_tris(&vertices, &faces);
     Ok(mesh_from_parts(vec![], vec![], tris))
 }
 
@@ -523,13 +508,19 @@ pub async fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         })
         .collect();
 
-    let mut tris = Vec::with_capacity(samples * 2);
+    let mut vertices = ring.clone();
+    let apex_idx = vertices.len();
+    vertices.push(apex);
+    let base_idx = vertices.len();
+    vertices.push(base);
+
+    let mut faces = Vec::with_capacity(samples * 2);
     for i in 0..samples {
         let next = (i + 1) % samples;
-        tris.push(default_tri(ring[i], ring[next], apex));
-        tris.push(default_tri(base, ring[next], ring[i]));
+        faces.push([i, next, apex_idx]);
+        faces.push([base_idx, next, i]);
     }
-    Ok(mesh_from_parts(vec![], vec![], tris))
+    Ok(mesh_from_parts(vec![], vec![], build_indexed_tris(&vertices, &faces)))
 }
 
 #[stdlib_func]
@@ -541,7 +532,7 @@ pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let major_samples = read_int(executor, stack_idx, -2, "major_samples")?.max(3) as usize;
     let minor_samples = read_int(executor, stack_idx, -1, "minor_samples")?.max(3) as usize;
     let (x, y, n) = polygon_basis(normal);
-    let mut tris = Vec::with_capacity(major_samples * minor_samples * 2);
+    let mut vertices = Vec::with_capacity(major_samples * minor_samples);
 
     let point = |u: usize, v: usize| {
         let theta = std::f32::consts::TAU * u as f32 / major_samples as f32;
@@ -552,19 +543,23 @@ pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value
     };
 
     for u in 0..major_samples {
-        let un = (u + 1) % major_samples;
         for v in 0..minor_samples {
-            let vn = (v + 1) % minor_samples;
-            let p00 = point(u, v);
-            let p01 = point(u, vn);
-            let p10 = point(un, v);
-            let p11 = point(un, vn);
-            tris.push(default_tri(p00, p10, p11));
-            tris.push(default_tri(p00, p11, p01));
+            vertices.push(point(u, v));
         }
     }
 
-    Ok(mesh_from_parts(vec![], vec![], tris))
+    let index = |u: usize, v: usize| u * minor_samples + v;
+    let mut faces = Vec::with_capacity(major_samples * minor_samples * 2);
+    for u in 0..major_samples {
+        let un = (u + 1) % major_samples;
+        for v in 0..minor_samples {
+            let vn = (v + 1) % minor_samples;
+            faces.push([index(u, v), index(un, v), index(un, vn)]);
+            faces.push([index(u, v), index(un, vn), index(u, vn)]);
+        }
+    }
+
+    Ok(mesh_from_parts(vec![], vec![], build_indexed_tris(&vertices, &faces)))
 }
 
 #[stdlib_func]
@@ -582,8 +577,7 @@ pub async fn mk_plane(executor: &mut Executor, stack_idx: usize) -> Result<Value
         center + x * (width / 2.0) + y * (height / 2.0),
         center - x * (width / 2.0) + y * (height / 2.0),
     ];
-    let mut lins = closed_polyline(&corners, n);
-    let tris = fan_tris(&corners, &mut lins);
+    let (lins, tris) = tessellate_planar_loops(&[corners], n)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -641,19 +635,21 @@ pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let head_len = (len * 0.25).min(0.35);
     let head_width = head_len * 0.5;
     let base = end - tangent * head_len;
-    Ok(mesh_from_parts(
-        vec![],
-        vec![
-            default_lin(tail, base, normal),
-            default_lin(base + side * head_width, end, normal),
-            default_lin(end, base - side * head_width, normal),
-        ],
-        vec![default_tri(
-            base + side * head_width,
-            end,
-            base - side * head_width,
-        )],
-    ))
+    let mut lins = vec![
+        default_lin(tail, base, normal),
+        default_lin(base + side * head_width, end, normal),
+        default_lin(end, base - side * head_width, normal),
+    ];
+    let mut tri = default_tri(
+        base + side * head_width,
+        end,
+        base - side * head_width,
+    );
+    tri.ab = mesh_ref(1);
+    tri.bc = mesh_ref(2);
+    lins[1].inv = mesh_ref(0);
+    lins[2].inv = mesh_ref(0);
+    Ok(mesh_from_parts(vec![], lins, vec![tri]))
 }
 
 #[stdlib_func]
@@ -685,8 +681,7 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
         center + x * (width / 2.0) + y * (height / 2.0),
         center - x * (width / 2.0) + y * (height / 2.0),
     ];
-    let mut lins = closed_polyline(&corners, normal);
-    let tris = fan_tris(&corners, &mut lins);
+    let (lins, tris) = tessellate_planar_loops(&[corners.to_vec()], normal)?;
     let mut mesh = match mesh_from_parts(vec![], lins, tris) {
         Value::Mesh(mesh) => (*mesh).clone(),
         _ => unreachable!(),
@@ -1133,7 +1128,7 @@ pub async fn mk_polar_axis(
                 center + x * (r * theta.cos()) + y * (r * theta.sin())
             })
             .collect();
-        lins.extend(closed_polyline(&points, normal));
+        push_closed_polyline(&mut lins, &points, normal);
         r += radius_step;
     }
 
@@ -1276,18 +1271,19 @@ pub async fn mk_explicit2d(
             *point = Float3::new(x, y, z);
         }
     }
-    let mut tris = Vec::with_capacity(nx * ny * 2);
+    let index = |ix: usize, iy: usize| ix * (ny + 1) + iy;
+    let vertices: Vec<_> = grid
+        .iter()
+        .flat_map(|col| col.iter().copied())
+        .collect();
+    let mut faces = Vec::with_capacity(nx * ny * 2);
     for ix in 0..nx {
         for iy in 0..ny {
-            let p00 = grid[ix][iy];
-            let p10 = grid[ix + 1][iy];
-            let p11 = grid[ix + 1][iy + 1];
-            let p01 = grid[ix][iy + 1];
-            tris.push(default_tri(p00, p10, p11));
-            tris.push(default_tri(p00, p11, p01));
+            faces.push([index(ix, iy), index(ix + 1, iy), index(ix + 1, iy + 1)]);
+            faces.push([index(ix, iy), index(ix + 1, iy + 1), index(ix, iy + 1)]);
         }
     }
-    Ok(mesh_from_parts(vec![], vec![], tris))
+    Ok(mesh_from_parts(vec![], vec![], build_indexed_tris(&vertices, &faces)))
 }
 
 #[stdlib_func]
@@ -1426,22 +1422,33 @@ pub async fn mk_explicit_diff(
         lower.push(Float3::new(x as f32, yg, 0.0));
     }
 
-    let mut tris = Vec::with_capacity((samples - 1) * 2);
+    let mut vertices = Vec::with_capacity(samples * 2);
+    vertices.extend(lower.iter().copied());
+    vertices.extend(upper.iter().copied());
+    let upper_idx = |i: usize| samples + i;
+
+    let mut faces = Vec::with_capacity((samples - 1) * 2);
     for i in 0..samples - 1 {
-        let mut a = default_tri(lower[i], upper[i], upper[i + 1]);
+        faces.push([i, upper_idx(i), upper_idx(i + 1)]);
+        faces.push([i, upper_idx(i + 1), i + 1]);
+    }
+    let mut tris = build_indexed_tris(&vertices, &faces);
+    for i in 0..samples - 1 {
+        let mut a = tris[2 * i];
         a.a.col = fill0;
         a.b.col = fill0;
         a.c.col = fill0;
-        let mut b = default_tri(lower[i], upper[i + 1], lower[i + 1]);
+        tris[2 * i] = a;
+
+        let mut b = tris[2 * i + 1];
         b.a.col = fill1;
         b.b.col = fill1;
         b.c.col = fill1;
-        tris.push(a);
-        tris.push(b);
+        tris[2 * i + 1] = b;
     }
 
     let mut lins = open_polyline(&upper, Float3::Z);
-    lins.extend(open_polyline(&lower, Float3::Z));
+    push_open_polyline(&mut lins, &lower, Float3::Z);
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 

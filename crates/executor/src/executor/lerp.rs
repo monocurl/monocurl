@@ -125,7 +125,7 @@ impl Executor {
                 Value::Lambda(rc) => rc,
                 other => return Err(ExecutorError::type_error("lambda", other.type_name())),
             };
-            let full_args = prepare_eager_call_args(lerped_args.iter().cloned(), &lambda);
+            let full_args = prepare_eager_call_args(lerped_args.iter().cloned(), &lambda)?;
             let trace_parent_idx = Some(self.state.last_stack_idx);
             let result = self
                 .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
@@ -212,7 +212,7 @@ impl Executor {
             let full_args = prepare_eager_call_args(
                 std::iter::once(lerped_operand.clone()).chain(lerped_args.iter().cloned()),
                 &operator.0,
-            );
+            )?;
             let trace_parent_idx = Some(self.state.last_stack_idx);
 
             let raw = self
@@ -274,7 +274,7 @@ impl Executor {
                 std::iter::once(mid)
                     .chain(inv.body.arguments.iter().map(|b| b.clone().elide_lvalue())),
                 &operator.0,
-            );
+            )?;
             let trace_parent_idx = Some(self.state.last_stack_idx);
 
             let raw = self

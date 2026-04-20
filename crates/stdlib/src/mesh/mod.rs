@@ -1,4 +1,4 @@
 mod constructors;
-mod helpers;
+pub(crate) mod helpers;
 mod ops;
 mod queries;

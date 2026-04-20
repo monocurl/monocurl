@@ -6,36 +6,6 @@ use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
 
-fn mesh_ref(idx: usize) -> i32 {
-    -2 - idx as i32
-}
-
-fn authored_fan_tris(points: &[Float3], boundary_lins: &mut [geo::mesh::Lin]) -> Vec<geo::mesh::Tri> {
-    let mut out = Vec::new();
-    if points.len() >= 3 {
-        for i in 1..points.len() - 1 {
-            let mut tri = default_tri(points[0], points[i], points[i + 1]);
-            tri.ab = if i == 1 { mesh_ref(0) } else { (i - 2) as i32 };
-            tri.bc = mesh_ref(i);
-            tri.ca = if i + 1 == points.len() - 1 {
-                mesh_ref(points.len() - 1)
-            } else {
-                i as i32
-            };
-            out.push(tri);
-        }
-
-        if !boundary_lins.is_empty() {
-            boundary_lins[0].inv = mesh_ref(0);
-            for i in 1..points.len() - 1 {
-                boundary_lins[i].inv = mesh_ref(i - 1);
-            }
-            boundary_lins[points.len() - 1].inv = mesh_ref(points.len() - 3);
-        }
-    }
-    out
-}
-
 fn read_scale_factor(
     executor: &Executor,
     stack_idx: usize,
@@ -533,37 +503,47 @@ pub async fn op_tag_map(executor: &mut Executor, stack_idx: usize) -> Result<Val
 
 #[stdlib_func]
 pub async fn op_uprank(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    fn ordered_loop_points(mesh: &Mesh) -> Option<Vec<Float3>> {
-        if mesh.lins.is_empty() {
+    fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
+        if mesh.lins.is_empty() || mesh.lins.iter().any(|lin| lin.prev < 0 || lin.next < 0) {
             return None;
         }
-        let mut points = Vec::with_capacity(mesh.lins.len() + 1);
-        points.push(mesh.lins[0].a.pos);
-        points.push(mesh.lins[0].b.pos);
-        for lin in mesh.lins.iter().skip(1) {
-            if lin.a.pos == *points.last()? {
-                points.push(lin.b.pos);
-            } else if lin.b.pos == *points.last()? {
-                points.push(lin.a.pos);
-            } else {
-                return None;
+
+        let mut visited = vec![false; mesh.lins.len()];
+        let mut contours = Vec::new();
+        for start in 0..mesh.lins.len() {
+            if visited[start] {
+                continue;
+            }
+
+            let mut contour = Vec::new();
+            let mut cursor = start;
+            loop {
+                if visited[cursor] {
+                    return None;
+                }
+                visited[cursor] = true;
+                contour.push(mesh.lins[cursor].a.pos);
+
+                let next = mesh.lins[cursor].next as usize;
+                if next >= mesh.lins.len() || mesh.lins[next].prev != cursor as i32 {
+                    return None;
+                }
+                cursor = next;
+                if cursor == start {
+                    break;
+                }
+            }
+
+            if contour.len() >= 3 {
+                contours.push(contour);
             }
         }
-        if points.first() == points.last() {
-            points.pop();
-        }
-        Some(points)
-    }
 
-    fn is_closed_line_chain(mesh: &Mesh) -> bool {
-        !mesh.lins.is_empty()
-            && mesh
-                .lins
-                .iter()
-                .all(|lin| lin.prev >= 0 && lin.next >= 0)
+        Some(contours)
     }
 
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -1, "target").await?;
+    let mut tessellation_error = None;
     tree.for_each_mut(&mut |mesh| {
         if !mesh.tris.is_empty() {
             return;
@@ -575,22 +555,23 @@ pub async fn op_uprank(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                 .map(|pair| default_lin(pair[0].pos, pair[1].pos, pair[0].norm))
                 .collect();
         }
-        if is_closed_line_chain(mesh) {
-            if let Some(points) = ordered_loop_points(mesh) {
-                if points.len() >= 3 {
-                    for lin in &mut mesh.lins {
-                        lin.inv = -1;
-                    }
-                    mesh.tris = authored_fan_tris(&points, &mut mesh.lins);
+        if let Some(contours) = closed_line_contours(mesh) {
+            match tessellate_planar_loops(
+                &contours,
+                mesh.lins.first().map(|lin| lin.norm).unwrap_or(Float3::Z),
+            ) {
+                Ok((lins, tris)) => {
+                    mesh.lins = lins;
+                    mesh.tris = tris;
                 }
-            }
-        } else if let Some(points) = ordered_loop_points(mesh) {
-            if points.len() >= 3 {
-                mesh.tris.clear();
+                Err(err) => tessellation_error = Some(err),
             }
         }
         debug_assert!(mesh.has_consistent_topology());
     });
+    if let Some(err) = tessellation_error {
+        return Err(err);
+    }
     Ok(tree.into_value())
 }
 
@@ -602,29 +583,44 @@ pub async fn op_downrank(
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -1, "target").await?;
     tree.for_each_mut(&mut |mesh| {
         if !mesh.tris.is_empty() {
-            let mut seen = std::collections::HashSet::new();
-            let mut lins = Vec::new();
             if !mesh.lins.is_empty() {
-                lins.extend(mesh.lins.iter().map(|lin| {
-                    let mut out = *lin;
-                    out.inv = -1;
-                    out
-                }));
-            }
-            for tri in &mesh.tris {
-                for (a, b) in [
-                    (tri.a.pos, tri.b.pos),
-                    (tri.b.pos, tri.c.pos),
-                    (tri.c.pos, tri.a.pos),
-                ] {
-                    let key = canonical_edge_key(a, b);
-                    if seen.insert(key) {
-                        lins.push(default_lin(a, b, Float3::Z));
+                mesh.lins = mesh
+                    .lins
+                    .iter()
+                    .map(|lin| {
+                        let mut out = *lin;
+                        out.inv = -1;
+                        out
+                    })
+                    .collect();
+            } else {
+                let mut seen = std::collections::HashSet::new();
+                let mut lins = Vec::new();
+                for tri in &mesh.tris {
+                    for (edge_ref, a, b) in [
+                        (tri.ab, tri.a.pos, tri.b.pos),
+                        (tri.bc, tri.b.pos, tri.c.pos),
+                        (tri.ca, tri.c.pos, tri.a.pos),
+                    ] {
+                        if edge_ref >= 0 {
+                            continue;
+                        }
+                        let key = canonical_edge_key(a, b);
+                        if seen.insert(key) {
+                            lins.push(default_lin(a, b, Float3::Z));
+                        }
                     }
                 }
+                mesh.lins = lins
+                    .into_iter()
+                    .map(|lin| {
+                        let mut out = lin;
+                        out.inv = -1;
+                        out
+                    })
+                    .collect();
             }
             mesh.tris.clear();
-            mesh.lins = lins;
         } else if !mesh.lins.is_empty() {
             mesh.dots = mesh
                 .lins

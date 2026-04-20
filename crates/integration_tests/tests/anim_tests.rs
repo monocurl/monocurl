@@ -1009,6 +1009,81 @@ fn test_trans_anim_interpolates_meshes_without_generic_mesh_lerp() {
 }
 
 #[test]
+fn test_trans_square_to_circle_midpoint_keeps_boundary_off_origin() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = Square([0, 0, 0], 2)
+                x = Circle([0, 0, 0], 1)
+                play Trans()
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        0.5,
+        &[anim_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+
+    let leader = r.mesh_leaders().into_iter().next().expect("expected mesh leader");
+    let Value::Mesh(mesh) = &leader.current else {
+        panic!("expected current mesh value");
+    };
+    let min_radius_sq = mesh
+        .lins
+        .iter()
+        .flat_map(|lin| [lin.a.pos, lin.b.pos])
+        .map(|point| point.x * point.x + point.y * point.y + point.z * point.z)
+        .fold(f32::INFINITY, f32::min);
+    assert!(
+        min_radius_sq > 0.01,
+        "boundary collapsed too close to the origin: {}",
+        min_radius_sq.sqrt()
+    );
+}
+
+#[test]
+fn test_trans_filled_square_to_clear_circle_fades_fill() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = fill{WHITE} Square([0, 0, 0], 2)
+                x = stroke{WHITE} fill{CLEAR} Circle([0, 0, 0], 1)
+                play Trans()
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        0.5,
+        &[anim_mcl, color_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+
+    let leader = r.mesh_leaders().into_iter().next().expect("expected mesh leader");
+    let Value::Mesh(mesh) = &leader.current else {
+        panic!("expected current mesh value");
+    };
+    let alpha = mesh
+        .tris
+        .first()
+        .expect("expected interpolated fill triangles")
+        .a
+        .col
+        .w;
+    assert!(
+        alpha > 0.05 && alpha < 0.95,
+        "expected mid-fade fill alpha, got {alpha}"
+    );
+}
+
+#[test]
 fn test_bend_anim_interpolates_polyline_meshes() {
     let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
     let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));

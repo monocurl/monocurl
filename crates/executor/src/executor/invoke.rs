@@ -395,6 +395,11 @@ impl Executor {
 
         let to_pop = (-stack_delta) as usize;
         let stack = self.state.stack_mut(stack_idx);
+        if to_pop > stack.stack_len() {
+            return ExecSingle::Error(ExecutorError::Other(
+                "internal error: return stack underflow".into(),
+            ));
+        }
         stack.pop_n(to_pop);
         stack.push(ret_val);
 
@@ -505,7 +510,7 @@ impl Executor {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
         Box::pin(async move {
-            let full_args = prepare_eager_call_args(args, lambda);
+            let full_args = prepare_eager_call_args(args, lambda)?;
             self.eagerly_invoke_lambda(lambda, &full_args, None).await
         })
     }
@@ -643,7 +648,7 @@ impl Executor {
                         };
                         evaled.push(resolved);
                     }
-                    let full_args = prepare_eager_call_args(evaled, &lambda);
+                    let full_args = prepare_eager_call_args(evaled, &lambda)?;
                     let trace_parent_idx = Some(self.state.last_stack_idx);
                     let result = self
                         .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
@@ -685,7 +690,7 @@ impl Executor {
                         };
                         evaled.push(resolved);
                     }
-                    let full_args = prepare_eager_call_args(evaled, &operator_inner.0);
+                    let full_args = prepare_eager_call_args(evaled, &operator_inner.0)?;
                     let trace_parent_idx = Some(self.state.last_stack_idx);
                     let raw = self
                         .eagerly_invoke_lambda(&operator_inner.0, &full_args, trace_parent_idx)
@@ -719,7 +724,7 @@ pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value>
 pub(crate) fn prepare_eager_call_args(
     args: impl IntoIterator<Item = Value>,
     lambda: &Lambda,
-) -> SmallVec<[Value; 4]> {
+) -> Result<SmallVec<[Value; 4]>, ExecutorError> {
     let mut prepared = SmallVec::<[Value; 4]>::new();
     prepared.extend(args.into_iter().map(|arg| {
         if arg.is_lvalue() {
@@ -728,11 +733,27 @@ pub(crate) fn prepare_eager_call_args(
             Value::Lvalue(VRc::new(arg))
         }
     }));
+    let minimum = lambda.required_args as usize;
+    let maximum = minimum + lambda.defaults.len();
+    if prepared.len() < minimum {
+        return Err(ExecutorError::TooFewArguments {
+            minimum,
+            got: prepared.len(),
+            operator: false,
+        });
+    }
+    if prepared.len() > maximum {
+        return Err(ExecutorError::TooManyArguments {
+            maximum,
+            got: prepared.len(),
+            operator: false,
+        });
+    }
     let total = lambda.required_args as usize + lambda.defaults.len();
     if prepared.len() < total {
         let missing = total - prepared.len();
         let default_start = lambda.defaults.len().saturating_sub(missing);
         prepared.extend(lambda.defaults[default_start..].iter().cloned());
     }
-    prepared
+    Ok(prepared)
 }

@@ -1903,9 +1903,9 @@ impl Compiler {
         }
     }
 
-    // compile a block body: init `_ = []`, compile stmts, implicit `return _`
+    // compile a block body: init `_ = nil`, compile stmts, implicit `return _`
     fn compile_block_body(&mut self, stmts: &[SpanTagged<Statement>], span: &Span8) {
-        self.emit_push(Instruction::PushEmptyVector, span.clone());
+        self.emit_push(Instruction::PushNil, span.clone());
         self.emit(
             Instruction::ConvertVar {
                 allow_stateful: false,

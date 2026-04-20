@@ -9,6 +9,13 @@ use crate::{
 
 use super::{ExecSingle, Executor};
 
+fn is_empty_mesh_value(value: &Value) -> bool {
+    matches!(
+        value.clone().elide_lvalue_leader_rec(),
+        Value::List(list) if list.is_empty()
+    )
+}
+
 impl Executor {
     fn exec_assign_dfs(&mut self, lhs: Value, rhs: Value, stack_idx: usize) -> ExecSingle {
         if let Value::List(llhs) = &lhs {
@@ -52,6 +59,20 @@ impl Executor {
                     ));
                 }
                 let stack_id = self.state.stack(stack_idx).stack_id;
+                if leader.kind == LeaderKind::Mesh {
+                    let follower = with_heap(|h| h.get(leader.follower_rc.key()).clone());
+                    if is_empty_mesh_value(&follower) {
+                        let current = with_heap(|h| h.get(leader.leader_rc.key()).clone());
+                        if !is_empty_mesh_value(&current) {
+                            heap_replace(leader.follower_rc.key(), current.to_follower_stateful());
+                            with_heap_mut(|h| {
+                                if let Value::Leader(l) = &mut *h.get_mut(key) {
+                                    l.follower_version += 1;
+                                }
+                            });
+                        }
+                    }
+                }
                 heap_replace(leader.leader_rc.key(), rhs);
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(key) {

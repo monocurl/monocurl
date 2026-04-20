@@ -98,9 +98,9 @@ pub async fn initial_background(
         [(
             "color",
             value_list([
-                Value::Integer(0),
-                Value::Integer(0),
-                Value::Integer(0),
+                Value::Integer(1),
+                Value::Integer(1),
+                Value::Integer(1),
                 Value::Integer(1),
             ]),
         )],

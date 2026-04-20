@@ -86,14 +86,14 @@ let Write = |meshes = [], time = 1, rate = smooth| {
 # interpolate by matching points between start and end meshes.
 let Trans = |meshes = [], time = 1, rate = smooth, path_arc = 0| {
     let embed = |start, dst| __monocurl__native__ trans_embed(start, dst)
-    let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, t, path_arc)
+    let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
     return PrimitiveAnim(time, meshes, rate, embed, lerp)
 }
 
 # like Trans, but pairs sub-meshes by their `tag` rather than by order.
 let TagTrans = |meshes = [], time = 1, rate = smooth, path_arc = 0| {
     let embed = |start, dst| __monocurl__native__ tag_trans_embed(start, dst)
-    let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, t, path_arc)
+    let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
     return PrimitiveAnim(time, meshes, rate, embed, lerp)
 }
 

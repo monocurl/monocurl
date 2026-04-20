@@ -1,4 +1,11 @@
-use std::{collections::HashSet, future::Future, pin::Pin, rc::Rc, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    ops::Range,
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+};
 
 use executor::{
     error::ExecutorError,
@@ -10,6 +17,7 @@ use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
     simd::{Float2, Float3, Float4},
 };
+use libtess2::{TessellationOptions, WindingRule};
 
 #[derive(Clone)]
 pub(super) enum MeshTree {
@@ -477,6 +485,181 @@ pub(super) fn default_tri(a: Float3, b: Float3, c: Float3) -> Tri {
     }
 }
 
+pub(super) fn mesh_ref(idx: usize) -> i32 {
+    -2 - idx as i32
+}
+
+pub(super) fn shift_line_refs(lines: &mut [Lin], delta: usize) {
+    let delta = delta as i32;
+    for line in lines {
+        for value in [
+            &mut line.prev,
+            &mut line.next,
+            &mut line.inv,
+            &mut line.anti,
+        ] {
+            if *value >= 0 {
+                *value += delta;
+            }
+        }
+    }
+}
+
+pub(super) fn push_open_polyline(
+    out: &mut Vec<Lin>,
+    points: &[Float3],
+    normal: Float3,
+) -> Range<usize> {
+    let start = out.len();
+    if points.len() < 2 {
+        return start..start;
+    }
+
+    let mut lines: Vec<_> = points
+        .windows(2)
+        .enumerate()
+        .map(|(i, w)| {
+            let mut lin = default_lin(w[0], w[1], normal);
+            lin.prev = if i == 0 { -1 } else { i as i32 - 1 };
+            lin.next = if i + 1 == points.len() - 1 {
+                -1
+            } else {
+                i as i32 + 1
+            };
+            lin
+        })
+        .collect();
+    shift_line_refs(&mut lines, start);
+    out.extend(lines);
+    start..out.len()
+}
+
+pub(crate) fn push_closed_polyline(
+    out: &mut Vec<Lin>,
+    points: &[Float3],
+    normal: Float3,
+) -> Range<usize> {
+    let start = out.len();
+    if points.len() < 2 {
+        return start..start;
+    }
+
+    let mut lines = Vec::with_capacity(points.len());
+    for i in 0..points.len() {
+        let mut lin = default_lin(points[i], points[(i + 1) % points.len()], normal);
+        lin.prev = ((i + points.len() - 1) % points.len()) as i32;
+        lin.next = ((i + 1) % points.len()) as i32;
+        lines.push(lin);
+    }
+    shift_line_refs(&mut lines, start);
+    out.extend(lines);
+    start..out.len()
+}
+
+pub(super) fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]]) -> Vec<Tri> {
+    let mut tris: Vec<_> = faces
+        .iter()
+        .map(|face| default_tri(vertices[face[0]], vertices[face[1]], vertices[face[2]]))
+        .collect();
+
+    let mut edge_map = HashMap::<(usize, usize), (usize, usize)>::new();
+    for (tri_idx, face) in faces.iter().enumerate() {
+        for (edge_idx, (a, b)) in [
+            (face[0], face[1]),
+            (face[1], face[2]),
+            (face[2], face[0]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let key = canonical_index_edge_key(a, b);
+            if let Some((other_tri, other_edge)) = edge_map.insert(key, (tri_idx, edge_idx)) {
+                set_tri_edge(&mut tris[tri_idx], edge_idx, other_tri as i32);
+                set_tri_edge(&mut tris[other_tri], other_edge, tri_idx as i32);
+            }
+        }
+    }
+
+    tris
+}
+
+pub(crate) fn tessellate_planar_loops(
+    contours: &[Vec<Float3>],
+    normal: Float3,
+) -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError> {
+    let contours: Vec<_> = contours
+        .iter()
+        .filter(|contour| contour.len() >= 3)
+        .cloned()
+        .collect();
+    if contours.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+
+    let mut lins = Vec::new();
+    let mut boundary_edges = HashMap::<(usize, usize), usize>::new();
+    let mut source_offset = 0usize;
+    for contour in &contours {
+        let range = push_closed_polyline(&mut lins, contour, normal);
+        for i in 0..contour.len() {
+            boundary_edges.insert(
+                canonical_index_edge_key(source_offset + i, source_offset + (i + 1) % contour.len()),
+                range.start + i,
+            );
+        }
+        source_offset += contour.len();
+    }
+
+    let tess = libtess2::triangulate(
+        contours.iter().map(Vec::as_slice),
+        TessellationOptions {
+            winding_rule: WindingRule::NonZero,
+            normal: Some(normal),
+            constrained_delaunay: true,
+            reverse_contours: false,
+        },
+    )
+    .map_err(|err| ExecutorError::Other(format!("failed to tessellate polygon: {err}")))?;
+
+    let mut tris = build_indexed_tris(&tess.vertices, &tess.triangles);
+    for (tri_idx, face) in tess.triangles.iter().enumerate() {
+        for (edge_idx, (a, b)) in [
+            (face[0], face[1]),
+            (face[1], face[2]),
+            (face[2], face[0]),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if tri_edge(&tris[tri_idx], edge_idx) >= 0 {
+                continue;
+            }
+
+            let Some(source_a) = tess.source_vertex_indices[a] else {
+                continue;
+            };
+            let Some(source_b) = tess.source_vertex_indices[b] else {
+                continue;
+            };
+            let Some(&line_idx) = boundary_edges.get(&canonical_index_edge_key(source_a, source_b))
+            else {
+                continue;
+            };
+
+            let line = lins[line_idx];
+            let (edge_start, edge_end) = tri_edge_positions(&tris[tri_idx], edge_idx);
+            if line.a.pos != edge_start || line.b.pos != edge_end {
+                continue;
+            }
+
+            set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_ref(line_idx));
+            lins[line_idx].inv = mesh_ref(tri_idx);
+        }
+    }
+
+    Ok((lins, tris))
+}
+
 pub(super) fn mesh_from_parts(dots: Vec<Dot>, lins: Vec<Lin>, tris: Vec<Tri>) -> Value {
     let mesh = Mesh {
         dots,
@@ -648,6 +831,37 @@ pub(super) fn triangle_key(a: Float3, b: Float3, c: Float3) -> [[u32; 3]; 3] {
     let mut key = [float3_key(a), float3_key(b), float3_key(c)];
     key.sort_unstable();
     key
+}
+
+fn canonical_index_edge_key(a: usize, b: usize) -> (usize, usize) {
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+fn set_tri_edge(tri: &mut Tri, edge_idx: usize, value: i32) {
+    match edge_idx {
+        0 => tri.ab = value,
+        1 => tri.bc = value,
+        2 => tri.ca = value,
+        _ => unreachable!(),
+    }
+}
+
+fn tri_edge(tri: &Tri, edge_idx: usize) -> i32 {
+    match edge_idx {
+        0 => tri.ab,
+        1 => tri.bc,
+        2 => tri.ca,
+        _ => unreachable!(),
+    }
+}
+
+fn tri_edge_positions(tri: &Tri, edge_idx: usize) -> (Float3, Float3) {
+    match edge_idx {
+        0 => (tri.a.pos, tri.b.pos),
+        1 => (tri.b.pos, tri.c.pos),
+        2 => (tri.c.pos, tri.a.pos),
+        _ => unreachable!(),
+    }
 }
 
 pub(super) fn bounds_of(tree: &MeshTree) -> Option<(Float3, Float3)> {
