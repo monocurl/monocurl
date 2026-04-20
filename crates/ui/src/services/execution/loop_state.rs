@@ -1,6 +1,5 @@
 use std::{
-    pin::pin,
-    time::{Duration, Instant},
+    f64, pin::pin, time::{Duration, Instant}
 };
 
 use executor::{
@@ -111,7 +110,7 @@ impl RuntimeState {
     }
 
     async fn sync_to_target(&mut self, sm_tx: &UnboundedSender<ServiceManagerMessage>) {
-        self.clamp_target_to_valid_timestamp().await;
+        self.clamp_target_to_valid_timestamp();
         self.emit_snapshot(sm_tx, true, None).await;
 
         self.has_seeked_for_play = true;
@@ -148,11 +147,10 @@ impl RuntimeState {
         let target_dt = self.playback_mode.default_time_interval().max(elapsed);
         let max_slide = self.max_slide();
 
-        let mut skip_scene_snapshot = false;
         match self.executor.seek_primitive_anim_skip(max_slide).await {
             SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
             SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
-                skip_scene_snapshot = self.advance_section_without_materializing().await;
+                self.advance_section_without_materializing().await;
                 self.is_playing = false;
             }
             SeekPrimitiveAnimSkipResult::Error(_) => {
@@ -162,11 +160,8 @@ impl RuntimeState {
 
         if self.is_playing {
             match self.executor.advance_playback(max_slide, target_dt).await {
-                Ok(true) => {
-                    self.refresh_target_from_executor();
-                }
+                Ok(true) => { }
                 Ok(false) => {
-                    self.advance_section_with_materialization(max_slide).await;
                     self.is_playing = false;
                 }
                 Err(_) => {
@@ -175,11 +170,9 @@ impl RuntimeState {
             }
         }
 
-        let scene_snapshot = if skip_scene_snapshot {
-            None
-        } else {
-            self.capture_scene_snapshot().await.ok().flatten()
-        };
+        self.refresh_target_from_executor();
+
+        let scene_snapshot = self.capture_scene_snapshot().await.ok().flatten();
         self.emit_snapshot(sm_tx, false, scene_snapshot).await;
 
         let full_elapsed = Instant::now()
@@ -198,8 +191,11 @@ impl RuntimeState {
         }
     }
 
-    async fn clamp_target_to_valid_timestamp(&mut self) {
-        self.target.slide = self.target.slide.min(self.executor.total_sections() - 1);
+    fn clamp_target_to_valid_timestamp(&mut self) {
+        if self.target.slide >= self.executor.total_sections() {
+            self.target.slide = self.executor.total_sections() - 1;
+            self.target.time = f64::INFINITY;
+        }
     }
 
     fn cancel_runtime_work(&mut self) {
@@ -212,26 +208,7 @@ impl RuntimeState {
         }
     }
 
-    async fn advance_section_without_materializing(&mut self) -> bool {
-        if self.executor.state.has_errors() {
-            self.cancel_runtime_work();
-            return false;
-        }
-
-        if self.executor.state.timestamp.slide + 1 >= self.executor.total_sections() {
-            return false;
-        }
-
-        self.executor.advance_section().await;
-        if self.executor.state.has_errors() {
-            self.cancel_runtime_work();
-            return false;
-        }
-        self.refresh_target_from_executor();
-        true
-    }
-
-    async fn advance_section_with_materialization(&mut self, max_slide: usize) {
+    async fn advance_section_without_materializing(&mut self) {
         if self.executor.state.has_errors() {
             self.cancel_runtime_work();
             return;
@@ -244,15 +221,9 @@ impl RuntimeState {
         self.executor.advance_section().await;
         if self.executor.state.has_errors() {
             self.cancel_runtime_work();
-            return;
-        }
-
-        match self.executor.seek_primitive_anim_skip(max_slide).await {
-            SeekPrimitiveAnimSkipResult::Error(_) => self.cancel_runtime_work(),
-            SeekPrimitiveAnimSkipResult::PrimitiveAnim
-            | SeekPrimitiveAnimSkipResult::NoAnimsLeft => self.refresh_target_from_executor(),
         }
     }
+
 
     async fn capture_scene_snapshot(&mut self) -> Result<Option<SceneSnapshot>, ()> {
         if self.has_compiler_error || self.executor.state.has_errors() {
@@ -274,7 +245,15 @@ impl RuntimeState {
         is_loading: bool,
         scene_snapshot: Option<SceneSnapshot>,
     ) {
-        let current_timestamp = self.executor.internal_to_user_timestamp(self.target);
+        let mut current_timestamp = self.executor.internal_to_user_timestamp(self.target);
+        if current_timestamp.time.is_infinite() {
+            debug_assert_eq!(self.target.slide, self.executor.total_sections() - 1);
+            current_timestamp.time =
+                self.executor.real_slide_durations().last().copied().flatten()
+                .or(self.executor.real_minimum_slide_durations().last().copied().flatten())
+                .unwrap_or_default();
+        }
+
         ExecutionService::emit_snapshot(
             sm_tx,
             &self.executor,

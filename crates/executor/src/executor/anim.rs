@@ -142,6 +142,7 @@ impl Executor {
         Ok(())
     }
 
+    /// returns Ok(true) if there may be more anims to step through, Ok(false) if we've reached the end of the section, or Err if an error was encountered
     pub async fn advance_playback(
         &mut self,
         max_slide: usize,
