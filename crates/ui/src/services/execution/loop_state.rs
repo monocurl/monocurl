@@ -1,5 +1,7 @@
 use std::{
-    f64, pin::pin, time::{Duration, Instant}
+    f64,
+    pin::pin,
+    time::{Duration, Instant},
 };
 
 use executor::{
@@ -160,7 +162,7 @@ impl RuntimeState {
 
         if self.is_playing {
             match self.executor.advance_playback(max_slide, target_dt).await {
-                Ok(true) => { }
+                Ok(true) => {}
                 Ok(false) => {
                     self.is_playing = false;
                 }
@@ -224,7 +226,6 @@ impl RuntimeState {
         }
     }
 
-
     async fn capture_scene_snapshot(&mut self) -> Result<Option<SceneSnapshot>, ()> {
         if self.has_compiler_error || self.executor.state.has_errors() {
             return Ok(None);
@@ -248,9 +249,18 @@ impl RuntimeState {
         let mut current_timestamp = self.executor.internal_to_user_timestamp(self.target);
         if current_timestamp.time.is_infinite() {
             debug_assert_eq!(self.target.slide, self.executor.total_sections() - 1);
-            current_timestamp.time =
-                self.executor.real_slide_durations().last().copied().flatten()
-                .or(self.executor.real_minimum_slide_durations().last().copied().flatten())
+            current_timestamp.time = self
+                .executor
+                .real_slide_durations()
+                .last()
+                .copied()
+                .flatten()
+                .or(self
+                    .executor
+                    .real_minimum_slide_durations()
+                    .last()
+                    .copied()
+                    .flatten())
                 .unwrap_or_default();
         }
 

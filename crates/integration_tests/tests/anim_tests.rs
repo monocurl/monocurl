@@ -185,6 +185,19 @@ fn load_stdlib_bundle(path: impl AsRef<Path>) -> Arc<SectionBundle> {
     load_stdlib_bundle_with_import_span(path, 0..0)
 }
 
+fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
+    match value {
+        Value::Mesh(mesh) => out.push(Value::Mesh(mesh.clone())),
+        Value::List(list) => {
+            for elem in list.elements() {
+                let elem = with_heap(|h| h.get(elem.key()).clone());
+                mesh_tree_leaves(&elem, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn load_stdlib_bundle_with_import_span(
     path: impl AsRef<Path>,
     import_span: Span8,
@@ -1093,6 +1106,137 @@ fn test_trans_filled_square_to_clear_circle_fades_fill() {
 }
 
 #[test]
+fn test_trans_from_empty_source_fades_target_in_place() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[
+            ("mesh x = []", SectionType::Init),
+            (
+                "
+                x = Circle([0, 0, 0], 1)
+                play Trans()
+            ",
+                SectionType::Slide,
+            ),
+        ],
+        0,
+        0.5,
+        &[anim_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut meshes = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut meshes);
+    assert_eq!(meshes.len(), 1, "expected one interpolated target mesh");
+
+    let Value::Mesh(mesh) = &meshes[0] else {
+        panic!("expected mesh leaf");
+    };
+    let min_radius_sq = mesh
+        .lins
+        .iter()
+        .flat_map(|lin| [lin.a.pos, lin.b.pos])
+        .map(|point| point.x * point.x + point.y * point.y + point.z * point.z)
+        .fold(f32::INFINITY, f32::min);
+    assert!(
+        min_radius_sq > 0.01,
+        "target geometry collapsed instead of fading in place"
+    );
+    assert!(
+        mesh.uniform.alpha > 0.05 && mesh.uniform.alpha < 0.95,
+        "expected mid-fade alpha, got {}",
+        mesh.uniform.alpha
+    );
+}
+
+#[test]
+fn test_trans_with_more_source_leaves_keeps_all_pairs_mid_animation() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[
+            (
+                "
+                mesh x = [
+                    Circle([-1, 0, 0], 0.5),
+                    Circle([1, 0, 0], 0.5)
+                ]
+            ",
+                SectionType::Init,
+            ),
+            (
+                "
+                x = [Square([0, 0, 0], 1)]
+                play Trans()
+            ",
+                SectionType::Slide,
+            ),
+        ],
+        0,
+        0.5,
+        &[anim_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut meshes = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut meshes);
+    assert_eq!(
+        meshes.len(),
+        2,
+        "old trans semantics keep one matched pair per larger-side leaf"
+    );
+}
+
+#[test]
+fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = Sphere([0, 0, 0], 1, 0)
+                x = Triangle([0, 0, 0], [1, 0, 0], [0, 1, 0])
+                play Trans()
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        0.5,
+        &[anim_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let Value::Mesh(mesh) = &leader.current else {
+        panic!("expected current mesh value");
+    };
+
+    assert!(
+        mesh.tris.len() > 100,
+        "expected larger source surface topology to be retained, got {} triangles",
+        mesh.tris.len()
+    );
+}
+
+#[test]
 fn test_color_grid_lambda_arity_error_is_reported_without_panicking() {
     let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
 
@@ -1680,6 +1824,90 @@ fn test_write_then_trans_polyline_to_square() {
         &[mesh_mcl, anim_mcl],
     );
     r.assert_ok();
+}
+
+#[test]
+fn test_write_staggers_across_mesh_leaves() {
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+
+    let src = r#"
+        mesh x = [
+            Polyline([[0, 0, 0], [2, 0, 0]]),
+            Polyline([[0, 1, 0], [2, 1, 0]])
+        ]
+        play Write()
+    "#;
+
+    let r = run_anim_impl(&[(src, SectionType::Slide)], 0, 0.05, &[mesh_mcl, anim_mcl]);
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut meshes = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut meshes);
+    assert_eq!(meshes.len(), 2);
+
+    let Value::Mesh(first) = &meshes[0] else {
+        panic!("expected first mesh leaf");
+    };
+    let Value::Mesh(second) = &meshes[1] else {
+        panic!("expected second mesh leaf");
+    };
+
+    let first_len = (first.lins[0].b.pos - first.lins[0].a.pos).len();
+    let second_len = (second.lins[0].b.pos - second.lins[0].a.pos).len();
+    assert!(
+        first_len > 0.01,
+        "expected first leaf to have started writing"
+    );
+    assert!(
+        second_len < 1e-6,
+        "expected second leaf to still be hidden, got length {second_len}"
+    );
+}
+
+#[test]
+fn test_write_reveals_boundary_before_fill() {
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+
+    let src = r#"
+        mesh x = Square([0, 0, 0], 2)
+        play Write()
+    "#;
+
+    let r = run_anim_impl(&[(src, SectionType::Slide)], 0, 0.15, &[mesh_mcl, anim_mcl]);
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let Value::Mesh(mesh) = &leader.current else {
+        panic!("expected current mesh");
+    };
+
+    let max_line_len = mesh
+        .lins
+        .iter()
+        .map(|lin| (lin.b.pos - lin.a.pos).len())
+        .fold(0.0, f32::max);
+    let max_fill_alpha = mesh
+        .tris
+        .iter()
+        .map(|tri| tri.a.col.w.max(tri.b.col.w).max(tri.c.col.w))
+        .fold(0.0, f32::max);
+
+    assert!(max_line_len > 0.01, "expected boundary to be visible");
+    assert!(
+        max_fill_alpha < 1e-6,
+        "expected fill to remain hidden early in write, got {max_fill_alpha}"
+    );
 }
 
 // -- regression: while loop before play --

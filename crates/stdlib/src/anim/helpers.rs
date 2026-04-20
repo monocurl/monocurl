@@ -1,4 +1,4 @@
-use std::{collections::HashMap, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use executor::{
     error::ExecutorError,
@@ -11,8 +11,6 @@ use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex},
     simd::{Float3, Float4},
 };
-
-use crate::mesh::helpers::mesh_position_groups;
 use crate::read_float;
 
 pub(super) fn read_time(
@@ -535,151 +533,6 @@ pub(super) fn fade_start_mesh(mesh: &Mesh, delta: Float3) -> Mesh {
     out
 }
 
-fn sample_positions(mesh: &Mesh) -> Vec<Float3> {
-    if !mesh.lins.is_empty() {
-        let mut points: Vec<_> = mesh.lins.iter().map(|lin| lin.a.pos).collect();
-        if mesh.lins.last().is_some_and(|lin| lin.next < 0) {
-            points.push(mesh.lins.last().unwrap().b.pos);
-        }
-        return points;
-    }
-
-    if !mesh.dots.is_empty() {
-        return mesh.dots.iter().map(|dot| dot.pos).collect();
-    }
-
-    mesh_vertices(mesh).collect()
-}
-
-fn sample_colors(mesh: &Mesh) -> Vec<Float4> {
-    if !mesh.lins.is_empty() {
-        let mut colors: Vec<_> = mesh.lins.iter().map(|lin| lin.a.col).collect();
-        if mesh.lins.last().is_some_and(|lin| lin.next < 0) {
-            colors.push(mesh.lins.last().unwrap().b.col);
-        }
-        return colors;
-    }
-
-    if !mesh.dots.is_empty() {
-        return mesh.dots.iter().map(|dot| dot.col).collect();
-    }
-
-    mesh.tris
-        .iter()
-        .flat_map(|tri| [tri.a.col, tri.b.col, tri.c.col])
-        .collect()
-}
-
-pub(super) fn conform_mesh_to_target(source: Option<&Mesh>, target: &Mesh) -> Mesh {
-    if let Some(source) = source {
-        if source.dots.len() == target.dots.len()
-            && source.lins.len() == target.lins.len()
-            && source.tris.len() == target.tris.len()
-        {
-            return source.clone();
-        }
-    }
-
-    let src_center = source
-        .map(mesh_center)
-        .unwrap_or_else(|| mesh_center(target));
-    let src_positions = source.map(sample_positions).unwrap_or_default();
-    let src_colors = source.map(sample_colors).unwrap_or_default();
-    let src_alpha = source.map(|mesh| mesh.uniform.alpha).unwrap_or(0.0);
-
-    let position_groups = mesh_position_groups(target);
-    let target_position_count = position_groups
-        .iter()
-        .copied()
-        .max()
-        .map(|group| group + 1)
-        .unwrap_or(0);
-    let target_vertex_count = target.dots.len() + target.lins.len() * 2 + target.tris.len() * 3;
-    let sample_index = |i: usize, len: usize| {
-        if len == 0 || target_vertex_count == 0 {
-            0
-        } else {
-            (i * len) / target_vertex_count
-        }
-    };
-    let sample_position_index = |slot: usize, len: usize| {
-        if len == 0 || target_position_count == 0 {
-            0
-        } else {
-            (position_groups[slot] * len) / target_position_count
-        }
-    };
-    let pick_pos = |slot: usize| {
-        src_positions
-            .get(sample_position_index(slot, src_positions.len()))
-            .copied()
-            .unwrap_or(src_center)
-    };
-    let pick_col = |i: usize, fallback: Float4| {
-        src_colors
-            .get(sample_index(i, src_colors.len()))
-            .copied()
-            .unwrap_or(fallback)
-    };
-
-    let mut vertex_index = 0usize;
-    let dots = target
-        .dots
-        .iter()
-        .map(|dot| {
-            let out =
-                copy_dot_template(dot, pick_pos(vertex_index), pick_col(vertex_index, dot.col));
-            vertex_index += 1;
-            out
-        })
-        .collect();
-    let lins = target
-        .lins
-        .iter()
-        .map(|lin| {
-            let out = copy_lin_template(
-                lin,
-                pick_pos(vertex_index),
-                pick_pos(vertex_index + 1),
-                pick_col(vertex_index, lin.a.col),
-                pick_col(vertex_index + 1, lin.b.col),
-            );
-            vertex_index += 2;
-            out
-        })
-        .collect();
-    let tris = target
-        .tris
-        .iter()
-        .map(|tri| {
-            let out = copy_tri_template(
-                tri,
-                pick_pos(vertex_index),
-                pick_pos(vertex_index + 1),
-                pick_pos(vertex_index + 2),
-                pick_col(vertex_index, tri.a.col),
-                pick_col(vertex_index + 1, tri.b.col),
-                pick_col(vertex_index + 2, tri.c.col),
-            );
-            vertex_index += 3;
-            out
-        })
-        .collect();
-
-    let mut mesh = target.clone();
-    mesh.dots = dots;
-    mesh.lins = lins;
-    mesh.tris = tris;
-    mesh.uniform.alpha = src_alpha;
-    if let Some(source) = source {
-        mesh.uniform.img = source.uniform.img.clone();
-        mesh.uniform.z_index = source.uniform.z_index;
-        mesh.uniform.fixed_in_frame = source.uniform.fixed_in_frame;
-    }
-    debug_assert!(mesh.has_consistent_topology());
-    mesh
-}
-
 pub(super) fn materialize_current_value(value: &Value) -> Result<Value, ExecutorError> {
     match value {
         Value::List(list) => {
@@ -736,13 +589,4 @@ pub(super) fn merge_transfer_value(dst: Value, transfer: Value) -> Value {
 
 pub(super) fn empty_mesh_tree() -> Value {
     list_value([])
-}
-
-pub(super) fn mesh_tag_map(value: &Value) -> Result<HashMap<Vec<isize>, Arc<Mesh>>, ExecutorError> {
-    let mut leaves = Vec::new();
-    flatten_mesh_leaves(value, &mut leaves)?;
-    Ok(leaves
-        .into_iter()
-        .map(|mesh| (mesh.tag.clone(), mesh))
-        .collect())
 }

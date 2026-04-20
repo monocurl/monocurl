@@ -79,7 +79,7 @@ let Fade = |meshes = [], time = 1, rate = smooth, delta = [0, 0, 0]| {
 # tracing animation for line / polyline content.
 let Write = |meshes = [], time = 1, rate = smooth| {
     let embed = |start, dst| __monocurl__native__ write_embed(start, dst)
-    let lerp = |a, b, state, t| __monocurl__native__ write_lerp_value(a, b, t)
+    let lerp = |a, b, state, t| __monocurl__native__ write_lerp_value(a, b, state, t)
     return PrimitiveAnim(time, meshes, rate, embed, lerp)
 }
 
