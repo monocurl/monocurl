@@ -3,7 +3,11 @@ use std::sync::Arc;
 
 use crate::heap::with_heap;
 
-use super::{Value, primitive_anim::PrimitiveAnim, stateful::StatefulNode};
+use super::{
+    Value,
+    primitive_anim::PrimitiveAnim,
+    stateful::StatefulNode,
+};
 
 impl Value {
     /// structural equality for all value types.
@@ -119,16 +123,30 @@ fn prim_anim_equal(a: &PrimitiveAnim, b: &PrimitiveAnim) -> bool {
                 candidates: ca,
                 time: ta,
                 progression: pa,
+                embed: ea,
+                lerp: la,
             },
             PrimitiveAnim::Lerp {
                 candidates: cb,
                 time: tb,
                 progression: pb,
+                embed: eb,
+                lerp: lb,
             },
         ) => {
             ta == tb
                 && Value::values_equal(ca, cb)
                 && match (pa, pb) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => Value::values_equal(a, b),
+                    _ => false,
+                }
+                && match (ea, eb) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => Value::values_equal(a, b),
+                    _ => false,
+                }
+                && match (la, lb) {
                     (None, None) => true,
                     (Some(a), Some(b)) => Value::values_equal(a, b),
                     _ => false,

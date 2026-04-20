@@ -478,13 +478,15 @@ pub(super) fn default_tri(a: Float3, b: Float3, c: Float3) -> Tri {
 }
 
 pub(super) fn mesh_from_parts(dots: Vec<Dot>, lins: Vec<Lin>, tris: Vec<Tri>) -> Value {
-    Value::Mesh(Arc::new(Mesh {
+    let mesh = Mesh {
         dots,
         lins,
         tris,
         uniform: Uniforms::default(),
         tag: vec![],
-    }))
+    };
+    debug_assert!(mesh.has_consistent_topology());
+    Value::Mesh(Arc::new(mesh))
 }
 
 pub(super) fn polygon_basis(normal: Float3) -> (Float3, Float3, Float3) {

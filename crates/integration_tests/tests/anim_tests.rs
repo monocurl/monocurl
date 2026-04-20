@@ -967,6 +967,101 @@ fn test_lerp_rate_lambda_shapes_progression() {
 }
 
 #[test]
+fn test_lerp_custom_lerp_lambda_shapes_value_interpolation() {
+    let r = run_anim_with_stdlib_at(
+        "
+        param x = 0
+        x = 10
+        play PrimitiveAnim(2, [&x], linear, nil, |a, b, state, t| a + (b - a) * t * t)
+    ",
+        1.0,
+    );
+    r.assert_ok();
+    let params = r.param_leaders();
+    params[2]
+        .assert_target_int(10)
+        .assert_current_float(2.5, 1e-9);
+}
+
+#[test]
+fn test_trans_anim_interpolates_meshes_without_generic_mesh_lerp() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[
+            ("mesh x = Circle()", SectionType::Init),
+            (
+                "
+                x = Square()
+                play Trans()
+            ",
+                SectionType::Slide,
+            ),
+        ],
+        0,
+        0.5,
+        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_bend_anim_interpolates_polyline_meshes() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[
+            (
+                "mesh x = Polyline([[0, 0, 0], [1, 0, 0], [2, 0, 0]])",
+                SectionType::Init,
+            ),
+            (
+                "
+                x = Polyline([[0, 0, 0], [0, 1, 0], [0, 2, 0]])
+                play Bend()
+            ",
+                SectionType::Slide,
+            ),
+        ],
+        0,
+        0.5,
+        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_fade_anim_materializes_live_operator_meshes() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
+    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[
+            ("mesh x = Circle()", SectionType::Init),
+            (
+                "
+                x = shift{1r} Circle()
+                play Fade()
+            ",
+                SectionType::Slide,
+            ),
+        ],
+        0,
+        0.5,
+        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+    );
+    r.assert_ok();
+}
+
+#[test]
 fn test_parallel_anim_blocks_auto_target_only_own_stack_lineage() {
     let r = run_anim_with_stdlib_at(
         "
@@ -1426,6 +1521,49 @@ fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
     r.assert_error("cannot lerp vectors of different lengths");
     assert!(!r.error_spans.is_empty(), "expected runtime error span");
     assert_eq!(r.error_spans[0], expected);
+}
+
+#[test]
+fn test_write_polyline_preserves_authored_line_links() {
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+
+    let src = r#"
+        mesh x = Polyline([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 0, 0]])
+        play Write()
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.25,
+        &[mesh_mcl, anim_mcl],
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_write_then_trans_polyline_to_square() {
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+
+    let src = r#"
+        mesh x = Polyline([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 0, 0]])
+
+        play Write()
+
+        x = Square()
+
+        play Trans()
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        f64::INFINITY,
+        &[mesh_mcl, anim_mcl],
+    );
+    r.assert_ok();
 }
 
 // -- regression: while loop before play --

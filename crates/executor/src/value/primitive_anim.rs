@@ -9,6 +9,8 @@ pub enum PrimitiveAnim {
         candidates: Box<Value>,
         time: f64,
         progression: Option<Box<Value>>,
+        embed: Option<Box<Value>>,
+        lerp: Option<Box<Value>>,
     },
     /// instantly snap all dirty followers to their leaders.
     Set { candidates: Box<Value> },

@@ -282,7 +282,7 @@ impl Executor {
             }
 
             Instruction::Play => {
-                return self.exec_play(stack_idx);
+                return self.exec_play(stack_idx).await;
             }
 
             Instruction::Negate => {

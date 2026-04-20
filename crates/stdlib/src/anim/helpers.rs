@@ -211,25 +211,9 @@ pub(super) fn leader_from_cell(cell: &VRc) -> Result<Leader, ExecutorError> {
     }
 }
 
-pub(super) fn leader_value(cell: &VRc) -> Result<Value, ExecutorError> {
-    let leader = leader_from_cell(cell)?;
-    Ok(with_heap(|h| h.get(leader.leader_rc.key()).clone()))
-}
-
 pub(super) fn follower_value(cell: &VRc) -> Result<Value, ExecutorError> {
     let leader = leader_from_cell(cell)?;
     Ok(with_heap(|h| h.get(leader.follower_rc.key()).clone()))
-}
-
-pub(super) fn replace_follower(cell: &VRc, value: Value) -> Result<(), ExecutorError> {
-    let leader = leader_from_cell(cell)?;
-    heap_replace(leader.follower_rc.key(), value);
-    with_heap_mut(|h| {
-        if let Value::Leader(leader) = &mut *h.get_mut(cell.key()) {
-            leader.follower_version += 1;
-        }
-    });
-    Ok(())
 }
 
 pub(super) fn replace_leader_and_follower(
@@ -253,11 +237,19 @@ pub(super) fn replace_leader_and_follower(
     Ok(())
 }
 
-pub(super) fn build_lerp(targets: &[VRc], time: f64, progression: Option<Box<Value>>) -> Value {
+pub(super) fn build_lerp(
+    targets: &[VRc],
+    time: f64,
+    progression: Option<Box<Value>>,
+    embed: Option<Box<Value>>,
+    lerp: Option<Box<Value>>,
+) -> Value {
     Value::PrimitiveAnim(PrimitiveAnim::Lerp {
         candidates: Box::new(targets_to_value(targets)),
         time,
         progression,
+        embed,
+        lerp,
     })
 }
 
@@ -273,10 +265,14 @@ pub(super) fn scale_primitive_time(anim: Value, factor: f64) -> Result<Value, Ex
             candidates,
             time,
             progression,
+            embed,
+            lerp,
         }) => Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
             candidates,
             time: time * factor,
             progression,
+            embed,
+            lerp,
         })),
         Value::PrimitiveAnim(PrimitiveAnim::Wait { time }) => {
             Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait {
@@ -298,10 +294,14 @@ pub(super) fn delay_primitive(anim: Value, delay: f64) -> Result<Value, Executor
             candidates,
             time,
             progression,
+            embed,
+            lerp,
         }) => Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
             candidates,
             time: time + delay,
             progression,
+            embed,
+            lerp,
         })),
         Value::PrimitiveAnim(PrimitiveAnim::Wait { time }) => {
             Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait {
@@ -313,6 +313,8 @@ pub(super) fn delay_primitive(anim: Value, delay: f64) -> Result<Value, Executor
                 candidates,
                 time: delay,
                 progression: None,
+                embed: None,
+                lerp: None,
             }))
         }
         other => Err(ExecutorError::type_error_for(
@@ -487,8 +489,183 @@ fn copy_tri_template(
     }
 }
 
+#[derive(Debug)]
+struct SlotDsu {
+    parent: Vec<usize>,
+    rank: Vec<u8>,
+}
+
+impl SlotDsu {
+    fn new(len: usize) -> Self {
+        Self {
+            parent: (0..len).collect(),
+            rank: vec![0; len],
+        }
+    }
+
+    fn find(&mut self, idx: usize) -> usize {
+        let parent = self.parent[idx];
+        if parent == idx {
+            idx
+        } else {
+            let root = self.find(parent);
+            self.parent[idx] = root;
+            root
+        }
+    }
+
+    fn union(&mut self, a: usize, b: usize) {
+        let mut ra = self.find(a);
+        let mut rb = self.find(b);
+        if ra == rb {
+            return;
+        }
+        if self.rank[ra] < self.rank[rb] {
+            std::mem::swap(&mut ra, &mut rb);
+        }
+        self.parent[rb] = ra;
+        if self.rank[ra] == self.rank[rb] {
+            self.rank[ra] += 1;
+        }
+    }
+}
+
+fn decode_mesh_ref(value: i32) -> Option<usize> {
+    (value < -1).then_some((-value - 2) as usize)
+}
+
+fn dot_slot(idx: usize) -> usize {
+    idx
+}
+
+fn line_a_slot(mesh: &Mesh, idx: usize) -> usize {
+    mesh.dots.len() + idx * 2
+}
+
+fn line_b_slot(mesh: &Mesh, idx: usize) -> usize {
+    line_a_slot(mesh, idx) + 1
+}
+
+fn tri_a_slot(mesh: &Mesh, idx: usize) -> usize {
+    mesh.dots.len() + mesh.lins.len() * 2 + idx * 3
+}
+
+fn tri_b_slot(mesh: &Mesh, idx: usize) -> usize {
+    tri_a_slot(mesh, idx) + 1
+}
+
+fn tri_c_slot(mesh: &Mesh, idx: usize) -> usize {
+    tri_a_slot(mesh, idx) + 2
+}
+
+fn tri_edge_slots(mesh: &Mesh, tri_idx: usize, edge_idx: usize) -> (usize, usize) {
+    match edge_idx {
+        0 => (tri_a_slot(mesh, tri_idx), tri_b_slot(mesh, tri_idx)),
+        1 => (tri_b_slot(mesh, tri_idx), tri_c_slot(mesh, tri_idx)),
+        _ => (tri_c_slot(mesh, tri_idx), tri_a_slot(mesh, tri_idx)),
+    }
+}
+
+fn tri_edge_for(tri: &Tri, value: i32) -> Option<usize> {
+    [tri.ab, tri.bc, tri.ca].iter().position(|edge| *edge == value)
+}
+
+fn shared_position_groups(mesh: &Mesh) -> Vec<usize> {
+    let slot_count = mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3;
+    let mut dsu = SlotDsu::new(slot_count);
+
+    for (idx, dot) in mesh.dots.iter().enumerate() {
+        if dot.inv >= 0 {
+            let inv = dot.inv as usize;
+            if inv < mesh.dots.len() {
+                dsu.union(dot_slot(idx), dot_slot(inv));
+            }
+        }
+        if dot.anti >= 0 {
+            let anti = dot.anti as usize;
+            if anti < mesh.dots.len() {
+                dsu.union(dot_slot(idx), dot_slot(anti));
+            }
+        }
+    }
+
+    for (idx, lin) in mesh.lins.iter().enumerate() {
+        if lin.prev >= 0 {
+            let prev = lin.prev as usize;
+            if prev < mesh.lins.len() {
+                dsu.union(line_a_slot(mesh, idx), line_b_slot(mesh, prev));
+            }
+        } else if let Some(dot_idx) = decode_mesh_ref(lin.prev).filter(|&i| i < mesh.dots.len()) {
+            dsu.union(line_a_slot(mesh, idx), dot_slot(dot_idx));
+        }
+
+        if lin.next >= 0 {
+            let next = lin.next as usize;
+            if next < mesh.lins.len() {
+                dsu.union(line_b_slot(mesh, idx), line_a_slot(mesh, next));
+            }
+        } else if let Some(dot_idx) = decode_mesh_ref(lin.next).filter(|&i| i < mesh.dots.len()) {
+            dsu.union(line_b_slot(mesh, idx), dot_slot(dot_idx));
+        }
+
+        if lin.inv >= 0 {
+            let inv = lin.inv as usize;
+            if inv < mesh.lins.len() {
+                dsu.union(line_a_slot(mesh, idx), line_b_slot(mesh, inv));
+                dsu.union(line_b_slot(mesh, idx), line_a_slot(mesh, inv));
+            }
+        }
+
+        if lin.anti >= 0 {
+            let anti = lin.anti as usize;
+            if anti < mesh.lins.len() {
+                dsu.union(line_a_slot(mesh, idx), line_a_slot(mesh, anti));
+                dsu.union(line_b_slot(mesh, idx), line_b_slot(mesh, anti));
+            }
+        }
+    }
+
+    for (tri_idx, tri) in mesh.tris.iter().enumerate() {
+        if tri.anti >= 0 {
+            let anti = tri.anti as usize;
+            if anti < mesh.tris.len() {
+                dsu.union(tri_a_slot(mesh, tri_idx), tri_b_slot(mesh, anti));
+                dsu.union(tri_b_slot(mesh, tri_idx), tri_a_slot(mesh, anti));
+                dsu.union(tri_c_slot(mesh, tri_idx), tri_c_slot(mesh, anti));
+            }
+        }
+
+        for (edge_idx, value) in [tri.ab, tri.bc, tri.ca].into_iter().enumerate() {
+            let (lhs, rhs) = tri_edge_slots(mesh, tri_idx, edge_idx);
+            if value >= 0 {
+                let neighbor = value as usize;
+                if neighbor < mesh.tris.len() {
+                    if let Some(other_edge) = tri_edge_for(&mesh.tris[neighbor], tri_idx as i32) {
+                        let (na, nb) = tri_edge_slots(mesh, neighbor, other_edge);
+                        dsu.union(lhs, nb);
+                        dsu.union(rhs, na);
+                    }
+                }
+            } else if let Some(line_idx) = decode_mesh_ref(value).filter(|&i| i < mesh.lins.len()) {
+                dsu.union(lhs, line_a_slot(mesh, line_idx));
+                dsu.union(rhs, line_b_slot(mesh, line_idx));
+            }
+        }
+    }
+
+    let mut roots = Vec::with_capacity(slot_count);
+    let mut root_to_group = std::collections::HashMap::<usize, usize>::new();
+    for slot in 0..slot_count {
+        let root = dsu.find(slot);
+        let next_group = root_to_group.len();
+        let group = *root_to_group.entry(root).or_insert(next_group);
+        roots.push(group);
+    }
+    roots
+}
+
 pub(super) fn collapse_mesh(mesh: &Mesh, center: Float3) -> Mesh {
-    Mesh {
+    let mesh = Mesh {
         dots: mesh
             .dots
             .iter()
@@ -508,7 +685,9 @@ pub(super) fn collapse_mesh(mesh: &Mesh, center: Float3) -> Mesh {
             .collect(),
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
-    }
+    };
+    debug_assert!(mesh.has_consistent_topology());
+    mesh
 }
 
 pub(super) fn fade_start_mesh(mesh: &Mesh, delta: Float3) -> Mesh {
@@ -526,37 +705,42 @@ pub(super) fn fade_start_mesh(mesh: &Mesh, delta: Float3) -> Mesh {
         tri.c.pos = tri.c.pos - delta;
     }
     out.uniform.alpha = 0.0;
-    out
-}
-
-pub(super) fn write_start_mesh(mesh: &Mesh) -> Mesh {
-    let pivot = mesh
-        .dots
-        .first()
-        .map(|dot| dot.pos)
-        .or_else(|| mesh.lins.first().map(|lin| lin.a.pos))
-        .or_else(|| mesh.tris.first().map(|tri| tri.a.pos))
-        .unwrap_or(Float3::ZERO);
-
-    let mut out = collapse_mesh(mesh, pivot);
-    out.uniform.alpha = 0.0;
+    debug_assert!(out.has_consistent_topology());
     out
 }
 
 fn sample_positions(mesh: &Mesh) -> Vec<Float3> {
+    if !mesh.lins.is_empty() {
+        let mut points: Vec<_> = mesh.lins.iter().map(|lin| lin.a.pos).collect();
+        if mesh.lins.last().is_some_and(|lin| lin.next < 0) {
+            points.push(mesh.lins.last().unwrap().b.pos);
+        }
+        return points;
+    }
+
+    if !mesh.dots.is_empty() {
+        return mesh.dots.iter().map(|dot| dot.pos).collect();
+    }
+
     mesh_vertices(mesh).collect()
 }
 
 fn sample_colors(mesh: &Mesh) -> Vec<Float4> {
-    mesh.dots
+    if !mesh.lins.is_empty() {
+        let mut colors: Vec<_> = mesh.lins.iter().map(|lin| lin.a.col).collect();
+        if mesh.lins.last().is_some_and(|lin| lin.next < 0) {
+            colors.push(mesh.lins.last().unwrap().b.col);
+        }
+        return colors;
+    }
+
+    if !mesh.dots.is_empty() {
+        return mesh.dots.iter().map(|dot| dot.col).collect();
+    }
+
+    mesh.tris
         .iter()
-        .map(|dot| dot.col)
-        .chain(mesh.lins.iter().flat_map(|lin| [lin.a.col, lin.b.col]))
-        .chain(
-            mesh.tris
-                .iter()
-                .flat_map(|tri| [tri.a.col, tri.b.col, tri.c.col]),
-        )
+        .flat_map(|tri| [tri.a.col, tri.b.col, tri.c.col])
         .collect()
 }
 
@@ -577,15 +761,38 @@ pub(super) fn conform_mesh_to_target(source: Option<&Mesh>, target: &Mesh) -> Me
     let src_colors = source.map(sample_colors).unwrap_or_default();
     let src_alpha = source.map(|mesh| mesh.uniform.alpha).unwrap_or(0.0);
 
-    let pick_pos = |i: usize| {
+    let position_groups = shared_position_groups(target);
+    let target_position_count = position_groups
+        .iter()
+        .copied()
+        .max()
+        .map(|group| group + 1)
+        .unwrap_or(0);
+    let target_vertex_count =
+        target.dots.len() + target.lins.len() * 2 + target.tris.len() * 3;
+    let sample_index = |i: usize, len: usize| {
+        if len == 0 || target_vertex_count == 0 {
+            0
+        } else {
+            (i * len) / target_vertex_count
+        }
+    };
+    let sample_position_index = |slot: usize, len: usize| {
+        if len == 0 || target_position_count == 0 {
+            0
+        } else {
+            (position_groups[slot] * len) / target_position_count
+        }
+    };
+    let pick_pos = |slot: usize| {
         src_positions
-            .get(i % src_positions.len().max(1))
+            .get(sample_position_index(slot, src_positions.len()))
             .copied()
             .unwrap_or(src_center)
     };
     let pick_col = |i: usize, fallback: Float4| {
         src_colors
-            .get(i % src_colors.len().max(1))
+            .get(sample_index(i, src_colors.len()))
             .copied()
             .unwrap_or(fallback)
     };
@@ -644,6 +851,7 @@ pub(super) fn conform_mesh_to_target(source: Option<&Mesh>, target: &Mesh) -> Me
         mesh.uniform.z_index = source.uniform.z_index;
         mesh.uniform.fixed_in_frame = source.uniform.fixed_in_frame;
     }
+    debug_assert!(mesh.has_consistent_topology());
     mesh
 }
 
@@ -745,6 +953,14 @@ pub(super) fn materialize_current_value(value: &Value) -> Result<Value, Executor
         Value::Leader(leader) => Ok(with_heap(|h| h.get(leader.follower_rc.key()).clone())),
         other => Ok(other.clone().elide_lvalue_leader_rec()),
     }
+}
+
+pub(super) async fn materialize_live_value(
+    executor: &mut Executor,
+    value: &Value,
+) -> Result<Value, ExecutorError> {
+    let resolved = value.clone().elide_wrappers(executor).await?;
+    materialize_current_value(&resolved)
 }
 
 pub(super) fn merge_transfer_value(dst: Value, transfer: Value) -> Value {

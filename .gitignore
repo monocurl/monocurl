@@ -3,6 +3,7 @@
 target
 *.swp
 tmp
+.zed
 
 CLAUDE.md
 AGENTS.md

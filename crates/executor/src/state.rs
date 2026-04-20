@@ -147,7 +147,10 @@ pub struct BakedPrimitiveAnim {
     pub end_time: f64,
     /// owning VRcs to leader cell slots
     pub targets: Vec<VRc>,
-    pub start_followers: Vec<Value>,
+    pub destinations: Vec<Value>,
+    pub embedded_starts: Vec<Value>,
+    pub embedded_ends: Vec<Value>,
+    pub embedded_states: Vec<Value>,
     pub parent_stack_idx: usize,
     pub stack_id: usize,
     pub span: Span8,

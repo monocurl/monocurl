@@ -1,17 +1,16 @@
 use executor::{error::ExecutorError, executor::Executor, value::Value};
-use geo::simd::Float3;
+use geo::{mesh::Lin, simd::Float3};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
 
 fn closed_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
-    let mut out = Vec::new();
+    let mut out = Vec::with_capacity(points.len());
     for i in 0..points.len() {
-        out.push(default_lin(
-            points[i],
-            points[(i + 1) % points.len()],
-            normal,
-        ));
+        let mut lin = default_lin(points[i], points[(i + 1) % points.len()], normal);
+        lin.prev = ((i + points.len() - 1) % points.len()) as i32;
+        lin.next = ((i + 1) % points.len()) as i32;
+        out.push(lin);
     }
     out
 }
@@ -19,18 +18,95 @@ fn closed_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
 fn open_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
     points
         .windows(2)
-        .map(|w| default_lin(w[0], w[1], normal))
+        .enumerate()
+        .map(|(i, w)| {
+            let mut lin = default_lin(w[0], w[1], normal);
+            lin.prev = if i == 0 { -1 } else { i as i32 - 1 };
+            lin.next = if i + 1 == points.len() - 1 {
+                -1
+            } else {
+                i as i32 + 1
+            };
+            lin
+        })
         .collect()
 }
 
-fn fan_tris(points: &[Float3]) -> Vec<geo::mesh::Tri> {
+fn mesh_ref(idx: usize) -> i32 {
+    -2 - idx as i32
+}
+
+fn fan_tris(points: &[Float3], boundary_lins: &mut [Lin]) -> Vec<geo::mesh::Tri> {
     let mut out = Vec::new();
     if points.len() >= 3 {
         for i in 1..points.len() - 1 {
-            out.push(default_tri(points[0], points[i], points[i + 1]));
+            let mut tri = default_tri(points[0], points[i], points[i + 1]);
+            tri.ab = if i == 1 { mesh_ref(0) } else { (i - 2) as i32 };
+            tri.bc = mesh_ref(i);
+            tri.ca = if i + 1 == points.len() - 1 {
+                mesh_ref(points.len() - 1)
+            } else {
+                i as i32
+            };
+            out.push(tri);
+        }
+
+        if !boundary_lins.is_empty() {
+            boundary_lins[0].inv = mesh_ref(0);
+            for i in 1..points.len() - 1 {
+                boundary_lins[i].inv = mesh_ref(i - 1);
+            }
+            boundary_lins[points.len() - 1].inv = mesh_ref(points.len() - 3);
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use geo::simd::Float3;
+
+    use super::{closed_polyline, fan_tris, mesh_ref, open_polyline};
+
+    #[test]
+    fn closed_polyline_sets_reciprocal_links() {
+        let lines = closed_polyline(
+            &[Float3::X, Float3::Y, Float3::Z, Float3::ZERO],
+            Float3::Z,
+        );
+        for (i, line) in lines.iter().enumerate() {
+            assert_eq!(lines[line.prev as usize].next, i as i32);
+            assert_eq!(lines[line.next as usize].prev, i as i32);
+        }
+    }
+
+    #[test]
+    fn open_polyline_sets_endpoints_to_negative_one() {
+        let lines = open_polyline(&[Float3::X, Float3::Y, Float3::Z], Float3::Z);
+        assert_eq!(lines[0].prev, -1);
+        assert_eq!(lines[0].next, 1);
+        assert_eq!(lines[1].prev, 0);
+        assert_eq!(lines[1].next, -1);
+    }
+
+    #[test]
+    fn fan_tris_sets_boundary_and_neighbor_refs() {
+        let points = [Float3::ZERO, Float3::X, Float3::Y, Float3::Z];
+        let mut lines = closed_polyline(&points, Float3::Z);
+        let tris = fan_tris(&points, &mut lines);
+
+        assert_eq!(tris.len(), 2);
+        assert_eq!(tris[0].ab, mesh_ref(0));
+        assert_eq!(tris[0].bc, mesh_ref(1));
+        assert_eq!(tris[0].ca, 1);
+        assert_eq!(tris[1].ab, 0);
+        assert_eq!(tris[1].bc, mesh_ref(2));
+        assert_eq!(tris[1].ca, mesh_ref(3));
+        assert_eq!(lines[0].inv, mesh_ref(0));
+        assert_eq!(lines[1].inv, mesh_ref(0));
+        assert_eq!(lines[2].inv, mesh_ref(1));
+        assert_eq!(lines[3].inv, mesh_ref(1));
+    }
 }
 
 #[stdlib_func]
@@ -56,11 +132,9 @@ pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             center + x * (radius * theta.cos()) + y * (radius * theta.sin())
         })
         .collect();
-    Ok(mesh_from_parts(
-        vec![],
-        closed_polyline(&points, normal),
-        fan_tris(&points),
-    ))
+    let mut lins = closed_polyline(&points, normal);
+    let tris = fan_tris(&points, &mut lins);
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -107,11 +181,9 @@ pub async fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         center + x * half + y * half,
         center - x * half + y * half,
     ];
-    Ok(mesh_from_parts(
-        vec![],
-        closed_polyline(&corners, normal),
-        fan_tris(&corners),
-    ))
+    let mut lins = closed_polyline(&corners, normal);
+    let tris = fan_tris(&corners, &mut lins);
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -127,11 +199,9 @@ pub async fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         center + x * (width / 2.0) + y * (height / 2.0),
         center - x * (width / 2.0) + y * (height / 2.0),
     ];
-    Ok(mesh_from_parts(
-        vec![],
-        closed_polyline(&corners, normal),
-        fan_tris(&corners),
-    ))
+    let mut lins = closed_polyline(&corners, normal);
+    let tris = fan_tris(&corners, &mut lins);
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -150,22 +220,18 @@ pub async fn mk_regular_polygon(
             center + x * (radius * theta.cos()) + y * (radius * theta.sin())
         })
         .collect();
-    Ok(mesh_from_parts(
-        vec![],
-        closed_polyline(&points, normal),
-        fan_tris(&points),
-    ))
+    let mut lins = closed_polyline(&points, normal);
+    let tris = fan_tris(&points, &mut lins);
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
 pub async fn mk_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let vertices = read_float3_list(executor, stack_idx, -2, "vertices")?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
-    Ok(mesh_from_parts(
-        vec![],
-        closed_polyline(&vertices, normal),
-        fan_tris(&vertices),
-    ))
+    let mut lins = closed_polyline(&vertices, normal);
+    let tris = fan_tris(&vertices, &mut lins);
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -214,16 +280,21 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let head_len = (len * 0.25).min(0.35);
     let head_width = head_len * 0.5;
     let base = end - tangent * head_len;
-    let lins = vec![
+    let mut lins = vec![
         default_lin(start, base, normal),
         default_lin(base + side * head_width, end, normal),
         default_lin(end, base - side * head_width, normal),
     ];
-    let tris = vec![default_tri(
+    let mut tri = default_tri(
         base + side * head_width,
         end,
         base - side * head_width,
-    )];
+    );
+    tri.ab = mesh_ref(1);
+    tri.bc = mesh_ref(2);
+    lins[1].inv = mesh_ref(0);
+    lins[2].inv = mesh_ref(0);
+    let tris = vec![tri];
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -275,11 +346,9 @@ pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Val
             end_center + axis * (end_radius * theta.cos()) + side * (end_radius * theta.sin()),
         );
     }
-    Ok(mesh_from_parts(
-        vec![],
-        closed_polyline(&points, normal),
-        fan_tris(&points),
-    ))
+    let mut lins = closed_polyline(&points, normal);
+    let tris = fan_tris(&points, &mut lins);
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -291,15 +360,19 @@ pub async fn mk_triangle(
     let q = read_float3(executor, stack_idx, -3, "q")?;
     let r = read_float3(executor, stack_idx, -2, "r")?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
-    Ok(mesh_from_parts(
-        vec![],
-        vec![
-            default_lin(p, q, normal),
-            default_lin(q, r, normal),
-            default_lin(r, p, normal),
-        ],
-        vec![default_tri(p, q, r)],
-    ))
+    let mut lins = vec![
+        default_lin(p, q, normal),
+        default_lin(q, r, normal),
+        default_lin(r, p, normal),
+    ];
+    let mut tri = default_tri(p, q, r);
+    tri.ab = mesh_ref(0);
+    tri.bc = mesh_ref(1);
+    tri.ca = mesh_ref(2);
+    for lin in &mut lins {
+        lin.inv = mesh_ref(0);
+    }
+    Ok(mesh_from_parts(vec![], lins, vec![tri]))
 }
 
 #[stdlib_func]
@@ -509,11 +582,9 @@ pub async fn mk_plane(executor: &mut Executor, stack_idx: usize) -> Result<Value
         center + x * (width / 2.0) + y * (height / 2.0),
         center - x * (width / 2.0) + y * (height / 2.0),
     ];
-    Ok(mesh_from_parts(
-        vec![],
-        closed_polyline(&corners, n),
-        fan_tris(&corners),
-    ))
+    let mut lins = closed_polyline(&corners, n);
+    let tris = fan_tris(&corners, &mut lins);
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -614,11 +685,9 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
         center + x * (width / 2.0) + y * (height / 2.0),
         center - x * (width / 2.0) + y * (height / 2.0),
     ];
-    let mut mesh = match mesh_from_parts(
-        vec![],
-        closed_polyline(&corners, normal),
-        fan_tris(&corners),
-    ) {
+    let mut lins = closed_polyline(&corners, normal);
+    let tris = fan_tris(&corners, &mut lins);
+    let mut mesh = match mesh_from_parts(vec![], lins, tris) {
         Value::Mesh(mesh) => (*mesh).clone(),
         _ => unreachable!(),
     };

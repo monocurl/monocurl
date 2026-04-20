@@ -11,7 +11,6 @@ use crate::{state::execution_state::ExecutionState, theme::ThemeSettings};
 
 const DOT_RADIUS: f32 = 3.5;
 const EDGE_WIDTH: f32 = 1.0;
-const TRI_EDGE_WIDTH: f32 = 1.0;
 const ORTHO_HALF_HEIGHT: f32 = 4.0;
 const MIN_FOV: f32 = 0.1;
 const MIN_NEAR: f32 = 0.01;
@@ -202,42 +201,12 @@ fn collect_triangle_draw_items(
 
     let depth = (a.depth + b.depth + c.depth) / 3.0;
     let fill_color = rgba_from_color((tri.a.col + tri.b.col + tri.c.col) / 3.0, alpha);
-    let edge_color = rgba_from_color((tri.a.col + tri.b.col + tri.c.col) / 3.0, alpha.max(0.85));
-
     items.push(DrawItem {
         z_index,
         depth,
         primitive: DrawPrimitive::Triangle {
             points: [a.point, b.point, c.point],
             color: fill_color,
-        },
-    });
-
-    items.push(DrawItem {
-        z_index,
-        depth,
-        primitive: DrawPrimitive::Line {
-            points: [a.point, b.point],
-            color: edge_color,
-            width: px(TRI_EDGE_WIDTH),
-        },
-    });
-    items.push(DrawItem {
-        z_index,
-        depth,
-        primitive: DrawPrimitive::Line {
-            points: [b.point, c.point],
-            color: edge_color,
-            width: px(TRI_EDGE_WIDTH),
-        },
-    });
-    items.push(DrawItem {
-        z_index,
-        depth,
-        primitive: DrawPrimitive::Line {
-            points: [c.point, a.point],
-            color: edge_color,
-            width: px(TRI_EDGE_WIDTH),
         },
     });
 }

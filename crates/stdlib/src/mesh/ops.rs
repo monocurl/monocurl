@@ -6,6 +6,36 @@ use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
 
+fn mesh_ref(idx: usize) -> i32 {
+    -2 - idx as i32
+}
+
+fn authored_fan_tris(points: &[Float3], boundary_lins: &mut [geo::mesh::Lin]) -> Vec<geo::mesh::Tri> {
+    let mut out = Vec::new();
+    if points.len() >= 3 {
+        for i in 1..points.len() - 1 {
+            let mut tri = default_tri(points[0], points[i], points[i + 1]);
+            tri.ab = if i == 1 { mesh_ref(0) } else { (i - 2) as i32 };
+            tri.bc = mesh_ref(i);
+            tri.ca = if i + 1 == points.len() - 1 {
+                mesh_ref(points.len() - 1)
+            } else {
+                i as i32
+            };
+            out.push(tri);
+        }
+
+        if !boundary_lins.is_empty() {
+            boundary_lins[0].inv = mesh_ref(0);
+            for i in 1..points.len() - 1 {
+                boundary_lins[i].inv = mesh_ref(i - 1);
+            }
+            boundary_lins[points.len() - 1].inv = mesh_ref(points.len() - 3);
+        }
+    }
+    out
+}
+
 fn read_scale_factor(
     executor: &Executor,
     stack_idx: usize,
@@ -525,6 +555,14 @@ pub async fn op_uprank(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         Some(points)
     }
 
+    fn is_closed_line_chain(mesh: &Mesh) -> bool {
+        !mesh.lins.is_empty()
+            && mesh
+                .lins
+                .iter()
+                .all(|lin| lin.prev >= 0 && lin.next >= 0)
+    }
+
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -1, "target").await?;
     tree.for_each_mut(&mut |mesh| {
         if !mesh.tris.is_empty() {
@@ -537,13 +575,21 @@ pub async fn op_uprank(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                 .map(|pair| default_lin(pair[0].pos, pair[1].pos, pair[0].norm))
                 .collect();
         }
-        if let Some(points) = ordered_loop_points(mesh) {
+        if is_closed_line_chain(mesh) {
+            if let Some(points) = ordered_loop_points(mesh) {
+                if points.len() >= 3 {
+                    for lin in &mut mesh.lins {
+                        lin.inv = -1;
+                    }
+                    mesh.tris = authored_fan_tris(&points, &mut mesh.lins);
+                }
+            }
+        } else if let Some(points) = ordered_loop_points(mesh) {
             if points.len() >= 3 {
-                mesh.tris = (1..points.len() - 1)
-                    .map(|i| default_tri(points[0], points[i], points[i + 1]))
-                    .collect();
+                mesh.tris.clear();
             }
         }
+        debug_assert!(mesh.has_consistent_topology());
     });
     Ok(tree.into_value())
 }
@@ -557,7 +603,14 @@ pub async fn op_downrank(
     tree.for_each_mut(&mut |mesh| {
         if !mesh.tris.is_empty() {
             let mut seen = std::collections::HashSet::new();
-            let mut lins = mesh.lins.clone();
+            let mut lins = Vec::new();
+            if !mesh.lins.is_empty() {
+                lins.extend(mesh.lins.iter().map(|lin| {
+                    let mut out = *lin;
+                    out.inv = -1;
+                    out
+                }));
+            }
             for tri in &mesh.tris {
                 for (a, b) in [
                     (tri.a.pos, tri.b.pos),
@@ -573,14 +626,14 @@ pub async fn op_downrank(
             mesh.tris.clear();
             mesh.lins = lins;
         } else if !mesh.lins.is_empty() {
-            mesh.dots.extend(mesh.lins.iter().flat_map(|lin| {
-                [
-                    default_dot(lin.a.pos, lin.norm),
-                    default_dot(lin.b.pos, lin.norm),
-                ]
-            }));
+            mesh.dots = mesh
+                .lins
+                .iter()
+                .flat_map(|lin| [default_dot(lin.a.pos, lin.norm), default_dot(lin.b.pos, lin.norm)])
+                .collect();
             mesh.lins.clear();
         }
+        debug_assert!(mesh.has_consistent_topology());
     });
     Ok(tree.into_value())
 }
@@ -618,17 +671,49 @@ pub async fn op_subdivide(
             }
         } else if !mesh.lins.is_empty() && factor > 1 {
             let mut lins = Vec::with_capacity(mesh.lins.len() * factor);
-            for lin in &mesh.lins {
+            for (lin_idx, lin) in mesh.lins.iter().enumerate() {
+                let base = lin_idx * factor;
                 for i in 0..factor {
                     let u = i as f32 / factor as f32;
                     let v = (i + 1) as f32 / factor as f32;
                     let a = lin.a.pos.lerp(lin.b.pos, u);
                     let b = lin.a.pos.lerp(lin.b.pos, v);
-                    lins.push(default_lin(a, b, lin.norm));
+                    let mut out = default_lin(a, b, lin.norm);
+                    out.prev = if i == 0 {
+                        if lin.prev >= 0 {
+                            (lin.prev as usize * factor + (factor - 1)) as i32
+                        } else {
+                            lin.prev
+                        }
+                    } else {
+                        (base + i - 1) as i32
+                    };
+                    out.next = if i + 1 == factor {
+                        if lin.next >= 0 {
+                            (lin.next as usize * factor) as i32
+                        } else {
+                            lin.next
+                        }
+                    } else {
+                        (base + i + 1) as i32
+                    };
+                    out.inv = if lin.inv >= 0 {
+                        (lin.inv as usize * factor + (factor - 1 - i)) as i32
+                    } else {
+                        lin.inv
+                    };
+                    out.anti = if lin.anti >= 0 {
+                        (lin.anti as usize * factor + i) as i32
+                    } else {
+                        lin.anti
+                    };
+                    out.is_dom_sib = lin.is_dom_sib;
+                    lins.push(out);
                 }
             }
             mesh.lins = lins;
         }
+        debug_assert!(mesh.has_consistent_topology());
     });
 
     Ok(tree.into_value())
@@ -658,6 +743,7 @@ pub async fn op_tesselated(
             }
             mesh.tris = tris;
         }
+        debug_assert!(mesh.has_consistent_topology());
     });
     Ok(tree.into_value())
 }
@@ -711,6 +797,7 @@ pub async fn op_extrude(executor: &mut Executor, stack_idx: usize) -> Result<Val
             tris.push(default_tri(a, b + delta, a + delta));
         }
         mesh.tris = tris;
+        debug_assert!(mesh.has_consistent_topology());
     });
 
     Ok(tree.into_value())
@@ -757,6 +844,7 @@ pub async fn op_revolve(executor: &mut Executor, stack_idx: usize) -> Result<Val
         }
         mesh.tris = tris;
         mesh.lins.clear();
+        debug_assert!(mesh.has_consistent_topology());
     });
 
     Ok(tree.into_value())
