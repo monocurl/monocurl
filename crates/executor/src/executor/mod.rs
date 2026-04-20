@@ -121,14 +121,6 @@ impl Executor {
         let leader_value_key = param.leader_value;
         let follower_value_key = param.follower_value;
 
-        // allow setting even during animation
-        let cell_val = with_heap(|h| h.get(leader_cell_key).clone());
-        if let Value::Leader(leader) = &cell_val {
-            if leader.locked_by_anim.is_some() {
-                return Err(ExecutorError::ConcurrentAnimation);
-            }
-        }
-
         heap_replace(leader_value_key, value.clone());
         heap_replace(follower_value_key, value);
         with_heap_mut(|h| {
