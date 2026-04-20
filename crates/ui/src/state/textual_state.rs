@@ -262,9 +262,16 @@ impl AutoCompleteState {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParameterHintArg {
+    pub name: String,
+    pub has_default: bool,
+    pub is_reference: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterPositionHint {
     pub name: String,
-    pub args: Vec<String>,
+    pub args: Vec<ParameterHintArg>,
     pub active_index: usize,
     pub function_start: Location8,
     pub is_operator: bool,

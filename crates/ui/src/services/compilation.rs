@@ -13,7 +13,7 @@ use structs::text::{Count8, Location8, Span8};
 
 use crate::state::diagnostics::{Diagnostic, DiagnosticType};
 use crate::state::textual_state::{
-    AutoCompleteCategory, AutoCompleteItem, Cursor, ParameterPositionHint,
+    AutoCompleteCategory, AutoCompleteItem, Cursor, ParameterHintArg, ParameterPositionHint,
 };
 use crate::{
     services::{ServiceManagerMessage, execution::ExecutionMessage},
@@ -148,9 +148,20 @@ impl CompilationService {
                                     0
                                 };
                                 let args = if args.len() <= offset {
-                                    vec!["".to_string()]
+                                    vec![ParameterHintArg {
+                                        name: String::new(),
+                                        has_default: false,
+                                        is_reference: false,
+                                    }]
                                 } else {
-                                    args[offset..].iter().cloned().collect()
+                                    args[offset..]
+                                        .iter()
+                                        .map(|arg| ParameterHintArg {
+                                            name: arg.name.clone(),
+                                            has_default: arg.has_default,
+                                            is_reference: arg.is_reference,
+                                        })
+                                        .collect()
                                 };
 
                                 let invoked_args = reference.invocation_spans.as_ref().unwrap();

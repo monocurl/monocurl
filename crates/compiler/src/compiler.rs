@@ -13,8 +13,8 @@ use bytecode::{
 use free_vars::{free_lvalue_refs_expr, free_vars_expr, free_vars_stmts};
 use parser::ast::{
     Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression,
-    For, IdentifierDeclaration, IdentifierReference, If, InvocationArguments, LambdaBody,
-    LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition,
+    For, IdentifierDeclaration, IdentifierReference, If, InvocationArguments, LambdaArg,
+    LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition,
     OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType, SpanTagged,
     Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType,
     While,
@@ -83,24 +83,37 @@ pub enum VariableType {
     Mesh,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FunctionArgInfo {
+    pub name: String,
+    pub has_default: bool,
+    pub is_reference: bool,
+}
+
 #[derive(Clone, Debug)]
 pub enum SymbolFunctionInfo {
     None,
-    Lambda { args: Vec<String> },
-    Operator { args: Vec<String> },
+    Lambda { args: Vec<FunctionArgInfo> },
+    Operator { args: Vec<FunctionArgInfo> },
 }
 
 impl SymbolFunctionInfo {
+    fn arg_info(arg: &LambdaArg) -> FunctionArgInfo {
+        FunctionArgInfo {
+            name: arg.identifier.1.0.clone(),
+            has_default: arg.default_value.is_some(),
+            is_reference: arg.must_be_reference,
+        }
+    }
+
     fn from(value: &Expression) -> Self {
         match value {
             Expression::LambdaDefinition(l) => SymbolFunctionInfo::Lambda {
-                args: l.args.iter().map(|a| a.identifier.1.0.clone()).collect(),
+                args: l.args.iter().map(Self::arg_info).collect(),
             },
             Expression::OperationDefinition(o) => SymbolFunctionInfo::Operator {
                 args: match &*o.lambda.1 {
-                    Expression::LambdaDefinition(l) => {
-                        l.args.iter().map(|a| a.identifier.1.0.clone()).collect()
-                    }
+                    Expression::LambdaDefinition(l) => l.args.iter().map(Self::arg_info).collect(),
                     // difficult to infer in this case
                     _ => Vec::new(),
                 },
@@ -1971,7 +1984,7 @@ mod test {
 
     use crate::cache::CompilerCache;
 
-    use super::{CompileResult, compile};
+    use super::{CompileResult, FunctionArgInfo, SymbolFunctionInfo, compile};
 
     fn empty_span() -> Span8 {
         0..0
@@ -2042,6 +2055,52 @@ mod test {
         if !result.errors.is_empty() {
             let msgs: Vec<_> = result.errors.iter().map(|e| e.message.as_str()).collect();
             panic!("expected no errors, got: {:?}", msgs);
+        }
+    }
+
+    #[test]
+    fn test_function_info_emits_reference_and_default_metadata_for_hints() {
+        let result = compile_src(
+            "
+            let a = 1
+            let b = 2
+            let c = 3
+            let f = |&x, y = 1, &z = c| x
+            f(a, b, c)
+        ",
+        );
+        no_errors(&result);
+
+        let reference = result
+            .root_references
+            .iter()
+            .find(|reference| reference.symbol.name == "f")
+            .expect("expected root reference to f");
+
+        match &reference.symbol.function_info {
+            SymbolFunctionInfo::Lambda { args } => {
+                assert_eq!(
+                    args,
+                    &vec![
+                        FunctionArgInfo {
+                            name: "x".to_string(),
+                            has_default: false,
+                            is_reference: true,
+                        },
+                        FunctionArgInfo {
+                            name: "y".to_string(),
+                            has_default: true,
+                            is_reference: false,
+                        },
+                        FunctionArgInfo {
+                            name: "z".to_string(),
+                            has_default: true,
+                            is_reference: true,
+                        },
+                    ]
+                );
+            }
+            other => panic!("expected lambda function info, got {other:?}"),
         }
     }
 

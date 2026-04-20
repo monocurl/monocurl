@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 use crate::{
     state::{
         diagnostics::Diagnostic,
-        textual_state::{AutoCompleteState, ParameterPositionState},
+        textual_state::{AutoCompleteState, ParameterHintArg, ParameterPositionState},
     },
     text_editor::TextEditor,
     theme::TextEditorStyles,
@@ -22,6 +22,18 @@ const PARAMETER_SUPPRESSION_DUE_TO_AUTOCOMPLETE: Duration = Duration::from_milli
 
 pub struct PopoverElement {
     pub editor: Entity<TextEditor>,
+}
+
+fn parameter_hint_arg_label(arg: &ParameterHintArg) -> String {
+    let mut label = String::new();
+    if arg.is_reference {
+        label.push('&');
+    }
+    label.push_str(&arg.name);
+    if arg.has_default {
+        label.push('=');
+    }
+    label
 }
 
 impl PopoverElement {
@@ -523,7 +535,7 @@ impl PopoverElement {
                                 .when(!is_active, |this| {
                                     this.text_color(styles.popover_inactive_argument_color)
                                 })
-                                .child(arg.clone())
+                                .child(parameter_hint_arg_label(arg))
                                 .into_any_element(),
                         ];
 
