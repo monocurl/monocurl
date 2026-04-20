@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use gpui::*;
 
@@ -106,21 +106,31 @@ const SLIDER_2D_SIZE: f32 = 120.0;
 const SLIDER_2D_MIN: f64 = -1.0;
 const SLIDER_2D_MAX: f64 = 1.0;
 const SLIDER_2D_DOT_R: f32 = 5.0;
+const RING_TRANSITION: Duration = Duration::from_millis(140);
+const HIDDEN_PARAMS: [&str; 2] = ["camera", "background"];
 
 // fixed value-units per slider-width (or canvas-size) when dragging outside bounds;
 // using a constant instead of proportional-to-range prevents exponential acceleration
-const OVERDRAG_RATE_1D: f64 = 4.0;
-const OVERDRAG_RATE_2D: f64 = 0.4;
+const OVERDRAG_RATE_1D: f64 = 2.0;
+const OVERDRAG_RATE_2D: f64 = 0.2;
 // absolute value-units past the current bounds before the bounds start to expand
 const BOUNDS_EXPAND_THRESH_1D: f64 = 0.5;
 const BOUNDS_EXPAND_THRESH_2D: f64 = 0.05;
+const BOUNDS_EXPAND_THRESH_FRAC: f64 = 0.05;
 // fraction of current range added as padding when bounds expand
 const BOUNDS_EXPAND_PAD: f64 = 0.1;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Slider2dKind {
     Complex,
-    VectorFloat,
+    VectorFloat(Vec<f64>),
+    VectorInt(Vec<i64>),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct RingStyle {
+    color: Rgba,
+    width: f32,
 }
 
 pub struct Viewport {
@@ -132,6 +142,9 @@ pub struct Viewport {
     scroll_handle: ScrollHandle,
     // per-parameter value-space bounds: [x_min, x_max, y_min, y_max]
     slider_bounds: HashMap<String, [f64; 4]>,
+    ring_style: Option<RingStyle>,
+    ring_previous: RingStyle,
+    ring_animation_nonce: usize,
 }
 
 impl Viewport {
@@ -151,6 +164,12 @@ impl Viewport {
             dragging_param: None,
             scroll_handle: ScrollHandle::new(),
             slider_bounds: HashMap::new(),
+            ring_style: None,
+            ring_previous: RingStyle {
+                color: TRANSPARENT,
+                width: 0.0,
+            },
+            ring_animation_nonce: 0,
         }
     }
 
@@ -170,6 +189,129 @@ impl Viewport {
     }
 }
 
+fn is_hidden_param(name: &str) -> bool {
+    HIDDEN_PARAMS.contains(&name)
+}
+
+fn lerp_f32(start: f32, end: f32, t: f32) -> f32 {
+    start + (end - start) * t
+}
+
+fn lerp_rgba(start: Rgba, end: Rgba, t: f32) -> Rgba {
+    Rgba {
+        r: lerp_f32(start.r, end.r, t),
+        g: lerp_f32(start.g, end.g, t),
+        b: lerp_f32(start.b, end.b, t),
+        a: lerp_f32(start.a, end.a, t),
+    }
+}
+
+fn with_alpha(color: Rgba, alpha: f32) -> Rgba {
+    Rgba { a: alpha, ..color }
+}
+
+fn ring_style_for(
+    status: ExecutionStatus,
+    is_presenting: bool,
+    theme: crate::theme::Theme,
+) -> RingStyle {
+    if is_presenting
+        && !matches!(
+            status,
+            ExecutionStatus::RuntimeError | ExecutionStatus::CompileError
+        )
+    {
+        return RingStyle {
+            color: with_alpha(theme.viewport_status_ring(status), 0.0),
+            width: 0.0,
+        };
+    }
+
+    match status {
+        ExecutionStatus::Playing | ExecutionStatus::Paused => RingStyle {
+            color: theme.viewport_status_ring(status),
+            width: 1.0,
+        },
+        ExecutionStatus::Seeking => RingStyle {
+            color: with_alpha(theme.viewport_status_loading, 0.9),
+            width: 1.5,
+        },
+        ExecutionStatus::RuntimeError => RingStyle {
+            color: theme.viewport_status_runtime_error,
+            width: 3.0,
+        },
+        ExecutionStatus::CompileError => RingStyle {
+            color: with_alpha(theme.viewport_status_compile_error, 0.72),
+            width: 2.0,
+        },
+    }
+}
+
+fn axis_default_bounds(value: f64, default_min: f64, default_max: f64, round: bool) -> (f64, f64) {
+    if (default_min..=default_max).contains(&value) {
+        return (default_min, default_max);
+    }
+
+    let span = (default_max - default_min).abs().max(value.abs().max(1.0));
+    let half = span * 0.5;
+    let mut min = value - half;
+    let mut max = value + half;
+    if round {
+        min = min.floor();
+        max = max.ceil();
+    }
+    (min, max)
+}
+
+fn default_bounds_for_value(value: &ParameterValue) -> [f64; 4] {
+    match value {
+        ParameterValue::Float(v) => {
+            let (min, max) = axis_default_bounds(*v, SLIDER_1D_MIN, SLIDER_1D_MAX, false);
+            [min, max, 0.0, 0.0]
+        }
+        ParameterValue::Int(v) => {
+            let (min, max) = axis_default_bounds(*v as f64, SLIDER_1D_MIN, SLIDER_1D_MAX, true);
+            [min, max, 0.0, 0.0]
+        }
+        ParameterValue::Complex { re, im } => {
+            let (x_min, x_max) = axis_default_bounds(*re, SLIDER_2D_MIN, SLIDER_2D_MAX, false);
+            let (y_min, y_max) = axis_default_bounds(*im, SLIDER_2D_MIN, SLIDER_2D_MAX, false);
+            [x_min, x_max, y_min, y_max]
+        }
+        ParameterValue::VectorFloat(values) if values.len() >= 2 => {
+            let (x_min, x_max) =
+                axis_default_bounds(values[0], SLIDER_2D_MIN, SLIDER_2D_MAX, false);
+            let (y_min, y_max) =
+                axis_default_bounds(values[1], SLIDER_2D_MIN, SLIDER_2D_MAX, false);
+            [x_min, x_max, y_min, y_max]
+        }
+        ParameterValue::VectorInt(values) if values.len() >= 2 => {
+            let (x_min, x_max) =
+                axis_default_bounds(values[0] as f64, SLIDER_2D_MIN, SLIDER_2D_MAX, true);
+            let (y_min, y_max) =
+                axis_default_bounds(values[1] as f64, SLIDER_2D_MIN, SLIDER_2D_MAX, true);
+            [x_min, x_max, y_min, y_max]
+        }
+        _ => [SLIDER_2D_MIN, SLIDER_2D_MAX, SLIDER_2D_MIN, SLIDER_2D_MAX],
+    }
+}
+
+fn current_slider_bounds(
+    weak_vp: &WeakEntity<Viewport>,
+    cx: &App,
+    name: &str,
+    fallback: [f64; 4],
+) -> [f64; 4] {
+    weak_vp
+        .upgrade()
+        .and_then(|entity| entity.read(cx).slider_bounds.get(name).copied())
+        .unwrap_or(fallback)
+}
+
+fn expand_threshold(range: f64, base: f64) -> f64 {
+    base.max(range.abs().max(1.0) * BOUNDS_EXPAND_THRESH_FRAC)
+}
+
 // --- drag computation helpers ---
 
 fn compute_1d_drag(
@@ -180,6 +322,7 @@ fn compute_1d_drag(
     is_int: bool,
 ) -> (ParameterValue, Option<(f64, f64)>) {
     let raw_p = (local_x / w) as f64;
+    let range = (max - min).abs().max(1.0);
     // outside bounds: fixed rate independent of current range to avoid acceleration
     let val_raw = if raw_p < 0.0 {
         min + raw_p * OVERDRAG_RATE_1D
@@ -195,13 +338,13 @@ fn compute_1d_drag(
         ParameterValue::Float(val)
     };
 
-    let range = max - min;
-    let mut new_min = if val_raw < min - BOUNDS_EXPAND_THRESH_1D {
+    let threshold = expand_threshold(range, BOUNDS_EXPAND_THRESH_1D);
+    let mut new_min = if val_raw < min - threshold {
         val_raw - BOUNDS_EXPAND_PAD * range
     } else {
         min
     };
-    let mut new_max = if val_raw > max + BOUNDS_EXPAND_THRESH_1D {
+    let mut new_max = if val_raw > max + threshold {
         val_raw + BOUNDS_EXPAND_PAD * range
     } else {
         max
@@ -251,27 +394,42 @@ fn compute_2d_drag(
 
     let pv = match kind {
         Slider2dKind::Complex => ParameterValue::Complex { re: xv, im: yv },
-        Slider2dKind::VectorFloat => ParameterValue::VectorFloat(vec![xv, yv]),
+        Slider2dKind::VectorFloat(tail) => {
+            let mut values = Vec::with_capacity(tail.len() + 2);
+            values.push(xv);
+            values.push(yv);
+            values.extend(tail);
+            ParameterValue::VectorFloat(values)
+        }
+        Slider2dKind::VectorInt(tail) => {
+            let mut values = Vec::with_capacity(tail.len() + 2);
+            values.push(xv.round() as i64);
+            values.push(yv.round() as i64);
+            values.extend(tail);
+            ParameterValue::VectorInt(values)
+        }
     };
 
-    let x_range = x_max - x_min;
-    let y_range = y_max - y_min;
-    let new_x_min = if xv < x_min - BOUNDS_EXPAND_THRESH_2D {
+    let x_range = (x_max - x_min).abs().max(1.0);
+    let y_range = (y_max - y_min).abs().max(1.0);
+    let x_threshold = expand_threshold(x_range, BOUNDS_EXPAND_THRESH_2D);
+    let y_threshold = expand_threshold(y_range, BOUNDS_EXPAND_THRESH_2D);
+    let new_x_min = if xv < x_min - x_threshold {
         xv - BOUNDS_EXPAND_PAD * x_range
     } else {
         x_min
     };
-    let new_x_max = if xv > x_max + BOUNDS_EXPAND_THRESH_2D {
+    let new_x_max = if xv > x_max + x_threshold {
         xv + BOUNDS_EXPAND_PAD * x_range
     } else {
         x_max
     };
-    let new_y_min = if yv < y_min - BOUNDS_EXPAND_THRESH_2D {
+    let new_y_min = if yv < y_min - y_threshold {
         yv - BOUNDS_EXPAND_PAD * y_range
     } else {
         y_min
     };
-    let new_y_max = if yv > y_max + BOUNDS_EXPAND_THRESH_2D {
+    let new_y_max = if yv > y_max + y_threshold {
         yv + BOUNDS_EXPAND_PAD * y_range
     } else {
         y_max
@@ -306,6 +464,7 @@ fn render_slider_1d(
     weak_vp: WeakEntity<Viewport>,
 ) -> impl IntoElement {
     let (min, max) = bounds;
+    let fallback_bounds = [min, max, 0.0, 0.0];
     let pct = ((value - min) / (max - min)).clamp(0.0, 1.0) as f32;
     let base_value = if is_int {
         format!("{}", value as i64)
@@ -436,6 +595,12 @@ fn render_slider_1d(
                                             {
                                                 return;
                                             }
+                                            let [min, max, _, _] = current_slider_bounds(
+                                                &weak_vp,
+                                                cx,
+                                                &name,
+                                                fallback_bounds,
+                                            );
                                             let local_x =
                                                 f32::from(ev.position.x - bounds.origin.x);
                                             let (pv, new_bounds) =
@@ -482,6 +647,12 @@ fn render_slider_1d(
                                             if !dragging {
                                                 return;
                                             }
+                                            let [min, max, _, _] = current_slider_bounds(
+                                                &weak_vp,
+                                                cx,
+                                                &name,
+                                                fallback_bounds,
+                                            );
                                             let local_x =
                                                 f32::from(ev.position.x - bounds.origin.x);
                                             let (pv, new_bounds) =
@@ -552,12 +723,13 @@ fn render_slider_2d(
 ) -> impl IntoElement {
     let (x_min, x_max) = x_bounds;
     let (y_min, y_max) = y_bounds;
+    let fallback_bounds = [x_min, x_max, y_min, y_max];
     let px_pct = ((x - x_min) / (x_max - x_min)).clamp(0.0, 1.0) as f32;
     let py_pct = 1.0 - ((y - y_min) / (y_max - y_min)).clamp(0.0, 1.0) as f32;
     // zero-crossing axis positions track true zero even when bounds shift
     let x_zero = ((-x_min) / (x_max - x_min)).clamp(0.0, 1.0) as f32;
     let y_zero = 1.0 - ((-y_min) / (y_max - y_min)).clamp(0.0, 1.0) as f32;
-    let value_text = match kind {
+    let value_text = match &kind {
         Slider2dKind::Complex => {
             if y < 0.0 {
                 format!("{:.2} - {:.2}i", x, y.abs())
@@ -565,7 +737,8 @@ fn render_slider_2d(
                 format!("{:.2} + {:.2}i", x, y)
             }
         }
-        Slider2dKind::VectorFloat => format!("({:.2}, {:.2})", x, y),
+        Slider2dKind::VectorFloat(_) => format!("({:.2}, {:.2})", x, y),
+        Slider2dKind::VectorInt(_) => format!("({}, {})", x.round() as i64, y.round() as i64),
     };
     let dot_color = if is_locked {
         SLIDER_THUMB_LOCKED
@@ -616,6 +789,7 @@ fn render_slider_2d(
                     .child(
                         canvas(move |bounds, _, _| bounds, {
                             let name = name_for_canvas.clone();
+                            let kind = kind.clone();
                             let services = services.clone();
                             let weak_vp = weak_vp.clone();
                             move |_, bounds: Bounds<Pixels>, window, _cx| {
@@ -663,6 +837,7 @@ fn render_slider_2d(
 
                                 {
                                     let name = name.clone();
+                                    let kind = kind.clone();
                                     let services = services.clone();
                                     let weak_vp = weak_vp.clone();
                                     window.on_mouse_event(
@@ -672,6 +847,13 @@ fn render_slider_2d(
                                             {
                                                 return;
                                             }
+                                            let [x_min, x_max, y_min, y_max] =
+                                                current_slider_bounds(
+                                                    &weak_vp,
+                                                    cx,
+                                                    &name,
+                                                    fallback_bounds,
+                                                );
                                             let (pv, new_bounds) = compute_2d_drag(
                                                 ev.position,
                                                 bounds,
@@ -679,7 +861,7 @@ fn render_slider_2d(
                                                 x_max,
                                                 y_min,
                                                 y_max,
-                                                kind,
+                                                kind.clone(),
                                             );
                                             weak_vp
                                                 .update(cx, |vp, cx| {
@@ -710,6 +892,7 @@ fn render_slider_2d(
                                 }
                                 {
                                     let name = name.clone();
+                                    let kind = kind.clone();
                                     let services = services.clone();
                                     let weak_vp = weak_vp.clone();
                                     window.on_mouse_event(
@@ -727,6 +910,13 @@ fn render_slider_2d(
                                             if !dragging {
                                                 return;
                                             }
+                                            let [x_min, x_max, y_min, y_max] =
+                                                current_slider_bounds(
+                                                    &weak_vp,
+                                                    cx,
+                                                    &name,
+                                                    fallback_bounds,
+                                                );
                                             let (pv, new_bounds) = compute_2d_drag(
                                                 ev.position,
                                                 bounds,
@@ -734,7 +924,7 @@ fn render_slider_2d(
                                                 x_max,
                                                 y_min,
                                                 y_max,
-                                                kind,
+                                                kind.clone(),
                                             );
                                             if let Some(((nx_min, nx_max), (ny_min, ny_max))) =
                                                 new_bounds
@@ -829,7 +1019,19 @@ fn render_param_control(
             name.to_string(),
             v[0],
             v[1],
-            Slider2dKind::VectorFloat,
+            Slider2dKind::VectorFloat(v[2..].to_vec()),
+            is_locked,
+            (bounds[0], bounds[1]),
+            (bounds[2], bounds[3]),
+            services,
+            weak_vp,
+        )
+        .into_any_element(),
+        ParameterValue::VectorInt(v) if v.len() >= 2 => render_slider_2d(
+            name.to_string(),
+            v[0] as f64,
+            v[1] as f64,
+            Slider2dKind::VectorInt(v[2..].to_vec()),
             is_locked,
             (bounds[0], bounds[1]),
             (bounds[2], bounds[3]),
@@ -866,45 +1068,52 @@ impl Render for Viewport {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
-        let (ring_color, ring_width, params, timestamp, slide_count) = {
+        let (status, params, timestamp, slide_count) = {
             let exec = self.services.read(cx).execution_state().read(cx);
-            let show_ring = if self.is_presenting {
-                exec.has_error()
-            } else {
-                true
-            };
-            let ring_width = if show_ring {
-                if matches!(
-                    exec.status,
-                    ExecutionStatus::Playing | ExecutionStatus::Paused
-                ) {
-                    px(1.0)
-                } else {
-                    px(4.0)
-                }
-            } else {
-                px(0.0)
-            };
             (
-                theme.viewport_status_ring(exec.status),
-                ring_width,
+                exec.status,
                 exec.parameters.clone(),
                 exec.current_timestamp,
                 exec.slide_count,
             )
         };
+        let target_ring = ring_style_for(status, self.is_presenting, theme);
+        match self.ring_style {
+            Some(current) if current != target_ring => {
+                self.ring_previous = current;
+                self.ring_style = Some(target_ring);
+                self.ring_animation_nonce = self.ring_animation_nonce.wrapping_add(1);
+            }
+            Some(_) => {}
+            None => {
+                self.ring_previous = target_ring;
+                self.ring_style = Some(target_ring);
+            }
+        }
+        let ring_style = self.ring_style.expect("ring style should be initialized");
+        let previous_ring = self.ring_previous;
+        let ring_animation_id = format!("viewport-ring-{}", self.ring_animation_nonce);
 
         let stage = div()
             .flex()
             .flex_1()
             .size_full()
-            .bg(ring_color)
-            .p(ring_width)
+            .bg(ring_style.color)
+            .p(px(ring_style.width))
             .child(
                 div()
                     .size_full()
                     .bg(theme.viewport_stage_background)
                     .child(self.scene.clone()),
+            )
+            .with_animation(
+                ring_animation_id,
+                Animation::new(RING_TRANSITION).with_easing(ease_in_out),
+                move |stage, delta| {
+                    stage
+                        .bg(lerp_rgba(previous_ring.color, ring_style.color, delta))
+                        .p(px(lerp_f32(previous_ring.width, ring_style.width, delta)))
+                },
             );
 
         if !self.is_presenting {
@@ -940,6 +1149,9 @@ impl Render for Viewport {
                     .iter()
                     .rev()
                     .filter_map(|name| {
+                        if is_hidden_param(name) {
+                            return None;
+                        }
                         let is_locked = p.locked_params.contains(name);
                         p.parameters
                             .get(name)
@@ -952,16 +1164,10 @@ impl Render for Viewport {
         let controls: Vec<AnyElement> = sorted
             .iter()
             .map(|(name, value, is_locked)| {
-                let bounds =
-                    slider_bounds
-                        .get(name.as_str())
-                        .copied()
-                        .unwrap_or_else(|| match value {
-                            ParameterValue::Float(_) | ParameterValue::Int(_) => {
-                                [SLIDER_1D_MIN, SLIDER_1D_MAX, 0.0, 0.0]
-                            }
-                            _ => [SLIDER_2D_MIN, SLIDER_2D_MAX, SLIDER_2D_MIN, SLIDER_2D_MAX],
-                        });
+                let bounds = slider_bounds
+                    .get(name.as_str())
+                    .copied()
+                    .unwrap_or_else(|| default_bounds_for_value(value));
                 render_param_control(
                     name,
                     value,

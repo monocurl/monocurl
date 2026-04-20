@@ -1,6 +1,6 @@
 // lex → parse → compile → execute
 
-use std::{f64, sync::Arc};
+use std::{f64, fs, path::Path, sync::Arc};
 
 use compiler::cache::CompilerCache;
 use executor::{
@@ -16,6 +16,7 @@ use parser::{
 };
 use stdlib::registry::registry;
 use structs::{
+    assets::Assets,
     rope::{Rope, TextAggregate},
     text::Span8,
 };
@@ -183,10 +184,22 @@ fn lex(src: &str) -> Vec<(Token, Span8)> {
 /// compile and execute a snippet of Monocurl slide code.
 /// the source is treated as the body of a single Slide section
 fn run(src: &str) -> ExecResult {
-    run_section(src, SectionType::Slide)
+    run_with_stdlib(src, &[])
+}
+
+fn run_with_stdlib(src: &str, stdlib_names: &[&str]) -> ExecResult {
+    run_section_with_stdlib(src, SectionType::Slide, stdlib_names)
 }
 
 fn run_section(src: &str, section_type: SectionType) -> ExecResult {
+    run_section_with_stdlib(src, section_type, &[])
+}
+
+fn run_section_with_stdlib(
+    src: &str,
+    section_type: SectionType,
+    stdlib_names: &[&str],
+) -> ExecResult {
     // -- parse --
     let tokens = lex(src);
     let rope: Rope<TextAggregate> = Rope::from_str(src);
@@ -207,10 +220,14 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         };
     }
 
-    let bundle = Arc::new(SectionBundle {
+    let stdlib_bundles: Vec<Arc<SectionBundle>> =
+        stdlib_names.iter().copied().map(stdlib_bundle).collect();
+    let imported_files: Vec<usize> = (0..stdlib_bundles.len()).collect();
+
+    let user_bundle = Arc::new(SectionBundle {
         file_path: None,
         file_index: 0,
-        imported_files: vec![],
+        imported_files,
         sections: vec![Section {
             body: stmts,
             section_type,
@@ -219,8 +236,11 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         was_cached: false,
     });
 
+    let mut bundles = stdlib_bundles;
+    bundles.push(user_bundle);
+
     let mut cache = CompilerCache::default();
-    let result = compiler::compiler::compile(&mut cache, None, &[bundle]);
+    let result = compiler::compiler::compile(&mut cache, None, &bundles);
 
     let compile_errors: Vec<String> = result.errors.iter().map(|e| e.message.clone()).collect();
     if !compile_errors.is_empty() {
@@ -251,7 +271,8 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
     let mut runtime_errors: Vec<String> = Vec::new();
 
     smol::block_on(async {
-        match executor.seek_to(Timestamp::new(1, f64::INFINITY)).await {
+        let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => {
                 runtime_errors.push(e.to_string());
@@ -288,6 +309,37 @@ fn run_section(src: &str, section_type: SectionType) -> ExecResult {
         errors: runtime_errors,
         _error_spans: error_spans,
     }
+}
+
+fn stdlib_path(name: &str) -> std::path::PathBuf {
+    Assets::std_lib().join(format!("std/{name}.mcl"))
+}
+
+fn stdlib_bundle(name: &str) -> Arc<SectionBundle> {
+    let src = fs::read_to_string(stdlib_path(name)).expect("failed to read stdlib file");
+    let tokens = lex(&src);
+    let rope: Rope<TextAggregate> = Rope::from_str(&src);
+    let mut parser = SectionParser::new(tokens, rope, SectionType::StandardLibrary, None, None);
+    let stmts = parser.parse_statement_list();
+    let errors: Vec<String> = parser
+        .artifacts()
+        .error_diagnostics
+        .iter()
+        .map(|e| e.message.clone())
+        .collect();
+    assert!(errors.is_empty(), "stdlib parse errors: {:?}", errors);
+
+    Arc::new(SectionBundle {
+        file_path: Some(Path::new(&format!("std/{name}.mcl")).to_path_buf()),
+        file_index: 0,
+        imported_files: vec![],
+        sections: vec![Section {
+            body: stmts,
+            section_type: SectionType::StandardLibrary,
+        }],
+        root_import_span: Some(0..0),
+        was_cached: false,
+    })
 }
 
 // -- literals and arithmetic --
@@ -1845,6 +1897,86 @@ fn test_live_elision_recomputes_defaulted_labeled_invocation() {
         let result = inv + inv.lbl
     ");
     r.assert_int(140);
+}
+
+#[test]
+fn test_util_attr_helpers_on_live_function() {
+    let r = run_with_stdlib(
+        "
+        let f = |x, y| x + y
+        var inv = f(lbl: 10, 30)
+        inv = set_attr(inv, \"lbl\", 25)
+        let result = has_attr(inv, \"lbl\") * 100 + has_attr(inv, \"missing\") * 10 + get_attr(inv, \"lbl\")
+    ",
+        &["util"],
+    );
+    r.assert_int(125);
+}
+
+#[test]
+fn test_util_attr_helpers_on_live_operator_delegate_to_operand() {
+    let r = run_with_stdlib(
+        "
+        let f = |x, y| x + y
+        let passthrough = operator |target, amount| [target, target]
+        let inv = passthrough{amount: 2} f(lbl: 40, 2)
+        let updated = set_attr(inv, \"lbl\", 50)
+        let result = has_attr(updated, \"lbl\") * 100 + get_attr(updated, \"lbl\")
+    ",
+        &["util"],
+    );
+    r.assert_int(150);
+}
+
+#[test]
+fn test_util_type_predicates_cover_callable_variants() {
+    let r = run_with_stdlib(
+        "
+        let f = |x, y| x + y
+        let op = operator |target| [target, target]
+        let live_f = f(arg: 1, 2)
+        let live_op = op{} 1
+        let result = is_float(1.5)
+            + is_number(2)
+            + is_list([1, 2])
+            + is_function(f)
+            + is_function(live_f)
+            + is_operator(op)
+            + is_operator(live_op)
+            + is_callable(f)
+            + is_callable(live_op)
+            + is_live_function(live_f)
+            + is_live_operator(live_op)
+    ",
+        &["util"],
+    );
+    r.assert_int(11);
+}
+
+#[test]
+fn test_util_type_predicates_cover_mesh_and_primitive_anim() {
+    let r = run_with_stdlib(
+        "
+        let result = is_mesh(Dot()) + is_primitive_anim(PrimitiveAnim())
+    ",
+        &["util", "mesh", "anim"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_util_type_of_and_runtime_error() {
+    let r = run_with_stdlib(
+        "
+        let f = |x, y| x + y
+        let result = type_of(f(lbl: 1, 2))
+    ",
+        &["util"],
+    );
+    r.assert_string("live function");
+
+    let err = run_with_stdlib("runtime_error(\"boom\")", &["util"]);
+    err.assert_error("boom");
 }
 
 // -- stack overflow --
