@@ -314,23 +314,23 @@ let fade = operator |target, opacity = 0| {
 }
 
 let stroke = operator |target, color = [0, 0, 0, 1]| {
-    let go = |c| __monocurl__native__ op_restroke(target, c)
-    return [target, go(c: color)]
+    let go = |c, level| __monocurl__native__ op_restroke(target, c, level)
+    return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
 let fill = operator |target, color = [0, 0, 0, 1]| {
-    let go = |c| __monocurl__native__ op_refill(target, c)
-    return [target, go(c: color)]
+    let go = |c, level| __monocurl__native__ op_refill(target, c, level)
+    return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
 let dotted = operator |target, color = [0, 0, 0, 1]| {
-    let go = |c| __monocurl__native__ op_redot(target, c)
-    return [target, go(c: color)]
+    let go = |c, level| __monocurl__native__ op_redot(target, c, level)
+    return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
 let normal_hint = operator |target, normal = 1f| {
-    let go = |n| __monocurl__native__ op_normal_hint(target, n)
-    return [target, go(n: normal)]
+    let go = |n, level| __monocurl__native__ op_normal_hint(target, n, level)
+    return [go(n: normal, level: 0), go(n: normal, level: 1)]
 }
 
 let retag = operator |target, tag = 0| [target, __monocurl__native__ op_retagged(target, |old| tag)]
@@ -339,9 +339,18 @@ let textured = operator |target, image| [target, __monocurl__native__ op_retextu
 let with_z = operator |target, index = 0| [target, __monocurl__native__ op_with_z(target, index)]
 let fixed_in_frame = operator |target, fixed = 1| [target, __monocurl__native__ op_fixed_in_frame(target, fixed)]
 let gloss = operator |target| [target, __monocurl__native__ op_gloss(target)]
-let point_map = operator |target, f| [__monocurl__native__ op_point_map(target, |p| p), __monocurl__native__ op_point_map(target, f)]
-let color_map = operator |target, f| [target, __monocurl__native__ op_color_map(target, f)]
-let uv_map = operator |target, f| [target, __monocurl__native__ op_uv_map(target, f)]
+let point_map = operator |target, f| {
+    let go = |level| __monocurl__native__ op_point_map(target, f, level)
+    return [go(level: 0), go(level: 1)]
+}
+let color_map = operator |target, f| {
+    let go = |level| __monocurl__native__ op_color_map(target, f, level)
+    return [go(level: 0), go(level: 1)]
+}
+let uv_map = operator |target, f| {
+    let go = |level| __monocurl__native__ op_uv_map(target, f, level)
+    return [go(level: 0), go(level: 1)]
+}
 let retagged = operator |target, f| [target, __monocurl__native__ op_retagged(target, f)]
 let tag_map = operator |target, f| [target, __monocurl__native__ op_tag_map(target, f)]
 let uprank = operator |target| [target, __monocurl__native__ op_uprank(target)]
@@ -351,12 +360,30 @@ let subdivide = operator |target, factor = 2| [__monocurl__native__ op_subdivide
 let tesselated = operator |target, depth = 1| [__monocurl__native__ op_tesselated(target, 0), __monocurl__native__ op_tesselated(target, depth)]
 let extrude = operator |target, delta = 1f| [__monocurl__native__ op_extrude(target, [0, 0, 0]), __monocurl__native__ op_extrude(target, delta)]
 let revolve = operator |target, rotation = [0, 3.14, 0]| [__monocurl__native__ op_revolve(target, [0, 0, 0]), __monocurl__native__ op_revolve(target, rotation)]
-let centered_at = operator |target, at = [0, 0, 0]| [target, __monocurl__native__ op_centered(target, at)]
-let moved_to_side = operator |target, dir = [0, 0, 0]| [target, __monocurl__native__ op_moved_to_side(target, dir)]
-let matched_edge = operator |target, ref, dir = 1r| [target, __monocurl__native__ op_matched_edge(target, ref, dir)]
-let next_to = operator |target, ref, dir = 1r| [target, __monocurl__native__ op_next_to(target, ref, dir)]
-let projected = operator |target, screen, ray = 1b| [target, __monocurl__native__ op_projected(target, screen, ray)]
-let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1f| [target, __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit)]
+let centered_at = operator |target, at = [0, 0, 0]| {
+    let go = |level| __monocurl__native__ op_centered(target, at, level)
+    return [go(level: 0), go(level: 1)]
+}
+let moved_to_side = operator |target, dir = [0, 0, 0]| {
+    let go = |level| __monocurl__native__ op_moved_to_side(target, dir, level)
+    return [go(level: 0), go(level: 1)]
+}
+let matched_edge = operator |target, ref, dir = 1r| {
+    let go = |level| __monocurl__native__ op_matched_edge(target, ref, dir, level)
+    return [go(level: 0), go(level: 1)]
+}
+let next_to = operator |target, ref, dir = 1r| {
+    let go = |level| __monocurl__native__ op_next_to(target, ref, dir, level)
+    return [go(level: 0), go(level: 1)]
+}
+let projected = operator |target, screen, ray = 1b| {
+    let go = |level| __monocurl__native__ op_projected(target, screen, ray, level)
+    return [go(level: 0), go(level: 1)]
+}
+let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1f| {
+    let go = |level| __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit, level)
+    return [go(level: 0), go(level: 1)]
+}
 
 let tag_filter = |target, filter| __monocurl__native__ tag_filter(target, filter)
 

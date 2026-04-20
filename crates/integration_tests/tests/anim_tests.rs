@@ -193,6 +193,24 @@ fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
     }
 }
 
+async fn current_mesh_leader_value(executor: &mut Executor) -> Value {
+    let entry = executor
+        .state
+        .leaders
+        .iter()
+        .find(|entry| entry.kind == LeaderKind::Mesh)
+        .expect("expected mesh leader");
+    let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
+    let Value::Leader(leader) = cell_val else {
+        panic!("mesh leader entry is not a Leader value");
+    };
+
+    with_heap(|h| h.get(leader.follower_rc.key()).clone())
+        .elide_wrappers(executor)
+        .await
+        .expect("mesh leader wrapper elision should succeed")
+}
+
 fn load_stdlib_bundle_with_import_span(
     path: impl AsRef<Path>,
     import_span: Span8,
@@ -909,6 +927,91 @@ fn test_lerp_of_mesh_operator_variants_after_label_mutation() {
         &stdlib_bundles(["color", "math", "mesh"]),
     );
     r.assert_ok();
+}
+
+#[test]
+fn test_stroke_operator_lerp_blends_from_identity_embed() {
+    let src = "
+        mesh x = shift{1r} Circle([0, 0, 0], 1)
+        x = stroke{RED} x
+        play Lerp()
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        match executor.seek_to(mid).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = &current else {
+        panic!("expected current mesh value");
+    };
+
+    let sample = mesh.lins.first().expect("expected stroked line");
+    assert!(
+        sample.a.col.x > 0.05 && sample.a.col.x < 0.95,
+        "expected interpolated stroke color, got {:?}",
+        sample.a.col.to_array()
+    );
+
+    let avg_x = mesh
+        .lins
+        .iter()
+        .flat_map(|lin| [lin.a.pos.x, lin.b.pos.x])
+        .sum::<f32>()
+        / (mesh.lins.len() as f32 * 2.0);
+    assert!(
+        avg_x > 0.5,
+        "expected shifted geometry to stay materialized, got avg x {avg_x}"
+    );
+}
+
+#[test]
+fn test_point_map_operator_lerp_blends_from_identity_embed() {
+    let src = "
+        mesh x = shift{1r} Dot()
+        x = point_map{|p| p + 2r} x
+        play Lerp()
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        match executor.seek_to(mid).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = &current else {
+        panic!("expected current mesh value");
+    };
+
+    let dot = mesh.dots.first().expect("expected mapped dot");
+    assert!(
+        (dot.pos.x - 2.0).abs() < 1e-3,
+        "expected midpoint point-map x of 2, got {}",
+        dot.pos.x
+    );
 }
 
 #[test]

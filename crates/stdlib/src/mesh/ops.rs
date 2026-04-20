@@ -30,6 +30,36 @@ fn read_scale_factor(
     }
 }
 
+fn read_level(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<f32, ExecutorError> {
+    Ok(crate::read_float(executor, stack_idx, index, name)?.clamp(0.0, 1.0) as f32)
+}
+
+fn blend_mesh_positions(mesh: &mut Mesh, level: f32, map: impl Fn(Float3) -> Float3) {
+    for dot in &mut mesh.dots {
+        let original = dot.pos;
+        dot.pos = original.lerp(map(original), level);
+    }
+    for lin in &mut mesh.lins {
+        let original = lin.a.pos;
+        lin.a.pos = original.lerp(map(original), level);
+        let original = lin.b.pos;
+        lin.b.pos = original.lerp(map(original), level);
+    }
+    for tri in &mut mesh.tris {
+        let original = tri.a.pos;
+        tri.a.pos = original.lerp(map(original), level);
+        let original = tri.b.pos;
+        tri.b.pos = original.lerp(map(original), level);
+        let original = tri.c.pos;
+        tri.c.pos = original.lerp(map(original), level);
+    }
+}
+
 fn midpoint_vertex(
     vertices: &mut Vec<SurfaceVertex>,
     edge_midpoints: &mut HashMap<(usize, usize), usize>,
@@ -167,12 +197,16 @@ pub async fn op_restroke(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let color = read_float4(executor, stack_idx, -1, "color")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let color = read_float4(executor, stack_idx, -2, "color")?;
     tree.for_each_mut(&mut |mesh| {
         for lin in &mut mesh.lins {
-            lin.a.col = color;
-            lin.b.col = color;
+            lin.a.col = lin.a.col.lerp(color, level);
+            lin.b.col = lin.b.col.lerp(color, level);
         }
     });
     Ok(tree.into_value())
@@ -180,13 +214,17 @@ pub async fn op_restroke(
 
 #[stdlib_func]
 pub async fn op_refill(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let color = read_float4(executor, stack_idx, -1, "color")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let color = read_float4(executor, stack_idx, -2, "color")?;
     tree.for_each_mut(&mut |mesh| {
         for tri in &mut mesh.tris {
-            tri.a.col = color;
-            tri.b.col = color;
-            tri.c.col = color;
+            tri.a.col = tri.a.col.lerp(color, level);
+            tri.b.col = tri.b.col.lerp(color, level);
+            tri.c.col = tri.c.col.lerp(color, level);
         }
     });
     Ok(tree.into_value())
@@ -194,11 +232,15 @@ pub async fn op_refill(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn op_redot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let color = read_float4(executor, stack_idx, -1, "color")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let color = read_float4(executor, stack_idx, -2, "color")?;
     tree.for_each_mut(&mut |mesh| {
         for dot in &mut mesh.dots {
-            dot.col = color;
+            dot.col = dot.col.lerp(color, level);
         }
     });
     Ok(tree.into_value())
@@ -209,14 +251,18 @@ pub async fn op_normal_hint(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let normal = read_float3(executor, stack_idx, -2, "normal")?;
     tree.for_each_mut(&mut |mesh| {
         for dot in &mut mesh.dots {
-            dot.norm = normal;
+            dot.norm = dot.norm.lerp(normal, level);
         }
         for lin in &mut mesh.lins {
-            lin.norm = normal;
+            lin.norm = lin.norm.lerp(normal, level);
         }
     });
     Ok(tree.into_value())
@@ -274,52 +320,68 @@ pub async fn op_point_map(
         executor: &'a mut Executor,
         tree: &'a mut MeshTree,
         func: &'a Value,
+        level: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), ExecutorError>> + 'a>> {
         Box::pin(async move {
             match tree {
                 MeshTree::Mesh(arc) => {
                     let mesh = Arc::make_mut(arc);
                     for dot in &mut mesh.dots {
-                        dot.pos = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(dot.pos)], "f")
+                        let original = dot.pos;
+                        let mapped = float3_from_value(
+                            invoke_callable(executor, func, vec![point_value(original)], "f")
                                 .await?,
                             "f",
                         )?;
+                        dot.pos = original.lerp(mapped, level);
                     }
                     for lin in &mut mesh.lins {
-                        lin.a.pos = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(lin.a.pos)], "f")
+                        let original = lin.a.pos;
+                        let mapped = float3_from_value(
+                            invoke_callable(executor, func, vec![point_value(original)], "f")
                                 .await?,
                             "f",
                         )?;
-                        lin.b.pos = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(lin.b.pos)], "f")
+                        lin.a.pos = original.lerp(mapped, level);
+
+                        let original = lin.b.pos;
+                        let mapped = float3_from_value(
+                            invoke_callable(executor, func, vec![point_value(original)], "f")
                                 .await?,
                             "f",
                         )?;
+                        lin.b.pos = original.lerp(mapped, level);
                     }
                     for tri in &mut mesh.tris {
-                        tri.a.pos = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.a.pos)], "f")
+                        let original = tri.a.pos;
+                        let mapped = float3_from_value(
+                            invoke_callable(executor, func, vec![point_value(original)], "f")
                                 .await?,
                             "f",
                         )?;
-                        tri.b.pos = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.b.pos)], "f")
+                        tri.a.pos = original.lerp(mapped, level);
+
+                        let original = tri.b.pos;
+                        let mapped = float3_from_value(
+                            invoke_callable(executor, func, vec![point_value(original)], "f")
                                 .await?,
                             "f",
                         )?;
-                        tri.c.pos = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.c.pos)], "f")
+                        tri.b.pos = original.lerp(mapped, level);
+
+                        let original = tri.c.pos;
+                        let mapped = float3_from_value(
+                            invoke_callable(executor, func, vec![point_value(original)], "f")
                                 .await?,
                             "f",
                         )?;
+                        tri.c.pos = original.lerp(mapped, level);
                     }
                     Ok(())
                 }
                 MeshTree::List(children) => {
                     for child in children {
-                        recurse(executor, child, func).await?;
+                        recurse(executor, child, func, level).await?;
                     }
                     Ok(())
                 }
@@ -327,14 +389,18 @@ pub async fn op_point_map(
         })
     }
 
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
     let func = executor
         .state
         .stack(stack_idx)
-        .read_at(-1)
+        .read_at(-2)
         .clone()
         .elide_lvalue();
-    recurse(executor, &mut tree, &func).await?;
+    recurse(executor, &mut tree, &func, level).await?;
     Ok(tree.into_value())
 }
 
@@ -347,52 +413,68 @@ pub async fn op_color_map(
         executor: &'a mut Executor,
         tree: &'a mut MeshTree,
         func: &'a Value,
+        level: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), ExecutorError>> + 'a>> {
         Box::pin(async move {
             match tree {
                 MeshTree::Mesh(arc) => {
                     let mesh = Arc::make_mut(arc);
                     for dot in &mut mesh.dots {
-                        dot.col = float4_from_value(
+                        let original = dot.col;
+                        let mapped = float4_from_value(
                             invoke_callable(executor, func, vec![point_value(dot.pos)], "f")
                                 .await?,
                             "f",
                         )?;
+                        dot.col = original.lerp(mapped, level);
                     }
                     for lin in &mut mesh.lins {
-                        lin.a.col = float4_from_value(
+                        let original = lin.a.col;
+                        let mapped = float4_from_value(
                             invoke_callable(executor, func, vec![point_value(lin.a.pos)], "f")
                                 .await?,
                             "f",
                         )?;
-                        lin.b.col = float4_from_value(
+                        lin.a.col = original.lerp(mapped, level);
+
+                        let original = lin.b.col;
+                        let mapped = float4_from_value(
                             invoke_callable(executor, func, vec![point_value(lin.b.pos)], "f")
                                 .await?,
                             "f",
                         )?;
+                        lin.b.col = original.lerp(mapped, level);
                     }
                     for tri in &mut mesh.tris {
-                        tri.a.col = float4_from_value(
+                        let original = tri.a.col;
+                        let mapped = float4_from_value(
                             invoke_callable(executor, func, vec![point_value(tri.a.pos)], "f")
                                 .await?,
                             "f",
                         )?;
-                        tri.b.col = float4_from_value(
+                        tri.a.col = original.lerp(mapped, level);
+
+                        let original = tri.b.col;
+                        let mapped = float4_from_value(
                             invoke_callable(executor, func, vec![point_value(tri.b.pos)], "f")
                                 .await?,
                             "f",
                         )?;
-                        tri.c.col = float4_from_value(
+                        tri.b.col = original.lerp(mapped, level);
+
+                        let original = tri.c.col;
+                        let mapped = float4_from_value(
                             invoke_callable(executor, func, vec![point_value(tri.c.pos)], "f")
                                 .await?,
                             "f",
                         )?;
+                        tri.c.col = original.lerp(mapped, level);
                     }
                     Ok(())
                 }
                 MeshTree::List(children) => {
                     for child in children {
-                        recurse(executor, child, func).await?;
+                        recurse(executor, child, func, level).await?;
                     }
                     Ok(())
                 }
@@ -400,14 +482,18 @@ pub async fn op_color_map(
         })
     }
 
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
     let func = executor
         .state
         .stack(stack_idx)
-        .read_at(-1)
+        .read_at(-2)
         .clone()
         .elide_lvalue();
-    recurse(executor, &mut tree, &func).await?;
+    recurse(executor, &mut tree, &func, level).await?;
     Ok(tree.into_value())
 }
 
@@ -417,33 +503,42 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         executor: &'a mut Executor,
         tree: &'a mut MeshTree,
         func: &'a Value,
+        level: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), ExecutorError>> + 'a>> {
         Box::pin(async move {
             match tree {
                 MeshTree::Mesh(arc) => {
                     let mesh = Arc::make_mut(arc);
                     for tri in &mut mesh.tris {
-                        tri.a.uv = float2_from_value(
+                        let original = tri.a.uv;
+                        let mapped = float2_from_value(
                             invoke_callable(executor, func, vec![point_value(tri.a.pos)], "f")
                                 .await?,
                             "f",
                         )?;
-                        tri.b.uv = float2_from_value(
+                        tri.a.uv = original.lerp(mapped, level);
+
+                        let original = tri.b.uv;
+                        let mapped = float2_from_value(
                             invoke_callable(executor, func, vec![point_value(tri.b.pos)], "f")
                                 .await?,
                             "f",
                         )?;
-                        tri.c.uv = float2_from_value(
+                        tri.b.uv = original.lerp(mapped, level);
+
+                        let original = tri.c.uv;
+                        let mapped = float2_from_value(
                             invoke_callable(executor, func, vec![point_value(tri.c.pos)], "f")
                                 .await?,
                             "f",
                         )?;
+                        tri.c.uv = original.lerp(mapped, level);
                     }
                     Ok(())
                 }
                 MeshTree::List(children) => {
                     for child in children {
-                        recurse(executor, child, func).await?;
+                        recurse(executor, child, func, level).await?;
                     }
                     Ok(())
                 }
@@ -451,14 +546,18 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         })
     }
 
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
     let func = executor
         .state
         .stack(stack_idx)
-        .read_at(-1)
+        .read_at(-2)
         .clone()
         .elide_lvalue();
-    recurse(executor, &mut tree, &func).await?;
+    recurse(executor, &mut tree, &func, level).await?;
     Ok(tree.into_value())
 }
 
@@ -925,10 +1024,14 @@ pub async fn op_centered(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let at = read_float3(executor, stack_idx, -1, "at")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let at = read_float3(executor, stack_idx, -2, "at")?;
     let center = tree_center(&tree).unwrap_or(Float3::ZERO);
-    let delta = at - center;
+    let delta = (at - center) * level;
     tree.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |p| p + delta));
     Ok(tree.into_value())
 }
@@ -938,8 +1041,12 @@ pub async fn op_moved_to_side(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let side = read_float3(executor, stack_idx, -1, "dir")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let side = read_float3(executor, stack_idx, -2, "dir")?;
     let center = tree_center(&tree).unwrap_or(Float3::ZERO);
     let right = extremal_point(&tree, Float3::X).unwrap_or(center).x;
     let left = extremal_point(&tree, -Float3::X).unwrap_or(center).x;
@@ -961,6 +1068,7 @@ pub async fn op_moved_to_side(
     } else {
         -center.y
     };
+    delta *= level;
     tree.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |p| p + delta));
     Ok(tree.into_value())
 }
@@ -970,23 +1078,31 @@ pub async fn op_matched_edge(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
-    let reference = read_mesh_tree_arg(executor, stack_idx, -2, "ref").await?;
-    let dir = read_float3(executor, stack_idx, -1, "dir")?.normalize();
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let reference = read_mesh_tree_arg(executor, stack_idx, -3, "ref").await?;
+    let dir = read_float3(executor, stack_idx, -2, "dir")?.normalize();
     let our = extremal_point(&tree, dir).unwrap_or(Float3::ZERO).dot(dir);
     let their = extremal_point(&reference, dir)
         .unwrap_or(Float3::ZERO)
         .dot(dir);
-    let delta = dir * (their - our);
+    let delta = dir * (their - our) * level;
     tree.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |p| p + delta));
     Ok(tree.into_value())
 }
 
 #[stdlib_func]
 pub async fn op_next_to(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
-    let reference = read_mesh_tree_arg(executor, stack_idx, -2, "ref").await?;
-    let dir = read_float3(executor, stack_idx, -1, "dir")?.normalize();
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let reference = read_mesh_tree_arg(executor, stack_idx, -3, "ref").await?;
+    let dir = read_float3(executor, stack_idx, -2, "dir")?.normalize();
     let our_center = tree_center(&tree).unwrap_or(Float3::ZERO);
     let ref_center = tree_center(&reference).unwrap_or(Float3::ZERO);
     let our_face = extremal_point(&tree, -dir).unwrap_or(our_center).dot(dir);
@@ -994,7 +1110,7 @@ pub async fn op_next_to(executor: &mut Executor, stack_idx: usize) -> Result<Val
         .unwrap_or(ref_center)
         .dot(dir);
     let orth = (ref_center - our_center) - dir * (ref_center - our_center).dot(dir);
-    let delta = dir * (ref_face - our_face + 0.1) + orth;
+    let delta = (dir * (ref_face - our_face + 0.1) + orth) * level;
     tree.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |p| p + delta));
     Ok(tree.into_value())
 }
@@ -1004,9 +1120,13 @@ pub async fn op_projected(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
-    let screen = read_mesh_tree_arg(executor, stack_idx, -2, "screen").await?;
-    let ray = read_float3(executor, stack_idx, -1, "ray")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let screen = read_mesh_tree_arg(executor, stack_idx, -3, "screen").await?;
+    let ray = read_float3(executor, stack_idx, -2, "ray")?;
     let ray = if ray.len_sq() <= 1e-12 {
         Float3::Z
     } else {
@@ -1032,7 +1152,7 @@ pub async fn op_projected(
             .unwrap_or(point)
     };
 
-    tree.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, cast));
+    tree.for_each_mut(&mut |mesh| blend_mesh_positions(mesh, level, cast));
     Ok(tree.into_value())
 }
 
@@ -1041,13 +1161,17 @@ pub async fn op_in_space(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
-    let axis_center = read_float3(executor, stack_idx, -4, "axis_center")?;
-    let x_unit = read_float3(executor, stack_idx, -3, "x_unit")?;
-    let y_unit = read_float3(executor, stack_idx, -2, "y_unit")?;
-    let z_unit = read_float3(executor, stack_idx, -1, "z_unit")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -6, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let axis_center = read_float3(executor, stack_idx, -5, "axis_center")?;
+    let x_unit = read_float3(executor, stack_idx, -4, "x_unit")?;
+    let y_unit = read_float3(executor, stack_idx, -3, "y_unit")?;
+    let z_unit = read_float3(executor, stack_idx, -2, "z_unit")?;
     tree.for_each_mut(&mut |mesh| {
-        transform_mesh_positions(mesh, |p| {
+        blend_mesh_positions(mesh, level, |p| {
             axis_center + x_unit * p.x + y_unit * p.y + z_unit * p.z
         })
     });
