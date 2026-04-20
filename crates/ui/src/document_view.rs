@@ -100,13 +100,17 @@ fn dirty_file(internal: &PathBuf, user: &Option<PathBuf>) -> bool {
 
 /* action handlers */
 impl DocumentView {
+    pub fn focus(&self, window: &mut Window) {
+        window.focus(&self.focus_handle);
+    }
+
     fn toggle_presentation(
         &mut self,
         _: &TogglePresentationMode,
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        w.focus(&self.focus_handle);
+        self.focus(w);
 
         if self.is_presenting {
             if w.is_fullscreen() && !self.was_fullscreen_before_presenting {
@@ -144,7 +148,7 @@ impl DocumentView {
     }
 
     fn unfocus_editor(&mut self, _: &UnfocusEditor, w: &mut Window, _cx: &mut Context<Self>) {
-        w.focus(&self.focus_handle);
+        self.focus(w);
     }
 
     fn toggle_playing(&mut self, _: &TogglePlaying, _w: &mut Window, cx: &mut Context<Self>) {
@@ -504,7 +508,7 @@ impl Render for DocumentView {
         cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         if window.focused(cx).is_none() {
-            window.focus(&self.focus_handle);
+            self.focus(window);
         }
 
         if self.is_presenting {

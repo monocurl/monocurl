@@ -53,6 +53,16 @@ pub struct WindowState {
 }
 
 impl WindowState {
+    fn focus_active_document(&self, window: &mut Window, cx: &mut App) {
+        let ActiveScreen::Document(document) = &self.screen else {
+            return;
+        };
+
+        let _ = document.view.update(cx, |view, _| {
+            view.focus(window);
+        });
+    }
+
     fn save_file() -> PathBuf {
         let mut path = dirs::data_local_dir().expect("Could not find local data directory");
         path.push("Monocurl");
@@ -472,6 +482,7 @@ impl WindowState {
                 .clone(),
         );
 
+        self.focus_active_document(window, cx);
         self.save();
     }
 }
