@@ -35,9 +35,7 @@ impl Executor {
         let lhs = stack.pop();
 
         if matches!(lhs, Value::Stateful(_)) || matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::Other(
-                "binary operators cannot be applied to stateful values".into(),
-            ));
+            return ExecSingle::Error(ExecutorError::stateful_binary_op());
         }
 
         if matches!(op, BinOp::Eq | BinOp::Ne) {
@@ -71,9 +69,7 @@ impl Executor {
 
     pub(super) async fn exec_negate(&mut self, val: Value) -> Result<Value, ExecutorError> {
         if matches!(val, Value::Stateful(_)) {
-            return Err(ExecutorError::Other(
-                "unary operators cannot be applied to stateful values".into(),
-            ));
+            return Err(ExecutorError::stateful_unary_op());
         }
 
         let val = val.elide_wrappers(self).await?;
@@ -89,9 +85,7 @@ impl Executor {
 
     pub(super) async fn exec_not(&mut self, val: Value) -> Result<Value, ExecutorError> {
         if matches!(val, Value::Stateful(_)) {
-            return Err(ExecutorError::Other(
-                "operators cannot be applied to stateful values".into(),
-            ));
+            return Err(ExecutorError::stateful_operator());
         }
 
         let val = val.elide_wrappers(self).await?;
@@ -313,14 +307,14 @@ fn multiply_list(list: &List, scalar: &Value, scalar_on_lhs: bool) -> Result<Val
 }
 
 fn list_index_err(op: &'static str, idx: usize, err: ExecutorError) -> ExecutorError {
-    ExecutorError::Other(format!(
+    ExecutorError::invalid_operation(format!(
         "cannot apply {} to list element [{}]: {}",
         op, idx, err
     ))
 }
 
 fn list_element_err(op: &'static str, idx: usize, err: ExecutorError) -> ExecutorError {
-    ExecutorError::Other(format!("cannot {} list element [{}]: {}", op, idx, err))
+    ExecutorError::invalid_operation(format!("cannot {} list element [{}]: {}", op, idx, err))
 }
 
 fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> {

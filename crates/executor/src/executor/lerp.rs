@@ -7,7 +7,7 @@ use crate::{
     executor::prepare_eager_call_args,
     heap::with_heap,
     value::{
-        InstructionPointer, Value,
+        Value,
         container::{HashableKey, List, Map},
         invoked_function::{InvokedFunction, make_invoked_function},
         invoked_operator::{InvokedOperator, extract_operator_result, make_invoked_operator},
@@ -60,9 +60,9 @@ impl Executor {
             }
 
             if let (Value::InvokedFunction(a_inv), Value::InvokedFunction(b_inv)) = (&a, &b) {
-                if let Some(ip) = same_lambda_ip(&a_inv.body.lambda, &b_inv.body.lambda) {
+                if same_lambda_ip(&a_inv.body.lambda, &b_inv.body.lambda) {
                     if a_inv.body.arguments.len() == b_inv.body.arguments.len() {
-                        return self.lerp_invoked_functions(a_inv, b_inv, ip, t).await;
+                        return self.lerp_invoked_functions(a_inv, b_inv, t).await;
                     }
                 }
             }
@@ -82,7 +82,6 @@ impl Executor {
         &'a mut self,
         a_inv: &'a InvokedFunction,
         b_inv: &'a InvokedFunction,
-        _ip: InstructionPointer,
         t: f64,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
@@ -92,7 +91,7 @@ impl Executor {
             let labels = a_inv.body.labels.clone();
 
             if a_inv.body.labels != b_inv.body.labels {
-                return Err(ExecutorError::Other(format!(
+                return Err(ExecutorError::invalid_interpolation(format!(
                     "cannot lerp invoked functions with different labeled arguments ({})",
                     format_label_mismatch(
                         &a_inv.body.labels,
@@ -114,7 +113,7 @@ impl Executor {
                 } else if Value::values_equal(&ai, &bi) {
                     lerped_args.push(ai);
                 } else {
-                    return Err(ExecutorError::Other(format!(
+                    return Err(ExecutorError::invalid_interpolation(format!(
                         "cannot lerp invoked functions when unlabeled argument at index {} differs",
                         index
                     )));
@@ -150,7 +149,7 @@ impl Executor {
             if !Value::values_equal(&a_inv.body.operator, &b_inv.body.operator)
                 || a_inv.body.labels != b_inv.body.labels
             {
-                return Err(ExecutorError::Other(format!(
+                return Err(ExecutorError::invalid_interpolation(format!(
                     "cannot lerp invoked operators with different operators or labeled arguments ({})",
                     format_label_mismatch(
                         &a_inv.body.labels,
@@ -161,7 +160,7 @@ impl Executor {
             }
 
             if a_inv.body.arguments.len() != b_inv.body.arguments.len() {
-                return Err(ExecutorError::Other(format!(
+                return Err(ExecutorError::invalid_interpolation(format!(
                     "cannot lerp invoked operators with different arity: {} vs {}",
                     a_inv.body.arguments.len(),
                     b_inv.body.arguments.len()
@@ -196,7 +195,7 @@ impl Executor {
                 } else if Value::values_equal(&ai, &bi) {
                     lerped_args.push(ai);
                 } else {
-                    return Err(ExecutorError::Other(format!(
+                    return Err(ExecutorError::invalid_interpolation(format!(
                         "cannot lerp invoked operators when unlabeled argument at index {} differs",
                         index
                     )));
@@ -295,7 +294,7 @@ impl Executor {
             match (a, b) {
                 (Value::List(a_list), Value::List(b_list)) => {
                     if a_list.len() != b_list.len() {
-                        return Err(ExecutorError::Other(format!(
+                        return Err(ExecutorError::invalid_interpolation(format!(
                             "cannot lerp lists of different lengths: {} vs {}",
                             a_list.len(),
                             b_list.len()
@@ -330,7 +329,7 @@ impl Executor {
                         .filter(|key| !a_map.contains_key(key))
                         .collect();
                     if !missing_from_a.is_empty() || !missing_from_b.is_empty() {
-                        return Err(ExecutorError::Other(format!(
+                        return Err(ExecutorError::invalid_interpolation(format!(
                             "cannot lerp maps with different keys ({})",
                             format_missing_keys(&missing_from_a, &missing_from_b)
                         )));
@@ -361,16 +360,16 @@ impl Executor {
     }
 }
 
-fn same_lambda_ip(a: &Value, b: &Value) -> Option<InstructionPointer> {
+fn same_lambda_ip(a: &Value, b: &Value) -> bool {
     let a_ip = match a.clone().elide_lvalue() {
         Value::Lambda(rc) => rc.ip,
-        _ => return None,
+        _ => return false,
     };
     let b_ip = match b.clone().elide_lvalue() {
         Value::Lambda(rc) => rc.ip,
-        _ => return None,
+        _ => return false,
     };
-    (a_ip == b_ip).then_some(a_ip)
+    a_ip == b_ip
 }
 
 fn operator_count(value: &Value) -> usize {
@@ -401,7 +400,7 @@ fn lerp_numbers(a: Value, b: Value, t: f64) -> Result<Value, ExecutorError> {
                 im: s * ai + t * bi,
             })
         }
-        (a, b) => Err(ExecutorError::Other(format!(
+        (a, b) => Err(ExecutorError::invalid_interpolation(format!(
             "cannot lerp {} and {}",
             a.type_name(),
             b.type_name()
@@ -410,7 +409,7 @@ fn lerp_numbers(a: Value, b: Value, t: f64) -> Result<Value, ExecutorError> {
 }
 
 fn lerp_context(context: String, err: ExecutorError) -> ExecutorError {
-    ExecutorError::Other(format!("{}: {}", context, err))
+    ExecutorError::invalid_interpolation(format!("{}: {}", context, err))
 }
 
 fn format_missing_keys(missing_from_a: &[&HashableKey], missing_from_b: &[&HashableKey]) -> String {

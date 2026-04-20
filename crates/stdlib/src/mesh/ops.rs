@@ -802,14 +802,14 @@ pub async fn op_extrude(executor: &mut Executor, stack_idx: usize) -> Result<Val
             return;
         }
         if mesh.tris.is_empty() {
-            extrude_error = Some(ExecutorError::Other(
-                "can only extrude meshes that have triangles".into(),
+            extrude_error = Some(ExecutorError::invalid_operation(
+                "can only extrude meshes that have triangles",
             ));
             return;
         }
         if mesh.lins.iter().any(|lin| lin.inv == -1) {
-            extrude_error = Some(ExecutorError::Other(
-                "cannot extrude meshes that have standalone line loops; try upranking first".into(),
+            extrude_error = Some(ExecutorError::invalid_operation(
+                "cannot extrude meshes that have standalone line loops; try upranking first",
             ));
             return;
         }
@@ -869,8 +869,8 @@ pub async fn op_revolve(executor: &mut Executor, stack_idx: usize) -> Result<Val
             return;
         }
         if mesh.lins.is_empty() || !mesh.tris.is_empty() {
-            revolve_error = Some(ExecutorError::Other(
-                "can only revolve meshes that are line meshes".into(),
+            revolve_error = Some(ExecutorError::invalid_operation(
+                "can only revolve meshes that are line meshes",
             ));
             return;
         }

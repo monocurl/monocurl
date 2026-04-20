@@ -115,7 +115,7 @@ impl Executor {
             .active_params
             .iter()
             .find(|param| param.name == name)
-            .ok_or_else(|| ExecutorError::Other(format!("unknown parameter '{}'", name)))?;
+            .ok_or_else(|| ExecutorError::unknown_parameter(name))?;
 
         let leader_cell_key = param.leader_cell.key();
         let leader_value_key = param.leader_value;
@@ -206,6 +206,6 @@ mod tests {
     fn update_parameter_errors_for_missing_name() {
         let mut executor = empty_executor();
         let error = executor.update_parameter("missing", Value::Integer(1));
-        assert!(matches!(error, Err(ExecutorError::Other(_))));
+        assert!(matches!(error, Err(ExecutorError::UnknownParameter(_))));
     }
 }

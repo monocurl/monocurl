@@ -54,9 +54,7 @@ impl Executor {
         match target {
             Value::Leader(leader) => {
                 if matches!(rhs, Value::Stateful(_)) && leader.kind != LeaderKind::Mesh {
-                    return ExecSingle::Error(ExecutorError::Other(
-                        "stateful values can only be assigned to mesh variables".into(),
-                    ));
+                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
                 let stack_id = self.state.stack(stack_idx).stack_id;
                 if leader.kind == LeaderKind::Mesh {
@@ -83,9 +81,7 @@ impl Executor {
             }
             _ => {
                 if matches!(rhs, Value::Stateful(_)) {
-                    return ExecSingle::Error(ExecutorError::Other(
-                        "stateful values can only be assigned to mesh variables".into(),
-                    ));
+                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
                 heap_replace(key, rhs);
             }
@@ -111,9 +107,7 @@ impl Executor {
         let lhs = stack.pop();
 
         if matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::Other(
-                "stateful values cannot be appended to lists".into(),
-            ));
+            return ExecSingle::Error(ExecutorError::stateful_cannot_append());
         }
 
         match lhs {
@@ -134,16 +128,12 @@ impl Executor {
         let key = match lhs.as_lvalue_key() {
             Some(k) => k,
             None => {
-                return ExecSingle::Error(ExecutorError::Other(
-                    "append-assign: lhs is not an lvalue".into(),
-                ));
+                return ExecSingle::Error(ExecutorError::invalid_lvalue("append-assign"));
             }
         };
 
         if matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::Other(
-                "stateful values cannot be appended to lists".into(),
-            ));
+            return ExecSingle::Error(ExecutorError::stateful_cannot_append());
         }
 
         let base_val = with_heap(|h| h.get(key).clone());
@@ -300,9 +290,7 @@ impl Executor {
             }
         } else {
             if matches!(base, Value::Stateful(_)) || matches!(index, Value::Stateful(_)) {
-                return ExecSingle::Error(ExecutorError::Other(
-                    "subscript cannot be applied to stateful values".into(),
-                ));
+                return ExecSingle::Error(ExecutorError::stateful_subscript());
             }
 
             let base = base.elide_lvalue();
@@ -417,10 +405,9 @@ impl Executor {
                             .stack_mut(stack_idx)
                             .push(Value::WeakLvalue(arg_ref.downgrade()));
                     } else {
-                        return ExecSingle::Error(ExecutorError::Other(format!(
-                            "no labeled argument '{}'",
-                            attr_name
-                        )));
+                        return ExecSingle::Error(ExecutorError::missing_labeled_argument(
+                            attr_name.clone(),
+                        ));
                     }
                 }
                 Value::InvokedOperator(ref inv) => {
@@ -464,9 +451,9 @@ impl Executor {
                                 .stack_mut(stack_idx)
                                 .push(Value::WeakLvalue(args[arg_idx].downgrade()));
                         } else {
-                            return ExecSingle::Error(ExecutorError::Other(format!(
-                                "no labeled argument '{attr_name}'"
-                            )));
+                            return ExecSingle::Error(ExecutorError::missing_labeled_argument(
+                                attr_name.clone(),
+                            ));
                         }
                     }
                     StatefulNode::LabeledOperatorCall {
@@ -511,10 +498,9 @@ impl Executor {
                         let val = inv.body.arguments[arg_idx].clone().elide_lvalue();
                         self.state.stack_mut(stack_idx).push(val);
                     } else {
-                        return ExecSingle::Error(ExecutorError::Other(format!(
-                            "no labeled argument '{}'",
-                            attr_name
-                        )));
+                        return ExecSingle::Error(ExecutorError::missing_labeled_argument(
+                            attr_name.clone(),
+                        ));
                     }
                 }
                 Value::InvokedOperator(inv) => {
@@ -537,9 +523,9 @@ impl Executor {
                                 with_heap(|h| h.get(args[arg_idx].key()).clone()).elide_lvalue();
                             self.state.stack_mut(stack_idx).push(val);
                         } else {
-                            return ExecSingle::Error(ExecutorError::Other(format!(
-                                "no labeled argument '{attr_name}'"
-                            )));
+                            return ExecSingle::Error(ExecutorError::missing_labeled_argument(
+                                attr_name.clone(),
+                            ));
                         }
                     }
                     StatefulNode::LabeledOperatorCall {

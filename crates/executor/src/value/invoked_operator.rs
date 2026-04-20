@@ -125,7 +125,7 @@ pub fn extract_operator_result(result: Value) -> Result<(Value, Value), Executor
             let modified = with_heap(|h| h.get(list.elements[1].key()).clone());
             Ok((initial, modified))
         }
-        Value::List(ref list) => Err(ExecutorError::Other(format!(
+        Value::List(ref list) => Err(ExecutorError::invalid_invocation(format!(
             "operator must return a 2-element [initial, modified] list, got {} elements",
             list.elements.len()
         ))),

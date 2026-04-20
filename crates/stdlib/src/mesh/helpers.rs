@@ -249,7 +249,7 @@ pub(super) fn read_float3(
             }
             Ok(Float3::from_array(components))
         }
-        Value::List(list) => Err(ExecutorError::Other(format!(
+        Value::List(list) => Err(ExecutorError::invalid_operation(format!(
             "{}: expected list of length 3, got list of length {}",
             name,
             list.elements().len()
@@ -404,7 +404,7 @@ pub(super) fn read_float3_list(
                     }
                     Ok(Float3::from_array(components))
                 }
-                other => Err(ExecutorError::Other(format!(
+                other => Err(ExecutorError::invalid_operation(format!(
                     "{}[{}]: expected list of length 3, got {}",
                     name,
                     i,
@@ -445,7 +445,7 @@ pub(super) fn read_float4(
             }
             Ok(Float4::from_array(components))
         }
-        Value::List(list) => Err(ExecutorError::Other(format!(
+        Value::List(list) => Err(ExecutorError::invalid_operation(format!(
             "{}: expected list of length 4, got list of length {}",
             name,
             list.elements().len()
@@ -1063,7 +1063,9 @@ pub(crate) fn tessellate_planar_loops(
             reverse_contours: false,
         },
     )
-    .map_err(|err| ExecutorError::Other(format!("failed to tessellate polygon: {err}")))?;
+    .map_err(|err| {
+        ExecutorError::invalid_operation(format!("failed to tessellate polygon: {err}"))
+    })?;
 
     let mut tris = build_indexed_tris(&tess.vertices, &tess.triangles);
     for (tri_idx, face) in tess.triangles.iter().enumerate() {

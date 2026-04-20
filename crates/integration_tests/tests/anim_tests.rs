@@ -5,6 +5,7 @@ use std::{f64, fs, path::Path, sync::Arc};
 
 use compiler::cache::CompilerCache;
 use executor::{
+    error::ExecutorError,
     executor::{Executor, SeekToResult},
     heap::with_heap,
     state::LeaderKind,
@@ -38,19 +39,6 @@ impl LeaderInfo {
         match &self.target {
             Value::Integer(n) => assert_eq!(*n, expected, "leader target int mismatch"),
             other => panic!("expected Integer({}), got {}", expected, other.type_name()),
-        }
-        self
-    }
-
-    pub fn _assert_target_float(&self, expected: f64, eps: f64) -> &Self {
-        match &self.target {
-            Value::Float(f) => assert!(
-                (f - expected).abs() < eps,
-                "leader target float mismatch: expected {}, got {}",
-                expected,
-                f
-            ),
-            other => panic!("expected Float({}), got {}", expected, other.type_name()),
         }
         self
     }
@@ -132,11 +120,6 @@ impl AnimResult {
         self
     }
 
-    pub fn assert_leader_count(&self, n: usize) -> &Self {
-        assert_eq!(self.leaders.len(), n, "leader count mismatch");
-        self
-    }
-
     pub fn mesh_leaders(&self) -> Vec<&LeaderInfo> {
         self.leaders
             .iter()
@@ -181,8 +164,20 @@ fn parse_section(src: &str, section_type: SectionType) -> (Section, Vec<String>)
     )
 }
 
-fn load_stdlib_bundle(path: impl AsRef<Path>) -> Arc<SectionBundle> {
-    load_stdlib_bundle_with_import_span(path, 0..0)
+fn stdlib_path(name: &str) -> std::path::PathBuf {
+    Assets::std_lib().join(format!("std/{name}.mcl"))
+}
+
+fn stdlib_bundle(name: &str) -> Arc<SectionBundle> {
+    load_stdlib_bundle_with_import_span(stdlib_path(name), 0..0)
+}
+
+fn stdlib_bundle_with_import_span(name: &str, import_span: Span8) -> Arc<SectionBundle> {
+    load_stdlib_bundle_with_import_span(stdlib_path(name), import_span)
+}
+
+fn stdlib_bundles<const N: usize>(names: [&str; N]) -> [Arc<SectionBundle>; N] {
+    names.map(stdlib_bundle)
 }
 
 fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
@@ -420,11 +415,6 @@ pub fn run_anim(src: &str) -> AnimResult {
     run_anim_impl(&[(src, SectionType::Slide)], 0, f64::INFINITY, &[])
 }
 
-/// run a single Slide section, seek to a specific time.
-pub fn run_anim_at(src: &str, time: f64) -> AnimResult {
-    run_anim_impl(&[(src, SectionType::Slide)], 0, time, &[])
-}
-
 /// run a single Slide section with `anim.mcl` stdlib imported, seek to end.
 pub fn run_anim_with_stdlib(src: &str) -> AnimResult {
     run_anim_with_stdlib_at(src, f64::INFINITY)
@@ -432,13 +422,22 @@ pub fn run_anim_with_stdlib(src: &str) -> AnimResult {
 
 /// run a single Slide section with `anim.mcl` stdlib imported, seek to a specific time.
 pub fn run_anim_with_stdlib_at(src: &str, time: f64) -> AnimResult {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    run_anim_impl(&[(src, SectionType::Slide)], 0, time, &[anim_mcl])
+    run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        time,
+        &stdlib_bundles(["anim"]),
+    )
 }
 
 pub fn run_anim_with_stdlib_playback_at(src: &str, start_time: f64, dt: f64) -> AnimResult {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    run_anim_playback_impl(&[(src, SectionType::Slide)], 0, start_time, dt, &[anim_mcl])
+    run_anim_playback_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        start_time,
+        dt,
+        &stdlib_bundles(["anim"]),
+    )
 }
 
 /// run multiple Slide sections, seeking to the given user slide and time.
@@ -454,10 +453,14 @@ pub fn run_multi_anim_with_stdlib(
     target_slide: usize,
     target_time: f64,
 ) -> AnimResult {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
     let section_slides: Vec<(&str, SectionType)> =
         slides.iter().map(|s| (*s, SectionType::Slide)).collect();
-    run_anim_impl(&section_slides, target_slide, target_time, &[anim_mcl])
+    run_anim_impl(
+        &section_slides,
+        target_slide,
+        target_time,
+        &stdlib_bundles(["anim"]),
+    )
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -754,7 +757,6 @@ fn test_set_has_minimum_positive_duration() {
 
 #[test]
 fn test_set_slide_can_seek_back_to_zero_after_finishing() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
     let (mut executor, user_slide_count) = match build_anim_executor(
         &[(
             "
@@ -764,7 +766,7 @@ fn test_set_slide_can_seek_back_to_zero_after_finishing() {
         ",
             SectionType::Slide,
         )],
-        &[anim_mcl],
+        &stdlib_bundles(["anim"]),
     ) {
         Ok(data) => data,
         Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
@@ -794,10 +796,6 @@ fn test_set_slide_can_seek_back_to_zero_after_finishing() {
 
 #[test]
 fn test_mesh_label_mutation_after_set_then_lerp() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
     let src = "
             mesh x = fill{CLEAR} stroke{RED} Circle(label: ORIGIN, 1)
 
@@ -811,18 +809,13 @@ fn test_mesh_label_mutation_after_set_then_lerp() {
         &[(src, SectionType::Slide)],
         0,
         f64::INFINITY,
-        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "color", "math", "mesh"]),
     );
     r.assert_ok();
 }
 
 #[test]
 fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let src = "
         mesh x = fill{CLEAR} stroke{RED} Circle(label: ORIGIN, 1)
 
@@ -835,7 +828,7 @@ fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
 
     let (mut executor, _) = match build_anim_executor(
         &[(src, SectionType::Slide)],
-        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "color", "math", "mesh"]),
     ) {
         Ok(data) => data,
         Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
@@ -872,10 +865,6 @@ fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
 
 #[test]
 fn test_ref_mutation_of_live_function_argument_does_not_panic() {
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[(
             "
@@ -890,7 +879,7 @@ fn test_ref_mutation_of_live_function_argument_does_not_panic() {
         )],
         0,
         f64::INFINITY,
-        &[color_mcl, math_mcl, mesh_mcl],
+        &stdlib_bundles(["color", "math", "mesh"]),
     );
     assert!(
         r.errors
@@ -903,10 +892,6 @@ fn test_ref_mutation_of_live_function_argument_does_not_panic() {
 
 #[test]
 fn test_lerp_of_mesh_operator_variants_after_label_mutation() {
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[(
             "
@@ -921,7 +906,7 @@ fn test_lerp_of_mesh_operator_variants_after_label_mutation() {
         )],
         0,
         f64::INFINITY,
-        &[color_mcl, math_mcl, mesh_mcl],
+        &stdlib_bundles(["color", "math", "mesh"]),
     );
     r.assert_ok();
 }
@@ -999,11 +984,6 @@ fn test_lerp_custom_lerp_lambda_shapes_value_interpolation() {
 
 #[test]
 fn test_trans_anim_interpolates_meshes_without_generic_mesh_lerp() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[
             ("mesh x = Circle()", SectionType::Init),
@@ -1017,16 +997,13 @@ fn test_trans_anim_interpolates_meshes_without_generic_mesh_lerp() {
         ],
         0,
         0.5,
-        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "color", "math", "mesh"]),
     );
     r.assert_ok();
 }
 
 #[test]
 fn test_trans_square_to_circle_midpoint_keeps_boundary_off_origin() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[(
             "
@@ -1038,7 +1015,7 @@ fn test_trans_square_to_circle_midpoint_keeps_boundary_off_origin() {
         )],
         0,
         0.5,
-        &[anim_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "mesh"]),
     );
     r.assert_ok();
 
@@ -1065,10 +1042,6 @@ fn test_trans_square_to_circle_midpoint_keeps_boundary_off_origin() {
 
 #[test]
 fn test_trans_filled_square_to_clear_circle_fades_fill() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[(
             "
@@ -1080,7 +1053,7 @@ fn test_trans_filled_square_to_clear_circle_fades_fill() {
         )],
         0,
         0.5,
-        &[anim_mcl, color_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "color", "mesh"]),
     );
     r.assert_ok();
 
@@ -1107,9 +1080,6 @@ fn test_trans_filled_square_to_clear_circle_fades_fill() {
 
 #[test]
 fn test_trans_from_empty_source_fades_target_in_place() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[
             ("mesh x = []", SectionType::Init),
@@ -1123,7 +1093,7 @@ fn test_trans_from_empty_source_fades_target_in_place() {
         ],
         0,
         0.5,
-        &[anim_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "mesh"]),
     );
     r.assert_ok();
 
@@ -1158,9 +1128,6 @@ fn test_trans_from_empty_source_fades_target_in_place() {
 
 #[test]
 fn test_trans_with_more_source_leaves_keeps_all_pairs_mid_animation() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[
             (
@@ -1182,7 +1149,7 @@ fn test_trans_with_more_source_leaves_keeps_all_pairs_mid_animation() {
         ],
         0,
         0.5,
-        &[anim_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "mesh"]),
     );
     r.assert_ok();
 
@@ -1202,9 +1169,6 @@ fn test_trans_with_more_source_leaves_keeps_all_pairs_mid_animation() {
 
 #[test]
 fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[(
             "
@@ -1216,7 +1180,7 @@ fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
         )],
         0,
         0.5,
-        &[anim_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "mesh"]),
     );
     r.assert_ok();
 
@@ -1238,8 +1202,6 @@ fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
 
 #[test]
 fn test_color_grid_lambda_arity_error_is_reported_without_panicking() {
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[(
             "
@@ -1249,18 +1211,13 @@ fn test_color_grid_lambda_arity_error_is_reported_without_panicking() {
         )],
         0,
         0.0,
-        &[mesh_mcl],
+        &stdlib_bundles(["mesh"]),
     );
     r.assert_error("too few positional arguments");
 }
 
 #[test]
 fn test_bend_anim_interpolates_polyline_meshes() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[
             (
@@ -1277,18 +1234,13 @@ fn test_bend_anim_interpolates_polyline_meshes() {
         ],
         0,
         0.5,
-        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "color", "math", "mesh"]),
     );
     r.assert_ok();
 }
 
 #[test]
 fn test_fade_anim_materializes_live_operator_meshes() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-
     let r = run_anim_impl(
         &[
             ("mesh x = Circle()", SectionType::Init),
@@ -1302,7 +1254,7 @@ fn test_fade_anim_materializes_live_operator_meshes() {
         ],
         0,
         0.5,
-        &[anim_mcl, color_mcl, math_mcl, mesh_mcl],
+        &stdlib_bundles(["anim", "color", "math", "mesh"]),
     );
     r.assert_ok();
 }
@@ -1449,10 +1401,7 @@ fn test_wait_negative_time_error() {
 fn test_imported_stdlib_runtime_error_uses_root_callsite_span() {
     let import_span = 1000..1006;
     let src = "play Wait(-1)";
-    let anim_mcl = load_stdlib_bundle_with_import_span(
-        Assets::std_lib().join("std/anim.mcl"),
-        import_span.clone(),
-    );
+    let anim_mcl = stdlib_bundle_with_import_span("anim", import_span.clone());
     let r = run_anim_impl(&[(src, SectionType::Slide)], 0, f64::INFINITY, &[anim_mcl]);
     r.assert_error("non-negative");
     assert!(!r.error_spans.is_empty(), "expected runtime error span");
@@ -1518,7 +1467,7 @@ fn test_root_recorded_error_uses_latest_root_statement_span() {
         }
     });
 
-    executor.record_runtime_error_at_root(executor::error::ExecutorError::Other("test".into()));
+    executor.record_runtime_error_at_root(ExecutorError::invalid_operation("test"));
 
     let expected_start = src
         .find("background = 0")
@@ -1553,7 +1502,7 @@ fn test_root_recorded_error_uses_latest_prior_root_section_span() {
         }
     });
 
-    executor.record_runtime_error_at_root(executor::error::ExecutorError::Other("test".into()));
+    executor.record_runtime_error_at_root(ExecutorError::invalid_operation("test"));
 
     let expected_start = init_src
         .find("background = 0")
@@ -1570,14 +1519,13 @@ fn test_root_recorded_error_uses_latest_prior_root_section_span() {
 
 #[test]
 fn test_scene_snapshot_error_after_play_uses_play_span() {
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
     let src = "
         background = 0
         play Set()
     ";
 
     let (mut executor, _user_slide_count) =
-        match build_anim_executor(&[(src, SectionType::Slide)], &[anim_mcl]) {
+        match build_anim_executor(&[(src, SectionType::Slide)], &stdlib_bundles(["anim"])) {
             Ok(data) => data,
             Err(result) => panic!("failed to build executor: {:?}", result.errors),
         };
@@ -1620,12 +1568,6 @@ fn test_anim_played_twice_error() {
 
 #[test]
 fn test_lerp_of_live_mesh_lambda_survives_assignment_chain() {
-    let util_mcl = load_stdlib_bundle(Assets::std_lib().join("std/util.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-
     let src = r#"
         let entity = |center, theta| {
             let outline = (
@@ -1657,19 +1599,13 @@ fn test_lerp_of_live_mesh_lambda_survives_assignment_chain() {
         &[(src, SectionType::Slide)],
         0,
         f64::INFINITY,
-        &[util_mcl, math_mcl, mesh_mcl, color_mcl, anim_mcl],
+        &stdlib_bundles(["util", "math", "mesh", "color", "anim"]),
     );
     r.assert_ok();
 }
 
 #[test]
 fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
-    let util_mcl = load_stdlib_bundle(Assets::std_lib().join("std/util.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-
     let src = r#"
         let entity = |center, theta| {
             let outline = (
@@ -1700,7 +1636,7 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
 
     let (mut executor, _user_slide_count) = match build_anim_executor(
         &[(src, SectionType::Slide)],
-        &[util_mcl, math_mcl, mesh_mcl, color_mcl, anim_mcl],
+        &stdlib_bundles(["util", "math", "mesh", "color", "anim"]),
     ) {
         Ok(data) => data,
         Err(result) => panic!("failed to build executor: {:?}", result.errors),
@@ -1742,12 +1678,6 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
 
 #[test]
 fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
-    let util_mcl = load_stdlib_bundle(Assets::std_lib().join("std/util.mcl"));
-    let math_mcl = load_stdlib_bundle(Assets::std_lib().join("std/math.mcl"));
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-    let color_mcl = load_stdlib_bundle(Assets::std_lib().join("std/color.mcl"));
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-
     let src = r#"
         let entity = |center, theta| {
             let outline = (
@@ -1778,7 +1708,7 @@ fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
         &[(src, SectionType::Slide)],
         0,
         5.0,
-        &[util_mcl, math_mcl, mesh_mcl, color_mcl, anim_mcl],
+        &stdlib_bundles(["util", "math", "mesh", "color", "anim"]),
     );
 
     let play_start = src.find("play Lerp").expect("missing play Lerp");
@@ -1790,23 +1720,22 @@ fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
 
 #[test]
 fn test_write_polyline_preserves_authored_line_links() {
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-
     let src = r#"
         mesh x = Polyline([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 0, 0]])
         play Write()
     "#;
 
-    let r = run_anim_impl(&[(src, SectionType::Slide)], 0, 0.25, &[mesh_mcl, anim_mcl]);
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.25,
+        &stdlib_bundles(["mesh", "anim"]),
+    );
     r.assert_ok();
 }
 
 #[test]
 fn test_write_then_trans_polyline_to_square() {
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-
     let src = r#"
         mesh x = Polyline([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 0, 0]])
 
@@ -1821,16 +1750,13 @@ fn test_write_then_trans_polyline_to_square() {
         &[(src, SectionType::Slide)],
         0,
         f64::INFINITY,
-        &[mesh_mcl, anim_mcl],
+        &stdlib_bundles(["mesh", "anim"]),
     );
     r.assert_ok();
 }
 
 #[test]
 fn test_write_staggers_across_mesh_leaves() {
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-
     let src = r#"
         mesh x = [
             Polyline([[0, 0, 0], [2, 0, 0]]),
@@ -1839,7 +1765,12 @@ fn test_write_staggers_across_mesh_leaves() {
         play Write()
     "#;
 
-    let r = run_anim_impl(&[(src, SectionType::Slide)], 0, 0.05, &[mesh_mcl, anim_mcl]);
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.05,
+        &stdlib_bundles(["mesh", "anim"]),
+    );
     r.assert_ok();
 
     let leader = r
@@ -1872,15 +1803,17 @@ fn test_write_staggers_across_mesh_leaves() {
 
 #[test]
 fn test_write_reveals_boundary_before_fill() {
-    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
-    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
-
     let src = r#"
         mesh x = Square([0, 0, 0], 2)
         play Write()
     "#;
 
-    let r = run_anim_impl(&[(src, SectionType::Slide)], 0, 0.15, &[mesh_mcl, anim_mcl]);
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.15,
+        &stdlib_bundles(["mesh", "anim"]),
+    );
     r.assert_ok();
 
     let leader = r
@@ -1933,7 +1866,6 @@ fn test_wait_duration_after_while_loop() {
 #[test]
 fn test_wait_duration_cross_section_lambda_with_while_loop() {
     // x is defined in an Init section; the Slide references it after a while loop
-    let anim_mcl = load_stdlib_bundle(structs::assets::Assets::std_lib().join("std/anim.mcl"));
     let r = run_anim_impl(
         &[
             ("let x = |y| y * 2", SectionType::Init),
@@ -1951,7 +1883,7 @@ fn test_wait_duration_cross_section_lambda_with_while_loop() {
         ],
         0,
         f64::INFINITY,
-        &[anim_mcl],
+        &stdlib_bundles(["anim"]),
     );
     r.assert_ok().assert_slide_time_approx(4.0, 1e-9);
 }

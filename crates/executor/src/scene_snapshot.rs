@@ -78,7 +78,7 @@ fn collect_scene_meshes<'a>(
                 }
                 Ok(())
             }
-            other => Err(ExecutorError::Other(format!(
+            other => Err(ExecutorError::invalid_scene(format!(
                 "on-screen mesh '{}' must resolve to a mesh tree, got {}",
                 target_name,
                 other.type_name()
@@ -173,7 +173,7 @@ async fn read_float3(
         ));
     };
     if list.len() != 3 {
-        return Err(ExecutorError::Other(format!(
+        return Err(ExecutorError::invalid_scene(format!(
             "{}: expected list of length 3, got list of length {}",
             target,
             list.len()
@@ -206,7 +206,7 @@ async fn read_float4(
         ));
     };
     if list.len() != 4 {
-        return Err(ExecutorError::Other(format!(
+        return Err(ExecutorError::invalid_scene(format!(
             "{}: expected list of length 4, got list of length {}",
             target,
             list.len()
@@ -239,11 +239,11 @@ async fn camera_snapshot_from_value(
     };
 
     let Some(kind) = map_field_value(&map, "kind") else {
-        return Err(ExecutorError::Other("camera: missing 'kind' field".into()));
+        return Err(ExecutorError::missing_field("camera", "kind"));
     };
     let kind = kind.elide_wrappers(executor).await?;
     if !matches!(kind, Value::String(ref kind) if kind == "camera") {
-        return Err(ExecutorError::Other(format!(
+        return Err(ExecutorError::invalid_scene(format!(
             "camera must resolve to a camera object, got kind {}",
             match kind {
                 Value::String(ref kind) => kind.as_str(),
@@ -253,29 +253,25 @@ async fn camera_snapshot_from_value(
     }
 
     let Some(position) = map_field_value(&map, "position") else {
-        return Err(ExecutorError::Other(
-            "camera: missing 'position' field".into(),
-        ));
+        return Err(ExecutorError::missing_field("camera", "position"));
     };
     let Some(look_at) = map_field_value(&map, "look_at") else {
-        return Err(ExecutorError::Other(
-            "camera: missing 'look_at' field".into(),
-        ));
+        return Err(ExecutorError::missing_field("camera", "look_at"));
     };
     let Some(up) = map_field_value(&map, "up") else {
-        return Err(ExecutorError::Other("camera: missing 'up' field".into()));
+        return Err(ExecutorError::missing_field("camera", "up"));
     };
     let Some(fov) = map_field_value(&map, "fov") else {
-        return Err(ExecutorError::Other("camera: missing 'fov' field".into()));
+        return Err(ExecutorError::missing_field("camera", "fov"));
     };
     let Some(near) = map_field_value(&map, "near") else {
-        return Err(ExecutorError::Other("camera: missing 'near' field".into()));
+        return Err(ExecutorError::missing_field("camera", "near"));
     };
     let Some(far) = map_field_value(&map, "far") else {
-        return Err(ExecutorError::Other("camera: missing 'far' field".into()));
+        return Err(ExecutorError::missing_field("camera", "far"));
     };
     let Some(ortho) = map_field_value(&map, "ortho") else {
-        return Err(ExecutorError::Other("camera: missing 'ortho' field".into()));
+        return Err(ExecutorError::missing_field("camera", "ortho"));
     };
 
     Ok(CameraSnapshot {
@@ -316,13 +312,11 @@ async fn background_snapshot_from_value(
     };
 
     let Some(kind) = map_field_value(&map, "kind") else {
-        return Err(ExecutorError::Other(
-            "background: missing 'kind' field".into(),
-        ));
+        return Err(ExecutorError::missing_field("background", "kind"));
     };
     let kind = kind.elide_wrappers(executor).await?;
     if !matches!(kind, Value::String(ref kind) if kind == "solid_background") {
-        return Err(ExecutorError::Other(format!(
+        return Err(ExecutorError::invalid_scene(format!(
             "background must resolve to a solid background, got kind {}",
             match kind {
                 Value::String(ref kind) => kind.as_str(),
@@ -332,9 +326,7 @@ async fn background_snapshot_from_value(
     }
 
     let Some(color) = map_field_value(&map, "color") else {
-        return Err(ExecutorError::Other(
-            "background: missing 'color' field".into(),
-        ));
+        return Err(ExecutorError::missing_field("background", "color"));
     };
 
     Ok(BackgroundSnapshot {

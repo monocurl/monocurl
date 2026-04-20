@@ -1,5 +1,6 @@
 use std::{rc::Rc, sync::Arc};
 
+use crate::read_float;
 use executor::{
     error::ExecutorError,
     executor::Executor,
@@ -11,7 +12,6 @@ use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex},
     simd::{Float3, Float4},
 };
-use crate::read_float;
 
 pub(super) fn read_time(
     executor: &Executor,
@@ -93,8 +93,8 @@ fn push_leader_candidate(
             if kind.is_none_or(|kind| leader.kind == kind) {
                 out.push(
                     find_leader_cell_from_value(executor, leader).ok_or_else(|| {
-                        ExecutorError::Other(
-                            "animation variable does not belong to executor state".into(),
+                        ExecutorError::internal(
+                            "animation variable does not belong to executor state",
                         )
                     })?,
                 );

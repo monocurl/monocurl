@@ -119,7 +119,7 @@ pub(super) fn compare_values(lhs: &Value, rhs: &Value) -> Result<Ordering, Execu
             }
             Ok(a.len().cmp(&b.len()))
         }
-        _ => Err(ExecutorError::Other(format!(
+        _ => Err(ExecutorError::invalid_operation(format!(
             "cannot compare {} and {}",
             lhs.type_name(),
             rhs.type_name()
@@ -132,7 +132,7 @@ pub async fn lambda_fallthrough_error(
     _executor: &mut Executor,
     _stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    Err(ExecutorError::Other(
-        "lambda reached end without explicit return".into(),
+    Err(ExecutorError::invalid_invocation(
+        "lambda reached end without explicit return",
     ))
 }

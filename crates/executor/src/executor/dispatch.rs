@@ -70,9 +70,7 @@ impl Executor {
                 if !allow_stateful
                     && matches!(self.state.stack(stack_idx).peek(), Value::Stateful(_))
                 {
-                    return ExecSingle::Error(ExecutorError::Other(
-                        "illegal assignment of stateful value. Stateful values must only be assigned to meshes".into(),
-                    ));
+                    return ExecSingle::Error(ExecutorError::stateful_illegal_assignment());
                 }
                 self.state.promote_to_var(stack_idx);
             }
@@ -87,9 +85,7 @@ impl Executor {
                     self.state.stack(stack_idx).peek().clone().elide_lvalue(),
                     Value::Stateful(_)
                 ) {
-                    return ExecSingle::Error(ExecutorError::Other(
-                        "stateful values can only be assigned to mesh variables".into(),
-                    ));
+                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
                 let name =
                     self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
@@ -110,9 +106,7 @@ impl Executor {
                 };
 
                 if let Value::Stateful(_) = lvalue_resolved {
-                    return ExecSingle::Error(ExecutorError::Other(
-                        "attempt to copy a stateful value directly. Use $<ident> to use the live value, and *ident to read the current value".into(),
-                    ));
+                    return ExecSingle::Error(ExecutorError::direct_stateful_copy());
                 }
 
                 if pop_tos {
@@ -175,8 +169,8 @@ impl Executor {
                                 return ExecSingle::Continue;
                             }
 
-                            return ExecSingle::Error(ExecutorError::Other(
-                                "$ can only be used with 'param' variables, not 'mesh' (unless the mesh contains a stateful value)  ".into(),
+                            return ExecSingle::Error(ExecutorError::invalid_access(
+                                "$ can only be used with 'param' variables, not 'mesh' (unless the mesh contains a stateful value)",
                             ));
                         }
                     }

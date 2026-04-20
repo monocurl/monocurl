@@ -41,6 +41,18 @@ pub enum ExecutorError {
         used: u64,
         limit: u64,
     },
+    StatefulValueError(String),
+    InvalidAccess(String),
+    InvalidOperation(String),
+    InvalidInvocation(String),
+    InvalidInterpolation(String),
+    InvalidScene(String),
+    MissingField {
+        target: String,
+        field: String,
+    },
+    UnknownParameter(String),
+    Internal(String),
     NativeFuncError(String),
     MissingArgument(&'static str),
     UnsupportedBinaryOp {
@@ -60,7 +72,6 @@ pub enum ExecutorError {
         arg: &'static str,
         message: &'static str,
     },
-    Other(String),
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +102,89 @@ impl ExecutorError {
             got,
             target: Some(target),
         }
+    }
+
+    pub fn stateful_value(message: impl Into<String>) -> Self {
+        Self::StatefulValueError(message.into())
+    }
+
+    pub fn invalid_access(message: impl Into<String>) -> Self {
+        Self::InvalidAccess(message.into())
+    }
+
+    pub fn invalid_operation(message: impl Into<String>) -> Self {
+        Self::InvalidOperation(message.into())
+    }
+
+    pub fn invalid_invocation(message: impl Into<String>) -> Self {
+        Self::InvalidInvocation(message.into())
+    }
+
+    pub fn invalid_interpolation(message: impl Into<String>) -> Self {
+        Self::InvalidInterpolation(message.into())
+    }
+
+    pub fn invalid_scene(message: impl Into<String>) -> Self {
+        Self::InvalidScene(message.into())
+    }
+
+    pub fn missing_field(target: impl Into<String>, field: impl Into<String>) -> Self {
+        Self::MissingField {
+            target: target.into(),
+            field: field.into(),
+        }
+    }
+
+    pub fn unknown_parameter(name: impl Into<String>) -> Self {
+        Self::UnknownParameter(name.into())
+    }
+
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal(message.into())
+    }
+
+    pub fn stateful_illegal_assignment() -> Self {
+        Self::stateful_value(
+            "illegal assignment of stateful value. Stateful values must only be assigned to meshes",
+        )
+    }
+
+    pub fn stateful_requires_mesh_assignment() -> Self {
+        Self::stateful_value("stateful values can only be assigned to mesh variables")
+    }
+
+    pub fn stateful_cannot_append() -> Self {
+        Self::stateful_value("stateful values cannot be appended to lists")
+    }
+
+    pub fn stateful_binary_op() -> Self {
+        Self::stateful_value("binary operators cannot be applied to stateful values")
+    }
+
+    pub fn stateful_unary_op() -> Self {
+        Self::stateful_value("unary operators cannot be applied to stateful values")
+    }
+
+    pub fn stateful_operator() -> Self {
+        Self::stateful_value("operators cannot be applied to stateful values")
+    }
+
+    pub fn stateful_subscript() -> Self {
+        Self::stateful_value("subscript cannot be applied to stateful values")
+    }
+
+    pub fn direct_stateful_copy() -> Self {
+        Self::stateful_value(
+            "attempt to copy a stateful value directly. Use $<ident> to use the live value, and *ident to read the current value",
+        )
+    }
+
+    pub fn missing_labeled_argument(name: impl Into<String>) -> Self {
+        Self::invalid_access(format!("no labeled argument '{}'", name.into()))
+    }
+
+    pub fn invalid_lvalue(context: &'static str) -> Self {
+        Self::invalid_access(format!("{context}: lhs is not an lvalue"))
     }
 }
 
@@ -179,6 +273,17 @@ impl fmt::Display for ExecutorError {
                     used, limit
                 )
             }
+            Self::StatefulValueError(msg)
+            | Self::InvalidAccess(msg)
+            | Self::InvalidOperation(msg)
+            | Self::InvalidInvocation(msg)
+            | Self::InvalidInterpolation(msg)
+            | Self::InvalidScene(msg)
+            | Self::Internal(msg) => write!(f, "{}", msg),
+            Self::MissingField { target, field } => {
+                write!(f, "{}: missing '{}' field", target, field)
+            }
+            Self::UnknownParameter(name) => write!(f, "unknown parameter '{}'", name),
             Self::NativeFuncError(msg) => write!(f, "{}", msg),
             Self::MissingArgument(name) => write!(f, "{}: missing argument", name),
             Self::UnsupportedBinaryOp { op, lhs, rhs } => {
@@ -227,7 +332,6 @@ impl fmt::Display for ExecutorError {
             Self::InvalidArgument { arg, message } => {
                 write!(f, "invalid argument '{}': {}", arg, message)
             }
-            Self::Other(msg) => write!(f, "{}", msg),
         }
     }
 }

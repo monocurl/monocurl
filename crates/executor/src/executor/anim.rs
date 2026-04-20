@@ -668,8 +668,8 @@ impl Executor {
             Value::WeakLvalue(vweak) => self.push_leader_candidate(vweak.key(), out),
             Value::Leader(leader) => {
                 let Some(cell) = self.find_leader_cell(leader) else {
-                    return Err(ExecutorError::Other(
-                        "animation variable does not belong to executor state".into(),
+                    return Err(ExecutorError::internal(
+                        "animation variable does not belong to executor state",
                     ));
                 };
                 out.push(cell);

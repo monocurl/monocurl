@@ -9,8 +9,8 @@ use stdlib_macros::stdlib_func;
 
 use crate::mesh::helpers::{mesh_position_groups, push_closed_polyline, tessellate_planar_loops};
 
-use super::{embed_triplet, lerp_uniforms, read_path_arc_value};
 use super::super::helpers::{self, list_value, materialize_live_value, mesh_center};
+use super::{embed_triplet, lerp_uniforms, read_path_arc_value};
 
 #[stdlib_func]
 pub async fn trans_embed(
@@ -968,14 +968,21 @@ fn signed_contour_area(points: &[Float3], normal: Float3) -> f32 {
 }
 
 fn mesh_vertex_samples(mesh: &Mesh) -> Vec<(Float3, Float4)> {
-    let mut samples = Vec::with_capacity(mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3);
+    let mut samples =
+        Vec::with_capacity(mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3);
     samples.extend(mesh.dots.iter().map(|dot| (dot.pos, dot.col)));
-    samples.extend(mesh.lins.iter().flat_map(|line| [(line.a.pos, line.a.col), (line.b.pos, line.b.col)]));
     samples.extend(
-        mesh.tris
+        mesh.lins
             .iter()
-            .flat_map(|tri| [(tri.a.pos, tri.a.col), (tri.b.pos, tri.b.col), (tri.c.pos, tri.c.col)]),
+            .flat_map(|line| [(line.a.pos, line.a.col), (line.b.pos, line.b.col)]),
     );
+    samples.extend(mesh.tris.iter().flat_map(|tri| {
+        [
+            (tri.a.pos, tri.a.col),
+            (tri.b.pos, tri.b.col),
+            (tri.c.pos, tri.c.col),
+        ]
+    }));
     samples
 }
 
@@ -986,7 +993,13 @@ fn conform_samples_to_template(
     template: &Mesh,
 ) -> Mesh {
     if samples.is_empty() {
-        return conform_constant_to_template(mesh_center(template), Float4::ZERO, uniform, tag, template);
+        return conform_constant_to_template(
+            mesh_center(template),
+            Float4::ZERO,
+            uniform,
+            tag,
+            template,
+        );
     }
 
     let groups = mesh_position_groups(template);
@@ -1191,10 +1204,14 @@ fn match_lin_lin(source: &Mesh, target: &Mesh) -> (Mesh, Mesh) {
                 )
             }
         }
-        _ if source.lins.len() >= target.lins.len() => {
-            (source.clone(), conform_line_mesh_to_template(target, source))
-        }
-        _ => (conform_line_mesh_to_template(source, target), target.clone()),
+        _ if source.lins.len() >= target.lins.len() => (
+            source.clone(),
+            conform_line_mesh_to_template(target, source),
+        ),
+        _ => (
+            conform_line_mesh_to_template(source, target),
+            target.clone(),
+        ),
     }
 }
 
@@ -1680,7 +1697,9 @@ fn grouped_ordered_path_from_mesh(mesh: &Mesh) -> Option<OrderedPath> {
         let b_group = groups[mesh.dots.len() + line_idx * 2 + 1];
         adjacency[a_group].push(line_idx);
         adjacency[b_group].push(line_idx);
-        endpoints.push((a_group, b_group, line.a.pos, line.b.pos, line.a.col, line.b.col));
+        endpoints.push((
+            a_group, b_group, line.a.pos, line.b.pos, line.a.col, line.b.col,
+        ));
     }
 
     let degree_one: Vec<_> = adjacency
@@ -2071,7 +2090,7 @@ fn mesh_tree_trans_lerp(
         }
         (Value::List(start), Value::List(end), Value::List(state)) => {
             if start.len() != end.len() || start.len() != state.len() {
-                return Err(ExecutorError::Other(format!(
+                return Err(ExecutorError::invalid_interpolation(format!(
                     "cannot trans lists of different lengths: {} vs {} vs {}",
                     start.len(),
                     end.len(),
@@ -2096,7 +2115,7 @@ fn mesh_tree_trans_lerp(
                 executor::value::container::List::new_with(elements),
             )))
         }
-        (start, end, state) => Err(ExecutorError::Other(format!(
+        (start, end, state) => Err(ExecutorError::invalid_interpolation(format!(
             "cannot trans {} and {} with state {}",
             start.type_name(),
             end.type_name(),
@@ -2123,7 +2142,7 @@ pub(super) fn mesh_tree_patharc_lerp(
         )?))),
         (Value::List(start), Value::List(end)) => {
             if start.len() != end.len() {
-                return Err(ExecutorError::Other(format!(
+                return Err(ExecutorError::invalid_interpolation(format!(
                     "cannot trans lists of different lengths: {} vs {}",
                     start.len(),
                     end.len()
@@ -2144,7 +2163,7 @@ pub(super) fn mesh_tree_patharc_lerp(
                 executor::value::container::List::new_with(elements),
             )))
         }
-        (start, end) => Err(ExecutorError::Other(format!(
+        (start, end) => Err(ExecutorError::invalid_interpolation(format!(
             "cannot trans {} and {}",
             start.type_name(),
             end.type_name()
@@ -2238,8 +2257,9 @@ fn planar_mesh_patharc_lerp(
     path_arc: Float3,
 ) -> Result<Mesh, ExecutorError> {
     let boundary = mesh_patharc_lerp(start, end, t, path_arc)?;
-    let contours = extract_closed_contours(&boundary)
-        .ok_or_else(|| ExecutorError::Other("planar trans produced a non-closed contour".into()))?;
+    let contours = extract_closed_contours(&boundary).ok_or_else(|| {
+        ExecutorError::invalid_interpolation("planar trans produced a non-closed contour")
+    })?;
     let contour_points: Vec<_> = contours
         .iter()
         .map(|contour| contour.points.clone())
@@ -2298,7 +2318,7 @@ fn ensure_same_mesh_topology(
             (a.ab, a.bc, a.ca, a.anti, a.is_dom_sib) != (b.ab, b.bc, b.ca, b.anti, b.is_dom_sib)
         })
     {
-        return Err(ExecutorError::Other(format!(
+        return Err(ExecutorError::invalid_interpolation(format!(
             "cannot {} meshes with different topology",
             op
         )));

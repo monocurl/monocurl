@@ -1,14 +1,11 @@
 use std::{rc::Rc, sync::Arc};
 
 use executor::{error::ExecutorError, executor::Executor, value::Value};
-use geo::{
-    mesh::Mesh,
-    simd::Float3,
-};
+use geo::{mesh::Mesh, simd::Float3};
 use stdlib_macros::stdlib_func;
 
-use super::{embed_triplet, write_start_mesh};
 use super::super::helpers::{list_value, materialize_live_value};
+use super::{embed_triplet, write_start_mesh};
 
 const WRITE_STATE_KIND: i64 = 2;
 const WRITE_LAG_RATIO: f32 = 0.075;
@@ -90,10 +87,10 @@ fn read_write_state(value: &Value) -> Result<(usize, usize), ExecutorError> {
                     Value::Integer(index),
                     Value::Integer(total),
                 ) if index >= 0 && total > 0 => Ok((index as usize, total as usize)),
-                _ => Err(ExecutorError::Other("invalid write state".into())),
+                _ => Err(ExecutorError::invalid_operation("invalid write state")),
             }
         }
-        _ => Err(ExecutorError::Other("invalid write state".into())),
+        _ => Err(ExecutorError::invalid_operation("invalid write state")),
     }
 }
 
@@ -110,13 +107,13 @@ fn write_tree_value(value: &Value, state: &Value, t: f32) -> Result<Value, Execu
         }
         Value::List(list) => {
             let Value::List(state_list) = state.clone().elide_lvalue_leader_rec() else {
-                return Err(ExecutorError::Other(format!(
+                return Err(ExecutorError::invalid_operation(format!(
                     "cannot write list with state {}",
                     state.type_name()
                 )));
             };
             if list.len() != state_list.len() {
-                return Err(ExecutorError::Other(format!(
+                return Err(ExecutorError::invalid_operation(format!(
                     "cannot write lists of different lengths: {} vs {}",
                     list.len(),
                     state_list.len()

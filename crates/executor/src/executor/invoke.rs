@@ -388,16 +388,16 @@ impl Executor {
         let ret_val = self.state.stack_mut(stack_idx).pop();
 
         if matches!(ret_val, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::Other(
-                "Cannot return a stateful value".into(),
+            return ExecSingle::Error(ExecutorError::invalid_invocation(
+                "Cannot return a stateful value",
             ));
         }
 
         let to_pop = (-stack_delta) as usize;
         let stack = self.state.stack_mut(stack_idx);
         if to_pop > stack.stack_len() {
-            return ExecSingle::Error(ExecutorError::Other(
-                "internal error: return stack underflow".into(),
+            return ExecSingle::Error(ExecutorError::internal(
+                "internal error: return stack underflow",
             ));
         }
         stack.pop_n(to_pop);
@@ -551,7 +551,7 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(live);
             }
             Value::List(ref list) => {
-                return ExecSingle::Error(ExecutorError::Other(format!(
+                return ExecSingle::Error(ExecutorError::invalid_invocation(format!(
                     "operator must return a 2-element list, got {}",
                     list.elements.len()
                 )));
