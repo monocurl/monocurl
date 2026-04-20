@@ -337,7 +337,6 @@ let retag = operator |target, tag = 0| [target, __monocurl__native__ op_retagged
 
 let textured = operator |target, image| [target, __monocurl__native__ op_retextured(target, image)]
 let with_z = operator |target, index = 0| [target, __monocurl__native__ op_with_z(target, index)]
-let fixed_in_frame = operator |target, fixed = 1| [target, __monocurl__native__ op_fixed_in_frame(target, fixed)]
 let gloss = operator |target| [target, __monocurl__native__ op_gloss(target)]
 let point_map = operator |target, f| {
     let go = |level| __monocurl__native__ op_point_map(target, f, level)

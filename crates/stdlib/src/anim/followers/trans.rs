@@ -7,7 +7,7 @@ use geo::{
 };
 use stdlib_macros::stdlib_func;
 
-use crate::mesh::helpers::{mesh_position_groups, push_closed_polyline, tessellate_planar_loops};
+use crate::mesh::helpers::{mesh_position_groups, push_closed_polyline, uprank_mesh};
 
 use super::super::helpers::{self, list_value, materialize_live_value, mesh_center};
 use super::{embed_triplet, lerp_uniforms, read_path_arc_value};
@@ -1065,93 +1065,6 @@ fn conform_line_mesh_to_template(source: &Mesh, template: &Mesh) -> Mesh {
     }
 }
 
-fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
-    if mesh.lins.is_empty() || mesh.lins.iter().any(|lin| lin.prev < 0 || lin.next < 0) {
-        return None;
-    }
-
-    let mut visited = vec![false; mesh.lins.len()];
-    let mut contours = Vec::new();
-    for start in 0..mesh.lins.len() {
-        if visited[start] {
-            continue;
-        }
-
-        let mut contour = Vec::new();
-        let mut cursor = start;
-        loop {
-            if visited[cursor] {
-                return None;
-            }
-            visited[cursor] = true;
-            contour.push(mesh.lins[cursor].a.pos);
-
-            let next = mesh.lins[cursor].next as usize;
-            if next >= mesh.lins.len() || mesh.lins[next].prev != cursor as i32 {
-                return None;
-            }
-            cursor = next;
-            if cursor == start {
-                break;
-            }
-        }
-
-        if contour.len() >= 3 {
-            contours.push(contour);
-        }
-    }
-
-    Some(contours)
-}
-
-fn uprank_line_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
-    let mut out = mesh.clone();
-    if !out.tris.is_empty() {
-        return Ok(Some(out));
-    }
-    if out.lins.is_empty() && out.dots.len() >= 2 {
-        out.lins = out
-            .dots
-            .windows(2)
-            .enumerate()
-            .map(|pair| Lin {
-                a: LinVertex {
-                    pos: pair.1[0].pos,
-                    col: pair.1[0].col,
-                },
-                b: LinVertex {
-                    pos: pair.1[1].pos,
-                    col: pair.1[1].col,
-                },
-                norm: pair.1[0].norm,
-                prev: if pair.0 == 0 { -1 } else { pair.0 as i32 - 1 },
-                next: if pair.0 + 2 == out.dots.len() {
-                    -1
-                } else {
-                    pair.0 as i32 + 1
-                },
-                inv: -1,
-                anti: -1,
-                is_dom_sib: false,
-            })
-            .collect();
-    }
-    let Some(contours) = closed_line_contours(&out) else {
-        return Ok(None);
-    };
-    let normal = out.lins.first().map(|line| line.norm).unwrap_or(Float3::Z);
-    let (lins, mut tris) = tessellate_planar_loops(&contours, normal)?;
-    for tri in &mut tris {
-        tri.a.col = Float4::ZERO;
-        tri.b.col = Float4::ZERO;
-        tri.c.col = Float4::ZERO;
-    }
-    out.lins = lins;
-    out.tris = tris;
-    debug_assert!(out.has_consistent_topology());
-    Ok(Some(out))
-}
-
 fn match_tri_tri(source: &Mesh, target: &Mesh) -> (Mesh, Mesh) {
     if surface_template_score(source) >= surface_template_score(target) {
         (source.clone(), conform_surface_to_template(target, source))
@@ -1161,7 +1074,12 @@ fn match_tri_tri(source: &Mesh, target: &Mesh) -> (Mesh, Mesh) {
 }
 
 fn match_tri_lin(surface: &Mesh, line: &Mesh) -> Result<(Mesh, Mesh), ExecutorError> {
-    if let Some(upranked) = uprank_line_mesh(line)? {
+    if let Some(mut upranked) = uprank_mesh(line)? {
+        for tri in &mut upranked.tris {
+            tri.a.col = Float4::ZERO;
+            tri.b.col = Float4::ZERO;
+            tri.c.col = Float4::ZERO;
+        }
         if !upranked.tris.is_empty() {
             return Ok(match_tri_tri(surface, &upranked));
         }
@@ -2257,19 +2175,16 @@ fn planar_mesh_patharc_lerp(
     path_arc: Float3,
 ) -> Result<Mesh, ExecutorError> {
     let boundary = mesh_patharc_lerp(start, end, t, path_arc)?;
-    let contours = extract_closed_contours(&boundary).ok_or_else(|| {
+    extract_closed_contours(&boundary).ok_or_else(|| {
         ExecutorError::invalid_interpolation("planar trans produced a non-closed contour")
     })?;
-    let contour_points: Vec<_> = contours
-        .iter()
-        .map(|contour| contour.points.clone())
-        .collect();
-    let normal = boundary
-        .lins
-        .first()
-        .map(|line| line.norm)
-        .unwrap_or(Float3::Z);
-    let (mut lins, mut tris) = tessellate_planar_loops(&contour_points, normal)?;
+    let Some(upranked) = uprank_mesh(&boundary)? else {
+        return Err(ExecutorError::invalid_interpolation(
+            "planar trans produced a non-closed contour",
+        ));
+    };
+    let mut lins = upranked.lins;
+    let mut tris = upranked.tris;
 
     if lins.len() == boundary.lins.len() {
         for (line, template) in lins.iter_mut().zip(&boundary.lins) {

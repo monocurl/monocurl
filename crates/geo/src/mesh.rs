@@ -59,7 +59,6 @@ pub struct Uniforms {
     pub alpha: f64,
     pub img: Option<PathBuf>,
     pub z_index: i32,
-    pub fixed_in_frame: bool,
 }
 
 impl Default for Uniforms {
@@ -68,7 +67,6 @@ impl Default for Uniforms {
             alpha: 1.0,
             img: None,
             z_index: 0,
-            fixed_in_frame: false,
         }
     }
 }

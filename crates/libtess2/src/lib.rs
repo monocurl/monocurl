@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use std::{error::Error, ffi::c_int, fmt, mem::size_of, ptr::NonNull, slice};
+use std::{collections::HashSet, error::Error, ffi::c_int, fmt, mem::size_of, ptr::NonNull, slice};
 
 pub use geo::simd::Float3;
 
@@ -103,6 +103,7 @@ pub struct TessellationOptions {
     pub normal: Option<Float3>,
     pub constrained_delaunay: bool,
     pub reverse_contours: bool,
+    pub normalize_input: bool,
 }
 
 impl Default for TessellationOptions {
@@ -112,6 +113,7 @@ impl Default for TessellationOptions {
             normal: None,
             constrained_delaunay: false,
             reverse_contours: false,
+            normalize_input: false,
         }
     }
 }
@@ -310,6 +312,57 @@ impl Drop for Tessellator {
     }
 }
 
+fn float3_key(point: Float3) -> [u32; 3] {
+    [point.x.to_bits(), point.y.to_bits(), point.z.to_bits()]
+}
+
+fn rotated_contour_cmp(
+    keys: &[[u32; 3]],
+    lhs_start: usize,
+    rhs_start: usize,
+) -> std::cmp::Ordering {
+    for offset in 0..keys.len() {
+        let lhs = keys[(lhs_start + offset) % keys.len()];
+        let rhs = keys[(rhs_start + offset) % keys.len()];
+        match lhs.cmp(&rhs) {
+            std::cmp::Ordering::Equal => {}
+            order => return order,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
+fn min_rotated_contour_key(keys: &[[u32; 3]]) -> Vec<[u32; 3]> {
+    if keys.is_empty() {
+        return Vec::new();
+    }
+
+    let mut best_start = 0usize;
+    for start in 1..keys.len() {
+        if rotated_contour_cmp(keys, start, best_start).is_lt() {
+            best_start = start;
+        }
+    }
+
+    (0..keys.len())
+        .map(|offset| keys[(best_start + offset) % keys.len()])
+        .collect()
+}
+
+fn canonical_contour_key(contour: &[Float3]) -> Vec<[u32; 3]> {
+    let keys: Vec<_> = contour.iter().copied().map(float3_key).collect();
+    min_rotated_contour_key(&keys)
+}
+
+pub fn normalize_contours(contours: &[Vec<Float3>]) -> Vec<Vec<Float3>> {
+    let mut seen = HashSet::<Vec<[u32; 3]>>::new();
+    contours
+        .iter()
+        .filter(|contour| seen.insert(canonical_contour_key(contour)))
+        .cloned()
+        .collect()
+}
+
 pub fn triangulate<I, C>(
     contours: I,
     options: TessellationOptions,
@@ -319,8 +372,20 @@ where
     C: AsRef<[Float3]>,
 {
     let mut tessellator = Tessellator::new()?;
-    for contour in contours {
-        tessellator.add_contour(contour.as_ref())?;
+    if options.normalize_input {
+        let normalized = normalize_contours(
+            &contours
+                .into_iter()
+                .map(|contour| contour.as_ref().to_vec())
+                .collect::<Vec<_>>(),
+        );
+        for contour in &normalized {
+            tessellator.add_contour(contour)?;
+        }
+    } else {
+        for contour in contours {
+            tessellator.add_contour(contour.as_ref())?;
+        }
     }
     tessellator.tessellate(options)
 }
@@ -395,5 +460,44 @@ mod tests {
                 .iter()
                 .all(|vertex| (vertex.z - (vertex.x + vertex.y)).abs() < 1e-5)
         );
+    }
+
+    #[test]
+    fn normalize_contours_separates_duplicate_loops() {
+        let square = vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ];
+        let contours = vec![square.clone(), square];
+
+        let normalized = normalize_contours(&contours);
+
+        assert_eq!(normalized.len(), 1);
+        assert_eq!(normalized[0], contours[0]);
+    }
+
+    #[test]
+    fn triangulates_duplicate_squares_when_normalized() {
+        let contour = vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ];
+
+        let tessellation = triangulate(
+            [contour.as_slice(), contour.as_slice()],
+            TessellationOptions {
+                winding_rule: WindingRule::NonZero,
+                constrained_delaunay: true,
+                normalize_input: true,
+                ..TessellationOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(!tessellation.triangles.is_empty());
     }
 }

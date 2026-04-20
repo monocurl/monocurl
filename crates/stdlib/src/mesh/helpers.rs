@@ -1028,6 +1028,14 @@ pub(crate) fn tessellate_planar_loops(
     contours: &[Vec<Float3>],
     normal: Float3,
 ) -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError> {
+    tessellate_planar_loops_with_options(contours, normal, false)
+}
+
+fn tessellate_planar_loops_with_options(
+    contours: &[Vec<Float3>],
+    normal: Float3,
+    normalize_input: bool,
+) -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError> {
     let contours: Vec<_> = contours
         .iter()
         .filter(|contour| contour.len() >= 3)
@@ -1061,6 +1069,7 @@ pub(crate) fn tessellate_planar_loops(
             normal: Some(normal),
             constrained_delaunay: true,
             reverse_contours: false,
+            normalize_input,
         },
     )
     .map_err(|err| {
@@ -1100,6 +1109,69 @@ pub(crate) fn tessellate_planar_loops(
     }
 
     Ok((lins, tris))
+}
+fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
+    if mesh.lins.is_empty() || mesh.lins.iter().any(|lin| lin.prev < 0 || lin.next < 0) {
+        return None;
+    }
+
+    let mut visited = vec![false; mesh.lins.len()];
+    let mut contours = Vec::new();
+    for start in 0..mesh.lins.len() {
+        if visited[start] {
+            continue;
+        }
+
+        let mut contour = Vec::new();
+        let mut cursor = start;
+        loop {
+            if visited[cursor] {
+                return None;
+            }
+            visited[cursor] = true;
+            contour.push(mesh.lins[cursor].a.pos);
+
+            let next = mesh.lins[cursor].next as usize;
+            if next >= mesh.lins.len() || mesh.lins[next].prev != cursor as i32 {
+                return None;
+            }
+            cursor = next;
+            if cursor == start {
+                break;
+            }
+        }
+
+        if contour.len() >= 3 {
+            contours.push(contour);
+        }
+    }
+
+    Some(contours)
+}
+pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
+    let mut out = mesh.clone();
+    if !out.tris.is_empty() {
+        return Ok(Some(out));
+    }
+
+    if out.lins.is_empty() && out.dots.len() >= 2 {
+        out.lins = out
+            .dots
+            .windows(2)
+            .map(|pair| default_lin(pair[0].pos, pair[1].pos, pair[0].norm))
+            .collect();
+    }
+
+    let Some(contours) = closed_line_contours(&out) else {
+        return Ok(None);
+    };
+
+    let normal = out.lins.first().map(|line| line.norm).unwrap_or(Float3::Z);
+    let (lins, tris) = tessellate_planar_loops_with_options(&contours, normal, true)?;
+    out.lins = lins;
+    out.tris = tris;
+    debug_assert!(out.has_consistent_topology());
+    Ok(Some(out))
 }
 
 pub(super) fn mesh_from_parts(dots: Vec<Dot>, lins: Vec<Lin>, tris: Vec<Tri>) -> Value {
@@ -1549,5 +1621,46 @@ pub(super) fn set_triangle_uv_rect(
             let rel = vertex.pos - min;
             vertex.uv = Float2::new(rel.dot(basis_x) / dx, rel.dot(basis_y) / dy);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use geo::{
+        mesh::{Mesh, Uniforms},
+        simd::Float3,
+    };
+
+    use super::{push_closed_polyline, uprank_mesh};
+
+    fn duplicate_square_mesh(copies: usize) -> Mesh {
+        let mut lins = Vec::new();
+        let square = [
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ];
+        for _ in 0..copies {
+            push_closed_polyline(&mut lins, &square, Float3::Z);
+        }
+
+        Mesh {
+            dots: Vec::new(),
+            lins,
+            tris: Vec::new(),
+            uniform: Uniforms::default(),
+            tag: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn uprank_handles_many_duplicate_contours() {
+        let mesh = duplicate_square_mesh(8);
+        let upranked = uprank_mesh(&mesh).expect("uprank should succeed");
+        let upranked = upranked.expect("closed contours should uprank");
+
+        assert!(!upranked.tris.is_empty());
+        assert!(upranked.has_consistent_topology());
     }
 }

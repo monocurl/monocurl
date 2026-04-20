@@ -292,19 +292,6 @@ pub async fn op_with_z(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn op_fixed_in_frame(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let fixed = read_flag(executor, stack_idx, -1, "fixed")?;
-    tree.for_each_mut(&mut |mesh| {
-        mesh.uniform.fixed_in_frame = fixed;
-    });
-    Ok(tree.into_value())
-}
-
-#[stdlib_func]
 pub async fn op_gloss(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     read_mesh_tree_arg(executor, stack_idx, -1, "target")
         .await
@@ -666,69 +653,13 @@ pub async fn op_tag_map(executor: &mut Executor, stack_idx: usize) -> Result<Val
 
 #[stdlib_func]
 pub async fn op_uprank(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
-        if mesh.lins.is_empty() || mesh.lins.iter().any(|lin| lin.prev < 0 || lin.next < 0) {
-            return None;
-        }
-
-        let mut visited = vec![false; mesh.lins.len()];
-        let mut contours = Vec::new();
-        for start in 0..mesh.lins.len() {
-            if visited[start] {
-                continue;
-            }
-
-            let mut contour = Vec::new();
-            let mut cursor = start;
-            loop {
-                if visited[cursor] {
-                    return None;
-                }
-                visited[cursor] = true;
-                contour.push(mesh.lins[cursor].a.pos);
-
-                let next = mesh.lins[cursor].next as usize;
-                if next >= mesh.lins.len() || mesh.lins[next].prev != cursor as i32 {
-                    return None;
-                }
-                cursor = next;
-                if cursor == start {
-                    break;
-                }
-            }
-
-            if contour.len() >= 3 {
-                contours.push(contour);
-            }
-        }
-
-        Some(contours)
-    }
-
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -1, "target").await?;
     let mut tessellation_error = None;
     tree.for_each_mut(&mut |mesh| {
-        if !mesh.tris.is_empty() {
-            return;
-        }
-        if mesh.lins.is_empty() && mesh.dots.len() >= 2 {
-            mesh.lins = mesh
-                .dots
-                .windows(2)
-                .map(|pair| default_lin(pair[0].pos, pair[1].pos, pair[0].norm))
-                .collect();
-        }
-        if let Some(contours) = closed_line_contours(mesh) {
-            match tessellate_planar_loops(
-                &contours,
-                mesh.lins.first().map(|lin| lin.norm).unwrap_or(Float3::Z),
-            ) {
-                Ok((lins, tris)) => {
-                    mesh.lins = lins;
-                    mesh.tris = tris;
-                }
-                Err(err) => tessellation_error = Some(err),
-            }
+        match uprank_mesh(mesh) {
+            Ok(Some(upranked)) => *mesh = upranked,
+            Ok(None) => {}
+            Err(err) => tessellation_error = Some(err),
         }
         debug_assert!(mesh.has_consistent_topology());
     });
