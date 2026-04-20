@@ -52,6 +52,44 @@ pub(super) fn read_int(
     }
 }
 
+#[stdlib_func]
+pub async fn expect_list(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let name = read_string(executor, stack_idx, -3, "name")?;
+    let value = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-2)
+        .clone()
+        .elide_lvalue();
+    let expected_len = read_int(executor, stack_idx, -1, "expected_len")?;
+
+    let Ok(expected_len) = usize::try_from(expected_len) else {
+        return Err(ExecutorError::invalid_operation(format!(
+            "invalid argument '{}': expected non-negative list length, got {}",
+            name, expected_len
+        )));
+    };
+
+    match value {
+        Value::List(list) if list.len() == expected_len => Ok(Value::List(list)),
+        Value::List(list) => Err(ExecutorError::invalid_operation(format!(
+            "invalid argument '{}': expected list of length {}, got list of length {}",
+            name,
+            expected_len,
+            list.len()
+        ))),
+        other => Err(ExecutorError::invalid_operation(format!(
+            "invalid argument '{}': expected list of length {}, got {}",
+            name,
+            expected_len,
+            other.type_name()
+        ))),
+    }
+}
+
 pub(super) fn read_rc_list(
     executor: &Executor,
     stack_idx: usize,

@@ -17,8 +17,12 @@ let Annulus = |center = [0, 0, 0], inner = 0.5, outer = 1, normal=1f|
 let Square = |center = [0, 0, 0], width = 1, normal = 1f|
     __monocurl__native__ mk_square(center, width, normal)
 
-let Rect = |center = [0, 0, 0], size = [1, 1], normal = 1f|
-    __monocurl__native__ mk_rect(center, size[0], size[1], normal)
+let Rect = |center = [0, 0, 0], size = [1, 1], normal = 1f| {
+    var width = 0
+    var height = 0
+    [width, height] = __monocurl__native__ expect_list("size", size, 2)
+    return __monocurl__native__ mk_rect(center, width, height, normal)
+}
 
 let RegularPolygon = |center = [0, 0, 0], n = 3, circumradius = 1, normal = 1f|
     __monocurl__native__ mk_regular_polygon(center, n, circumradius, normal)
@@ -35,11 +39,19 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1f|
 let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1f, path_arc = 0|
     __monocurl__native__ mk_arrow(start, end, normal, path_arc)
 
-let Arc = |center = [0, 0, 0], radius = 1, theta = [0, 3.14159265358979], normal = 1f|
-    __monocurl__native__ mk_arc(center, radius, theta[0], theta[1], normal)
+let Arc = |center = [0, 0, 0], radius = 1, theta = [0, 3.14159265358979], normal = 1f| {
+    var theta_start = 0
+    var theta_end = 0
+    [theta_start, theta_end] = __monocurl__native__ expect_list("theta", theta, 2)
+    return __monocurl__native__ mk_arc(center, radius, theta_start, theta_end, normal)
+}
 
-let Capsule = |start_center = [-1, 0, 0], end_center = [1, 0, 0], radii = [0.4, 0.5], normal = 1f|
-    __monocurl__native__ mk_capsule(start_center, end_center, radii[0], radii[1], normal)
+let Capsule = |start_center = [-1, 0, 0], end_center = [1, 0, 0], radii = [0.4, 0.5], normal = 1f| {
+    var start_radius = 0
+    var end_radius = 0
+    [start_radius, end_radius] = __monocurl__native__ expect_list("radii", radii, 2)
+    return __monocurl__native__ mk_capsule(start_center, end_center, start_radius, end_radius, normal)
+}
 
 let Triangle = |p = [0, 0, 0], q = [1, 0, 0], r = [0, 1, 0], normal_hint = 1f|
     __monocurl__native__ mk_triangle(p, q, r, normal_hint)
@@ -58,11 +70,22 @@ let Cylinder = |center = [0, 0, 0], radius = 1, height = 2, direction = 1u, samp
 let Cone = |apex = [0, 1, 0], base = [0, 0, 0], radius = 1, sample_count = 32|
     __monocurl__native__ mk_cone(apex, base, radius, sample_count)
 
-let Torus = |center = [0, 0, 0], radii = [1, 0.3], normal = 1u, samples = [48, 24]|
-    __monocurl__native__ mk_torus(center, radii[0], radii[1], normal, samples[0], samples[1])
+let Torus = |center = [0, 0, 0], radii = [1, 0.3], normal = 1u, samples = [48, 24]| {
+    var major_radius = 0
+    var minor_radius = 0
+    var major_samples = 0
+    var minor_samples = 0
+    [major_radius, minor_radius] = __monocurl__native__ expect_list("radii", radii, 2)
+    [major_samples, minor_samples] = __monocurl__native__ expect_list("samples", samples, 2)
+    return __monocurl__native__ mk_torus(center, major_radius, minor_radius, normal, major_samples, minor_samples)
+}
 
-let Plane = |normal = 1u, dist = 0, size = [4, 4]|
-    __monocurl__native__ mk_plane(normal, dist, size[0], size[1])
+let Plane = |normal = 1u, dist = 0, size = [4, 4]| {
+    var width = 0
+    var height = 0
+    [width, height] = __monocurl__native__ expect_list("size", size, 2)
+    return __monocurl__native__ mk_plane(normal, dist, width, height)
+}
 
 # visual / graphical
 
@@ -75,14 +98,36 @@ let Vector = |tail = [0, 0, 0], delta = 1r, normal = 1f|
 let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1f|
     __monocurl__native__ mk_half_vector(tail, delta, normal)
 
-let Image = |name, center = [0, 0, 0], size = [1, 1], normal = 1f|
-    __monocurl__native__ mk_image(name, center, size[0], size[1], normal)
+let Image = |name, center = [0, 0, 0], size = [1, 1], normal = 1f| {
+    var width = 0
+    var height = 0
+    [width, height] = __monocurl__native__ expect_list("size", size, 2)
+    return __monocurl__native__ mk_image(name, center, width, height, normal)
+}
 
-let ColorGrid = |color_at, x = [-1, 1, 0.1], y = [-1, 1, 0.1], mask = |pos| 1|
-    __monocurl__native__ mk_color_grid(x[0], x[1], y[0], y[1], x[2], y[2], mask, color_at)
+let ColorGrid = |color_at, x = [-1, 1, 0.1], y = [-1, 1, 0.1], mask = |pos| 1| {
+    var x_min = 0
+    var x_max = 0
+    var x_step = 0
+    var y_min = 0
+    var y_max = 0
+    var y_step = 0
+    [x_min, x_max, x_step] = __monocurl__native__ expect_list("x", x, 3)
+    [y_min, y_max, y_step] = __monocurl__native__ expect_list("y", y, 3)
+    return __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_step, y_step, mask, color_at)
+}
 
-let Field = |mesh_at, x = [-1, 1, 0.1], y = [-1, 1, 0.1], mask = |pos| 1|
-    __monocurl__native__ mk_field(x[0], x[1], y[0], y[1], x[2], y[2], mask, mesh_at)
+let Field = |mesh_at, x = [-1, 1, 0.1], y = [-1, 1, 0.1], mask = |pos| 1| {
+    var x_min = 0
+    var x_max = 0
+    var x_step = 0
+    var y_min = 0
+    var y_max = 0
+    var y_step = 0
+    [x_min, x_max, x_step] = __monocurl__native__ expect_list("x", x, 3)
+    [y_min, y_max, y_step] = __monocurl__native__ expect_list("y", y, 3)
+    return __monocurl__native__ mk_field(x_min, x_max, y_min, y_max, x_step, y_step, mask, mesh_at)
+}
 
 # text / labels
 
@@ -102,32 +147,124 @@ let Number = |value = 0, precision = 2, scale = 1|
 
 # graphing
 
-let Axis1d = |center = [0, 0, 0], axis = 1r, normal = 1f, range = [-5, 5], unit = 1, tick_step = 1, label = |v| v, label_rate = 1|
-    __monocurl__native__ mk_axis1d(center, axis, normal, range[0], range[1], unit, tick_step, label, label_rate)
+let Axis1d = |center = [0, 0, 0], axis = 1r, normal = 1f, range = [-5, 5], unit = 1, tick_step = 1, label = |v| v, label_rate = 1| {
+    var min = 0
+    var max = 0
+    [min, max] = __monocurl__native__ expect_list("range", range, 2)
+    return __monocurl__native__ mk_axis1d(center, axis, normal, min, max, unit, tick_step, label, label_rate)
+}
 
-let Axis2d = |center = [0, 0, 0], axes = [1r, 1u], x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], labels = [|v| v, |v| v], label_rates = [1, 1], grid = 0|
-    __monocurl__native__ mk_axis2d(center, axes[0], axes[1], x[0], x[1], x[2], x[3], y[0], y[1], y[2], y[3], labels[0], label_rates[0], labels[1], label_rates[1], grid)
+let Axis2d = |center = [0, 0, 0], axes = [1r, 1u], x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], labels = [|v| v, |v| v], label_rates = [1, 1], grid = 0| {
+    var x_axis = 0
+    var y_axis = 0
+    var x_min = 0
+    var x_max = 0
+    var x_unit = 0
+    var x_tick_step = 0
+    var y_min = 0
+    var y_max = 0
+    var y_unit = 0
+    var y_tick_step = 0
+    var x_label = 0
+    var y_label = 0
+    var x_label_rate = 0
+    var y_label_rate = 0
+    [x_axis, y_axis] = __monocurl__native__ expect_list("axes", axes, 2)
+    [x_min, x_max, x_unit, x_tick_step] = __monocurl__native__ expect_list("x", x, 4)
+    [y_min, y_max, y_unit, y_tick_step] = __monocurl__native__ expect_list("y", y, 4)
+    [x_label, y_label] = __monocurl__native__ expect_list("labels", labels, 2)
+    [x_label_rate, y_label_rate] = __monocurl__native__ expect_list("label_rates", label_rates, 2)
+    return __monocurl__native__ mk_axis2d(center, x_axis, y_axis, x_min, x_max, x_unit, x_tick_step, y_min, y_max, y_unit, y_tick_step, x_label, x_label_rate, y_label, y_label_rate, grid)
+}
 
-let Axis3d = |center = [0, 0, 0], axes = [1r, 1u, 1f], x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], z = [-5, 5, 1, 1], labels = [|v| v, |v| v, |v| v], grid = 0|
-    __monocurl__native__ mk_axis3d(center, axes[0], axes[1], axes[2], x[0], x[1], x[2], x[3], y[0], y[1], y[2], y[3], z[0], z[1], z[2], z[3], labels[0], labels[1], labels[2], grid)
+let Axis3d = |center = [0, 0, 0], axes = [1r, 1u, 1f], x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], z = [-5, 5, 1, 1], labels = [|v| v, |v| v, |v| v], grid = 0| {
+    var x_axis = 0
+    var y_axis = 0
+    var z_axis = 0
+    var x_min = 0
+    var x_max = 0
+    var x_unit = 0
+    var x_tick_step = 0
+    var y_min = 0
+    var y_max = 0
+    var y_unit = 0
+    var y_tick_step = 0
+    var z_min = 0
+    var z_max = 0
+    var z_unit = 0
+    var z_tick_step = 0
+    var x_label = 0
+    var y_label = 0
+    var z_label = 0
+    [x_axis, y_axis, z_axis] = __monocurl__native__ expect_list("axes", axes, 3)
+    [x_min, x_max, x_unit, x_tick_step] = __monocurl__native__ expect_list("x", x, 4)
+    [y_min, y_max, y_unit, y_tick_step] = __monocurl__native__ expect_list("y", y, 4)
+    [z_min, z_max, z_unit, z_tick_step] = __monocurl__native__ expect_list("z", z, 4)
+    [x_label, y_label, z_label] = __monocurl__native__ expect_list("labels", labels, 3)
+    return __monocurl__native__ mk_axis3d(center, x_axis, y_axis, z_axis, x_min, x_max, x_unit, x_tick_step, y_min, y_max, y_unit, y_tick_step, z_min, z_max, z_unit, z_tick_step, x_label, y_label, z_label, grid)
+}
 
-let PolarAxis = |center = [0, 0, 0], normal = 1f, theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]|
-    __monocurl__native__ mk_polar_axis(center, normal, theta[0], theta[1], theta[2], theta[3], radius[0], radius[1], radius[2], radius[3])
+let PolarAxis = |center = [0, 0, 0], normal = 1f, theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
+    var theta_min = 0
+    var theta_max = 0
+    var theta_unit = 0
+    var theta_tick_step = 0
+    var radius_min = 0
+    var radius_max = 0
+    var radius_unit = 0
+    var radius_tick_step = 0
+    [theta_min, theta_max, theta_unit, theta_tick_step] = __monocurl__native__ expect_list("theta", theta, 4)
+    [radius_min, radius_max, radius_unit, radius_tick_step] = __monocurl__native__ expect_list("radius", radius, 4)
+    return __monocurl__native__ mk_polar_axis(center, normal, theta_min, theta_max, theta_unit, theta_tick_step, radius_min, radius_max, radius_unit, radius_tick_step)
+}
 
-let ParametricFunc = |f, domain = [0, 1], samples = 64|
-    __monocurl__native__ mk_parametric(f, domain[0], domain[1], samples)
+let ParametricFunc = |f, domain = [0, 1], samples = 64| {
+    var min = 0
+    var max = 0
+    [min, max] = __monocurl__native__ expect_list("domain", domain, 2)
+    return __monocurl__native__ mk_parametric(f, min, max, samples)
+}
 
-let ExplicitFunc = |f, domain = [-5, 5], samples = 128|
-    __monocurl__native__ mk_explicit(f, domain[0], domain[1], samples)
+let ExplicitFunc = |f, domain = [-5, 5], samples = 128| {
+    var min = 0
+    var max = 0
+    [min, max] = __monocurl__native__ expect_list("domain", domain, 2)
+    return __monocurl__native__ mk_explicit(f, min, max, samples)
+}
 
-let ExplicitFunc2d = |f, x = [-1, 1, 0.1], y = [-1, 1, 0.1]|
-    __monocurl__native__ mk_explicit2d(f, x[0], x[1], y[0], y[1], x[2], y[2])
+let ExplicitFunc2d = |f, x = [-1, 1, 0.1], y = [-1, 1, 0.1]| {
+    var x_min = 0
+    var x_max = 0
+    var x_step = 0
+    var y_min = 0
+    var y_max = 0
+    var y_step = 0
+    [x_min, x_max, x_step] = __monocurl__native__ expect_list("x", x, 3)
+    [y_min, y_max, y_step] = __monocurl__native__ expect_list("y", y, 3)
+    return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_step, y_step)
+}
 
-let ImplicitFunc2d = |f, x = [-1, 1, 0.05], y = [-1, 1, 0.05]|
-    __monocurl__native__ mk_implicit2d(f, x[0], x[1], y[0], y[1], x[2], y[2])
+let ImplicitFunc2d = |f, x = [-1, 1, 0.05], y = [-1, 1, 0.05]| {
+    var x_min = 0
+    var x_max = 0
+    var x_step = 0
+    var y_min = 0
+    var y_max = 0
+    var y_step = 0
+    [x_min, x_max, x_step] = __monocurl__native__ expect_list("x", x, 3)
+    [y_min, y_max, y_step] = __monocurl__native__ expect_list("y", y, 3)
+    return __monocurl__native__ mk_implicit2d(f, x_min, x_max, y_min, y_max, x_step, y_step)
+}
 
-let ExplicitFuncDiff = |f, g, domain = [-5, 5], samples = 128, fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]]|
-    __monocurl__native__ mk_explicit_diff(f, g, domain[0], domain[1], samples, fills[0], fills[1])
+let ExplicitFuncDiff = |f, g, domain = [-5, 5], samples = 128, fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]]| {
+    var min = 0
+    var max = 0
+    var lower_fill = 0
+    var upper_fill = 0
+    [min, max] = __monocurl__native__ expect_list("domain", domain, 2)
+    [lower_fill, upper_fill] = __monocurl__native__ expect_list("fills", fills, 2)
+    return __monocurl__native__ mk_explicit_diff(f, g, min, max, samples, lower_fill, upper_fill)
+}
 
 # layout / grouping
 

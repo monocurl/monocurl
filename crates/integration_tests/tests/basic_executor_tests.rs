@@ -2023,6 +2023,45 @@ fn test_util_type_of_and_runtime_error() {
     err.assert_error("boom");
 }
 
+#[test]
+fn test_mesh_stdlib_reports_named_bad_list_argument() {
+    let r = run_with_stdlib(
+        "
+        let result = ColorGrid(|pos| [1, 0, 0, 1], 5)
+    ",
+        &["mesh"],
+    );
+    r.assert_error("invalid argument 'x'");
+    r.assert_error("expected list of length 3");
+    r.assert_error("got int");
+}
+
+#[test]
+fn test_mesh_stdlib_reports_named_bad_list_length() {
+    let r = run_with_stdlib(
+        "
+        let result = Rect([0, 0, 0], [1, 2, 3])
+    ",
+        &["mesh"],
+    );
+    r.assert_error("invalid argument 'size'");
+    r.assert_error("expected list of length 2");
+    r.assert_error("got list of length 3");
+}
+
+#[test]
+fn test_color_stdlib_reports_named_bad_color_argument() {
+    let r = run_with_stdlib(
+        "
+        let result = with_alpha(7, 0.5)
+    ",
+        &["color"],
+    );
+    r.assert_error("invalid argument 'color'");
+    r.assert_error("expected list of length 4");
+    r.assert_error("got int");
+}
+
 // -- stack overflow --
 
 #[test]
