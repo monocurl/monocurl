@@ -1178,31 +1178,6 @@ pub async fn op_in_space(
     Ok(tree.into_value())
 }
 
-#[stdlib_func]
-pub async fn op_masked(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("keep only the part of the target inside a mask mesh")
-}
-
-#[stdlib_func]
-pub async fn op_joined(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("union two meshes")
-}
-
-#[stdlib_func]
-pub async fn op_set_diff(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("subtract one mesh from another")
-}
-
-#[stdlib_func]
-pub async fn op_sym_diff(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("symmetric difference of two meshes")
-}
-
-#[stdlib_func]
-pub async fn op_minkowski_sum(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("minkowski sum of two meshes")
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

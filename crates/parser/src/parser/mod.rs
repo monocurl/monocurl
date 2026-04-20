@@ -25,8 +25,8 @@ use crate::{
     import_context::{FileResult, ParseImportContext},
     parser::predicate::{
         BinaryOperatorPred, ExactPred, ExactPredDesc, InLambdaOrBlockPredicate, InLoopPredicate,
-        InStdLibPredicate, NullPredicate, PlayablePredicate, StatePredicate, TokenPredicate,
-        UnaryOperatorPred, VariableDeclarationPred,
+        InStdLibPredicate, NullPredicate, PlayablePredicate, RootTopLevelPredicate, StatePredicate,
+        TokenPredicate, UnaryOperatorPred, VariableDeclarationPred,
     },
 };
 

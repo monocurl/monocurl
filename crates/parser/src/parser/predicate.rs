@@ -73,6 +73,17 @@ impl StatePredicate for InStdLibPredicate {
     }
 }
 
+pub(super) struct RootTopLevelPredicate;
+impl StatePredicate for RootTopLevelPredicate {
+    fn ok(&self, state: &ShortTermState) -> bool {
+        state.root_import_span.is_none() && state.frames.len() == 1
+    }
+
+    fn fail_description(&self) -> &'static str {
+        "we are not at the root statement level"
+    }
+}
+
 pub(super) struct ExactPredDesc(pub Token, pub &'static str);
 impl TokenPredicate for ExactPredDesc {
     type Output = Token;

@@ -99,6 +99,10 @@ impl SectionParser {
                 let (span, statement) = self.parse_play();
                 (span, Statement::Play(statement))
             },
+            if RootTopLevelPredicate, ExactPred(Token::Slide) => {
+                // for autocomplete only
+                unreachable!("root files are split on 'slide' before section parsing")
+            },
             if InLoopPredicate, ExactPred(Token::Break) => {
                 let span = self.advance_token();
                 (span, Statement::Break)

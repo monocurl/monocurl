@@ -1824,6 +1824,16 @@ mod test {
     }
 
     #[test]
+    fn test_root_statement_autocomplete_includes_slide() {
+        let content = "foo";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None, Some(1));
+        let _ = parser.parse_statement();
+        assert!(parser.autocomplete_possibilities().contains(&Token::Slide));
+    }
+
+    #[test]
     fn test_error_ambiguous_vector_map() {
         error_expr_test("[1, 2 -> 3]");
     }
