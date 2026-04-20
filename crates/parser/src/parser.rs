@@ -1150,7 +1150,6 @@ impl SectionParser {
         let mut expr = Some(base);
 
         loop {
-            let newline_start = self.token_index;
             let mut saw_newline = false;
             while self
                 .tokens
@@ -1161,13 +1160,7 @@ impl SectionParser {
                 self.token_index += 1;
             }
 
-            if saw_newline
-                && self
-                    .tokens
-                    .get(self.token_index)
-                    .is_some_and(|(tok, _)| *tok == Token::Dot)
-            {
-                self.token_index = newline_start;
+            if saw_newline {
                 return expr.unwrap();
             }
 
@@ -1628,80 +1621,86 @@ impl SectionParser {
 
     fn parse_map_or_vector_literal(&mut self) -> SpanTagged<Expression> {
         self.debug_assert_token_eq(Token::LBracket);
+        let inner_range = self.precomputation.bracket_internal_range(self.token_index);
         let base_span = self.advance_token();
-        // empty
-        self.advance_newlines();
-        if self.read_if_token(Token::KeyValueMap).is_some() {
-            self.advance_newlines();
+
+        if inner_range.is_empty() {
             let end_span = self.read_token_best_effort(Token::RBracket);
-            return (
-                base_span.start..end_span.end,
-                Expression::Literal(Literal::Map(vec![])),
-            );
-        } else if let Some(end_span) = self.read_if_token(Token::RBracket) {
             return (
                 base_span.start..end_span.end,
                 Expression::Literal(Literal::Vector(vec![])),
             );
         }
 
-        let mut vector_entries = Vec::new();
-        let mut map_entries = Vec::new();
-        let mut last_span = base_span.clone();
-        let mut emitted_error = false;
-        loop {
-            let entry = self.parse_expr_best_effort();
-            if let Some(span) = self.read_if_token(Token::KeyValueMap) {
-                if !vector_entries.is_empty() && !emitted_error {
-                    self.emit_error(
-                        "Ambiguous Literal".into(),
-                        "cannot decide if literal is list or map".into(),
-                        base_span.start..span.end,
-                    );
-                    emitted_error = true;
-                }
-                let value = self.parse_expr_best_effort();
-                map_entries.push((entry, value));
-            } else {
-                if !map_entries.is_empty() && !emitted_error {
-                    self.emit_error(
-                        "Ambiguous Literal".into(),
-                        "cannot decide if literal is list or map".into(),
-                        base_span.start..entry.0.end,
-                    );
-                    emitted_error = true;
-                }
-                vector_entries.push(entry)
-            }
+        self.state.push_frame(|frame| {
+            frame.operating_range = inner_range;
+        });
 
-            self.advance_newlines();
-            let mut is_finished = false;
-            let fail = try_all!(self, {
-                ExactPred(Token::Comma) => {
-                    self.advance_token();
-                },
-                ExactPred(Token::RBracket) => {
-                    last_span = self.advance_token();
-                    is_finished = true;
-                },
-            })
-            .is_err();
-            if is_finished || fail {
-                break;
-            }
-        }
+        self.advance_newlines();
 
-        if !vector_entries.is_empty() {
-            (
-                base_span.start..last_span.end,
-                Expression::Literal(Literal::Vector(vector_entries)),
-            )
+        let literal = if self.read_if_token(Token::KeyValueMap).is_some() {
+            Expression::Literal(Literal::Map(vec![]))
         } else {
-            (
-                base_span.start..last_span.end,
-                Expression::Literal(Literal::Map(map_entries)),
-            )
-        }
+            let mut vector_entries = Vec::new();
+            let mut map_entries = Vec::new();
+            let mut emitted_error = false;
+
+            loop {
+                let entry = self.parse_expr_best_effort();
+                if let Some(span) = self.read_if_token(Token::KeyValueMap) {
+                    if !vector_entries.is_empty() && !emitted_error {
+                        self.emit_error(
+                            "Ambiguous Literal".into(),
+                            "cannot decide if literal is list or map".into(),
+                            base_span.start..span.end,
+                        );
+                        emitted_error = true;
+                    }
+                    let value = self.parse_expr_best_effort();
+                    map_entries.push((entry, value));
+                } else {
+                    if !map_entries.is_empty() && !emitted_error {
+                        self.emit_error(
+                            "Ambiguous Literal".into(),
+                            "cannot decide if literal is list or map".into(),
+                            base_span.start..entry.0.end,
+                        );
+                        emitted_error = true;
+                    }
+                    vector_entries.push(entry)
+                }
+
+                self.advance_newlines();
+                if self.peek_token().is_none() {
+                    break;
+                }
+
+                let fail = try_all!(self, {
+                    ExactPred(Token::Comma) => {
+                        self.advance_token();
+                    },
+                    else {
+                        Result::<_, ()>::Err(())
+                    }
+                })
+                .is_err();
+                if fail {
+                    break;
+                }
+            }
+
+            if !vector_entries.is_empty() {
+                Expression::Literal(Literal::Vector(vector_entries))
+            } else {
+                Expression::Literal(Literal::Map(map_entries))
+            }
+        };
+
+        self.state.pop_frame();
+
+        self.advance_newlines();
+        let end_span = self.read_token_best_effort(Token::RBracket);
+        (base_span.start..end_span.end, literal)
     }
 }
 
@@ -3434,6 +3433,57 @@ mod test {
             ),
         ]));
         assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_nested_vector_destructure_assignment() {
+        let content = "[c, [d, a]] = [a, [b, d]]";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
+        let result = parser.parse_statement().unwrap();
+        assert!(
+            parser.artifacts.error_diagnostics.is_empty(),
+            "{:?}",
+            parser.artifacts.error_diagnostics
+        );
+
+        let Statement::Expression(Expression::BinaryOperator(op)) = result.1 else {
+            panic!("expected assignment expression");
+        };
+        assert_eq!(op.op_type, BinaryOperatorType::Assign);
+        assert!(matches!(
+            op.lhs.1.as_ref(),
+            Expression::Literal(Literal::Vector(_))
+        ));
+        assert!(matches!(
+            op.rhs.1.as_ref(),
+            Expression::Literal(Literal::Vector(_))
+        ));
+    }
+
+    #[test]
+    fn test_multiline_destructure_starts_new_statement() {
+        let content = "var d = 1\n[a, b] = [b, a]";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
+        let result = parser.parse_statement_list();
+
+        assert!(
+            parser.artifacts.error_diagnostics.is_empty(),
+            "{:?}",
+            parser.artifacts.error_diagnostics
+        );
+        assert_eq!(result.len(), 2);
+        assert!(matches!(result[0].1, Statement::Declaration(_)));
+        assert!(matches!(
+            result[1].1,
+            Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                op_type: BinaryOperatorType::Assign,
+                ..
+            }))
+        ));
     }
 
     #[test]

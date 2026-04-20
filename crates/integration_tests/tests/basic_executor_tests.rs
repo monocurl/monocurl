@@ -29,6 +29,37 @@ struct ExecResult {
     _error_spans: Vec<Span8>,
 }
 
+fn cached_value_for_assert(cell: &std::cell::Cell<Option<Box<Value>>>) -> Option<Value> {
+    let cached = cell.take();
+    let cloned = cached.as_ref().map(|value| (**value).clone());
+    cell.set(cached);
+    cloned
+}
+
+fn elide_value_for_assert(value: &Value) -> Value {
+    match value {
+        Value::Lvalue(vrc) => {
+            let resolved = with_heap(|h| h.get(vrc.key()).clone());
+            elide_value_for_assert(&resolved)
+        }
+        Value::WeakLvalue(vweak) => {
+            let resolved = with_heap(|h| h.get(vweak.key()).clone());
+            elide_value_for_assert(&resolved)
+        }
+        Value::Leader(leader) => {
+            let resolved = with_heap(|h| h.get(leader.leader_rc.key()).clone());
+            elide_value_for_assert(&resolved)
+        }
+        Value::InvokedFunction(inv) => cached_value_for_assert(&inv.cache.0)
+            .map(|resolved| elide_value_for_assert(&resolved))
+            .unwrap_or_else(|| value.clone()),
+        Value::InvokedOperator(inv) => cached_value_for_assert(&inv.cache.cached_result)
+            .map(|resolved| elide_value_for_assert(&resolved))
+            .unwrap_or_else(|| value.clone()),
+        other => other.clone(),
+    }
+}
+
 impl ExecResult {
     fn assert_ok(&self) {
         assert!(
@@ -47,6 +78,19 @@ impl ExecResult {
                 expected,
                 other.as_ref().map(Value::type_name).unwrap_or("(empty)")
             ),
+        }
+    }
+
+    fn assert_elided_int(&self, expected: i64) {
+        self.assert_ok();
+        let value = self
+            .value
+            .as_ref()
+            .map(elide_value_for_assert)
+            .unwrap_or(Value::Nil);
+        match value {
+            Value::Integer(n) => assert_eq!(n, expected, "integer mismatch"),
+            other => panic!("expected Integer({}), got {}", expected, other.type_name()),
         }
     }
 
@@ -1111,7 +1155,7 @@ fn test_exec_operator_creation_and_invocation() {
         let x = 40
         let result = add{2} x
     ");
-    r.assert_int(42);
+    r.assert_elided_int(42);
 }
 
 #[test]
@@ -1143,7 +1187,7 @@ fn test_exec_operator_chain_invocation() {
         let x = 10
         let result = add{2} mul{3} x
     ");
-    r.assert_int(32);
+    r.assert_elided_int(32);
 }
 
 #[test]
@@ -1160,7 +1204,7 @@ fn test_exec_operator_chain_with_aliases() {
         let x = 10
         let result = outer{2} inner{3} x
     ");
-    r.assert_int(32);
+    r.assert_elided_int(32);
 }
 
 #[test]
@@ -1172,7 +1216,7 @@ fn test_exec_operator_chain_same_operator_multiple_times() {
         let x = 10
         let result = add{2} add{3} add{4} x
     ");
-    r.assert_int(19);
+    r.assert_elided_int(19);
 }
 
 #[test]
@@ -1240,7 +1284,7 @@ fn test_exec_labeled_operator_mutation_updates_downstream_value() {
         inv.amount = 5
         let result = mul{2} inv
     ");
-    r.assert_int(90);
+    r.assert_elided_int(90);
 }
 
 #[test]
