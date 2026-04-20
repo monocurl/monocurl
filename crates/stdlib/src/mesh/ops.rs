@@ -23,10 +23,74 @@ fn read_scale_factor(
         Value::Float(value) => Ok(Float3::splat(value as f32)),
         Value::List(_) => read_float3(executor, stack_idx, index, name),
         other => Err(ExecutorError::type_error_for(
-            "float or 3-vector",
+            "float or list of length 3",
             other.type_name(),
             name,
         )),
+    }
+}
+
+fn midpoint_vertex(
+    vertices: &mut Vec<SurfaceVertex>,
+    edge_midpoints: &mut HashMap<(usize, usize), usize>,
+    a: usize,
+    b: usize,
+) -> usize {
+    let key = if a <= b { (a, b) } else { (b, a) };
+    if let Some(&idx) = edge_midpoints.get(&key) {
+        return idx;
+    }
+
+    let idx = vertices.len();
+    vertices.push(SurfaceVertex {
+        pos: vertices[a].pos.lerp(vertices[b].pos, 0.5),
+        col: vertices[a].col.lerp(vertices[b].col, 0.5),
+        uv: vertices[a].uv.lerp(vertices[b].uv, 0.5),
+    });
+    edge_midpoints.insert(key, idx);
+    idx
+}
+
+fn subdivide_indexed_surface(surface: &IndexedSurface) -> IndexedSurface {
+    let mut vertices = surface.vertices.clone();
+    let mut edge_midpoints = HashMap::<(usize, usize), usize>::new();
+    let mut faces = Vec::with_capacity(surface.faces.len() * 4);
+
+    for &[a, b, c] in &surface.faces {
+        let ab = midpoint_vertex(&mut vertices, &mut edge_midpoints, a, b);
+        let bc = midpoint_vertex(&mut vertices, &mut edge_midpoints, b, c);
+        let ca = midpoint_vertex(&mut vertices, &mut edge_midpoints, c, a);
+        faces.push([a, ab, ca]);
+        faces.push([ab, b, bc]);
+        faces.push([ca, bc, c]);
+        faces.push([ab, bc, ca]);
+    }
+
+    let mut boundary_edges = HashMap::with_capacity(surface.boundary_edges.len() * 2);
+    for (&(a, b), template) in &surface.boundary_edges {
+        let mid = edge_midpoints[&if a <= b { (a, b) } else { (b, a) }];
+        boundary_edges.insert(
+            (a, mid),
+            BoundaryEdge {
+                a_col: template.a_col,
+                b_col: template.a_col.lerp(template.b_col, 0.5),
+                norm: template.norm,
+            },
+        );
+        boundary_edges.insert(
+            (mid, b),
+            BoundaryEdge {
+                a_col: template.a_col.lerp(template.b_col, 0.5),
+                b_col: template.b_col,
+                norm: template.norm,
+            },
+        );
+    }
+
+    IndexedSurface {
+        vertices,
+        faces,
+        boundary_edges,
     }
 }
 
@@ -594,38 +658,32 @@ pub async fn op_downrank(
                     })
                     .collect();
             } else {
-                let mut seen = std::collections::HashSet::new();
-                let mut lins = Vec::new();
-                for tri in &mesh.tris {
-                    for (edge_ref, a, b) in [
-                        (tri.ab, tri.a.pos, tri.b.pos),
-                        (tri.bc, tri.b.pos, tri.c.pos),
-                        (tri.ca, tri.c.pos, tri.a.pos),
-                    ] {
-                        if edge_ref >= 0 {
-                            continue;
-                        }
-                        let key = canonical_edge_key(a, b);
-                        if seen.insert(key) {
-                            lins.push(default_lin(a, b, Float3::Z));
-                        }
-                    }
-                }
-                mesh.lins = lins
-                    .into_iter()
-                    .map(|lin| {
-                        let mut out = lin;
-                        out.inv = -1;
-                        out
-                    })
-                    .collect();
+                let surface = mesh_to_indexed_surface(mesh);
+                mesh.lins = build_indexed_surface(
+                    &surface.vertices,
+                    &surface.faces,
+                    &surface.boundary_edges,
+                )
+                .0
+                .into_iter()
+                .map(|lin| {
+                    let mut out = lin;
+                    out.inv = -1;
+                    out
+                })
+                .collect();
             }
             mesh.tris.clear();
         } else if !mesh.lins.is_empty() {
             mesh.dots = mesh
                 .lins
                 .iter()
-                .flat_map(|lin| [default_dot(lin.a.pos, lin.norm), default_dot(lin.b.pos, lin.norm)])
+                .flat_map(|lin| {
+                    [
+                        default_dot(lin.a.pos, lin.norm),
+                        default_dot(lin.b.pos, lin.norm),
+                    ]
+                })
                 .collect();
             mesh.lins.clear();
         }
@@ -652,19 +710,14 @@ pub async fn op_subdivide(
 
     tree.for_each_mut(&mut |mesh| {
         if !mesh.tris.is_empty() {
+            let mut surface = mesh_to_indexed_surface(mesh);
             for _ in 1..factor {
-                let mut tris = Vec::with_capacity(mesh.tris.len() * 4);
-                for tri in &mesh.tris {
-                    let ab = (tri.a.pos + tri.b.pos) / 2.0;
-                    let bc = (tri.b.pos + tri.c.pos) / 2.0;
-                    let ca = (tri.c.pos + tri.a.pos) / 2.0;
-                    tris.push(default_tri(tri.a.pos, ab, ca));
-                    tris.push(default_tri(ab, tri.b.pos, bc));
-                    tris.push(default_tri(ca, bc, tri.c.pos));
-                    tris.push(default_tri(ab, bc, ca));
-                }
-                mesh.tris = tris;
+                surface = subdivide_indexed_surface(&surface);
             }
+            let (lins, tris) =
+                build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+            mesh.lins = lins;
+            mesh.tris = tris;
         } else if !mesh.lins.is_empty() && factor > 1 {
             let mut lins = Vec::with_capacity(mesh.lins.len() * factor);
             for (lin_idx, lin) in mesh.lins.iter().enumerate() {
@@ -723,20 +776,14 @@ pub async fn op_tesselated(
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
     let depth = read_int(executor, stack_idx, -1, "depth")?.max(0) as usize;
     tree.for_each_mut(&mut |mesh| {
-        for _ in 0..depth {
-            if mesh.tris.is_empty() {
-                break;
+        if !mesh.tris.is_empty() {
+            let mut surface = mesh_to_indexed_surface(mesh);
+            for _ in 0..depth {
+                surface = subdivide_indexed_surface(&surface);
             }
-            let mut tris = Vec::with_capacity(mesh.tris.len() * 4);
-            for tri in &mesh.tris {
-                let ab = (tri.a.pos + tri.b.pos) / 2.0;
-                let bc = (tri.b.pos + tri.c.pos) / 2.0;
-                let ca = (tri.c.pos + tri.a.pos) / 2.0;
-                tris.push(default_tri(tri.a.pos, ab, ca));
-                tris.push(default_tri(ab, tri.b.pos, bc));
-                tris.push(default_tri(ca, bc, tri.c.pos));
-                tris.push(default_tri(ab, bc, ca));
-            }
+            let (lins, tris) =
+                build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+            mesh.lins = lins;
             mesh.tris = tris;
         }
         debug_assert!(mesh.has_consistent_topology());
@@ -748,53 +795,57 @@ pub async fn op_tesselated(
 pub async fn op_extrude(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
     let delta = read_float3(executor, stack_idx, -1, "delta")?;
+    let mut extrude_error = None;
 
     tree.for_each_mut(&mut |mesh| {
-        if mesh.tris.is_empty() && !mesh.lins.is_empty() {
-            let points: Vec<_> = mesh.lins.iter().map(|lin| lin.a.pos).collect();
-            if points.len() >= 3 {
-                mesh.tris = (1..points.len() - 1)
-                    .map(|i| default_tri(points[0], points[i], points[i + 1]))
-                    .collect();
-            }
+        if extrude_error.is_some() {
+            return;
         }
         if mesh.tris.is_empty() {
+            extrude_error = Some(ExecutorError::Other(
+                "can only extrude meshes that have triangles".into(),
+            ));
+            return;
+        }
+        if mesh.lins.iter().any(|lin| lin.inv == -1) {
+            extrude_error = Some(ExecutorError::Other(
+                "cannot extrude meshes that have standalone line loops; try upranking first".into(),
+            ));
             return;
         }
 
-        let base_tris = mesh.tris.clone();
-        let mut edge_counts = HashMap::<_, usize>::new();
-        let mut edge_dirs = HashMap::<_, (Float3, Float3)>::new();
-        for tri in &base_tris {
-            for (a, b) in [
-                (tri.a.pos, tri.b.pos),
-                (tri.b.pos, tri.c.pos),
-                (tri.c.pos, tri.a.pos),
-            ] {
-                *edge_counts.entry(canonical_edge_key(a, b)).or_default() += 1;
-                edge_dirs.entry(canonical_edge_key(a, b)).or_insert((a, b));
-            }
+        let surface = mesh_to_indexed_surface(mesh);
+        let base_vertex_count = surface.vertices.len();
+        let mut vertices = surface.vertices.clone();
+        vertices.extend(surface.vertices.iter().map(|vertex| SurfaceVertex {
+            pos: vertex.pos + delta,
+            col: vertex.col,
+            uv: vertex.uv,
+        }));
+
+        let mut faces =
+            Vec::with_capacity(surface.faces.len() * 2 + surface.boundary_edges.len() * 2);
+        faces.extend(surface.faces.iter().copied());
+        faces.extend(surface.faces.iter().map(|&[a, b, c]| {
+            [
+                c + base_vertex_count,
+                b + base_vertex_count,
+                a + base_vertex_count,
+            ]
+        }));
+        for &(a, b) in surface.boundary_edges.keys() {
+            faces.push([a, b, b + base_vertex_count]);
+            faces.push([a, b + base_vertex_count, a + base_vertex_count]);
         }
 
-        let mut tris = Vec::with_capacity(base_tris.len() * 4);
-        tris.extend(base_tris.iter().copied());
-        tris.extend(
-            base_tris
-                .iter()
-                .map(|tri| default_tri(tri.c.pos + delta, tri.b.pos + delta, tri.a.pos + delta)),
-        );
-
-        for (key, count) in edge_counts {
-            if count != 1 {
-                continue;
-            }
-            let (a, b) = edge_dirs[&key];
-            tris.push(default_tri(a, b, b + delta));
-            tris.push(default_tri(a, b + delta, a + delta));
-        }
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        mesh.lins = lins;
         mesh.tris = tris;
         debug_assert!(mesh.has_consistent_topology());
     });
+    if let Some(err) = extrude_error {
+        return Err(err);
+    }
 
     Ok(tree.into_value())
 }
@@ -811,37 +862,60 @@ pub async fn op_revolve(executor: &mut Executor, stack_idx: usize) -> Result<Val
     };
     let full_turn = angle >= std::f32::consts::TAU - 1e-3;
     let steps = ((angle.abs() / (std::f32::consts::TAU / 24.0)).ceil() as usize).max(1);
+    let mut revolve_error = None;
 
     tree.for_each_mut(&mut |mesh| {
-        if mesh.lins.is_empty() {
+        if revolve_error.is_some() {
             return;
         }
-        let source = mesh.lins.clone();
-        let mut tris = Vec::with_capacity(source.len() * steps * 2);
-        for lin in &source {
-            for step in 0..steps {
-                let t0 = angle * step as f32 / steps as f32;
-                let t1 = angle * (step + 1) as f32 / steps as f32;
-                let a0 = rotate_about_axis(lin.a.pos, axis, t0);
-                let b0 = rotate_about_axis(lin.b.pos, axis, t0);
-                let a1 = if full_turn && step + 1 == steps {
-                    lin.a.pos
-                } else {
-                    rotate_about_axis(lin.a.pos, axis, t1)
-                };
-                let b1 = if full_turn && step + 1 == steps {
-                    lin.b.pos
-                } else {
-                    rotate_about_axis(lin.b.pos, axis, t1)
-                };
-                tris.push(default_tri(a0, b0, b1));
-                tris.push(default_tri(a0, b1, a1));
+        if mesh.lins.is_empty() || !mesh.tris.is_empty() {
+            revolve_error = Some(ExecutorError::Other(
+                "can only revolve meshes that are line meshes".into(),
+            ));
+            return;
+        }
+
+        let profile = mesh_to_indexed_lines(mesh);
+        let ring_count = if full_turn { steps } else { steps + 1 };
+        let mut vertices = Vec::with_capacity(profile.vertices.len() * ring_count);
+        for step in 0..ring_count {
+            let theta = angle * step as f32 / steps as f32;
+            for vertex in &profile.vertices {
+                vertices.push(SurfaceVertex {
+                    pos: rotate_about_axis(vertex.pos, axis, theta),
+                    col: vertex.col,
+                    uv: vertex.uv,
+                });
             }
         }
+
+        let mut faces = Vec::with_capacity(profile.segments.len() * steps * 2);
+        let ring_stride = profile.vertices.len();
+        let ring_vertex = |step: usize, vertex: usize| step * ring_stride + vertex;
+        for &[a, b] in &profile.segments {
+            for step in 0..steps {
+                let next = if full_turn {
+                    (step + 1) % ring_count
+                } else {
+                    step + 1
+                };
+                let a0 = ring_vertex(step, a);
+                let b0 = ring_vertex(step, b);
+                let a1 = ring_vertex(next, a);
+                let b1 = ring_vertex(next, b);
+                faces.push([a0, b0, b1]);
+                faces.push([a0, b1, a1]);
+            }
+        }
+
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        mesh.lins = lins;
         mesh.tris = tris;
-        mesh.lins.clear();
         debug_assert!(mesh.has_consistent_topology());
     });
+    if let Some(err) = revolve_error {
+        return Err(err);
+    }
 
     Ok(tree.into_value())
 }
@@ -1003,4 +1077,141 @@ pub async fn op_sym_diff(_e: &mut Executor, _s: usize) -> Result<Value, Executor
 #[stdlib_func]
 pub async fn op_minkowski_sum(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
     todo!("minkowski sum of two meshes")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use geo::{
+        mesh::{Mesh, Uniforms},
+        simd::{Float2, Float3, Float4},
+    };
+
+    use super::{
+        BoundaryEdge, IndexedSurface, SurfaceVertex, build_indexed_surface,
+        subdivide_indexed_surface,
+    };
+
+    fn square_surface() -> IndexedSurface {
+        let vertices = vec![
+            SurfaceVertex {
+                pos: Float3::new(-1.0, -1.0, 0.0),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(1.0, -1.0, 0.0),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(1.0, 1.0, 0.0),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(-1.0, 1.0, 0.0),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+        ];
+        let faces = vec![[0, 1, 2], [0, 2, 3]];
+        let boundary_edges = HashMap::from([
+            (
+                (0, 1),
+                BoundaryEdge {
+                    a_col: Float4::ONE,
+                    b_col: Float4::ONE,
+                    norm: Float3::Z,
+                },
+            ),
+            (
+                (1, 2),
+                BoundaryEdge {
+                    a_col: Float4::ONE,
+                    b_col: Float4::ONE,
+                    norm: Float3::Z,
+                },
+            ),
+            (
+                (2, 3),
+                BoundaryEdge {
+                    a_col: Float4::ONE,
+                    b_col: Float4::ONE,
+                    norm: Float3::Z,
+                },
+            ),
+            (
+                (3, 0),
+                BoundaryEdge {
+                    a_col: Float4::ONE,
+                    b_col: Float4::ONE,
+                    norm: Float3::Z,
+                },
+            ),
+        ]);
+
+        IndexedSurface {
+            vertices,
+            faces,
+            boundary_edges,
+        }
+    }
+
+    #[test]
+    fn subdivide_surface_authors_consistent_boundary_topology() {
+        let surface = subdivide_indexed_surface(&square_surface());
+        let (lins, tris) =
+            build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+        let mesh = Mesh {
+            dots: vec![],
+            lins,
+            tris,
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+
+        assert_eq!(mesh.tris.len(), 8);
+        assert_eq!(mesh.lins.len(), 8);
+        assert!(mesh.has_consistent_topology());
+    }
+
+    #[test]
+    fn revolved_strip_authors_consistent_boundary_topology() {
+        let vertices = vec![
+            SurfaceVertex {
+                pos: Float3::new(0.0, 0.0, 0.0),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(1.0, 0.0, 0.0),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(0.0, 0.0, 1.0),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(1.0, 0.0, 1.0),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+        ];
+        let faces = vec![[0, 1, 3], [0, 3, 2]];
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        let mesh = Mesh {
+            dots: vec![],
+            lins,
+            tris,
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+
+        assert!(!mesh.lins.is_empty());
+        assert!(mesh.has_consistent_topology());
+    }
 }

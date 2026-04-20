@@ -10,7 +10,7 @@ let PI  = 3.1415926535897932
 let TAU = 6.2831853071795864
 let INF = 1.0 / 0.0
 
-# canonical 3-vectors. Direction-suffix literals (1l, 1r, 1u, 1d, 1f, 1b)
+# canonical lists of length 3. Direction-suffix literals (1l, 1r, 1u, 1d, 1f, 1b)
 # produce the same values; these names read more naturally in expressions.
 let ORIGIN   = [0, 0, 0]
 let ZERO_V   = [0, 0, 0]

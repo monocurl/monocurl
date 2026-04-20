@@ -1,7 +1,7 @@
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use stdlib_macros::stdlib_func;
 
-use super::helpers::{binary_f64, unary_f64};
+use super::helpers::{NumberPair, binary_f64, read_number_pair, unary_f64};
 
 #[stdlib_func]
 pub async fn sqrt(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
@@ -130,20 +130,34 @@ pub async fn trunc(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
 
 #[stdlib_func]
 pub async fn mod_func(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let n = crate::read_float(executor, stack_idx, -2, "n")?;
-    let m = crate::read_float(executor, stack_idx, -1, "m")?;
-    if m == 0.0 {
-        return Err(ExecutorError::DivisionByZero);
+    match read_number_pair(executor, stack_idx, "n", "m")? {
+        NumberPair::Int(n, m) => {
+            if m == 0 {
+                return Err(ExecutorError::DivisionByZero);
+            }
+            Ok(Value::Integer(n.rem_euclid(m)))
+        }
+        NumberPair::Float(n, m) => {
+            if m == 0.0 {
+                return Err(ExecutorError::DivisionByZero);
+            }
+            Ok(Value::Float(n.rem_euclid(m)))
+        }
     }
-    Ok(Value::Float(n.rem_euclid(m)))
 }
 
 #[stdlib_func]
 pub async fn min(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    binary_f64(executor, stack_idx, "a", "b", f64::min)
+    match read_number_pair(executor, stack_idx, "a", "b")? {
+        NumberPair::Int(a, b) => Ok(Value::Integer(a.min(b))),
+        NumberPair::Float(a, b) => Ok(Value::Float(a.min(b))),
+    }
 }
 
 #[stdlib_func]
 pub async fn max(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    binary_f64(executor, stack_idx, "a", "b", f64::max)
+    match read_number_pair(executor, stack_idx, "a", "b")? {
+        NumberPair::Int(a, b) => Ok(Value::Integer(a.max(b))),
+        NumberPair::Float(a, b) => Ok(Value::Float(a.max(b))),
+    }
 }

@@ -874,7 +874,10 @@ impl Render for Viewport {
                 true
             };
             let ring_width = if show_ring {
-                if matches!(exec.status, ExecutionStatus::Playing | ExecutionStatus::Paused) {
+                if matches!(
+                    exec.status,
+                    ExecutionStatus::Playing | ExecutionStatus::Paused
+                ) {
                     px(1.0)
                 } else {
                     px(4.0)

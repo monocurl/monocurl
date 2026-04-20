@@ -19,6 +19,10 @@ use geo::{
 };
 use libtess2::{TessellationOptions, WindingRule};
 
+fn default_ink() -> Float4 {
+    Float4::new(0.0, 0.0, 0.0, 1.0)
+}
+
 #[derive(Clone)]
 pub(super) enum MeshTree {
     Mesh(Arc<Mesh>),
@@ -28,6 +32,33 @@ pub(super) enum MeshTree {
 pub(super) enum TagFilter {
     Exact(HashSet<isize>),
     Predicate(Rc<Lambda>),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SurfaceVertex {
+    pub pos: Float3,
+    pub col: Float4,
+    pub uv: Float2,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BoundaryEdge {
+    pub a_col: Float4,
+    pub b_col: Float4,
+    pub norm: Float3,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct IndexedSurface {
+    pub vertices: Vec<SurfaceVertex>,
+    pub faces: Vec<[usize; 3]>,
+    pub boundary_edges: HashMap<(usize, usize), BoundaryEdge>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct IndexedLineMesh {
+    pub vertices: Vec<SurfaceVertex>,
+    pub segments: Vec<[usize; 2]>,
 }
 
 impl MeshTree {
@@ -224,7 +255,7 @@ pub(super) fn read_float3(
             list.elements().len()
         ))),
         other => Err(ExecutorError::type_error_for(
-            "3-vector",
+            "list of length 3",
             other.type_name(),
             name,
         )),
@@ -251,7 +282,7 @@ pub(super) fn float2_from_value(value: Value, name: &'static str) -> Result<Floa
             Ok(Float2::from_array(components))
         }
         other => Err(ExecutorError::type_error_for(
-            "2-vector",
+            "list of length 2",
             other.type_name(),
             name,
         )),
@@ -278,7 +309,7 @@ pub(super) fn float3_from_value(value: Value, name: &'static str) -> Result<Floa
             Ok(Float3::from_array(components))
         }
         other => Err(ExecutorError::type_error_for(
-            "3-vector",
+            "list of length 3",
             other.type_name(),
             name,
         )),
@@ -305,7 +336,7 @@ pub(super) fn float4_from_value(value: Value, name: &'static str) -> Result<Floa
             Ok(Float4::from_array(components))
         }
         other => Err(ExecutorError::type_error_for(
-            "4-vector",
+            "list of length 4",
             other.type_name(),
             name,
         )),
@@ -420,7 +451,7 @@ pub(super) fn read_float4(
             list.elements().len()
         ))),
         other => Err(ExecutorError::type_error_for(
-            "4-vector",
+            "list of length 4",
             other.type_name(),
             name,
         )),
@@ -431,7 +462,7 @@ pub(super) fn default_dot(pos: Float3, norm: Float3) -> Dot {
     Dot {
         pos,
         norm,
-        col: Float4::ONE,
+        col: default_ink(),
         inv: -1,
         anti: -1,
         is_dom_sib: false,
@@ -442,11 +473,11 @@ pub(super) fn default_lin(a: Float3, b: Float3, norm: Float3) -> Lin {
     Lin {
         a: LinVertex {
             pos: a,
-            col: Float4::ONE,
+            col: default_ink(),
         },
         b: LinVertex {
             pos: b,
-            col: Float4::ONE,
+            col: default_ink(),
         },
         norm,
         prev: -1,
@@ -464,17 +495,17 @@ pub(super) fn default_tri(a: Float3, b: Float3, c: Float3) -> Tri {
     Tri {
         a: TriVertex {
             pos: a,
-            col: Float4::ONE,
+            col: default_ink(),
             uv: uv_a,
         },
         b: TriVertex {
             pos: b,
-            col: Float4::ONE,
+            col: default_ink(),
             uv: uv_b,
         },
         c: TriVertex {
             pos: c,
-            col: Float4::ONE,
+            col: default_ink(),
             uv: uv_c,
         },
         ab: -1,
@@ -483,6 +514,182 @@ pub(super) fn default_tri(a: Float3, b: Float3, c: Float3) -> Tri {
         anti: -1,
         is_dom_sib: false,
     }
+}
+
+#[derive(Debug)]
+struct SlotDsu {
+    parent: Vec<usize>,
+    rank: Vec<u8>,
+}
+
+impl SlotDsu {
+    fn new(len: usize) -> Self {
+        Self {
+            parent: (0..len).collect(),
+            rank: vec![0; len],
+        }
+    }
+
+    fn find(&mut self, idx: usize) -> usize {
+        let parent = self.parent[idx];
+        if parent == idx {
+            idx
+        } else {
+            let root = self.find(parent);
+            self.parent[idx] = root;
+            root
+        }
+    }
+
+    fn union(&mut self, a: usize, b: usize) {
+        let mut ra = self.find(a);
+        let mut rb = self.find(b);
+        if ra == rb {
+            return;
+        }
+        if self.rank[ra] < self.rank[rb] {
+            std::mem::swap(&mut ra, &mut rb);
+        }
+        self.parent[rb] = ra;
+        if self.rank[ra] == self.rank[rb] {
+            self.rank[ra] += 1;
+        }
+    }
+}
+
+fn decode_mesh_ref(value: i32) -> Option<usize> {
+    (value < -1).then_some((-value - 2) as usize)
+}
+
+fn dot_slot(idx: usize) -> usize {
+    idx
+}
+
+fn line_a_slot(mesh: &Mesh, idx: usize) -> usize {
+    mesh.dots.len() + idx * 2
+}
+
+fn line_b_slot(mesh: &Mesh, idx: usize) -> usize {
+    line_a_slot(mesh, idx) + 1
+}
+
+fn tri_a_slot(mesh: &Mesh, idx: usize) -> usize {
+    mesh.dots.len() + mesh.lins.len() * 2 + idx * 3
+}
+
+fn tri_b_slot(mesh: &Mesh, idx: usize) -> usize {
+    tri_a_slot(mesh, idx) + 1
+}
+
+fn tri_c_slot(mesh: &Mesh, idx: usize) -> usize {
+    tri_a_slot(mesh, idx) + 2
+}
+
+fn tri_edge_slots(mesh: &Mesh, tri_idx: usize, edge_idx: usize) -> (usize, usize) {
+    match edge_idx {
+        0 => (tri_a_slot(mesh, tri_idx), tri_b_slot(mesh, tri_idx)),
+        1 => (tri_b_slot(mesh, tri_idx), tri_c_slot(mesh, tri_idx)),
+        _ => (tri_c_slot(mesh, tri_idx), tri_a_slot(mesh, tri_idx)),
+    }
+}
+
+fn tri_edge_for(tri: &Tri, value: i32) -> Option<usize> {
+    [tri.ab, tri.bc, tri.ca]
+        .iter()
+        .position(|edge| *edge == value)
+}
+
+pub(crate) fn mesh_position_groups(mesh: &Mesh) -> Vec<usize> {
+    let slot_count = mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3;
+    let mut dsu = SlotDsu::new(slot_count);
+
+    for (idx, dot) in mesh.dots.iter().enumerate() {
+        if dot.inv >= 0 {
+            let inv = dot.inv as usize;
+            if inv < mesh.dots.len() {
+                dsu.union(dot_slot(idx), dot_slot(inv));
+            }
+        }
+        if dot.anti >= 0 {
+            let anti = dot.anti as usize;
+            if anti < mesh.dots.len() {
+                dsu.union(dot_slot(idx), dot_slot(anti));
+            }
+        }
+    }
+
+    for (idx, lin) in mesh.lins.iter().enumerate() {
+        if lin.prev >= 0 {
+            let prev = lin.prev as usize;
+            if prev < mesh.lins.len() {
+                dsu.union(line_a_slot(mesh, idx), line_b_slot(mesh, prev));
+            }
+        } else if let Some(dot_idx) = decode_mesh_ref(lin.prev).filter(|&i| i < mesh.dots.len()) {
+            dsu.union(line_a_slot(mesh, idx), dot_slot(dot_idx));
+        }
+
+        if lin.next >= 0 {
+            let next = lin.next as usize;
+            if next < mesh.lins.len() {
+                dsu.union(line_b_slot(mesh, idx), line_a_slot(mesh, next));
+            }
+        } else if let Some(dot_idx) = decode_mesh_ref(lin.next).filter(|&i| i < mesh.dots.len()) {
+            dsu.union(line_b_slot(mesh, idx), dot_slot(dot_idx));
+        }
+
+        if lin.inv >= 0 {
+            let inv = lin.inv as usize;
+            if inv < mesh.lins.len() {
+                dsu.union(line_a_slot(mesh, idx), line_b_slot(mesh, inv));
+                dsu.union(line_b_slot(mesh, idx), line_a_slot(mesh, inv));
+            }
+        }
+
+        if lin.anti >= 0 {
+            let anti = lin.anti as usize;
+            if anti < mesh.lins.len() {
+                dsu.union(line_a_slot(mesh, idx), line_a_slot(mesh, anti));
+                dsu.union(line_b_slot(mesh, idx), line_b_slot(mesh, anti));
+            }
+        }
+    }
+
+    for (tri_idx, tri) in mesh.tris.iter().enumerate() {
+        if tri.anti >= 0 {
+            let anti = tri.anti as usize;
+            if anti < mesh.tris.len() {
+                dsu.union(tri_a_slot(mesh, tri_idx), tri_b_slot(mesh, anti));
+                dsu.union(tri_b_slot(mesh, tri_idx), tri_a_slot(mesh, anti));
+                dsu.union(tri_c_slot(mesh, tri_idx), tri_c_slot(mesh, anti));
+            }
+        }
+
+        for (edge_idx, value) in [tri.ab, tri.bc, tri.ca].into_iter().enumerate() {
+            let (lhs, rhs) = tri_edge_slots(mesh, tri_idx, edge_idx);
+            if value >= 0 {
+                let neighbor = value as usize;
+                if neighbor < mesh.tris.len() {
+                    if let Some(other_edge) = tri_edge_for(&mesh.tris[neighbor], tri_idx as i32) {
+                        let (na, nb) = tri_edge_slots(mesh, neighbor, other_edge);
+                        dsu.union(lhs, nb);
+                        dsu.union(rhs, na);
+                    }
+                }
+            } else if let Some(line_idx) = decode_mesh_ref(value).filter(|&i| i < mesh.lins.len()) {
+                dsu.union(lhs, line_a_slot(mesh, line_idx));
+                dsu.union(rhs, line_b_slot(mesh, line_idx));
+            }
+        }
+    }
+
+    let mut groups = Vec::with_capacity(slot_count);
+    let mut root_to_group = HashMap::<usize, usize>::new();
+    for slot in 0..slot_count {
+        let root = dsu.find(slot);
+        let next_group = root_to_group.len();
+        groups.push(*root_to_group.entry(root).or_insert(next_group));
+    }
+    groups
 }
 
 pub(super) fn mesh_ref(idx: usize) -> i32 {
@@ -556,31 +763,265 @@ pub(crate) fn push_closed_polyline(
     start..out.len()
 }
 
-pub(super) fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]]) -> Vec<Tri> {
+pub(super) fn build_indexed_surface(
+    vertices: &[SurfaceVertex],
+    faces: &[[usize; 3]],
+    boundary_edges: &HashMap<(usize, usize), BoundaryEdge>,
+) -> (Vec<Lin>, Vec<Tri>) {
     let mut tris: Vec<_> = faces
         .iter()
-        .map(|face| default_tri(vertices[face[0]], vertices[face[1]], vertices[face[2]]))
+        .map(|face| Tri {
+            a: TriVertex {
+                pos: vertices[face[0]].pos,
+                col: vertices[face[0]].col,
+                uv: vertices[face[0]].uv,
+            },
+            b: TriVertex {
+                pos: vertices[face[1]].pos,
+                col: vertices[face[1]].col,
+                uv: vertices[face[1]].uv,
+            },
+            c: TriVertex {
+                pos: vertices[face[2]].pos,
+                col: vertices[face[2]].col,
+                uv: vertices[face[2]].uv,
+            },
+            ab: -1,
+            bc: -1,
+            ca: -1,
+            anti: -1,
+            is_dom_sib: false,
+        })
         .collect();
 
-    let mut edge_map = HashMap::<(usize, usize), (usize, usize)>::new();
+    let mut edge_map = HashMap::<(usize, usize), (usize, usize, usize, usize)>::new();
     for (tri_idx, face) in faces.iter().enumerate() {
-        for (edge_idx, (a, b)) in [
-            (face[0], face[1]),
-            (face[1], face[2]),
-            (face[2], face[0]),
-        ]
-        .into_iter()
-        .enumerate()
+        for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
+            .into_iter()
+            .enumerate()
         {
             let key = canonical_index_edge_key(a, b);
-            if let Some((other_tri, other_edge)) = edge_map.insert(key, (tri_idx, edge_idx)) {
+            if let Some((other_tri, other_edge, _, _)) = edge_map.remove(&key) {
                 set_tri_edge(&mut tris[tri_idx], edge_idx, other_tri as i32);
                 set_tri_edge(&mut tris[other_tri], other_edge, tri_idx as i32);
+            } else {
+                edge_map.insert(key, (tri_idx, edge_idx, a, b));
             }
         }
     }
 
-    tris
+    let mut boundary_items: Vec<_> = edge_map.into_values().collect();
+    boundary_items.sort_unstable_by_key(|(tri_idx, edge_idx, _, _)| (*tri_idx, *edge_idx));
+
+    let mut lins = Vec::with_capacity(boundary_items.len());
+    let mut edge_to_line = HashMap::<(usize, usize), usize>::with_capacity(boundary_items.len());
+    for (tri_idx, edge_idx, a, b) in boundary_items {
+        let template = boundary_edges
+            .get(&(a, b))
+            .copied()
+            .unwrap_or(BoundaryEdge {
+                a_col: vertices[a].col,
+                b_col: vertices[b].col,
+                norm: Float3::ZERO,
+            });
+        let line_idx = lins.len();
+        let mut line = default_lin(vertices[a].pos, vertices[b].pos, template.norm);
+        line.a.col = template.a_col;
+        line.b.col = template.b_col;
+        line.inv = mesh_ref(tri_idx);
+        set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_ref(line_idx));
+        lins.push(line);
+        edge_to_line.insert((a, b), line_idx);
+    }
+
+    let mut incoming = HashMap::<usize, Vec<usize>>::new();
+    let mut outgoing = HashMap::<usize, Vec<usize>>::new();
+    for (&(a, b), &line_idx) in &edge_to_line {
+        outgoing.entry(a).or_default().push(line_idx);
+        incoming.entry(b).or_default().push(line_idx);
+    }
+
+    for (&(a, b), &line_idx) in &edge_to_line {
+        lins[line_idx].prev = incoming
+            .get(&a)
+            .and_then(|candidates| (candidates.len() == 1).then_some(candidates[0] as i32))
+            .unwrap_or(-1);
+        lins[line_idx].next = outgoing
+            .get(&b)
+            .and_then(|candidates| (candidates.len() == 1).then_some(candidates[0] as i32))
+            .unwrap_or(-1);
+    }
+
+    (lins, tris)
+}
+
+pub(super) fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]]) -> Vec<Tri> {
+    let vertices: Vec<_> = vertices
+        .iter()
+        .copied()
+        .map(|pos| SurfaceVertex {
+            pos,
+            col: default_ink(),
+            uv: Float2::ZERO,
+        })
+        .collect();
+    build_indexed_surface(&vertices, faces, &HashMap::new()).1
+}
+
+pub(super) fn mesh_to_indexed_surface(mesh: &Mesh) -> IndexedSurface {
+    let groups = mesh_position_groups(mesh);
+    let group_count = groups
+        .iter()
+        .copied()
+        .max()
+        .map(|group| group + 1)
+        .unwrap_or(0);
+    let mut vertices = vec![
+        SurfaceVertex {
+            pos: Float3::ZERO,
+            col: default_ink(),
+            uv: Float2::ZERO,
+        };
+        group_count
+    ];
+    let mut seen = vec![false; group_count];
+
+    let mut assign_vertex = |group: usize, pos: Float3, col: Float4, uv: Float2| {
+        if !seen[group] {
+            seen[group] = true;
+            vertices[group] = SurfaceVertex { pos, col, uv };
+        }
+    };
+
+    for (idx, dot) in mesh.dots.iter().enumerate() {
+        assign_vertex(groups[dot_slot(idx)], dot.pos, dot.col, Float2::ZERO);
+    }
+    for (idx, lin) in mesh.lins.iter().enumerate() {
+        assign_vertex(
+            groups[line_a_slot(mesh, idx)],
+            lin.a.pos,
+            lin.a.col,
+            Float2::ZERO,
+        );
+        assign_vertex(
+            groups[line_b_slot(mesh, idx)],
+            lin.b.pos,
+            lin.b.col,
+            Float2::ZERO,
+        );
+    }
+    for (idx, tri) in mesh.tris.iter().enumerate() {
+        assign_vertex(
+            groups[tri_a_slot(mesh, idx)],
+            tri.a.pos,
+            tri.a.col,
+            tri.a.uv,
+        );
+        assign_vertex(
+            groups[tri_b_slot(mesh, idx)],
+            tri.b.pos,
+            tri.b.col,
+            tri.b.uv,
+        );
+        assign_vertex(
+            groups[tri_c_slot(mesh, idx)],
+            tri.c.pos,
+            tri.c.col,
+            tri.c.uv,
+        );
+    }
+
+    let faces = mesh
+        .tris
+        .iter()
+        .enumerate()
+        .map(|(idx, _)| {
+            [
+                groups[tri_a_slot(mesh, idx)],
+                groups[tri_b_slot(mesh, idx)],
+                groups[tri_c_slot(mesh, idx)],
+            ]
+        })
+        .collect();
+
+    let boundary_edges = mesh
+        .lins
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| {
+            decode_mesh_ref(line.inv).map(|_| {
+                (
+                    (
+                        groups[line_a_slot(mesh, idx)],
+                        groups[line_b_slot(mesh, idx)],
+                    ),
+                    BoundaryEdge {
+                        a_col: line.a.col,
+                        b_col: line.b.col,
+                        norm: line.norm,
+                    },
+                )
+            })
+        })
+        .collect();
+
+    IndexedSurface {
+        vertices,
+        faces,
+        boundary_edges,
+    }
+}
+
+pub(super) fn mesh_to_indexed_lines(mesh: &Mesh) -> IndexedLineMesh {
+    let groups = mesh_position_groups(mesh);
+    let group_count = groups
+        .iter()
+        .copied()
+        .max()
+        .map(|group| group + 1)
+        .unwrap_or(0);
+    let mut vertices = vec![
+        SurfaceVertex {
+            pos: Float3::ZERO,
+            col: default_ink(),
+            uv: Float2::ZERO,
+        };
+        group_count
+    ];
+    let mut seen = vec![false; group_count];
+
+    let mut assign_vertex = |group: usize, pos: Float3, col: Float4| {
+        if !seen[group] {
+            seen[group] = true;
+            vertices[group] = SurfaceVertex {
+                pos,
+                col,
+                uv: Float2::ZERO,
+            };
+        }
+    };
+
+    for (idx, dot) in mesh.dots.iter().enumerate() {
+        assign_vertex(groups[dot_slot(idx)], dot.pos, dot.col);
+    }
+    for (idx, line) in mesh.lins.iter().enumerate() {
+        assign_vertex(groups[line_a_slot(mesh, idx)], line.a.pos, line.a.col);
+        assign_vertex(groups[line_b_slot(mesh, idx)], line.b.pos, line.b.col);
+    }
+
+    let segments = mesh
+        .lins
+        .iter()
+        .enumerate()
+        .map(|(idx, _)| {
+            [
+                groups[line_a_slot(mesh, idx)],
+                groups[line_b_slot(mesh, idx)],
+            ]
+        })
+        .collect();
+
+    IndexedLineMesh { vertices, segments }
 }
 
 pub(crate) fn tessellate_planar_loops(
@@ -603,7 +1044,10 @@ pub(crate) fn tessellate_planar_loops(
         let range = push_closed_polyline(&mut lins, contour, normal);
         for i in 0..contour.len() {
             boundary_edges.insert(
-                canonical_index_edge_key(source_offset + i, source_offset + (i + 1) % contour.len()),
+                canonical_index_edge_key(
+                    source_offset + i,
+                    source_offset + (i + 1) % contour.len(),
+                ),
                 range.start + i,
             );
         }
@@ -623,13 +1067,9 @@ pub(crate) fn tessellate_planar_loops(
 
     let mut tris = build_indexed_tris(&tess.vertices, &tess.triangles);
     for (tri_idx, face) in tess.triangles.iter().enumerate() {
-        for (edge_idx, (a, b)) in [
-            (face[0], face[1]),
-            (face[1], face[2]),
-            (face[2], face[0]),
-        ]
-        .into_iter()
-        .enumerate()
+        for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
+            .into_iter()
+            .enumerate()
         {
             if tri_edge(&tris[tri_idx], edge_idx) >= 0 {
                 continue;

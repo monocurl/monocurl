@@ -1,4 +1,4 @@
-# colors are RGBA 4-vectors in [0, 1].
+# colors are RGBA lists of length 4 in [0, 1].
 # all constants are fully opaque unless their name says otherwise.
 
 let RED        = [0.9, 0.3, 0.2, 1]

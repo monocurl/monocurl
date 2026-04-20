@@ -868,6 +868,7 @@ fn test_ref_mutation_of_live_function_argument_does_not_panic() {
             "
             let mutate = |&y| {
                 y.label = 2l
+                return []
             }
 
             mutate(Circle(label: ORIGIN, 1))
@@ -1028,7 +1029,11 @@ fn test_trans_square_to_circle_midpoint_keeps_boundary_off_origin() {
     );
     r.assert_ok();
 
-    let leader = r.mesh_leaders().into_iter().next().expect("expected mesh leader");
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
     let Value::Mesh(mesh) = &leader.current else {
         panic!("expected current mesh value");
     };
@@ -1066,7 +1071,11 @@ fn test_trans_filled_square_to_clear_circle_fades_fill() {
     );
     r.assert_ok();
 
-    let leader = r.mesh_leaders().into_iter().next().expect("expected mesh leader");
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
     let Value::Mesh(mesh) = &leader.current else {
         panic!("expected current mesh value");
     };
@@ -1081,6 +1090,24 @@ fn test_trans_filled_square_to_clear_circle_fades_fill() {
         alpha > 0.05 && alpha < 0.95,
         "expected mid-fade fill alpha, got {alpha}"
     );
+}
+
+#[test]
+fn test_color_grid_lambda_arity_error_is_reported_without_panicking() {
+    let mesh_mcl = load_stdlib_bundle(Assets::std_lib().join("std/mesh.mcl"));
+
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = ColorGrid(|x, y| {})
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        0.0,
+        &[mesh_mcl],
+    );
+    r.assert_error("too few positional arguments");
 }
 
 #[test]
@@ -1457,13 +1484,19 @@ fn test_lerp_of_live_mesh_lambda_survives_assignment_chain() {
 
     let src = r#"
         let entity = |center, theta| {
-            . stroke{WHITE} fill{CLEAR} Circle(center, 2)
-
+            let outline = (
+                stroke{WHITE}
+                fill{CLEAR}
+                Circle(center, 2)
+            )
             let r = 0.25
             let y = r * sin(theta)
             let x = r * cos(theta)
-
-            . fill{WHITE} Circle(center + [x, y, 0], 0.05)
+            let point = (
+                fill{WHITE}
+                Circle(center + [x, y, 0], 0.05)
+            )
+            return [outline, point]
         }
 
         mesh left = entity(2l, theta: 0)
@@ -1495,7 +1528,11 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
 
     let src = r#"
         let entity = |center, theta| {
-            . stroke{WHITE} fill{CLEAR} Circle(center, 2)
+            let outline = (
+                stroke{WHITE}
+                fill{CLEAR}
+                Circle(center, 2)
+            )
 
             if (theta >= 0.5) {
                 let bad = sin("bad")
@@ -1504,8 +1541,11 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
             let r = 0.25
             let y = r * sin(theta)
             let x = r * cos(theta)
-
-            . fill{WHITE} Circle(center + [x, y, 0], 0.05)
+            let point = (
+                fill{WHITE}
+                Circle(center + [x, y, 0], 0.05)
+            )
+            return [outline, point]
         }
 
         mesh left = entity(2l, theta: 0)
@@ -1566,13 +1606,19 @@ fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
 
     let src = r#"
         let entity = |center, theta| {
-            . stroke{WHITE} fill{CLEAR} Circle(center, 2)
-
+            let outline = (
+                stroke{WHITE}
+                fill{CLEAR}
+                Circle(center, 2)
+            )
             let r = 0.25
             let y = r * sin(theta)
             let x = r * cos(theta)
-
-            . fill{WHITE} Circle(center + [x, y, 0], 0.05)
+            let point = (
+                fill{WHITE}
+                Circle(center + [x, y, 0], 0.05)
+            )
+            return [outline, point]
         }
 
         mesh left = entity(2l, theta: 0)
@@ -1593,7 +1639,7 @@ fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
 
     let play_start = src.find("play Lerp").expect("missing play Lerp");
     let expected = play_start..play_start + "play Lerp(duration, [], identity)".len();
-    r.assert_error("cannot lerp vectors of different lengths");
+    r.assert_error("cannot lerp lists of different lengths");
     assert!(!r.error_spans.is_empty(), "expected runtime error span");
     assert_eq!(r.error_spans[0], expected);
 }
@@ -1608,12 +1654,7 @@ fn test_write_polyline_preserves_authored_line_links() {
         play Write()
     "#;
 
-    let r = run_anim_impl(
-        &[(src, SectionType::Slide)],
-        0,
-        0.25,
-        &[mesh_mcl, anim_mcl],
-    );
+    let r = run_anim_impl(&[(src, SectionType::Slide)], 0, 0.25, &[mesh_mcl, anim_mcl]);
     r.assert_ok();
 }
 

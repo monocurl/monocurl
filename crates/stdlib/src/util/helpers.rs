@@ -6,6 +6,7 @@ use executor::{
     heap::{VRc, with_heap},
     value::{Value, container::List, lambda::Lambda},
 };
+use stdlib_macros::stdlib_func;
 
 pub(super) fn list_from<I: IntoIterator<Item = Value>>(values: I) -> Value {
     Value::List(Rc::new(List::new_with(
@@ -124,4 +125,14 @@ pub(super) fn compare_values(lhs: &Value, rhs: &Value) -> Result<Ordering, Execu
             rhs.type_name()
         ))),
     }
+}
+
+#[stdlib_func]
+pub async fn lambda_fallthrough_error(
+    _executor: &mut Executor,
+    _stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    Err(ExecutorError::Other(
+        "lambda reached end without explicit return".into(),
+    ))
 }

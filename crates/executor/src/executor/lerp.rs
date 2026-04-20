@@ -296,7 +296,7 @@ impl Executor {
                 (Value::List(a_list), Value::List(b_list)) => {
                     if a_list.len() != b_list.len() {
                         return Err(ExecutorError::Other(format!(
-                            "cannot lerp vectors of different lengths: {} vs {}",
+                            "cannot lerp lists of different lengths: {} vs {}",
                             a_list.len(),
                             b_list.len()
                         )));

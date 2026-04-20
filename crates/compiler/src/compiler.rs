@@ -1720,7 +1720,14 @@ impl Compiler {
                 );
             }
             LambdaBody::Block(stmts) => {
-                self.compile_block_body(stmts, &l.body.0);
+                self.compile_statements(stmts);
+                self.emit(
+                    Instruction::NativeInvoke {
+                        index: registry().index_of("lambda_fallthrough_error") as u16,
+                        arg_count: 0,
+                    },
+                    span.clone(),
+                );
             }
         }
 
@@ -1903,9 +1910,9 @@ impl Compiler {
         }
     }
 
-    // compile a block body: init `_ = nil`, compile stmts, implicit `return _`
+    // compile a block body: init `_ = []`, compile stmts, implicit `return _`
     fn compile_block_body(&mut self, stmts: &[SpanTagged<Statement>], span: &Span8) {
-        self.emit_push(Instruction::PushNil, span.clone());
+        self.emit_push(Instruction::PushEmptyVector, span.clone());
         self.emit(
             Instruction::ConvertVar {
                 allow_stateful: false,
@@ -1933,10 +1940,7 @@ impl Compiler {
     }
 
     fn compute_lambda_captures(&mut self, l: &LambdaDefinition) -> Vec<Arc<Symbol>> {
-        let mut pre: HashSet<String> = l.args.iter().map(|a| a.identifier.1.0.clone()).collect();
-        if matches!(l.body.1, LambdaBody::Block(_)) {
-            pre.insert("_".to_string());
-        }
+        let pre: HashSet<String> = l.args.iter().map(|a| a.identifier.1.0.clone()).collect();
         let free = match &l.body.1 {
             LambdaBody::Inline(e) => free_vars_expr(e, pre),
             LambdaBody::Block(s) => free_vars_stmts(s, pre),

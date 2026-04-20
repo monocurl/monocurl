@@ -305,6 +305,39 @@ fn test_exec_literal_nil() {
 }
 
 #[test]
+fn test_block_lambda_fallthrough_is_runtime_error() {
+    let src = "
+        let f = |x| {
+            let y = x + 1
+        }
+        let z = f(1)
+    ";
+    let r = run(src);
+    let start = src.find("|x|").expect("missing lambda");
+    let end = src[start..]
+        .find('}')
+        .map(|offset| start + offset + 1)
+        .expect("missing lambda end");
+    r.assert_error("lambda reached end without explicit return");
+    r.assert_first_error_span(start..end);
+}
+
+#[test]
+fn test_empty_block_expression_returns_empty_vector() {
+    let r = run("let result = block {}");
+    r.assert_int_list(&[]);
+}
+
+#[test]
+fn test_eager_lambda_too_few_arguments_is_runtime_error() {
+    let r = run("
+        let f = |x, y| x
+        let z = f(1)
+        ");
+    r.assert_error("too few positional arguments");
+}
+
+#[test]
 fn test_exec_literal_float() {
     let r = run("let x = 3.14");
     r.assert_float(3.14);
@@ -761,6 +794,39 @@ fn test_exec_lambda_default_arg_overridden() {
         let result = add(5, 20)
     ");
     r.assert_int(25);
+}
+
+#[test]
+fn test_exec_mod_preserves_integer_result_for_integer_inputs() {
+    let r = run_section(
+        "
+        let result = __monocurl__native__ mod_func(7, 3)
+    ",
+        SectionType::StandardLibrary,
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_exec_min_preserves_integer_result_for_integer_inputs() {
+    let r = run_section(
+        "
+        let result = __monocurl__native__ min(7, 3)
+    ",
+        SectionType::StandardLibrary,
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_exec_max_promotes_only_when_needed() {
+    let r = run_section(
+        "
+        let result = __monocurl__native__ max(7, 3.5)
+    ",
+        SectionType::StandardLibrary,
+    );
+    r.assert_float(7.0);
 }
 
 #[test]
@@ -1833,6 +1899,7 @@ fn test_ref_basic_mutation() {
         param x = 0
         let mutate = |&y| {
             y = y + 1
+            return []
         }
         mutate(&x)
         let result = *x
@@ -1847,6 +1914,7 @@ fn test_ref_mutation_does_not_affect_unrelated_var() {
         param z = 99
         let inc = |&y| {
             y = y + 1
+            return []
         }
         inc(&x)
         let result = *z
@@ -1860,6 +1928,7 @@ fn test_ref_called_multiple_times() {
         param x = 0
         let inc = |&y| {
             y = y + 1
+            return []
         }
         inc(&x)
         inc(&x)
@@ -1876,10 +1945,12 @@ fn test_ref_chain_of_lambdas() {
         param x = 0
         let add_two = |&y| {
             y = y + 2
+            return []
         }
         let double_add = |&z| {
             add_two(&z)
             add_two(&z)
+            return []
         }
         double_add(&x)
         let result = *x
@@ -1895,6 +1966,7 @@ fn test_ref_two_distinct_references() {
         let modify_both = |&x, &y| {
             x = x + 1
             y = y + 1
+            return []
         }
         modify_both(&a, &b)
         let result = *a + *b
@@ -1910,6 +1982,7 @@ fn test_ref_reference_to_list_via_ref() {
         param arr = [0, 0, 0]
         let set_first = |&a| {
             a[0] = 42
+            return []
         }
         set_first(&arr)
         let result = (*arr)[0]
@@ -1926,6 +1999,7 @@ fn test_ref_destructure_list_references() {
         let set_both = |&x, &y| {
             x = 7
             y = 13
+            return []
         }
         set_both(&a, &b)
         let result = *a + *b
@@ -1941,6 +2015,7 @@ fn test_ref_reference_in_closure_capture() {
         param target = 0
         let f = |&r| {
             r = captured + 1
+            return []
         }
         f(&target)
         let result = *target
@@ -1953,6 +2028,7 @@ fn test_ref_lambda_called_with_value_reports_runtime_error_instead_of_panicking(
     let r = run("
         let overwrite = |&y| {
             y = 2
+            return []
         }
         overwrite(1)
     ");

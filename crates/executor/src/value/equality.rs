@@ -3,11 +3,7 @@ use std::sync::Arc;
 
 use crate::heap::with_heap;
 
-use super::{
-    Value,
-    primitive_anim::PrimitiveAnim,
-    stateful::StatefulNode,
-};
+use super::{Value, primitive_anim::PrimitiveAnim, stateful::StatefulNode};
 
 impl Value {
     /// structural equality for all value types.

@@ -695,6 +695,7 @@ fn test_ref_to_param_and_independent_stateful() {
         mesh m = $p
         let inc = |&y| {
             y = y + 1
+            return []
         }
         inc(&p)
         mesh updated = *m

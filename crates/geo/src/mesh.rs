@@ -148,7 +148,11 @@ enum NeighborDirection {
 }
 
 fn tri_edge_positions(tri: &Tri) -> [(Float3, Float3); 3] {
-    [(tri.a.pos, tri.b.pos), (tri.b.pos, tri.c.pos), (tri.c.pos, tri.a.pos)]
+    [
+        (tri.a.pos, tri.b.pos),
+        (tri.b.pos, tri.c.pos),
+        (tri.c.pos, tri.a.pos),
+    ]
 }
 
 fn same_triangle_positions(a: &Tri, b: &Tri) -> bool {

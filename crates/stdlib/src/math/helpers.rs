@@ -1,5 +1,10 @@
 use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
 
+pub(super) enum NumberPair {
+    Int(i64, i64),
+    Float(f64, f64),
+}
+
 pub(super) fn unary_f64(
     executor: &Executor,
     stack: usize,
@@ -68,6 +73,41 @@ pub(super) fn read_list(
             "list",
             other.type_name(),
             name,
+        )),
+    }
+}
+
+pub(super) fn read_number_pair(
+    executor: &Executor,
+    stack: usize,
+    lhs: &'static str,
+    rhs: &'static str,
+) -> Result<NumberPair, ExecutorError> {
+    let lhs_value = executor
+        .state
+        .stack(stack)
+        .read_at(-2)
+        .clone()
+        .elide_lvalue();
+    let rhs_value = executor
+        .state
+        .stack(stack)
+        .read_at(-1)
+        .clone()
+        .elide_lvalue();
+
+    match (lhs_value, rhs_value) {
+        (Value::Integer(a), Value::Integer(b)) => Ok(NumberPair::Int(a, b)),
+        (Value::Integer(a), Value::Float(b)) => Ok(NumberPair::Float(a as f64, b)),
+        (Value::Float(a), Value::Integer(b)) => Ok(NumberPair::Float(a, b as f64)),
+        (Value::Float(a), Value::Float(b)) => Ok(NumberPair::Float(a, b)),
+        (other, _) if !matches!(other, Value::Integer(_) | Value::Float(_)) => Err(
+            ExecutorError::type_error_for("number", other.type_name(), lhs),
+        ),
+        (_, other) => Err(ExecutorError::type_error_for(
+            "number",
+            other.type_name(),
+            rhs,
         )),
     }
 }

@@ -504,7 +504,9 @@ impl Executor {
         prim: PrimitiveAnim,
         reserved: &[VRc],
     ) -> Result<(), ExecutorError> {
-        let baked = self.plan_primitive_anim(parent_stack_idx, prim, reserved).await?;
+        let baked = self
+            .plan_primitive_anim(parent_stack_idx, prim, reserved)
+            .await?;
         self.install_baked_primitive_anim(parent_stack_idx, baked);
         Ok(())
     }

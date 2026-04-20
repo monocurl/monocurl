@@ -1,5 +1,7 @@
+use std::collections::HashMap;
+
 use executor::{error::ExecutorError, executor::Executor, value::Value};
-use geo::simd::Float3;
+use geo::simd::{Float2, Float3, Float4};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
@@ -55,10 +57,7 @@ mod tests {
 
     #[test]
     fn closed_polyline_sets_reciprocal_links() {
-        let lines = closed_polyline(
-            &[Float3::X, Float3::Y, Float3::Z, Float3::ZERO],
-            Float3::Z,
-        );
+        let lines = closed_polyline(&[Float3::X, Float3::Y, Float3::Z, Float3::ZERO], Float3::Z);
         for (i, line) in lines.iter().enumerate() {
             assert_eq!(lines[line.prev as usize].next, i as i32);
             assert_eq!(lines[line.next as usize].prev, i as i32);
@@ -260,11 +259,7 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
         default_lin(base + side * head_width, end, normal),
         default_lin(end, base - side * head_width, normal),
     ];
-    let mut tri = default_tri(
-        base + side * head_width,
-        end,
-        base - side * head_width,
-    );
+    let mut tri = default_tri(base + side * head_width, end, base - side * head_width);
     tri.ab = mesh_ref(1);
     tri.bc = mesh_ref(2);
     lins[1].inv = mesh_ref(0);
@@ -356,50 +351,61 @@ pub async fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let depth = read_int(executor, stack_idx, -1, "sample_depth")?.max(0) as usize;
     let lat_steps = (8usize << depth).max(8);
     let lon_steps = (lat_steps * 2).max(16);
-    let mut tris = Vec::with_capacity(lat_steps * lon_steps * 2);
-
-    for i in 0..lat_steps {
-        let phi0 = std::f32::consts::PI * i as f32 / lat_steps as f32;
-        let phi1 = std::f32::consts::PI * (i + 1) as f32 / lat_steps as f32;
+    let top = center + Float3::new(0.0, radius, 0.0);
+    let bottom = center + Float3::new(0.0, -radius, 0.0);
+    let mut vertices = vec![SurfaceVertex {
+        pos: top,
+        col: Float4::new(0.0, 0.0, 0.0, 1.0),
+        uv: Float2::ZERO,
+    }];
+    for i in 1..lat_steps {
+        let phi = std::f32::consts::PI * i as f32 / lat_steps as f32;
         for j in 0..lon_steps {
-            let theta0 = std::f32::consts::TAU * j as f32 / lon_steps as f32;
-            let theta1 = std::f32::consts::TAU * (j + 1) as f32 / lon_steps as f32;
-            let p00 = center
-                + Float3::new(
-                    radius * phi0.sin() * theta0.cos(),
-                    radius * phi0.cos(),
-                    radius * phi0.sin() * theta0.sin(),
-                );
-            let p01 = center
-                + Float3::new(
-                    radius * phi0.sin() * theta1.cos(),
-                    radius * phi0.cos(),
-                    radius * phi0.sin() * theta1.sin(),
-                );
-            let p10 = center
-                + Float3::new(
-                    radius * phi1.sin() * theta0.cos(),
-                    radius * phi1.cos(),
-                    radius * phi1.sin() * theta0.sin(),
-                );
-            let p11 = center
-                + Float3::new(
-                    radius * phi1.sin() * theta1.cos(),
-                    radius * phi1.cos(),
-                    radius * phi1.sin() * theta1.sin(),
-                );
-            if i == 0 {
-                tris.push(default_tri(p00, p10, p11));
-            } else if i + 1 == lat_steps {
-                tris.push(default_tri(p00, p10, p01));
-            } else {
-                tris.push(default_tri(p00, p10, p11));
-                tris.push(default_tri(p00, p11, p01));
-            }
+            let theta = std::f32::consts::TAU * j as f32 / lon_steps as f32;
+            vertices.push(SurfaceVertex {
+                pos: center
+                    + Float3::new(
+                        radius * phi.sin() * theta.cos(),
+                        radius * phi.cos(),
+                        radius * phi.sin() * theta.sin(),
+                    ),
+                col: Float4::new(0.0, 0.0, 0.0, 1.0),
+                uv: Float2::ZERO,
+            });
         }
     }
+    let bottom_idx = vertices.len();
+    vertices.push(SurfaceVertex {
+        pos: bottom,
+        col: Float4::new(0.0, 0.0, 0.0, 1.0),
+        uv: Float2::ZERO,
+    });
 
-    Ok(mesh_from_parts(vec![], vec![], tris))
+    let ring = |lat: usize, lon: usize| 1 + (lat - 1) * lon_steps + lon % lon_steps;
+    let mut faces = Vec::with_capacity(lat_steps * lon_steps * 2);
+    for j in 0..lon_steps {
+        faces.push([0, ring(1, j), ring(1, j + 1)]);
+    }
+    for i in 1..lat_steps - 1 {
+        for j in 0..lon_steps {
+            let p00 = ring(i, j);
+            let p01 = ring(i, j + 1);
+            let p10 = ring(i + 1, j);
+            let p11 = ring(i + 1, j + 1);
+            faces.push([p00, p10, p11]);
+            faces.push([p00, p11, p01]);
+        }
+    }
+    for j in 0..lon_steps {
+        faces.push([
+            ring(lat_steps - 1, j),
+            bottom_idx,
+            ring(lat_steps - 1, j + 1),
+        ]);
+    }
+
+    let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -520,7 +526,11 @@ pub async fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         faces.push([i, next, apex_idx]);
         faces.push([base_idx, next, i]);
     }
-    Ok(mesh_from_parts(vec![], vec![], build_indexed_tris(&vertices, &faces)))
+    Ok(mesh_from_parts(
+        vec![],
+        vec![],
+        build_indexed_tris(&vertices, &faces),
+    ))
 }
 
 #[stdlib_func]
@@ -559,7 +569,11 @@ pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value
         }
     }
 
-    Ok(mesh_from_parts(vec![], vec![], build_indexed_tris(&vertices, &faces)))
+    Ok(mesh_from_parts(
+        vec![],
+        vec![],
+        build_indexed_tris(&vertices, &faces),
+    ))
 }
 
 #[stdlib_func]
@@ -640,11 +654,7 @@ pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         default_lin(base + side * head_width, end, normal),
         default_lin(end, base - side * head_width, normal),
     ];
-    let mut tri = default_tri(
-        base + side * head_width,
-        end,
-        base - side * head_width,
-    );
+    let mut tri = default_tri(base + side * head_width, end, base - side * head_width);
     tri.ab = mesh_ref(1);
     tri.bc = mesh_ref(2);
     lins[1].inv = mesh_ref(0);
@@ -721,7 +731,25 @@ pub async fn mk_color_grid(
 
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
-    let mut tris = Vec::new();
+    let mut vertices = Vec::<SurfaceVertex>::new();
+    let mut faces = Vec::<[usize; 3]>::new();
+    for ix in 0..=nx {
+        for iy in 0..=ny {
+            let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
+            let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
+            let pos = Float3::new(x, y, 0.0);
+            let col = float4_from_value(
+                invoke_callable(executor, &color_at, vec![point_value(pos)], "color_at").await?,
+                "color_at",
+            )?;
+            vertices.push(SurfaceVertex {
+                pos,
+                col,
+                uv: Float2::ZERO,
+            });
+        }
+    }
+    let grid_vertex = |ix: usize, iy: usize| ix * (ny + 1) + iy;
 
     for ix in 0..nx {
         for iy in 0..ny {
@@ -737,64 +765,17 @@ pub async fn mk_color_grid(
                 continue;
             }
 
-            let mut tri0 = default_tri(
-                Float3::new(xa, ya, 0.0),
-                Float3::new(xb, ya, 0.0),
-                Float3::new(xb, yb, 0.0),
-            );
-            let mut tri1 = default_tri(
-                Float3::new(xa, ya, 0.0),
-                Float3::new(xb, yb, 0.0),
-                Float3::new(xa, yb, 0.0),
-            );
-            tri0.a.col = float4_from_value(
-                invoke_callable(
-                    executor,
-                    &color_at,
-                    vec![point_value(tri0.a.pos)],
-                    "color_at",
-                )
-                .await?,
-                "color_at",
-            )?;
-            tri0.b.col = float4_from_value(
-                invoke_callable(
-                    executor,
-                    &color_at,
-                    vec![point_value(tri0.b.pos)],
-                    "color_at",
-                )
-                .await?,
-                "color_at",
-            )?;
-            tri0.c.col = float4_from_value(
-                invoke_callable(
-                    executor,
-                    &color_at,
-                    vec![point_value(tri0.c.pos)],
-                    "color_at",
-                )
-                .await?,
-                "color_at",
-            )?;
-            tri1.a.col = tri0.a.col;
-            tri1.b.col = tri0.c.col;
-            tri1.c.col = float4_from_value(
-                invoke_callable(
-                    executor,
-                    &color_at,
-                    vec![point_value(tri1.c.pos)],
-                    "color_at",
-                )
-                .await?,
-                "color_at",
-            )?;
-            tris.push(tri0);
-            tris.push(tri1);
+            let a = grid_vertex(ix, iy);
+            let b = grid_vertex(ix + 1, iy);
+            let c = grid_vertex(ix + 1, iy + 1);
+            let d = grid_vertex(ix, iy + 1);
+            faces.push([a, b, c]);
+            faces.push([a, c, d]);
         }
     }
 
-    Ok(mesh_from_parts(vec![], vec![], tris))
+    let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -1272,10 +1253,7 @@ pub async fn mk_explicit2d(
         }
     }
     let index = |ix: usize, iy: usize| ix * (ny + 1) + iy;
-    let vertices: Vec<_> = grid
-        .iter()
-        .flat_map(|col| col.iter().copied())
-        .collect();
+    let vertices: Vec<_> = grid.iter().flat_map(|col| col.iter().copied()).collect();
     let mut faces = Vec::with_capacity(nx * ny * 2);
     for ix in 0..nx {
         for iy in 0..ny {
@@ -1283,7 +1261,11 @@ pub async fn mk_explicit2d(
             faces.push([index(ix, iy), index(ix + 1, iy + 1), index(ix, iy + 1)]);
         }
     }
-    Ok(mesh_from_parts(vec![], vec![], build_indexed_tris(&vertices, &faces)))
+    Ok(mesh_from_parts(
+        vec![],
+        vec![],
+        build_indexed_tris(&vertices, &faces),
+    ))
 }
 
 #[stdlib_func]

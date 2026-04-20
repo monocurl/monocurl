@@ -168,12 +168,12 @@ impl Theme {
         Self {
             mode: ThemeMode::Light,
             app_background: rgba(0xEFF1F5),
-            document_background: rgba(0x2B2E2F),
-            viewport_background: rgba(0xDCE0E8),
-            viewport_stage_background: rgba(0xF5EBEA),
-            viewport_status_playing: rgba(0xFFFFFF),
+            document_background: rgba(0xFFFFFF),
+            viewport_background: rgba(0xFFFFFF),
+            viewport_stage_background: rgba(0xFFFFFF),
+            viewport_status_playing: rgba(0x11111B),
             viewport_status_loading: rgba(0x1E66F5),
-            viewport_status_paused: rgba(0xFFFFFF),
+            viewport_status_paused: rgba(0x11111B),
             viewport_status_runtime_error: rgba(0x8839EF),
             viewport_status_compile_error: rgba(0xD20F39),
 
@@ -341,7 +341,7 @@ impl TextEditorStyles {
 
     pub fn light() -> Self {
         Self {
-            bg_color: hsla(0.61, 0.23, 0.9, 1.0),
+            bg_color: hsla(0.0, 0.0, 1.0, 1.0),
             text_font: gpui::font(FontSet::MONOSPACE),
             italic_text_font: gpui::font(FontSet::MONOSPACE).italic(),
 

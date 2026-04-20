@@ -309,7 +309,7 @@ async fn background_snapshot_from_value(
 
     let Value::Map(map) = value else {
         return Err(ExecutorError::type_error_for(
-            "solid background / rgba 4-vector",
+            "solid background / list of length 4",
             value.type_name(),
             "background",
         ));

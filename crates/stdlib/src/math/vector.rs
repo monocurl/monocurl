@@ -34,7 +34,7 @@ pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
     if u.len() != 3 || v.len() != 3 {
         return Err(ExecutorError::InvalidArgument {
             arg: "u",
-            message: "cross product requires 3-vectors",
+            message: "cross product requires lists of length 3",
         });
     }
     let out = [

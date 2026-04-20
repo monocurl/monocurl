@@ -1,11 +1,6 @@
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
-use executor::{
-    error::ExecutorError,
-    executor::Executor,
-    state::LeaderKind,
-    value::Value,
-};
+use executor::{error::ExecutorError, executor::Executor, state::LeaderKind, value::Value};
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
     simd::{Float3, Float4},
@@ -15,9 +10,9 @@ use stdlib_macros::stdlib_func;
 use crate::mesh::helpers::{push_closed_polyline, tessellate_planar_loops};
 
 use super::helpers::{
-    build_lerp, collapse_mesh, fade_start_mesh, flatten_mesh_leaves, list_value,
-    map_mesh_tree, materialize_live_value, mesh_center, mesh_tag_map, progression_from,
-    read_time, resolve_targets, conform_mesh_to_target,
+    build_lerp, collapse_mesh, conform_mesh_to_target, fade_start_mesh, flatten_mesh_leaves,
+    list_value, map_mesh_tree, materialize_live_value, mesh_center, mesh_tag_map, progression_from,
+    read_time, resolve_targets,
 };
 
 #[stdlib_func]
@@ -35,16 +30,16 @@ pub async fn fade_embed(executor: &mut Executor, stack_idx: usize) -> Result<Val
     let _start = executor.state.stack(stack_idx).read_at(-3).clone();
     let destination_value = executor.state.stack(stack_idx).read_at(-2).clone();
     let destination = materialize_live_value(executor, &destination_value).await?;
-    let delta = read_vec3_value(
-        executor.state.stack(stack_idx).read_at(-1).clone(),
-        "delta",
-    )?;
+    let delta = read_vec3_value(executor.state.stack(stack_idx).read_at(-1).clone(), "delta")?;
     let start = map_mesh_tree(&destination, &mut |mesh| fade_start_mesh(mesh, delta))?;
     Ok(embed_triplet(start, destination, Value::Nil))
 }
 
 #[stdlib_func]
-pub async fn write_embed(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn write_embed(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let _start = executor.state.stack(stack_idx).read_at(-2).clone();
     let destination_value = executor.state.stack(stack_idx).read_at(-1).clone();
     let destination = materialize_live_value(executor, &destination_value).await?;
@@ -53,14 +48,18 @@ pub async fn write_embed(executor: &mut Executor, stack_idx: usize) -> Result<Va
 }
 
 #[stdlib_func]
-pub async fn trans_embed(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn trans_embed(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let start_value = executor.state.stack(stack_idx).read_at(-2).clone();
     let destination_value = executor.state.stack(stack_idx).read_at(-1).clone();
     let start = materialize_live_value(executor, &start_value).await?;
     let destination = materialize_live_value(executor, &destination_value).await?;
     let mut start_leaves = Vec::new();
     flatten_mesh_leaves(&start, &mut start_leaves)?;
-    let (aligned, prepared_destination, state) = prepare_trans_value_like(&start_leaves, &destination)?;
+    let (aligned, prepared_destination, state) =
+        prepare_trans_value_like(&start_leaves, &destination)?;
     Ok(embed_triplet(aligned, prepared_destination, state))
 }
 
@@ -126,7 +125,10 @@ pub async fn highlight_embed(
 }
 
 #[stdlib_func]
-pub async fn flash_embed(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn flash_embed(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let _start = executor.state.stack(stack_idx).read_at(-2).clone();
     let destination_value = executor.state.stack(stack_idx).read_at(-1).clone();
     let destination = materialize_live_value(executor, &destination_value).await?;
@@ -308,13 +310,16 @@ fn prepare_trans_value_like_by_tag(
     ) -> Result<(Value, Value, Value), ExecutorError> {
         match target {
             Value::Mesh(target_mesh) => {
-                let source = source_by_tag.get(&target_mesh.tag).map(Arc::as_ref).or_else(|| {
-                    if source_fallback.is_empty() {
-                        None
-                    } else {
-                        Some(source_fallback[*cursor % source_fallback.len()].as_ref())
-                    }
-                });
+                let source = source_by_tag
+                    .get(&target_mesh.tag)
+                    .map(Arc::as_ref)
+                    .or_else(|| {
+                        if source_fallback.is_empty() {
+                            None
+                        } else {
+                            Some(source_fallback[*cursor % source_fallback.len()].as_ref())
+                        }
+                    });
                 *cursor += 1;
                 let (start, end, state) = prepare_trans_mesh_pair(source, target_mesh)?;
                 Ok((
@@ -423,21 +428,32 @@ fn prepare_planar_trans_mesh_pair(
     for i in 0..loop_count {
         let start_contour = &start_contours[i % start_contours.len()];
         let end_contour = &end_contours[i % end_contours.len()];
-        let sample_count = start_contour.points.len().max(end_contour.points.len()).max(3);
+        let sample_count = start_contour
+            .points
+            .len()
+            .max(end_contour.points.len())
+            .max(3);
 
-        let sampled_start = resample_closed_contour(start_contour, sample_count);
-        let sampled_end = align_resampled_contour(&sampled_start, end_contour, sample_count);
+        let (sampled_start, sampled_end) =
+            match_closed_contours(start_contour, end_contour, sample_count);
         append_closed_contour(&mut start_mesh, &sampled_start);
         append_closed_contour(&mut end_mesh, &sampled_end);
     }
 
     debug_assert!(start_mesh.has_consistent_topology());
     debug_assert!(end_mesh.has_consistent_topology());
-    Ok(Some((start_mesh, end_mesh, planar_state(start_fill, end_fill))))
+    Ok(Some((
+        start_mesh,
+        end_mesh,
+        planar_state(start_fill, end_fill),
+    )))
 }
 
 fn extract_closed_contours(mesh: &Mesh) -> Option<Vec<ClosedContour>> {
-    if mesh.lins.is_empty() || mesh.dots.len() != 0 || mesh.lins.iter().any(|lin| lin.prev < 0 || lin.next < 0) {
+    if mesh.lins.is_empty()
+        || mesh.dots.len() != 0
+        || mesh.lins.iter().any(|lin| lin.prev < 0 || lin.next < 0)
+    {
         return None;
     }
 
@@ -493,7 +509,9 @@ fn planar_fill_color(mesh: &Mesh) -> Option<Float4> {
     }
 
     let color = mesh.tris.first()?.a.col;
-    mesh.tris.iter().all(|tri| tri.a.col == color && tri.b.col == color && tri.c.col == color)
+    mesh.tris
+        .iter()
+        .all(|tri| tri.a.col == color && tri.b.col == color && tri.c.col == color)
         .then_some(color)
 }
 
@@ -544,22 +562,47 @@ fn resample_closed_contour(contour: &ClosedContour, sample_count: usize) -> Clos
     }
 }
 
-fn align_resampled_contour(
-    reference: &ClosedContour,
-    contour: &ClosedContour,
+fn match_closed_contours(
+    start: &ClosedContour,
+    end: &ClosedContour,
     sample_count: usize,
-) -> ClosedContour {
-    let mut sampled = resample_closed_contour(contour, sample_count);
-    if reference.signed_area * sampled.signed_area < 0.0 {
-        sampled.points.reverse();
-        sampled.colors.reverse();
-        sampled.signed_area = -sampled.signed_area;
+) -> (ClosedContour, ClosedContour) {
+    let mut sampled_start = resample_closed_contour(start, sample_count);
+    let mut sampled_end = resample_closed_contour(end, sample_count);
+    if sampled_start.signed_area * sampled_end.signed_area < 0.0 {
+        sampled_end.points.reverse();
+        sampled_end.colors.reverse();
+        sampled_end.signed_area = -sampled_end.signed_area;
     }
 
-    let shift = best_contour_shift(&reference.points, &sampled.points);
-    rotate_vec(&mut sampled.points, shift);
-    rotate_vec(&mut sampled.colors, shift);
-    sampled
+    let start_is_anchor = start.points.len() >= end.points.len();
+    let (anchor, candidate) = if start_is_anchor {
+        (&sampled_start, &sampled_end)
+    } else {
+        (&sampled_end, &sampled_start)
+    };
+    let anchor_pivot = choose_anchor_edge(anchor, candidate);
+    let candidate_pivot = best_matching_edge(anchor, candidate, anchor_pivot);
+
+    if start_is_anchor {
+        rotate_vec(&mut sampled_start.points, anchor_pivot);
+        rotate_vec(&mut sampled_start.colors, anchor_pivot);
+        rotate_vec(&mut sampled_end.points, candidate_pivot);
+        rotate_vec(&mut sampled_end.colors, candidate_pivot);
+        let residual = best_contour_shift(&sampled_start.points, &sampled_end.points);
+        rotate_vec(&mut sampled_end.points, residual);
+        rotate_vec(&mut sampled_end.colors, residual);
+    } else {
+        rotate_vec(&mut sampled_end.points, anchor_pivot);
+        rotate_vec(&mut sampled_end.colors, anchor_pivot);
+        rotate_vec(&mut sampled_start.points, candidate_pivot);
+        rotate_vec(&mut sampled_start.colors, candidate_pivot);
+        let residual = best_contour_shift(&sampled_end.points, &sampled_start.points);
+        rotate_vec(&mut sampled_start.points, residual);
+        rotate_vec(&mut sampled_start.colors, residual);
+    }
+
+    (sampled_start, sampled_end)
 }
 
 fn best_contour_shift(reference: &[Float3], candidate: &[Float3]) -> usize {
@@ -584,6 +627,81 @@ fn rotate_vec<T>(values: &mut [T], shift: usize) {
     if !values.is_empty() {
         values.rotate_left(shift % values.len());
     }
+}
+
+fn contour_center(contour: &ClosedContour) -> Float3 {
+    let sum = contour
+        .points
+        .iter()
+        .copied()
+        .fold(Float3::ZERO, |acc, point| acc + point);
+    sum / contour.points.len().max(1) as f32
+}
+
+fn contour_edge_midpoint(contour: &ClosedContour, idx: usize) -> Float3 {
+    (contour.points[idx] + contour.points[(idx + 1) % contour.points.len()]) / 2.0
+}
+
+fn contour_edge_direction(contour: &ClosedContour, idx: usize) -> Float3 {
+    let direction = contour.points[(idx + 1) % contour.points.len()] - contour.points[idx];
+    let len = direction.len();
+    if len <= 1e-6 {
+        Float3::ZERO
+    } else {
+        direction / len
+    }
+}
+
+fn choose_anchor_edge(anchor: &ClosedContour, other: &ClosedContour) -> usize {
+    let delta = contour_center(anchor) - contour_center(other);
+    if delta.len_sq() <= 1e-6 {
+        return 0;
+    }
+
+    (0..anchor.points.len())
+        .max_by(|&lhs, &rhs| {
+            contour_edge_midpoint(anchor, lhs)
+                .dot(delta)
+                .partial_cmp(&contour_edge_midpoint(anchor, rhs).dot(delta))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(0)
+}
+
+fn best_matching_edge(
+    anchor: &ClosedContour,
+    candidate: &ClosedContour,
+    anchor_edge: usize,
+) -> usize {
+    const TRANSLATION_BIAS: f32 = 20.0;
+
+    let unit = contour_edge_direction(anchor, anchor_edge);
+    let comp_point = contour_edge_midpoint(anchor, anchor_edge);
+    (0..candidate.points.len())
+        .min_by(|&lhs, &rhs| {
+            contour_edge_match_cost(candidate, lhs, unit, comp_point, TRANSLATION_BIAS)
+                .partial_cmp(&contour_edge_match_cost(
+                    candidate,
+                    rhs,
+                    unit,
+                    comp_point,
+                    TRANSLATION_BIAS,
+                ))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .unwrap_or(0)
+}
+
+fn contour_edge_match_cost(
+    contour: &ClosedContour,
+    edge_idx: usize,
+    unit: Float3,
+    comp_point: Float3,
+    translation_bias: f32,
+) -> f32 {
+    let candidate_unit = contour_edge_direction(contour, edge_idx);
+    let midpoint = contour_edge_midpoint(contour, edge_idx);
+    (translation_bias - unit.dot(candidate_unit)) * (midpoint - comp_point).len()
 }
 
 fn append_closed_contour(mesh: &mut Mesh, contour: &ClosedContour) {
@@ -629,20 +747,22 @@ fn read_vec3_value(value: Value, name: &'static str) -> Result<Float3, ExecutorE
             let comps = list
                 .elements()
                 .iter()
-                .map(|key| match executor::heap::with_heap(|h| h.get(key.key()).clone()) {
-                    Value::Integer(n) => Ok(n as f32),
-                    Value::Float(f) => Ok(f as f32),
-                    other => Err(ExecutorError::type_error_for(
-                        "number",
-                        other.type_name(),
-                        name,
-                    )),
-                })
+                .map(
+                    |key| match executor::heap::with_heap(|h| h.get(key.key()).clone()) {
+                        Value::Integer(n) => Ok(n as f32),
+                        Value::Float(f) => Ok(f as f32),
+                        other => Err(ExecutorError::type_error_for(
+                            "number",
+                            other.type_name(),
+                            name,
+                        )),
+                    },
+                )
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Float3::new(comps[0], comps[1], comps[2]))
         }
         other => Err(ExecutorError::type_error_for(
-            "3-vector",
+            "list of length 3",
             other.type_name(),
             name,
         )),
@@ -759,7 +879,7 @@ fn mesh_tree_trans_lerp(
         (Value::List(start), Value::List(end), Value::List(state)) => {
             if start.len() != end.len() || start.len() != state.len() {
                 return Err(ExecutorError::Other(format!(
-                    "cannot trans vectors of different lengths: {} vs {} vs {}",
+                    "cannot trans lists of different lengths: {} vs {} vs {}",
                     start.len(),
                     end.len(),
                     state.len()
@@ -779,9 +899,9 @@ fn mesh_tree_trans_lerp(
                         .map(executor::heap::VRc::new)
                 })
                 .collect::<Result<_, _>>()?;
-            Ok(Value::List(Rc::new(executor::value::container::List::new_with(
-                elements,
-            ))))
+            Ok(Value::List(Rc::new(
+                executor::value::container::List::new_with(elements),
+            )))
         }
         (start, end, state) => Err(ExecutorError::Other(format!(
             "cannot trans {} and {} with state {}",
@@ -811,7 +931,7 @@ fn mesh_tree_patharc_lerp(
         (Value::List(start), Value::List(end)) => {
             if start.len() != end.len() {
                 return Err(ExecutorError::Other(format!(
-                    "cannot trans vectors of different lengths: {} vs {}",
+                    "cannot trans lists of different lengths: {} vs {}",
                     start.len(),
                     end.len()
                 )));
@@ -827,9 +947,9 @@ fn mesh_tree_patharc_lerp(
                     mesh_tree_patharc_lerp(&start, &end, t, path_arc).map(executor::heap::VRc::new)
                 })
                 .collect::<Result<_, _>>()?;
-            Ok(Value::List(Rc::new(executor::value::container::List::new_with(
-                elements,
-            ))))
+            Ok(Value::List(Rc::new(
+                executor::value::container::List::new_with(elements),
+            )))
         }
         (start, end) => Err(ExecutorError::Other(format!(
             "cannot trans {} and {}",
@@ -929,10 +1049,12 @@ fn planar_mesh_patharc_lerp(
     path_arc: Float3,
 ) -> Result<Mesh, ExecutorError> {
     let boundary = mesh_patharc_lerp(start, end, t, path_arc)?;
-    let contours = extract_closed_contours(&boundary).ok_or_else(|| {
-        ExecutorError::Other("planar trans produced a non-closed contour".into())
-    })?;
-    let contour_points: Vec<_> = contours.iter().map(|contour| contour.points.clone()).collect();
+    let contours = extract_closed_contours(&boundary)
+        .ok_or_else(|| ExecutorError::Other("planar trans produced a non-closed contour".into()))?;
+    let contour_points: Vec<_> = contours
+        .iter()
+        .map(|contour| contour.points.clone())
+        .collect();
     let normal = boundary
         .lins
         .first()
@@ -966,7 +1088,11 @@ fn planar_mesh_patharc_lerp(
     Ok(mesh)
 }
 
-fn ensure_same_mesh_topology(start: &Mesh, end: &Mesh, op: &'static str) -> Result<(), ExecutorError> {
+fn ensure_same_mesh_topology(
+    start: &Mesh,
+    end: &Mesh,
+    op: &'static str,
+) -> Result<(), ExecutorError> {
     if start.dots.len() != end.dots.len()
         || start.lins.len() != end.lins.len()
         || start.tris.len() != end.tris.len()
@@ -975,22 +1101,13 @@ fn ensure_same_mesh_topology(start: &Mesh, end: &Mesh, op: &'static str) -> Resu
             .iter()
             .zip(&end.dots)
             .any(|(a, b)| (a.inv, a.anti, a.is_dom_sib) != (b.inv, b.anti, b.is_dom_sib))
-        || start
-            .lins
-            .iter()
-            .zip(&end.lins)
-            .any(|(a, b)| {
-                (a.prev, a.next, a.inv, a.anti, a.is_dom_sib)
-                    != (b.prev, b.next, b.inv, b.anti, b.is_dom_sib)
-            })
-        || start
-            .tris
-            .iter()
-            .zip(&end.tris)
-            .any(|(a, b)| {
-                (a.ab, a.bc, a.ca, a.anti, a.is_dom_sib)
-                    != (b.ab, b.bc, b.ca, b.anti, b.is_dom_sib)
-            })
+        || start.lins.iter().zip(&end.lins).any(|(a, b)| {
+            (a.prev, a.next, a.inv, a.anti, a.is_dom_sib)
+                != (b.prev, b.next, b.inv, b.anti, b.is_dom_sib)
+        })
+        || start.tris.iter().zip(&end.tris).any(|(a, b)| {
+            (a.ab, a.bc, a.ca, a.anti, a.is_dom_sib) != (b.ab, b.bc, b.ca, b.anti, b.is_dom_sib)
+        })
     {
         return Err(ExecutorError::Other(format!(
             "cannot {} meshes with different topology",
@@ -1061,11 +1178,7 @@ mod tests {
 fn vec3_norm_lerp(start: Float3, t: f32, end: Float3) -> Float3 {
     let raw = start.lerp(end, t);
     let len = raw.len();
-    if len <= 1e-6 {
-        end
-    } else {
-        raw / len
-    }
+    if len <= 1e-6 { end } else { raw / len }
 }
 
 fn vec3_patharc_lerp(start: Float3, t: f32, end: Float3, path_arc: Float3) -> Float3 {
@@ -1106,7 +1219,8 @@ fn vec3_patharc_lerp(start: Float3, t: f32, end: Float3, path_arc: Float3) -> Fl
     let axis = axis / axis.len();
 
     let theta = angle * t;
-    let rotated =
-        from * theta.cos() + axis.cross(from) * theta.sin() + axis * axis.dot(from) * (1.0 - theta.cos());
+    let rotated = from * theta.cos()
+        + axis.cross(from) * theta.sin()
+        + axis * axis.dot(from) * (1.0 - theta.cos());
     center + rotated
 }
