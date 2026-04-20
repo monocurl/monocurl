@@ -16,7 +16,7 @@ use bytecode::Bytecode;
 use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
-use crate::heap::{heap_replace, with_heap, with_heap_mut};
+use crate::heap::{heap_replace, with_heap_mut};
 use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 

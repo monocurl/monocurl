@@ -3,7 +3,7 @@ use std::{future::Future, sync::Arc};
 use geo::{mesh::Mesh, simd::Float3};
 
 use crate::{
-    error::ExecutorError,
+    error::{ExecutorError, RuntimeError},
     executor::Executor,
     heap::with_heap,
     state::LeaderKind,
@@ -358,13 +358,10 @@ impl Executor {
         })
     }
 
-    pub async fn capture_stable_scene_snapshot(&mut self) -> Option<SceneSnapshot> {
+    pub async fn capture_stable_scene_snapshot(&mut self) -> Result<SceneSnapshot, RuntimeError> {
         match self.stable_scene_snapshot().await {
-            Ok(scene) => Some(scene),
-            Err(error) => {
-                self.record_runtime_error_at_root(error);
-                None
-            }
+            Ok(scene) => Ok(scene),
+            Err(error) => Err(self.record_runtime_error_at_root(error)),
         }
     }
 }

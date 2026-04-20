@@ -125,17 +125,22 @@ impl RuntimeState {
         .await;
 
         self.has_seeked_for_play = true;
+        if self.executor.state.has_errors() {
+            self.cancel_runtime_work();
+            self.emit_snapshot(sm_tx, false, None).await;
+            return;
+        }
+
         match self.executor.seek_to(self.target).await {
             SeekToResult::SeekedTo(reached) => {
                 self.target = reached;
             }
             SeekToResult::Error(_) => {
-                self.target = self.executor.state.timestamp;
-                self.is_playing = false;
+                self.cancel_runtime_work();
             }
         }
 
-        let scene_snapshot = self.capture_scene_snapshot().await;
+        let scene_snapshot = self.capture_scene_snapshot().await.ok().flatten();
         self.emit_snapshot(sm_tx, false, scene_snapshot).await;
     }
 
@@ -181,7 +186,7 @@ impl RuntimeState {
         let scene_snapshot = if skip_scene_snapshot {
             None
         } else {
-            self.capture_scene_snapshot().await
+            self.capture_scene_snapshot().await.ok().flatten()
         };
         self.emit_snapshot(sm_tx, false, scene_snapshot).await;
 
@@ -201,7 +206,17 @@ impl RuntimeState {
         }
     }
 
+    fn cancel_runtime_work(&mut self) {
+        self.is_playing = false;
+        self.target = self.executor.state.timestamp;
+    }
+
     async fn advance_section_without_materializing(&mut self) -> bool {
+        if self.executor.state.has_errors() {
+            self.cancel_runtime_work();
+            return false;
+        }
+
         if self.executor.state.timestamp.slide + 1 >= self.executor.total_sections() {
             return false;
         }
@@ -212,6 +227,11 @@ impl RuntimeState {
     }
 
     async fn advance_section_with_materialization(&mut self, max_slide: usize) {
+        if self.executor.state.has_errors() {
+            self.cancel_runtime_work();
+            return;
+        }
+
         if self.executor.state.timestamp.slide + 1 >= self.executor.total_sections() {
             return;
         }
@@ -221,12 +241,18 @@ impl RuntimeState {
         self.target = self.executor.state.timestamp;
     }
 
-    async fn capture_scene_snapshot(&mut self) -> Option<SceneSnapshot> {
+    async fn capture_scene_snapshot(&mut self) -> Result<Option<SceneSnapshot>, ()> {
         if self.has_compiler_error || self.executor.state.has_errors() {
-            return None;
+            return Ok(None);
         }
 
-        ExecutionService::capture_stable_scene_snapshot(&mut self.executor).await
+        match ExecutionService::capture_stable_scene_snapshot(&mut self.executor).await {
+            Ok(scene_snapshot) => Ok(Some(scene_snapshot)),
+            Err(_) => {
+                self.cancel_runtime_work();
+                Err(())
+            }
+        }
     }
 
     async fn emit_snapshot(
@@ -247,6 +273,146 @@ impl RuntimeState {
             scene_snapshot,
         )
         .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, sync::Arc};
+
+    use compiler::cache::CompilerCache;
+    use futures::channel::mpsc::unbounded;
+    use lexer::{lexer::Lexer, token::Token};
+    use parser::{
+        ast::{Section, SectionBundle, SectionType},
+        parser::SectionParser,
+    };
+    use structs::{
+        assets::Assets,
+        rope::{Rope, TextAggregate},
+    };
+
+    use super::*;
+
+    fn parse_section(src: &str, section_type: SectionType) -> Section {
+        let tokens = Lexer::token_stream(src.chars())
+            .into_iter()
+            .filter(|(token, _)| token != &Token::Whitespace && token != &Token::Comment)
+            .collect();
+        let rope: Rope<TextAggregate> = Rope::from_str(src);
+        let mut parser = SectionParser::new(tokens, rope, section_type.clone(), None, None);
+        let statements = parser.parse_statement_list();
+        let artifacts = parser.artifacts();
+        assert!(
+            artifacts.error_diagnostics.is_empty(),
+            "parse errors: {:?}",
+            artifacts
+                .error_diagnostics
+                .iter()
+                .map(|error| error.message.clone())
+                .collect::<Vec<_>>()
+        );
+
+        Section {
+            body: statements,
+            section_type,
+        }
+    }
+
+    fn load_stdlib_bundle(path: impl AsRef<std::path::Path>) -> Arc<SectionBundle> {
+        let src = fs::read_to_string(path).expect("failed to read stdlib file");
+        Arc::new(SectionBundle {
+            file_path: None,
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![parse_section(&src, SectionType::StandardLibrary)],
+            root_import_span: Some(0..0),
+            was_cached: false,
+        })
+    }
+
+    fn compile_runtime_state(
+        sections: &[(&str, SectionType)],
+        stdlib_bundles: &[Arc<SectionBundle>],
+    ) -> RuntimeState {
+        let imported_files: Vec<_> = (0..stdlib_bundles.len()).collect();
+        let user_sections = sections
+            .iter()
+            .map(|(src, section_type)| parse_section(src, section_type.clone()))
+            .collect();
+        let user_bundle = Arc::new(SectionBundle {
+            file_path: None,
+            file_index: 0,
+            imported_files,
+            sections: user_sections,
+            root_import_span: None,
+            was_cached: false,
+        });
+
+        let mut bundles = stdlib_bundles.to_vec();
+        bundles.push(user_bundle);
+
+        let mut cache = CompilerCache::default();
+        let compile_result = compiler::compiler::compile(&mut cache, None, &bundles);
+        assert!(
+            compile_result.errors.is_empty(),
+            "compile errors: {:?}",
+            compile_result
+                .errors
+                .iter()
+                .map(|error| error.message.clone())
+                .collect::<Vec<_>>()
+        );
+
+        let mut runtime = RuntimeState::new();
+        let root_text = sections
+            .iter()
+            .map(|(src, _)| *src)
+            .collect::<Vec<_>>()
+            .join("\n");
+        runtime.apply_message(ExecutionMessage::UpdateBytecode {
+            bytecode: Some(compile_result.bytecode),
+            root_text_rope: Rope::from_str(&root_text),
+            version: 1,
+        });
+        runtime
+    }
+
+    #[test]
+    fn snapshot_error_cancels_further_runtime_work() {
+        let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+        let mut runtime = compile_runtime_state(
+            &[("background = 0\nplay Set()", SectionType::Slide)],
+            &[anim_mcl],
+        );
+        let (sm_tx, _sm_rx) = unbounded();
+
+        runtime.is_playing = true;
+        runtime.target = runtime
+            .executor
+            .user_to_internal_timestamp(executor::time::Timestamp::new(0, f64::INFINITY));
+
+        smol::block_on(async {
+            runtime.sync_to_target(&sm_tx).await;
+        });
+
+        assert!(runtime.executor.state.has_errors());
+        assert!(!runtime.is_playing);
+        assert_eq!(runtime.target, runtime.executor.state.timestamp);
+
+        let timestamp_after_error = runtime.executor.state.timestamp;
+        runtime.target = runtime
+            .executor
+            .user_to_internal_timestamp(executor::time::Timestamp::new(0, 0.0));
+        runtime.is_playing = true;
+
+        smol::block_on(async {
+            runtime.sync_to_target(&sm_tx).await;
+        });
+
+        assert_eq!(runtime.executor.state.timestamp, timestamp_after_error);
+        assert_eq!(runtime.target, timestamp_after_error);
+        assert!(!runtime.is_playing);
     }
 }
 

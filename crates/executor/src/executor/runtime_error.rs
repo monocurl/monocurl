@@ -11,14 +11,16 @@ use super::Executor;
 const RUNTIME_ERROR_CALLSTACK_LIMIT: usize = 5;
 
 impl Executor {
-    pub fn record_runtime_error(&mut self, error: ExecutorError) {
+    pub fn record_runtime_error(&mut self, error: ExecutorError) -> RuntimeError {
         let runtime_error = self.build_runtime_error_at_stack(error, self.state.last_stack_idx);
-        self.state.error(runtime_error);
+        self.state.error(runtime_error.clone());
+        runtime_error
     }
 
-    pub fn record_runtime_error_at_root(&mut self, error: ExecutorError) {
+    pub fn record_runtime_error_at_root(&mut self, error: ExecutorError) -> RuntimeError {
         let runtime_error = self.build_runtime_error_at_stack(error, ExecutionState::ROOT_STACK_ID);
-        self.state.error(runtime_error);
+        self.state.error(runtime_error.clone());
+        runtime_error
     }
 
     pub(crate) fn build_runtime_error(&self, error: crate::error::ExecutorError) -> RuntimeError {
@@ -66,9 +68,14 @@ impl Executor {
     }
 
     fn best_effort_span(&self, _stack_idx: usize, ip: InstructionPointer) -> Span8 {
-        self.span_for_next_ip(ip)
+        let section_idx = ip.0 as usize;
+
+        self.span_for_recent_ip(ip)
             .or_else(|| self.annotation_span(ip))
-            .or_else(|| self.first_root_annotation_span())
+            .or_else(|| self.recent_root_annotation_span(section_idx))
+            .or_else(|| self.section_fallback_span(section_idx))
+            .or_else(|| self.recent_root_section_fallback_span(section_idx))
+            .or_else(|| self.global_fallback_span())
             .unwrap_or_else(|| nondegenerate_span(0..1))
     }
 
@@ -80,26 +87,58 @@ impl Executor {
         }
 
         let idx = (ip.1 as usize).min(annotations.len().saturating_sub(1));
-        Some(nondegenerate_span(annotations[idx].source_loc.clone()))
+        meaningful_span(annotations[idx].source_loc.clone())
     }
 
-    fn span_for_next_ip(&self, next_ip: InstructionPointer) -> Option<Span8> {
-        let instr_idx = next_ip.1.checked_sub(1)? as usize;
-        let raw = self.bytecode.sections[next_ip.0 as usize]
-            .annotations
-            .get(instr_idx)?
-            .source_loc
-            .clone();
-        Some(nondegenerate_span(raw))
+    fn span_for_recent_ip(&self, next_ip: InstructionPointer) -> Option<Span8> {
+        let section = self.bytecode.sections.get(next_ip.0 as usize)?;
+        let annotations = &section.annotations;
+        let last_idx = annotations.len().checked_sub(1)?;
+        let start_idx = next_ip.1.saturating_sub(1).min(last_idx as u32) as usize;
+
+        annotations[..=start_idx]
+            .iter()
+            .rev()
+            .find_map(|annotation| meaningful_span(annotation.source_loc.clone()))
     }
 
-    fn first_root_annotation_span(&self) -> Option<Span8> {
+    fn recent_root_annotation_span(&self, section_idx: usize) -> Option<Span8> {
+        let upper_bound = section_idx.min(self.bytecode.sections.len().saturating_sub(1));
+        self.bytecode.sections[..=upper_bound]
+            .iter()
+            .rev()
+            .filter(|section| section.flags.is_root_module)
+            .find_map(|section| {
+                section
+                    .annotations
+                    .iter()
+                    .rev()
+                    .find_map(|annotation| meaningful_span(annotation.source_loc.clone()))
+            })
+    }
+
+    fn section_fallback_span(&self, section_idx: usize) -> Option<Span8> {
+        let section = self.bytecode.sections.get(section_idx)?;
+        section_fallback_span_from_annotations(&section.annotations)
+    }
+
+    fn recent_root_section_fallback_span(&self, section_idx: usize) -> Option<Span8> {
+        let upper_bound = section_idx.min(self.bytecode.sections.len().saturating_sub(1));
+        self.bytecode
+            .sections
+            .get(..=upper_bound)?
+            .iter()
+            .rev()
+            .filter(|section| section.flags.is_root_module)
+            .find_map(|section| section_fallback_span_from_annotations(&section.annotations))
+    }
+
+    fn global_fallback_span(&self) -> Option<Span8> {
         self.bytecode
             .sections
             .iter()
-            .find(|section| section.flags.is_root_module)
-            .and_then(|section| section.annotations.first())
-            .map(|annotation| nondegenerate_span(annotation.source_loc.clone()))
+            .rev()
+            .find_map(|section| section_fallback_span_from_annotations(&section.annotations))
     }
 
     fn recover_call_stack(&self, stack_idx: usize) -> std::vec::IntoIter<RecoveredFrame> {
@@ -160,6 +199,18 @@ fn nondegenerate_span(raw: Span8) -> Span8 {
     }
 }
 
+fn meaningful_span(raw: Span8) -> Option<Span8> {
+    (!raw.is_empty()).then_some(raw)
+}
+
+fn section_fallback_span_from_annotations(
+    annotations: &[bytecode::InstructionAnnotation],
+) -> Option<Span8> {
+    let first = annotations.first()?.source_loc.clone();
+    let last = annotations.last()?.source_loc.clone();
+    Some(nondegenerate_span(first.start..last.end))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -207,5 +258,40 @@ mod tests {
             .collect();
 
         assert_eq!(spans, vec![10..14, 20..24, 40..44, 30..34]);
+    }
+
+    #[test]
+    fn best_effort_span_skips_empty_end_of_section_annotations() {
+        let executor = executor_with_root_annotations(&[(10, 14), (20, 24), (0, 0)]);
+
+        assert_eq!(executor.best_effort_span(0, (0, 3)), 20..24);
+    }
+
+    #[test]
+    fn best_effort_span_uses_latest_prior_root_section_span() {
+        let mut first = SectionBytecode::new(SectionFlags {
+            is_stdlib: false,
+            is_library: false,
+            is_init: true,
+            is_root_module: true,
+        });
+        first.annotations = vec![InstructionAnnotation { source_loc: 10..24 }];
+        first.instructions = vec![bytecode::Instruction::PushNil];
+
+        let mut second = SectionBytecode::new(SectionFlags {
+            is_stdlib: false,
+            is_library: false,
+            is_init: false,
+            is_root_module: true,
+        });
+        second.annotations = vec![InstructionAnnotation { source_loc: 0..0 }];
+        second.instructions = vec![bytecode::Instruction::EndOfExecutionHead];
+
+        let executor = Executor::new(
+            Bytecode::new(vec![Arc::new(first), Arc::new(second)]),
+            Vec::new(),
+        );
+
+        assert_eq!(executor.best_effort_span(0, (1, 1)), 10..24);
     }
 }

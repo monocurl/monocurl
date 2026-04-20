@@ -1101,9 +1101,7 @@ mod tests {
         state.set_items(vec![autocomplete_item("log10")]);
 
         assert!(state.filtered_items.is_empty());
-        assert!(!state.recheck_should_display(Cursor::collapsed(
-            state.cursor_at
-        )));
+        assert!(!state.recheck_should_display(Cursor::collapsed(state.cursor_at)));
     }
 
     #[test]

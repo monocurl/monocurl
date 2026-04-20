@@ -71,7 +71,11 @@ fn point_dist(p: Point<Pixels>) -> Pixels {
     px(hypot as f32)
 }
 
-fn adjust_cursor_after_uncomment(cursor_col: usize, comment_col: usize, removed_len: usize) -> usize {
+fn adjust_cursor_after_uncomment(
+    cursor_col: usize,
+    comment_col: usize,
+    removed_len: usize,
+) -> usize {
     if cursor_col <= comment_col {
         cursor_col
     } else if cursor_col < comment_col + removed_len {
@@ -1259,7 +1263,10 @@ impl TextEditor {
             let state = self.state.read(cx);
             let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
             let line_end = state
-                .loc8_to_offset8(Location8 { row: row + 1, col: 0 })
+                .loc8_to_offset8(Location8 {
+                    row: row + 1,
+                    col: 0,
+                })
                 .min(state.len());
             let line_text = state.read(line_start..line_end);
             Self::line_comment_prefix_len(&line_text).is_some()
@@ -1270,7 +1277,10 @@ impl TextEditor {
             let state = self.state.read(cx);
             let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
             let line_end = state
-                .loc8_to_offset8(Location8 { row: row + 1, col: 0 })
+                .loc8_to_offset8(Location8 {
+                    row: row + 1,
+                    col: 0,
+                })
                 .min(state.len());
             let line_text = state.read(line_start..line_end);
 
@@ -1288,18 +1298,12 @@ impl TextEditor {
                 );
 
                 if row == cursor.anchor.row {
-                    cursor.anchor.col = adjust_cursor_after_uncomment(
-                        cursor.anchor.col,
-                        comment_col,
-                        removed_len,
-                    );
+                    cursor.anchor.col =
+                        adjust_cursor_after_uncomment(cursor.anchor.col, comment_col, removed_len);
                 }
                 if row == cursor.head.row {
-                    cursor.head.col = adjust_cursor_after_uncomment(
-                        cursor.head.col,
-                        comment_col,
-                        removed_len,
-                    );
+                    cursor.head.col =
+                        adjust_cursor_after_uncomment(cursor.head.col, comment_col, removed_len);
                 }
             } else {
                 let comment_col = 0;

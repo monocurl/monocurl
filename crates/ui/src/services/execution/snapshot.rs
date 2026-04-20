@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use executor::{
+    error::RuntimeError,
     executor::Executor,
     heap::{VRc, with_heap},
     scene_snapshot::SceneSnapshot,
@@ -19,7 +20,7 @@ use super::{
 impl ExecutionService {
     pub(super) async fn capture_stable_scene_snapshot(
         executor: &mut Executor,
-    ) -> Option<SceneSnapshot> {
+    ) -> Result<SceneSnapshot, RuntimeError> {
         executor.capture_stable_scene_snapshot().await
     }
 

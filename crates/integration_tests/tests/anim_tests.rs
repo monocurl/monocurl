@@ -1158,6 +1158,114 @@ fn test_imported_init_runtime_error_uses_import_span_when_no_root_frame_exists()
 }
 
 #[test]
+fn test_root_recorded_error_uses_latest_root_statement_span() {
+    let src = "
+        background = 0
+    ";
+
+    let (mut executor, _user_slide_count) =
+        match build_anim_executor(&[(src, SectionType::Slide)], &[]) {
+            Ok(data) => data,
+            Err(result) => panic!("failed to build executor: {:?}", result.errors),
+        };
+
+    smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+    });
+
+    executor.record_runtime_error_at_root(executor::error::ExecutorError::Other("test".into()));
+
+    let expected_start = src
+        .find("background = 0")
+        .expect("missing background assignment");
+    let expected = expected_start..expected_start + "background = 0".len();
+
+    let runtime_error = executor
+        .state
+        .errors
+        .last()
+        .expect("expected recorded runtime error");
+    assert_eq!(runtime_error.span, expected);
+}
+
+#[test]
+fn test_root_recorded_error_uses_latest_prior_root_section_span() {
+    let init_src = "background = 0";
+
+    let (mut executor, _user_slide_count) = match build_anim_executor(
+        &[(init_src, SectionType::Init), ("", SectionType::Slide)],
+        &[],
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("failed to build executor: {:?}", result.errors),
+    };
+
+    smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+    });
+
+    executor.record_runtime_error_at_root(executor::error::ExecutorError::Other("test".into()));
+
+    let expected_start = init_src
+        .find("background = 0")
+        .expect("missing background assignment");
+    let expected = expected_start..expected_start + "background = 0".len();
+
+    let runtime_error = executor
+        .state
+        .errors
+        .last()
+        .expect("expected recorded runtime error");
+    assert_eq!(runtime_error.span, expected);
+}
+
+#[test]
+fn test_scene_snapshot_error_after_play_uses_play_span() {
+    let anim_mcl = load_stdlib_bundle(Assets::std_lib().join("std/anim.mcl"));
+    let src = "
+        background = 0
+        play Set()
+    ";
+
+    let (mut executor, _user_slide_count) =
+        match build_anim_executor(&[(src, SectionType::Slide)], &[anim_mcl]) {
+            Ok(data) => data,
+            Err(result) => panic!("failed to build executor: {:?}", result.errors),
+        };
+
+    smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+
+        assert!(
+            executor.capture_stable_scene_snapshot().await.is_err(),
+            "expected scene snapshot to fail"
+        );
+    });
+
+    let expected_start = src.find("play Set()").expect("missing play Set()");
+    let expected = expected_start..expected_start + "play Set()".len();
+
+    let runtime_error = executor
+        .state
+        .errors
+        .last()
+        .expect("expected recorded runtime error");
+    assert_eq!(runtime_error.span, expected);
+}
+
+#[test]
 fn test_anim_played_twice_error() {
     let r = run_anim_with_stdlib(
         "
@@ -1247,7 +1355,9 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
     let internal_target = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0));
     smol::block_on(async {
         let _ = executor.seek_to(internal_target).await;
-        let _ = executor.advance_playback(executor.total_sections(), 0.5).await;
+        let _ = executor
+            .advance_playback(executor.total_sections(), 0.5)
+            .await;
     });
 
     let runtime_error = executor

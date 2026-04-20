@@ -3379,10 +3379,13 @@ mod test {
 
         assert_eq!(block.body.len(), 2);
         assert!(matches!(block.body[0].1, Statement::Declaration(_)));
-        assert!(matches!(block.body[1].1, Statement::Expression(Expression::BinaryOperator(BinaryOperator {
-            op_type: BinaryOperatorType::DotAssign,
-            ..
-        }))));
+        assert!(matches!(
+            block.body[1].1,
+            Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                op_type: BinaryOperatorType::DotAssign,
+                ..
+            }))
+        ));
     }
 
     #[test]
