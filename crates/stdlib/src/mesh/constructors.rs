@@ -6,6 +6,49 @@ use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
 
+const MAX_POLYGON_POINTS: usize = 1 << 13;
+const MAX_CURVE_SAMPLES: usize = 1 << 14;
+const MAX_AXIS_TICKS: usize = 1 << 12;
+const MAX_GRID_CELLS: usize = 1 << 16;
+const MAX_FIELD_SAMPLES: usize = 1 << 16;
+const MAX_SURFACE_TRIANGLES: usize = 1 << 17;
+
+fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
+    ExecutorError::invalid_invocation(format!("{kind} is too large ({actual}, limit {limit})"))
+}
+
+fn ensure_limit(kind: &str, actual: usize, limit: usize) -> Result<(), ExecutorError> {
+    if actual > limit {
+        Err(mesh_limit_error(kind, actual, limit))
+    } else {
+        Ok(())
+    }
+}
+
+fn checked_product(kind: &str, a: usize, b: usize, limit: usize) -> Result<usize, ExecutorError> {
+    let total = a
+        .checked_mul(b)
+        .ok_or_else(|| mesh_limit_error(kind, usize::MAX, limit))?;
+    ensure_limit(kind, total, limit)?;
+    Ok(total)
+}
+
+fn ensure_grid_cells(kind: &str, nx: usize, ny: usize) -> Result<usize, ExecutorError> {
+    checked_product(kind, nx, ny, MAX_GRID_CELLS)
+}
+
+fn ensure_surface_triangles(kind: &str, tris: usize) -> Result<(), ExecutorError> {
+    ensure_limit(kind, tris, MAX_SURFACE_TRIANGLES)
+}
+
+fn tick_count(min: f32, max: f32, step: f32) -> usize {
+    if max < min {
+        0
+    } else {
+        (((max - min) / step).ceil() as usize).saturating_add(1)
+    }
+}
+
 fn closed_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
     let mut out = Vec::with_capacity(points.len());
     push_closed_polyline(&mut out, points, normal);
@@ -108,6 +151,7 @@ pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let center = read_float3(executor, stack_idx, -4, "center")?;
     let radius = crate::read_float(executor, stack_idx, -3, "radius")? as f32;
     let samples = read_int(executor, stack_idx, -2, "samples")?.max(3) as usize;
+    ensure_limit("circle samples", samples, MAX_POLYGON_POINTS)?;
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
     let (x, y, normal) = polygon_basis(normal);
     let points: Vec<_> = (0..samples)
@@ -187,6 +231,7 @@ pub async fn mk_regular_polygon(
 ) -> Result<Value, ExecutorError> {
     let center = read_float3(executor, stack_idx, -4, "center")?;
     let n = read_int(executor, stack_idx, -3, "n")?.max(3) as usize;
+    ensure_limit("regular polygon sides", n, MAX_POLYGON_POINTS)?;
     let radius = crate::read_float(executor, stack_idx, -2, "circumradius")? as f32;
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
     let (x, y, normal) = polygon_basis(normal);
@@ -203,6 +248,7 @@ pub async fn mk_regular_polygon(
 #[stdlib_func]
 pub async fn mk_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let vertices = read_float3_list(executor, stack_idx, -2, "vertices")?;
+    ensure_limit("polygon vertices", vertices.len(), MAX_POLYGON_POINTS)?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
     let (lins, tris) = tessellate_planar_loops(&[vertices], normal)?;
     Ok(mesh_from_parts(vec![], lins, tris))
@@ -214,6 +260,7 @@ pub async fn mk_polyline(
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
     let vertices = read_float3_list(executor, stack_idx, -2, "vertices")?;
+    ensure_limit("polyline vertices", vertices.len(), MAX_CURVE_SAMPLES)?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
     Ok(mesh_from_parts(
         vec![],
@@ -277,6 +324,7 @@ pub async fn mk_arc(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
     let (x, y, normal) = polygon_basis(normal);
     let steps = (((theta1 - theta0).abs() / std::f32::consts::TAU) * 64.0).ceil() as usize + 2;
+    ensure_limit("arc samples", steps, MAX_CURVE_SAMPLES)?;
     let points: Vec<_> = (0..steps)
         .map(|i| {
             let t = i as f32 / (steps - 1) as f32;
@@ -351,6 +399,8 @@ pub async fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let depth = read_int(executor, stack_idx, -1, "sample_depth")?.max(0) as usize;
     let lat_steps = (8usize << depth).max(8);
     let lon_steps = (lat_steps * 2).max(16);
+    let sphere_tris = 2 * lon_steps * lat_steps.saturating_sub(1);
+    ensure_surface_triangles("sphere triangles", sphere_tris)?;
     let top = center + Float3::new(0.0, radius, 0.0);
     let bottom = center + Float3::new(0.0, -radius, 0.0);
     let mut vertices = vec![SurfaceVertex {
@@ -456,6 +506,8 @@ pub async fn mk_cylinder(
     let height = crate::read_float(executor, stack_idx, -3, "height")? as f32;
     let direction = read_float3(executor, stack_idx, -2, "direction")?;
     let samples = read_int(executor, stack_idx, -1, "sample_count")?.max(3) as usize;
+    ensure_limit("cylinder samples", samples, MAX_POLYGON_POINTS)?;
+    ensure_surface_triangles("cylinder triangles", samples.saturating_mul(4))?;
     let axis = if direction.len_sq() <= 1e-12 {
         Float3::Y
     } else {
@@ -505,6 +557,8 @@ pub async fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value,
     let base = read_float3(executor, stack_idx, -3, "base")?;
     let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
     let samples = read_int(executor, stack_idx, -1, "sample_count")?.max(3) as usize;
+    ensure_limit("cone samples", samples, MAX_POLYGON_POINTS)?;
+    ensure_surface_triangles("cone triangles", samples.saturating_mul(2))?;
     let axis = (apex - base).normalize();
     let (x, y, _) = polygon_basis(axis);
     let ring: Vec<_> = (0..samples)
@@ -541,6 +595,10 @@ pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let normal = read_float3(executor, stack_idx, -3, "normal")?;
     let major_samples = read_int(executor, stack_idx, -2, "major_samples")?.max(3) as usize;
     let minor_samples = read_int(executor, stack_idx, -1, "minor_samples")?.max(3) as usize;
+    ensure_limit("torus major samples", major_samples, MAX_POLYGON_POINTS)?;
+    ensure_limit("torus minor samples", minor_samples, MAX_POLYGON_POINTS)?;
+    let torus_quads = checked_product("torus cells", major_samples, minor_samples, MAX_GRID_CELLS)?;
+    ensure_surface_triangles("torus triangles", torus_quads.saturating_mul(2))?;
     let (x, y, n) = polygon_basis(normal);
     let mut vertices = Vec::with_capacity(major_samples * minor_samples);
 
@@ -731,6 +789,8 @@ pub async fn mk_color_grid(
 
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
+    let cell_count = ensure_grid_cells("color grid cells", nx, ny)?;
+    ensure_surface_triangles("color grid triangles", cell_count.saturating_mul(2))?;
     let mut vertices = Vec::<SurfaceVertex>::new();
     let mut faces = Vec::<[usize; 3]>::new();
     for ix in 0..=nx {
@@ -805,7 +865,13 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
-    let mut out = Vec::new();
+    let sample_count = checked_product(
+        "field samples",
+        nx.saturating_add(1),
+        ny.saturating_add(1),
+        MAX_FIELD_SAMPLES,
+    )?;
+    let mut out = Vec::with_capacity(sample_count);
 
     for ix in 0..=nx {
         for iy in 0..=ny {
@@ -930,6 +996,11 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let tick_step = crate::read_float(executor, stack_idx, -3, "tick_step")?
         .abs()
         .max(1e-3) as f32;
+    ensure_limit(
+        "axis ticks",
+        tick_count(min, max, tick_step),
+        MAX_AXIS_TICKS,
+    )?;
     let tick_dir = {
         let dir = normal.cross(axis);
         if dir.len_sq() > 1e-6 {
@@ -975,6 +1046,16 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         .abs()
         .max(1e-3) as f32;
     let grid = read_flag(executor, stack_idx, -1, "grid")?;
+    ensure_limit(
+        "axis x ticks",
+        tick_count(x_min, x_max, x_tick),
+        MAX_AXIS_TICKS,
+    )?;
+    ensure_limit(
+        "axis y ticks",
+        tick_count(y_min, y_max, y_tick),
+        MAX_AXIS_TICKS,
+    )?;
     let normal = x_axis.cross(y_axis).normalize();
     let tick_half = 0.06 * x_unit.min(y_unit).max(0.2);
     let mut lins = vec![
@@ -1097,6 +1178,16 @@ pub async fn mk_polar_axis(
     let radius_step = crate::read_float(executor, stack_idx, -2, "radius_step")?
         .abs()
         .max(1e-3) as f32;
+    ensure_limit(
+        "polar axis rings",
+        tick_count(radius_min.max(radius_step), radius_max, radius_step),
+        MAX_AXIS_TICKS,
+    )?;
+    ensure_limit(
+        "polar axis rays",
+        tick_count(theta_min, theta_max, theta_step),
+        MAX_AXIS_TICKS,
+    )?;
     let (x, y, normal) = polygon_basis(normal);
     let mut lins = Vec::new();
 
@@ -1140,6 +1231,7 @@ pub async fn mk_parametric(
     let t0 = crate::read_float(executor, stack_idx, -3, "t0")?;
     let t1 = crate::read_float(executor, stack_idx, -2, "t1")?;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(2) as usize;
+    ensure_limit("parametric samples", samples, MAX_CURVE_SAMPLES)?;
     let mut points = Vec::with_capacity(samples);
     for i in 0..samples {
         let t = if samples == 1 {
@@ -1180,6 +1272,7 @@ pub async fn mk_explicit(
     let x0 = crate::read_float(executor, stack_idx, -3, "x0")?;
     let x1 = crate::read_float(executor, stack_idx, -2, "x1")?;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(2) as usize;
+    ensure_limit("explicit samples", samples, MAX_CURVE_SAMPLES)?;
     let mut points = Vec::with_capacity(samples);
     for i in 0..samples {
         let x = x0 + (x1 - x0) * i as f64 / (samples - 1) as f64;
@@ -1226,6 +1319,8 @@ pub async fn mk_explicit2d(
         .max(1e-3) as f32;
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
+    let cell_count = ensure_grid_cells("explicit surface cells", nx, ny)?;
+    ensure_surface_triangles("explicit surface triangles", cell_count.saturating_mul(2))?;
     let mut grid = vec![vec![Float3::ZERO; ny + 1]; nx + 1];
     for (ix, col) in grid.iter_mut().enumerate() {
         for (iy, point) in col.iter_mut().enumerate() {
@@ -1291,6 +1386,7 @@ pub async fn mk_implicit2d(
         .max(1e-3) as f32;
     let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
     let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
+    ensure_grid_cells("implicit surface cells", nx, ny)?;
     let mut vals = vec![vec![0.0f32; ny + 1]; nx + 1];
     for (ix, col) in vals.iter_mut().enumerate() {
         for (iy, val) in col.iter_mut().enumerate() {
@@ -1371,6 +1467,11 @@ pub async fn mk_explicit_diff(
     let x0 = crate::read_float(executor, stack_idx, -5, "x0")?;
     let x1 = crate::read_float(executor, stack_idx, -4, "x1")?;
     let samples = read_int(executor, stack_idx, -3, "samples")?.max(2) as usize;
+    ensure_limit("explicit diff samples", samples, MAX_CURVE_SAMPLES)?;
+    ensure_surface_triangles(
+        "explicit diff triangles",
+        samples.saturating_sub(1).saturating_mul(2),
+    )?;
     let fill0 = read_float4(executor, stack_idx, -2, "fill0")?;
     let fill1 = read_float4(executor, stack_idx, -1, "fill1")?;
 

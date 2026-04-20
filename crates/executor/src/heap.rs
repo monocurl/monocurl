@@ -65,6 +65,10 @@ impl VirtualHeap {
         }
     }
 
+    pub fn slot_count(&self) -> usize {
+        self.slots.len()
+    }
+
     pub fn get(&self, key: HeapKey) -> Ref<'_, Value> {
         Ref::map(self.slots[key as usize].borrow(), |opt| {
             opt.as_ref().expect("HeapKey points to free slot")

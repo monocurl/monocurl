@@ -376,6 +376,12 @@ fn test_exec_integer_division() {
 }
 
 #[test]
+fn test_exec_float_integer_division_returns_int() {
+    let r = run("let x = 7.5 // 2");
+    r.assert_int(3);
+}
+
+#[test]
 fn test_exec_power() {
     let r = run("let x = 2 ^ 10");
     r.assert_float(1024.0);
@@ -1513,6 +1519,12 @@ fn test_exec_compile_error_mutate_let() {
 #[test]
 fn test_exec_runtime_error_div_zero() {
     let r = run("let x = 1 / 0");
+    r.assert_error("division by zero");
+}
+
+#[test]
+fn test_exec_runtime_error_float_div_zero() {
+    let r = run("let x = 1.0 / 0");
     r.assert_error("division by zero");
 }
 

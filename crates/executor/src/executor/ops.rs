@@ -191,10 +191,14 @@ fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, Ex
         }
         (Value::Complex { re: ar, im: ai }, Value::Complex { re: br, im: bi }, BinOp::Div) => {
             let denom = br * br + bi * bi;
-            Ok(Value::Complex {
-                re: (ar * br + ai * bi) / denom,
-                im: (ai * br - ar * bi) / denom,
-            })
+            if denom == 0.0 {
+                Err(ExecutorError::DivisionByZero)
+            } else {
+                Ok(Value::Complex {
+                    re: (ar * br + ai * bi) / denom,
+                    im: (ai * br - ar * bi) / denom,
+                })
+            }
         }
 
         // string concatenation
@@ -318,21 +322,33 @@ fn list_element_err(op: &'static str, idx: usize, err: ExecutorError) -> Executo
 }
 
 fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> {
-    Ok(match op {
-        BinOp::Add => Value::Float(a + b),
-        BinOp::Sub => Value::Float(a - b),
-        BinOp::Mul => Value::Float(a * b),
-        BinOp::Div => Value::Float(a / b),
-        BinOp::IntDiv => Value::Float((a / b).floor()),
-        BinOp::Power => Value::Float(a.powf(b)),
-        BinOp::Lt => Value::Integer((a < b) as i64),
-        BinOp::Le => Value::Integer((a <= b) as i64),
-        BinOp::Gt => Value::Integer((a > b) as i64),
-        BinOp::Ge => Value::Integer((a >= b) as i64),
+    match op {
+        BinOp::Add => Ok(Value::Float(a + b)),
+        BinOp::Sub => Ok(Value::Float(a - b)),
+        BinOp::Mul => Ok(Value::Float(a * b)),
+        BinOp::Div => {
+            if b == 0.0 {
+                Err(ExecutorError::DivisionByZero)
+            } else {
+                Ok(Value::Float(a / b))
+            }
+        }
+        BinOp::IntDiv => {
+            if b == 0.0 {
+                Err(ExecutorError::DivisionByZero)
+            } else {
+                Ok(Value::Integer((a / b).floor() as i64))
+            }
+        }
+        BinOp::Power => Ok(Value::Float(a.powf(b))),
+        BinOp::Lt => Ok(Value::Integer((a < b) as i64)),
+        BinOp::Le => Ok(Value::Integer((a <= b) as i64)),
+        BinOp::Gt => Ok(Value::Integer((a > b) as i64)),
+        BinOp::Ge => Ok(Value::Integer((a >= b) as i64)),
         BinOp::Eq | BinOp::Ne | BinOp::In => {
             unreachable!("handled before promotion")
         }
-    })
+    }
 }
 
 impl BinOp {

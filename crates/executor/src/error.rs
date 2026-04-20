@@ -41,6 +41,10 @@ pub enum ExecutorError {
         used: u64,
         limit: u64,
     },
+    VirtualHeapLimitExceeded {
+        used: usize,
+        limit: usize,
+    },
     StatefulValueError(String),
     InvalidAccess(String),
     InvalidOperation(String),
@@ -270,6 +274,13 @@ impl fmt::Display for ExecutorError {
                 write!(
                     f,
                     "memory limit exceeded: process is using {} bytes, limit is {} bytes",
+                    used, limit
+                )
+            }
+            Self::VirtualHeapLimitExceeded { used, limit } => {
+                write!(
+                    f,
+                    "virtual heap limit exceeded: heap is using {} slots, limit is {} slots",
                     used, limit
                 )
             }

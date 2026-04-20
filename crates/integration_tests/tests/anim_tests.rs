@@ -1217,6 +1217,49 @@ fn test_color_grid_lambda_arity_error_is_reported_without_panicking() {
 }
 
 #[test]
+fn test_color_grid_triangle_limit_is_reported() {
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = ColorGrid(|pos| [1, 0, 0, 1], [-1, 1, 0.005], [-1, 1, 0.005])
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        0.0,
+        &stdlib_bundles(["mesh"]),
+    );
+    r.assert_error("color grid cells is too large");
+}
+
+#[test]
+fn test_regular_polygon_limit_is_reported() {
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = RegularPolygon([0, 0, 0], 9000, 1)
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        0.0,
+        &stdlib_bundles(["mesh"]),
+    );
+    r.assert_error("regular polygon sides is too large");
+}
+
+#[test]
+fn test_math_stdlib_no_longer_exports_inf() {
+    let r = run_anim_impl(
+        &[("let x = INF", SectionType::Slide)],
+        0,
+        0.0,
+        &stdlib_bundles(["math"]),
+    );
+    r.assert_error("undefined");
+}
+
+#[test]
 fn test_bend_anim_interpolates_polyline_meshes() {
     let r = run_anim_impl(
         &[
