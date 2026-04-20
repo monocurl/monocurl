@@ -2,9 +2,14 @@
   - src/lib.rs: Instruction / prototype definitions plus SectionBytecode metadata (flags, instruction annotations, source file name, imported-bundle display index)
 - cli: binary crate that contains the gluing logic for the monocurl cli
 - compiler: converts AST into bytecode, performs static analysis
-  - src/compiler.rs: main bytecode compiler, symbol/scope tracking, cached-bundle remapping, compile errors/warnings, autocomplete/reference extraction, and statement compilation. `block { ... }` bodies still get implicit `_` accumulation and default to `[]`, but ordinary block-bodied lambdas no longer synthesize `_`; falling off the end of one now emits an explicit runtime error anchored to the full lambda span
+  - src/compiler/mod.rs: compiler module root; shared symbol/compile-result types, the `compile(...)` entrypoint, compiler-frame state, and bundle/section emission helpers
+  - src/compiler/cursor.rs: cursor-visible symbol enumeration for autocomplete plus root-reference tracking metadata used by signature hints
+  - src/compiler/statements.rs: statement and control-flow lowering (`let`/`var`/`mesh`/`param`, loops, `if`, `return`, `break`, `continue`, `play`)
+  - src/compiler/expressions.rs: expression lowering, identifier/property/subscript access, literals, unary/binary ops, and lambda/operator/native invocation bytecode emission
+  - src/compiler/closures.rs: lambda/operator/block/anim lowering, closure-frame setup/teardown, capture registration, and implicit block `_` accumulation. `block { ... }` bodies still default to `[]`, while ordinary block-bodied lambdas now fall through to an explicit runtime error anchored to the full lambda span
   - src/compiler/free_vars.rs: free-variable and free-lvalue walkers used for lambda/block capture analysis
   - src/compiler/stateful.rs: compiler-side stateful-expression lowering and validation helpers
+  - src/compiler/tests.rs: compiler unit tests split out of the module root
   - src/compiler/warnings.rs: AST walker for compile-time warnings about useless expression statements with no syntactic side effects
 - executor: takes bytecode and scene state and executes it
   - src/error.rs: ExecutorError enum plus RuntimeError / RuntimeCallFrame (raw execution error, selected span, bounded recovered callstack)
@@ -45,7 +50,13 @@
   - src/token.rs: contains an enum of all of the tokens and helper functions related to them
 - parser: transforms lexed source file into an AST
   - src/ast.rs: contains structs related to all of the types of ast nodes
-  - src/parser.rs: contains the code to actually parse a lexed stream into an AST, ideally error resistant/tolerant
+  - src/parser/mod.rs: parser module root; shared parser state/diagnostic structs, bracket precomputation, token-reading helpers, and top-level `Parser` / `SectionParser` definitions
+  - src/parser/predicate.rs: token/state predicates used by the tolerant `try_all!` parser machinery and cursor-possibility emission
+  - src/parser/statements.rs: section/statement-list parsing plus statement bodies, declarations, loop/if/play/return parsing, and identifier declarations
+  - src/parser/expressions.rs: precedence parser, postfix/property/subscript/invocation parsing, and lambda/block/anim expression parsing
+  - src/parser/literals.rs: string/numeric/vector/map literal parsing helpers
+  - src/parser/imports.rs: import DFS/preparse logic, file splitting into sections, cache-aware bundle assembly, and the public parse entrypoint
+  - src/parser/tests.rs: parser unit tests split out of the module root
 - renderer: given a state snapshot, actually renders it via platform specific shaders
 - stdlib: actual lib monocurl routine implementations. depends on executor for Value types
   - src/registry.rs: defines `FunctionEntry` (using executor's `NativeFunc` type), `inventory::collect!`, the `Registry` singleton (lazily built, sorted by name via `OnceLock`), and `func_table()` to build a Vec<NativeFunc> for the executor
