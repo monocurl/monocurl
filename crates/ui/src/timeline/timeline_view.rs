@@ -30,6 +30,10 @@ fn gap_w(duration: Option<f64>, zoom: f32) -> f32 {
     duration.map_or(MIN_GAP, |d| (d as f32 * PX_PER_SEC * zoom).max(MIN_GAP))
 }
 
+fn painted_gap_w(duration: Option<f64>, zoom: f32) -> f32 {
+    duration.map_or(0.0, |d| (d as f32 * PX_PER_SEC * zoom).max(0.0))
+}
+
 fn effective_durations(
     slide_count: usize,
     durations: &[Option<f64>],
@@ -70,6 +74,12 @@ fn compute_gap_ws(slide_count: usize, durations: &[Option<f64>], zoom: f32) -> V
         .collect()
 }
 
+fn compute_painted_gap_ws(slide_count: usize, durations: &[Option<f64>], zoom: f32) -> Vec<f32> {
+    (0..slide_count)
+        .map(|i| painted_gap_w(durations.get(i).and_then(|d| *d), zoom))
+        .collect()
+}
+
 fn compute_track_width(slide_count: usize, durations: &[Option<f64>], zoom: f32) -> f32 {
     if slide_count == 0 {
         return 200.0;
@@ -97,6 +107,7 @@ fn compute_playhead_x(
 struct TrackPrepaint {
     slide_xs: Vec<f32>,
     gap_ws: Vec<f32>,
+    painted_gap_ws: Vec<f32>,
     playhead_x: f32,
     // effective display duration per slide (may be inferred from current_time)
     durations: Vec<Option<f64>>,
@@ -340,6 +351,7 @@ impl Timeline {
 
                     let slide_xs = compute_slide_xs(slide_count, &effective, zoom);
                     let gap_ws = compute_gap_ws(slide_count, &effective, zoom);
+                    let painted_gap_ws = compute_painted_gap_ws(slide_count, &effective, zoom);
                     let playhead_x =
                         compute_playhead_x(current_slide, current_time, &slide_xs, &gap_ws, zoom);
                     let vert_offset = (f32::from(bounds.size.height) - CONTENT_H).max(0.0) / 2.0;
@@ -385,6 +397,7 @@ impl Timeline {
                     TrackPrepaint {
                         slide_xs,
                         gap_ws,
+                        painted_gap_ws,
                         playhead_x,
                         durations: effective,
                         explicit,
@@ -398,6 +411,7 @@ impl Timeline {
                 let TrackPrepaint {
                     slide_xs,
                     gap_ws,
+                    painted_gap_ws,
                     playhead_x,
                     durations,
                     explicit,
@@ -417,16 +431,18 @@ impl Timeline {
                 // connectors: horizontal line, leading tick, and per-second stubs
                 for i in 0..slide_count {
                     let gap_x = slide_xs[i] + SLIDE_W;
-                    let gw = gap_ws[i];
+                    let painted_gw = painted_gap_ws[i];
 
                     // horizontal connector line
-                    window.paint_quad(fill(
-                        Bounds::new(
-                            point(ox + px(gap_x), oy + px(line_y - 0.5)),
-                            size(px(gw), px(1.0)),
-                        ),
-                        theme.timeline_connector,
-                    ));
+                    if painted_gw > 0.0 {
+                        window.paint_quad(fill(
+                            Bounds::new(
+                                point(ox + px(gap_x), oy + px(line_y - 0.5)),
+                                size(px(painted_gw), px(1.0)),
+                            ),
+                            theme.timeline_connector,
+                        ));
+                    }
 
                     // leading tick at start of gap
                     window.paint_quad(fill(
@@ -442,7 +458,7 @@ impl Timeline {
                     let num_marks = duration_secs.floor() as usize;
                     for sec in 1..=num_marks {
                         let mark_x = gap_x + sec as f32 * sec_px;
-                        if mark_x < gap_x + gw {
+                        if mark_x < gap_x + painted_gw {
                             window.paint_quad(fill(
                                 Bounds::new(
                                     point(ox + px(mark_x - 1.0), oy + px(line_y - 3.0)),
