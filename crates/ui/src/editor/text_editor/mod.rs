@@ -1556,8 +1556,6 @@ impl TextEditor {
             self.undo_group_boundary(cx);
             text = text.replace("\t", &" ".repeat(TAB_SIZE));
             if text.chars().any(|c| c == '\n') {
-                // change indentation for pasted multiline text
-                // pretty dumb but whatever
                 let state = self.state.read(cx);
                 let cursor_loc = self.cursor(cx).head.min(self.cursor(cx).anchor);
                 let line_start_offset = state.loc8_to_offset8(Location8 {
@@ -1566,25 +1564,29 @@ impl TextEditor {
                 });
                 let line_start_text =
                     state.read(line_start_offset..state.loc8_to_offset8(cursor_loc));
-                let mut leading_spaces = line_start_text.chars().take_while(|c| *c == ' ').count();
+                let cursor_indent =
+                    line_start_text.chars().take_while(|c| *c == ' ').count();
+
+                // base indent = minimum leading spaces across non-empty lines
+                let base_indent = text
+                    .split('\n')
+                    .filter(|l| !l.trim().is_empty())
+                    .map(|l| l.chars().take_while(|&c| c == ' ').count())
+                    .min()
+                    .unwrap_or(0);
 
                 let mut new_text = String::new();
+                let mut first = true;
                 for line in text.split('\n') {
-                    let real_pad = if new_text.is_empty() {
-                        0
-                    } else {
+                    if !first {
                         new_text.push('\n');
-                        if line.trim_start().starts_with('}') {
-                            leading_spaces = leading_spaces.saturating_sub(TAB_SIZE);
-                        }
-                        leading_spaces
-                    };
-
-                    let my_space_count = line.chars().take_while(|ch| *ch == ' ').count();
-                    new_text.push_str(&(" ".repeat(real_pad) + &line[my_space_count..]));
-                    if line.trim_end().ends_with('{') {
-                        leading_spaces += TAB_SIZE;
                     }
+                    let line_indent = line.chars().take_while(|&c| c == ' ').count();
+                    let relative = line_indent.saturating_sub(base_indent);
+                    let pad = if first { relative } else { cursor_indent + relative };
+                    first = false;
+                    new_text.push_str(&" ".repeat(pad));
+                    new_text.push_str(&line[line_indent.min(line.len())..]);
                 }
 
                 text = new_text;

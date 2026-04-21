@@ -7,6 +7,7 @@ use crate::{
     value::{
         Value,
         anim_block::AnimBlock,
+        container::{List, Map},
         invoked_function::{InvokedFunction, make_invoked_function},
         invoked_operator::{InvokedOperator, extract_operator_result, make_invoked_operator},
         lambda::Lambda,
@@ -180,6 +181,10 @@ impl Executor {
                 .await
             {
                 Ok(result_val) => {
+                    let result_val = match self.materialize_cached_value(result_val).await {
+                        Ok(value) => value,
+                        Err(error) => return ExecSingle::Error(error),
+                    };
                     let inv = make_invoked_function(
                         Value::Lambda(lambda),
                         full_args.into(),
@@ -312,6 +317,14 @@ impl Executor {
             {
                 Ok(raw) => match extract_operator_result(raw) {
                     Ok((initial, modified)) => {
+                        let initial = match self.materialize_cached_value(initial).await {
+                            Ok(value) => value,
+                            Err(error) => return ExecSingle::Error(error),
+                        };
+                        let modified = match self.materialize_cached_value(modified).await {
+                            Ok(value) => value,
+                            Err(error) => return ExecSingle::Error(error),
+                        };
                         let inv = make_invoked_operator(
                             Value::Operator(operator),
                             operand,
@@ -347,6 +360,14 @@ impl Executor {
             {
                 Ok(raw) => match extract_operator_result(raw) {
                     Ok((initial, modified)) => {
+                        let initial = match self.materialize_cached_value(initial).await {
+                            Ok(value) => value,
+                            Err(error) => return ExecSingle::Error(error),
+                        };
+                        let modified = match self.materialize_cached_value(modified).await {
+                            Ok(value) => value,
+                            Err(error) => return ExecSingle::Error(error),
+                        };
                         let inv = make_invoked_operator(
                             Value::Operator(operator),
                             operand,
@@ -585,12 +606,13 @@ impl Executor {
             let result = self
                 .eval_stateful_node(&stateful.body.root, override_read_kind)
                 .await?;
+            let result = self.materialize_cached_value(result).await?;
             crate::value::stateful::stateful_update_cache(stateful, result.clone());
             Ok(result)
         })
     }
 
-    pub(crate) fn eval_stateful<'a>(
+    pub fn eval_stateful<'a>(
         &'a mut self,
         stateful: &'a crate::value::stateful::Stateful,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
@@ -702,12 +724,66 @@ impl Executor {
         })
     }
 
+    pub(crate) fn materialize_cached_value<'a>(
+        &'a mut self,
+        val: Value,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
+    {
+        Box::pin(async move {
+            match val {
+                Value::Lvalue(vrc) => {
+                    let inner = with_heap(|h| h.get(vrc.key()).clone());
+                    self.materialize_cached_value(inner).await
+                }
+                Value::WeakLvalue(vweak) => {
+                    let inner = with_heap(|h| h.get(vweak.key()).clone());
+                    self.materialize_cached_value(inner).await
+                }
+                Value::Leader(leader) => {
+                    let inner = with_heap(|h| h.get(leader.leader_rc.key()).clone());
+                    self.materialize_cached_value(inner).await
+                }
+                Value::InvokedFunction(inv) => {
+                    let inner = InvokedFunction::value(&inv, self).await?;
+                    self.materialize_cached_value(inner).await
+                }
+                Value::InvokedOperator(inv) => {
+                    let inner = InvokedOperator::value(&inv, self).await?;
+                    self.materialize_cached_value(inner).await
+                }
+                Value::Stateful(stateful) => {
+                    let inner = self.eval_stateful(&stateful).await?;
+                    self.materialize_cached_value(inner).await
+                }
+                Value::List(list) => {
+                    let mut elements = SmallVec::with_capacity(list.len());
+                    for value_ref in list.elements() {
+                        let value = with_heap(|h| h.get(value_ref.key()).clone());
+                        elements.push(VRc::new(self.materialize_cached_value(value).await?));
+                    }
+                    Ok(Value::List(Rc::new(List::new_with(elements))))
+                }
+                Value::Map(map) => {
+                    let mut out = Map::new();
+                    for key in &map.insertion_order {
+                        let value_ref = map
+                            .get(key)
+                            .expect("map insertion order points to missing entry");
+                        let value = with_heap(|h| h.get(value_ref.key()).clone());
+                        out.insert(
+                            key.clone(),
+                            VRc::new(self.materialize_cached_value(value).await?),
+                        );
+                    }
+                    Ok(Value::Map(Rc::new(out)))
+                }
+                other => Ok(other),
+            }
+        })
+    }
+
     async fn resolve_live_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
-        match val {
-            Value::InvokedFunction(ref inv) => InvokedFunction::value(inv, self).await,
-            Value::InvokedOperator(ref inv) => InvokedOperator::value(inv, self).await,
-            other => Ok(other),
-        }
+        self.materialize_cached_value(val).await
     }
 }
 

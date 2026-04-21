@@ -5,7 +5,7 @@ use smallvec::SmallVec;
 use crate::{
     error::ExecutorError,
     executor::{Executor, fill_defaults},
-    value::{Value, invoked_function::InvokedFunction},
+    value::Value,
 };
 
 use super::rc_cached::RcCached;
@@ -80,7 +80,7 @@ impl InvokedOperator {
         Box::pin(async move {
             let cached = this.cache.cached_result.take();
             let result = match cached {
-                Some(result) => result,
+                Some(result) => *result,
                 None => {
                     let operator = match this.body.operator.as_ref().clone().elide_lvalue() {
                         Value::Operator(op) => op,
@@ -99,19 +99,14 @@ impl InvokedOperator {
                         .eagerly_invoke_lambda(&operator.0, &full_args, trace_parent_idx)
                         .await?;
                     let (initial, modified) = extract_operator_result(raw)?;
+                    let initial = executor.materialize_cached_value(initial).await?;
+                    let modified = executor.materialize_cached_value(modified).await?;
                     this.cache.unmodified.set(Some(Box::new(initial)));
-                    Box::new(modified)
+                    modified
                 }
             };
-
-            let live = match result.as_ref() {
-                Value::InvokedFunction(inv) => InvokedFunction::value(inv, executor).await?,
-                Value::InvokedOperator(inv) => InvokedOperator::value(inv, executor).await?,
-                other => other.clone(),
-            };
-
-            this.cache.cached_result.set(Some(result));
-            Ok(live)
+            this.cache.cached_result.set(Some(Box::new(result.clone())));
+            Ok(result)
         })
     }
 }

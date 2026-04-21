@@ -129,6 +129,7 @@ impl Executor {
             let result = self
                 .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
                 .await?;
+            let result = self.materialize_cached_value(result).await?;
 
             Ok(Value::InvokedFunction(make_invoked_function(
                 lambda_val,
@@ -218,6 +219,8 @@ impl Executor {
                 .eagerly_invoke_lambda(&operator.0, &full_args, trace_parent_idx)
                 .await?;
             let (initial, modified) = extract_operator_result(raw)?;
+            let initial = self.materialize_cached_value(initial).await?;
+            let modified = self.materialize_cached_value(modified).await?;
 
             Ok(Value::InvokedOperator(make_invoked_operator(
                 operator_value,

@@ -79,6 +79,7 @@ impl Value {
                 Value::Leader(ref leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
                 Value::InvokedOperator(ref op) => InvokedOperator::value(op, executor).await?,
                 Value::InvokedFunction(ref func) => InvokedFunction::value(func, executor).await?,
+                Value::Stateful(ref stateful) => executor.eval_stateful(stateful).await?,
                 other => return Ok(other),
             };
         }

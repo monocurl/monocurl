@@ -552,12 +552,28 @@ pub(super) fn materialize_current_value(value: &Value) -> Result<Value, Executor
     }
 }
 
-pub(super) async fn materialize_live_value(
-    executor: &mut Executor,
-    value: &Value,
-) -> Result<Value, ExecutorError> {
-    let resolved = value.clone().elide_wrappers(executor).await?;
-    materialize_current_value(&resolved)
+pub(super) fn materialize_live_value<'a>(
+    executor: &'a mut Executor,
+    value: &'a Value,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>> {
+    Box::pin(async move {
+        let resolved = value.clone().elide_wrappers(executor).await?;
+        match resolved {
+            Value::List(list) => {
+                let mut out = Vec::with_capacity(list.len());
+                for elem in list.elements() {
+                    let elem = with_heap(|h| h.get(elem.key()).clone());
+                    out.push(materialize_live_value(executor, &elem).await?);
+                }
+                Ok(list_value(out))
+            }
+            Value::Stateful(ref s) => {
+                let inner = executor.eval_stateful(s).await?;
+                materialize_live_value(executor, &inner).await
+            }
+            other => materialize_current_value(&other),
+        }
+    })
 }
 
 pub(super) fn merge_transfer_value(dst: Value, transfer: Value) -> Value {

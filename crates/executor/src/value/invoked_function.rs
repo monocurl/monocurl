@@ -54,7 +54,7 @@ impl InvokedFunction {
         Box::pin(async move {
             let cached = this.cache.0.take();
             let result = match cached {
-                Some(result) => result,
+                Some(result) => *result,
                 None => {
                     let lambda = match this.body.lambda.as_ref().clone().elide_lvalue() {
                         Value::Lambda(lambda) => lambda,
@@ -66,24 +66,14 @@ impl InvokedFunction {
                     let full_args =
                         fill_defaults(this.body.arguments.iter().cloned().collect(), &lambda);
                     let trace_parent_idx = Some(executor.state.last_stack_idx);
-                    Box::new(
-                        executor
-                            .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
-                            .await?,
-                    )
+                    let raw = executor
+                        .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
+                        .await?;
+                    executor.materialize_cached_value(raw).await?
                 }
             };
-
-            let live = match result.as_ref() {
-                Value::InvokedFunction(inv) => InvokedFunction::value(inv, executor).await?,
-                Value::InvokedOperator(inv) => {
-                    crate::value::invoked_operator::InvokedOperator::value(inv, executor).await?
-                }
-                other => other.clone(),
-            };
-
-            this.cache.0.set(Some(result));
-            Ok(live)
+            this.cache.0.set(Some(Box::new(result.clone())));
+            Ok(result)
         })
     }
 }

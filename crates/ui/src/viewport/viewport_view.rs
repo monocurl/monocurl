@@ -112,14 +112,8 @@ const HIDDEN_PARAMS: [&str; 2] = ["camera", "background"];
 
 // fixed per-tick overdrag step; cursor position only selects direction,
 // which avoids the runaway acceleration from mapping arbitrary cursor distance
-const OVERDRAG_STEP_1D: f64 = 0.025;
-const OVERDRAG_STEP_2D: f64 = 0.0125;
-// absolute value-units past the current bounds before the bounds start to expand
-const BOUNDS_EXPAND_THRESH_1D: f64 = 0.5;
-const BOUNDS_EXPAND_THRESH_2D: f64 = 0.05;
-const BOUNDS_EXPAND_THRESH_FRAC: f64 = 0.05;
-// fraction of current range added as padding when bounds expand
-const BOUNDS_EXPAND_PAD: f64 = 0.1;
+const OVERDRAG_STEP_1D: f64 = 0.02;
+const OVERDRAG_STEP_2D: f64 = 0.01;
 
 #[derive(Clone)]
 enum Slider2dKind {
@@ -134,6 +128,8 @@ enum DragState {
         name: String,
         value: f64,
         is_int: bool,
+        min: f64,
+        max: f64,
         overdrag_dir: i8,
     },
     Plane {
@@ -141,6 +137,10 @@ enum DragState {
         x: f64,
         y: f64,
         kind: Slider2dKind,
+        x_min: f64,
+        x_max: f64,
+        y_min: f64,
+        y_max: f64,
         x_overdrag_dir: i8,
         y_overdrag_dir: i8,
     },
@@ -246,6 +246,38 @@ impl Viewport {
     }
 
     fn end_drag(&mut self, cx: &mut Context<Self>) {
+        if let Some(state) = &self.drag_state {
+            match state {
+                DragState::Scalar {
+                    name,
+                    value,
+                    min,
+                    max,
+                    ..
+                } if *value < *min || *value > *max => {
+                    self.slider_bounds.insert(
+                        name.clone(),
+                        default_bounds_for_value(&state.display_value()),
+                    );
+                }
+                DragState::Plane {
+                    name,
+                    x,
+                    y,
+                    x_min,
+                    x_max,
+                    y_min,
+                    y_max,
+                    ..
+                } if *x < *x_min || *x > *x_max || *y < *y_min || *y > *y_max => {
+                    self.slider_bounds.insert(
+                        name.clone(),
+                        default_bounds_for_value(&state.display_value()),
+                    );
+                }
+                _ => {}
+            }
+        }
         self.drag_state = None;
         cx.notify();
     }
@@ -268,26 +300,25 @@ impl Viewport {
         fallback_bounds: [f64; 4],
         cx: &mut Context<Self>,
     ) -> ParameterValue {
-        let [min, max, _, _] = self.current_bounds(name, fallback_bounds);
-        let current = match &self.drag_state {
+        let (min, max, current) = match &self.drag_state {
             Some(DragState::Scalar {
                 name: drag_name,
                 value,
+                min,
+                max,
                 ..
-            }) if drag_name == name => *value,
-            _ => fallback_value,
+            }) if drag_name == name => (*min, *max, *value),
+            _ => (fallback_bounds[0], fallback_bounds[1], fallback_value),
         };
         let (value, overdrag_dir) = scalar_drag_target(local_x, width, min, max, current);
         self.drag_state = Some(DragState::Scalar {
             name: name.to_string(),
             value,
             is_int,
+            min,
+            max,
             overdrag_dir,
         });
-        if let Some((new_min, new_max)) = expand_1d_bounds(min, max, value, is_int) {
-            self.slider_bounds
-                .insert(name.to_string(), [new_min, new_max, 0.0, 0.0]);
-        }
         cx.notify();
         scalar_parameter_value(value, is_int)
     }
@@ -327,15 +358,25 @@ impl Viewport {
         fallback_bounds: [f64; 4],
         cx: &mut Context<Self>,
     ) -> ParameterValue {
-        let [x_min, x_max, y_min, y_max] = self.current_bounds(name, fallback_bounds);
-        let (current_x, current_y) = match &self.drag_state {
+        let (x_min, x_max, y_min, y_max, current_x, current_y) = match &self.drag_state {
             Some(DragState::Plane {
                 name: drag_name,
                 x,
                 y,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
                 ..
-            }) if drag_name == name => (*x, *y),
-            _ => (fallback_x, fallback_y),
+            }) if drag_name == name => (*x_min, *x_max, *y_min, *y_max, *x, *y),
+            _ => (
+                fallback_bounds[0],
+                fallback_bounds[1],
+                fallback_bounds[2],
+                fallback_bounds[3],
+                fallback_x,
+                fallback_y,
+            ),
         };
         let ((x, y), (x_overdrag_dir, y_overdrag_dir)) = plane_drag_target(
             pos, canvas, x_min, x_max, y_min, y_max, current_x, current_y,
@@ -345,15 +386,13 @@ impl Viewport {
             x,
             y,
             kind: kind.clone(),
+            x_min,
+            x_max,
+            y_min,
+            y_max,
             x_overdrag_dir,
             y_overdrag_dir,
         });
-        if let Some(((nx_min, nx_max), (ny_min, ny_max))) =
-            expand_2d_bounds(x_min, x_max, y_min, y_max, x, y)
-        {
-            self.slider_bounds
-                .insert(name.to_string(), [nx_min, nx_max, ny_min, ny_max]);
-        }
         cx.notify();
         plane_parameter_value(x, y, kind)
     }
@@ -384,10 +423,6 @@ impl Viewport {
         ))
     }
 
-    fn current_bounds(&self, name: &str, fallback: [f64; 4]) -> [f64; 4] {
-        self.slider_bounds.get(name).copied().unwrap_or(fallback)
-    }
-
     fn tick_overdrag(&mut self, cx: &mut Context<Self>) {
         let Some(mut state) = self.drag_state.take() else {
             return;
@@ -398,6 +433,8 @@ impl Viewport {
                 name,
                 value,
                 is_int,
+                min: _,
+                max: _,
                 overdrag_dir,
             } => {
                 if *overdrag_dir == 0 {
@@ -405,14 +442,6 @@ impl Viewport {
                     return;
                 }
                 *value += *overdrag_dir as f64 * OVERDRAG_STEP_1D;
-                let [min, max, _, _] = self.current_bounds(
-                    name.as_str(),
-                    default_bounds_for_value(&scalar_parameter_value(*value, *is_int)),
-                );
-                if let Some((new_min, new_max)) = expand_1d_bounds(min, max, *value, *is_int) {
-                    self.slider_bounds
-                        .insert(name.clone(), [new_min, new_max, 0.0, 0.0]);
-                }
                 (name.clone(), scalar_parameter_value(*value, *is_int))
             }
             DragState::Plane {
@@ -420,6 +449,10 @@ impl Viewport {
                 x,
                 y,
                 kind,
+                x_min: _,
+                x_max: _,
+                y_min: _,
+                y_max: _,
                 x_overdrag_dir,
                 y_overdrag_dir,
             } => {
@@ -429,16 +462,6 @@ impl Viewport {
                 }
                 *x += *x_overdrag_dir as f64 * OVERDRAG_STEP_2D;
                 *y += *y_overdrag_dir as f64 * OVERDRAG_STEP_2D;
-                let [x_min, x_max, y_min, y_max] = self.current_bounds(
-                    name.as_str(),
-                    default_bounds_for_value(&plane_parameter_value(*x, *y, kind)),
-                );
-                if let Some(((nx_min, nx_max), (ny_min, ny_max))) =
-                    expand_2d_bounds(x_min, x_max, y_min, y_max, *x, *y)
-                {
-                    self.slider_bounds
-                        .insert(name.clone(), [nx_min, nx_max, ny_min, ny_max]);
-                }
                 (name.clone(), plane_parameter_value(*x, *y, kind))
             }
         };
@@ -586,37 +609,7 @@ fn default_bounds_for_value(value: &ParameterValue) -> [f64; 4] {
     }
 }
 
-fn expand_threshold(range: f64, base: f64) -> f64 {
-    base.max(range.abs().max(1.0) * BOUNDS_EXPAND_THRESH_FRAC)
-}
-
 // --- drag computation helpers ---
-
-fn expand_1d_bounds(min: f64, max: f64, value: f64, is_int: bool) -> Option<(f64, f64)> {
-    let range = (max - min).abs().max(1.0);
-    let threshold = expand_threshold(range, BOUNDS_EXPAND_THRESH_1D);
-    let mut new_min = if value < min - threshold {
-        value - BOUNDS_EXPAND_PAD * range
-    } else {
-        min
-    };
-    let mut new_max = if value > max + threshold {
-        value + BOUNDS_EXPAND_PAD * range
-    } else {
-        max
-    };
-    // integer sliders keep integer-valued bounds
-    if is_int {
-        new_min = new_min.floor();
-        new_max = new_max.ceil();
-    }
-    let new_bounds = if new_min != min || new_max != max {
-        Some((new_min, new_max))
-    } else {
-        None
-    };
-    new_bounds
-}
 
 fn scalar_drag_target(local_x: f32, width: f32, min: f64, max: f64, current: f64) -> (f64, i8) {
     let raw_p = (local_x / width) as f64;
@@ -661,48 +654,6 @@ fn plane_drag_target(
     };
 
     ((x, y), (x_dir, y_dir))
-}
-
-fn expand_2d_bounds(
-    x_min: f64,
-    x_max: f64,
-    y_min: f64,
-    y_max: f64,
-    x: f64,
-    y: f64,
-) -> Option<((f64, f64), (f64, f64))> {
-    let x_range = (x_max - x_min).abs().max(1.0);
-    let y_range = (y_max - y_min).abs().max(1.0);
-    let x_threshold = expand_threshold(x_range, BOUNDS_EXPAND_THRESH_2D);
-    let y_threshold = expand_threshold(y_range, BOUNDS_EXPAND_THRESH_2D);
-    let new_x_min = if x < x_min - x_threshold {
-        x - BOUNDS_EXPAND_PAD * x_range
-    } else {
-        x_min
-    };
-    let new_x_max = if x > x_max + x_threshold {
-        x + BOUNDS_EXPAND_PAD * x_range
-    } else {
-        x_max
-    };
-    let new_y_min = if y < y_min - y_threshold {
-        y - BOUNDS_EXPAND_PAD * y_range
-    } else {
-        y_min
-    };
-    let new_y_max = if y > y_max + y_threshold {
-        y + BOUNDS_EXPAND_PAD * y_range
-    } else {
-        y_max
-    };
-
-    let new_bounds =
-        if new_x_min != x_min || new_x_max != x_max || new_y_min != y_min || new_y_max != y_max {
-            Some(((new_x_min, new_x_max), (new_y_min, new_y_max)))
-        } else {
-            None
-        };
-    new_bounds
 }
 
 fn format_bound(v: f64) -> String {
@@ -995,6 +946,10 @@ fn render_slider_2d(
     };
     let label_color = if is_locked { PRES_MUTED } else { PRES_TEXT };
     let name_for_canvas = name.clone();
+    let x_min_text = format_bound(x_min);
+    let x_max_text = format_bound(x_max);
+    let y_min_text = format_bound(y_min);
+    let y_max_text = format_bound(y_max);
 
     let locked_suffix = if is_locked { " (locked)" } else { "" };
     let header_text = format!("{}{}", value_text, locked_suffix);
@@ -1027,164 +982,214 @@ fn render_slider_2d(
                         .child(header_text),
                 ),
         )
-        // canvas centered horizontally
+        .child(
+            div().flex().justify_center().mb(px(4.0)).child(
+                div()
+                    .w(px(SLIDER_2D_SIZE))
+                    .flex()
+                    .justify_center()
+                    .text_color(PRES_MUTED)
+                    .text_size(px(10.0))
+                    .child(y_max_text),
+            ),
+        )
+        // canvas centered horizontally with visible x-bounds
         .child(
             div().flex().justify_center().child(
                 div()
-                    .w(px(SLIDER_2D_SIZE))
-                    .h(px(SLIDER_2D_SIZE))
-                    .flex_shrink_0()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(8.0))
                     .child(
-                        canvas(move |bounds, _, _| bounds, {
-                            let name = name_for_canvas.clone();
-                            let kind = kind.clone();
-                            let services = services.clone();
-                            let weak_vp = weak_vp.clone();
-                            move |_, bounds: Bounds<Pixels>, window, _cx| {
-                                let w = f32::from(bounds.size.width);
-                                let h = f32::from(bounds.size.height);
-                                let ox = bounds.origin.x;
-                                let oy = bounds.origin.y;
-
-                                window.paint_quad(fill(
-                                    Bounds::new(bounds.origin, size(px(w), px(h))),
-                                    SLIDER_2D_BG,
-                                ));
-                                window.paint_quad(fill(
-                                    Bounds::new(
-                                        point(ox + px(w * x_zero - 0.5), oy),
-                                        size(px(1.0), px(h)),
-                                    ),
-                                    SLIDER_2D_AXIS,
-                                ));
-                                window.paint_quad(fill(
-                                    Bounds::new(
-                                        point(ox, oy + px(h * y_zero - 0.5)),
-                                        size(px(w), px(1.0)),
-                                    ),
-                                    SLIDER_2D_AXIS,
-                                ));
-                                window.paint_quad(quad(
-                                    Bounds::new(
-                                        point(
-                                            ox + px(w * px_pct - SLIDER_2D_DOT_R),
-                                            oy + px(h * py_pct - SLIDER_2D_DOT_R),
-                                        ),
-                                        size(px(SLIDER_2D_DOT_R * 2.0), px(SLIDER_2D_DOT_R * 2.0)),
-                                    ),
-                                    px(SLIDER_2D_DOT_R),
-                                    dot_color,
-                                    px(0.0),
-                                    TRANSPARENT,
-                                    BorderStyle::Solid,
-                                ));
-
-                                if is_locked {
-                                    return;
-                                }
-
-                                {
-                                    let name = name.clone();
+                        div()
+                            .w(px(34.0))
+                            .text_color(PRES_MUTED)
+                            .text_size(px(10.0))
+                            .flex()
+                            .justify_end()
+                            .child(x_min_text),
+                    )
+                    .child(
+                        div()
+                            .w(px(SLIDER_2D_SIZE))
+                            .h(px(SLIDER_2D_SIZE))
+                            .flex_shrink_0()
+                            .child(
+                                canvas(move |bounds, _, _| bounds, {
+                                    let name = name_for_canvas.clone();
                                     let kind = kind.clone();
                                     let services = services.clone();
                                     let weak_vp = weak_vp.clone();
-                                    window.on_mouse_event(
-                                        move |ev: &MouseDownEvent, phase, _, cx| {
-                                            if phase != DispatchPhase::Bubble
-                                                || !bounds.contains(&ev.position)
-                                            {
-                                                return;
-                                            }
-                                            let pv = weak_vp
-                                                .update(cx, |vp, cx| {
-                                                    vp.begin_plane_drag(
-                                                        &name,
-                                                        x,
-                                                        y,
-                                                        &kind,
-                                                        ev.position,
-                                                        bounds,
-                                                        fallback_bounds,
-                                                        cx,
-                                                    )
-                                                })
-                                                .ok();
-                                            if let Some(pv) = pv {
-                                                services
-                                                    .update(cx, |s, _| {
-                                                        s.update_parameters(HashMap::from([(
-                                                            name.clone(),
-                                                            pv,
-                                                        )]))
-                                                    })
-                                                    .ok();
-                                            }
-                                        },
-                                    );
-                                }
-                                {
-                                    let name = name.clone();
-                                    let kind = kind.clone();
-                                    let services = services.clone();
-                                    let weak_vp = weak_vp.clone();
-                                    window.on_mouse_event(
-                                        move |ev: &MouseMoveEvent, phase, _, cx| {
-                                            if phase != DispatchPhase::Bubble {
-                                                return;
-                                            }
-                                            let dragging = weak_vp
-                                                .upgrade()
-                                                .map(|e| e.read(cx).is_dragging(name.as_str()))
-                                                .unwrap_or(false);
-                                            if !dragging {
-                                                return;
-                                            }
-                                            let pv = weak_vp
-                                                .update(cx, |vp, cx| {
-                                                    vp.update_plane_drag(
-                                                        &name,
-                                                        x,
-                                                        y,
-                                                        &kind,
-                                                        ev.position,
-                                                        bounds,
-                                                        fallback_bounds,
-                                                        cx,
-                                                    )
-                                                })
-                                                .ok()
-                                                .flatten();
-                                            if let Some(pv) = pv {
-                                                services
-                                                    .update(cx, |s, _| {
-                                                        s.update_parameters(HashMap::from([(
-                                                            name.clone(),
-                                                            pv,
-                                                        )]))
-                                                    })
-                                                    .ok();
-                                            }
-                                        },
-                                    );
-                                }
-                                {
-                                    let weak_vp = weak_vp.clone();
-                                    window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
-                                        if phase != DispatchPhase::Bubble {
+                                    move |_, bounds: Bounds<Pixels>, window, _cx| {
+                                        let w = f32::from(bounds.size.width);
+                                        let h = f32::from(bounds.size.height);
+                                        let ox = bounds.origin.x;
+                                        let oy = bounds.origin.y;
+
+                                        window.paint_quad(fill(
+                                            Bounds::new(bounds.origin, size(px(w), px(h))),
+                                            SLIDER_2D_BG,
+                                        ));
+                                        window.paint_quad(fill(
+                                            Bounds::new(
+                                                point(ox + px(w * x_zero - 0.5), oy),
+                                                size(px(1.0), px(h)),
+                                            ),
+                                            SLIDER_2D_AXIS,
+                                        ));
+                                        window.paint_quad(fill(
+                                            Bounds::new(
+                                                point(ox, oy + px(h * y_zero - 0.5)),
+                                                size(px(w), px(1.0)),
+                                            ),
+                                            SLIDER_2D_AXIS,
+                                        ));
+                                        window.paint_quad(quad(
+                                            Bounds::new(
+                                                point(
+                                                    ox + px(w * px_pct - SLIDER_2D_DOT_R),
+                                                    oy + px(h * py_pct - SLIDER_2D_DOT_R),
+                                                ),
+                                                size(
+                                                    px(SLIDER_2D_DOT_R * 2.0),
+                                                    px(SLIDER_2D_DOT_R * 2.0),
+                                                ),
+                                            ),
+                                            px(SLIDER_2D_DOT_R),
+                                            dot_color,
+                                            px(0.0),
+                                            TRANSPARENT,
+                                            BorderStyle::Solid,
+                                        ));
+
+                                        if is_locked {
                                             return;
                                         }
-                                        weak_vp
-                                            .update(cx, |vp, cx| {
-                                                vp.end_drag(cx);
-                                            })
-                                            .ok();
-                                    });
-                                }
-                            }
-                        })
-                        .w(px(SLIDER_2D_SIZE))
-                        .h(px(SLIDER_2D_SIZE)),
+
+                                        {
+                                            let name = name.clone();
+                                            let kind = kind.clone();
+                                            let services = services.clone();
+                                            let weak_vp = weak_vp.clone();
+                                            window.on_mouse_event(
+                                                move |ev: &MouseDownEvent, phase, _, cx| {
+                                                    if phase != DispatchPhase::Bubble
+                                                        || !bounds.contains(&ev.position)
+                                                    {
+                                                        return;
+                                                    }
+                                                    let pv = weak_vp
+                                                        .update(cx, |vp, cx| {
+                                                            vp.begin_plane_drag(
+                                                                &name,
+                                                                x,
+                                                                y,
+                                                                &kind,
+                                                                ev.position,
+                                                                bounds,
+                                                                fallback_bounds,
+                                                                cx,
+                                                            )
+                                                        })
+                                                        .ok();
+                                                    if let Some(pv) = pv {
+                                                        services
+                                                            .update(cx, |s, _| {
+                                                                s.update_parameters(HashMap::from(
+                                                                    [(name.clone(), pv)],
+                                                                ))
+                                                            })
+                                                            .ok();
+                                                    }
+                                                },
+                                            );
+                                        }
+                                        {
+                                            let name = name.clone();
+                                            let kind = kind.clone();
+                                            let services = services.clone();
+                                            let weak_vp = weak_vp.clone();
+                                            window.on_mouse_event(
+                                                move |ev: &MouseMoveEvent, phase, _, cx| {
+                                                    if phase != DispatchPhase::Bubble {
+                                                        return;
+                                                    }
+                                                    let dragging = weak_vp
+                                                        .upgrade()
+                                                        .map(|e| {
+                                                            e.read(cx).is_dragging(name.as_str())
+                                                        })
+                                                        .unwrap_or(false);
+                                                    if !dragging {
+                                                        return;
+                                                    }
+                                                    let pv = weak_vp
+                                                        .update(cx, |vp, cx| {
+                                                            vp.update_plane_drag(
+                                                                &name,
+                                                                x,
+                                                                y,
+                                                                &kind,
+                                                                ev.position,
+                                                                bounds,
+                                                                fallback_bounds,
+                                                                cx,
+                                                            )
+                                                        })
+                                                        .ok()
+                                                        .flatten();
+                                                    if let Some(pv) = pv {
+                                                        services
+                                                            .update(cx, |s, _| {
+                                                                s.update_parameters(HashMap::from(
+                                                                    [(name.clone(), pv)],
+                                                                ))
+                                                            })
+                                                            .ok();
+                                                    }
+                                                },
+                                            );
+                                        }
+                                        {
+                                            let weak_vp = weak_vp.clone();
+                                            window.on_mouse_event(
+                                                move |_: &MouseUpEvent, phase, _, cx| {
+                                                    if phase != DispatchPhase::Bubble {
+                                                        return;
+                                                    }
+                                                    weak_vp
+                                                        .update(cx, |vp, cx| {
+                                                            vp.end_drag(cx);
+                                                        })
+                                                        .ok();
+                                                },
+                                            );
+                                        }
+                                    }
+                                })
+                                .w(px(SLIDER_2D_SIZE))
+                                .h(px(SLIDER_2D_SIZE)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(px(34.0))
+                            .text_color(PRES_MUTED)
+                            .text_size(px(10.0))
+                            .child(x_max_text),
                     ),
+            ),
+        )
+        .child(
+            div().flex().justify_center().mt(px(4.0)).child(
+                div()
+                    .w(px(SLIDER_2D_SIZE))
+                    .flex()
+                    .justify_center()
+                    .text_color(PRES_MUTED)
+                    .text_size(px(10.0))
+                    .child(y_min_text),
             ),
         )
 }

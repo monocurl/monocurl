@@ -310,8 +310,8 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
     }
     let tangent = delta / len;
     let side = normal.cross(tangent).normalize();
-    let head_len = (len * 0.32).clamp(0.2, 0.6);
-    let head_width = head_len * 0.95;
+    let head_len = (len * 0.25).clamp(0.15, 0.45);
+    let head_width = head_len * 0.55;
     let base = end - tangent * head_len;
     let mut lins = vec![
         default_lin(start, base, normal),
@@ -358,8 +358,24 @@ pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Val
     let start_radius = crate::read_float(executor, stack_idx, -3, "start_radius")? as f32;
     let end_radius = crate::read_float(executor, stack_idx, -2, "end_radius")? as f32;
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    let axis = (end_center - start_center).normalize();
-    let side = normal.cross(axis).normalize();
+    let axis_delta = end_center - start_center;
+    let axis = if axis_delta.len_sq() > 1e-8 {
+        axis_delta.normalize()
+    } else if normal.len_sq() > 1e-8 {
+        let normal = normal.normalize();
+        let alt = if normal.x.abs() < 0.9 { Float3::X } else { Float3::Y };
+        alt.cross(normal).normalize()
+    } else {
+        Float3::X
+    };
+    let side_raw = normal.cross(axis);
+    let side = if side_raw.len_sq() > 1e-8 {
+        side_raw.normalize()
+    } else {
+        // normal ∥ axis; pick any perpendicular
+        let alt = if axis.x.abs() < 0.9 { Float3::X } else { Float3::Y };
+        alt.cross(axis).normalize()
+    };
     let steps = 16usize;
     let mut points = Vec::with_capacity((steps + 1) * 2);
     for i in 0..=steps {
@@ -1459,25 +1475,27 @@ pub async fn mk_explicit_diff(
     let f = executor
         .state
         .stack(stack_idx)
-        .read_at(-7)
+        .read_at(-9)
         .clone()
         .elide_lvalue();
     let g = executor
         .state
         .stack(stack_idx)
-        .read_at(-6)
+        .read_at(-8)
         .clone()
         .elide_lvalue();
-    let x0 = crate::read_float(executor, stack_idx, -5, "x0")?;
-    let x1 = crate::read_float(executor, stack_idx, -4, "x1")?;
-    let samples = read_int(executor, stack_idx, -3, "samples")?.max(2) as usize;
+    let x0 = crate::read_float(executor, stack_idx, -7, "x0")?;
+    let x1 = crate::read_float(executor, stack_idx, -6, "x1")?;
+    let samples = read_int(executor, stack_idx, -5, "samples")?.max(2) as usize;
     ensure_limit("explicit diff samples", samples, MAX_CURVE_SAMPLES)?;
     ensure_surface_triangles(
         "explicit diff triangles",
         samples.saturating_sub(1).saturating_mul(2),
     )?;
-    let fill0 = read_float4(executor, stack_idx, -2, "fill0")?;
-    let fill1 = read_float4(executor, stack_idx, -1, "fill1")?;
+    let fill0 = read_float4(executor, stack_idx, -4, "fill0")?;
+    let fill1 = read_float4(executor, stack_idx, -3, "fill1")?;
+    let tag0 = read_int(executor, stack_idx, -2, "tag0")? as isize;
+    let tag1 = read_int(executor, stack_idx, -1, "tag1")? as isize;
 
     let mut upper = Vec::with_capacity(samples);
     let mut lower = Vec::with_capacity(samples);
@@ -1509,34 +1527,63 @@ pub async fn mk_explicit_diff(
         lower.push(Float3::new(x as f32, yg, 0.0));
     }
 
-    let mut vertices = Vec::with_capacity(samples * 2);
-    vertices.extend(lower.iter().copied());
-    vertices.extend(upper.iter().copied());
-    let upper_idx = |i: usize| samples + i;
+    // split tris into positive (f >= g) and negative (f < g) regions per column
+    let mut pos_verts: Vec<Float3> = Vec::new();
+    let mut pos_faces: Vec<[usize; 3]> = Vec::new();
+    let mut neg_verts: Vec<Float3> = Vec::new();
+    let mut neg_faces: Vec<[usize; 3]> = Vec::new();
 
-    let mut faces = Vec::with_capacity((samples - 1) * 2);
     for i in 0..samples - 1 {
-        faces.push([i, upper_idx(i), upper_idx(i + 1)]);
-        faces.push([i, upper_idx(i + 1), i + 1]);
+        let yf_mid = (upper[i].y + upper[i + 1].y) * 0.5;
+        let yg_mid = (lower[i].y + lower[i + 1].y) * 0.5;
+        let (verts, faces, fill) = if yf_mid >= yg_mid {
+            (&mut pos_verts, &mut pos_faces, fill0)
+        } else {
+            (&mut neg_verts, &mut neg_faces, fill1)
+        };
+        let base = verts.len();
+        verts.extend_from_slice(&[lower[i], upper[i], upper[i + 1], lower[i + 1]]);
+        faces.push([base, base + 1, base + 2]);
+        faces.push([base, base + 2, base + 3]);
+        // apply fill color to the just-added face vertices
+        let _ = fill; // color applied after build_indexed_tris below
     }
-    let mut tris = build_indexed_tris(&vertices, &faces);
-    for i in 0..samples - 1 {
-        let mut a = tris[2 * i];
-        a.a.col = fill0;
-        a.b.col = fill0;
-        a.c.col = fill0;
-        tris[2 * i] = a;
 
-        let mut b = tris[2 * i + 1];
-        b.a.col = fill1;
-        b.b.col = fill1;
-        b.c.col = fill1;
-        tris[2 * i + 1] = b;
-    }
+    let build_region = |verts: Vec<Float3>, faces: Vec<[usize; 3]>, fill: Float4| {
+        let vertices: Vec<_> = verts
+            .into_iter()
+            .map(|pos| SurfaceVertex {
+                pos,
+                col: fill,
+                uv: Float2::ZERO,
+            })
+            .collect();
+        build_indexed_surface(&vertices, &faces, &HashMap::new())
+    };
+
+    let (pos_lins, pos_tris) = build_region(pos_verts, pos_faces, fill0);
+    let (neg_lins, neg_tris) = build_region(neg_verts, neg_faces, fill1);
+
+    let make_tagged_mesh = |lins, tris, tag: isize| {
+        let mesh = geo::mesh::Mesh {
+            dots: vec![],
+            lins,
+            tris,
+            uniform: geo::mesh::Uniforms::default(),
+            tag: vec![tag],
+        };
+        debug_assert!(mesh.has_consistent_topology());
+        Value::Mesh(std::sync::Arc::new(mesh))
+    };
+
+    let pos_val = make_tagged_mesh(pos_lins, pos_tris, tag0);
+    let neg_val = make_tagged_mesh(neg_lins, neg_tris, tag1);
 
     let mut lins = open_polyline(&upper, Float3::Z);
     push_open_polyline(&mut lins, &lower, Float3::Z);
-    Ok(mesh_from_parts(vec![], lins, tris))
+    let outline_val = mesh_from_parts(vec![], lins, vec![]);
+
+    Ok(list_value([pos_val, neg_val, outline_val]))
 }
 
 #[stdlib_func]

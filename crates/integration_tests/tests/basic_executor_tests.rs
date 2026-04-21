@@ -2072,6 +2072,70 @@ fn test_mesh_stdlib_reports_named_bad_list_argument() {
 }
 
 #[test]
+fn test_mesh_operator_filter_applies_predicate_to_subset() {
+    let r = run_with_stdlib(
+        "
+        let scene = [
+            retag{1} Circle([0, 0, 0], 1),
+            retag{2} Circle([4, 0, 0], 1)
+        ]
+        let shifted = shift{delta: 10 * 1r, filter: |tag| tag == 1} scene
+        let x1 = mesh_center(tag_filter(shifted, 1))[0]
+        let x2 = mesh_center(tag_filter(shifted, 2))[0]
+        let result = (abs(x1 - 10) < 0.001) + (abs(x2 - 4) < 0.001)
+    ",
+        &["mesh", "math"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_on_side_and_on_corner_smoke() {
+    let r = run_with_stdlib(
+        "
+        let cam = Camera([0, 0, -10], 1f, 1u)
+        let side = mesh_center(on_side{dir: 1r, camera: cam} Circle())
+        let corner = mesh_center(on_corner{dir: [1, 1, 0], camera: cam, buffer: 0.1} Circle())
+        let result = (side[0] > 0) + (corner[0] > 0) + (corner[1] > 0)
+    ",
+        &["mesh", "scene"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_capsule_accepts_scalar_and_equal_pair_radii() {
+    let r = run_with_stdlib(
+        "
+        let scalar = len(mesh_triangle_set(Capsule([0, 0, 0], [2, 0, 0], 0.4)))
+        let pair = len(mesh_triangle_set(Capsule([0, 0, 0], [2, 0, 0], [0.4, 0.4])))
+        let result = (scalar > 0) + (pair > 0)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_explicit_func_diff_accepts_custom_tags() {
+    let r = run_with_stdlib(
+        "
+        let f = |x| 1
+        let g = |x| 0
+        let fill0 = [0.3, 0.8, 0.3, 0.5]
+        let fill1 = [0.8, 0.3, 0.3, 0.5]
+        let fills = [fill0, fill1]
+        let custom_tags = [7, 9]
+        let diff = ExplicitFuncDiff(f, g, [-1, 1, 16], fills, custom_tags)
+        let tags = sort(mesh_tags(diff))
+        let result = (len(tags) == 2) + (tags[0] == 7) + (tags[1] == 9)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
 fn test_parametric_func_reports_named_bad_sample_range_argument() {
     let r = run_with_stdlib(
         "

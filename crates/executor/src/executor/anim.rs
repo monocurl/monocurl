@@ -342,14 +342,19 @@ impl Executor {
         args: Vec<Value>,
         target: &'static str,
     ) -> Result<Value, ExecutorError> {
+        let mut materialized_args = Vec::with_capacity(args.len());
+        for arg in args {
+            materialized_args.push(self.materialize_cached_value(arg).await?);
+        }
+
         match callable.clone().elide_lvalue() {
             Value::Lambda(lambda) => {
-                let args = prepare_eager_call_args(args, &lambda)?;
+                let args = prepare_eager_call_args(materialized_args, &lambda)?;
                 self.eagerly_invoke_lambda(&lambda, &args, Some(parent_stack_idx))
                     .await
             }
             Value::Operator(operator) => {
-                let args = prepare_eager_call_args(args, &operator.0)?;
+                let args = prepare_eager_call_args(materialized_args, &operator.0)?;
                 self.eagerly_invoke_lambda(&operator.0, &args, Some(parent_stack_idx))
                     .await
             }

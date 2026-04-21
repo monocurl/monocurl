@@ -74,6 +74,10 @@ fn collect_scene_meshes<'a>(
                 }
                 Ok(())
             }
+            Value::Stateful(ref s) => {
+                let resolved = executor.eval_stateful(s).await?;
+                collect_scene_meshes(executor, resolved, target_name, out).await
+            }
             other => Err(ExecutorError::invalid_scene(format!(
                 "on-screen mesh '{}' must resolve to a mesh tree, got {}",
                 target_name,

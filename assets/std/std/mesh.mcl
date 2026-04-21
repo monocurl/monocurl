@@ -46,10 +46,15 @@ let Arc = |center = [0, 0, 0], radius = 1, theta = [0, 3.14159265358979], normal
     return __monocurl__native__ mk_arc(center, radius, theta_start, theta_end, normal)
 }
 
-let Capsule = |start_center = [-1, 0, 0], end_center = [1, 0, 0], radii = [0.4, 0.5], normal = 1f| {
+let Capsule = |start_center = [-1, 0, 0], end_center = [1, 0, 0], radii = 0.4, normal = 1f| {
     var start_radius = 0
     var end_radius = 0
-    [start_radius, end_radius] = __monocurl__native__ expect_list("radii", radii, 2)
+    if (__monocurl__native__ is_list(radii)) {
+        [start_radius, end_radius] = __monocurl__native__ expect_list("radii", radii, 2)
+    } else {
+        start_radius = radii
+        end_radius = radii
+    }
     return __monocurl__native__ mk_capsule(start_center, end_center, start_radius, end_radius, normal)
 }
 
@@ -258,125 +263,133 @@ let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 41], y_min_max_samples = [-
     return __monocurl__native__ mk_implicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
 }
 
-let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]]| {
+let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]], tags = [0, 1]| {
     var min = 0
     var max = 0
     var samples = 0
     var lower_fill = 0
     var upper_fill = 0
+    var tag0 = 0
+    var tag1 = 0
     [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
     [lower_fill, upper_fill] = __monocurl__native__ expect_list("fills", fills, 2)
-    return __monocurl__native__ mk_explicit_diff(f, g, min, max, samples, lower_fill, upper_fill)
+    [tag0, tag1] = __monocurl__native__ expect_list("tags", tags, 2)
+    return __monocurl__native__ mk_explicit_diff(f, g, min, max, samples, lower_fill, upper_fill, tag0, tag1)
 }
 
 # layout / grouping
 
-let Stack = |meshes = [], dir = 1r, align_dir = [0, 0, 0]| __monocurl__native__ mk_stack(meshes, dir, align_dir)
+let Stack = |meshes, dir, align_dir = [0, 0, 0]| __monocurl__native__ mk_stack(meshes, dir, align_dir)
 
-let XStack = |meshes = [], align_dir = [0, 0, 0]| Stack(meshes, 1r, align_dir)
-let YStack = |meshes = [], align_dir = [0, 0, 0]| Stack(meshes, 1u, align_dir)
-let ZStack = |meshes = [], align_dir = [0, 0, 0]| Stack(meshes, 1f, align_dir)
+let XStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1r, align_dir)
+let YStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1u, align_dir)
+let ZStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1f, align_dir)
 
-let Grid = |mesh_array = []| __monocurl__native__ mk_grid(mesh_array)
+let Grid = |mesh_array| __monocurl__native__ mk_grid(mesh_array)
 
-let Table = |mesh_array = []| __monocurl__native__ mk_table(mesh_array)
+let Table = |mesh_array| __monocurl__native__ mk_table(mesh_array)
 
 let BoundingBox = |target, buffer = 0.1|
     __monocurl__native__ mk_bounding_box(target, buffer)
 
 # transform operators
 
-let shift = operator |target, delta| {
-    let go = |d| __monocurl__native__ op_shift(target, d)
+let shift = operator |target, delta, filter = nil| {
+    let go = |d| __monocurl__native__ op_shift(target, d, filter)
     return [go(d: [0, 0, 0]), go(d: delta)]
 }
 
-let scale = operator |target, factor = 1| {
-    let go = |s| __monocurl__native__ op_scale(target, s)
+let scale = operator |target, factor = 1, filter = nil| {
+    let go = |s| __monocurl__native__ op_scale(target, s, filter)
     if (__monocurl__native__ is_list(factor)) {
         return [go(s: [1, 1, 1]), go(s: factor)]
     }
     return [go(s: 1), go(s: factor)]
 }
 
-let rotate = operator |target, radians, axis = 1f, pivot = nil| {
-    let go = |angle| __monocurl__native__ op_rotate(target, angle, axis, pivot)
+let rotate = operator |target, radians, axis = 1f, pivot = nil, filter = nil| {
+    let go = |angle| __monocurl__native__ op_rotate(target, angle, axis, pivot, filter)
     return [go(angle: 0), go(angle: radians)]
 }
 
-let fade = operator |target, opacity = 0| {
-    let go = |o| __monocurl__native__ op_fade(target, o)
+let fade = operator |target, opacity = 0, filter = nil| {
+    let go = |o| __monocurl__native__ op_fade(target, o, filter)
     return [go(o: 1), go(o: opacity)]
 }
 
-let stroke = operator |target, color = [0, 0, 0, 1]| {
-    let go = |c, level| __monocurl__native__ op_restroke(target, c, level)
+let stroke = operator |target, color = [0, 0, 0, 1], filter = nil| {
+    let go = |c, level| __monocurl__native__ op_restroke(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
-let fill = operator |target, color = [0, 0, 0, 1]| {
-    let go = |c, level| __monocurl__native__ op_refill(target, c, level)
+let fill = operator |target, color = [0, 0, 0, 1], filter = nil| {
+    let go = |c, level| __monocurl__native__ op_refill(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
-let dotted = operator |target, color = [0, 0, 0, 1]| {
-    let go = |c, level| __monocurl__native__ op_redot(target, c, level)
+let dotted = operator |target, color = [0, 0, 0, 1], filter = nil| {
+    let go = |c, level| __monocurl__native__ op_redot(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
-let normal_hint = operator |target, normal = 1f| {
-    let go = |n, level| __monocurl__native__ op_normal_hint(target, n, level)
+let normal_hint = operator |target, normal = 1f, filter = nil| {
+    let go = |n, level| __monocurl__native__ op_normal_hint(target, n, filter, level)
     return [go(n: normal, level: 0), go(n: normal, level: 1)]
 }
 
-let retag = operator |target, tag = 0| [target, __monocurl__native__ op_retagged(target, |old| tag)]
+let retag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_retagged(target, |old| tag, filter)]
 
-let textured = operator |target, image| [target, __monocurl__native__ op_retextured(target, image)]
-let with_z = operator |target, index = 0| [target, __monocurl__native__ op_with_z(target, index)]
+let textured = operator |target, image, filter = nil| [target, __monocurl__native__ op_retextured(target, image, filter)]
+let with_z = operator |target, index, filter = nil| [target, __monocurl__native__ op_with_z(target, index, filter)]
 let gloss = operator |target| [target, __monocurl__native__ op_gloss(target)]
-let point_map = operator |target, f| {
-    let go = |level| __monocurl__native__ op_point_map(target, f, level)
+let point_map = operator |target, f, filter = nil| {
+    let go = |level| __monocurl__native__ op_point_map(target, f, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let color_map = operator |target, f| {
-    let go = |level| __monocurl__native__ op_color_map(target, f, level)
+let color_map = operator |target, f, filter = nil| {
+    let go = |level| __monocurl__native__ op_color_map(target, f, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let uv_map = operator |target, f| {
-    let go = |level| __monocurl__native__ op_uv_map(target, f, level)
+let uv_map = operator |target, f, filter = nil| {
+    let go = |level| __monocurl__native__ op_uv_map(target, f, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let retagged = operator |target, f| [target, __monocurl__native__ op_retagged(target, f)]
+let retagged = operator |target, f, filter = nil| [target, __monocurl__native__ op_retagged(target, f, filter)]
 let tag_map = operator |target, f| [target, __monocurl__native__ op_tag_map(target, f)]
-let uprank = operator |target| [target, __monocurl__native__ op_uprank(target)]
-let downrank = operator |target| [target, __monocurl__native__ op_downrank(target)]
-let wireframe = operator |target| [target, __monocurl__native__ op_wireframe(target)]
-let subdivide = operator |target, factor = 2| [__monocurl__native__ op_subdivide(target, 1), __monocurl__native__ op_subdivide(target, factor)]
-let tesselated = operator |target, depth = 1| [__monocurl__native__ op_tesselated(target, 0), __monocurl__native__ op_tesselated(target, depth)]
-let extrude = operator |target, delta = 1f| [__monocurl__native__ op_extrude(target, [0, 0, 0]), __monocurl__native__ op_extrude(target, delta)]
-let revolve = operator |target, rotation = [0, 3.14, 0]| [__monocurl__native__ op_revolve(target, [0, 0, 0]), __monocurl__native__ op_revolve(target, rotation)]
-let centered_at = operator |target, at = [0, 0, 0]| {
-    let go = |level| __monocurl__native__ op_centered(target, at, level)
+let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_uprank(target, filter)]
+let downrank = operator |target, filter = nil| [target, __monocurl__native__ op_downrank(target, filter)]
+let wireframe = operator |target, filter = nil| [target, __monocurl__native__ op_wireframe(target, filter)]
+let subdivide = operator |target, factor = 2, filter = nil| [__monocurl__native__ op_subdivide(target, 1, filter), __monocurl__native__ op_subdivide(target, factor, filter)]
+let tesselated = operator |target, depth = 1, filter = nil| [__monocurl__native__ op_tesselated(target, 0, filter), __monocurl__native__ op_tesselated(target, depth, filter)]
+let extrude = operator |target, delta, filter = nil| [__monocurl__native__ op_extrude(target, [0, 0, 0], filter), __monocurl__native__ op_extrude(target, delta, filter)]
+let revolve = operator |target, rotation, filter = nil| [__monocurl__native__ op_revolve(target, [0, 0, 0], filter), __monocurl__native__ op_revolve(target, rotation, filter)]
+let centered_at = operator |target, at, filter = nil| {
+    let go = |level| __monocurl__native__ op_centered(target, at, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let moved_to_side = operator |target, dir = [0, 0, 0]| {
-    let go = |level| __monocurl__native__ op_moved_to_side(target, dir, level)
+let on_side = operator |target, dir = [0, 0, 0], camera = nil, buffer = 0, filter = nil| {
+    let go = |level| __monocurl__native__ op_on_side(target, dir, camera, buffer, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let matched_edge = operator |target, ref, dir = 1r| {
-    let go = |level| __monocurl__native__ op_matched_edge(target, ref, dir, level)
+let moved_to_side = on_side
+let on_corner = operator |target, dir = [1, 1, 0], camera = nil, buffer = 0, filter = nil| {
+    let go = |level| __monocurl__native__ op_on_corner(target, dir, camera, buffer, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let next_to = operator |target, ref, dir = 1r| {
-    let go = |level| __monocurl__native__ op_next_to(target, ref, dir, level)
+let matched_edge = operator |target, ref, dir = 1r, filter = nil| {
+    let go = |level| __monocurl__native__ op_matched_edge(target, ref, dir, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let projected = operator |target, screen, ray = 1b| {
-    let go = |level| __monocurl__native__ op_projected(target, screen, ray, level)
+let next_to = operator |target, ref, dir = 1r, buffer = 0.1, filter = nil| {
+    let go = |level| __monocurl__native__ op_next_to(target, ref, dir, buffer, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1f| {
-    let go = |level| __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit, level)
+let projected = operator |target, screen, ray = 1b, filter = nil| {
+    let go = |level| __monocurl__native__ op_projected(target, screen, ray, filter, level)
+    return [go(level: 0), go(level: 1)]
+}
+let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1f, filter = nil| {
+    let go = |level| __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit, filter, level)
     return [go(level: 0), go(level: 1)]
 }
 

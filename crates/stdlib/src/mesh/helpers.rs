@@ -77,6 +77,37 @@ impl MeshTree {
         }
     }
 
+    pub(super) fn for_each_filtered<'a, F>(
+        &'a mut self,
+        executor: &'a mut Executor,
+        filter: Option<&'a TagFilter>,
+        f: &'a mut F,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ExecutorError>> + 'a>>
+    where
+        F: FnMut(&mut Mesh) + 'a,
+    {
+        Box::pin(async move {
+            match self {
+                MeshTree::Mesh(arc) => {
+                    let keep = match filter {
+                        Some(filter) => mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?,
+                        None => true,
+                    };
+                    if keep {
+                        f(Arc::make_mut(arc));
+                    }
+                    Ok(())
+                }
+                MeshTree::List(children) => {
+                    for child in children {
+                        child.for_each_filtered(executor, filter, f).await?;
+                    }
+                    Ok(())
+                }
+            }
+        })
+    }
+
     pub(super) fn into_value(self) -> Value {
         match self {
             MeshTree::Mesh(arc) => Value::Mesh(arc),
@@ -1231,6 +1262,10 @@ pub(super) fn read_mesh_tree<'a>(
                 }
                 Ok(MeshTree::List(children))
             }
+            Value::Stateful(ref s) => {
+                let resolved = executor.eval_stateful(s).await?;
+                read_mesh_tree(executor, resolved, name).await
+            }
             other => Err(ExecutorError::type_error_for(
                 "mesh / list of meshes",
                 other.type_name(),
@@ -1313,6 +1348,25 @@ pub(super) fn read_tag_filter(
             }
         })),
     }
+}
+
+/// returns `None` for nil (match all), otherwise delegates to `read_tag_filter`.
+pub(super) fn read_optional_tag_filter(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<Option<TagFilter>, ExecutorError> {
+    let value = executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_lvalue();
+    if matches!(value, Value::Nil) {
+        return Ok(None);
+    }
+    read_tag_filter(executor, stack_idx, index, name).map(Some)
 }
 
 pub(super) fn axis_aligned_rank(mesh: &Mesh) -> i64 {
