@@ -6,10 +6,16 @@ use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{
     components::buttons::link_button, navbar_view::Navbar, state::window_state::WindowState,
-    theme::ThemeSettings,
+    theme::{ThemeMode, ThemeSettings},
 };
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
+const HOME_PURPLE_DIVIDER: Rgba = Rgba {
+    r: 0.20,
+    g: 0.14,
+    b: 0.28,
+    a: 1.0,
+};
 
 fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
     let home_dir = dirs::home_dir()?;
@@ -219,12 +225,12 @@ impl HomeView {
                             .child(
                                 div()
                                     .child(name.clone())
-                                    .text_sm()
+                                    .text_size(px(13.0))
                                     .text_color(theme.text_primary),
                             )
                             .child(
                                 div()
-                                    .text_xs()
+                                    .text_size(px(10.5))
                                     .text_color(theme.text_muted)
                                     .child(path)
                                     .truncate(),
@@ -328,6 +334,11 @@ impl HomeView {
 
     fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
+        let divider_color = if matches!(theme.mode, ThemeMode::Dark) {
+            HOME_PURPLE_DIVIDER
+        } else {
+            theme.accent
+        };
 
         div()
             .flex()
@@ -394,7 +405,7 @@ impl HomeView {
                     .gap_2()
                     .p_2(),
             )
-            .child(div().h(px(2.)).w_full().bg(theme.accent))
+            .child(div().h(px(1.)).w_full().bg(divider_color))
             .child(self.projects_list(cx))
             .bg(theme.home_panel_background)
     }
@@ -403,6 +414,11 @@ impl HomeView {
 impl Render for HomeView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
+        let divider_color = if matches!(theme.mode, ThemeMode::Dark) {
+            HOME_PURPLE_DIVIDER
+        } else {
+            theme.accent
+        };
 
         div()
             .flex_col()
@@ -412,7 +428,7 @@ impl Render for HomeView {
                     .flex()
                     .flex_row()
                     .child(self.render_logo(cx))
-                    .child(div().w(px(4.)).h_full().bg(theme.accent))
+                    .child(div().w(px(0.5)).h_full().bg(divider_color))
                     .child(self.render_projects(cx))
                     .size_full(),
             )

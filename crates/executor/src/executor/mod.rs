@@ -36,7 +36,7 @@ enum SeekPrimitiveResult {
     PrimitiveAnim,
 }
 
-pub enum SeekPrimitiveAnimSkipResult {
+enum SeekPrimitiveAnimSkipResult {
     Error(ExecutorError),
     PrimitiveAnim,
     NoAnimsLeft,

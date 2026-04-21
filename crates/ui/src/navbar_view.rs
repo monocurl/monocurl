@@ -58,7 +58,7 @@ impl DocumentList {
             .pr_1()
             .h_full()
             .border_r(px(0.5))
-            .border_color(theme.accent)
+            .border_color(theme.navbar_border)
             .h(px(30.0))
             .bg(bg)
             .text_color(theme.text_primary)
@@ -191,7 +191,7 @@ impl Navbar {
                 .justify_start()
                 .rounded_full()
                 .border_1()
-                .border_color(theme.navbar_border)
+                .border_color(theme.accent)
                 .bg(theme.navbar_background)
                 .child(
                     div()
@@ -269,7 +269,7 @@ impl Render for Navbar {
                         theme.tab_background
                     })
                     .border_r(px(0.5))
-                    .border_color(theme.accent)
+                    .border_color(theme.navbar_border)
                     .child(div().flex_1().min_w_0().child(self.document_list.clone())),
             )
             .child(

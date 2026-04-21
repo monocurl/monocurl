@@ -234,7 +234,7 @@ impl Timeline {
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(theme.timeline_subtext)
+                .text_color(theme.accent)
                 .text_size(px(11.0))
                 .cursor_pointer()
                 .hover(|s| s.opacity(0.6))
@@ -271,7 +271,7 @@ impl Timeline {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(theme.timeline_text)
+                    .text_color(theme.accent)
                     .text_size(px(11.0))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.6))
@@ -307,7 +307,7 @@ impl Timeline {
             )
             .child(
                 div()
-                    .text_color(theme.timeline_subtext)
+                    .text_color(theme.timeline_text)
                     .text_size(px(11.0))
                     .child(format!("{:.2}s", current_time)),
             )
@@ -320,7 +320,7 @@ impl Timeline {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(theme.timeline_subtext)
+                    .text_color(theme.accent)
                     .text_size(px(14.0))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.6))
@@ -349,7 +349,7 @@ impl Timeline {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(theme.timeline_subtext)
+                    .text_color(theme.accent)
                     .text_size(px(14.0))
                     .cursor_pointer()
                     .hover(|s| s.opacity(0.6))
@@ -423,7 +423,7 @@ impl Timeline {
                             ts.shape_line(
                                 SharedString::from(s.clone()),
                                 px(DUR_FONT_SIZE),
-                                &[make_run(&s, theme.timeline_subtext)],
+                                &[make_run(&s, theme.timeline_text)],
                                 None,
                             )
                         })
@@ -435,7 +435,7 @@ impl Timeline {
                             ts.shape_line(
                                 SharedString::from(s.clone()),
                                 px(LABEL_FONT_SIZE),
-                                &[make_run(&s, theme.timeline_subtext)],
+                                &[make_run(&s, theme.timeline_text)],
                                 None,
                             )
                         })

@@ -5,7 +5,7 @@ use std::{
 };
 
 use executor::{
-    executor::{Executor, SeekPrimitiveAnimSkipResult, SeekToResult},
+    executor::{Executor, SeekToResult},
     scene_snapshot::SceneSnapshot,
     time::Timestamp,
 };
