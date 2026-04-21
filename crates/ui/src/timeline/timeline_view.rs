@@ -106,10 +106,8 @@ fn compute_playhead_x(
 
 struct TrackPrepaint {
     slide_xs: Vec<f32>,
-    gap_ws: Vec<f32>,
     painted_gap_ws: Vec<f32>,
     playhead_x: f32,
-    seek_hitbox: Hitbox,
     // effective display duration per slide (may be inferred from current_time)
     durations: Vec<Option<f64>>,
     // true if the duration was explicitly provided (determines border color)
@@ -130,6 +128,12 @@ pub struct Timeline {
 
 impl Timeline {
     pub fn new(services: Entity<ServiceManager>, cx: &mut Context<Self>) -> Self {
+        let execution_state = services.read(cx).execution_state().clone();
+        cx.observe(&execution_state, |this, _, cx| {
+            this.recenter_playhead_if_needed(cx);
+            cx.notify();
+        })
+        .detach();
         cx.observe_global::<ThemeSettings>(|_this, cx| {
             cx.notify();
         })
@@ -154,6 +158,49 @@ impl Timeline {
     pub fn zoom_out(&mut self, _: &ZoomOut, _w: &mut Window, cx: &mut Context<Self>) {
         self.zoom_idx = self.zoom_idx.saturating_sub(1);
         cx.notify();
+    }
+
+    fn recenter_playhead_if_needed(&mut self, cx: &mut Context<Self>) {
+        let exec_state = self.services.read(cx).execution_state().clone();
+        let exec = exec_state.read(cx);
+        if exec.slide_count == 0 {
+            return;
+        }
+
+        let viewport_width = f32::from(self.scroll.bounds().size.width);
+        if viewport_width <= 0.0 {
+            return;
+        }
+
+        let zoom = self.zoom_factor();
+        let effective = effective_durations(
+            exec.slide_count,
+            &exec.slide_durations,
+            &exec.minimum_slide_durations,
+            exec.current_timestamp.slide,
+            exec.current_timestamp.time,
+        );
+        let slide_xs = compute_slide_xs(exec.slide_count, &effective, zoom);
+        let gap_ws = compute_gap_ws(exec.slide_count, &effective, zoom);
+        let playhead_x = compute_playhead_x(
+            exec.current_timestamp.slide,
+            exec.current_timestamp.time,
+            &slide_xs,
+            &gap_ws,
+            zoom,
+        );
+
+        let scroll_offset = self.scroll.offset();
+        let visible_left = -f32::from(scroll_offset.x);
+        let visible_right = visible_left + viewport_width;
+        if playhead_x >= visible_left && playhead_x <= visible_right {
+            return;
+        }
+
+        let max_x = f32::from(self.scroll.max_offset().width).max(0.0);
+        let centered_left = (playhead_x - viewport_width * 0.5).clamp(0.0, max_x);
+        self.scroll
+            .set_offset(point(px(-centered_left), scroll_offset.y));
     }
 }
 
@@ -316,7 +363,6 @@ impl Timeline {
     }
 
     fn render_track(
-        services: WeakEntity<ServiceManager>,
         current_slide: usize,
         current_time: f64,
         slide_count: usize,
@@ -356,19 +402,6 @@ impl Timeline {
                     let playhead_x =
                         compute_playhead_x(current_slide, current_time, &slide_xs, &gap_ws, zoom);
                     let vert_offset = (f32::from(bounds.size.height) - CONTENT_H).max(0.0) / 2.0;
-                    let seek_hitbox = window.insert_hitbox(
-                        Bounds::new(
-                            point(
-                                bounds.origin.x + px(PADDING_H),
-                                bounds.origin.y + px(vert_offset),
-                            ),
-                            size(
-                                px((f32::from(bounds.size.width) - 2.0 * PADDING_H).max(0.0)),
-                                px(CONTENT_H.min(f32::from(bounds.size.height))),
-                            ),
-                        ),
-                        HitboxBehavior::Normal,
-                    );
 
                     let ts = window.text_system();
                     let make_run = |text: &str, color: Rgba| TextRun {
@@ -410,10 +443,8 @@ impl Timeline {
 
                     TrackPrepaint {
                         slide_xs,
-                        gap_ws,
                         painted_gap_ws,
                         playhead_x,
-                        seek_hitbox,
                         durations: effective,
                         explicit,
                         vert_offset,
@@ -425,10 +456,8 @@ impl Timeline {
             move |bounds, prepaint, window, cx| {
                 let TrackPrepaint {
                     slide_xs,
-                    gap_ws,
                     painted_gap_ws,
                     playhead_x,
-                    seek_hitbox,
                     durations,
                     explicit,
                     vert_offset,
@@ -543,37 +572,6 @@ impl Timeline {
                 ));
 
                 // click-to-seek
-                let slide_xs_c = slide_xs.clone();
-                let gap_ws_c = gap_ws.clone();
-                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-                    if phase != DispatchPhase::Bubble
-                        || event.button != MouseButton::Left
-                        || !seek_hitbox.is_hovered(window)
-                    {
-                        return;
-                    }
-                    let local_x = f32::from(event.position.x - bounds.origin.x);
-                    for i in 0..slide_count {
-                        let bx = slide_xs_c[i];
-                        let gw = gap_ws_c[i];
-                        if local_x >= bx && local_x < bx + SLIDE_W {
-                            services
-                                .update(cx, |s, _| s.seek_to(Timestamp::new(i, 0.0)))
-                                .ok();
-                            cx.stop_propagation();
-                            return;
-                        }
-                        let gap_start = bx + SLIDE_W;
-                        if local_x >= gap_start && local_x < gap_start + gw {
-                            let t = ((local_x - gap_start) / (PX_PER_SEC * zoom)) as f64;
-                            services
-                                .update(cx, |s, _| s.seek_to(Timestamp::new(i, t)))
-                                .ok();
-                            cx.stop_propagation();
-                            return;
-                        }
-                    }
-                });
             },
         )
         .w(px(track_w))
@@ -600,6 +598,16 @@ impl Render for Timeline {
         let minimum_durations = exec.minimum_slide_durations.clone();
         let has_error = exec.has_error();
         let theme = ThemeSettings::theme(cx);
+        let zoom = self.zoom_factor();
+        let effective_for_seek = effective_durations(
+            slide_count,
+            &durations,
+            &minimum_durations,
+            current_slide,
+            current_time,
+        );
+        let slide_xs = compute_slide_xs(slide_count, &effective_for_seek, zoom);
+        let gap_ws = compute_gap_ws(slide_count, &effective_for_seek, zoom);
 
         let toolbar = self.render_toolbar(
             is_playing,
@@ -610,13 +618,12 @@ impl Render for Timeline {
             cx,
         );
         let track = Self::render_track(
-            self.services.downgrade(),
             current_slide,
             current_time,
             slide_count,
             durations,
             minimum_durations,
-            self.zoom_factor(),
+            zoom,
             theme,
         );
 
@@ -633,6 +640,35 @@ impl Render for Timeline {
                     .flex_1()
                     .overflow_x_scroll()
                     .track_scroll(&self.scroll)
+                    .on_mouse_down(MouseButton::Left, {
+                        let services = self.services.downgrade();
+                        let scroll = self.scroll.clone();
+                        move |event, _window, cx| {
+                            let bounds = scroll.bounds();
+                            let scroll_offset = scroll.offset();
+                            let local_x =
+                                f32::from(event.position.x - bounds.origin.x - scroll_offset.x);
+
+                            for i in 0..slide_count {
+                                let bx = slide_xs[i];
+                                let gw = gap_ws[i];
+                                if local_x >= bx && local_x < bx + SLIDE_W {
+                                    services
+                                        .update(cx, |s, _| s.seek_to(Timestamp::new(i, 0.0)))
+                                        .ok();
+                                    return;
+                                }
+                                let gap_start = bx + SLIDE_W;
+                                if local_x >= gap_start && local_x < gap_start + gw {
+                                    let t = ((local_x - gap_start) / (PX_PER_SEC * zoom)) as f64;
+                                    services
+                                        .update(cx, |s, _| s.seek_to(Timestamp::new(i, t)))
+                                        .ok();
+                                    return;
+                                }
+                            }
+                        }
+                    })
                     .child(track),
             )
     }
