@@ -318,22 +318,22 @@ let fade = operator |target, opacity = 0, filter = nil| {
     return [go(o: 1), go(o: opacity)]
 }
 
-let stroke = operator |target, color = [0, 0, 0, 1], filter = nil| {
+let stroke = operator |target, color, filter = nil| {
     let go = |c, level| __monocurl__native__ op_restroke(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
-let fill = operator |target, color = [0, 0, 0, 1], filter = nil| {
+let fill = operator |target, color, filter = nil| {
     let go = |c, level| __monocurl__native__ op_refill(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
-let dotted = operator |target, color = [0, 0, 0, 1], filter = nil| {
+let dotted = operator |target, color, filter = nil| {
     let go = |c, level| __monocurl__native__ op_redot(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
-let normal_hint = operator |target, normal = 1f, filter = nil| {
+let normal_hint = operator |target, normal, filter = nil| {
     let go = |n, level| __monocurl__native__ op_normal_hint(target, n, filter, level)
     return [go(n: normal, level: 0), go(n: normal, level: 1)]
 }

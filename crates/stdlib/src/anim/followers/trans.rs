@@ -1087,10 +1087,7 @@ fn match_tri_tri(source: &Mesh, target: &Mesh) -> (Mesh, Mesh) {
         )
     } else {
         let template = canonicalize_surface_template(target);
-        (
-            conform_surface_to_template(source, &template),
-            template,
-        )
+        (conform_surface_to_template(source, &template), template)
     }
 }
 
@@ -1225,7 +1222,8 @@ fn surface_template_score(mesh: &Mesh) -> (usize, usize, usize) {
 
 fn canonicalize_surface_template(mesh: &Mesh) -> Mesh {
     let surface = mesh_to_indexed_surface(mesh);
-    let (lins, tris) = build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+    let (lins, tris) =
+        build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
     let out = Mesh {
         dots: mesh.dots.clone(),
         lins,
@@ -1527,7 +1525,8 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
             vertex.uv = group_uv[group];
         }
     }
-    let (lins, tris) = build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+    let (lins, tris) =
+        build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
     let out = Mesh {
         dots,
         lins,
@@ -2310,8 +2309,7 @@ mod tests {
     use super::{
         ClosedContour, append_closed_contour, extract_closed_contours, pair_leaf_indices_by_tag,
         prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair, same_mesh_topology,
-        split_mesh_contours,
-        vec3_patharc_lerp,
+        split_mesh_contours, vec3_patharc_lerp,
     };
 
     fn line(a: Float3, b: Float3, prev: i32, next: i32) -> Lin {

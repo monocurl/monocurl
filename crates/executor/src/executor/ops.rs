@@ -276,10 +276,8 @@ fn combine_lists(lhs: &List, rhs: &List, op: BinOp) -> Result<Value, ExecutorErr
                 combine_lists(&lhs_inner, &rhs_inner, op)
                     .map_err(|err| list_index_err(op.name(), idx, err))?
             }
-            (lhs_val, rhs_val) => {
-                eval_binary(&lhs_val, &rhs_val, op)
-                    .map_err(|err| list_index_err(op.name(), idx, err))?
-            }
+            (lhs_val, rhs_val) => eval_binary(&lhs_val, &rhs_val, op)
+                .map_err(|err| list_index_err(op.name(), idx, err))?,
         };
         elements.push(crate::heap::VRc::new(combined));
     }

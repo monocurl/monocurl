@@ -12,6 +12,12 @@ const MAX_AXIS_TICKS: usize = 1 << 12;
 const MAX_GRID_CELLS: usize = 1 << 16;
 const MAX_FIELD_SAMPLES: usize = 1 << 16;
 const MAX_SURFACE_TRIANGLES: usize = 1 << 17;
+const DEFAULT_ARROW_PATH_SAMPLES: usize = 64;
+const MAX_ARROW_HEAD_RADIUS: f32 = 0.065;
+const ARROW_HEAD_RADIUS_OVER_LENGTH: f32 = 0.4;
+const ARROW_STEM_RADIUS_OVER_HEAD_RADIUS: f32 = 0.33;
+const ARROW_HEAD_WIDTH_OVER_RADIUS: f32 = 1.2;
+const ARROW_HEAD_DEPTH_OVER_RADIUS: f32 = 2.1;
 
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
     ExecutorError::invalid_invocation(format!("{kind} is too large ({actual}, limit {limit})"))
@@ -77,6 +83,158 @@ fn mesh_ref(idx: usize) -> i32 {
     super::helpers::mesh_ref(idx)
 }
 
+fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
+    if vec.len_sq() > 1e-8 {
+        vec.normalize()
+    } else {
+        fallback
+    }
+}
+
+fn resolve_arrow_plane_normal(tangent: Float3, normal: Float3) -> Float3 {
+    let normal = normalize_or(normal, Float3::Z);
+    if normal.cross(tangent).len_sq() > 1e-8 {
+        return normal;
+    }
+
+    let helper = if tangent.z.abs() < 0.9 {
+        Float3::Z
+    } else {
+        Float3::X
+    };
+    normalize_or(helper.cross(tangent), Float3::Y)
+}
+
+fn path_arc_point(start: Float3, t: f32, end: Float3, path_arc: Float3) -> Float3 {
+    if path_arc.len_sq() <= 1e-12 {
+        return start.lerp(end, t);
+    }
+
+    let delta = end - start;
+    if delta.len_sq() <= 1e-12 {
+        return start.lerp(end, t);
+    }
+
+    let cross = path_arc.cross(delta);
+    let cross_len = cross.len();
+    if cross_len <= 1e-6 {
+        return start.lerp(end, t);
+    }
+
+    let alpha = path_arc.len();
+    let tan_half = (alpha / 2.0).tan();
+    if !alpha.is_finite() || alpha.abs() <= 1e-6 || !tan_half.is_finite() || tan_half.abs() <= 1e-6
+    {
+        return start.lerp(end, t);
+    }
+
+    let pivot = (start + end) / 2.0 + cross * (delta.len() / (2.0 * tan_half * cross_len));
+    let radius_vec = start - pivot;
+    let radius = radius_vec.len();
+    if radius <= 1e-6 {
+        return start.lerp(end, t);
+    }
+
+    let a_prime = radius_vec / radius;
+    let a_prime_norm = path_arc.cross(a_prime);
+    let a_prime_norm_len = a_prime_norm.len();
+    if a_prime_norm_len <= 1e-6 {
+        return start.lerp(end, t);
+    }
+
+    let theta = t * alpha;
+    pivot
+        + a_prime * (theta.cos() * radius)
+        + (a_prime_norm / a_prime_norm_len) * (theta.sin() * radius)
+}
+
+fn orient_contour_to_normal(contour: &mut [Float3], normal: Float3) {
+    let mut area_normal = Float3::ZERO;
+    for i in 0..contour.len() {
+        area_normal = area_normal + contour[i].cross(contour[(i + 1) % contour.len()]);
+    }
+    if area_normal.dot(normal) < 0.0 {
+        contour.reverse();
+    }
+}
+
+fn vector_like_mesh(
+    tail: Float3,
+    delta: Float3,
+    normal: Float3,
+    path_arc: f64,
+) -> Result<Value, ExecutorError> {
+    let len = delta.len();
+    if len <= 1e-6 {
+        return Ok(mesh_from_parts(
+            vec![default_dot(tail, normalize_or(normal, Float3::Z))],
+            vec![],
+            vec![],
+        ));
+    }
+
+    let tangent = delta / len;
+    let normal = resolve_arrow_plane_normal(tangent, normal);
+    let path_arc = path_arc as f32;
+    let alpha = path_arc.abs();
+    let samples = if alpha <= 1e-6 {
+        2
+    } else {
+        DEFAULT_ARROW_PATH_SAMPLES
+    };
+    ensure_limit("arrow samples", samples, MAX_CURVE_SAMPLES)?;
+
+    let head_radius = (len * ARROW_HEAD_RADIUS_OVER_LENGTH).min(MAX_ARROW_HEAD_RADIUS);
+    let stem_radius = head_radius * ARROW_STEM_RADIUS_OVER_HEAD_RADIUS;
+    let head_half_width = head_radius * ARROW_HEAD_WIDTH_OVER_RADIUS;
+    let head_depth = head_radius * ARROW_HEAD_DEPTH_OVER_RADIUS;
+    let sinc = if alpha <= 1e-6 {
+        1.0
+    } else {
+        (alpha / 2.0).sin() / (alpha / 2.0)
+    };
+    let modded_length = if sinc.abs() <= 1e-6 { len } else { len / sinc };
+    let shaft_end = if modded_length <= 1e-6 {
+        0.0
+    } else {
+        ((modded_length - head_depth).max(0.0) / modded_length).clamp(0.0, 1.0)
+    };
+
+    let start = tail;
+    let end = tail + delta;
+    let path_arc_vec = normal * path_arc;
+    let mut centers = Vec::with_capacity(samples);
+    for i in 0..samples {
+        let t = i as f32 / (samples - 1) as f32;
+        centers.push(path_arc_point(start, t * shaft_end, end, path_arc_vec));
+    }
+
+    let mut offsets = Vec::with_capacity(samples);
+    for i in 0..samples {
+        let prev = centers[i.saturating_sub(1)];
+        let next = centers[(i + 1).min(samples - 1)];
+        let seg = normalize_or(next - prev, tangent);
+        offsets.push(normal.cross(seg).normalize() * stem_radius);
+    }
+
+    let tip_dir = normalize_or(end - centers[samples - 1], tangent);
+    let side_dir = normalize_or(offsets[samples - 1], normal.cross(tip_dir));
+    let mut contour = Vec::with_capacity(samples * 2 + 3);
+    for (center, offset) in centers.iter().zip(offsets.iter()) {
+        contour.push(*center + *offset);
+    }
+    contour.push(centers[samples - 1] + side_dir * head_half_width);
+    contour.push(end);
+    contour.push(centers[samples - 1] - side_dir * head_half_width);
+    for (center, offset) in centers.iter().zip(offsets.iter()).rev() {
+        contour.push(*center - *offset);
+    }
+    orient_contour_to_normal(&mut contour, normal);
+
+    let (lins, tris) = tessellate_planar_loops(&[contour], normal)?;
+    Ok(mesh_from_parts(vec![], lins, tris))
+}
+
 #[cfg(test)]
 fn fan_tris(points: &[Float3], boundary_lins: &mut [geo::mesh::Lin]) -> Vec<geo::mesh::Tri> {
     let mut out = Vec::new();
@@ -106,9 +264,10 @@ fn fan_tris(points: &[Float3], boundary_lins: &mut [geo::mesh::Lin]) -> Vec<geo:
 
 #[cfg(test)]
 mod tests {
+    use executor::value::Value;
     use geo::simd::Float3;
 
-    use super::{closed_polyline, fan_tris, mesh_ref, open_polyline};
+    use super::{closed_polyline, fan_tris, mesh_ref, open_polyline, vector_like_mesh};
 
     #[test]
     fn closed_polyline_sets_reciprocal_links() {
@@ -145,6 +304,33 @@ mod tests {
         assert_eq!(lines[1].inv, mesh_ref(0));
         assert_eq!(lines[2].inv, mesh_ref(1));
         assert_eq!(lines[3].inv, mesh_ref(1));
+    }
+
+    #[test]
+    fn vector_like_mesh_builds_connected_arrow_surface() {
+        let Value::Mesh(mesh) =
+            vector_like_mesh(Float3::ZERO, Float3::new(1.0, 0.0, 0.0), Float3::Z, 0.0).unwrap()
+        else {
+            panic!("expected mesh");
+        };
+
+        assert!(mesh.has_consistent_topology());
+        assert_eq!(mesh.dots.len(), 0);
+        assert!(mesh.lins.len() >= 6);
+        assert!(mesh.tris.len() >= 4);
+    }
+
+    #[test]
+    fn vector_like_mesh_supports_curved_arrow_paths() {
+        let Value::Mesh(mesh) =
+            vector_like_mesh(Float3::ZERO, Float3::new(1.0, 0.0, 0.0), Float3::Z, 0.8).unwrap()
+        else {
+            panic!("expected mesh");
+        };
+
+        assert!(mesh.has_consistent_topology());
+        assert!(mesh.lins.len() > 16);
+        assert!(mesh.tris.len() > 16);
     }
 }
 
@@ -298,33 +484,8 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let start = read_float3(executor, stack_idx, -4, "start")?;
     let end = read_float3(executor, stack_idx, -3, "end")?;
     let normal = read_float3(executor, stack_idx, -2, "normal")?;
-    let _path_arc = crate::read_float(executor, stack_idx, -1, "path_arc")?;
-    let delta = end - start;
-    let len = delta.len();
-    if len <= 1e-6 {
-        return Ok(mesh_from_parts(
-            vec![default_dot(start, normal)],
-            vec![],
-            vec![],
-        ));
-    }
-    let tangent = delta / len;
-    let side = normal.cross(tangent).normalize();
-    let head_len = (len * 0.25).clamp(0.15, 0.45);
-    let head_width = head_len * 0.55;
-    let base = end - tangent * head_len;
-    let mut lins = vec![
-        default_lin(start, base, normal),
-        default_lin(base + side * head_width, end, normal),
-        default_lin(end, base - side * head_width, normal),
-    ];
-    let mut tri = default_tri(base + side * head_width, end, base - side * head_width);
-    tri.ab = mesh_ref(1);
-    tri.bc = mesh_ref(2);
-    lins[1].inv = mesh_ref(0);
-    lins[2].inv = mesh_ref(0);
-    let tris = vec![tri];
-    Ok(mesh_from_parts(vec![], lins, tris))
+    let path_arc = crate::read_float(executor, stack_idx, -1, "path_arc")?;
+    vector_like_mesh(start, end - start, normal, path_arc)
 }
 
 #[stdlib_func]
@@ -363,7 +524,11 @@ pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Val
         axis_delta.normalize()
     } else if normal.len_sq() > 1e-8 {
         let normal = normal.normalize();
-        let alt = if normal.x.abs() < 0.9 { Float3::X } else { Float3::Y };
+        let alt = if normal.x.abs() < 0.9 {
+            Float3::X
+        } else {
+            Float3::Y
+        };
         alt.cross(normal).normalize()
     } else {
         Float3::X
@@ -373,7 +538,11 @@ pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Val
         side_raw.normalize()
     } else {
         // normal ∥ axis; pick any perpendicular
-        let alt = if axis.x.abs() < 0.9 { Float3::X } else { Float3::Y };
+        let alt = if axis.x.abs() < 0.9 {
+            Float3::X
+        } else {
+            Float3::Y
+        };
         alt.cross(axis).normalize()
     };
     let steps = 16usize;
@@ -730,31 +899,7 @@ pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let tail = read_float3(executor, stack_idx, -3, "tail")?;
     let delta = read_float3(executor, stack_idx, -2, "delta")?;
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    let end = tail + delta;
-    let len = delta.len();
-    if len <= 1e-6 {
-        return Ok(mesh_from_parts(
-            vec![default_dot(tail, normal)],
-            vec![],
-            vec![],
-        ));
-    }
-    let tangent = delta / len;
-    let side = normal.cross(tangent).normalize();
-    let head_len = (len * 0.25).min(0.35);
-    let head_width = head_len * 0.5;
-    let base = end - tangent * head_len;
-    let mut lins = vec![
-        default_lin(tail, base, normal),
-        default_lin(base + side * head_width, end, normal),
-        default_lin(end, base - side * head_width, normal),
-    ];
-    let mut tri = default_tri(base + side * head_width, end, base - side * head_width);
-    tri.ab = mesh_ref(1);
-    tri.bc = mesh_ref(2);
-    lins[1].inv = mesh_ref(0);
-    lins[2].inv = mesh_ref(0);
-    Ok(mesh_from_parts(vec![], lins, vec![tri]))
+    vector_like_mesh(tail, delta, normal, 0.0)
 }
 
 #[stdlib_func]
@@ -1549,7 +1694,8 @@ pub async fn mk_explicit_diff(
     let mut neg_verts: Vec<Float3> = Vec::new();
     let mut neg_faces: Vec<[usize; 3]> = Vec::new();
 
-    let interval_is_pos = |i: usize| (upper[i].y + upper[i + 1].y) * 0.5 >= (lower[i].y + lower[i + 1].y) * 0.5;
+    let interval_is_pos =
+        |i: usize| (upper[i].y + upper[i + 1].y) * 0.5 >= (lower[i].y + lower[i + 1].y) * 0.5;
     let append_strip =
         |verts: &mut Vec<Float3>, faces: &mut Vec<[usize; 3]>, start: usize, end: usize| {
             let base = verts.len();

@@ -90,7 +90,9 @@ impl MeshTree {
             match self {
                 MeshTree::Mesh(arc) => {
                     let keep = match filter {
-                        Some(filter) => mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?,
+                        Some(filter) => {
+                            mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?
+                        }
                         None => true,
                     };
                     if keep {

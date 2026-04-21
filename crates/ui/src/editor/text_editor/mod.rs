@@ -1564,8 +1564,7 @@ impl TextEditor {
                 });
                 let line_start_text =
                     state.read(line_start_offset..state.loc8_to_offset8(cursor_loc));
-                let cursor_indent =
-                    line_start_text.chars().take_while(|c| *c == ' ').count();
+                let cursor_indent = line_start_text.chars().take_while(|c| *c == ' ').count();
 
                 // base indent = minimum leading spaces across non-empty lines
                 let base_indent = text
@@ -1583,7 +1582,11 @@ impl TextEditor {
                     }
                     let line_indent = line.chars().take_while(|&c| c == ' ').count();
                     let relative = line_indent.saturating_sub(base_indent);
-                    let pad = if first { relative } else { cursor_indent + relative };
+                    let pad = if first {
+                        relative
+                    } else {
+                        cursor_indent + relative
+                    };
                     first = false;
                     new_text.push_str(&" ".repeat(pad));
                     new_text.push_str(&line[line_indent.min(line.len())..]);

@@ -425,7 +425,9 @@ pub async fn op_point_map(
             match tree {
                 MeshTree::Mesh(arc) => {
                     let keep = match filter {
-                        Some(filter) => mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?,
+                        Some(filter) => {
+                            mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?
+                        }
                         None => true,
                     };
                     if !keep {
@@ -527,7 +529,9 @@ pub async fn op_color_map(
             match tree {
                 MeshTree::Mesh(arc) => {
                     let keep = match filter {
-                        Some(filter) => mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?,
+                        Some(filter) => {
+                            mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?
+                        }
                         None => true,
                     };
                     if !keep {
@@ -626,7 +630,9 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             match tree {
                 MeshTree::Mesh(arc) => {
                     let keep = match filter {
-                        Some(filter) => mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?,
+                        Some(filter) => {
+                            mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?
+                        }
                         None => true,
                     };
                     if !keep {
@@ -721,7 +727,9 @@ pub async fn op_retagged(
             match tree {
                 MeshTree::Mesh(arc) => {
                     let keep = match filter {
-                        Some(filter) => mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?,
+                        Some(filter) => {
+                            mesh_matches_tag_filter(executor, filter, arc.as_ref()).await?
+                        }
                         None => true,
                     };
                     if !keep {
@@ -1134,10 +1142,7 @@ pub async fn op_centered(
 }
 
 #[stdlib_func]
-pub async fn op_to_side(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub async fn op_to_side(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -6, "target").await?;
     let level = read_level(executor, stack_idx, -1, "level")?;
     if level <= 0.0 {

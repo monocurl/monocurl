@@ -1894,11 +1894,13 @@ fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
 
 #[test]
 fn test_scene_snapshot_camera_accepts_look_at_surface() {
-    let (mut executor, _user_slide_count) =
-        match build_anim_executor(&[("play Set()", SectionType::Slide)], &stdlib_bundles(["anim"])) {
-            Ok(data) => data,
-            Err(result) => panic!("failed to build executor: {:?}", result.errors),
-        };
+    let (mut executor, _user_slide_count) = match build_anim_executor(
+        &[("play Set()", SectionType::Slide)],
+        &stdlib_bundles(["anim"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("failed to build executor: {:?}", result.errors),
+    };
 
     let list_value = |values: Vec<Value>| {
         Value::List(Rc::new(List::new_with(

@@ -63,8 +63,11 @@ impl ExecutionState {
         }
         self.current_timestamp = snapshot.current_timestamp;
         self.status = snapshot.status;
-        self.slide_durations = snapshot.slide_durations;
-        self.minimum_slide_durations = snapshot.minimum_slide_durations;
+        // causes visual glitches if in seek mode
+        if snapshot.status != ExecutionStatus::Seeking {
+            self.slide_durations = snapshot.slide_durations;
+            self.minimum_slide_durations = snapshot.minimum_slide_durations;
+        }
         self.slide_count = snapshot.slide_count;
         if let Some(ref params) = snapshot.parameters {
             self.parameter_state = params.parameters.clone();

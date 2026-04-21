@@ -1332,10 +1332,9 @@ mod test {
 
     #[test]
     fn test_multiline_operator_chain_in_declaration() {
-        let result = parse_stmt_test(
-            "mesh x = \n    fill{CLEAR}\n    stroke{RED}\n    Circle(radius: 1)",
-        )
-        .unwrap();
+        let result =
+            parse_stmt_test("mesh x = \n    fill{CLEAR}\n    stroke{RED}\n    Circle(radius: 1)")
+                .unwrap();
 
         let Statement::Declaration(decl) = result.1 else {
             panic!("expected declaration");
