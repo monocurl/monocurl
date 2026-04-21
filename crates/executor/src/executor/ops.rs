@@ -123,7 +123,10 @@ fn promote_pair(lhs: Value, rhs: Value) -> (Value, Value) {
 pub(crate) fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorError> {
     match (lhs, rhs, op) {
         (Value::List(lhs_list), Value::List(rhs_list), BinOp::Add) => {
-            return add_lists(lhs_list, rhs_list);
+            return combine_lists(lhs_list, rhs_list, BinOp::Add);
+        }
+        (Value::List(lhs_list), Value::List(rhs_list), BinOp::Sub) => {
+            return combine_lists(lhs_list, rhs_list, BinOp::Sub);
         }
         (Value::List(list), rhs, BinOp::Mul) if !matches!(rhs, Value::List(_)) => {
             return multiply_list(list, rhs, false);
@@ -255,10 +258,10 @@ fn negate_list(list: &List) -> Result<Value, ExecutorError> {
     })))
 }
 
-fn add_lists(lhs: &List, rhs: &List) -> Result<Value, ExecutorError> {
+fn combine_lists(lhs: &List, rhs: &List, op: BinOp) -> Result<Value, ExecutorError> {
     if lhs.len() != rhs.len() {
         return Err(ExecutorError::ListLengthMismatch {
-            op: BinOp::Add.name(),
+            op: op.name(),
             lhs_len: lhs.len(),
             rhs_len: rhs.len(),
         });
@@ -268,15 +271,17 @@ fn add_lists(lhs: &List, rhs: &List) -> Result<Value, ExecutorError> {
     for (idx, (lhs_key, rhs_key)) in lhs.elements.iter().zip(rhs.elements.iter()).enumerate() {
         let lhs_val = with_heap(|h| h.get(lhs_key.key()).clone());
         let rhs_val = with_heap(|h| h.get(rhs_key.key()).clone());
-        let sum = match (lhs_val, rhs_val) {
+        let combined = match (lhs_val, rhs_val) {
             (Value::List(lhs_inner), Value::List(rhs_inner)) => {
-                add_lists(&lhs_inner, &rhs_inner)
-                    .map_err(|err| list_index_err(BinOp::Add.name(), idx, err))?
+                combine_lists(&lhs_inner, &rhs_inner, op)
+                    .map_err(|err| list_index_err(op.name(), idx, err))?
             }
-            (lhs_val, rhs_val) => eval_binary(&lhs_val, &rhs_val, BinOp::Add)
-                .map_err(|err| list_index_err(BinOp::Add.name(), idx, err))?,
+            (lhs_val, rhs_val) => {
+                eval_binary(&lhs_val, &rhs_val, op)
+                    .map_err(|err| list_index_err(op.name(), idx, err))?
+            }
         };
-        elements.push(crate::heap::VRc::new(sum));
+        elements.push(crate::heap::VRc::new(combined));
     }
 
     Ok(Value::List(Rc::new(List {

@@ -549,6 +549,15 @@ fn test_exec_nested_list_addition() {
 }
 
 #[test]
+fn test_exec_nested_list_subtraction() {
+    let r = run("
+        let rows = [[10, 20], [30, 40]] - [[1, 2], [3, 4]]
+        let result = rows[0][1] + rows[1][0]
+    ");
+    r.assert_int(45);
+}
+
+#[test]
 fn test_exec_negate_nested_list() {
     let r = run("
         let rows = -[[1, 2], [3, 4]]
@@ -1692,6 +1701,14 @@ fn test_exec_runtime_error_type_in_arithmetic() {
 fn test_exec_runtime_error_list_add_length_mismatch() {
     let r = run("
         let x = [[1], [2, 3]] + [[4], [5]]
+    ");
+    r.assert_error("different lengths");
+}
+
+#[test]
+fn test_exec_runtime_error_list_sub_length_mismatch() {
+    let r = run("
+        let x = [[1], [2, 3]] - [[4], [5]]
     ");
     r.assert_error("different lengths");
 }
