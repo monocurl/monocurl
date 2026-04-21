@@ -153,17 +153,21 @@ impl Executor {
                 })
                 .expect("No stateful argument despite marked stateful invocation");
 
+            let stateful = make_stateful(
+                roots,
+                StatefulNode::LabeledCall {
+                    func: Box::new(func_node),
+                    args: arg_refs,
+                    labels,
+                },
+                read_kind,
+            );
+            if let Err(error) = self.eval_stateful(&stateful).await {
+                return ExecSingle::Error(error);
+            }
             self.state
                 .stack_mut(stack_idx)
-                .push(Value::Stateful(make_stateful(
-                    roots,
-                    StatefulNode::LabeledCall {
-                        func: Box::new(func_node),
-                        args: arg_refs,
-                        labels,
-                    },
-                    read_kind,
-                )));
+                .push(Value::Stateful(stateful));
             return ExecSingle::Continue;
         } else if labeled {
             let labels = self.drain_labels(stack_idx, section_idx);
@@ -282,18 +286,22 @@ impl Executor {
                 })
                 .expect("No stateful argument despite marked stateful invocation");
 
+            let stateful = make_stateful(
+                roots,
+                StatefulNode::LabeledOperatorCall {
+                    operator: Box::new(op_node),
+                    operand: operand_ref,
+                    extra_args: extra_arg_refs,
+                    labels,
+                },
+                read_kind,
+            );
+            if let Err(error) = self.eval_stateful(&stateful).await {
+                return ExecSingle::Error(error);
+            }
             self.state
                 .stack_mut(stack_idx)
-                .push(Value::Stateful(make_stateful(
-                    roots,
-                    StatefulNode::LabeledOperatorCall {
-                        operator: Box::new(op_node),
-                        operand: operand_ref,
-                        extra_args: extra_arg_refs,
-                        labels,
-                    },
-                    read_kind,
-                )));
+                .push(Value::Stateful(stateful));
 
             self.state.stack_mut(stack_idx).ip.1 += 1;
             return ExecSingle::Continue;

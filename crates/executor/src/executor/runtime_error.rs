@@ -23,6 +23,19 @@ impl Executor {
         runtime_error
     }
 
+    pub fn record_runtime_error_at_root_init_section(
+        &mut self,
+        error: ExecutorError,
+    ) -> RuntimeError {
+        let mut runtime_error =
+            self.build_runtime_error_at_stack(error, ExecutionState::ROOT_STACK_ID);
+        if let Some(span) = self.latest_root_init_section_span() {
+            runtime_error.span = span;
+        }
+        self.state.error(runtime_error.clone());
+        runtime_error
+    }
+
     pub(crate) fn build_runtime_error(&self, error: crate::error::ExecutorError) -> RuntimeError {
         self.build_runtime_error_at_stack(error, self.state.last_stack_idx)
     }
@@ -141,6 +154,15 @@ impl Executor {
             .find_map(|section| section_fallback_span_from_annotations(&section.annotations))
     }
 
+    fn latest_root_init_section_span(&self) -> Option<Span8> {
+        self.bytecode
+            .sections
+            .iter()
+            .rev()
+            .filter(|section| section.flags.is_root_module && section.flags.is_init)
+            .find_map(|section| section_fallback_span_from_annotations(&section.annotations))
+    }
+
     fn recover_call_stack(&self, stack_idx: usize) -> std::vec::IntoIter<RecoveredFrame> {
         let mut frames = Vec::new();
         let mut cursor = Some(stack_idx);
@@ -206,8 +228,14 @@ fn meaningful_span(raw: Span8) -> Option<Span8> {
 fn section_fallback_span_from_annotations(
     annotations: &[bytecode::InstructionAnnotation],
 ) -> Option<Span8> {
-    let first = annotations.first()?.source_loc.clone();
-    let last = annotations.last()?.source_loc.clone();
+    let first = annotations
+        .iter()
+        .find_map(|annotation| meaningful_span(annotation.source_loc.clone()))?;
+    let last = annotations
+        .iter()
+        .rev()
+        .find_map(|annotation| meaningful_span(annotation.source_loc.clone()))
+        .unwrap_or_else(|| first.clone());
     Some(nondegenerate_span(first.start..last.end))
 }
 
@@ -293,5 +321,47 @@ mod tests {
         );
 
         assert_eq!(executor.best_effort_span(0, (1, 1)), 10..24);
+    }
+
+    #[test]
+    fn record_runtime_error_at_root_init_section_prefers_latest_root_init_span() {
+        let mut init = SectionBytecode::new(SectionFlags {
+            is_stdlib: false,
+            is_library: false,
+            is_init: true,
+            is_root_module: true,
+        });
+        init.annotations = vec![
+            InstructionAnnotation { source_loc: 10..14 },
+            InstructionAnnotation { source_loc: 20..30 },
+        ];
+        init.instructions = vec![bytecode::Instruction::PushNil; 2];
+
+        let mut slide = SectionBytecode::new(SectionFlags {
+            is_stdlib: false,
+            is_library: false,
+            is_init: false,
+            is_root_module: true,
+        });
+        slide.annotations = vec![InstructionAnnotation {
+            source_loc: 100..108,
+        }];
+        slide.instructions = vec![bytecode::Instruction::PushNil];
+
+        let mut executor = Executor::new(
+            Bytecode::new(vec![Arc::new(init), Arc::new(slide)]),
+            Vec::new(),
+        );
+
+        executor.record_runtime_error_at_root_init_section(
+            crate::error::ExecutorError::invalid_operation("test"),
+        );
+
+        let runtime_error = executor
+            .state
+            .errors
+            .last()
+            .expect("expected recorded runtime error");
+        assert_eq!(runtime_error.span, 10..30);
     }
 }

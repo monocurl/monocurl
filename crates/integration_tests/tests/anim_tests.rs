@@ -1845,6 +1845,50 @@ fn test_scene_snapshot_error_after_play_uses_play_span() {
 }
 
 #[test]
+fn test_init_scene_snapshot_type_error_uses_entire_init_section_span() {
+    let init_src = "
+        background = [1, 1, 1]
+        let keep = 1
+    ";
+
+    let (mut executor, _user_slide_count) =
+        match build_anim_executor(&[(init_src, SectionType::Init), ("", SectionType::Slide)], &[])
+        {
+            Ok(data) => data,
+            Err(result) => panic!("failed to build executor: {:?}", result.errors),
+        };
+
+    smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+
+        assert!(
+            executor.capture_stable_scene_snapshot().await.is_err(),
+            "expected scene snapshot to fail"
+        );
+    });
+
+    let expected_start = init_src
+        .find("background = [1, 1, 1]")
+        .expect("missing background assignment");
+    let expected_end = init_src
+        .find("let keep = 1")
+        .expect("missing keep binding")
+        + "let keep = 1".len();
+    let expected = expected_start..expected_end;
+
+    let runtime_error = executor
+        .state
+        .errors
+        .last()
+        .expect("expected recorded runtime error");
+    assert_eq!(runtime_error.span, expected);
+}
+
+#[test]
 fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
     let src = "
         camera = Camera([0, 0, -16], [0, 0, 0], 1u)

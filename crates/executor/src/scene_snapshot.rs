@@ -37,14 +37,67 @@ pub struct SceneSnapshot {
     pub meshes: Vec<Arc<Mesh>>,
 }
 
+struct SceneSnapshotBuildError {
+    error: ExecutorError,
+    prefer_root_init_span: bool,
+}
+
+struct SceneFieldValue {
+    value: Value,
+    prefer_root_init_span: bool,
+}
+
+struct SceneFieldValueWithVersion {
+    value: Value,
+    version: u64,
+    prefer_root_init_span: bool,
+}
+
+fn scene_snapshot_error(
+    error: ExecutorError,
+    prefer_root_init_span: bool,
+) -> SceneSnapshotBuildError {
+    SceneSnapshotBuildError {
+        prefer_root_init_span: prefer_root_init_span && scene_shape_error(&error),
+        error,
+    }
+}
+
+fn scene_shape_error(error: &ExecutorError) -> bool {
+    match error {
+        ExecutorError::TypeError {
+            target: Some(target),
+            ..
+        } => target.starts_with("camera") || target.starts_with("background"),
+        ExecutorError::MissingField { target, .. } => target == "camera" || target == "background",
+        ExecutorError::InvalidScene(message) => {
+            message.starts_with("camera")
+                || message.starts_with("background")
+                || message.starts_with("on-screen mesh '")
+        }
+        _ => false,
+    }
+}
+
+fn leader_prefers_root_init_span(entry: &crate::state::LeaderEntry) -> bool {
+    matches!(
+        with_heap(|h| h.get(entry.leader_cell.key()).clone()),
+        Value::Leader(ref leader) if leader.last_modified_stack.is_none()
+    )
+}
+
 fn collect_scene_meshes<'a>(
     executor: &'a mut Executor,
     value: Value,
     target_name: &'a str,
+    prefer_root_init_span: bool,
     out: &'a mut Vec<Arc<Mesh>>,
-) -> std::pin::Pin<Box<dyn Future<Output = Result<(), ExecutorError>> + 'a>> {
+) -> std::pin::Pin<Box<dyn Future<Output = Result<(), SceneSnapshotBuildError>> + 'a>> {
     Box::pin(async move {
-        let value = value.elide_wrappers(executor).await?;
+        let value = value
+            .elide_wrappers(executor)
+            .await
+            .map_err(|error| scene_snapshot_error(error, false))?;
         match value {
             Value::Mesh(mesh) => {
                 out.push(mesh);
@@ -53,36 +106,57 @@ fn collect_scene_meshes<'a>(
             Value::List(list) => {
                 for item in list.elements() {
                     let item = with_heap(|h| h.get(item.key()).clone());
-                    collect_scene_meshes(executor, item, target_name, out).await?;
+                    collect_scene_meshes(executor, item, target_name, prefer_root_init_span, out)
+                        .await?;
                 }
                 Ok(())
             }
             Value::Stateful(ref s) => {
-                let resolved = executor.eval_stateful(s).await?;
-                collect_scene_meshes(executor, resolved, target_name, out).await
+                let resolved = executor
+                    .eval_stateful(s)
+                    .await
+                    .map_err(|error| scene_snapshot_error(error, false))?;
+                collect_scene_meshes(executor, resolved, target_name, prefer_root_init_span, out)
+                    .await
             }
-            other => Err(ExecutorError::invalid_scene(format!(
-                "on-screen mesh '{}' must resolve to a mesh tree, got {}",
-                target_name,
-                other.type_name()
-            ))),
+            other => Err(scene_snapshot_error(
+                ExecutorError::invalid_scene(format!(
+                    "on-screen mesh '{}' must resolve to a mesh tree, got {}",
+                    target_name,
+                    other.type_name()
+                )),
+                prefer_root_init_span,
+            )),
         }
     })
 }
 
-async fn scene_meshes(executor: &mut Executor) -> Result<Vec<Arc<Mesh>>, ExecutorError> {
+async fn scene_meshes(executor: &mut Executor) -> Result<Vec<Arc<Mesh>>, SceneSnapshotBuildError> {
     let mut meshes = Vec::new();
     let leaders = executor
         .state
         .leaders
         .iter()
         .filter(|entry| entry.kind == LeaderKind::Mesh)
-        .map(|entry| (entry.name.clone(), entry.follower_value))
+        .map(|entry| {
+            (
+                entry.name.clone(),
+                entry.follower_value,
+                leader_prefers_root_init_span(entry),
+            )
+        })
         .collect::<Vec<_>>();
 
-    for (name, follower_value) in leaders {
+    for (name, follower_value, prefer_root_init_span) in leaders {
         let follower = with_heap(|h| h.get(follower_value).clone());
-        collect_scene_meshes(executor, follower, &name, &mut meshes).await?;
+        collect_scene_meshes(
+            executor,
+            follower,
+            &name,
+            prefer_root_init_span,
+            &mut meshes,
+        )
+        .await?;
     }
     Ok(meshes)
 }
@@ -95,17 +169,28 @@ fn map_field_value(map: &Map, name: &str) -> Option<Value> {
 async fn scene_field_value(
     executor: &mut Executor,
     name: &'static str,
-) -> Result<Option<Value>, ExecutorError> {
+) -> Result<Option<SceneFieldValue>, SceneSnapshotBuildError> {
     let follower = executor
         .state
         .leaders
         .iter()
         .rev()
         .find(|entry| entry.name == name)
-        .map(|entry| with_heap(|h| h.get(entry.follower_value).clone()));
+        .map(|entry| {
+            (
+                with_heap(|h| h.get(entry.follower_value).clone()),
+                leader_prefers_root_init_span(entry),
+            )
+        });
 
     match follower {
-        Some(value) => Ok(Some(value.elide_wrappers(executor).await?)),
+        Some((value, prefer_root_init_span)) => Ok(Some(SceneFieldValue {
+            value: value
+                .elide_wrappers(executor)
+                .await
+                .map_err(|error| scene_snapshot_error(error, prefer_root_init_span))?,
+            prefer_root_init_span,
+        })),
         None => Ok(None),
     }
 }
@@ -113,7 +198,7 @@ async fn scene_field_value(
 async fn scene_field_value_with_version(
     executor: &mut Executor,
     name: &'static str,
-) -> Result<Option<(Value, u64)>, ExecutorError> {
+) -> Result<Option<SceneFieldValueWithVersion>, SceneSnapshotBuildError> {
     let follower = executor
         .state
         .leaders
@@ -121,15 +206,29 @@ async fn scene_field_value_with_version(
         .rev()
         .find(|entry| entry.name == name)
         .and_then(|entry| {
-            let version = match with_heap(|h| h.get(entry.leader_cell.key()).clone()) {
-                Value::Leader(leader) => leader.follower_version,
-                _ => return None,
-            };
-            Some((with_heap(|h| h.get(entry.follower_value).clone()), version))
+            let (version, prefer_root_init_span) =
+                match with_heap(|h| h.get(entry.leader_cell.key()).clone()) {
+                    Value::Leader(leader) => {
+                        (leader.follower_version, leader.last_modified_stack.is_none())
+                    }
+                    _ => return None,
+                };
+            Some((
+                with_heap(|h| h.get(entry.follower_value).clone()),
+                version,
+                prefer_root_init_span,
+            ))
         });
 
     match follower {
-        Some((value, version)) => Ok(Some((value.elide_wrappers(executor).await?, version))),
+        Some((value, version, prefer_root_init_span)) => Ok(Some(SceneFieldValueWithVersion {
+            value: value
+                .elide_wrappers(executor)
+                .await
+                .map_err(|error| scene_snapshot_error(error, prefer_root_init_span))?,
+            version,
+            prefer_root_init_span,
+        })),
         None => Ok(None),
     }
 }
@@ -190,13 +289,6 @@ async fn camera_snapshot_from_value(
     parse_camera_value(executor, value, "camera").await
 }
 
-async fn camera_snapshot(executor: &mut Executor) -> Result<(CameraSnapshot, u64), ExecutorError> {
-    match scene_field_value_with_version(executor, "camera").await? {
-        Some((value, version)) => Ok((camera_snapshot_from_value(executor, value).await?, version)),
-        None => Ok((CameraSnapshot::default(), 0)),
-    }
-}
-
 async fn background_snapshot_from_value(
     executor: &mut Executor,
     value: Value,
@@ -239,28 +331,49 @@ async fn background_snapshot_from_value(
     })
 }
 
-async fn background_snapshot(executor: &mut Executor) -> Result<BackgroundSnapshot, ExecutorError> {
-    match scene_field_value(executor, "background").await? {
-        Some(value) => background_snapshot_from_value(executor, value).await,
-        None => Ok(BackgroundSnapshot::default()),
-    }
-}
-
 impl Executor {
-    pub async fn stable_scene_snapshot(&mut self) -> Result<SceneSnapshot, ExecutorError> {
-        let (camera, camera_version) = camera_snapshot(self).await?;
+    async fn stable_scene_snapshot_impl(
+        &mut self,
+    ) -> Result<SceneSnapshot, SceneSnapshotBuildError> {
+        let (camera, camera_version) = match scene_field_value_with_version(self, "camera").await? {
+            Some(value) => (
+                camera_snapshot_from_value(self, value.value)
+                    .await
+                    .map_err(|error| scene_snapshot_error(error, value.prefer_root_init_span))?,
+                value.version,
+            ),
+            None => (CameraSnapshot::default(), 0),
+        };
+
+        let background = match scene_field_value(self, "background").await? {
+            Some(value) => background_snapshot_from_value(self, value.value)
+                .await
+                .map_err(|error| scene_snapshot_error(error, value.prefer_root_init_span))?,
+            None => BackgroundSnapshot::default(),
+        };
+
         Ok(SceneSnapshot {
             meshes: scene_meshes(self).await?,
-            background: background_snapshot(self).await?,
+            background,
             camera,
             camera_version,
         })
     }
 
+    pub async fn stable_scene_snapshot(&mut self) -> Result<SceneSnapshot, ExecutorError> {
+        self.stable_scene_snapshot_impl()
+            .await
+            .map_err(|build_error| build_error.error)
+    }
+
     pub async fn capture_stable_scene_snapshot(&mut self) -> Result<SceneSnapshot, RuntimeError> {
-        match self.stable_scene_snapshot().await {
+        match self.stable_scene_snapshot_impl().await {
             Ok(scene) => Ok(scene),
-            Err(error) => Err(self.record_runtime_error_at_root(error)),
+            Err(build_error) => Err(if build_error.prefer_root_init_span {
+                self.record_runtime_error_at_root_init_section(build_error.error)
+            } else {
+                self.record_runtime_error_at_root(build_error.error)
+            }),
         }
     }
 }

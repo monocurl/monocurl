@@ -608,6 +608,20 @@ fn test_operator_stateful_operand_stored_in_mesh() {
     r.assert_ok();
 }
 
+#[test]
+fn test_operator_stateful_operand_primes_cache_during_seek() {
+    let r = run_anim(
+        "
+        param base = 5
+        let bad = operator |target| {
+            return [target, target[0]]
+        }
+        mesh m = bad{} $base
+    ",
+    );
+    r.assert_error("cannot subscript int");
+}
+
 // ── stateful in labeled lambda invocations ────────────────────────────────────
 
 #[test]
@@ -621,6 +635,18 @@ fn test_labeled_lambda_stateful_arg_stored_in_mesh() {
     ",
     );
     r.assert_ok();
+}
+
+#[test]
+fn test_labeled_lambda_stateful_arg_primes_cache_during_seek() {
+    let r = run_anim(
+        "
+        param offset = 3
+        let f = |x| x[0]
+        mesh m = f(x: $offset)
+    ",
+    );
+    r.assert_error("cannot subscript int");
 }
 
 #[test]

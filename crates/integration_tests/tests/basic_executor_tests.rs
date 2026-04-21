@@ -2129,13 +2129,27 @@ fn test_to_side_and_to_corner_smoke() {
     let r = run_with_stdlib(
         "
         let cam = Camera([0, 0, -10], [0, 0, 0], 1u)
-        let side = mesh_center(to_side{dir: 1r, camera: cam} Circle())
-        let corner = mesh_center(to_corner{dir: [1, 1, 0], camera: cam, buffer: 0.1} Circle())
+        let side = mesh_center(to_side{cam, 1r} Circle())
+        let corner = mesh_center(to_corner{cam, [1, 1, 0], 0.1} Circle())
         let result = (side[0] > 0) + (corner[0] > 0) + (corner[1] > 0)
     ",
         &["mesh", "scene"],
     );
     r.assert_int(3);
+}
+
+#[test]
+fn test_to_side_and_to_corner_use_default_camera_when_omitted() {
+    let r = run_with_stdlib(
+        "
+        let side = mesh_center(to_side{[1, 0, 0]} Circle())
+        let side_buffered = mesh_center(to_side{[1, 0, 0], 0.1} Circle())
+        let corner = mesh_center(to_corner{[1, 1, 0], 0.1} Circle())
+        let result = (side[0] > 0) + (side_buffered[0] > 0) + (corner[0] > 0) + (corner[1] > 0)
+    ",
+        &["mesh"],
+    );
+    r.assert_int(4);
 }
 
 #[test]

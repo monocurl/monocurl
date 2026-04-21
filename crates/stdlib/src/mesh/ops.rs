@@ -1,7 +1,9 @@
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use executor::{
-    camera::{CameraBasis, DEFAULT_CAMERA_ASPECT, DEFAULT_CAMERA_FOV, parse_camera_arg},
+    camera::{
+        CameraBasis, CameraSnapshot, DEFAULT_CAMERA_ASPECT, DEFAULT_CAMERA_FOV, parse_camera_arg,
+    },
     error::ExecutorError,
     executor::Executor,
     heap::with_heap,
@@ -129,6 +131,22 @@ fn camera_space_placement_delta(
     };
 
     Some(camera.right * delta_x + camera.up * delta_y)
+}
+
+async fn read_camera_basis_or_default(
+    executor: &mut Executor,
+    stack_idx: usize,
+    index: i32,
+    target: &'static str,
+) -> Result<CameraBasis, ExecutorError> {
+    let value = executor.state.stack(stack_idx).read_at(index).clone().elide_lvalue();
+    if matches!(value, Value::Nil) {
+        Ok(CameraSnapshot::default().basis())
+    } else {
+        Ok(parse_camera_arg(executor, stack_idx, index, target)
+            .await?
+            .basis())
+    }
 }
 
 fn camera_space_coords(point: Float3, camera: CameraBasis) -> Float3 {
@@ -1293,9 +1311,7 @@ pub async fn op_to_side(executor: &mut Executor, stack_idx: usize) -> Result<Val
         return Ok(tree.into_value());
     }
     let side = read_float3(executor, stack_idx, -5, "dir")?;
-    let camera = parse_camera_arg(executor, stack_idx, -4, "camera")
-        .await?
-        .basis();
+    let camera = read_camera_basis_or_default(executor, stack_idx, -4, "camera").await?;
     let buffer = crate::read_float(executor, stack_idx, -3, "buffer")? as f32;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
@@ -1327,9 +1343,7 @@ pub async fn op_to_corner(
     if side.y == 0.0 {
         side.y = 1.0;
     }
-    let camera = parse_camera_arg(executor, stack_idx, -4, "camera")
-        .await?
-        .basis();
+    let camera = read_camera_basis_or_default(executor, stack_idx, -4, "camera").await?;
     let buffer = crate::read_float(executor, stack_idx, -3, "buffer")? as f32;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
