@@ -11,7 +11,7 @@ use crate::{state::execution_state::ExecutionState, theme::ThemeSettings};
 
 const DOT_RADIUS: f32 = 3.5;
 const EDGE_WIDTH: f32 = 1.0;
-const ORTHO_HALF_HEIGHT: f32 = 4.0;
+const DEFAULT_CAMERA_FOV: f32 = 0.698_131_7;
 const MIN_FOV: f32 = 0.1;
 const MIN_NEAR: f32 = 0.01;
 const TRANSPARENT: Rgba = Rgba {
@@ -41,7 +41,6 @@ struct CameraBasis {
     near: f32,
     far: f32,
     fov: f32,
-    ortho: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -131,7 +130,7 @@ fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Win
 }
 
 fn camera_basis(camera: &CameraSnapshot) -> CameraBasis {
-    let mut forward = camera.look_at - camera.position;
+    let mut forward = camera.forward;
     if forward.len_sq() <= 1e-6 {
         forward = Float3::Z;
     } else {
@@ -154,8 +153,7 @@ fn camera_basis(camera: &CameraSnapshot) -> CameraBasis {
         forward,
         near: camera.near.max(MIN_NEAR),
         far: camera.far.max(camera.near.max(MIN_NEAR)),
-        fov: camera.fov.max(MIN_FOV),
-        ortho: camera.ortho,
+        fov: DEFAULT_CAMERA_FOV.max(MIN_FOV),
     }
 }
 
@@ -274,12 +272,7 @@ fn project_point(
     }
 
     let aspect = f32::from(bounds.size.width) / f32::from(bounds.size.height).max(1.0);
-    let (ndc_x, ndc_y) = if basis.ortho {
-        (
-            camera_x / (ORTHO_HALF_HEIGHT * aspect.max(0.1)),
-            camera_y / ORTHO_HALF_HEIGHT,
-        )
-    } else {
+    let (ndc_x, ndc_y) = {
         let tan_half_fov = (basis.fov * 0.5).tan().max(0.05);
         (
             camera_x / (camera_z * tan_half_fov * aspect.max(0.1)),

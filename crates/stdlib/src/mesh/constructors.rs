@@ -49,6 +49,18 @@ fn tick_count(min: f32, max: f32, step: f32) -> usize {
     }
 }
 
+fn point_samples(samples: i64) -> usize {
+    samples.max(1) as usize
+}
+
+fn grid_axis_samples(samples: i64) -> usize {
+    samples.max(2) as usize
+}
+
+fn sample_index_value(ix: usize, iy: usize) -> Value {
+    list_value([Value::Integer(ix as i64), Value::Integer(iy as i64)])
+}
+
 fn closed_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
     let mut out = Vec::with_capacity(points.len());
     push_closed_polyline(&mut out, points, normal);
@@ -298,8 +310,8 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
     }
     let tangent = delta / len;
     let side = normal.cross(tangent).normalize();
-    let head_len = (len * 0.25).min(0.35);
-    let head_width = head_len * 0.5;
+    let head_len = (len * 0.32).clamp(0.2, 0.6);
+    let head_width = head_len * 0.95;
     let base = end - tangent * head_len;
     let mut lins = vec![
         default_lin(start, base, normal),
@@ -589,7 +601,6 @@ pub async fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 
 #[stdlib_func]
 pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -6, "center")?;
     let major = crate::read_float(executor, stack_idx, -5, "major_radius")? as f32;
     let minor = crate::read_float(executor, stack_idx, -4, "minor_radius")? as f32;
     let normal = read_float3(executor, stack_idx, -3, "normal")?;
@@ -605,7 +616,7 @@ pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let point = |u: usize, v: usize| {
         let theta = std::f32::consts::TAU * u as f32 / major_samples as f32;
         let phi = std::f32::consts::TAU * v as f32 / minor_samples as f32;
-        let ring_center = center + x * (major * theta.cos()) + y * (major * theta.sin());
+        let ring_center = x * (major * theta.cos()) + y * (major * theta.sin());
         let ring_normal = (x * theta.cos() + y * theta.sin()).normalize();
         ring_center + ring_normal * (minor * phi.cos()) + n * (minor * phi.sin())
     };
@@ -768,12 +779,8 @@ pub async fn mk_color_grid(
     let x1 = crate::read_float(executor, stack_idx, -7, "x1")? as f32;
     let y0 = crate::read_float(executor, stack_idx, -6, "y0")? as f32;
     let y1 = crate::read_float(executor, stack_idx, -5, "y1")? as f32;
-    let dx = crate::read_float(executor, stack_idx, -4, "dx")?
-        .abs()
-        .max(1e-3) as f32;
-    let dy = crate::read_float(executor, stack_idx, -3, "dy")?
-        .abs()
-        .max(1e-3) as f32;
+    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -4, "x_samples")?);
+    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -3, "y_samples")?);
     let mask = executor
         .state
         .stack(stack_idx)
@@ -787,19 +794,25 @@ pub async fn mk_color_grid(
         .clone()
         .elide_lvalue();
 
-    let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
-    let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
+    let nx = x_samples - 1;
+    let ny = y_samples - 1;
     let cell_count = ensure_grid_cells("color grid cells", nx, ny)?;
     ensure_surface_triangles("color grid triangles", cell_count.saturating_mul(2))?;
     let mut vertices = Vec::<SurfaceVertex>::new();
     let mut faces = Vec::<[usize; 3]>::new();
-    for ix in 0..=nx {
-        for iy in 0..=ny {
+    for ix in 0..x_samples {
+        for iy in 0..y_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             let pos = Float3::new(x, y, 0.0);
             let col = float4_from_value(
-                invoke_callable(executor, &color_at, vec![point_value(pos)], "color_at").await?,
+                invoke_callable(
+                    executor,
+                    &color_at,
+                    vec![point_value(pos), sample_index_value(ix, iy)],
+                    "color_at",
+                )
+                .await?,
                 "color_at",
             )?;
             vertices.push(SurfaceVertex {
@@ -809,7 +822,7 @@ pub async fn mk_color_grid(
             });
         }
     }
-    let grid_vertex = |ix: usize, iy: usize| ix * (ny + 1) + iy;
+    let grid_vertex = |ix: usize, iy: usize| ix * y_samples + iy;
 
     for ix in 0..nx {
         for iy in 0..ny {
@@ -844,12 +857,8 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let x1 = crate::read_float(executor, stack_idx, -7, "x1")? as f32;
     let y0 = crate::read_float(executor, stack_idx, -6, "y0")? as f32;
     let y1 = crate::read_float(executor, stack_idx, -5, "y1")? as f32;
-    let dx = crate::read_float(executor, stack_idx, -4, "dx")?
-        .abs()
-        .max(1e-3) as f32;
-    let dy = crate::read_float(executor, stack_idx, -3, "dy")?
-        .abs()
-        .max(1e-3) as f32;
+    let x_samples = point_samples(read_int(executor, stack_idx, -4, "x_samples")?);
+    let y_samples = point_samples(read_int(executor, stack_idx, -3, "y_samples")?);
     let mask = executor
         .state
         .stack(stack_idx)
@@ -863,18 +872,13 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
         .clone()
         .elide_lvalue();
 
-    let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
-    let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
-    let sample_count = checked_product(
-        "field samples",
-        nx.saturating_add(1),
-        ny.saturating_add(1),
-        MAX_FIELD_SAMPLES,
-    )?;
+    let sample_count = checked_product("field samples", x_samples, y_samples, MAX_FIELD_SAMPLES)?;
     let mut out = Vec::with_capacity(sample_count);
+    let nx = x_samples.saturating_sub(1).max(1);
+    let ny = y_samples.saturating_sub(1).max(1);
 
-    for ix in 0..=nx {
-        for iy in 0..=ny {
+    for ix in 0..x_samples {
+        for iy in 0..y_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             let pos = Float3::new(x, y, 0.0);
@@ -884,7 +888,15 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
             {
                 continue;
             }
-            out.push(invoke_callable(executor, &mesh_at, vec![point_value(pos)], "mesh_at").await?);
+            out.push(
+                invoke_callable(
+                    executor,
+                    &mesh_at,
+                    vec![point_value(pos), sample_index_value(ix, iy)],
+                    "mesh_at",
+                )
+                .await?,
+            );
         }
     }
 
@@ -1311,17 +1323,13 @@ pub async fn mk_explicit2d(
     let x1 = crate::read_float(executor, stack_idx, -5, "x1")? as f32;
     let y0 = crate::read_float(executor, stack_idx, -4, "y0")? as f32;
     let y1 = crate::read_float(executor, stack_idx, -3, "y1")? as f32;
-    let dx = crate::read_float(executor, stack_idx, -2, "dx")?
-        .abs()
-        .max(1e-3) as f32;
-    let dy = crate::read_float(executor, stack_idx, -1, "dy")?
-        .abs()
-        .max(1e-3) as f32;
-    let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
-    let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
+    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -2, "x_samples")?);
+    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -1, "y_samples")?);
+    let nx = x_samples - 1;
+    let ny = y_samples - 1;
     let cell_count = ensure_grid_cells("explicit surface cells", nx, ny)?;
     ensure_surface_triangles("explicit surface triangles", cell_count.saturating_mul(2))?;
-    let mut grid = vec![vec![Float3::ZERO; ny + 1]; nx + 1];
+    let mut grid = vec![vec![Float3::ZERO; y_samples]; x_samples];
     for (ix, col) in grid.iter_mut().enumerate() {
         for (iy, point) in col.iter_mut().enumerate() {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
@@ -1378,16 +1386,12 @@ pub async fn mk_implicit2d(
     let x1 = crate::read_float(executor, stack_idx, -5, "x1")? as f32;
     let y0 = crate::read_float(executor, stack_idx, -4, "y0")? as f32;
     let y1 = crate::read_float(executor, stack_idx, -3, "y1")? as f32;
-    let dx = crate::read_float(executor, stack_idx, -2, "dx")?
-        .abs()
-        .max(1e-3) as f32;
-    let dy = crate::read_float(executor, stack_idx, -1, "dy")?
-        .abs()
-        .max(1e-3) as f32;
-    let nx = (((x1 - x0).abs() / dx).ceil() as usize).max(1);
-    let ny = (((y1 - y0).abs() / dy).ceil() as usize).max(1);
+    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -2, "x_samples")?);
+    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -1, "y_samples")?);
+    let nx = x_samples - 1;
+    let ny = y_samples - 1;
     ensure_grid_cells("implicit surface cells", nx, ny)?;
-    let mut vals = vec![vec![0.0f32; ny + 1]; nx + 1];
+    let mut vals = vec![vec![0.0f32; y_samples]; x_samples];
     for (ix, col) in vals.iter_mut().enumerate() {
         for (iy, val) in col.iter_mut().enumerate() {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;

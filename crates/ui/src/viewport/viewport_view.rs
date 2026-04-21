@@ -107,12 +107,13 @@ const SLIDER_2D_MIN: f64 = -1.0;
 const SLIDER_2D_MAX: f64 = 1.0;
 const SLIDER_2D_DOT_R: f32 = 5.0;
 const RING_TRANSITION: Duration = Duration::from_millis(140);
+const OVERDRAG_TICK: Duration = Duration::from_nanos(8_333_333);
 const HIDDEN_PARAMS: [&str; 2] = ["camera", "background"];
 
-// fixed value-units per slider-width (or canvas-size) when dragging outside bounds;
-// using a constant instead of proportional-to-range prevents exponential acceleration
-const OVERDRAG_RATE_1D: f64 = 2.0;
-const OVERDRAG_RATE_2D: f64 = 0.2;
+// fixed per-tick overdrag step; cursor position only selects direction,
+// which avoids the runaway acceleration from mapping arbitrary cursor distance
+const OVERDRAG_STEP_1D: f64 = 0.025;
+const OVERDRAG_STEP_2D: f64 = 0.0125;
 // absolute value-units past the current bounds before the bounds start to expand
 const BOUNDS_EXPAND_THRESH_1D: f64 = 0.5;
 const BOUNDS_EXPAND_THRESH_2D: f64 = 0.05;
@@ -127,6 +128,39 @@ enum Slider2dKind {
     VectorInt(Vec<i64>),
 }
 
+#[derive(Clone)]
+enum DragState {
+    Scalar {
+        name: String,
+        value: f64,
+        is_int: bool,
+        overdrag_dir: i8,
+    },
+    Plane {
+        name: String,
+        x: f64,
+        y: f64,
+        kind: Slider2dKind,
+        x_overdrag_dir: i8,
+        y_overdrag_dir: i8,
+    },
+}
+
+impl DragState {
+    fn name(&self) -> &str {
+        match self {
+            Self::Scalar { name, .. } | Self::Plane { name, .. } => name,
+        }
+    }
+
+    fn display_value(&self) -> ParameterValue {
+        match self {
+            Self::Scalar { value, is_int, .. } => scalar_parameter_value(*value, *is_int),
+            Self::Plane { x, y, kind, .. } => plane_parameter_value(*x, *y, kind),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 struct RingStyle {
     color: Rgba,
@@ -138,7 +172,7 @@ pub struct Viewport {
     scene: Entity<DebugSceneView>,
     is_presenting: bool,
     show_params: bool,
-    dragging_param: Option<String>,
+    drag_state: Option<DragState>,
     scroll_handle: ScrollHandle,
     // per-parameter value-space bounds: [x_min, x_max, y_min, y_max]
     slider_bounds: HashMap<String, [f64; 4]>,
@@ -156,12 +190,12 @@ impl Viewport {
         let execution_state = services.read(cx).execution_state().clone();
         let scene = cx.new(|cx| DebugSceneView::new(execution_state, cx));
 
-        Self {
+        let viewport = Self {
             services,
             scene,
             is_presenting: false,
             show_params: false,
-            dragging_param: None,
+            drag_state: None,
             scroll_handle: ScrollHandle::new(),
             slider_bounds: HashMap::new(),
             ring_style: None,
@@ -170,14 +204,31 @@ impl Viewport {
                 width: 0.0,
             },
             ring_animation_nonce: 0,
-        }
+        };
+
+        cx.spawn(async move |weak, cx| {
+            loop {
+                cx.background_executor().timer(OVERDRAG_TICK).await;
+                let should_continue = weak
+                    .update(cx, |viewport, cx| {
+                        viewport.tick_overdrag(cx);
+                    })
+                    .is_ok();
+                if !should_continue {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        viewport
     }
 
     pub fn set_presenting(&mut self, presenting: bool, cx: &mut Context<Self>) {
         self.is_presenting = presenting;
         if !presenting {
             self.show_params = false;
-            self.dragging_param = None;
+            self.drag_state = None;
             self.slider_bounds.clear();
         }
         cx.notify();
@@ -187,10 +238,249 @@ impl Viewport {
         self.show_params = !self.show_params;
         cx.notify();
     }
+
+    fn is_dragging(&self, name: &str) -> bool {
+        self.drag_state
+            .as_ref()
+            .is_some_and(|state| state.name() == name)
+    }
+
+    fn end_drag(&mut self, cx: &mut Context<Self>) {
+        self.drag_state = None;
+        cx.notify();
+    }
+
+    fn display_parameter_value(&self, name: &str, fallback: &ParameterValue) -> ParameterValue {
+        self.drag_state
+            .as_ref()
+            .filter(|state| state.name() == name)
+            .map(DragState::display_value)
+            .unwrap_or_else(|| fallback.clone())
+    }
+
+    fn begin_scalar_drag(
+        &mut self,
+        name: &str,
+        fallback_value: f64,
+        is_int: bool,
+        local_x: f32,
+        width: f32,
+        fallback_bounds: [f64; 4],
+        cx: &mut Context<Self>,
+    ) -> ParameterValue {
+        let [min, max, _, _] = self.current_bounds(name, fallback_bounds);
+        let current = match &self.drag_state {
+            Some(DragState::Scalar {
+                name: drag_name,
+                value,
+                ..
+            }) if drag_name == name => *value,
+            _ => fallback_value,
+        };
+        let (value, overdrag_dir) = scalar_drag_target(local_x, width, min, max, current);
+        self.drag_state = Some(DragState::Scalar {
+            name: name.to_string(),
+            value,
+            is_int,
+            overdrag_dir,
+        });
+        if let Some((new_min, new_max)) = expand_1d_bounds(min, max, value, is_int) {
+            self.slider_bounds
+                .insert(name.to_string(), [new_min, new_max, 0.0, 0.0]);
+        }
+        cx.notify();
+        scalar_parameter_value(value, is_int)
+    }
+
+    fn update_scalar_drag(
+        &mut self,
+        name: &str,
+        fallback_value: f64,
+        is_int: bool,
+        local_x: f32,
+        width: f32,
+        fallback_bounds: [f64; 4],
+        cx: &mut Context<Self>,
+    ) -> Option<ParameterValue> {
+        if !self.is_dragging(name) {
+            return None;
+        }
+        Some(self.begin_scalar_drag(
+            name,
+            fallback_value,
+            is_int,
+            local_x,
+            width,
+            fallback_bounds,
+            cx,
+        ))
+    }
+
+    fn begin_plane_drag(
+        &mut self,
+        name: &str,
+        fallback_x: f64,
+        fallback_y: f64,
+        kind: &Slider2dKind,
+        pos: Point<Pixels>,
+        canvas: Bounds<Pixels>,
+        fallback_bounds: [f64; 4],
+        cx: &mut Context<Self>,
+    ) -> ParameterValue {
+        let [x_min, x_max, y_min, y_max] = self.current_bounds(name, fallback_bounds);
+        let (current_x, current_y) = match &self.drag_state {
+            Some(DragState::Plane {
+                name: drag_name,
+                x,
+                y,
+                ..
+            }) if drag_name == name => (*x, *y),
+            _ => (fallback_x, fallback_y),
+        };
+        let ((x, y), (x_overdrag_dir, y_overdrag_dir)) = plane_drag_target(
+            pos, canvas, x_min, x_max, y_min, y_max, current_x, current_y,
+        );
+        self.drag_state = Some(DragState::Plane {
+            name: name.to_string(),
+            x,
+            y,
+            kind: kind.clone(),
+            x_overdrag_dir,
+            y_overdrag_dir,
+        });
+        if let Some(((nx_min, nx_max), (ny_min, ny_max))) =
+            expand_2d_bounds(x_min, x_max, y_min, y_max, x, y)
+        {
+            self.slider_bounds
+                .insert(name.to_string(), [nx_min, nx_max, ny_min, ny_max]);
+        }
+        cx.notify();
+        plane_parameter_value(x, y, kind)
+    }
+
+    fn update_plane_drag(
+        &mut self,
+        name: &str,
+        fallback_x: f64,
+        fallback_y: f64,
+        kind: &Slider2dKind,
+        pos: Point<Pixels>,
+        canvas: Bounds<Pixels>,
+        fallback_bounds: [f64; 4],
+        cx: &mut Context<Self>,
+    ) -> Option<ParameterValue> {
+        if !self.is_dragging(name) {
+            return None;
+        }
+        Some(self.begin_plane_drag(
+            name,
+            fallback_x,
+            fallback_y,
+            kind,
+            pos,
+            canvas,
+            fallback_bounds,
+            cx,
+        ))
+    }
+
+    fn current_bounds(&self, name: &str, fallback: [f64; 4]) -> [f64; 4] {
+        self.slider_bounds.get(name).copied().unwrap_or(fallback)
+    }
+
+    fn tick_overdrag(&mut self, cx: &mut Context<Self>) {
+        let Some(mut state) = self.drag_state.take() else {
+            return;
+        };
+
+        let update = match &mut state {
+            DragState::Scalar {
+                name,
+                value,
+                is_int,
+                overdrag_dir,
+            } => {
+                if *overdrag_dir == 0 {
+                    self.drag_state = Some(state);
+                    return;
+                }
+                *value += *overdrag_dir as f64 * OVERDRAG_STEP_1D;
+                let [min, max, _, _] = self.current_bounds(
+                    name.as_str(),
+                    default_bounds_for_value(&scalar_parameter_value(*value, *is_int)),
+                );
+                if let Some((new_min, new_max)) = expand_1d_bounds(min, max, *value, *is_int) {
+                    self.slider_bounds
+                        .insert(name.clone(), [new_min, new_max, 0.0, 0.0]);
+                }
+                (name.clone(), scalar_parameter_value(*value, *is_int))
+            }
+            DragState::Plane {
+                name,
+                x,
+                y,
+                kind,
+                x_overdrag_dir,
+                y_overdrag_dir,
+            } => {
+                if *x_overdrag_dir == 0 && *y_overdrag_dir == 0 {
+                    self.drag_state = Some(state);
+                    return;
+                }
+                *x += *x_overdrag_dir as f64 * OVERDRAG_STEP_2D;
+                *y += *y_overdrag_dir as f64 * OVERDRAG_STEP_2D;
+                let [x_min, x_max, y_min, y_max] = self.current_bounds(
+                    name.as_str(),
+                    default_bounds_for_value(&plane_parameter_value(*x, *y, kind)),
+                );
+                if let Some(((nx_min, nx_max), (ny_min, ny_max))) =
+                    expand_2d_bounds(x_min, x_max, y_min, y_max, *x, *y)
+                {
+                    self.slider_bounds
+                        .insert(name.clone(), [nx_min, nx_max, ny_min, ny_max]);
+                }
+                (name.clone(), plane_parameter_value(*x, *y, kind))
+            }
+        };
+        self.drag_state = Some(state);
+
+        self.services.update(cx, |services, _| {
+            services.update_parameters(HashMap::from([update]))
+        });
+        cx.notify();
+    }
 }
 
 fn is_hidden_param(name: &str) -> bool {
     HIDDEN_PARAMS.contains(&name)
+}
+
+fn scalar_parameter_value(value: f64, is_int: bool) -> ParameterValue {
+    if is_int {
+        ParameterValue::Int(value.round() as i64)
+    } else {
+        ParameterValue::Float(value)
+    }
+}
+
+fn plane_parameter_value(x: f64, y: f64, kind: &Slider2dKind) -> ParameterValue {
+    match kind {
+        Slider2dKind::Complex => ParameterValue::Complex { re: x, im: y },
+        Slider2dKind::VectorFloat(tail) => {
+            let mut values = Vec::with_capacity(tail.len() + 2);
+            values.push(x);
+            values.push(y);
+            values.extend(tail.iter().copied());
+            ParameterValue::VectorFloat(values)
+        }
+        Slider2dKind::VectorInt(tail) => {
+            let mut values = Vec::with_capacity(tail.len() + 2);
+            values.push(x.round() as i64);
+            values.push(y.round() as i64);
+            values.extend(tail.iter().copied());
+            ParameterValue::VectorInt(values)
+        }
+    }
 }
 
 fn lerp_f32(start: f32, end: f32, t: f32) -> f32 {
@@ -296,56 +586,22 @@ fn default_bounds_for_value(value: &ParameterValue) -> [f64; 4] {
     }
 }
 
-fn current_slider_bounds(
-    weak_vp: &WeakEntity<Viewport>,
-    cx: &App,
-    name: &str,
-    fallback: [f64; 4],
-) -> [f64; 4] {
-    weak_vp
-        .upgrade()
-        .and_then(|entity| entity.read(cx).slider_bounds.get(name).copied())
-        .unwrap_or(fallback)
-}
-
 fn expand_threshold(range: f64, base: f64) -> f64 {
     base.max(range.abs().max(1.0) * BOUNDS_EXPAND_THRESH_FRAC)
 }
 
 // --- drag computation helpers ---
 
-fn compute_1d_drag(
-    local_x: f32,
-    w: f32,
-    min: f64,
-    max: f64,
-    is_int: bool,
-) -> (ParameterValue, Option<(f64, f64)>) {
-    let raw_p = (local_x / w) as f64;
+fn expand_1d_bounds(min: f64, max: f64, value: f64, is_int: bool) -> Option<(f64, f64)> {
     let range = (max - min).abs().max(1.0);
-    // outside bounds: fixed rate independent of current range to avoid acceleration
-    let val_raw = if raw_p < 0.0 {
-        min + raw_p * OVERDRAG_RATE_1D
-    } else if raw_p > 1.0 {
-        max + (raw_p - 1.0) * OVERDRAG_RATE_1D
-    } else {
-        min + raw_p * (max - min)
-    };
-    let val = if is_int { val_raw.round() } else { val_raw };
-    let pv = if is_int {
-        ParameterValue::Int(val as i64)
-    } else {
-        ParameterValue::Float(val)
-    };
-
     let threshold = expand_threshold(range, BOUNDS_EXPAND_THRESH_1D);
-    let mut new_min = if val_raw < min - threshold {
-        val_raw - BOUNDS_EXPAND_PAD * range
+    let mut new_min = if value < min - threshold {
+        value - BOUNDS_EXPAND_PAD * range
     } else {
         min
     };
-    let mut new_max = if val_raw > max + threshold {
-        val_raw + BOUNDS_EXPAND_PAD * range
+    let mut new_max = if value > max + threshold {
+        value + BOUNDS_EXPAND_PAD * range
     } else {
         max
     };
@@ -359,78 +615,83 @@ fn compute_1d_drag(
     } else {
         None
     };
-    (pv, new_bounds)
+    new_bounds
 }
 
-fn compute_2d_drag(
+fn scalar_drag_target(local_x: f32, width: f32, min: f64, max: f64, current: f64) -> (f64, i8) {
+    let raw_p = (local_x / width) as f64;
+    if raw_p < 0.0 {
+        (current.min(min), -1)
+    } else if raw_p > 1.0 {
+        (current.max(max), 1)
+    } else {
+        (min + raw_p * (max - min), 0)
+    }
+}
+
+fn plane_drag_target(
     pos: Point<Pixels>,
     canvas: Bounds<Pixels>,
     x_min: f64,
     x_max: f64,
     y_min: f64,
     y_max: f64,
-    kind: Slider2dKind,
-) -> (ParameterValue, Option<((f64, f64), (f64, f64))>) {
+    current_x: f64,
+    current_y: f64,
+) -> ((f64, f64), (i8, i8)) {
     let w = f32::from(canvas.size.width);
     let h = f32::from(canvas.size.height);
     let raw_xp = (f32::from(pos.x - canvas.origin.x) / w) as f64;
     let raw_yp = (f32::from(pos.y - canvas.origin.y) / h) as f64;
 
-    let xv = if raw_xp < 0.0 {
-        x_min + raw_xp * OVERDRAG_RATE_2D
+    let (x, x_dir) = if raw_xp < 0.0 {
+        (current_x.min(x_min), -1)
     } else if raw_xp > 1.0 {
-        x_max + (raw_xp - 1.0) * OVERDRAG_RATE_2D
+        (current_x.max(x_max), 1)
     } else {
-        x_min + raw_xp * (x_max - x_min)
+        (x_min + raw_xp * (x_max - x_min), 0)
     };
-    // y-axis flipped: top = y_max, bottom = y_min
-    let yv = if raw_yp < 0.0 {
-        y_max + (-raw_yp) * OVERDRAG_RATE_2D
+
+    let (y, y_dir) = if raw_yp < 0.0 {
+        (current_y.max(y_max), 1)
     } else if raw_yp > 1.0 {
-        y_min - (raw_yp - 1.0) * OVERDRAG_RATE_2D
+        (current_y.min(y_min), -1)
     } else {
-        y_max - raw_yp * (y_max - y_min)
+        (y_max - raw_yp * (y_max - y_min), 0)
     };
 
-    let pv = match kind {
-        Slider2dKind::Complex => ParameterValue::Complex { re: xv, im: yv },
-        Slider2dKind::VectorFloat(tail) => {
-            let mut values = Vec::with_capacity(tail.len() + 2);
-            values.push(xv);
-            values.push(yv);
-            values.extend(tail);
-            ParameterValue::VectorFloat(values)
-        }
-        Slider2dKind::VectorInt(tail) => {
-            let mut values = Vec::with_capacity(tail.len() + 2);
-            values.push(xv.round() as i64);
-            values.push(yv.round() as i64);
-            values.extend(tail);
-            ParameterValue::VectorInt(values)
-        }
-    };
+    ((x, y), (x_dir, y_dir))
+}
 
+fn expand_2d_bounds(
+    x_min: f64,
+    x_max: f64,
+    y_min: f64,
+    y_max: f64,
+    x: f64,
+    y: f64,
+) -> Option<((f64, f64), (f64, f64))> {
     let x_range = (x_max - x_min).abs().max(1.0);
     let y_range = (y_max - y_min).abs().max(1.0);
     let x_threshold = expand_threshold(x_range, BOUNDS_EXPAND_THRESH_2D);
     let y_threshold = expand_threshold(y_range, BOUNDS_EXPAND_THRESH_2D);
-    let new_x_min = if xv < x_min - x_threshold {
-        xv - BOUNDS_EXPAND_PAD * x_range
+    let new_x_min = if x < x_min - x_threshold {
+        x - BOUNDS_EXPAND_PAD * x_range
     } else {
         x_min
     };
-    let new_x_max = if xv > x_max + x_threshold {
-        xv + BOUNDS_EXPAND_PAD * x_range
+    let new_x_max = if x > x_max + x_threshold {
+        x + BOUNDS_EXPAND_PAD * x_range
     } else {
         x_max
     };
-    let new_y_min = if yv < y_min - y_threshold {
-        yv - BOUNDS_EXPAND_PAD * y_range
+    let new_y_min = if y < y_min - y_threshold {
+        y - BOUNDS_EXPAND_PAD * y_range
     } else {
         y_min
     };
-    let new_y_max = if yv > y_max + y_threshold {
-        yv + BOUNDS_EXPAND_PAD * y_range
+    let new_y_max = if y > y_max + y_threshold {
+        y + BOUNDS_EXPAND_PAD * y_range
     } else {
         y_max
     };
@@ -441,7 +702,7 @@ fn compute_2d_drag(
         } else {
             None
         };
-    (pv, new_bounds)
+    new_bounds
 }
 
 fn format_bound(v: f64) -> String {
@@ -595,36 +856,31 @@ fn render_slider_1d(
                                             {
                                                 return;
                                             }
-                                            let [min, max, _, _] = current_slider_bounds(
-                                                &weak_vp,
-                                                cx,
-                                                &name,
-                                                fallback_bounds,
-                                            );
                                             let local_x =
                                                 f32::from(ev.position.x - bounds.origin.x);
-                                            let (pv, new_bounds) =
-                                                compute_1d_drag(local_x, w, min, max, is_int);
-                                            weak_vp
+                                            let pv = weak_vp
                                                 .update(cx, |vp, cx| {
-                                                    if let Some((new_min, new_max)) = new_bounds {
-                                                        vp.slider_bounds.insert(
+                                                    vp.begin_scalar_drag(
+                                                        &name,
+                                                        value,
+                                                        is_int,
+                                                        local_x,
+                                                        w,
+                                                        fallback_bounds,
+                                                        cx,
+                                                    )
+                                                })
+                                                .ok();
+                                            if let Some(pv) = pv {
+                                                services
+                                                    .update(cx, |s, _| {
+                                                        s.update_parameters(HashMap::from([(
                                                             name.clone(),
-                                                            [new_min, new_max, 0.0, 0.0],
-                                                        );
-                                                    }
-                                                    vp.dragging_param = Some(name.clone());
-                                                    cx.notify();
-                                                })
-                                                .ok();
-                                            services
-                                                .update(cx, |s, _| {
-                                                    s.update_parameters(HashMap::from([(
-                                                        name.clone(),
-                                                        pv,
-                                                    )]))
-                                                })
-                                                .ok();
+                                                            pv,
+                                                        )]))
+                                                    })
+                                                    .ok();
+                                            }
                                         },
                                     );
                                 }
@@ -639,44 +895,37 @@ fn render_slider_1d(
                                             }
                                             let dragging = weak_vp
                                                 .upgrade()
-                                                .map(|e| {
-                                                    e.read(cx).dragging_param.as_deref()
-                                                        == Some(name.as_str())
-                                                })
+                                                .map(|e| e.read(cx).is_dragging(name.as_str()))
                                                 .unwrap_or(false);
                                             if !dragging {
                                                 return;
                                             }
-                                            let [min, max, _, _] = current_slider_bounds(
-                                                &weak_vp,
-                                                cx,
-                                                &name,
-                                                fallback_bounds,
-                                            );
                                             let local_x =
                                                 f32::from(ev.position.x - bounds.origin.x);
-                                            let (pv, new_bounds) =
-                                                compute_1d_drag(local_x, w, min, max, is_int);
-                                            if let Some((new_min, new_max)) = new_bounds {
-                                                let name = name.clone();
-                                                weak_vp
-                                                    .update(cx, |vp, cx| {
-                                                        vp.slider_bounds.insert(
-                                                            name,
-                                                            [new_min, new_max, 0.0, 0.0],
-                                                        );
-                                                        cx.notify();
+                                            let pv = weak_vp
+                                                .update(cx, |vp, cx| {
+                                                    vp.update_scalar_drag(
+                                                        &name,
+                                                        value,
+                                                        is_int,
+                                                        local_x,
+                                                        w,
+                                                        fallback_bounds,
+                                                        cx,
+                                                    )
+                                                })
+                                                .ok()
+                                                .flatten();
+                                            if let Some(pv) = pv {
+                                                services
+                                                    .update(cx, |s, _| {
+                                                        s.update_parameters(HashMap::from([(
+                                                            name.clone(),
+                                                            pv,
+                                                        )]))
                                                     })
                                                     .ok();
                                             }
-                                            services
-                                                .update(cx, |s, _| {
-                                                    s.update_parameters(HashMap::from([(
-                                                        name.clone(),
-                                                        pv,
-                                                    )]))
-                                                })
-                                                .ok();
                                         },
                                     );
                                 }
@@ -688,8 +937,7 @@ fn render_slider_1d(
                                         }
                                         weak_vp
                                             .update(cx, |vp, cx| {
-                                                vp.dragging_param = None;
-                                                cx.notify();
+                                                vp.end_drag(cx);
                                             })
                                             .ok();
                                     });
@@ -847,46 +1095,30 @@ fn render_slider_2d(
                                             {
                                                 return;
                                             }
-                                            let [x_min, x_max, y_min, y_max] =
-                                                current_slider_bounds(
-                                                    &weak_vp,
-                                                    cx,
-                                                    &name,
-                                                    fallback_bounds,
-                                                );
-                                            let (pv, new_bounds) = compute_2d_drag(
-                                                ev.position,
-                                                bounds,
-                                                x_min,
-                                                x_max,
-                                                y_min,
-                                                y_max,
-                                                kind.clone(),
-                                            );
-                                            weak_vp
+                                            let pv = weak_vp
                                                 .update(cx, |vp, cx| {
-                                                    if let Some((
-                                                        (nx_min, nx_max),
-                                                        (ny_min, ny_max),
-                                                    )) = new_bounds
-                                                    {
-                                                        vp.slider_bounds.insert(
+                                                    vp.begin_plane_drag(
+                                                        &name,
+                                                        x,
+                                                        y,
+                                                        &kind,
+                                                        ev.position,
+                                                        bounds,
+                                                        fallback_bounds,
+                                                        cx,
+                                                    )
+                                                })
+                                                .ok();
+                                            if let Some(pv) = pv {
+                                                services
+                                                    .update(cx, |s, _| {
+                                                        s.update_parameters(HashMap::from([(
                                                             name.clone(),
-                                                            [nx_min, nx_max, ny_min, ny_max],
-                                                        );
-                                                    }
-                                                    vp.dragging_param = Some(name.clone());
-                                                    cx.notify();
-                                                })
-                                                .ok();
-                                            services
-                                                .update(cx, |s, _| {
-                                                    s.update_parameters(HashMap::from([(
-                                                        name.clone(),
-                                                        pv,
-                                                    )]))
-                                                })
-                                                .ok();
+                                                            pv,
+                                                        )]))
+                                                    })
+                                                    .ok();
+                                            }
                                         },
                                     );
                                 }
@@ -902,52 +1134,36 @@ fn render_slider_2d(
                                             }
                                             let dragging = weak_vp
                                                 .upgrade()
-                                                .map(|e| {
-                                                    e.read(cx).dragging_param.as_deref()
-                                                        == Some(name.as_str())
-                                                })
+                                                .map(|e| e.read(cx).is_dragging(name.as_str()))
                                                 .unwrap_or(false);
                                             if !dragging {
                                                 return;
                                             }
-                                            let [x_min, x_max, y_min, y_max] =
-                                                current_slider_bounds(
-                                                    &weak_vp,
-                                                    cx,
-                                                    &name,
-                                                    fallback_bounds,
-                                                );
-                                            let (pv, new_bounds) = compute_2d_drag(
-                                                ev.position,
-                                                bounds,
-                                                x_min,
-                                                x_max,
-                                                y_min,
-                                                y_max,
-                                                kind.clone(),
-                                            );
-                                            if let Some(((nx_min, nx_max), (ny_min, ny_max))) =
-                                                new_bounds
-                                            {
-                                                let name = name.clone();
-                                                weak_vp
-                                                    .update(cx, |vp, cx| {
-                                                        vp.slider_bounds.insert(
-                                                            name,
-                                                            [nx_min, nx_max, ny_min, ny_max],
-                                                        );
-                                                        cx.notify();
+                                            let pv = weak_vp
+                                                .update(cx, |vp, cx| {
+                                                    vp.update_plane_drag(
+                                                        &name,
+                                                        x,
+                                                        y,
+                                                        &kind,
+                                                        ev.position,
+                                                        bounds,
+                                                        fallback_bounds,
+                                                        cx,
+                                                    )
+                                                })
+                                                .ok()
+                                                .flatten();
+                                            if let Some(pv) = pv {
+                                                services
+                                                    .update(cx, |s, _| {
+                                                        s.update_parameters(HashMap::from([(
+                                                            name.clone(),
+                                                            pv,
+                                                        )]))
                                                     })
                                                     .ok();
                                             }
-                                            services
-                                                .update(cx, |s, _| {
-                                                    s.update_parameters(HashMap::from([(
-                                                        name.clone(),
-                                                        pv,
-                                                    )]))
-                                                })
-                                                .ok();
                                         },
                                     );
                                 }
@@ -959,8 +1175,7 @@ fn render_slider_2d(
                                         }
                                         weak_vp
                                             .update(cx, |vp, cx| {
-                                                vp.dragging_param = None;
-                                                cx.notify();
+                                                vp.end_drag(cx);
                                             })
                                             .ok();
                                     });
@@ -1153,9 +1368,13 @@ impl Render for Viewport {
                             return None;
                         }
                         let is_locked = p.locked_params.contains(name);
-                        p.parameters
-                            .get(name)
-                            .map(|v| (name.clone(), v.clone(), is_locked))
+                        p.parameters.get(name).map(|v| {
+                            (
+                                name.clone(),
+                                self.display_parameter_value(name, v),
+                                is_locked,
+                            )
+                        })
                     })
                     .collect()
             })

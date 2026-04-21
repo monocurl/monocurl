@@ -1513,21 +1513,6 @@ pub(super) fn filter_tree_by_tag_filter<'a>(
     })
 }
 
-pub(super) fn rotate_point(point: Float3, pivot: Float3, rotation: Float3) -> Float3 {
-    let mut p = point - pivot;
-
-    let (sx, cx) = rotation.x.sin_cos();
-    p = Float3::new(p.x, cx * p.y - sx * p.z, sx * p.y + cx * p.z);
-
-    let (sy, cy) = rotation.y.sin_cos();
-    p = Float3::new(cy * p.x + sy * p.z, p.y, -sy * p.x + cy * p.z);
-
-    let (sz, cz) = rotation.z.sin_cos();
-    p = Float3::new(cz * p.x - sz * p.y, sz * p.x + cz * p.y, p.z);
-
-    p + pivot
-}
-
 pub(super) fn rotate_about_axis(point: Float3, axis: Float3, angle: f32) -> Float3 {
     if axis.len_sq() <= 1e-12 || angle.abs() <= 1e-12 {
         return point;

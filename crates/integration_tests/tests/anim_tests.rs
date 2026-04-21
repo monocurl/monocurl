@@ -1308,7 +1308,7 @@ fn test_color_grid_lambda_arity_error_is_reported_without_panicking() {
     let r = run_anim_impl(
         &[(
             "
-                mesh x = ColorGrid(|x, y| {})
+                mesh x = ColorGrid(|pos| {})
             ",
             SectionType::Slide,
         )],
@@ -1316,7 +1316,7 @@ fn test_color_grid_lambda_arity_error_is_reported_without_panicking() {
         0.0,
         &stdlib_bundles(["mesh"]),
     );
-    r.assert_error("too few positional arguments");
+    r.assert_error("too many positional arguments");
 }
 
 #[test]
@@ -1324,7 +1324,7 @@ fn test_color_grid_triangle_limit_is_reported() {
     let r = run_anim_impl(
         &[(
             "
-                mesh x = ColorGrid(|pos| [1, 0, 0, 1], [-1, 1, 0.005], [-1, 1, 0.005])
+                mesh x = ColorGrid(|pos, idx| [1, 0, 0, 1], [-1, 1, 400], [-1, 1, 400])
             ",
             SectionType::Slide,
         )],
@@ -1986,6 +1986,113 @@ fn test_write_reveals_boundary_before_fill() {
     assert!(
         max_fill_alpha < 1e-6,
         "expected fill to remain hidden early in write, got {max_fill_alpha}"
+    );
+}
+
+#[test]
+fn test_delay_operator_wraps_animation_in_wait_block() {
+    let r = run_anim_impl(
+        &[(
+            "
+                play delay{0.5} Wait(1)
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim"]),
+    );
+    r.assert_ok().assert_slide_time_approx(1.5, 1e-9);
+}
+
+#[test]
+fn test_highlight_composes_set_and_lerp_over_reference_target() {
+    let src = "
+        mesh x = stroke{RED} Line([0, 0, 0], [1, 0, 0])
+        play Highlight(&x, BLUE, 1)
+    ";
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.5,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let Value::Mesh(mesh) = &leader.current else {
+        panic!("expected current mesh");
+    };
+
+    let line = mesh.lins.first().expect("expected highlighted line");
+    assert!(
+        line.a.col.x > 0.05 && line.a.col.x < 0.95,
+        "expected red channel to be mid-fade, got {:?}",
+        line.a.col.to_array()
+    );
+    assert!(
+        line.a.col.z > 0.05 && line.a.col.z < 0.95,
+        "expected blue channel to be mid-fade, got {:?}",
+        line.a.col.to_array()
+    );
+}
+
+#[test]
+fn test_flash_composes_write_and_trailing_lerp_over_reference_target() {
+    let src = "
+        mesh x = stroke{RED} Line([0, 0, 0], [1, 0, 0])
+        play Flash(&x, 1)
+    ";
+
+    let mid = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.75,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    mid.assert_ok();
+
+    let leader = mid
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let Value::Mesh(mesh) = &leader.current else {
+        panic!("expected current mesh");
+    };
+    let line = mesh.lins.first().expect("expected flashed line");
+    assert!(
+        line.a.col.w > 0.05 && line.a.col.w < 0.95,
+        "expected flash trail to be partially faded, got {:?}",
+        line.a.col.to_array()
+    );
+
+    let end = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    end.assert_ok();
+
+    let leader = end
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let Value::Mesh(mesh) = &leader.current else {
+        panic!("expected current mesh");
+    };
+    let line = mesh.lins.first().expect("expected flashed line");
+    assert!(
+        (line.a.col.w - 1.0).abs() < 1e-6,
+        "expected flash to restore original alpha, got {:?}",
+        line.a.col.to_array()
     );
 }
 

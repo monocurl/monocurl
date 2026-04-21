@@ -22,23 +22,6 @@ fn read_value(executor: &Executor, stack_idx: usize, index: i32, _name: &'static
         .elide_lvalue_leader_rec()
 }
 
-fn read_int_flag(
-    executor: &Executor,
-    stack_idx: usize,
-    index: i32,
-    name: &'static str,
-) -> Result<i64, ExecutorError> {
-    match executor.state.stack(stack_idx).read_at(index) {
-        Value::Integer(n) => Ok(*n),
-        Value::Float(f) if f.fract() == 0.0 => Ok(*f as i64),
-        other => Err(ExecutorError::type_error_for(
-            "int",
-            other.type_name(),
-            name,
-        )),
-    }
-}
-
 fn value_list(values: impl IntoIterator<Item = Value>) -> Value {
     Value::List(Rc::new(List::new_with(
         values.into_iter().map(VRc::new).collect(),
@@ -60,6 +43,39 @@ fn tagged_map(
     Value::Map(Rc::new(map))
 }
 
+fn camera_value(
+    executor: &Executor,
+    stack_idx: usize,
+    position_idx: i32,
+    forward_idx: i32,
+    up_idx: i32,
+    near_idx: i32,
+    far_idx: i32,
+) -> Result<Value, ExecutorError> {
+    Ok(tagged_map(
+        "camera",
+        [
+            (
+                "position",
+                read_value(executor, stack_idx, position_idx, "position"),
+            ),
+            (
+                "forward",
+                read_value(executor, stack_idx, forward_idx, "forward"),
+            ),
+            ("up", read_value(executor, stack_idx, up_idx, "up")),
+            (
+                "near",
+                Value::Float(read_float(executor, stack_idx, near_idx, "near")?),
+            ),
+            (
+                "far",
+                Value::Float(read_float(executor, stack_idx, far_idx, "far")?),
+            ),
+        ],
+    ))
+}
+
 #[stdlib_func]
 pub async fn initial_camera(
     _executor: &mut Executor,
@@ -73,17 +89,15 @@ pub async fn initial_camera(
                 value_list([Value::Integer(0), Value::Integer(0), Value::Integer(-10)]),
             ),
             (
-                "look_at",
-                value_list([Value::Integer(0), Value::Integer(0), Value::Integer(0)]),
+                "forward",
+                value_list([Value::Integer(0), Value::Integer(0), Value::Integer(1)]),
             ),
             (
                 "up",
                 value_list([Value::Integer(0), Value::Integer(1), Value::Integer(0)]),
             ),
-            ("fov", Value::Float(0.6981317007977318)),
             ("near", Value::Float(0.1)),
             ("far", Value::Integer(100)),
-            ("ortho", Value::Integer(0)),
         ],
     ))
 }
@@ -109,28 +123,5 @@ pub async fn initial_background(
 
 #[stdlib_func]
 pub async fn mk_camera(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    Ok(tagged_map(
-        "camera",
-        [
-            ("position", read_value(executor, stack_idx, -7, "position")),
-            ("look_at", read_value(executor, stack_idx, -6, "look_at")),
-            ("up", read_value(executor, stack_idx, -5, "up")),
-            (
-                "fov",
-                Value::Float(read_float(executor, stack_idx, -4, "fov")?),
-            ),
-            (
-                "near",
-                Value::Float(read_float(executor, stack_idx, -3, "near")?),
-            ),
-            (
-                "far",
-                Value::Float(read_float(executor, stack_idx, -2, "far")?),
-            ),
-            (
-                "ortho",
-                Value::Integer(read_int_flag(executor, stack_idx, -1, "ortho")?),
-            ),
-        ],
-    ))
+    camera_value(executor, stack_idx, -5, -4, -3, -2, -1)
 }

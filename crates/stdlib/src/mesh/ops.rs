@@ -144,40 +144,36 @@ pub async fn op_scale(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn op_scale_xyz(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
-    op_scale(executor, stack_idx).await
-}
-
-#[stdlib_func]
 pub async fn op_rotate(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let rotation = read_float3(executor, stack_idx, -1, "rotation")?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
+    let angle = crate::read_float(executor, stack_idx, -3, "radians")? as f32;
+    let axis = read_float3(executor, stack_idx, -2, "axis")?;
+    let axis = if axis.len_sq() <= 1e-12 {
+        Float3::Z
+    } else {
+        axis.normalize()
+    };
+    let pivot = match executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_lvalue_leader_rec()
+    {
+        Value::Nil => None,
+        value => Some(float3_from_value(value, "pivot")?),
+    };
     tree.for_each_mut(&mut |mesh| {
-        let center = mesh_center(mesh).unwrap_or(Float3::ZERO);
-        transform_mesh_positions(mesh, |p| rotate_point(p, center, rotation));
+        let center = pivot.unwrap_or_else(|| mesh_center(mesh).unwrap_or(Float3::ZERO));
+        transform_mesh_positions(mesh, |p| {
+            center + rotate_about_axis(p - center, axis, angle)
+        });
         for dot in &mut mesh.dots {
-            dot.norm = rotate_point(dot.norm, Float3::ZERO, rotation);
+            dot.norm = rotate_about_axis(dot.norm, axis, angle);
         }
         for lin in &mut mesh.lins {
-            lin.norm = rotate_point(lin.norm, Float3::ZERO, rotation);
+            lin.norm = rotate_about_axis(lin.norm, axis, angle);
         }
-    });
-    Ok(tree.into_value())
-}
-
-#[stdlib_func]
-pub async fn op_rotate_around(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
-    let pivot = read_float3(executor, stack_idx, -2, "pivot")?;
-    let rotation = read_float3(executor, stack_idx, -1, "rotation")?;
-    tree.for_each_mut(&mut |mesh| {
-        transform_mesh_positions(mesh, |p| rotate_point(p, pivot, rotation))
     });
     Ok(tree.into_value())
 }

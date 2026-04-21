@@ -1,10 +1,98 @@
 use std::collections::HashSet;
 
 use executor::{error::ExecutorError, executor::Executor, value::Value};
-use geo::simd::Float3;
+use geo::{
+    mesh::{Dot, Lin, Mesh, Tri},
+    simd::Float3,
+};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
+
+fn decode_mesh_ref(value: i32) -> Option<usize> {
+    (value < -1).then_some((-value - 2) as usize)
+}
+
+fn shift_dot_refs(dots: &mut [Dot], delta: usize) {
+    let delta = delta as i32;
+    for dot in dots {
+        if dot.inv >= 0 {
+            dot.inv += delta;
+        }
+        if dot.anti >= 0 {
+            dot.anti += delta;
+        }
+    }
+}
+
+fn shift_line_point_ref(value: &mut i32, dot_delta: usize, line_delta: usize) {
+    if *value >= 0 {
+        *value += line_delta as i32;
+    } else if let Some(dot_idx) = decode_mesh_ref(*value) {
+        *value = mesh_ref(dot_idx + dot_delta);
+    }
+}
+
+fn shift_line_surface_ref(value: &mut i32, tri_delta: usize, line_delta: usize) {
+    if *value >= 0 {
+        *value += line_delta as i32;
+    } else if let Some(tri_idx) = decode_mesh_ref(*value) {
+        *value = mesh_ref(tri_idx + tri_delta);
+    }
+}
+
+fn shift_line_refs(lines: &mut [Lin], dot_delta: usize, line_delta: usize, tri_delta: usize) {
+    for line in lines {
+        shift_line_point_ref(&mut line.prev, dot_delta, line_delta);
+        shift_line_point_ref(&mut line.next, dot_delta, line_delta);
+        shift_line_surface_ref(&mut line.inv, tri_delta, line_delta);
+        if line.anti >= 0 {
+            line.anti += line_delta as i32;
+        }
+    }
+}
+
+fn shift_tri_edge_ref(value: &mut i32, line_delta: usize, tri_delta: usize) {
+    if *value >= 0 {
+        *value += tri_delta as i32;
+    } else if let Some(line_idx) = decode_mesh_ref(*value) {
+        *value = mesh_ref(line_idx + line_delta);
+    }
+}
+
+fn shift_tri_refs(tris: &mut [Tri], line_delta: usize, tri_delta: usize) {
+    for tri in tris {
+        shift_tri_edge_ref(&mut tri.ab, line_delta, tri_delta);
+        shift_tri_edge_ref(&mut tri.bc, line_delta, tri_delta);
+        shift_tri_edge_ref(&mut tri.ca, line_delta, tri_delta);
+        if tri.anti >= 0 {
+            tri.anti += tri_delta as i32;
+        }
+    }
+}
+
+fn append_mesh_into(out: &mut Mesh, mesh: &Mesh) {
+    let dot_delta = out.dots.len();
+    let line_delta = out.lins.len();
+    let tri_delta = out.tris.len();
+
+    let mut dots = mesh.dots.clone();
+    let mut lins = mesh.lins.clone();
+    let mut tris = mesh.tris.clone();
+
+    shift_dot_refs(&mut dots, dot_delta);
+    shift_line_refs(&mut lins, dot_delta, line_delta, tri_delta);
+    shift_tri_refs(&mut tris, line_delta, tri_delta);
+
+    out.dots.extend(dots);
+    out.lins.extend(lins);
+    out.tris.extend(tris);
+    for &tag in &mesh.tag {
+        if !out.tag.contains(&tag) {
+            out.tag.push(tag);
+        }
+    }
+}
 
 #[stdlib_func]
 pub async fn tag_filter(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
@@ -14,6 +102,25 @@ pub async fn tag_filter(executor: &mut Executor, stack_idx: usize) -> Result<Val
         .await?
         .map(MeshTree::into_value)
         .unwrap_or_else(|| list_value([])))
+}
+
+#[stdlib_func]
+pub async fn mesh_collapse(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let tree = read_mesh_tree_arg(executor, stack_idx, -1, "target").await?;
+    let mut iter = tree.iter();
+    let Some(first) = iter.next() else {
+        return Ok(mesh_from_parts(vec![], vec![], vec![]));
+    };
+
+    let mut out = first.clone();
+    for mesh in iter {
+        append_mesh_into(&mut out, mesh);
+    }
+    debug_assert!(out.has_consistent_topology());
+    Ok(Value::Mesh(out.into()))
 }
 
 #[stdlib_func]

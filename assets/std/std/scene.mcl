@@ -6,13 +6,9 @@
 
 # constructors
 
-# build a camera from a position, a point to look at, and an up vector.
-# `fov` is the vertical field of view in radians.
-let Camera = |position = [0, 0, -10], look_at = [0, 0, 0], up = 1u, fov = 0.6981317007977318, near = 0.1, far = 100, ortho = 0| __monocurl__native__ mk_camera(position, look_at, up, fov, near, far, ortho)
+# build a camera from a position, a forward vector, and an up vector.
+let Camera = |position = [0, 0, -10], forward = 1f, up = 1u, near = 0.1, far = 100| __monocurl__native__ mk_camera(position, forward, up, near, far)
 
-# orthographic camera with an explicit viewport width (height derived from
-# aspect ratio).
-let OrthographicCamera = |position = [0, 0, -10], look_at = [0, 0, 0], up = 1u, width = 10, near = 0.1, far = 100| Camera(position, look_at, up, 0, near, far, 1)
 
 # defaults
 # these two names are conventional — `mesh camera = DEFAULT_CAMERA` /

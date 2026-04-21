@@ -62,18 +62,18 @@ let Lerp = |time = 1, vars = [], rate = smooth| PrimitiveAnim(time, vars, rate)
 # these each have a specific transform they apply to the follower start state
 # before letting a standard interpolation finish the job.
 
-let __mesh_lerp = |a, b, state, t| __monocurl__native__ mesh_lerp_value(a, b, t)
-
 # points start co-located at the mesh centroid and grow outward.
 let Grow = |meshes = [], time = 1, rate = smooth| {
     let embed = |start, dst| __monocurl__native__ grow_embed(start, dst)
-    return PrimitiveAnim(time, meshes, rate, embed, __mesh_lerp)
+    let lerp = |a, b, state, t| __monocurl__native__ mesh_lerp_value(a, b, t)
+    return PrimitiveAnim(time, meshes, rate, embed, lerp)
 }
 
 # interpolate opacity from 0 (or along `delta`) to full.
-let Fade = |meshes = [], time = 1, rate = smooth, delta = [0, 0, 0]| {
+let Fade = |delta = [0, 0, 0], meshes = [], time = 1, rate = smooth| {
     let embed = |start, dst| __monocurl__native__ fade_embed(start, dst, delta)
-    return PrimitiveAnim(time, meshes, rate, embed, __mesh_lerp)
+    let lerp = |a, b, state, t| __monocurl__native__ mesh_lerp_value(a, b, t)
+    return PrimitiveAnim(time, meshes, rate, embed, lerp)
 }
 
 # tracing animation for line / polyline content.
@@ -112,21 +112,42 @@ let TagBend = |meshes = [], time = 1, rate = smooth| {
 }
 
 # camera-aware lerp that slerps the orientation to avoid gimbal lock.
-let CameraLerp = |camera = [], time = 1, rate = smooth| __monocurl__native__ camera_lerp_anim(camera, time, rate)
+let CameraLerp = |&camera, time = 1, rate = smooth| __monocurl__native__ camera_lerp_anim(camera, time, rate)
 
 # indication animations
 
 # flash a mesh to `color` and back.
-let Highlight = |value, color, time = 1, rate = smooth| {
-    let embed = |start, dst| __monocurl__native__ highlight_embed(start, dst, color)
-    return PrimitiveAnim(time, [value], rate, embed, __mesh_lerp)
+let Highlight = |&value, color, time = 1, rate = smooth| anim {
+    var highlighted = 0
+    var original = 0
+    var state = 0
+    [highlighted, original, state] = __monocurl__native__ highlight_embed(value, value, color)
+
+    value = highlighted
+    play Set()
+
+    value = original
+    play Trans([], time, rate)
 }
 
 # brief "write then unwrite" over stroke of a mesh.
-let Flash = |value, time = 1, lead = smooth, trail = smooth| {
-    let _ = trail
-    let embed = |start, dst| __monocurl__native__ flash_embed(start, dst)
-    return PrimitiveAnim(time, [value], lead, embed, __mesh_lerp)
+let Flash = |&value, time = 1, lead = smooth, trail = smooth| anim {
+    var start = 0
+    var original = 0
+    var state = 0
+    [start, original, state] = __monocurl__native__ flash_embed(value, value)
+
+    value = start
+    play Set()
+
+    value = original
+    play Write([], time / 2, lead)
+
+    value = start
+    play Trans([], time / 2, trail)
+
+    value = original
+    play Set()
 }
 
 # transfer animations
@@ -144,13 +165,20 @@ let LaggedMap = |anims, average_offset = 0.1, unit_map = smooth| __monocurl__nat
 # animation operators
 # play slow{2} Lerp(1)   → Lerp runs over 2 seconds
 # play fast{2} Lerp(2)   → Lerp runs over 1 second
-# play delayed{0.5} Lerp(1) → 0.5s pause, then Lerp
+# play delay{0.5} Lerp(1) → 0.5s pause, then Lerp
+# play anim { play Wait(0.5); play Lerp(1) } → 0.5s pause, then Lerp
 
 let slow = operator |target, factor = 2| [target, __monocurl__native__ anim_time_scale(target, factor)]
 
 let fast = operator |target, factor = 2| [target, __monocurl__native__ anim_time_scale(target, 1 / factor)]
 
-let delayed = operator |target, time = 0.5| [target, __monocurl__native__ anim_delayed(target, time)]
+let delay = operator |target, time = 1| {
+    let go = |dt| anim {
+        play Wait(dt)
+        play target
+    }
+    return [target, go(dt: time)]
+}
 
 # override the rate function on a primitive animation.
 let with_rate = operator |target, rate| [target, __monocurl__native__ anim_with_rate(target, rate)]

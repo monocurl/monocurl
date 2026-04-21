@@ -152,6 +152,41 @@ impl ExecResult {
         }
     }
 
+    fn assert_float_list_approx(&self, expected: &[f64], eps: f64) {
+        self.assert_ok();
+        match &self.value {
+            Some(Value::List(list)) => {
+                assert_eq!(
+                    list.elements().len(),
+                    expected.len(),
+                    "list length mismatch"
+                );
+
+                for (actual, expected) in list.elements().iter().zip(expected.iter()) {
+                    match with_heap(|h| h.get(actual.key()).clone()) {
+                        Value::Float(f) => assert!(
+                            (f - *expected).abs() < eps,
+                            "float mismatch: expected {}, got {}",
+                            expected,
+                            f
+                        ),
+                        Value::Integer(n) => assert!(
+                            (n as f64 - *expected).abs() < eps,
+                            "float mismatch: expected {}, got {}",
+                            expected,
+                            n
+                        ),
+                        other => panic!("expected numeric list element, got {}", other.type_name()),
+                    }
+                }
+            }
+            other => panic!(
+                "expected List, got {}",
+                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+            ),
+        }
+    }
+
     fn assert_int_list(&self, expected: &[i64]) {
         self.assert_ok();
         match &self.value {
@@ -2031,7 +2066,33 @@ fn test_mesh_stdlib_reports_named_bad_list_argument() {
     ",
         &["mesh"],
     );
-    r.assert_error("invalid argument 'x'");
+    r.assert_error("invalid argument 'x_min_max_samples'");
+    r.assert_error("expected list of length 3");
+    r.assert_error("got int");
+}
+
+#[test]
+fn test_parametric_func_reports_named_bad_sample_range_argument() {
+    let r = run_with_stdlib(
+        "
+        let result = ParametricFunc(|t| [t, 0, 0], 5)
+    ",
+        &["mesh"],
+    );
+    r.assert_error("invalid argument 't_min_max_samples'");
+    r.assert_error("expected list of length 3");
+    r.assert_error("got int");
+}
+
+#[test]
+fn test_explicit_func_reports_named_bad_sample_range_argument() {
+    let r = run_with_stdlib(
+        "
+        let result = ExplicitFunc(|x| x, 5)
+    ",
+        &["mesh"],
+    );
+    r.assert_error("invalid argument 'x_min_max_samples'");
     r.assert_error("expected list of length 3");
     r.assert_error("got int");
 }
@@ -2060,6 +2121,127 @@ fn test_color_stdlib_reports_named_bad_color_argument() {
     r.assert_error("invalid argument 'color'");
     r.assert_error("expected list of length 4");
     r.assert_error("got int");
+}
+
+#[test]
+fn test_field_uses_sample_counts_and_index_callback() {
+    let r = run_with_stdlib(
+        "
+        let result = Field(|pos, idx| idx[0] * 10 + idx[1], [0, 1, 3], [0, 1, 2])
+    ",
+        &["mesh"],
+    );
+    r.assert_int_list(&[0, 1, 10, 11, 20, 21]);
+}
+
+#[test]
+fn test_color_grid_uses_sample_counts() {
+    let r = run_with_stdlib(
+        "
+        let result = len(mesh_triangle_set(ColorGrid(|pos, idx| [1, 0, 0, 1], [0, 1, 3], [0, 1, 4])))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(12);
+}
+
+#[test]
+fn test_parametric_func_sample_limit_is_reported() {
+    let r = run_with_stdlib(
+        "
+        let result = ParametricFunc(|t| [t, 0, 0], [0, 1, 20000])
+    ",
+        &["mesh"],
+    );
+    r.assert_error("parametric samples is too large");
+}
+
+#[test]
+fn test_mesh_collapse_flattens_tree_into_one_mesh() {
+    let r = run_with_stdlib(
+        "
+        let result = mesh_center(mesh_collapse([Line([0, 0, 0], [1, 0, 0]), Line([2, 0, 0], [3, 0, 0])]))
+    ",
+        &["mesh"],
+    );
+    r.assert_float_list_approx(&[1.5, 0.0, 0.0], 1e-9);
+}
+
+#[test]
+fn test_mesh_trans_helper_interpolates_without_animation_context() {
+    let r = run_with_stdlib(
+        "
+        let result = mesh_center(trans(Dot([0, 0, 0]), Dot([2, 0, 0]), 0.5))
+    ",
+        &["mesh"],
+    );
+    r.assert_float_list_approx(&[1.0, 0.0, 0.0], 1e-9);
+}
+
+#[test]
+fn test_rotate_operator_uses_angle_axis_and_optional_pivot() {
+    let r = run_with_stdlib(
+        "
+        let result = mesh_center(rotate{1.5707963267948966, 1f, [0, 0, 0]} Dot([1, 0, 0]))
+    ",
+        &["mesh"],
+    );
+    r.assert_float_list_approx(&[0.0, 1.0, 0.0], 1e-5);
+}
+
+#[test]
+fn test_camera_stdlib_uses_forward_vector_surface() {
+    let r = run_with_stdlib(
+        "
+        let cam = Camera([1, 2, 3], [0, 0, 2], [0, 1, 0], 0.2, 50)
+        let result = [cam[\"position\"], cam[\"forward\"], cam[\"near\"], cam[\"far\"]]
+    ",
+        &["scene"],
+    );
+    r.assert_ok();
+    match &r.value {
+        Some(Value::List(list)) => {
+            let elems = list.elements();
+            match with_heap(|h| h.get(elems[0].key()).clone()) {
+                Value::List(position) => {
+                    let coords: Vec<_> = position
+                        .elements()
+                        .iter()
+                        .map(|elem| with_heap(|h| h.get(elem.key()).clone()))
+                        .collect();
+                    assert!(matches!(coords[0], Value::Integer(1)));
+                    assert!(matches!(coords[1], Value::Integer(2)));
+                    assert!(matches!(coords[2], Value::Integer(3)));
+                }
+                other => panic!("expected camera position list, got {}", other.type_name()),
+            }
+            match with_heap(|h| h.get(elems[1].key()).clone()) {
+                Value::List(forward) => {
+                    let coords: Vec<_> = forward
+                        .elements()
+                        .iter()
+                        .map(|elem| with_heap(|h| h.get(elem.key()).clone()))
+                        .collect();
+                    assert!(matches!(coords[0], Value::Integer(0)));
+                    assert!(matches!(coords[1], Value::Integer(0)));
+                    assert!(matches!(coords[2], Value::Integer(2)));
+                }
+                other => panic!("expected camera forward list, got {}", other.type_name()),
+            }
+            assert!(matches!(
+                with_heap(|h| h.get(elems[2].key()).clone()),
+                Value::Float(f) if (f - 0.2).abs() < 1e-9
+            ));
+            assert!(matches!(
+                with_heap(|h| h.get(elems[3].key()).clone()),
+                Value::Float(f) if (f - 50.0).abs() < 1e-9
+            ));
+        }
+        other => panic!(
+            "expected camera surface list, got {}",
+            other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+        ),
+    }
 }
 
 // -- stack overflow --

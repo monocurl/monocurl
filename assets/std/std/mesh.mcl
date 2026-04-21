@@ -70,14 +70,14 @@ let Cylinder = |center = [0, 0, 0], radius = 1, height = 2, direction = 1u, samp
 let Cone = |apex = [0, 1, 0], base = [0, 0, 0], radius = 1, sample_count = 32|
     __monocurl__native__ mk_cone(apex, base, radius, sample_count)
 
-let Torus = |center = [0, 0, 0], radii = [1, 0.3], normal = 1u, samples = [48, 24]| {
+let Torus = |radii = [1, 0.3], samples = [48, 24], normal = 1u| {
     var major_radius = 0
     var minor_radius = 0
     var major_samples = 0
     var minor_samples = 0
     [major_radius, minor_radius] = __monocurl__native__ expect_list("radii", radii, 2)
     [major_samples, minor_samples] = __monocurl__native__ expect_list("samples", samples, 2)
-    return __monocurl__native__ mk_torus(center, major_radius, minor_radius, normal, major_samples, minor_samples)
+    return __monocurl__native__ mk_torus(major_radius, minor_radius, normal, major_samples, minor_samples)
 }
 
 let Plane = |normal = 1u, dist = 0, size = [4, 4]| {
@@ -105,28 +105,28 @@ let Image = |name, center = [0, 0, 0], size = [1, 1], normal = 1f| {
     return __monocurl__native__ mk_image(name, center, width, height, normal)
 }
 
-let ColorGrid = |color_at, x = [-1, 1, 0.1], y = [-1, 1, 0.1], mask = |pos| 1| {
+let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], mask = |pos| 1| {
     var x_min = 0
     var x_max = 0
-    var x_step = 0
+    var x_samples = 0
     var y_min = 0
     var y_max = 0
-    var y_step = 0
-    [x_min, x_max, x_step] = __monocurl__native__ expect_list("x", x, 3)
-    [y_min, y_max, y_step] = __monocurl__native__ expect_list("y", y, 3)
-    return __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_step, y_step, mask, color_at)
+    var y_samples = 0
+    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    return __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, mask, color_at)
 }
 
-let Field = |mesh_at, x = [-1, 1, 0.1], y = [-1, 1, 0.1], mask = |pos| 1| {
+let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], mask = |pos| 1| {
     var x_min = 0
     var x_max = 0
-    var x_step = 0
+    var x_samples = 0
     var y_min = 0
     var y_max = 0
-    var y_step = 0
-    [x_min, x_max, x_step] = __monocurl__native__ expect_list("x", x, 3)
-    [y_min, y_max, y_step] = __monocurl__native__ expect_list("y", y, 3)
-    return __monocurl__native__ mk_field(x_min, x_max, y_min, y_max, x_step, y_step, mask, mesh_at)
+    var y_samples = 0
+    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    return __monocurl__native__ mk_field(x_min, x_max, y_min, y_max, x_samples, y_samples, mask, mesh_at)
 }
 
 # text / labels
@@ -218,50 +218,53 @@ let PolarAxis = |center = [0, 0, 0], normal = 1f, theta = [-5, 5, 1, 1], radius 
     return __monocurl__native__ mk_polar_axis(center, normal, theta_min, theta_max, theta_unit, theta_tick_step, radius_min, radius_max, radius_unit, radius_tick_step)
 }
 
-let ParametricFunc = |f, domain = [0, 1], samples = 64| {
+let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
     var min = 0
     var max = 0
-    [min, max] = __monocurl__native__ expect_list("domain", domain, 2)
+    var samples = 0
+    [min, max, samples] = __monocurl__native__ expect_list("t_min_max_samples", t_min_max_samples, 3)
     return __monocurl__native__ mk_parametric(f, min, max, samples)
 }
 
-let ExplicitFunc = |f, domain = [-5, 5], samples = 128| {
+let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128]| {
     var min = 0
     var max = 0
-    [min, max] = __monocurl__native__ expect_list("domain", domain, 2)
+    var samples = 0
+    [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
     return __monocurl__native__ mk_explicit(f, min, max, samples)
 }
 
-let ExplicitFunc2d = |f, x = [-1, 1, 0.1], y = [-1, 1, 0.1]| {
+let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21]| {
     var x_min = 0
     var x_max = 0
-    var x_step = 0
+    var x_samples = 0
     var y_min = 0
     var y_max = 0
-    var y_step = 0
-    [x_min, x_max, x_step] = __monocurl__native__ expect_list("x", x, 3)
-    [y_min, y_max, y_step] = __monocurl__native__ expect_list("y", y, 3)
-    return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_step, y_step)
+    var y_samples = 0
+    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
 }
 
-let ImplicitFunc2d = |f, x = [-1, 1, 0.05], y = [-1, 1, 0.05]| {
+let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 41], y_min_max_samples = [-1, 1, 41]| {
     var x_min = 0
     var x_max = 0
-    var x_step = 0
+    var x_samples = 0
     var y_min = 0
     var y_max = 0
-    var y_step = 0
-    [x_min, x_max, x_step] = __monocurl__native__ expect_list("x", x, 3)
-    [y_min, y_max, y_step] = __monocurl__native__ expect_list("y", y, 3)
-    return __monocurl__native__ mk_implicit2d(f, x_min, x_max, y_min, y_max, x_step, y_step)
+    var y_samples = 0
+    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    return __monocurl__native__ mk_implicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
 }
 
-let ExplicitFuncDiff = |f, g, domain = [-5, 5], samples = 128, fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]]| {
+let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]]| {
     var min = 0
     var max = 0
+    var samples = 0
     var lower_fill = 0
     var upper_fill = 0
-    [min, max] = __monocurl__native__ expect_list("domain", domain, 2)
+    [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
     [lower_fill, upper_fill] = __monocurl__native__ expect_list("fills", fills, 2)
     return __monocurl__native__ mk_explicit_diff(f, g, min, max, samples, lower_fill, upper_fill)
 }
@@ -283,29 +286,22 @@ let BoundingBox = |target, buffer = 0.1|
 
 # transform operators
 
-let shift = operator |target, delta = [0, 0, 0]| {
+let shift = operator |target, delta| {
     let go = |d| __monocurl__native__ op_shift(target, d)
     return [go(d: [0, 0, 0]), go(d: delta)]
 }
 
 let scale = operator |target, factor = 1| {
     let go = |s| __monocurl__native__ op_scale(target, s)
+    if (__monocurl__native__ is_list(factor)) {
+        return [go(s: [1, 1, 1]), go(s: factor)]
+    }
     return [go(s: 1), go(s: factor)]
 }
 
-let scale_xyz = operator |target, factors = [1, 1, 1]| {
-    let go = |s| __monocurl__native__ op_scale(target, s)
-    return [go(s: [1, 1, 1]), go(s: factors)]
-}
-
-let rotate = operator |target, rotation = [0, 0, 0]| {
-    let go = |r| __monocurl__native__ op_rotate(target, r)
-    return [go(r: [0, 0, 0]), go(r: rotation)]
-}
-
-let rotate_around = operator |target, pivot = [0, 0, 0], rotation = [0, 0, 0]| {
-    let go = |r| __monocurl__native__ op_rotate_around(target, pivot, r)
-    return [go(r: [0, 0, 0]), go(r: rotation)]
+let rotate = operator |target, radians, axis = 1f, pivot = nil| {
+    let go = |angle| __monocurl__native__ op_rotate(target, angle, axis, pivot)
+    return [go(angle: 0), go(angle: radians)]
 }
 
 let fade = operator |target, opacity = 0| {
@@ -385,6 +381,23 @@ let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 
 }
 
 let tag_filter = |target, filter| __monocurl__native__ tag_filter(target, filter)
+let mesh_collapse = |target| __monocurl__native__ mesh_collapse(target)
+
+let trans = |start, end, t, path_arc = 0| {
+    var aligned_start = 0
+    var aligned_end = 0
+    var state = 0
+    [aligned_start, aligned_end, state] = __monocurl__native__ trans_embed(start, end)
+    return __monocurl__native__ trans_lerp_value(aligned_start, aligned_end, state, t, path_arc)
+}
+
+let bend = |start, end, t| {
+    var aligned_start = 0
+    var aligned_end = 0
+    var state = 0
+    [aligned_start, aligned_end, state] = __monocurl__native__ bend_embed(start, end)
+    return __monocurl__native__ bend_lerp_value(aligned_start, aligned_end, t)
+}
 
 # queries
 

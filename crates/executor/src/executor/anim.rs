@@ -398,6 +398,10 @@ impl Executor {
 
     pub(super) async fn exec_play(&mut self, stack_idx: usize) -> ExecSingle {
         let val = self.state.stack_mut(stack_idx).pop();
+        let val = match val.elide_wrappers(self).await {
+            Ok(val) => val,
+            Err(e) => return ExecSingle::Error(e),
+        };
 
         match val {
             Value::AnimBlock(anim_block) => match self.spawn_anim_block(stack_idx, anim_block) {
@@ -417,11 +421,15 @@ impl Executor {
                 }
             }
             Value::List(list) => {
-                let values: Vec<Value> = list
-                    .elements
-                    .iter()
-                    .map(|k| with_heap(|h| h.get(k.key()).clone()))
-                    .collect();
+                let mut values = Vec::with_capacity(list.elements.len());
+                for key in list.elements.iter() {
+                    let elem = with_heap(|h| h.get(key.key()).clone());
+                    let elem = match elem.elide_wrappers(self).await {
+                        Ok(elem) => elem,
+                        Err(e) => return ExecSingle::Error(e),
+                    };
+                    values.push(elem);
+                }
                 let mut reserved = Vec::new();
                 let mut planned_primitives = Vec::new();
                 for elem in &values {

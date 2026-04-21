@@ -16,24 +16,20 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct CameraSnapshot {
     pub position: Float3,
-    pub look_at: Float3,
+    pub forward: Float3,
     pub up: Float3,
-    pub fov: f32,
     pub near: f32,
     pub far: f32,
-    pub ortho: bool,
 }
 
 impl Default for CameraSnapshot {
     fn default() -> Self {
         Self {
             position: Float3::new(0.0, 0.0, -10.0),
-            look_at: Float3::ZERO,
+            forward: Float3::Z,
             up: Float3::Y,
-            fov: 0.698_131_7,
             near: 0.1,
             far: 100.0,
-            ortho: false,
         }
     }
 }
@@ -143,22 +139,6 @@ async fn read_f32(
     }
 }
 
-async fn read_bool_flag(
-    executor: &mut Executor,
-    value: Value,
-    target: &'static str,
-) -> Result<bool, ExecutorError> {
-    match value.elide_wrappers(executor).await? {
-        Value::Integer(n) => Ok(n != 0),
-        Value::Float(f) => Ok(f != 0.0),
-        other => Err(ExecutorError::type_error_for(
-            "number",
-            other.type_name(),
-            target,
-        )),
-    }
-}
-
 async fn read_float3(
     executor: &mut Executor,
     value: Value,
@@ -255,14 +235,16 @@ async fn camera_snapshot_from_value(
     let Some(position) = map_field_value(&map, "position") else {
         return Err(ExecutorError::missing_field("camera", "position"));
     };
-    let Some(look_at) = map_field_value(&map, "look_at") else {
-        return Err(ExecutorError::missing_field("camera", "look_at"));
+    let position = read_float3(executor, position, "camera.position").await?;
+    let forward = if let Some(forward) = map_field_value(&map, "forward") {
+        read_float3(executor, forward, "camera.forward").await?
+    } else if let Some(look_at) = map_field_value(&map, "look_at") {
+        read_float3(executor, look_at, "camera.look_at").await? - position
+    } else {
+        return Err(ExecutorError::missing_field("camera", "forward"));
     };
     let Some(up) = map_field_value(&map, "up") else {
         return Err(ExecutorError::missing_field("camera", "up"));
-    };
-    let Some(fov) = map_field_value(&map, "fov") else {
-        return Err(ExecutorError::missing_field("camera", "fov"));
     };
     let Some(near) = map_field_value(&map, "near") else {
         return Err(ExecutorError::missing_field("camera", "near"));
@@ -270,18 +252,13 @@ async fn camera_snapshot_from_value(
     let Some(far) = map_field_value(&map, "far") else {
         return Err(ExecutorError::missing_field("camera", "far"));
     };
-    let Some(ortho) = map_field_value(&map, "ortho") else {
-        return Err(ExecutorError::missing_field("camera", "ortho"));
-    };
 
     Ok(CameraSnapshot {
-        position: read_float3(executor, position, "camera.position").await?,
-        look_at: read_float3(executor, look_at, "camera.look_at").await?,
+        position,
+        forward,
         up: read_float3(executor, up, "camera.up").await?,
-        fov: read_f32(executor, fov, "camera.fov").await?,
         near: read_f32(executor, near, "camera.near").await?,
         far: read_f32(executor, far, "camera.far").await?,
-        ortho: read_bool_flag(executor, ortho, "camera.ortho").await?,
     })
 }
 
