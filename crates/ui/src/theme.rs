@@ -123,7 +123,6 @@ pub struct Theme {
 
     pub text_primary: Rgba,
     pub text_muted: Rgba,
-    pub text_inverse: Rgba,
     pub link_text: Rgba,
     pub danger: Rgba,
 
@@ -140,6 +139,7 @@ pub struct Theme {
     pub row_hover_overlay: Rgba,
 
     pub split_divider: Rgba,
+    pub timeline_transport_color: Rgba,
 
     pub timeline_background: Hsla,
     pub timeline_toolbar_background: Rgba,
@@ -162,11 +162,14 @@ impl Theme {
     }
 
     pub fn light() -> Self {
+        let timeline_background = hsla(0.61, 0.21, 0.87, 1.0);
+        let chrome_background: Rgba = timeline_background.into();
+
         Self {
             mode: ThemeMode::Light,
-            app_background: rgba(0xE8ECF2),
-            document_background: rgba(0xF5F7FA),
-            viewport_background: rgba(0xDDE2EB),
+            app_background: chrome_background,
+            document_background: chrome_background,
+            viewport_background: chrome_background,
             viewport_stage_background: rgba(0xFAFBFD),
             viewport_status_playing: rgba(0x11111B),
             viewport_status_loading: rgba(0x1E66F5),
@@ -176,30 +179,31 @@ impl Theme {
 
             text_primary: rgba(0x4C4F69),
             text_muted: rgba(0x6C6F85),
-            text_inverse: rgba(0xEFF1F5),
             link_text: rgba(0x1E66F5),
             danger: rgba(0xD20F39),
 
             accent: rgba(0x1E66F5),
 
-            navbar_background: rgba(0xD8DDE6),
+            navbar_background: chrome_background,
             navbar_border: rgba(0x9CA0B0),
-            tab_background: rgba(0xCDD3DE),
+            tab_background: chrome_background,
             tab_active_background: rgba(0xECEFF5),
-            tab_close_hover_background: rgba(0xBCC0CC),
+            tab_close_hover_background: rgba(0xCCD2DB),
 
-            home_sidebar_background: rgba(0xE1E6EE),
-            home_panel_background: rgba(0xECEFF5),
+            home_sidebar_background: chrome_background,
+            home_panel_background: chrome_background,
             row_hover_overlay: Rgba {
                 a: 0.08,
                 ..rgba(0x11111B)
             },
 
             split_divider: rgba(0x9CA0B0),
+            timeline_transport_color: rgba(0x1E66F5),
 
-            timeline_background: hsla(0.61, 0.21, 0.87, 1.0),
+            timeline_background,
+
             timeline_toolbar_background: rgba(0xE1E6EE),
-            timeline_slide_background: rgba(0xCDD3DE),
+            timeline_slide_background: chrome_background,
             timeline_active_border: rgba(0x1E66F5),
             timeline_inactive_border: rgba(0x8C8FA1),
             timeline_connector: rgba(0xBCC0CC),
@@ -211,49 +215,55 @@ impl Theme {
     }
 
     pub fn dark() -> Self {
+        let timeline_background: Rgba = rgba(0x2B2E2F);
+        let chrome_background: Rgba = timeline_background;
+        let timeline_background: Hsla = timeline_background.into();
+        let active_surface: Rgba = rgba(0x1b1b1b);
+        let dark_home_nav: Rgba = rgba(0x121212);
+
         Self {
             mode: ThemeMode::Dark,
-            app_background: rgba(0x2B2C2E),
-            document_background: rgba(0x2E2F31),
-            viewport_background: rgba(0x66666B),
-            viewport_stage_background: rgba(0xF2E9E4),
+            app_background: dark_home_nav,
+            document_background: chrome_background,
+            viewport_background: chrome_background,
+            viewport_stage_background: rgba(0x121720),
             viewport_status_playing: rgba(0xFFFFFF),
-            viewport_status_loading: rgba(0x7DBEFF),
+            viewport_status_loading: rgba(0x1E66F5),
             viewport_status_paused: rgba(0xFFFFFF),
             viewport_status_runtime_error: rgba(0xC18FFF),
             viewport_status_compile_error: rgba(0xF07A7A),
 
             text_primary: rgba(0xECECF0),
             text_muted: rgba(0xB7B8BE),
-            text_inverse: rgba(0xFFFFFF),
-            link_text: rgba(0x5AA8FF),
+            link_text: rgba(0x4D8EFF),
             danger: rgba(0xF07A7A),
 
-            accent: rgba(0xE3C318),
+            accent: rgba(0x4D8EFF),
 
-            navbar_background: rgba(0x343538),
-            navbar_border: rgba(0x64666B),
-            tab_background: rgba(0x303134),
-            tab_active_background: rgba(0x3A3B3E),
-            tab_close_hover_background: rgba(0x4A4B50),
+            navbar_background: dark_home_nav,
+            navbar_border: rgba(0x2F2F2F),
+            tab_background: dark_home_nav,
+            tab_active_background: active_surface,
+            tab_close_hover_background: rgba(0x3B4350),
 
             home_sidebar_background: rgba(0x000000),
-            home_panel_background: rgba(0x191A1C),
+            home_panel_background: dark_home_nav,
             row_hover_overlay: Rgba {
                 a: 0.06,
                 ..rgba(0xFFFFFF)
             },
 
-            split_divider: rgba(0x131416),
+            split_divider: rgba(0x000000),
+            timeline_transport_color: rgba(0x1E66F5),
 
-            timeline_background: hsla(0.0, 0.0, 0.18, 1.0),
-            timeline_toolbar_background: rgba(0x000000),
-            timeline_slide_background: rgba(0x2F3032),
+            timeline_background,
+            timeline_toolbar_background: dark_home_nav,
+            timeline_slide_background: chrome_background,
             timeline_active_border: rgba(0xE3C318),
-            timeline_inactive_border: rgba(0xD1B11A),
-            timeline_connector: rgba(0xC0C1C8),
-            timeline_tick: rgba(0xC0C1C8),
-            timeline_text: rgba(0xF3F3F6),
+            timeline_inactive_border: rgba(0x7C8391),
+            timeline_connector: gpui::white().into(),
+            timeline_tick:  gpui::white().into(),
+            timeline_text: gpui::white().into(),
             timeline_subtext: rgba(0xC8C9CF),
             timeline_playhead: rgba(0xECECF1),
         }
@@ -279,7 +289,6 @@ pub struct TextEditorStyles {
     pub bg_color: Hsla,
 
     pub text_font: Font,
-    pub italic_text_font: Font,
     pub text_size: Pixels,
     pub line_height: Pixels,
 
@@ -290,6 +299,8 @@ pub struct TextEditorStyles {
     pub numeric_literal_color: Hsla,
     pub argument_label_color: Hsla,
     pub identifier_color: Hsla,
+    pub invoked_function_color: Hsla,
+    pub invoked_operator_color: Hsla,
     pub operator_color: Hsla,
     pub punctuation_color: Hsla,
     pub default_text_color: Hsla,
@@ -334,7 +345,6 @@ impl TextEditorStyles {
         Self {
             bg_color: hsla(0.61, 0.16, 0.97, 1.0),
             text_font: gpui::font(FontSet::MONOSPACE),
-            italic_text_font: gpui::font(FontSet::MONOSPACE).italic(),
 
             text_size: px(14.0),
             line_height: px(20.0),
@@ -344,7 +354,9 @@ impl TextEditorStyles {
             text_literal_color: hsla(0.36, 0.29, 0.44, 1.0),
             numeric_literal_color: hsla(0.07, 0.99, 0.45, 1.0),
             identifier_color: hsla(0.61, 0.16, 0.23, 1.0),
-            argument_label_color: hsla(0.61, 0.91, 0.54, 1.0),
+            argument_label_color: hsla(0.93, 0.42, 0.50, 1.0),
+            invoked_function_color: hsla(0.58, 0.44, 0.49, 1.0),
+            invoked_operator_color: hsla(0.74, 0.26, 0.54, 1.0),
             operator_color: hsla(0.54, 0.59, 0.45, 1.0),
             punctuation_color: hsla(0.61, 0.13, 0.40, 1.0),
             default_text_color: hsla(0.61, 0.16, 0.23, 1.0),
@@ -373,44 +385,62 @@ impl TextEditorStyles {
     }
 
     pub fn dark() -> Self {
+        // Nightfox-inspired editor palette.
+        let nightfox_background: Rgba = rgba(0x192330);
+        let nightfox_bg1: Rgba = rgba(0x131A24);
+        let nightfox_bg2: Rgba = rgba(0x1D2A35);
+        let nightfox_fg: Rgba = rgba(0xCDCED2);
+        let nightfox_subtle: Rgba = rgba(0x6E7481);
+        let nightfox_cyan: Rgba = rgba(0x63CDCF);
+        let nightfox_blue: Rgba = rgba(0x81A1C1);
+        let nightfox_purple: Rgba = rgba(0xBB9AF7);
+        let nightfox_pink: Rgba = rgba(0xE08DCD);
+        let nightfox_orange: Rgba = rgba(0xE0AF68);
+        let nightfox_green: Rgba = rgba(0x81B29A);
+        let nightfox_soft_blue: Rgba = rgba(0x8FB9C9);
+        let nightfox_lavender: Rgba = rgba(0xB3A1D9);
+        let nightfox_rose: Rgba = rgba(0xC790A9);
+        let nightfox_yellow: Rgba = rgba(0xDBBC7F);
+        let nightfox_error: Rgba = rgba(0xEC6B64);
         Self {
-            bg_color: hsla(0.0, 0.0, 0.22, 1.0),
+            bg_color: nightfox_background.into(),
             text_font: gpui::font(FontSet::MONOSPACE),
-            italic_text_font: gpui::font(FontSet::MONOSPACE).italic(),
 
             text_size: px(14.0),
             line_height: px(20.0),
-            control_flow_color: hsla(0.96, 0.70, 0.75, 1.0),
-            non_control_flow_color: hsla(0.75, 0.62, 0.74, 1.0),
-            comment_color: hsla(0.0, 0.0, 0.46, 1.0),
-            text_literal_color: hsla(0.36, 0.46, 0.66, 1.0),
-            numeric_literal_color: hsla(0.52, 0.62, 0.73, 1.0),
-            identifier_color: hsla(0.00, 0.00, 0.84, 1.0),
-            argument_label_color: hsla(0.54, 0.65, 0.73, 1.0),
-            operator_color: hsla(0.00, 0.00, 0.84, 1.0),
-            punctuation_color: hsla(0.00, 0.00, 0.68, 1.0),
-            default_text_color: hsla(0.00, 0.00, 0.84, 1.0),
-            runtime_error_color: hsla(0.96, 0.82, 0.74, 1.0),
-            compile_time_error_color: hsla(0.96, 0.82, 0.74, 1.0),
-            compile_time_warning_color: hsla(0.13, 0.58, 0.70, 1.0),
-            cursor_color: hsla(0.00, 0.00, 0.84, 1.0),
+            control_flow_color: nightfox_purple.into(),
+            non_control_flow_color: nightfox_pink.into(),
+            comment_color: nightfox_subtle.into(),
+            text_literal_color: nightfox_green.into(),
+            numeric_literal_color: nightfox_orange.into(),
+            identifier_color: nightfox_fg.into(),
+            argument_label_color: nightfox_rose.into(),
+            invoked_function_color: nightfox_soft_blue.into(),
+            invoked_operator_color: nightfox_lavender.into(),
+            operator_color: nightfox_cyan.into(),
+            punctuation_color: nightfox_fg.into(),
+            default_text_color: nightfox_fg.into(),
+            runtime_error_color: nightfox_error.into(),
+            compile_time_error_color: nightfox_error.into(),
+            compile_time_warning_color: nightfox_yellow.into(),
+            cursor_color: nightfox_blue.into(),
             gutter_font: gpui::font(FontSet::MONOSPACE),
-            gutter_text_color: hsla(0.0, 0.0, 0.56, 1.0),
-            gutter_active_color: hsla(0.96, 0.70, 0.75, 1.0),
-            selection_color: hsla(0.59, 0.55, 0.64, 0.16),
-            active_line_color: hsla(0.0, 0.0, 0.25, 1.0),
-            scroll_color: hsla(0.0, 0.0, 0.76, 0.24),
-            scroll_background_color: hsla(0.0, 0.0, 0.18, 0.68),
-            popover_background_color: rgba(0x323336),
-            popover_border_color: rgba(0x54565C),
+            gutter_text_color: nightfox_subtle.into(),
+            gutter_active_color: nightfox_orange.into(),
+            selection_color: hsla(0.59, 0.16, 0.32, 0.60),
+            active_line_color: nightfox_bg2.into(),
+            scroll_color: nightfox_blue.into(),
+            scroll_background_color: nightfox_bg1.into(),
+            popover_background_color: nightfox_background.into(),
+            popover_border_color: nightfox_fg.into(),
             popover_shadow_color: hsla(0.0, 0.0, 0.0, 0.42),
-            popover_title_color: rgba(0xD8D8DE),
-            popover_text_color: rgba(0xC2C2C9),
-            popover_highlight_color: rgba(0x7DBEFF),
-            popover_selected_background_color: rgba(0x3B3C40),
-            popover_hover_background_color: rgba(0x424347),
-            popover_active_argument_color: rgba(0xC18FFF),
-            popover_inactive_argument_color: rgba(0x8C8A96),
+            popover_title_color: nightfox_fg.into(),
+            popover_text_color: nightfox_fg.into(),
+            popover_highlight_color: nightfox_purple.into(),
+            popover_selected_background_color: nightfox_bg2.into(),
+            popover_hover_background_color: nightfox_bg2.into(),
+            popover_active_argument_color: nightfox_pink,
+            popover_inactive_argument_color: nightfox_subtle.into(),
         }
     }
 }

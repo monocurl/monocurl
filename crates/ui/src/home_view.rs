@@ -6,16 +6,10 @@ use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{
     components::buttons::link_button, navbar_view::Navbar, state::window_state::WindowState,
-    theme::{ThemeMode, ThemeSettings},
+    theme::ThemeSettings,
 };
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
-const HOME_PURPLE_DIVIDER: Rgba = Rgba {
-    r: 0.20,
-    g: 0.14,
-    b: 0.28,
-    a: 1.0,
-};
 
 fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
     let home_dir = dirs::home_dir()?;
@@ -148,9 +142,9 @@ impl HomeView {
                 ),
             )
             .bg(theme.home_sidebar_background)
-            .min_w(px(500.))
+            .min_w(px(600.))
             .w(relative(0.5))
-            .max_w(px(600.))
+            .max_w(px(800.))
     }
 
     fn single_project(
@@ -334,11 +328,7 @@ impl HomeView {
 
     fn render_projects(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
-        let divider_color = if matches!(theme.mode, ThemeMode::Dark) {
-            HOME_PURPLE_DIVIDER
-        } else {
-            theme.accent
-        };
+        let divider_color = theme.accent;
 
         div()
             .flex()
@@ -405,7 +395,7 @@ impl HomeView {
                     .gap_2()
                     .p_2(),
             )
-            .child(div().h(px(1.)).w_full().bg(divider_color))
+            .child(div().h(px(0.5)).w_full().bg(divider_color))
             .child(self.projects_list(cx))
             .bg(theme.home_panel_background)
     }
@@ -414,11 +404,7 @@ impl HomeView {
 impl Render for HomeView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
-        let divider_color = if matches!(theme.mode, ThemeMode::Dark) {
-            HOME_PURPLE_DIVIDER
-        } else {
-            theme.accent
-        };
+        let divider_color = theme.accent;
 
         div()
             .flex_col()

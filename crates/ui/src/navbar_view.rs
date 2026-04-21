@@ -126,7 +126,7 @@ impl Render for DocumentList {
             .flex_shrink()
             .h_full()
             .id("document-list")
-            .border(px(1.0))
+            .border(px(0.5))
             .border_color(theme.navbar_border)
             .children(
                 state.open_documents().map(|doc| {
@@ -166,26 +166,7 @@ impl Navbar {
             div()
                 .w(px(34.0))
                 .h(px(18.0))
-                .px(px(2.0))
-                .flex()
-                .items_center()
-                .justify_end()
-                .rounded_full()
-                .border_1()
-                .border_color(theme.accent)
-                .bg(theme.navbar_background)
-                .child(
-                    div()
-                        .w(px(12.0))
-                        .h(px(12.0))
-                        .rounded_full()
-                        .bg(theme.accent),
-                )
-        } else {
-            div()
-                .w(px(34.0))
-                .h(px(18.0))
-                .px(px(2.0))
+                .px(px(0.5))
                 .flex()
                 .items_center()
                 .justify_start()
@@ -197,8 +178,29 @@ impl Navbar {
                     div()
                         .w(px(12.0))
                         .h(px(12.0))
+                        .ml(px(16.0))
                         .rounded_full()
-                        .bg(theme.text_inverse),
+                        .bg(theme.accent),
+                )
+        } else {
+            div()
+                .w(px(34.0))
+                .h(px(18.0))
+                .px(px(0.5))
+                .flex()
+                .items_center()
+                .justify_start()
+                .rounded_full()
+                .border_1()
+                .border_color(theme.accent)
+                .bg(theme.navbar_background)
+                .child(
+                    div()
+                        .w(px(12.0))
+                        .h(px(12.0))
+                        .ml(px(3.0))
+                        .rounded_full()
+                        .bg(theme.accent),
                 )
         };
 
@@ -226,7 +228,6 @@ impl Render for Navbar {
         let entity = self.window_state.upgrade().unwrap();
         let state = entity.read(cx);
         let theme = ThemeSettings::theme(cx);
-        let home_active = matches!(state.screen, ActiveScreen::Home);
 
         div()
             .flex()
@@ -247,6 +248,11 @@ impl Render for Navbar {
                     .flex_1()
                     .child(
                         div()
+                            .bg(if matches!(state.screen, ActiveScreen::Home) {
+                                theme.tab_active_background
+                            } else {
+                                theme.tab_background
+                            })
                             .child(link_button(
                                 "Home",
                                 theme.link_text,
@@ -263,13 +269,6 @@ impl Render for Navbar {
                             .flex()
                             .items_center(),
                     )
-                    .bg(if home_active {
-                        theme.tab_active_background
-                    } else {
-                        theme.tab_background
-                    })
-                    .border_r(px(0.5))
-                    .border_color(theme.navbar_border)
                     .child(div().flex_1().min_w_0().child(self.document_list.clone())),
             )
             .child(

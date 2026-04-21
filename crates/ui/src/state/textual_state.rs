@@ -14,7 +14,14 @@ use crate::{
 };
 
 pub type LexData = Token;
-pub type StaticAnalysisData = bool;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum StaticAnalysisData {
+    #[default]
+    None,
+    FunctionInvocation,
+    OperatorInvocation,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AutoCompleteCategory {

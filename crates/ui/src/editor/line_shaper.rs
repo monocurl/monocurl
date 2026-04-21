@@ -65,7 +65,7 @@ where
         let t_category = lex_data.category();
 
         // ignore analysis data for now
-        let color = match t_category {
+        let lexical_color = match t_category {
             TokenCategory::Whitespace => self.style.default_text_color,
             TokenCategory::Comment => self.style.comment_color,
             TokenCategory::TextLiteral => self.style.text_literal_color,
@@ -79,6 +79,12 @@ where
             TokenCategory::Unknown => self.style.default_text_color,
         };
 
+        let color = match analysis_data {
+            StaticAnalysisData::None => lexical_color,
+            StaticAnalysisData::FunctionInvocation => self.style.invoked_function_color,
+            StaticAnalysisData::OperatorInvocation => self.style.invoked_operator_color,
+        };
+
         let underline = diagnostics.iter().next().map(|d| {
             let color = d.color(self.style);
             UnderlineStyle {
@@ -88,15 +94,9 @@ where
             }
         });
 
-        let italicize = *analysis_data;
-
         TextRun {
             len: size,
-            font: if italicize {
-                self.style.italic_text_font.clone()
-            } else {
-                self.style.text_font.clone()
-            },
+            font: self.style.text_font.clone(),
             color,
             background_color: None,
             underline: underline,

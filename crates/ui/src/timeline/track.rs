@@ -145,7 +145,7 @@ pub(super) fn render_track(
                 window.paint_quad(fill(
                     Bounds::new(
                         point(ox + px(gap_x), oy + px(line_y - 4.0)),
-                        size(px(1.5), px(8.0)),
+                        size(px(1.0), px(8.0)),
                     ),
                     theme.timeline_tick,
                 ));
@@ -158,7 +158,7 @@ pub(super) fn render_track(
                         window.paint_quad(fill(
                             Bounds::new(
                                 point(ox + px(mark_x - 1.0), oy + px(line_y - 3.0)),
-                                size(px(2.0), px(6.0)),
+                                size(px(1.0), px(6.0)),
                             ),
                             theme.timeline_tick,
                         ));
@@ -182,7 +182,7 @@ pub(super) fn render_track(
                     box_bounds,
                     px(5.0),
                     theme.timeline_slide_background,
-                    px(1.5),
+                    px(1.0),
                     border_color,
                     BorderStyle::Solid,
                 ));

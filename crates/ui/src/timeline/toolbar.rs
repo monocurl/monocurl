@@ -31,11 +31,11 @@ pub(super) fn render_toolbar(
             .h(px(TRANSPORT_BTN_H))
             .p(px(2.0))
             .flex()
-            .items_center()
-            .justify_center()
-            .cursor_pointer()
-            .hover(|s| s.opacity(0.6))
-            .child(transport_icon(icon, theme.accent))
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .hover(|s| s.opacity(0.6))
+                .child(transport_icon(icon, theme.timeline_transport_color))
     };
 
     let transport_controls = div()
@@ -65,7 +65,7 @@ pub(super) fn render_toolbar(
                     } else {
                         TransportIcon::Play
                     },
-                    theme.accent,
+                    theme.timeline_transport_color,
                 ))
                 .on_click({
                     let svc = svc.clone();
@@ -117,7 +117,7 @@ pub(super) fn render_toolbar(
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(theme.accent)
+                .text_color(theme.timeline_transport_color)
                 .text_size(px(14.0))
                 .cursor_pointer()
                 .hover(|s| s.opacity(0.6))
@@ -146,7 +146,7 @@ pub(super) fn render_toolbar(
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_color(theme.accent)
+                .text_color(theme.timeline_transport_color)
                 .text_size(px(14.0))
                 .cursor_pointer()
                 .hover(|s| s.opacity(0.6))
