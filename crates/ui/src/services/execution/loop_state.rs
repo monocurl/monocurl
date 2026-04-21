@@ -149,26 +149,14 @@ impl RuntimeState {
         let target_dt = self.playback_mode.default_time_interval().max(elapsed);
         let max_slide = self.max_slide();
 
-        match self.executor.seek_primitive_anim_skip(max_slide).await {
-            SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
-            SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
-                self.advance_section_without_materializing().await;
+        match self.executor.advance_playback(max_slide, target_dt).await {
+            Ok(true) => {}
+            Ok(false) => {
+                self.checked_advance_section().await;
                 self.is_playing = false;
             }
-            SeekPrimitiveAnimSkipResult::Error(_) => {
+            Err(_) => {
                 self.cancel_runtime_work();
-            }
-        }
-
-        if self.is_playing {
-            match self.executor.advance_playback(max_slide, target_dt).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    self.is_playing = false;
-                }
-                Err(_) => {
-                    self.cancel_runtime_work();
-                }
             }
         }
 
@@ -210,7 +198,7 @@ impl RuntimeState {
         }
     }
 
-    async fn advance_section_without_materializing(&mut self) {
+    async fn checked_advance_section(&mut self) {
         if self.executor.state.has_errors() {
             self.cancel_runtime_work();
             return;

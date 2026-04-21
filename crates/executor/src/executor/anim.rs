@@ -68,7 +68,7 @@ impl Executor {
         }
     }
 
-    pub async fn seek_primitive_anim_skip(
+    async fn seek_primitive_anim_skip(
         &mut self,
         max_slide: usize,
     ) -> SeekPrimitiveAnimSkipResult {
