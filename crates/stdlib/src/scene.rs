@@ -47,7 +47,7 @@ fn camera_value(
     executor: &Executor,
     stack_idx: usize,
     position_idx: i32,
-    forward_idx: i32,
+    look_at_idx: i32,
     up_idx: i32,
     near_idx: i32,
     far_idx: i32,
@@ -60,8 +60,8 @@ fn camera_value(
                 read_value(executor, stack_idx, position_idx, "position"),
             ),
             (
-                "forward",
-                read_value(executor, stack_idx, forward_idx, "forward"),
+                "look_at",
+                read_value(executor, stack_idx, look_at_idx, "look_at"),
             ),
             ("up", read_value(executor, stack_idx, up_idx, "up")),
             (
@@ -89,8 +89,8 @@ pub async fn initial_camera(
                 value_list([Value::Integer(0), Value::Integer(0), Value::Integer(-10)]),
             ),
             (
-                "forward",
-                value_list([Value::Integer(0), Value::Integer(0), Value::Integer(1)]),
+                "look_at",
+                value_list([Value::Integer(0), Value::Integer(0), Value::Integer(0)]),
             ),
             (
                 "up",

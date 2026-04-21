@@ -2128,7 +2128,7 @@ fn test_subset_map_applies_mapping_to_matching_subset() {
 fn test_to_side_and_to_corner_smoke() {
     let r = run_with_stdlib(
         "
-        let cam = Camera([0, 0, -10], 1f, 1u)
+        let cam = Camera([0, 0, -10], [0, 0, 0], 1u)
         let side = mesh_center(to_side{dir: 1r, camera: cam} Circle())
         let corner = mesh_center(to_corner{dir: [1, 1, 0], camera: cam, buffer: 0.1} Circle())
         let result = (side[0] > 0) + (corner[0] > 0) + (corner[1] > 0)
@@ -2327,11 +2327,11 @@ fn test_rotate_operator_uses_angle_axis_and_optional_pivot() {
 }
 
 #[test]
-fn test_camera_stdlib_uses_forward_vector_surface() {
+fn test_camera_stdlib_uses_look_at_surface() {
     let r = run_with_stdlib(
         "
-        let cam = Camera([1, 2, 3], [0, 0, 2], [0, 1, 0], 0.2, 50)
-        let result = [cam[\"position\"], cam[\"forward\"], cam[\"near\"], cam[\"far\"]]
+        let cam = Camera([1, 2, 3], [1, 2, 5], [0, 1, 0], 0.2, 50)
+        let result = [cam[\"position\"], cam[\"look_at\"], cam[\"near\"], cam[\"far\"]]
     ",
         &["scene"],
     );
@@ -2353,17 +2353,17 @@ fn test_camera_stdlib_uses_forward_vector_surface() {
                 other => panic!("expected camera position list, got {}", other.type_name()),
             }
             match with_heap(|h| h.get(elems[1].key()).clone()) {
-                Value::List(forward) => {
-                    let coords: Vec<_> = forward
+                Value::List(look_at) => {
+                    let coords: Vec<_> = look_at
                         .elements()
                         .iter()
                         .map(|elem| with_heap(|h| h.get(elem.key()).clone()))
                         .collect();
-                    assert!(matches!(coords[0], Value::Integer(0)));
-                    assert!(matches!(coords[1], Value::Integer(0)));
-                    assert!(matches!(coords[2], Value::Integer(2)));
+                    assert!(matches!(coords[0], Value::Integer(1)));
+                    assert!(matches!(coords[1], Value::Integer(2)));
+                    assert!(matches!(coords[2], Value::Integer(5)));
                 }
-                other => panic!("expected camera forward list, got {}", other.type_name()),
+                other => panic!("expected camera look_at list, got {}", other.type_name()),
             }
             assert!(matches!(
                 with_heap(|h| h.get(elems[2].key()).clone()),

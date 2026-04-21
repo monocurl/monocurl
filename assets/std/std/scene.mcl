@@ -6,8 +6,8 @@
 
 # constructors
 
-# build a camera from a position, a forward vector, and an up vector.
-let Camera = |position = [0, 0, -10], forward = 1f, up = 1u, near = 0.1, far = 100| __monocurl__native__ mk_camera(position, forward, up, near, far)
+# build a camera from a position, a target point, and an up vector.
+let Camera = |position, target, up = 1u, near = 0.1, far = 100| __monocurl__native__ mk_camera(position, target, up, near, far)
 
 
 # defaults

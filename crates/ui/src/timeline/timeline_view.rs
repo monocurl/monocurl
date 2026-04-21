@@ -113,7 +113,6 @@ impl Render for Timeline {
         let slide_count = exec.slide_count;
         let durations = exec.slide_durations.clone();
         let minimum_durations = exec.minimum_slide_durations.clone();
-        let has_error = exec.has_error();
         let theme = ThemeSettings::theme(cx);
         let zoom = self.zoom_factor();
         let effective_for_seek = effective_durations(
@@ -129,7 +128,6 @@ impl Render for Timeline {
         let toolbar = render_toolbar(
             self,
             is_playing,
-            has_error,
             current_slide,
             slide_count,
             current_time,

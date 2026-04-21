@@ -1,2 +1,2 @@
-pub mod debug_scene_view;
+pub mod scene_renderer;
 pub mod viewport_view;

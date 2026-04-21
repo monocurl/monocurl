@@ -33,6 +33,7 @@ impl Default for BackgroundSnapshot {
 pub struct SceneSnapshot {
     pub background: BackgroundSnapshot,
     pub camera: CameraSnapshot,
+    pub camera_version: u64,
     pub meshes: Vec<Arc<Mesh>>,
 }
 
@@ -109,6 +110,30 @@ async fn scene_field_value(
     }
 }
 
+async fn scene_field_value_with_version(
+    executor: &mut Executor,
+    name: &'static str,
+) -> Result<Option<(Value, u64)>, ExecutorError> {
+    let follower = executor
+        .state
+        .leaders
+        .iter()
+        .rev()
+        .find(|entry| entry.name == name)
+        .and_then(|entry| {
+            let version = match with_heap(|h| h.get(entry.leader_cell.key()).clone()) {
+                Value::Leader(leader) => leader.follower_version,
+                _ => return None,
+            };
+            Some((with_heap(|h| h.get(entry.follower_value).clone()), version))
+        });
+
+    match follower {
+        Some((value, version)) => Ok(Some((value.elide_wrappers(executor).await?, version))),
+        None => Ok(None),
+    }
+}
+
 async fn read_f32(
     executor: &mut Executor,
     value: Value,
@@ -165,10 +190,10 @@ async fn camera_snapshot_from_value(
     parse_camera_value(executor, value, "camera").await
 }
 
-async fn camera_snapshot(executor: &mut Executor) -> Result<CameraSnapshot, ExecutorError> {
-    match scene_field_value(executor, "camera").await? {
-        Some(value) => camera_snapshot_from_value(executor, value).await,
-        None => Ok(CameraSnapshot::default()),
+async fn camera_snapshot(executor: &mut Executor) -> Result<(CameraSnapshot, u64), ExecutorError> {
+    match scene_field_value_with_version(executor, "camera").await? {
+        Some((value, version)) => Ok((camera_snapshot_from_value(executor, value).await?, version)),
+        None => Ok((CameraSnapshot::default(), 0)),
     }
 }
 
@@ -223,10 +248,12 @@ async fn background_snapshot(executor: &mut Executor) -> Result<BackgroundSnapsh
 
 impl Executor {
     pub async fn stable_scene_snapshot(&mut self) -> Result<SceneSnapshot, ExecutorError> {
+        let (camera, camera_version) = camera_snapshot(self).await?;
         Ok(SceneSnapshot {
             meshes: scene_meshes(self).await?,
             background: background_snapshot(self).await?,
-            camera: camera_snapshot(self).await?,
+            camera,
+            camera_version,
         })
     }
 

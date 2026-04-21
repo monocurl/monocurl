@@ -48,6 +48,7 @@ actions!(
         UnfocusEditor,
         TogglePresentationMode,
         ToggleParamsPanel,
+        SyncViewportCamera,
         TogglePlaying,
         SceneStart,
         SceneEnd,

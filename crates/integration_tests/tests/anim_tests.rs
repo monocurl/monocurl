@@ -1847,7 +1847,7 @@ fn test_scene_snapshot_error_after_play_uses_play_span() {
 #[test]
 fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
     let src = "
-        camera = Camera([0, 0, -16], 1f, 1u)
+        camera = Camera([0, 0, -16], [0, 0, 0], 1u)
 
         param radius = 1.1
         param spread = 2.5
@@ -1952,7 +1952,7 @@ fn test_scene_snapshot_camera_accepts_look_at_surface() {
             .await
             .expect("camera parser should accept look_at surface");
         assert_eq!(camera.position.to_array(), [1.0, 2.0, 3.0]);
-        assert_eq!(camera.forward.to_array(), [0.0, 0.0, 2.0]);
+        assert_eq!(camera.look_at.to_array(), [1.0, 2.0, 5.0]);
         assert_eq!(camera.up.to_array(), [0.0, 1.0, 0.0]);
         assert!((camera.near - 0.2).abs() < 1e-6);
         assert!((camera.far - 50.0).abs() < 1e-6);

@@ -14,7 +14,6 @@ use super::{
 pub(super) fn render_toolbar(
     timeline: &Timeline,
     is_playing: bool,
-    has_error: bool,
     current_slide: usize,
     slide_count: usize,
     current_time: f64,

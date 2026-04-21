@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use executor::{
+    camera::camera_value_from_snapshot,
     error::RuntimeError,
     executor::Executor,
     heap::{VRc, with_heap},
@@ -41,6 +42,7 @@ impl ExecutionService {
                     .collect(),
             ))),
             ParameterValue::Complex { re, im } => Value::Complex { re: *re, im: *im },
+            ParameterValue::Camera(camera) => camera_value_from_snapshot(camera),
             ParameterValue::Other => return None,
         })
     }
@@ -124,18 +126,20 @@ impl ExecutionService {
             ExecutionStatus::Paused
         };
 
-        let (background, camera, meshes) = match scene_snapshot {
+        let (background, camera, camera_version, meshes) = match scene_snapshot {
             Some(scene) => (
                 Some(scene.background),
                 Some(scene.camera),
+                Some(scene.camera_version),
                 Some(scene.meshes),
             ),
-            None => (None, None, None),
+            None => (None, None, None, None),
         };
 
         let snapshot = ExecutionSnapshot {
             background,
             camera,
+            camera_version,
             meshes,
             current_timestamp,
             status,

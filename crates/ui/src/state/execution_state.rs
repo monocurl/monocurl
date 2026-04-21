@@ -9,6 +9,7 @@ use geo::mesh::Mesh;
 pub struct ExecutionState {
     pub background: BackgroundSnapshot,
     pub camera: CameraSnapshot,
+    pub camera_version: u64,
     pub meshes: Vec<Arc<Mesh>>,
     pub parameter_state: HashMap<String, ParameterValue>,
 
@@ -27,6 +28,7 @@ impl Default for ExecutionState {
         Self {
             background: BackgroundSnapshot::default(),
             camera: CameraSnapshot::default(),
+            camera_version: 0,
             meshes: Vec::new(),
             parameter_state: HashMap::new(),
             current_timestamp: Timestamp::default(),
@@ -44,19 +46,15 @@ impl ExecutionState {
         matches!(self.status, ExecutionStatus::Playing)
     }
 
-    pub fn has_error(&self) -> bool {
-        matches!(
-            self.status,
-            ExecutionStatus::CompileError | ExecutionStatus::RuntimeError
-        )
-    }
-
     pub fn apply_snapshot(&mut self, snapshot: ExecutionSnapshot) {
         if let Some(background) = snapshot.background {
             self.background = background;
         }
         if let Some(camera) = snapshot.camera {
             self.camera = camera;
+        }
+        if let Some(camera_version) = snapshot.camera_version {
+            self.camera_version = camera_version;
         }
         if let Some(meshes) = snapshot.meshes {
             self.meshes = meshes;

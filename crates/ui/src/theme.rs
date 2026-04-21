@@ -150,8 +150,6 @@ pub struct Theme {
     pub timeline_tick: Rgba,
     pub timeline_text: Rgba,
     pub timeline_subtext: Rgba,
-    pub timeline_status_error: Rgba,
-    pub timeline_status_ok: Rgba,
     pub timeline_playhead: Rgba,
 }
 
@@ -208,8 +206,6 @@ impl Theme {
             timeline_tick: rgba(0x7C7F93),
             timeline_text: rgba(0x4C4F69),
             timeline_subtext: rgba(0x6C6F85),
-            timeline_status_error: rgba(0xD20F39),
-            timeline_status_ok: rgba(0x179299),
             timeline_playhead: rgba(0x000000),
         }
     }
@@ -259,8 +255,6 @@ impl Theme {
             timeline_tick: rgba(0xC0C1C8),
             timeline_text: rgba(0xF3F3F6),
             timeline_subtext: rgba(0xC8C9CF),
-            timeline_status_error: rgba(0xF07A7A),
-            timeline_status_ok: rgba(0x7AD7A4),
             timeline_playhead: rgba(0xECECF1),
         }
     }

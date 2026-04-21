@@ -7,8 +7,6 @@ use geo::{
 };
 use gpui::*;
 
-use crate::{state::execution_state::ExecutionState, theme::ThemeSettings};
-
 const DOT_RADIUS: f32 = 3.5;
 const EDGE_WIDTH: f32 = 1.0;
 const TRANSPARENT: Rgba = Rgba {
@@ -18,15 +16,11 @@ const TRANSPARENT: Rgba = Rgba {
     a: 0.0,
 };
 
-pub struct DebugSceneView {
-    execution_state: Entity<ExecutionState>,
-}
-
 #[derive(Clone)]
-struct SceneRenderData {
-    background_color: Rgba,
-    camera: CameraSnapshot,
-    meshes: Vec<Arc<Mesh>>,
+pub struct SceneRenderData {
+    pub background_color: Rgba,
+    pub camera: CameraSnapshot,
+    pub meshes: Vec<Arc<Mesh>>,
 }
 
 #[derive(Clone, Copy)]
@@ -57,45 +51,7 @@ struct DrawItem {
     primitive: DrawPrimitive,
 }
 
-impl DebugSceneView {
-    pub fn new(execution_state: Entity<ExecutionState>, cx: &mut Context<Self>) -> Self {
-        cx.observe(&execution_state, |_this, _, cx| {
-            cx.notify();
-        })
-        .detach();
-        cx.observe_global::<ThemeSettings>(|_this, cx| {
-            cx.notify();
-        })
-        .detach();
-
-        Self { execution_state }
-    }
-}
-
-impl Render for DebugSceneView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let scene = {
-            let execution_state = self.execution_state.read(cx);
-            SceneRenderData {
-                background_color: rgba_from_tuple(execution_state.background.color),
-                camera: execution_state.camera.clone(),
-                meshes: execution_state.meshes.clone(),
-            }
-        };
-
-        div().size_full().child(
-            canvas(
-                move |bounds, _, _| bounds,
-                move |_, bounds, window, _| {
-                    paint_scene(&scene, bounds, window);
-                },
-            )
-            .size_full(),
-        )
-    }
-}
-
-fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Window) {
+pub fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Window) {
     window.paint_quad(fill(bounds, scene.background_color));
 
     let basis = scene.camera.basis();
@@ -112,6 +68,15 @@ fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Win
 
     for item in items {
         paint_draw_item(item, window);
+    }
+}
+
+pub fn rgba_from_tuple(color: (f32, f32, f32, f32)) -> Rgba {
+    Rgba {
+        r: color.0.clamp(0.0, 1.0),
+        g: color.1.clamp(0.0, 1.0),
+        b: color.2.clamp(0.0, 1.0),
+        a: color.3.clamp(0.0, 1.0),
     }
 }
 
@@ -302,14 +267,5 @@ fn rgba_from_color(color: Float4, alpha_scale: f32) -> Rgba {
         g: color.y.clamp(0.0, 1.0),
         b: color.z.clamp(0.0, 1.0),
         a: (color.w * alpha_scale).clamp(0.0, 1.0),
-    }
-}
-
-fn rgba_from_tuple(color: (f32, f32, f32, f32)) -> Rgba {
-    Rgba {
-        r: color.0.clamp(0.0, 1.0),
-        g: color.1.clamp(0.0, 1.0),
-        b: color.2.clamp(0.0, 1.0),
-        a: color.3.clamp(0.0, 1.0),
     }
 }

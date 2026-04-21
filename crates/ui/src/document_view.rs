@@ -8,8 +8,9 @@ use ui_cli_shared::doc_type::DocumentType;
 use crate::{
     actions::{
         CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo,
-        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleParamsPanel,
-        TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut,
+        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart,
+        SyncViewportCamera, ToggleParamsPanel, TogglePlaying, TogglePresentationMode, Undo,
+        UnfocusEditor, ZoomIn, ZoomOut,
     },
     components::split_pane::Split,
     editor::editor_view::Editor,
@@ -34,6 +35,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-shift-z", Redo, None),
         KeyBinding::new("secondary-p", TogglePresentationMode, None),
         KeyBinding::new("secondary-t", ToggleParamsPanel, Some("presenter")),
+        KeyBinding::new("secondary-l", SyncViewportCamera, None),
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
         KeyBinding::new("escape", UnfocusEditor, Some("!presenter")),
         KeyBinding::new("space", TogglePlaying, Some("!editor")),
@@ -145,6 +147,16 @@ impl DocumentView {
         cx: &mut Context<Self>,
     ) {
         self.viewport.update(cx, |vp, cx| vp.toggle_params(cx));
+    }
+
+    fn sync_viewport_camera(
+        &mut self,
+        _: &SyncViewportCamera,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.viewport
+            .update(cx, |viewport, cx| viewport.sync_viewport_camera(cx));
     }
 
     fn unfocus_editor(&mut self, _: &UnfocusEditor, w: &mut Window, _cx: &mut Context<Self>) {
@@ -441,6 +453,7 @@ impl DocumentView {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_presentation))
             .on_action(cx.listener(Self::toggle_params_panel))
+            .on_action(cx.listener(Self::sync_viewport_camera))
             .on_action(cx.listener(Self::toggle_playing))
             .on_action(cx.listener(Self::prev_slide))
             .on_action(cx.listener(Self::next_slide))
@@ -484,6 +497,7 @@ impl DocumentView {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_presentation))
             .on_action(cx.listener(Self::toggle_playing))
+            .on_action(cx.listener(Self::sync_viewport_camera))
             .on_action(cx.listener(Self::unfocus_editor))
             .on_action(cx.listener(Self::prev_slide))
             .on_action(cx.listener(Self::next_slide))

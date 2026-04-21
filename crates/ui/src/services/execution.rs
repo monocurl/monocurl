@@ -25,6 +25,7 @@ pub enum ParameterValue {
     Float(f64),
     VectorFloat(Vec<f64>),
     Complex { re: f64, im: f64 },
+    Camera(CameraSnapshot),
     Other,
 }
 
@@ -38,6 +39,7 @@ pub struct ParameterSnapshot {
 pub struct ExecutionSnapshot {
     pub background: Option<BackgroundSnapshot>,
     pub camera: Option<CameraSnapshot>,
+    pub camera_version: Option<u64>,
     pub meshes: Option<Vec<Arc<Mesh>>>,
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,
