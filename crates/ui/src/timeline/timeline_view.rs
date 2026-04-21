@@ -424,6 +424,16 @@ impl Timeline {
                 // oy: content origin, offset to vertically center slides
                 let oy_full = bounds.origin.y;
                 let oy = oy_full + px(vert_offset);
+                let seek_hitbox = window.insert_hitbox(
+                    Bounds::new(
+                        point(ox + px(PADDING_H), oy),
+                        size(
+                            px((f32::from(bounds.size.width) - 2.0 * PADDING_H).max(0.0)),
+                            px(CONTENT_H.min(f32::from(bounds.size.height))),
+                        ),
+                    ),
+                    HitboxBehavior::Normal,
+                );
 
                 let line_y = PADDING_V + SLIDE_H / 2.0;
                 let sec_px = PX_PER_SEC * zoom;
@@ -529,8 +539,11 @@ impl Timeline {
                 // click-to-seek
                 let slide_xs_c = slide_xs.clone();
                 let gap_ws_c = gap_ws.clone();
-                window.on_mouse_event(move |event: &MouseDownEvent, phase, _window, cx| {
-                    if phase != DispatchPhase::Bubble || !bounds.contains(&event.position) {
+                window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+                    if phase != DispatchPhase::Bubble
+                        || event.button != MouseButton::Left
+                        || !seek_hitbox.is_hovered(window)
+                    {
                         return;
                     }
                     let local_x = f32::from(event.position.x - bounds.origin.x);
@@ -541,6 +554,7 @@ impl Timeline {
                             services
                                 .update(cx, |s, _| s.seek_to(Timestamp::new(i, 0.0)))
                                 .ok();
+                            cx.stop_propagation();
                             return;
                         }
                         let gap_start = bx + SLIDE_W;
@@ -549,6 +563,7 @@ impl Timeline {
                             services
                                 .update(cx, |s, _| s.seek_to(Timestamp::new(i, t)))
                                 .ok();
+                            cx.stop_propagation();
                             return;
                         }
                     }
