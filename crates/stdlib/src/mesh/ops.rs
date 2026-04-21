@@ -1170,8 +1170,8 @@ pub async fn op_extrude(executor: &mut Executor, stack_idx: usize) -> Result<Val
             ]
         }));
         for &(a, b) in surface.boundary_edges.keys() {
-            faces.push([a, b, b + base_vertex_count]);
-            faces.push([a, b + base_vertex_count, a + base_vertex_count]);
+            faces.push([b, a, a + base_vertex_count]);
+            faces.push([b, a + base_vertex_count, b + base_vertex_count]);
         }
 
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());

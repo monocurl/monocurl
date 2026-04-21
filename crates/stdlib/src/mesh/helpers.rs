@@ -35,21 +35,21 @@ pub(super) enum TagFilter {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct SurfaceVertex {
+pub(crate) struct SurfaceVertex {
     pub pos: Float3,
     pub col: Float4,
     pub uv: Float2,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct BoundaryEdge {
+pub(crate) struct BoundaryEdge {
     pub a_col: Float4,
     pub b_col: Float4,
     pub norm: Float3,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct IndexedSurface {
+pub(crate) struct IndexedSurface {
     pub vertices: Vec<SurfaceVertex>,
     pub faces: Vec<[usize; 3]>,
     pub boundary_edges: HashMap<(usize, usize), BoundaryEdge>,
@@ -794,7 +794,7 @@ pub(crate) fn push_closed_polyline(
     start..out.len()
 }
 
-pub(super) fn build_indexed_surface(
+pub(crate) fn build_indexed_surface(
     vertices: &[SurfaceVertex],
     faces: &[[usize; 3]],
     boundary_edges: &HashMap<(usize, usize), BoundaryEdge>,
@@ -899,7 +899,7 @@ pub(super) fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]]) -> V
     build_indexed_surface(&vertices, faces, &HashMap::new()).1
 }
 
-pub(super) fn mesh_to_indexed_surface(mesh: &Mesh) -> IndexedSurface {
+pub(crate) fn mesh_to_indexed_surface(mesh: &Mesh) -> IndexedSurface {
     let groups = mesh_position_groups(mesh);
     let group_count = groups
         .iter()

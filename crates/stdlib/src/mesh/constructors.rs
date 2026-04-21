@@ -608,11 +608,16 @@ pub async fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         faces.push([i, next, apex_idx]);
         faces.push([base_idx, next, i]);
     }
-    Ok(mesh_from_parts(
-        vec![],
-        vec![],
-        build_indexed_tris(&vertices, &faces),
-    ))
+    let surface_vertices: Vec<_> = vertices
+        .into_iter()
+        .map(|pos| SurfaceVertex {
+            pos,
+            col: Float4::new(0.0, 0.0, 0.0, 1.0),
+            uv: Float2::ZERO,
+        })
+        .collect();
+    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &HashMap::new());
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -654,11 +659,16 @@ pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value
         }
     }
 
-    Ok(mesh_from_parts(
-        vec![],
-        vec![],
-        build_indexed_tris(&vertices, &faces),
-    ))
+    let surface_vertices: Vec<_> = vertices
+        .into_iter()
+        .map(|pos| SurfaceVertex {
+            pos,
+            col: Float4::new(0.0, 0.0, 0.0, 1.0),
+            uv: Float2::ZERO,
+        })
+        .collect();
+    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &HashMap::new());
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -1380,11 +1390,16 @@ pub async fn mk_explicit2d(
             faces.push([index(ix, iy), index(ix + 1, iy + 1), index(ix, iy + 1)]);
         }
     }
-    Ok(mesh_from_parts(
-        vec![],
-        vec![],
-        build_indexed_tris(&vertices, &faces),
-    ))
+    let surface_vertices: Vec<_> = vertices
+        .into_iter()
+        .map(|pos| SurfaceVertex {
+            pos,
+            col: Float4::new(0.0, 0.0, 0.0, 1.0),
+            uv: Float2::ZERO,
+        })
+        .collect();
+    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &HashMap::new());
+    Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
@@ -1527,26 +1542,46 @@ pub async fn mk_explicit_diff(
         lower.push(Float3::new(x as f32, yg, 0.0));
     }
 
-    // split tris into positive (f >= g) and negative (f < g) regions per column
+    // split contiguous same-sign columns into shared strips so interior columns
+    // do not leave stroked seams between identical regions
     let mut pos_verts: Vec<Float3> = Vec::new();
     let mut pos_faces: Vec<[usize; 3]> = Vec::new();
     let mut neg_verts: Vec<Float3> = Vec::new();
     let mut neg_faces: Vec<[usize; 3]> = Vec::new();
 
-    for i in 0..samples - 1 {
-        let yf_mid = (upper[i].y + upper[i + 1].y) * 0.5;
-        let yg_mid = (lower[i].y + lower[i + 1].y) * 0.5;
-        let (verts, faces, fill) = if yf_mid >= yg_mid {
-            (&mut pos_verts, &mut pos_faces, fill0)
-        } else {
-            (&mut neg_verts, &mut neg_faces, fill1)
+    let interval_is_pos = |i: usize| (upper[i].y + upper[i + 1].y) * 0.5 >= (lower[i].y + lower[i + 1].y) * 0.5;
+    let append_strip =
+        |verts: &mut Vec<Float3>, faces: &mut Vec<[usize; 3]>, start: usize, end: usize| {
+            let base = verts.len();
+            for idx in start..=end {
+                verts.push(lower[idx]);
+                verts.push(upper[idx]);
+            }
+            for idx in 0..end - start {
+                let col = base + idx * 2;
+                faces.push([col, col + 1, col + 3]);
+                faces.push([col, col + 3, col + 2]);
+            }
         };
-        let base = verts.len();
-        verts.extend_from_slice(&[lower[i], upper[i], upper[i + 1], lower[i + 1]]);
-        faces.push([base, base + 1, base + 2]);
-        faces.push([base, base + 2, base + 3]);
-        // apply fill color to the just-added face vertices
-        let _ = fill; // color applied after build_indexed_tris below
+
+    let mut run_start = 0usize;
+    let mut is_pos = interval_is_pos(0);
+    for i in 1..samples - 1 {
+        let next_is_pos = interval_is_pos(i);
+        if next_is_pos != is_pos {
+            if is_pos {
+                append_strip(&mut pos_verts, &mut pos_faces, run_start, i);
+            } else {
+                append_strip(&mut neg_verts, &mut neg_faces, run_start, i);
+            }
+            run_start = i;
+            is_pos = next_is_pos;
+        }
+    }
+    if is_pos {
+        append_strip(&mut pos_verts, &mut pos_faces, run_start, samples - 1);
+    } else {
+        append_strip(&mut neg_verts, &mut neg_faces, run_start, samples - 1);
     }
 
     let build_region = |verts: Vec<Float3>, faces: Vec<[usize; 3]>, fill: Float4| {

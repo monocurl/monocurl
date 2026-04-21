@@ -1,6 +1,7 @@
 # mesh constructors, mesh operators, and mesh queries.
 #
 # constructors keep geometry-focused args only.
+# shiftable primitives are authored at the origin; use `shift` to place them.
 # styling/tagging is handled after construction via operators like
 # `stroke`, `fill`, `dotted`, and `retag`.
 
@@ -8,24 +9,24 @@
 
 let Dot = |point = [0, 0, 0]| __monocurl__native__ mk_dot(point)
 
-let Circle = |center = [0, 0, 0], radius = 1, samples = 64, normal = 1f|
-    __monocurl__native__ mk_circle(center, radius, samples, normal)
+let Circle = |radius = 1, samples = 64, normal = 1f|
+    __monocurl__native__ mk_circle([0, 0, 0], radius, samples, normal)
 
-let Annulus = |center = [0, 0, 0], inner = 0.5, outer = 1, normal=1f|
-    __monocurl__native__ mk_annulus(center, inner, outer, normal)
+let Annulus = |inner = 0.5, outer = 1, normal = 1f|
+    __monocurl__native__ mk_annulus([0, 0, 0], inner, outer, normal)
 
-let Square = |center = [0, 0, 0], width = 1, normal = 1f|
-    __monocurl__native__ mk_square(center, width, normal)
+let Square = |width = 1, normal = 1f|
+    __monocurl__native__ mk_square([0, 0, 0], width, normal)
 
-let Rect = |center = [0, 0, 0], size = [1, 1], normal = 1f| {
+let Rect = |size = [1, 1], normal = 1f| {
     var width = 0
     var height = 0
     [width, height] = __monocurl__native__ expect_list("size", size, 2)
-    return __monocurl__native__ mk_rect(center, width, height, normal)
+    return __monocurl__native__ mk_rect([0, 0, 0], width, height, normal)
 }
 
-let RegularPolygon = |center = [0, 0, 0], n = 3, circumradius = 1, normal = 1f|
-    __monocurl__native__ mk_regular_polygon(center, n, circumradius, normal)
+let RegularPolygon = |n = 3, circumradius = 1, normal = 1f|
+    __monocurl__native__ mk_regular_polygon([0, 0, 0], n, circumradius, normal)
 
 let Polygon = |vertices = [], normal_hint = 1f|
     __monocurl__native__ mk_polygon(vertices, normal_hint)
@@ -39,11 +40,11 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1f|
 let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1f, path_arc = 0|
     __monocurl__native__ mk_arrow(start, end, normal, path_arc)
 
-let Arc = |center = [0, 0, 0], radius = 1, theta = [0, 3.14159265358979], normal = 1f| {
+let Arc = |radius = 1, theta = [0, 3.14159265358979], normal = 1f| {
     var theta_start = 0
     var theta_end = 0
     [theta_start, theta_end] = __monocurl__native__ expect_list("theta", theta, 2)
-    return __monocurl__native__ mk_arc(center, radius, theta_start, theta_end, normal)
+    return __monocurl__native__ mk_arc([0, 0, 0], radius, theta_start, theta_end, normal)
 }
 
 let Capsule = |start_center = [-1, 0, 0], end_center = [1, 0, 0], radii = 0.4, normal = 1f| {
@@ -63,14 +64,14 @@ let Triangle = |p = [0, 0, 0], q = [1, 0, 0], r = [0, 1, 0], normal_hint = 1f|
 
 # 3-d primitives
 
-let Sphere = |center = [0, 0, 0], radius = 1, sample_depth = 2|
-    __monocurl__native__ mk_sphere(center, radius, sample_depth)
+let Sphere = |radius = 1, sample_depth = 2|
+    __monocurl__native__ mk_sphere([0, 0, 0], radius, sample_depth)
 
-let RectangularPrism = |center = [0, 0, 0], dimensions = [1, 1, 1]|
-    __monocurl__native__ mk_rect_prism(center, dimensions)
+let RectangularPrism = |dimensions = [1, 1, 1]|
+    __monocurl__native__ mk_rect_prism([0, 0, 0], dimensions)
 
-let Cylinder = |center = [0, 0, 0], radius = 1, height = 2, direction = 1u, sample_count = 32|
-    __monocurl__native__ mk_cylinder(center, radius, height, direction, sample_count)
+let Cylinder = |radius = 1, height = 2, direction = 1u, sample_count = 32|
+    __monocurl__native__ mk_cylinder([0, 0, 0], radius, height, direction, sample_count)
 
 let Cone = |apex = [0, 1, 0], base = [0, 0, 0], radius = 1, sample_count = 32|
     __monocurl__native__ mk_cone(apex, base, radius, sample_count)

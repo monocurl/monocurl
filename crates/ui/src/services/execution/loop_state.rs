@@ -205,7 +205,7 @@ impl RuntimeState {
     }
 
     fn refresh_target_from_executor(&mut self) {
-        if !self.has_compiler_error && !self.executor.state.has_errors() {
+        if !self.has_compiler_error {
             self.target = self.executor.state.timestamp;
         }
     }

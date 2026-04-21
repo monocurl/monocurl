@@ -1333,7 +1333,7 @@ mod test {
     #[test]
     fn test_multiline_operator_chain_in_declaration() {
         let result = parse_stmt_test(
-            "mesh x = \n    fill{CLEAR}\n    stroke{RED}\n    Circle(ORIGIN, radius: 1)",
+            "mesh x = \n    fill{CLEAR}\n    stroke{RED}\n    Circle(radius: 1)",
         )
         .unwrap();
 
@@ -1381,7 +1381,7 @@ mod test {
     #[test]
     fn test_multiline_grouped_operator_chain_allows_newline_before_close_paren() {
         let result = parse_stmt_test(
-            "mesh x = (\n    fill{CLEAR}\n    stroke{RED}\n    Circle(ORIGIN, radius: 1)\n)",
+            "mesh x = (\n    fill{CLEAR}\n    stroke{RED}\n    Circle(radius: 1)\n)",
         )
         .unwrap();
 

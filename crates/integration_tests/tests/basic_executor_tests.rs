@@ -2093,8 +2093,8 @@ fn test_mesh_operator_filter_applies_predicate_to_subset() {
     let r = run_with_stdlib(
         "
         let scene = [
-            retag{1} Circle([0, 0, 0], 1),
-            retag{2} Circle([4, 0, 0], 1)
+            retag{1} Circle(1),
+            retag{2} shift{delta: [4, 0, 0]} Circle(1)
         ]
         let shifted = shift{delta: 10 * 1r, filter: |tag| tag == 1} scene
         let x1 = mesh_center(tag_filter(shifted, 1))[0]
@@ -2153,6 +2153,32 @@ fn test_explicit_func_diff_accepts_custom_tags() {
 }
 
 #[test]
+fn test_explicit_func_diff_connects_same_sign_strip() {
+    let r = run_with_stdlib(
+        "
+        let diff = ExplicitFuncDiff(|x| 1, |x| 0, [-1, 1, 6])
+        let pos = diff[0]
+        let neg = diff[1]
+        let result = (len(mesh_triangle_set(pos)) == 10) + (len(mesh_edge_set(pos)) == 21) + (len(mesh_triangle_set(neg)) == 0)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_extrude_square_authors_consistent_closed_surface() {
+    let r = run_with_stdlib(
+        "
+        let solid = extrude{delta: [0, 0, 1]} Square()
+        let result = (mesh_rank(solid) == 2) + (len(mesh_triangle_set(solid)) == 12)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
 fn test_parametric_func_reports_named_bad_sample_range_argument() {
     let r = run_with_stdlib(
         "
@@ -2182,7 +2208,7 @@ fn test_explicit_func_reports_named_bad_sample_range_argument() {
 fn test_mesh_stdlib_reports_named_bad_list_length() {
     let r = run_with_stdlib(
         "
-        let result = Rect([0, 0, 0], [1, 2, 3])
+        let result = Rect([1, 2, 3])
     ",
         &["mesh"],
     );
@@ -2224,6 +2250,18 @@ fn test_color_grid_uses_sample_counts() {
         &["mesh", "util"],
     );
     r.assert_int(12);
+}
+
+#[test]
+fn test_explicit_func2d_preserves_open_surface_boundary_topology() {
+    let r = run_with_stdlib(
+        "
+        let surf = ExplicitFunc2d(|x, y| x * y, [0, 1, 4], [0, 1, 3])
+        let result = (len(mesh_triangle_set(surf)) == 12) + (len(mesh_edge_set(surf)) > 0)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
 }
 
 #[test]

@@ -815,7 +815,7 @@ fn test_set_slide_can_seek_back_to_zero_after_finishing() {
 #[test]
 fn test_mesh_label_mutation_after_set_then_lerp() {
     let src = "
-            mesh x = fill{CLEAR} stroke{RED} Circle(label: ORIGIN, 1)
+            mesh x = fill{CLEAR} stroke{RED} shift{label: ORIGIN} Circle(1)
 
             play Set()
 
@@ -835,7 +835,7 @@ fn test_mesh_label_mutation_after_set_then_lerp() {
 #[test]
 fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
     let src = "
-        mesh x = fill{CLEAR} stroke{RED} Circle(label: ORIGIN, 1)
+        mesh x = fill{CLEAR} stroke{RED} shift{label: ORIGIN} Circle(1)
 
         play Set()
 
@@ -891,7 +891,7 @@ fn test_ref_mutation_of_live_function_argument_does_not_panic() {
                 return []
             }
 
-            mutate(Circle(label: ORIGIN, 1))
+            mutate(shift{label: ORIGIN} Circle(1))
         ",
             SectionType::Slide,
         )],
@@ -913,7 +913,7 @@ fn test_lerp_of_mesh_operator_variants_after_label_mutation() {
     let r = run_anim_impl(
         &[(
             "
-            let x = fill{CLEAR} stroke{RED} Circle(label: ORIGIN, 1)
+            let x = fill{CLEAR} stroke{RED} shift{label: ORIGIN} Circle(1)
 
             var y = x
             y.label = 2l
@@ -932,7 +932,7 @@ fn test_lerp_of_mesh_operator_variants_after_label_mutation() {
 #[test]
 fn test_stroke_operator_lerp_blends_from_identity_embed() {
     let src = "
-        mesh x = shift{1r} Circle([0, 0, 0], 1)
+        mesh x = shift{1r} Circle(1)
         x = stroke{RED} x
         play Lerp()
     ";
@@ -1110,8 +1110,8 @@ fn test_trans_square_to_circle_midpoint_keeps_boundary_off_origin() {
     let r = run_anim_impl(
         &[(
             "
-                mesh x = Square([0, 0, 0], 2)
-                x = Circle([0, 0, 0], 1)
+                mesh x = Square(2)
+                x = Circle(1)
                 play Trans()
             ",
             SectionType::Slide,
@@ -1148,8 +1148,8 @@ fn test_trans_filled_square_to_clear_circle_fades_fill() {
     let r = run_anim_impl(
         &[(
             "
-                mesh x = fill{WHITE} Square([0, 0, 0], 2)
-                x = stroke{WHITE} fill{CLEAR} Circle([0, 0, 0], 1)
+                mesh x = fill{WHITE} Square(2)
+                x = stroke{WHITE} fill{CLEAR} Circle(1)
                 play Trans()
             ",
             SectionType::Slide,
@@ -1188,7 +1188,7 @@ fn test_trans_from_empty_source_fades_target_in_place() {
             ("mesh x = []", SectionType::Init),
             (
                 "
-                x = Circle([0, 0, 0], 1)
+                x = Circle(1)
                 play Trans()
             ",
                 SectionType::Slide,
@@ -1236,15 +1236,15 @@ fn test_trans_with_more_source_leaves_keeps_all_pairs_mid_animation() {
             (
                 "
                 mesh x = [
-                    Circle([-1, 0, 0], 0.5),
-                    Circle([1, 0, 0], 0.5)
+                    shift{delta: [-1, 0, 0]} Circle(0.5),
+                    shift{delta: [1, 0, 0]} Circle(0.5)
                 ]
             ",
                 SectionType::Init,
             ),
             (
                 "
-                x = [Square([0, 0, 0], 1)]
+                x = [Square(1)]
                 play Trans()
             ",
                 SectionType::Slide,
@@ -1275,7 +1275,7 @@ fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
     let r = run_anim_impl(
         &[(
             "
-                mesh x = Sphere([0, 0, 0], 1, 0)
+                mesh x = Sphere(1, 0)
                 x = Triangle([0, 0, 0], [1, 0, 0], [0, 1, 0])
                 play Trans()
             ",
@@ -1301,6 +1301,146 @@ fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
         "expected larger source surface topology to be retained, got {} triangles",
         mesh.tris.len()
     );
+}
+
+#[test]
+fn test_tag_trans_handles_everything_intro_badges() {
+    let src = r#"
+        let soft = |c, a = 0.22| with_alpha(c, a)
+        let badge = |shape, color, tag = 0| retag{tag} fill{soft(color)} stroke{color} shape
+
+        mesh intro = [
+            badge(shift{delta: [-5.5, 2.6, 0]} Circle(radius: 0.7), RED, 1),
+            badge(shift{delta: [-3.5, 2.6, 0]} Square(width: 1.2), BLUE, 2),
+            badge(Triangle([1.5, 1.8, 0], [2.5, 3.4, 0], [3.3, 1.7, 0]), GREEN, 3),
+            badge(shift{delta: [5.3, 2.6, 0]} RegularPolygon(n: 6, circumradius: 0.8), PURPLE, 4),
+            retag{5} stroke{ORANGE} Arrow([-6.0, -2.6, 0], [-3.4, -2.6, 0]),
+            retag{6} stroke{TEAL} shift{delta: [0, -2.6, 0]} Arc(radius: 1.15, theta: [0, 3.141592653589793]),
+            retag{7} stroke{MAGENTA} Capsule([3.6, -3.0, 0], [6.2, -2.2, 0], [0.22, 0.22])
+        ]
+
+        play Set([&intro])
+
+        intro = [
+            badge(shift{delta: [-5.5, 2.6, 0]} Circle(radius: 0.78), PURPLE, 4),
+            badge(shift{delta: [-1.9, 2.5, 0]} RegularPolygon(n: 5, circumradius: 0.9), RED, 1),
+            badge(Capsule([0.8, 1.8, 0], [3.2, 3.0, 0], [0.28, 0.54]), BLUE, 2),
+            badge(shift{delta: [5.2, 2.6, 0]} Annulus(inner: 0.34, outer: 0.82), GREEN, 3),
+            retag{5} stroke{ORANGE} Arrow([-6.0, -2.4, 0], [-2.8, -2.0, 0]),
+            retag{6} stroke{TEAL} shift{delta: [0, -2.5, 0]} Arc(radius: 1.3, theta: [0.2, 3.2]),
+            retag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
+        ]
+
+        play TagTrans([&intro], 1.2, smoother, 0.6 * 1u)
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_tag_trans_handles_everything_intro_after_operator_rewrite() {
+    let src = r#"
+        let soft = |c, a = 0.22| with_alpha(c, a)
+        let badge = |shape, color, tag = 0| retag{tag} fill{soft(color)} stroke{color} shape
+
+        mesh intro = [
+            badge(shift{[5.5, 2.6, 0]} Circle(0.7), RED, 1),
+            badge(shift{[-3.5, 2.6, 0]} Square(1.2), BLUE, 2),
+            badge(Triangle([1.5, 1.8, 0], [2.5, 3.4, 0], [3.3, 1.7, 0]), GREEN, 3),
+            badge(shift{[5.3, 2.6, 0]} RegularPolygon(6, 0.8), PURPLE, 4),
+            retag{5} stroke{ORANGE} Arrow([-6.0, -2.6, 0], [-3.4, -2.6, 0]),
+            retag{6} stroke{TEAL} shift{[0, -2.6, 0]} Arc(1.15, [0, 3.141592653589793]),
+            retag{7} stroke{MAGENTA} Capsule([3.6, -3.0, 0], [6.2, -2.2, 0], [0.22, 0.22])
+        ]
+
+        intro = point_map{|p| [p[0], p[1] + 0.25 * sin(1.7 * p[0]), p[2]]}
+            color_map{|c| WHITE}
+            rotate{0.35}
+            scale{[1.05, 0.9, 1]}
+            intro
+
+        play Set([&intro])
+
+        intro = [
+            badge(shift{[-5.5, 2.6, 0]} Circle(0.78), PURPLE, 4),
+            badge(shift{[-1.9, 2.5, 0]} RegularPolygon(5, 0.9), RED, 1),
+            badge(Capsule([0.8, 1.8, 0], [3.2, 3.0, 0], [0.28, 0.54]), BLUE, 2),
+            badge(shift{[5.2, 2.6, 0]} Annulus(0.34, 0.82), GREEN, 3),
+            retag{5} stroke{ORANGE} Arrow([-6.0, -2.4, 0], [-2.8, -2.0, 0]),
+            retag{6} stroke{TEAL} shift{[0, -2.5, 0]} Arc(1.3, [0.2, 3.2]),
+            retag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
+        ]
+
+        play TagTrans([&intro], 1.2, smoother, 0.6 * 1u)
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "color", "math", "mesh"]),
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_trans_handles_square_to_capsule_badge_pair() {
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = fill{with_alpha(BLUE, 0.22)} stroke{BLUE} Square(width: 1.2)
+                x = fill{with_alpha(BLUE, 0.22)} stroke{BLUE} Capsule([0.8, 1.8, 0], [3.2, 3.0, 0], [0.28, 0.54])
+                play Trans()
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_trans_handles_triangle_to_annulus_badge_pair() {
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = fill{with_alpha(GREEN, 0.22)} stroke{GREEN} Triangle([1.5, 1.8, 0], [2.5, 3.4, 0], [3.3, 1.7, 0])
+                x = shift{delta: [5.2, 2.6, 0]} fill{with_alpha(GREEN, 0.22)} stroke{GREEN} Annulus(inner: 0.34, outer: 0.82)
+                play Trans()
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_trans_handles_capsule_to_capsule_badge_pair() {
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = stroke{MAGENTA} Capsule([3.6, -3.0, 0], [6.2, -2.2, 0], [0.22, 0.22])
+                x = stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
+                play Trans()
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    r.assert_ok();
 }
 
 #[test]
@@ -1340,7 +1480,7 @@ fn test_regular_polygon_limit_is_reported() {
     let r = run_anim_impl(
         &[(
             "
-                mesh x = RegularPolygon([0, 0, 0], 9000, 1)
+                mesh x = RegularPolygon(9000, 1)
             ",
             SectionType::Slide,
         )],
@@ -1712,7 +1852,7 @@ fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
         let mul = |x| x * 1r
         mesh reactive = shift{delta: mul($spread)}
             rotate{radians: $spin, axis: 1f}
-            Circle([0, 0, 0], radius: $radius)
+            Circle(radius: $radius)
 
         play Set([&reactive])
 
@@ -1756,7 +1896,7 @@ fn test_fade_accepts_stateful_live_mesh_targets() {
 
         let mul = |x| x * 1r
         mesh reactive = shift{delta: mul($spread)}
-            Circle([0, 0, 0], radius: $radius)
+            Circle(radius: $radius)
 
         play Set([&reactive])
 
@@ -1790,7 +1930,7 @@ fn test_custom_lerp_accepts_stateful_live_mesh_targets() {
 
         let mul = |x| x * 1r
         mesh reactive = shift{delta: mul($spread)}
-            Circle([0, 0, 0], radius: $radius)
+            Circle(radius: $radius)
 
         play Set([&reactive])
 
@@ -1835,14 +1975,14 @@ fn test_lerp_of_live_mesh_lambda_survives_assignment_chain() {
             let outline = (
                 stroke{WHITE}
                 fill{CLEAR}
-                Circle(center, 2)
+                shift{delta: center} Circle(2)
             )
             let r = 0.25
             let y = r * sin(theta)
             let x = r * cos(theta)
             let point = (
                 fill{WHITE}
-                Circle(center + [x, y, 0], 0.05)
+                shift{delta: center + [x, y, 0]} Circle(0.05)
             )
             return [outline, point]
         }
@@ -1873,7 +2013,7 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
             let outline = (
                 stroke{WHITE}
                 fill{CLEAR}
-                Circle(center, 2)
+                shift{delta: center} Circle(2)
             )
 
             if (theta >= 0.5) {
@@ -1885,7 +2025,7 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
             let x = r * cos(theta)
             let point = (
                 fill{WHITE}
-                Circle(center + [x, y, 0], 0.05)
+                shift{delta: center + [x, y, 0]} Circle(0.05)
             )
             return [outline, point]
         }
@@ -1945,14 +2085,14 @@ fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
             let outline = (
                 stroke{WHITE}
                 fill{CLEAR}
-                Circle(center, 2)
+                shift{delta: center} Circle(2)
             )
             let r = 0.25
             let y = r * sin(theta)
             let x = r * cos(theta)
             let point = (
                 fill{WHITE}
-                Circle(center + [x, y, 0], 0.05)
+                shift{delta: center + [x, y, 0]} Circle(0.05)
             )
             return [outline, point]
         }
@@ -2066,7 +2206,7 @@ fn test_write_staggers_across_mesh_leaves() {
 #[test]
 fn test_write_reveals_boundary_before_fill() {
     let src = r#"
-        mesh x = Square([0, 0, 0], 2)
+        mesh x = Square(2)
         play Write()
     "#;
 

@@ -7,7 +7,10 @@ use geo::{
 };
 use stdlib_macros::stdlib_func;
 
-use crate::mesh::helpers::{mesh_position_groups, push_closed_polyline, uprank_mesh};
+use crate::mesh::helpers::{
+    build_indexed_surface, mesh_position_groups, mesh_to_indexed_surface, push_closed_polyline,
+    uprank_mesh,
+};
 
 use super::super::helpers::{self, list_value, materialize_live_value, mesh_center};
 use super::{embed_triplet, lerp_uniforms, read_path_arc_value};
@@ -1015,17 +1018,40 @@ fn conform_samples_to_template(
         idx.min(samples.len() - 1)
     };
 
-    let mut out = template.clone();
-    out.uniform = uniform.clone();
-    out.tag = tag.to_vec();
-
+    let mut dots = template.dots.clone();
     let mut slot = 0usize;
-    for dot in &mut out.dots {
+    for dot in &mut dots {
         let (pos, col) = samples[sample_for_group(groups[slot])];
         dot.pos = pos;
         dot.col = col;
         slot += 1;
     }
+
+    if !template.tris.is_empty() {
+        let mut surface = mesh_to_indexed_surface(template);
+        for (group, vertex) in surface.vertices.iter_mut().enumerate() {
+            let (pos, col) = samples[sample_for_group(group)];
+            vertex.pos = pos;
+            vertex.col = col;
+            vertex.uv = Float2::ZERO;
+        }
+        let (lins, tris) =
+            build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+        let out = Mesh {
+            dots,
+            lins,
+            tris,
+            uniform: uniform.clone(),
+            tag: tag.to_vec(),
+        };
+        debug_assert!(out.has_consistent_topology());
+        return out;
+    }
+
+    let mut out = template.clone();
+    out.dots = dots;
+    out.uniform = uniform.clone();
+    out.tag = tag.to_vec();
     for line in &mut out.lins {
         let (a_pos, a_col) = samples[sample_for_group(groups[slot])];
         let (b_pos, b_col) = samples[sample_for_group(groups[slot + 1])];
@@ -1035,19 +1061,6 @@ fn conform_samples_to_template(
         line.b.col = b_col;
         slot += 2;
     }
-    for tri in &mut out.tris {
-        let (a_pos, a_col) = samples[sample_for_group(groups[slot])];
-        let (b_pos, b_col) = samples[sample_for_group(groups[slot + 1])];
-        let (c_pos, c_col) = samples[sample_for_group(groups[slot + 2])];
-        tri.a.pos = a_pos;
-        tri.a.col = a_col;
-        tri.b.pos = b_pos;
-        tri.b.col = b_col;
-        tri.c.pos = c_pos;
-        tri.c.col = c_col;
-        slot += 3;
-    }
-
     debug_assert!(out.has_consistent_topology());
     out
 }
@@ -1067,9 +1080,17 @@ fn conform_line_mesh_to_template(source: &Mesh, template: &Mesh) -> Mesh {
 
 fn match_tri_tri(source: &Mesh, target: &Mesh) -> (Mesh, Mesh) {
     if surface_template_score(source) >= surface_template_score(target) {
-        (source.clone(), conform_surface_to_template(target, source))
+        let template = canonicalize_surface_template(source);
+        (
+            template.clone(),
+            conform_surface_to_template(target, &template),
+        )
     } else {
-        (conform_surface_to_template(source, target), target.clone())
+        let template = canonicalize_surface_template(target);
+        (
+            conform_surface_to_template(source, &template),
+            template,
+        )
     }
 }
 
@@ -1202,6 +1223,20 @@ fn surface_template_score(mesh: &Mesh) -> (usize, usize, usize) {
     (mesh.tris.len(), mesh.lins.len(), mesh.dots.len())
 }
 
+fn canonicalize_surface_template(mesh: &Mesh) -> Mesh {
+    let surface = mesh_to_indexed_surface(mesh);
+    let (lins, tris) = build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+    let out = Mesh {
+        dots: mesh.dots.clone(),
+        lins,
+        tris,
+        uniform: mesh.uniform.clone(),
+        tag: mesh.tag.clone(),
+    };
+    debug_assert!(out.has_consistent_topology());
+    out
+}
+
 fn representative_point(mesh: &Mesh) -> Float3 {
     mesh.dots
         .first()
@@ -1226,12 +1261,6 @@ fn representative_color(mesh: &Mesh) -> Float4 {
 
 fn triangle_centroid(tri: &Tri) -> Float3 {
     (tri.a.pos + tri.b.pos + tri.c.pos) / 3.0
-}
-
-fn triangle_face_normal(tri: &Tri) -> Float3 {
-    let raw = (tri.b.pos - tri.a.pos).cross(tri.c.pos - tri.a.pos);
-    let len = raw.len();
-    if len <= 1e-6 { Float3::ZERO } else { raw / len }
 }
 
 fn tri_edge_value(tri: &Tri, edge_idx: usize) -> i32 {
@@ -1359,6 +1388,15 @@ fn rotated_triangle_vertices(tri: &Tri, rotation: usize) -> [TriVertex; 3] {
     ]
 }
 
+fn mirrored_triangle_vertices(tri: &Tri, rotation: usize) -> [TriVertex; 3] {
+    let vertices = [tri.a, tri.b, tri.c];
+    [
+        vertices[rotation % 3],
+        vertices[(rotation + 2) % 3],
+        vertices[(rotation + 1) % 3],
+    ]
+}
+
 fn choose_triangle_rotation(
     template: &Tri,
     template_incoming: Option<usize>,
@@ -1371,8 +1409,13 @@ fn choose_triangle_rotation(
     });
 
     (0..3)
-        .filter_map(|rotation| {
-            let vertices = rotated_triangle_vertices(source, rotation);
+        .flat_map(|rotation| {
+            [
+                rotated_triangle_vertices(source, rotation),
+                mirrored_triangle_vertices(source, rotation),
+            ]
+        })
+        .filter_map(|vertices| {
             let rotated = Tri {
                 a: vertices[0],
                 b: vertices[1],
@@ -1420,9 +1463,6 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
         );
     }
 
-    let mut out = template.clone();
-    out.uniform = source.uniform.clone();
-    out.tag = source.tag.clone();
     let groups = mesh_position_groups(template);
     let group_count = groups
         .iter()
@@ -1445,7 +1485,7 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
             source_tri,
             source_visit.incoming_edge,
         );
-        let slot = out.dots.len() + out.lins.len() * 2 + template_visit.tri_idx * 3;
+        let slot = template.dots.len() + template.lins.len() * 2 + template_visit.tri_idx * 3;
         for (group, vertex) in [
             (groups[slot], rotated[0]),
             (groups[slot + 1], rotated[1]),
@@ -1468,8 +1508,9 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
         group_uv[group] *= scale;
     }
 
+    let mut dots = template.dots.clone();
     let mut slot = 0usize;
-    for dot in &mut out.dots {
+    for dot in &mut dots {
         let group = groups[slot];
         if group_hits[group] > 0 {
             dot.pos = group_pos[group];
@@ -1477,62 +1518,26 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
         }
         slot += 1;
     }
-    for line in &mut out.lins {
-        let a_group = groups[slot];
-        let b_group = groups[slot + 1];
-        if group_hits[a_group] > 0 {
-            line.a.pos = group_pos[a_group];
-            line.a.col = group_col[a_group];
-        }
-        if group_hits[b_group] > 0 {
-            line.b.pos = group_pos[b_group];
-            line.b.col = group_col[b_group];
-        }
-        slot += 2;
-    }
-    for tri in &mut out.tris {
-        let a_group = groups[slot];
-        let b_group = groups[slot + 1];
-        let c_group = groups[slot + 2];
-        if group_hits[a_group] > 0 {
-            tri.a.pos = group_pos[a_group];
-            tri.a.col = group_col[a_group];
-            tri.a.uv = group_uv[a_group];
-        }
-        if group_hits[b_group] > 0 {
-            tri.b.pos = group_pos[b_group];
-            tri.b.col = group_col[b_group];
-            tri.b.uv = group_uv[b_group];
-        }
-        if group_hits[c_group] > 0 {
-            tri.c.pos = group_pos[c_group];
-            tri.c.col = group_col[c_group];
-            tri.c.uv = group_uv[c_group];
-        }
-        slot += 3;
-    }
 
-    for line_idx in 0..out.lins.len() {
-        if let Some((tri_idx, edge_idx)) = template_line_owner_edge(template, line_idx) {
-            let tri = out.tris[tri_idx];
-            let (a, b, col_a, col_b) = tri_edge_positions_with_color(&tri, edge_idx);
-            out.lins[line_idx].a.pos = a;
-            out.lins[line_idx].b.pos = b;
-            out.lins[line_idx].a.col = col_a;
-            out.lins[line_idx].b.col = col_b;
-            out.lins[line_idx].norm = triangle_face_normal(&tri);
+    let mut surface = mesh_to_indexed_surface(template);
+    for (group, vertex) in surface.vertices.iter_mut().enumerate() {
+        if group_hits[group] > 0 {
+            vertex.pos = group_pos[group];
+            vertex.col = group_col[group];
+            vertex.uv = group_uv[group];
         }
     }
+    let (lins, tris) = build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+    let out = Mesh {
+        dots,
+        lins,
+        tris,
+        uniform: source.uniform.clone(),
+        tag: source.tag.clone(),
+    };
 
     debug_assert!(out.has_consistent_topology());
     out
-}
-
-fn template_line_owner_edge(template: &Mesh, line_idx: usize) -> Option<(usize, usize)> {
-    let line_ref = mesh_ref(line_idx);
-    template.tris.iter().enumerate().find_map(|(tri_idx, tri)| {
-        tri_edge_for_neighbor(tri, line_ref).map(|edge_idx| (tri_idx, edge_idx))
-    })
 }
 
 fn ordered_path_from_mesh(mesh: &Mesh) -> Option<OrderedPath> {
@@ -2300,9 +2305,12 @@ mod tests {
         simd::{Float3, Float4},
     };
 
+    use crate::mesh::helpers::tessellate_planar_loops;
+
     use super::{
         ClosedContour, append_closed_contour, extract_closed_contours, pair_leaf_indices_by_tag,
-        prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair, split_mesh_contours,
+        prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair, same_mesh_topology,
+        split_mesh_contours,
         vec3_patharc_lerp,
     };
 
@@ -2358,6 +2366,60 @@ mod tests {
             anti: -1,
             is_dom_sib: false,
         }
+    }
+
+    fn tessellated_mesh(contours: &[Vec<Float3>]) -> Mesh {
+        let (lins, tris) =
+            tessellate_planar_loops(contours, Float3::Z).expect("planar tessellation should work");
+        Mesh {
+            dots: vec![],
+            lins,
+            tris,
+            uniform: Uniforms::default(),
+            tag: vec![],
+        }
+    }
+
+    fn circle_points(radius: f32, samples: usize) -> Vec<Float3> {
+        (0..samples)
+            .map(|i| {
+                let theta = std::f32::consts::TAU * i as f32 / samples as f32;
+                Float3::new(radius * theta.cos(), radius * theta.sin(), 0.0)
+            })
+            .collect()
+    }
+
+    fn regular_polygon_points(radius: f32, samples: usize) -> Vec<Float3> {
+        circle_points(radius, samples)
+    }
+
+    fn annulus_mesh(inner: f32, outer: f32, samples: usize) -> Mesh {
+        let mut inner_pts = circle_points(inner, samples);
+        inner_pts.reverse();
+        tessellated_mesh(&[circle_points(outer, samples), inner_pts])
+    }
+
+    fn capsule_mesh(half_len: f32, radius: f32, arc_samples: usize) -> Mesh {
+        let mut contour = Vec::with_capacity(arc_samples * 2);
+        for i in 0..arc_samples {
+            let theta = -std::f32::consts::FRAC_PI_2
+                + std::f32::consts::PI * i as f32 / (arc_samples - 1) as f32;
+            contour.push(Float3::new(
+                half_len + radius * theta.cos(),
+                radius * theta.sin(),
+                0.0,
+            ));
+        }
+        for i in 0..arc_samples {
+            let theta = std::f32::consts::FRAC_PI_2
+                + std::f32::consts::PI * i as f32 / (arc_samples - 1) as f32;
+            contour.push(Float3::new(
+                -half_len + radius * theta.cos(),
+                radius * theta.sin(),
+                0.0,
+            ));
+        }
+        tessellated_mesh(&[contour])
     }
 
     #[test]
@@ -2534,5 +2596,110 @@ mod tests {
 
         assert_eq!(aligned_source.tris.len(), 2);
         assert_eq!(aligned_target.tris.len(), 2);
+    }
+
+    #[test]
+    fn prepare_trans_mesh_pair_handles_polygon_to_annulus() {
+        let source = tessellated_mesh(&[vec![
+            Float3::new(-1.0, -0.7, 0.0),
+            Float3::new(1.1, -0.9, 0.0),
+            Float3::new(0.0, 1.2, 0.0),
+        ]]);
+        let target = annulus_mesh(0.4, 1.1, 24);
+
+        let (aligned_source, aligned_target, _) =
+            prepare_trans_mesh_pair(Some(&source), Some(&target))
+                .expect("pair prep should succeed");
+
+        assert!(aligned_source.has_consistent_topology());
+        assert!(aligned_target.has_consistent_topology());
+        assert!(same_mesh_topology(&aligned_source, &aligned_target));
+    }
+
+    #[test]
+    fn prepare_trans_mesh_pair_handles_polygon_to_capsule_like_surface() {
+        let source = tessellated_mesh(&[vec![
+            Float3::new(-0.9, -0.9, 0.0),
+            Float3::new(0.9, -0.9, 0.0),
+            Float3::new(0.9, 0.9, 0.0),
+            Float3::new(-0.9, 0.9, 0.0),
+        ]]);
+        let target = capsule_mesh(1.0, 0.35, 16);
+
+        let (aligned_source, aligned_target, _) =
+            prepare_trans_mesh_pair(Some(&source), Some(&target))
+                .expect("pair prep should succeed");
+
+        assert!(aligned_source.has_consistent_topology());
+        assert!(aligned_target.has_consistent_topology());
+        assert!(same_mesh_topology(&aligned_source, &aligned_target));
+    }
+
+    #[test]
+    fn prepare_trans_mesh_pair_handles_circle_to_regular_polygon() {
+        let source = tessellated_mesh(&[circle_points(0.8, 32)]);
+        let target = tessellated_mesh(&[regular_polygon_points(0.9, 5)]);
+
+        let (aligned_source, aligned_target, _) =
+            prepare_trans_mesh_pair(Some(&source), Some(&target))
+                .expect("pair prep should succeed");
+
+        assert!(aligned_source.has_consistent_topology());
+        assert!(aligned_target.has_consistent_topology());
+        assert!(same_mesh_topology(&aligned_source, &aligned_target));
+    }
+
+    #[test]
+    fn prepare_trans_mesh_pair_handles_clockwise_triangle_to_annulus() {
+        let mut lins = vec![
+            line(
+                Float3::new(1.5, 1.8, 0.0),
+                Float3::new(2.5, 3.4, 0.0),
+                -1,
+                -1,
+            ),
+            line(
+                Float3::new(2.5, 3.4, 0.0),
+                Float3::new(3.3, 1.7, 0.0),
+                -1,
+                -1,
+            ),
+            line(
+                Float3::new(3.3, 1.7, 0.0),
+                Float3::new(1.5, 1.8, 0.0),
+                -1,
+                -1,
+            ),
+        ];
+        let mut triangle = tri(
+            Float3::new(1.5, 1.8, 0.0),
+            Float3::new(2.5, 3.4, 0.0),
+            Float3::new(3.3, 1.7, 0.0),
+            super::mesh_ref(0),
+            super::mesh_ref(1),
+            super::mesh_ref(2),
+        );
+        for line in &mut lins {
+            line.inv = super::mesh_ref(0);
+        }
+        triangle.a.col = Float4::ONE;
+        triangle.b.col = Float4::ONE;
+        triangle.c.col = Float4::ONE;
+        let source = Mesh {
+            dots: vec![],
+            lins,
+            tris: vec![triangle],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+        let target = annulus_mesh(0.34, 0.82, 64);
+
+        let (aligned_source, aligned_target, _) =
+            prepare_trans_mesh_pair(Some(&source), Some(&target))
+                .expect("pair prep should succeed");
+
+        assert!(aligned_source.has_consistent_topology());
+        assert!(aligned_target.has_consistent_topology());
+        assert!(same_mesh_topology(&aligned_source, &aligned_target));
     }
 }
