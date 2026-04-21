@@ -1,16 +1,20 @@
 // animation test framework and tests
 // covers: slide durations, leader values, multi-slide scenes, stdlib usage
 
-use std::{f64, fs, path::Path, sync::Arc};
+use std::{f64, fs, path::Path, rc::Rc, sync::Arc};
 
 use compiler::cache::CompilerCache;
 use executor::{
+    camera::parse_camera_value,
     error::ExecutorError,
     executor::{Executor, SeekToResult},
-    heap::with_heap,
+    heap::{VRc, with_heap},
     state::LeaderKind,
     time::Timestamp,
-    value::Value,
+    value::{
+        Value,
+        container::{HashableKey, List, Map},
+    },
 };
 use lexer::{lexer::Lexer, token::Token};
 use parser::{
@@ -1885,6 +1889,71 @@ fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
             !snapshot.meshes.is_empty(),
             "scene snapshot should include the reactive mesh"
         );
+    });
+}
+
+#[test]
+fn test_scene_snapshot_camera_accepts_look_at_surface() {
+    let (mut executor, _user_slide_count) =
+        match build_anim_executor(&[("play Set()", SectionType::Slide)], &stdlib_bundles(["anim"])) {
+            Ok(data) => data,
+            Err(result) => panic!("failed to build executor: {:?}", result.errors),
+        };
+
+    let list_value = |values: Vec<Value>| {
+        Value::List(Rc::new(List::new_with(
+            values.into_iter().map(VRc::new).collect(),
+        )))
+    };
+
+    let mut map = Map::new();
+    map.insert(
+        HashableKey::String("kind".to_string()),
+        VRc::new(Value::String("camera".to_string())),
+    );
+    map.insert(
+        HashableKey::String("position".to_string()),
+        VRc::new(list_value(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(3),
+        ])),
+    );
+    map.insert(
+        HashableKey::String("look_at".to_string()),
+        VRc::new(list_value(vec![
+            Value::Integer(1),
+            Value::Integer(2),
+            Value::Integer(5),
+        ])),
+    );
+    map.insert(
+        HashableKey::String("up".to_string()),
+        VRc::new(list_value(vec![
+            Value::Integer(0),
+            Value::Integer(1),
+            Value::Integer(0),
+        ])),
+    );
+    map.insert(
+        HashableKey::String("near".to_string()),
+        VRc::new(Value::Float(0.2)),
+    );
+    map.insert(
+        HashableKey::String("far".to_string()),
+        VRc::new(Value::Integer(50)),
+    );
+    let camera_value = Value::Map(Rc::new(map));
+
+    smol::block_on(async {
+        let camera = parse_camera_value(&mut executor, camera_value, "camera")
+            .await
+            .expect("camera parser should accept look_at surface");
+        assert_eq!(camera.position.to_array(), [1.0, 2.0, 3.0]);
+        assert_eq!(camera.forward.to_array(), [0.0, 0.0, 2.0]);
+        assert_eq!(camera.up.to_array(), [0.0, 1.0, 0.0]);
+        assert!((camera.near - 0.2).abs() < 1e-6);
+        assert!((camera.far - 50.0).abs() < 1e-6);
     });
 }
 

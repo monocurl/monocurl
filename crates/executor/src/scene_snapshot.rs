@@ -1,8 +1,9 @@
 use std::{future::Future, sync::Arc};
 
-use geo::{mesh::Mesh, simd::Float3};
+use geo::mesh::Mesh;
 
 use crate::{
+    camera::parse_camera_value,
     error::{ExecutorError, RuntimeError},
     executor::Executor,
     heap::with_heap,
@@ -13,26 +14,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct CameraSnapshot {
-    pub position: Float3,
-    pub forward: Float3,
-    pub up: Float3,
-    pub near: f32,
-    pub far: f32,
-}
-
-impl Default for CameraSnapshot {
-    fn default() -> Self {
-        Self {
-            position: Float3::new(0.0, 0.0, -10.0),
-            forward: Float3::Z,
-            up: Float3::Y,
-            near: 0.1,
-            far: 100.0,
-        }
-    }
-}
+pub use crate::camera::CameraSnapshot;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BackgroundSnapshot {
@@ -143,39 +125,6 @@ async fn read_f32(
     }
 }
 
-async fn read_float3(
-    executor: &mut Executor,
-    value: Value,
-    target: &'static str,
-) -> Result<Float3, ExecutorError> {
-    let value = value.elide_wrappers(executor).await?;
-    let Value::List(list) = value else {
-        return Err(ExecutorError::type_error_for(
-            "list of length 3",
-            value.type_name(),
-            target,
-        ));
-    };
-    if list.len() != 3 {
-        return Err(ExecutorError::invalid_scene(format!(
-            "{}: expected list of length 3, got list of length {}",
-            target,
-            list.len()
-        )));
-    }
-
-    let mut components = [0.0; 3];
-    for (slot, component) in components.iter_mut().zip(list.elements()) {
-        *slot = read_f32(
-            executor,
-            with_heap(|h| h.get(component.key()).clone()),
-            target,
-        )
-        .await?;
-    }
-    Ok(Float3::from_array(components))
-}
-
 async fn read_float4(
     executor: &mut Executor,
     value: Value,
@@ -213,57 +162,7 @@ async fn camera_snapshot_from_value(
     executor: &mut Executor,
     value: Value,
 ) -> Result<CameraSnapshot, ExecutorError> {
-    let value = value.elide_wrappers(executor).await?;
-    let Value::Map(map) = value else {
-        return Err(ExecutorError::type_error_for(
-            "camera",
-            value.type_name(),
-            "camera",
-        ));
-    };
-
-    let Some(kind) = map_field_value(&map, "kind") else {
-        return Err(ExecutorError::missing_field("camera", "kind"));
-    };
-    let kind = kind.elide_wrappers(executor).await?;
-    if !matches!(kind, Value::String(ref kind) if kind == "camera") {
-        return Err(ExecutorError::invalid_scene(format!(
-            "camera must resolve to a camera object, got kind {}",
-            match kind {
-                Value::String(ref kind) => kind.as_str(),
-                other => other.type_name(),
-            }
-        )));
-    }
-
-    let Some(position) = map_field_value(&map, "position") else {
-        return Err(ExecutorError::missing_field("camera", "position"));
-    };
-    let position = read_float3(executor, position, "camera.position").await?;
-    let forward = if let Some(forward) = map_field_value(&map, "forward") {
-        read_float3(executor, forward, "camera.forward").await?
-    } else if let Some(look_at) = map_field_value(&map, "look_at") {
-        read_float3(executor, look_at, "camera.look_at").await? - position
-    } else {
-        return Err(ExecutorError::missing_field("camera", "forward"));
-    };
-    let Some(up) = map_field_value(&map, "up") else {
-        return Err(ExecutorError::missing_field("camera", "up"));
-    };
-    let Some(near) = map_field_value(&map, "near") else {
-        return Err(ExecutorError::missing_field("camera", "near"));
-    };
-    let Some(far) = map_field_value(&map, "far") else {
-        return Err(ExecutorError::missing_field("camera", "far"));
-    };
-
-    Ok(CameraSnapshot {
-        position,
-        forward,
-        up: read_float3(executor, up, "camera.up").await?,
-        near: read_f32(executor, near, "camera.near").await?,
-        far: read_f32(executor, far, "camera.far").await?,
-    })
+    parse_camera_value(executor, value, "camera").await
 }
 
 async fn camera_snapshot(executor: &mut Executor) -> Result<CameraSnapshot, ExecutorError> {

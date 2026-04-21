@@ -341,7 +341,8 @@ let normal_hint = operator |target, normal = 1f, filter = nil| {
 let retag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_retagged(target, |old| tag, filter)]
 
 let textured = operator |target, image, filter = nil| [target, __monocurl__native__ op_retextured(target, image, filter)]
-let with_z = operator |target, index, filter = nil| [target, __monocurl__native__ op_with_z(target, index, filter)]
+let with_zindex = operator |target, z_index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, z_index, filter)]
+let with_z = operator |target, index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, index, filter)]
 let gloss = operator |target| [target, __monocurl__native__ op_gloss(target)]
 let point_map = operator |target, f, filter = nil| {
     let go = |level| __monocurl__native__ op_point_map(target, f, filter, level)
@@ -368,16 +369,15 @@ let centered_at = operator |target, at, filter = nil| {
     let go = |level| __monocurl__native__ op_centered(target, at, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let on_side = operator |target, dir = [0, 0, 0], camera = nil, buffer = 0, filter = nil| {
-    let go = |level| __monocurl__native__ op_on_side(target, dir, camera, buffer, filter, level)
+let to_side = operator |target, dir = [0, 0, 0], camera = nil, buffer = 0, filter = nil| {
+    let go = |level| __monocurl__native__ op_to_side(target, dir, camera, buffer, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let moved_to_side = on_side
-let on_corner = operator |target, dir = [1, 1, 0], camera = nil, buffer = 0, filter = nil| {
-    let go = |level| __monocurl__native__ op_on_corner(target, dir, camera, buffer, filter, level)
+let to_corner = operator |target, dir = [1, 1, 0], camera = nil, buffer = 0, filter = nil| {
+    let go = |level| __monocurl__native__ op_to_corner(target, dir, camera, buffer, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let matched_edge = operator |target, ref, dir = 1r, filter = nil| {
+let matched_edge = operator |target, ref, dir, filter = nil| {
     let go = |level| __monocurl__native__ op_matched_edge(target, ref, dir, filter, level)
     return [go(level: 0), go(level: 1)]
 }

@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, sync::Arc};
 
-use executor::scene_snapshot::CameraSnapshot;
+use executor::{camera::CameraBasis, scene_snapshot::CameraSnapshot};
 use geo::{
     mesh::{Dot, Lin, Mesh, Tri},
     simd::{Float3, Float4},
@@ -11,9 +11,6 @@ use crate::{state::execution_state::ExecutionState, theme::ThemeSettings};
 
 const DOT_RADIUS: f32 = 3.5;
 const EDGE_WIDTH: f32 = 1.0;
-const DEFAULT_CAMERA_FOV: f32 = 0.698_131_7;
-const MIN_FOV: f32 = 0.1;
-const MIN_NEAR: f32 = 0.01;
 const TRANSPARENT: Rgba = Rgba {
     r: 0.0,
     g: 0.0,
@@ -30,17 +27,6 @@ struct SceneRenderData {
     background_color: Rgba,
     camera: CameraSnapshot,
     meshes: Vec<Arc<Mesh>>,
-}
-
-#[derive(Clone, Copy)]
-struct CameraBasis {
-    position: Float3,
-    right: Float3,
-    up: Float3,
-    forward: Float3,
-    near: f32,
-    far: f32,
-    fov: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -112,7 +98,7 @@ impl Render for DebugSceneView {
 fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Window) {
     window.paint_quad(fill(bounds, scene.background_color));
 
-    let basis = camera_basis(&scene.camera);
+    let basis = scene.camera.basis();
     let mut items = Vec::new();
     for mesh in &scene.meshes {
         collect_mesh_draw_items(mesh, basis, bounds, &mut items);
@@ -126,34 +112,6 @@ fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Win
 
     for item in items {
         paint_draw_item(item, window);
-    }
-}
-
-fn camera_basis(camera: &CameraSnapshot) -> CameraBasis {
-    let mut forward = camera.forward;
-    if forward.len_sq() <= 1e-6 {
-        forward = Float3::Z;
-    } else {
-        forward = forward.normalize();
-    }
-
-    let mut right = camera.up.cross(forward);
-    if right.len_sq() <= 1e-6 {
-        right = Float3::X;
-    } else {
-        right = right.normalize();
-    }
-
-    let up = forward.cross(right).normalize();
-
-    CameraBasis {
-        position: camera.position,
-        right,
-        up,
-        forward,
-        near: camera.near.max(MIN_NEAR),
-        far: camera.far.max(camera.near.max(MIN_NEAR)),
-        fov: DEFAULT_CAMERA_FOV.max(MIN_FOV),
     }
 }
 

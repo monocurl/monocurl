@@ -109,6 +109,7 @@ struct TrackPrepaint {
     gap_ws: Vec<f32>,
     painted_gap_ws: Vec<f32>,
     playhead_x: f32,
+    seek_hitbox: Hitbox,
     // effective display duration per slide (may be inferred from current_time)
     durations: Vec<Option<f64>>,
     // true if the duration was explicitly provided (determines border color)
@@ -355,6 +356,19 @@ impl Timeline {
                     let playhead_x =
                         compute_playhead_x(current_slide, current_time, &slide_xs, &gap_ws, zoom);
                     let vert_offset = (f32::from(bounds.size.height) - CONTENT_H).max(0.0) / 2.0;
+                    let seek_hitbox = window.insert_hitbox(
+                        Bounds::new(
+                            point(
+                                bounds.origin.x + px(PADDING_H),
+                                bounds.origin.y + px(vert_offset),
+                            ),
+                            size(
+                                px((f32::from(bounds.size.width) - 2.0 * PADDING_H).max(0.0)),
+                                px(CONTENT_H.min(f32::from(bounds.size.height))),
+                            ),
+                        ),
+                        HitboxBehavior::Normal,
+                    );
 
                     let ts = window.text_system();
                     let make_run = |text: &str, color: Rgba| TextRun {
@@ -399,6 +413,7 @@ impl Timeline {
                         gap_ws,
                         painted_gap_ws,
                         playhead_x,
+                        seek_hitbox,
                         durations: effective,
                         explicit,
                         vert_offset,
@@ -413,6 +428,7 @@ impl Timeline {
                     gap_ws,
                     painted_gap_ws,
                     playhead_x,
+                    seek_hitbox,
                     durations,
                     explicit,
                     vert_offset,
@@ -424,16 +440,6 @@ impl Timeline {
                 // oy: content origin, offset to vertically center slides
                 let oy_full = bounds.origin.y;
                 let oy = oy_full + px(vert_offset);
-                let seek_hitbox = window.insert_hitbox(
-                    Bounds::new(
-                        point(ox + px(PADDING_H), oy),
-                        size(
-                            px((f32::from(bounds.size.width) - 2.0 * PADDING_H).max(0.0)),
-                            px(CONTENT_H.min(f32::from(bounds.size.height))),
-                        ),
-                    ),
-                    HitboxBehavior::Normal,
-                );
 
                 let line_y = PADDING_V + SLIDE_H / 2.0;
                 let sec_px = PX_PER_SEC * zoom;

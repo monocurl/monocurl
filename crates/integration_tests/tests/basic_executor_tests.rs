@@ -2107,12 +2107,12 @@ fn test_mesh_operator_filter_applies_predicate_to_subset() {
 }
 
 #[test]
-fn test_on_side_and_on_corner_smoke() {
+fn test_to_side_and_to_corner_smoke() {
     let r = run_with_stdlib(
         "
         let cam = Camera([0, 0, -10], 1f, 1u)
-        let side = mesh_center(on_side{dir: 1r, camera: cam} Circle())
-        let corner = mesh_center(on_corner{dir: [1, 1, 0], camera: cam, buffer: 0.1} Circle())
+        let side = mesh_center(to_side{dir: 1r, camera: cam} Circle())
+        let corner = mesh_center(to_corner{dir: [1, 1, 0], camera: cam, buffer: 0.1} Circle())
         let result = (side[0] > 0) + (corner[0] > 0) + (corner[1] > 0)
     ",
         &["mesh", "scene"],

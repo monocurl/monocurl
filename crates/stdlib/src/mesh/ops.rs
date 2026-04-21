@@ -1,31 +1,16 @@
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use executor::{
+    camera::{CameraBasis, DEFAULT_CAMERA_ASPECT, DEFAULT_CAMERA_FOV, parse_camera_arg},
     error::ExecutorError,
     executor::Executor,
     heap::with_heap,
-    value::{
-        Value,
-        container::{HashableKey, Map},
-    },
+    value::Value,
 };
 use geo::{mesh::Mesh, simd::Float3};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
-
-const DEFAULT_CAMERA_FOV: f32 = 0.698_131_7;
-const DEFAULT_CAMERA_ASPECT: f32 = 16.0 / 9.0;
-const MIN_CAMERA_NEAR: f32 = 0.01;
-
-#[derive(Clone, Copy)]
-struct LayoutCamera {
-    position: Float3,
-    right: Float3,
-    up: Float3,
-    forward: Float3,
-    near: f32,
-}
 
 fn read_scale_factor(
     executor: &Executor,
@@ -60,146 +45,8 @@ fn read_level(
     Ok(crate::read_float(executor, stack_idx, index, name)?.clamp(0.0, 1.0) as f32)
 }
 
-fn map_field(map: &Map, name: &str) -> Option<Value> {
-    map.get(&HashableKey::String(name.to_string()))
-        .map(|value| with_heap(|h| h.get(value.key()).clone()))
-}
-
-fn read_float_value<'a>(
-    executor: &'a mut Executor,
-    value: Value,
-    name: &'static str,
-) -> Pin<Box<dyn Future<Output = Result<f32, ExecutorError>> + 'a>> {
-    Box::pin(async move {
-        match value.elide_wrappers(executor).await? {
-            Value::Integer(value) => Ok(value as f32),
-            Value::Float(value) => Ok(value as f32),
-            other => Err(ExecutorError::type_error_for(
-                "float",
-                other.type_name(),
-                name,
-            )),
-        }
-    })
-}
-
-fn read_float3_value<'a>(
-    executor: &'a mut Executor,
-    value: Value,
-    name: &'static str,
-) -> Pin<Box<dyn Future<Output = Result<Float3, ExecutorError>> + 'a>> {
-    Box::pin(async move {
-        let value = value.elide_wrappers(executor).await?;
-        let Value::List(list) = value else {
-            return Err(ExecutorError::type_error_for(
-                "list of length 3",
-                value.type_name(),
-                name,
-            ));
-        };
-        if list.len() != 3 {
-            return Err(ExecutorError::InvalidArgument {
-                arg: name,
-                message: "expected list of length 3",
-            });
-        }
-        let mut components = [0.0f32; 3];
-        for (idx, value_ref) in list.elements().iter().enumerate() {
-            let value = with_heap(|h| h.get(value_ref.key()).clone());
-            components[idx] = read_float_value(executor, value, name).await?;
-        }
-        Ok(Float3::from_array(components))
-    })
-}
-
-fn read_layout_camera<'a>(
-    executor: &'a mut Executor,
-    stack_idx: usize,
-    index: i32,
-    name: &'static str,
-) -> Pin<Box<dyn Future<Output = Result<LayoutCamera, ExecutorError>> + 'a>> {
-    Box::pin(async move {
-        let value = executor
-            .state
-            .stack(stack_idx)
-            .read_at(index)
-            .clone()
-            .elide_wrappers(executor)
-            .await?;
-        let Value::Map(map) = value else {
-            return Err(ExecutorError::type_error_for(
-                "camera",
-                value.type_name(),
-                name,
-            ));
-        };
-
-        let kind = map_field(&map, "kind")
-            .ok_or_else(|| ExecutorError::missing_field("camera", "kind"))?
-            .elide_wrappers(executor)
-            .await?;
-        if !matches!(kind, Value::String(ref kind) if kind == "camera") {
-            return Err(ExecutorError::type_error_for(
-                "camera",
-                kind.type_name(),
-                name,
-            ));
-        }
-
-        let position = read_float3_value(
-            executor,
-            map_field(&map, "position")
-                .ok_or_else(|| ExecutorError::missing_field("camera", "position"))?,
-            "camera.position",
-        )
-        .await?;
-        let mut forward = read_float3_value(
-            executor,
-            map_field(&map, "forward")
-                .ok_or_else(|| ExecutorError::missing_field("camera", "forward"))?,
-            "camera.forward",
-        )
-        .await?;
-        if forward.len_sq() <= 1e-6 {
-            forward = Float3::Z;
-        } else {
-            forward = forward.normalize();
-        }
-
-        let up_hint = read_float3_value(
-            executor,
-            map_field(&map, "up").ok_or_else(|| ExecutorError::missing_field("camera", "up"))?,
-            "camera.up",
-        )
-        .await?;
-        let mut right = up_hint.cross(forward);
-        if right.len_sq() <= 1e-6 {
-            right = Float3::X;
-        } else {
-            right = right.normalize();
-        }
-        let up = forward.cross(right).normalize();
-
-        let near = read_float_value(
-            executor,
-            map_field(&map, "near").ok_or_else(|| ExecutorError::missing_field("camera", "near"))?,
-            "camera.near",
-        )
-        .await?
-        .max(MIN_CAMERA_NEAR);
-
-        Ok(LayoutCamera {
-            position,
-            right,
-            up,
-            forward,
-            near,
-        })
-    })
-}
-
 fn viewport_half_extents(depth: f32) -> (f32, f32) {
-    let depth = depth.max(MIN_CAMERA_NEAR);
+    let depth = depth.max(executor::camera::MIN_CAMERA_NEAR);
     let tan_half_fov = (DEFAULT_CAMERA_FOV * 0.5).tan().max(0.05);
     (
         depth * tan_half_fov * DEFAULT_CAMERA_ASPECT,
@@ -209,7 +56,7 @@ fn viewport_half_extents(depth: f32) -> (f32, f32) {
 
 fn camera_space_placement_delta(
     tree: &MeshTree,
-    camera: LayoutCamera,
+    camera: CameraBasis,
     side: Float3,
     buffer: f32,
 ) -> Option<Float3> {
@@ -541,9 +388,12 @@ pub async fn op_retextured(
 }
 
 #[stdlib_func]
-pub async fn op_with_z(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn op_with_zindex(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
-    let z_index = read_int(executor, stack_idx, -2, "index")?;
+    let z_index = read_int(executor, stack_idx, -2, "z_index")?;
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         mesh.uniform.z_index = z_index as i32;
@@ -1284,7 +1134,7 @@ pub async fn op_centered(
 }
 
 #[stdlib_func]
-pub async fn op_on_side(
+pub async fn op_to_side(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -1294,7 +1144,9 @@ pub async fn op_on_side(
         return Ok(tree.into_value());
     }
     let side = read_float3(executor, stack_idx, -5, "dir")?;
-    let camera = read_layout_camera(executor, stack_idx, -4, "camera").await?;
+    let camera = parse_camera_arg(executor, stack_idx, -4, "camera")
+        .await?
+        .basis();
     let buffer = crate::read_float(executor, stack_idx, -3, "buffer")? as f32;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
@@ -1310,7 +1162,7 @@ pub async fn op_on_side(
 }
 
 #[stdlib_func]
-pub async fn op_on_corner(
+pub async fn op_to_corner(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -1326,7 +1178,9 @@ pub async fn op_on_corner(
     if side.y == 0.0 {
         side.y = 1.0;
     }
-    let camera = read_layout_camera(executor, stack_idx, -4, "camera").await?;
+    let camera = parse_camera_arg(executor, stack_idx, -4, "camera")
+        .await?
+        .basis();
     let buffer = crate::read_float(executor, stack_idx, -3, "buffer")? as f32;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {

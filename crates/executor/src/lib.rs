@@ -1,3 +1,4 @@
+pub mod camera;
 pub mod error;
 pub mod executor;
 pub mod heap;
