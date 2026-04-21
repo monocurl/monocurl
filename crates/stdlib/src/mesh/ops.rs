@@ -131,6 +131,33 @@ fn camera_space_placement_delta(
     Some(camera.right * delta_x + camera.up * delta_y)
 }
 
+fn camera_space_coords(point: Float3, camera: CameraBasis) -> Float3 {
+    let relative = point - camera.position;
+    Float3::new(
+        relative.dot(camera.right),
+        relative.dot(camera.up),
+        relative.dot(camera.forward),
+    )
+}
+
+fn point_from_camera_space(coords: Float3, camera: CameraBasis) -> Float3 {
+    camera.position + camera.right * coords.x + camera.up * coords.y + camera.forward * coords.z
+}
+
+fn remap_point_between_cameras(point: Float3, from: CameraBasis, to: CameraBasis) -> Float3 {
+    point_from_camera_space(camera_space_coords(point, from), to)
+}
+
+fn remap_direction_between_cameras(
+    direction: Float3,
+    from: CameraBasis,
+    to: CameraBasis,
+) -> Float3 {
+    to.right * direction.dot(from.right)
+        + to.up * direction.dot(from.up)
+        + to.forward * direction.dot(from.forward)
+}
+
 fn filtered_tree_view<'a>(
     executor: &'a mut Executor,
     tree: &'a MeshTree,
@@ -285,6 +312,41 @@ pub async fn op_rotate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         }
         for lin in &mut mesh.lins {
             lin.norm = rotate_about_axis(lin.norm, axis, angle);
+        }
+    })
+    .await?;
+    Ok(tree.into_value())
+}
+
+#[stdlib_func]
+pub async fn op_fixed_in_frame(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let original_camera = parse_camera_arg(executor, stack_idx, -4, "original_camera")
+        .await?
+        .basis();
+    let live_camera = parse_camera_arg(executor, stack_idx, -3, "live_camera")
+        .await?
+        .basis();
+    let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
+
+    tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
+        blend_mesh_positions(mesh, level, |point| {
+            remap_point_between_cameras(point, original_camera, live_camera)
+        });
+        for dot in &mut mesh.dots {
+            let target = remap_direction_between_cameras(dot.norm, original_camera, live_camera);
+            dot.norm = dot.norm.lerp(target, level);
+        }
+        for lin in &mut mesh.lins {
+            let target = remap_direction_between_cameras(lin.norm, original_camera, live_camera);
+            lin.norm = lin.norm.lerp(target, level);
         }
     })
     .await?;

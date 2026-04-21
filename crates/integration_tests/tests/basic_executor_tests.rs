@@ -2139,6 +2139,32 @@ fn test_to_side_and_to_corner_smoke() {
 }
 
 #[test]
+fn test_fixed_in_frame_preserves_camera_space_under_translation() {
+    let r = run_with_stdlib(
+        "
+        let original = Camera([0, 0, -10], [0, 0, 0], 1u)
+        let live = Camera([2, 3, -10], [2, 3, 0], 1u)
+        let result = mesh_center(fixed_in_frame{original, live} Dot([1, 0, 0]))
+    ",
+        &["mesh", "scene"],
+    );
+    r.assert_float_list_approx(&[3.0, 3.0, 0.0], 1e-6);
+}
+
+#[test]
+fn test_fixed_in_frame_preserves_camera_space_under_orbit() {
+    let r = run_with_stdlib(
+        "
+        let original = Camera([0, 0, -10], [0, 0, 0], 1u)
+        let live = Camera([10, 0, 0], [0, 0, 0], 1u)
+        let result = mesh_center(fixed_in_frame{original, live} Dot([1, 0, 0]))
+    ",
+        &["mesh", "scene"],
+    );
+    r.assert_float_list_approx(&[0.0, 0.0, 1.0], 1e-5);
+}
+
+#[test]
 fn test_capsule_accepts_scalar_and_equal_pair_radii() {
     let r = run_with_stdlib(
         "
