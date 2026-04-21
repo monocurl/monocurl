@@ -81,7 +81,7 @@ const SLIDER_2D_BG: Rgba = Rgba {
     b: 0.18,
     a: 1.0,
 };
-const SLIDER_2D_AXIS: Rgba = Rgba {
+const SLIDER_2D_GRID: Rgba = Rgba {
     r: 0.32,
     g: 0.32,
     b: 0.32,
@@ -94,7 +94,7 @@ const TRANSPARENT: Rgba = Rgba {
     a: 0.0,
 };
 
-const PRES_TOOLBAR_H: f32 = 32.0;
+const PRES_TOOLBAR_H: f32 = 40.0;
 const PARAM_PANEL_W: f32 = 260.0;
 const SLIDER_TRACK_H: f32 = 4.0;
 const SLIDER_THUMB_R: f32 = 7.0;
@@ -106,12 +106,18 @@ const SLIDER_2D_SIZE: f32 = 120.0;
 const SLIDER_2D_MIN: f64 = -1.0;
 const SLIDER_2D_MAX: f64 = 1.0;
 const SLIDER_2D_DOT_R: f32 = 5.0;
+const SLIDER_2D_GRID_DIVISIONS: usize = 4;
+const SLIDER_1D_EDGE_GAP: f32 = SLIDER_THUMB_R + 1.0;
+const SLIDER_2D_EDGE_GAP: f32 = SLIDER_2D_DOT_R + 2.0;
 const RING_TRANSITION: Duration = Duration::from_millis(140);
 const OVERDRAG_TICK: Duration = Duration::from_nanos(8_333_333);
 const HIDDEN_PARAMS: [&str; 2] = ["camera", "background"];
+const ESCAPE_SPEED_NEAR_PX: f32 = 8.0;
+const ESCAPE_SPEED_FAR_PX: f32 = 96.0;
+const ESCAPE_SPEED_MAX_MULT: f64 = 5.0;
 
-// fixed per-tick overdrag step; cursor position only selects direction,
-// which avoids the runaway acceleration from mapping arbitrary cursor distance
+// fixed per-tick escape step; cursor position only selects direction,
+// and escaped axes translate their live bounds with the value
 const OVERDRAG_STEP_1D: f64 = 0.02;
 const OVERDRAG_STEP_2D: f64 = 0.01;
 
@@ -122,27 +128,33 @@ enum Slider2dKind {
     VectorInt(Vec<i64>),
 }
 
+#[derive(Clone, Copy)]
+struct AxisDrag {
+    value: f64,
+    min: f64,
+    max: f64,
+    overdrag_dir: i8,
+    escape_distance: f32,
+}
+
+impl AxisDrag {
+    fn bounds(self) -> (f64, f64) {
+        (self.min, self.max)
+    }
+}
+
 #[derive(Clone)]
 enum DragState {
     Scalar {
         name: String,
-        value: f64,
+        axis: AxisDrag,
         is_int: bool,
-        min: f64,
-        max: f64,
-        overdrag_dir: i8,
     },
     Plane {
         name: String,
-        x: f64,
-        y: f64,
+        x_axis: AxisDrag,
+        y_axis: AxisDrag,
         kind: Slider2dKind,
-        x_min: f64,
-        x_max: f64,
-        y_min: f64,
-        y_max: f64,
-        x_overdrag_dir: i8,
-        y_overdrag_dir: i8,
     },
 }
 
@@ -155,8 +167,13 @@ impl DragState {
 
     fn display_value(&self) -> ParameterValue {
         match self {
-            Self::Scalar { value, is_int, .. } => scalar_parameter_value(*value, *is_int),
-            Self::Plane { x, y, kind, .. } => plane_parameter_value(*x, *y, kind),
+            Self::Scalar { axis, is_int, .. } => scalar_parameter_value(axis.value, *is_int),
+            Self::Plane {
+                x_axis,
+                y_axis,
+                kind,
+                ..
+            } => plane_parameter_value(x_axis.value, y_axis.value, kind),
         }
     }
 }
@@ -247,36 +264,16 @@ impl Viewport {
 
     fn end_drag(&mut self, cx: &mut Context<Self>) {
         if let Some(state) = &self.drag_state {
-            match state {
-                DragState::Scalar {
-                    name,
-                    value,
-                    min,
-                    max,
-                    ..
-                } if *value < *min || *value > *max => {
-                    self.slider_bounds.insert(
-                        name.clone(),
-                        default_bounds_for_value(&state.display_value()),
-                    );
-                }
+            let (name, bounds) = match state {
+                DragState::Scalar { name, axis, .. } => (name, [axis.min, axis.max, 0.0, 0.0]),
                 DragState::Plane {
                     name,
-                    x,
-                    y,
-                    x_min,
-                    x_max,
-                    y_min,
-                    y_max,
+                    x_axis,
+                    y_axis,
                     ..
-                } if *x < *x_min || *x > *x_max || *y < *y_min || *y > *y_max => {
-                    self.slider_bounds.insert(
-                        name.clone(),
-                        default_bounds_for_value(&state.display_value()),
-                    );
-                }
-                _ => {}
-            }
+                } => (name, [x_axis.min, x_axis.max, y_axis.min, y_axis.max]),
+            };
+            self.slider_bounds.insert(name.clone(), bounds);
         }
         self.drag_state = None;
         cx.notify();
@@ -290,6 +287,25 @@ impl Viewport {
             .unwrap_or_else(|| fallback.clone())
     }
 
+    fn display_parameter_bounds(&self, name: &str, fallback: [f64; 4]) -> [f64; 4] {
+        match self
+            .drag_state
+            .as_ref()
+            .filter(|state| state.name() == name)
+        {
+            Some(DragState::Scalar { axis, .. }) => {
+                let (min, max) = axis.bounds();
+                [min, max, 0.0, 0.0]
+            }
+            Some(DragState::Plane { x_axis, y_axis, .. }) => {
+                let (x_min, x_max) = x_axis.bounds();
+                let (y_min, y_max) = y_axis.bounds();
+                [x_min, x_max, y_min, y_max]
+            }
+            None => fallback,
+        }
+    }
+
     fn begin_scalar_drag(
         &mut self,
         name: &str,
@@ -300,27 +316,28 @@ impl Viewport {
         fallback_bounds: [f64; 4],
         cx: &mut Context<Self>,
     ) -> ParameterValue {
-        let (min, max, current) = match &self.drag_state {
+        let axis = match &self.drag_state {
             Some(DragState::Scalar {
                 name: drag_name,
-                value,
-                min,
-                max,
+                axis,
                 ..
-            }) if drag_name == name => (*min, *max, *value),
-            _ => (fallback_bounds[0], fallback_bounds[1], fallback_value),
+            }) if drag_name == name => *axis,
+            _ => AxisDrag {
+                value: fallback_value,
+                min: fallback_bounds[0],
+                max: fallback_bounds[1],
+                overdrag_dir: 0,
+                escape_distance: 0.0,
+            },
         };
-        let (value, overdrag_dir) = scalar_drag_target(local_x, width, min, max, current);
+        let axis = axis_drag_target(local_x, width, axis);
         self.drag_state = Some(DragState::Scalar {
             name: name.to_string(),
-            value,
+            axis,
             is_int,
-            min,
-            max,
-            overdrag_dir,
         });
         cx.notify();
-        scalar_parameter_value(value, is_int)
+        scalar_parameter_value(axis.value, is_int)
     }
 
     fn update_scalar_drag(
@@ -358,43 +375,42 @@ impl Viewport {
         fallback_bounds: [f64; 4],
         cx: &mut Context<Self>,
     ) -> ParameterValue {
-        let (x_min, x_max, y_min, y_max, current_x, current_y) = match &self.drag_state {
+        let (x_axis, y_axis) = match &self.drag_state {
             Some(DragState::Plane {
                 name: drag_name,
-                x,
-                y,
-                x_min,
-                x_max,
-                y_min,
-                y_max,
+                x_axis,
+                y_axis,
                 ..
-            }) if drag_name == name => (*x_min, *x_max, *y_min, *y_max, *x, *y),
+            }) if drag_name == name => (*x_axis, *y_axis),
             _ => (
-                fallback_bounds[0],
-                fallback_bounds[1],
-                fallback_bounds[2],
-                fallback_bounds[3],
-                fallback_x,
-                fallback_y,
+                AxisDrag {
+                    value: fallback_x,
+                    min: fallback_bounds[0],
+                    max: fallback_bounds[1],
+                    overdrag_dir: 0,
+                    escape_distance: 0.0,
+                },
+                AxisDrag {
+                    value: fallback_y,
+                    min: fallback_bounds[2],
+                    max: fallback_bounds[3],
+                    overdrag_dir: 0,
+                    escape_distance: 0.0,
+                },
             ),
         };
-        let ((x, y), (x_overdrag_dir, y_overdrag_dir)) = plane_drag_target(
-            pos, canvas, x_min, x_max, y_min, y_max, current_x, current_y,
-        );
+        let local_x = f32::from(pos.x - canvas.origin.x);
+        let local_y = f32::from(pos.y - canvas.origin.y);
+        let x_axis = axis_drag_target(local_x, f32::from(canvas.size.width), x_axis);
+        let y_axis = axis_drag_target_inverted(local_y, f32::from(canvas.size.height), y_axis);
         self.drag_state = Some(DragState::Plane {
             name: name.to_string(),
-            x,
-            y,
+            x_axis,
+            y_axis,
             kind: kind.clone(),
-            x_min,
-            x_max,
-            y_min,
-            y_max,
-            x_overdrag_dir,
-            y_overdrag_dir,
         });
         cx.notify();
-        plane_parameter_value(x, y, kind)
+        plane_parameter_value(x_axis.value, y_axis.value, kind)
     }
 
     fn update_plane_drag(
@@ -430,39 +446,30 @@ impl Viewport {
 
         let update = match &mut state {
             DragState::Scalar {
-                name,
-                value,
-                is_int,
-                min: _,
-                max: _,
-                overdrag_dir,
+                name, axis, is_int, ..
             } => {
-                if *overdrag_dir == 0 {
+                if !tick_axis_overdrag(axis, OVERDRAG_STEP_1D) {
                     self.drag_state = Some(state);
                     return;
                 }
-                *value += *overdrag_dir as f64 * OVERDRAG_STEP_1D;
-                (name.clone(), scalar_parameter_value(*value, *is_int))
+                (name.clone(), scalar_parameter_value(axis.value, *is_int))
             }
             DragState::Plane {
                 name,
-                x,
-                y,
+                x_axis,
+                y_axis,
                 kind,
-                x_min: _,
-                x_max: _,
-                y_min: _,
-                y_max: _,
-                x_overdrag_dir,
-                y_overdrag_dir,
             } => {
-                if *x_overdrag_dir == 0 && *y_overdrag_dir == 0 {
+                let x_changed = tick_axis_overdrag(x_axis, OVERDRAG_STEP_2D);
+                let y_changed = tick_axis_overdrag(y_axis, OVERDRAG_STEP_2D);
+                if !x_changed && !y_changed {
                     self.drag_state = Some(state);
                     return;
                 }
-                *x += *x_overdrag_dir as f64 * OVERDRAG_STEP_2D;
-                *y += *y_overdrag_dir as f64 * OVERDRAG_STEP_2D;
-                (name.clone(), plane_parameter_value(*x, *y, kind))
+                (
+                    name.clone(),
+                    plane_parameter_value(x_axis.value, y_axis.value, kind),
+                )
             }
         };
         self.drag_state = Some(state);
@@ -611,49 +618,67 @@ fn default_bounds_for_value(value: &ParameterValue) -> [f64; 4] {
 
 // --- drag computation helpers ---
 
-fn scalar_drag_target(local_x: f32, width: f32, min: f64, max: f64, current: f64) -> (f64, i8) {
-    let raw_p = (local_x / width) as f64;
+fn axis_drag_target(local_pos: f32, span: f32, axis: AxisDrag) -> AxisDrag {
+    if span <= 0.0 {
+        return axis;
+    }
+
+    let raw_p = (local_pos / span) as f64;
     if raw_p < 0.0 {
-        (current.min(min), -1)
+        AxisDrag {
+            value: axis.min,
+            overdrag_dir: -1,
+            escape_distance: -local_pos,
+            ..axis
+        }
     } else if raw_p > 1.0 {
-        (current.max(max), 1)
+        AxisDrag {
+            value: axis.max,
+            overdrag_dir: 1,
+            escape_distance: local_pos - span,
+            ..axis
+        }
     } else {
-        (min + raw_p * (max - min), 0)
+        AxisDrag {
+            value: axis.min + raw_p * (axis.max - axis.min),
+            overdrag_dir: 0,
+            escape_distance: 0.0,
+            ..axis
+        }
     }
 }
 
-fn plane_drag_target(
-    pos: Point<Pixels>,
-    canvas: Bounds<Pixels>,
-    x_min: f64,
-    x_max: f64,
-    y_min: f64,
-    y_max: f64,
-    current_x: f64,
-    current_y: f64,
-) -> ((f64, f64), (i8, i8)) {
-    let w = f32::from(canvas.size.width);
-    let h = f32::from(canvas.size.height);
-    let raw_xp = (f32::from(pos.x - canvas.origin.x) / w) as f64;
-    let raw_yp = (f32::from(pos.y - canvas.origin.y) / h) as f64;
+fn axis_drag_target_inverted(local_pos: f32, span: f32, axis: AxisDrag) -> AxisDrag {
+    axis_drag_target(span - local_pos, span, axis)
+}
 
-    let (x, x_dir) = if raw_xp < 0.0 {
-        (current_x.min(x_min), -1)
-    } else if raw_xp > 1.0 {
-        (current_x.max(x_max), 1)
+fn tick_axis_overdrag(axis: &mut AxisDrag, step: f64) -> bool {
+    if axis.overdrag_dir == 0 {
+        return false;
+    }
+
+    let delta = axis.overdrag_dir as f64 * step * axis_escape_speed_multiplier(axis);
+    axis.min += delta;
+    axis.max += delta;
+    axis.value = if axis.overdrag_dir < 0 {
+        axis.min
     } else {
-        (x_min + raw_xp * (x_max - x_min), 0)
+        axis.max
     };
+    true
+}
 
-    let (y, y_dir) = if raw_yp < 0.0 {
-        (current_y.max(y_max), 1)
-    } else if raw_yp > 1.0 {
-        (current_y.min(y_min), -1)
-    } else {
-        (y_max - raw_yp * (y_max - y_min), 0)
-    };
+fn axis_escape_speed_multiplier(axis: &AxisDrag) -> f64 {
+    let distance = axis.escape_distance.max(0.0);
+    if distance <= ESCAPE_SPEED_NEAR_PX {
+        return 1.0;
+    }
+    if distance >= ESCAPE_SPEED_FAR_PX {
+        return ESCAPE_SPEED_MAX_MULT;
+    }
 
-    ((x, y), (x_dir, y_dir))
+    let t = (distance - ESCAPE_SPEED_NEAR_PX) / (ESCAPE_SPEED_FAR_PX - ESCAPE_SPEED_NEAR_PX);
+    1.0 + (ESCAPE_SPEED_MAX_MULT - 1.0) * t as f64
 }
 
 fn format_bound(v: f64) -> String {
@@ -661,6 +686,43 @@ fn format_bound(v: f64) -> String {
         format!("{}", v as i64)
     } else {
         format!("{:.1}", v)
+    }
+}
+
+fn axis_fraction(value: f64, min: f64, max: f64) -> f32 {
+    let span = max - min;
+    if span.abs() <= f64::EPSILON {
+        0.5
+    } else {
+        ((value - min) / span).clamp(0.0, 1.0) as f32
+    }
+}
+
+fn inset_axis_position(span: f32, fraction: f32, gap: f32) -> f32 {
+    if span <= 2.0 * gap {
+        span * 0.5
+    } else {
+        gap + fraction.clamp(0.0, 1.0) * (span - 2.0 * gap)
+    }
+}
+
+fn paint_slider_2d_grid(window: &mut Window, bounds: Bounds<Pixels>) {
+    let w = f32::from(bounds.size.width);
+    let h = f32::from(bounds.size.height);
+    let ox = bounds.origin.x;
+    let oy = bounds.origin.y;
+    let grid_color = with_alpha(SLIDER_2D_GRID, 0.55);
+
+    for step in 1..SLIDER_2D_GRID_DIVISIONS {
+        let t = step as f32 / SLIDER_2D_GRID_DIVISIONS as f32;
+        window.paint_quad(fill(
+            Bounds::new(point(ox + px(w * t - 0.5), oy), size(px(1.0), px(h))),
+            grid_color,
+        ));
+        window.paint_quad(fill(
+            Bounds::new(point(ox, oy + px(h * t - 0.5)), size(px(w), px(1.0))),
+            grid_color,
+        ));
     }
 }
 
@@ -677,7 +739,7 @@ fn render_slider_1d(
 ) -> impl IntoElement {
     let (min, max) = bounds;
     let fallback_bounds = [min, max, 0.0, 0.0];
-    let pct = ((value - min) / (max - min)).clamp(0.0, 1.0) as f32;
+    let pct = axis_fraction(value, min, max);
     let base_value = if is_int {
         format!("{}", value as i64)
     } else {
@@ -760,19 +822,22 @@ fn render_slider_1d(
                                 let ox = bounds.origin.x;
                                 let oy = bounds.origin.y;
                                 let track_y = h / 2.0 - SLIDER_TRACK_H / 2.0;
+                                let track_x = SLIDER_1D_EDGE_GAP;
+                                let track_w = (w - 2.0 * SLIDER_1D_EDGE_GAP).max(0.0);
+                                let thumb_x = inset_axis_position(w, pct, SLIDER_1D_EDGE_GAP);
 
                                 window.paint_quad(fill(
                                     Bounds::new(
-                                        point(ox, oy + px(track_y)),
-                                        size(px(w), px(SLIDER_TRACK_H)),
+                                        point(ox + px(track_x), oy + px(track_y)),
+                                        size(px(track_w), px(SLIDER_TRACK_H)),
                                     ),
                                     SLIDER_TRACK_BG,
                                 ));
                                 if pct > 0.0 {
                                     window.paint_quad(fill(
                                         Bounds::new(
-                                            point(ox, oy + px(track_y)),
-                                            size(px(w * pct), px(SLIDER_TRACK_H)),
+                                            point(ox + px(track_x), oy + px(track_y)),
+                                            size(px(track_w * pct), px(SLIDER_TRACK_H)),
                                         ),
                                         fill_color,
                                     ));
@@ -780,7 +845,7 @@ fn render_slider_1d(
                                 window.paint_quad(quad(
                                     Bounds::new(
                                         point(
-                                            ox + px(w * pct - SLIDER_THUMB_R),
+                                            ox + px(thumb_x - SLIDER_THUMB_R),
                                             oy + px(h / 2.0 - SLIDER_THUMB_R),
                                         ),
                                         size(px(SLIDER_THUMB_R * 2.0), px(SLIDER_THUMB_R * 2.0)),
@@ -923,11 +988,8 @@ fn render_slider_2d(
     let (x_min, x_max) = x_bounds;
     let (y_min, y_max) = y_bounds;
     let fallback_bounds = [x_min, x_max, y_min, y_max];
-    let px_pct = ((x - x_min) / (x_max - x_min)).clamp(0.0, 1.0) as f32;
-    let py_pct = 1.0 - ((y - y_min) / (y_max - y_min)).clamp(0.0, 1.0) as f32;
-    // zero-crossing axis positions track true zero even when bounds shift
-    let x_zero = ((-x_min) / (x_max - x_min)).clamp(0.0, 1.0) as f32;
-    let y_zero = 1.0 - ((-y_min) / (y_max - y_min)).clamp(0.0, 1.0) as f32;
+    let px_pct = axis_fraction(x, x_min, x_max);
+    let py_pct = 1.0 - axis_fraction(y, y_min, y_max);
     let value_text = match &kind {
         Slider2dKind::Complex => {
             if y < 0.0 {
@@ -1026,30 +1088,21 @@ fn render_slider_2d(
                                         let h = f32::from(bounds.size.height);
                                         let ox = bounds.origin.x;
                                         let oy = bounds.origin.y;
+                                        let dot_x =
+                                            inset_axis_position(w, px_pct, SLIDER_2D_EDGE_GAP);
+                                        let dot_y =
+                                            inset_axis_position(h, py_pct, SLIDER_2D_EDGE_GAP);
 
                                         window.paint_quad(fill(
                                             Bounds::new(bounds.origin, size(px(w), px(h))),
                                             SLIDER_2D_BG,
                                         ));
-                                        window.paint_quad(fill(
-                                            Bounds::new(
-                                                point(ox + px(w * x_zero - 0.5), oy),
-                                                size(px(1.0), px(h)),
-                                            ),
-                                            SLIDER_2D_AXIS,
-                                        ));
-                                        window.paint_quad(fill(
-                                            Bounds::new(
-                                                point(ox, oy + px(h * y_zero - 0.5)),
-                                                size(px(w), px(1.0)),
-                                            ),
-                                            SLIDER_2D_AXIS,
-                                        ));
+                                        paint_slider_2d_grid(window, bounds);
                                         window.paint_quad(quad(
                                             Bounds::new(
                                                 point(
-                                                    ox + px(w * px_pct - SLIDER_2D_DOT_R),
-                                                    oy + px(h * py_pct - SLIDER_2D_DOT_R),
+                                                    ox + px(dot_x - SLIDER_2D_DOT_R),
+                                                    oy + px(dot_y - SLIDER_2D_DOT_R),
                                                 ),
                                                 size(
                                                     px(SLIDER_2D_DOT_R * 2.0),
@@ -1388,10 +1441,11 @@ impl Render for Viewport {
         let controls: Vec<AnyElement> = sorted
             .iter()
             .map(|(name, value, is_locked)| {
-                let bounds = slider_bounds
+                let stored_bounds = slider_bounds
                     .get(name.as_str())
                     .copied()
                     .unwrap_or_else(|| default_bounds_for_value(value));
+                let bounds = self.display_parameter_bounds(name, stored_bounds);
                 render_param_control(
                     name,
                     value,
