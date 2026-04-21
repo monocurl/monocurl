@@ -150,7 +150,6 @@ pub struct Theme {
     pub timeline_tick: Rgba,
     pub timeline_text: Rgba,
     pub timeline_subtext: Rgba,
-    pub timeline_divider: Rgba,
     pub timeline_status_error: Rgba,
     pub timeline_status_ok: Rgba,
     pub timeline_playhead: Rgba,
@@ -183,7 +182,7 @@ impl Theme {
             link_text: rgba(0x1E66F5),
             danger: rgba(0xD20F39),
 
-            accent: rgba(0x74C0FC),
+            accent: rgba(0x1E66F5),
 
             navbar_background: rgba(0xD8DDE6),
             navbar_border: rgba(0x9CA0B0),
@@ -209,7 +208,6 @@ impl Theme {
             timeline_tick: rgba(0x7C7F93),
             timeline_text: rgba(0x4C4F69),
             timeline_subtext: rgba(0x6C6F85),
-            timeline_divider: rgba(0xDCE0E8),
             timeline_status_error: rgba(0xD20F39),
             timeline_status_ok: rgba(0x179299),
             timeline_playhead: rgba(0x000000),
@@ -235,7 +233,7 @@ impl Theme {
             link_text: rgba(0x5AA8FF),
             danger: rgba(0xF07A7A),
 
-            accent: rgba(0x7DBEFF),
+            accent: rgba(0xE3C318),
 
             navbar_background: rgba(0x343538),
             navbar_border: rgba(0x64666B),
@@ -261,7 +259,6 @@ impl Theme {
             timeline_tick: rgba(0xC0C1C8),
             timeline_text: rgba(0xF3F3F6),
             timeline_subtext: rgba(0xC8C9CF),
-            timeline_divider: rgba(0x0F1012),
             timeline_status_error: rgba(0xF07A7A),
             timeline_status_ok: rgba(0x7AD7A4),
             timeline_playhead: rgba(0xECECF1),

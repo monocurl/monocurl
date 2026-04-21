@@ -158,11 +158,12 @@ impl Element for Split {
     ) {
         paint_split_handle(layout, window, cx);
 
-        self.second.paint(window, cx);
-        self.first.paint(window, cx);
 
-        // paint divider on top of children so it's visible
+        self.second.paint(window, cx);
+
         window.paint_quad(fill(layout.divider_bounds, self.divider_color));
+
+        self.first.paint(window, cx);
     }
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {

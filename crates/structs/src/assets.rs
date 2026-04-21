@@ -25,6 +25,12 @@ impl Assets {
         base
     }
 
+    pub fn image_resource(name: impl AsRef<Path>) -> String {
+        let mut path = PathBuf::from("img");
+        path.push(name.as_ref());
+        path.to_string_lossy().into_owned()
+    }
+
     pub fn font(name: impl AsRef<Path>) -> PathBuf {
         let mut base = Self::base_path();
         base.push("font");
