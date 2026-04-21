@@ -333,6 +333,11 @@ let dotted = operator |target, color, filter = nil| {
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
+let color = operator |target, color, filter = nil| {
+    let go = |c, level| __monocurl__native__ op_recolor(target, c, filter, level)
+    return [go(c: color, level: 0), go(c: color, level: 1)]
+}
+
 let normal_hint = operator |target, normal, filter = nil| {
     let go = |n, level| __monocurl__native__ op_normal_hint(target, n, filter, level)
     return [go(n: normal, level: 0), go(n: normal, level: 1)]
@@ -358,6 +363,7 @@ let uv_map = operator |target, f, filter = nil| {
 }
 let retagged = operator |target, f, filter = nil| [target, __monocurl__native__ op_retagged(target, f, filter)]
 let tag_map = operator |target, f| [target, __monocurl__native__ op_tag_map(target, f)]
+let subset_map = operator |target, filter, f| [target, __monocurl__native__ op_subset_map(target, filter, f)]
 let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_uprank(target, filter)]
 let downrank = operator |target, filter = nil| [target, __monocurl__native__ op_downrank(target, filter)]
 let wireframe = operator |target, filter = nil| [target, __monocurl__native__ op_wireframe(target, filter)]

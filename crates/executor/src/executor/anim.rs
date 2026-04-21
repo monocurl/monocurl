@@ -68,10 +68,7 @@ impl Executor {
         }
     }
 
-    async fn seek_primitive_anim_skip(
-        &mut self,
-        max_slide: usize,
-    ) -> SeekPrimitiveAnimSkipResult {
+    async fn seek_primitive_anim_skip(&mut self, max_slide: usize) -> SeekPrimitiveAnimSkipResult {
         loop {
             self.tick_yielder().await;
 

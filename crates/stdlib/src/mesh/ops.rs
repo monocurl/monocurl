@@ -45,6 +45,21 @@ fn read_level(
     Ok(crate::read_float(executor, stack_idx, index, name)?.clamp(0.0, 1.0) as f32)
 }
 
+fn recolor_mesh(mesh: &mut Mesh, color: geo::simd::Float4, level: f32) {
+    for dot in &mut mesh.dots {
+        dot.col = dot.col.lerp(color, level);
+    }
+    for lin in &mut mesh.lins {
+        lin.a.col = lin.a.col.lerp(color, level);
+        lin.b.col = lin.b.col.lerp(color, level);
+    }
+    for tri in &mut mesh.tris {
+        tri.a.col = tri.a.col.lerp(color, level);
+        tri.b.col = tri.b.col.lerp(color, level);
+        tri.c.col = tri.c.col.lerp(color, level);
+    }
+}
+
 fn viewport_half_extents(depth: f32) -> (f32, f32) {
     let depth = depth.max(executor::camera::MIN_CAMERA_NEAR);
     let tan_half_fov = (DEFAULT_CAMERA_FOV * 0.5).tan().max(0.05);
@@ -343,6 +358,22 @@ pub async fn op_redot(executor: &mut Executor, stack_idx: usize) -> Result<Value
         for dot in &mut mesh.dots {
             dot.col = dot.col.lerp(color, level);
         }
+    })
+    .await?;
+    Ok(tree.into_value())
+}
+
+#[stdlib_func]
+pub async fn op_recolor(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
+    let level = read_level(executor, stack_idx, -1, "level")?;
+    if level <= 0.0 {
+        return Ok(tree.into_value());
+    }
+    let color = read_float4(executor, stack_idx, -3, "color")?;
+    let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
+    tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
+        recolor_mesh(mesh, color, level);
     })
     .await?;
     Ok(tree.into_value())
@@ -804,6 +835,57 @@ pub async fn op_tag_map(executor: &mut Executor, stack_idx: usize) -> Result<Val
         .clone()
         .elide_lvalue();
     recurse(executor, tree, &func).await
+}
+
+#[stdlib_func]
+pub async fn op_subset_map(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    fn recurse<'a>(
+        executor: &'a mut Executor,
+        tree: MeshTree,
+        func: &'a Value,
+        filter: Option<&'a TagFilter>,
+    ) -> Pin<Box<dyn Future<Output = Result<MeshTree, ExecutorError>> + 'a>> {
+        Box::pin(async move {
+            match tree {
+                MeshTree::Mesh(mesh) => {
+                    let keep = match filter {
+                        Some(filter) => mesh_matches_tag_filter(executor, filter, &mesh).await?,
+                        None => true,
+                    };
+                    if !keep {
+                        return Ok(MeshTree::Mesh(mesh));
+                    }
+
+                    let mapped =
+                        invoke_callable(executor, func, vec![Value::Mesh(mesh.clone())], "f")
+                            .await?;
+                    read_mesh_tree(executor, mapped, "f").await
+                }
+                MeshTree::List(children) => {
+                    let mut mapped = Vec::with_capacity(children.len());
+                    for child in children {
+                        mapped.push(recurse(executor, child, func, filter).await?);
+                    }
+                    Ok(MeshTree::List(mapped))
+                }
+            }
+        })
+    }
+
+    let tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let filter = read_tag_filter(executor, stack_idx, -2, "filter")?;
+    let func = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_lvalue();
+    recurse(executor, tree, &func, Some(&filter))
+        .await
+        .map(MeshTree::into_value)
 }
 
 #[stdlib_func]
@@ -1331,12 +1413,12 @@ mod tests {
     use std::collections::HashMap;
 
     use geo::{
-        mesh::{Mesh, Uniforms},
+        mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
         simd::{Float2, Float3, Float4},
     };
 
     use super::{
-        BoundaryEdge, IndexedSurface, SurfaceVertex, build_indexed_surface,
+        BoundaryEdge, IndexedSurface, SurfaceVertex, build_indexed_surface, recolor_mesh,
         subdivide_indexed_surface,
     };
 
@@ -1460,5 +1542,73 @@ mod tests {
 
         assert!(!mesh.lins.is_empty());
         assert!(mesh.has_consistent_topology());
+    }
+
+    #[test]
+    fn recolor_mesh_updates_dots_lines_and_tris() {
+        let start = Float4::new(0.2, 0.3, 0.4, 1.0);
+        let target = Float4::new(0.8, 0.1, 0.6, 1.0);
+        let mut mesh = Mesh {
+            dots: vec![Dot {
+                pos: Float3::ZERO,
+                norm: Float3::Z,
+                col: start,
+                inv: -1,
+                anti: -1,
+                is_dom_sib: false,
+            }],
+            lins: vec![Lin {
+                a: LinVertex {
+                    pos: Float3::ZERO,
+                    col: start,
+                },
+                b: LinVertex {
+                    pos: Float3::X,
+                    col: start,
+                },
+                norm: Float3::Z,
+                prev: -1,
+                next: -1,
+                inv: -1,
+                anti: -1,
+                is_dom_sib: false,
+            }],
+            tris: vec![Tri {
+                a: TriVertex {
+                    pos: Float3::ZERO,
+                    col: start,
+                    uv: Float2::ZERO,
+                },
+                b: TriVertex {
+                    pos: Float3::X,
+                    col: start,
+                    uv: Float2::ZERO,
+                },
+                c: TriVertex {
+                    pos: Float3::Y,
+                    col: start,
+                    uv: Float2::ZERO,
+                },
+                ab: -1,
+                bc: -1,
+                ca: -1,
+                anti: -1,
+                is_dom_sib: false,
+            }],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+
+        recolor_mesh(&mut mesh, target, 1.0);
+
+        let approx_eq =
+            |lhs: Float4, rhs: Float4| (lhs - rhs).to_array().into_iter().all(|x| x.abs() < 1e-6);
+
+        assert!(approx_eq(mesh.dots[0].col, target));
+        assert!(approx_eq(mesh.lins[0].a.col, target));
+        assert!(approx_eq(mesh.lins[0].b.col, target));
+        assert!(approx_eq(mesh.tris[0].a.col, target));
+        assert!(approx_eq(mesh.tris[0].b.col, target));
+        assert!(approx_eq(mesh.tris[0].c.col, target));
     }
 }

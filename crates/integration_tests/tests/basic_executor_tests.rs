@@ -2107,6 +2107,24 @@ fn test_mesh_operator_filter_applies_predicate_to_subset() {
 }
 
 #[test]
+fn test_subset_map_applies_mapping_to_matching_subset() {
+    let r = run_with_stdlib(
+        "
+        let scene = [
+            retag{1} Circle(1),
+            retag{2} shift{delta: [4, 0, 0]} Circle(1)
+        ]
+        let shifted = subset_map{filter: |tag| tag == 1, f: |m| shift{delta: 10 * 1r} m} scene
+        let x1 = mesh_center(tag_filter(shifted, 1))[0]
+        let x2 = mesh_center(tag_filter(shifted, 2))[0]
+        let result = (abs(x1 - 10) < 0.001) + (abs(x2 - 4) < 0.001)
+    ",
+        &["mesh", "math"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
 fn test_to_side_and_to_corner_smoke() {
     let r = run_with_stdlib(
         "
