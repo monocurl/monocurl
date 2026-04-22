@@ -806,10 +806,11 @@ fn test_stateful_logical_and() {
         param x = 1
         param y = 0
         mesh m = $x and $y
-        let result = *m
+        mesh result = *m
     ",
     );
-    r.assert_error("stateful has no truthiness");
+    r.assert_ok();
+    assert_mesh_target_int(&r.leaders, 1, 0);
 }
 
 #[test]
@@ -819,10 +820,11 @@ fn test_stateful_logical_or() {
         param x = 0
         param y = 4
         mesh m = $x or $y
-        let result = *m
+        mesh result = *m
     ",
     );
-    r.assert_error("stateful has no truthiness");
+    r.assert_ok();
+    assert_mesh_target_int(&r.leaders, 1, 4);
 }
 
 #[test]

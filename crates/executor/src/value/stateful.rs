@@ -157,7 +157,22 @@ pub fn value_into_stateful_node(val: Value) -> (StatefulNode, Vec<HeapKey>) {
 
 /// collect stateful roots from a value
 pub fn collect_roots_from_value(val: &Value, roots: &mut Vec<HeapKey>) {
-    if let Value::Stateful(s) = val {
-        roots.extend(s.body.roots.iter().copied());
+    match val {
+        Value::Stateful(s) => {
+            roots.extend(s.body.roots.iter().copied());
+        }
+        Value::Lvalue(vrc) => {
+            let inner = with_heap(|h| h.get(vrc.key()).clone());
+            collect_roots_from_value(&inner, roots);
+        }
+        Value::WeakLvalue(vweak) => {
+            let inner = with_heap(|h| h.get(vweak.key()).clone());
+            collect_roots_from_value(&inner, roots);
+        }
+        Value::Leader(leader) => {
+            let inner = with_heap(|h| h.get(leader.leader_rc.key()).clone());
+            collect_roots_from_value(&inner, roots);
+        }
+        _ => {}
     }
 }
