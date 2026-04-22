@@ -951,7 +951,7 @@ pub async fn mk_half_vector(
 
 #[stdlib_func]
 pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let image = read_string(executor, stack_idx, -4, "name")?;
+    let image = read_string(executor, stack_idx, -4, "name").await?;
     let center = read_float3(executor, stack_idx, -3, "center")?;
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
@@ -1108,7 +1108,7 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let text = read_string(executor, stack_idx, -2, "text")?;
+    let text = read_string(executor, stack_idx, -2, "text").await?;
     let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
     let meshes = latex::render_text(&text, scale).map_err(|error| {
         ExecutorError::invalid_invocation(format!("text render failed: {error:#}"))
@@ -1118,7 +1118,7 @@ pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 
 #[stdlib_func]
 pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let tex = read_string(executor, stack_idx, -2, "tex")?;
+    let tex = read_string(executor, stack_idx, -2, "tex").await?;
     let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
     let meshes = latex::render_tex(&tex, scale).map_err(|error| {
         ExecutorError::invalid_invocation(format!("tex render failed: {error:#}"))
@@ -1128,7 +1128,7 @@ pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 
 #[stdlib_func]
 pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let latex = read_string(executor, stack_idx, -2, "latex")?;
+    let latex = read_string(executor, stack_idx, -2, "latex").await?;
     let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
     let meshes = latex::render_latex(&latex, scale).map_err(|error| {
         ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
@@ -1213,7 +1213,7 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
 #[stdlib_func]
 pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let target = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
-    let str = read_string(executor, stack_idx, -4, "str")?;
+    let str = read_string(executor, stack_idx, -4, "str").await?;
     let scale = read_text_scale(executor, stack_idx, -3, "scale")?;
     let dir = read_float3(executor, stack_idx, -2, "dir")?;
     let buffer = read_nonnegative_float(executor, stack_idx, -1, "buffer")?;

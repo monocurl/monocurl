@@ -207,24 +207,42 @@ fn patched_script() -> &'static String {
     static PATCHED: OnceLock<String> = OnceLock::new();
     PATCHED.get_or_init(|| {
         SCRIPT
-            .replacen(
-                "packages:[`base`,`ams`,`newcommand`,`noundefined`]",
-                "packages:[`base`,`ams`,`newcommand`,`noundefined`,`color`,`html`]",
-                1,
-            )
             .replacen("fontCache:`local`", "fontCache:`none`", 1)
             .replacen("__host_log(e,n)", "globalThis.__host_log?.(e,n)", 1)
+            + "\n\
+const __mcCssIdPackage = `monocurl-css-id`;\n\
+const __mcCssIdMacroMap = `monocurl-css-id-macros`;\n\
+function __mcCssId(parser,name){\n\
+  const id=parser.GetArgument(name);\n\
+  const body=parser.ParseArg(name);\n\
+  parser.Push(parser.create(`node`,`mstyle`,[body],{id}));\n\
+}\n\
+if(!__.parseOptions.packageData.has(__mcCssIdPackage)){\n\
+  __.parseOptions.packageData.set(__mcCssIdPackage,{});\n\
+  new Bt(__mcCssIdMacroMap,{cssId:__mcCssId});\n\
+  __.parseOptions.handlers.add({[E.MACRO]:[__mcCssIdMacroMap]},{},10);\n\
+}\n"
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::patched_script;
+    use super::{RenderOptions, patched_script, render_svg};
 
     #[test]
     fn patched_script_uses_global_host_logger_lookup() {
         let script = patched_script();
         assert!(script.contains("globalThis.__host_log?.(e,n)"));
         assert!(!script.contains("__host_log(e,n)"));
+        assert!(script.contains("monocurl-css-id-macros"));
+    }
+
+    #[test]
+    fn render_svg_preserves_css_id_markup() {
+        let svg = render_svg(r"\cssId{mc-span-lhs}{x}", RenderOptions::new(36.0)).unwrap();
+        assert!(
+            svg.contains("mc-span-lhs"),
+            "expected cssId marker in MathJax output:\n{svg}"
+        );
     }
 }

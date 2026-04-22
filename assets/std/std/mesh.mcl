@@ -143,6 +143,8 @@ let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 
 let Latex = |latex, scale = 1| __monocurl__native__ mk_latex(latex, scale)
 
+let text_tag = operator |target, tag| [target, __monocurl__native__ text_tag_encode(target, tag)]
+
 let Brace = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_brace(target, dir, buffer)
 
 let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(target, dir, buffer)

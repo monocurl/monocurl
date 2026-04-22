@@ -684,6 +684,27 @@ fn test_tex_and_latex_accept_list_string_inputs() {
 }
 
 #[test]
+fn test_text_tag_operator_tags_text_backends() {
+    let r = run_with_stdlib(
+        "
+        let tex = Tex([text_tag{1} \"x\", \" + \", text_tag{[2, 3, 4]} \"y\"], 1)
+        let text = Text([text_tag{5} \"hello\"], 1)
+        let latex = Latex([text_tag{[6, 7]} \"$z$\"], 1)
+        let result =
+            (1 in mesh_tags(tex)) +
+            (2 in mesh_tags(tex)) +
+            (3 in mesh_tags(tex)) +
+            (4 in mesh_tags(tex)) +
+            (5 in mesh_tags(text)) +
+            (6 in mesh_tags(latex)) +
+            (7 in mesh_tags(latex))
+    ",
+        &["mesh"],
+    );
+    r.assert_int(7);
+}
+
+#[test]
 fn test_fixed_in_frame_preserves_camera_space_under_translation() {
     let r = run_with_stdlib(
         "

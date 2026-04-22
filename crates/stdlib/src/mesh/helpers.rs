@@ -158,14 +158,20 @@ pub(super) fn triangle_value(a: Float3, b: Float3, c: Float3) -> Value {
     list_value([point_value(a), point_value(b), point_value(c)])
 }
 
-pub(super) fn read_string(
-    executor: &Executor,
+pub(super) async fn read_string(
+    executor: &mut Executor,
     stack_idx: usize,
     index: i32,
     name: &'static str,
 ) -> Result<String, ExecutorError> {
-    crate::stringify_value(executor.state.stack(stack_idx).read_at(index).clone())
-        .map_err(|kind| ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, kind, name))
+    crate::stringify_value(executor, executor.state.stack(stack_idx).read_at(index).clone())
+        .await
+        .map_err(|error| match error {
+            ExecutorError::TypeError { got, .. } => {
+                ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, name)
+            }
+            other => other,
+        })
 }
 
 pub(super) fn read_int(

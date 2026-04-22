@@ -1,3 +1,5 @@
+use std::{future::Future, pin::Pin};
+
 use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
 
 mod anim;
@@ -10,22 +12,30 @@ mod util;
 
 pub(crate) const STRING_COMPATIBLE_DESC: &str = "string-compatible value";
 
-pub(crate) fn stringify_value(value: Value) -> Result<String, &'static str> {
-    match value.elide_lvalue_leader_rec() {
-        Value::String(value) => Ok(value),
-        Value::Integer(value) => Ok(value.to_string()),
-        Value::Float(value) => Ok(value.to_string()),
-        Value::Nil => Ok("nil".to_string()),
-        Value::List(list) => {
-            let mut out = String::new();
-            for key in list.elements() {
-                let value = with_heap(|h| h.get(key.key()).clone());
-                out.push_str(&stringify_value(value)?);
+pub(crate) fn stringify_value<'a>(
+    executor: &'a mut Executor,
+    value: Value,
+) -> Pin<Box<dyn Future<Output = Result<String, ExecutorError>> + 'a>> {
+    Box::pin(async move {
+        match value.elide_wrappers(executor).await? {
+            Value::String(value) => Ok(value),
+            Value::Integer(value) => Ok(value.to_string()),
+            Value::Float(value) => Ok(value.to_string()),
+            Value::Nil => Ok("nil".to_string()),
+            Value::List(list) => {
+                let mut out = String::new();
+                for key in list.elements() {
+                    let value = with_heap(|h| h.get(key.key()).clone());
+                    out.push_str(&stringify_value(executor, value).await?);
+                }
+                Ok(out)
             }
-            Ok(out)
+            other => Err(ExecutorError::type_error(
+                STRING_COMPATIBLE_DESC,
+                other.type_name(),
+            )),
         }
-        other => Err(other.type_name()),
-    }
+    })
 }
 
 fn read_float(

@@ -507,7 +507,7 @@ pub async fn op_retextured(
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
-    let image = read_string(executor, stack_idx, -2, "image")?;
+    let image = read_string(executor, stack_idx, -2, "image").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         mesh.uniform.img = Some(image.clone().into());

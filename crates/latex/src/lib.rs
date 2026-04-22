@@ -45,20 +45,33 @@ pub struct RenderedOutput {
 static CACHE: OnceLock<Mutex<HashMap<CacheKey, CacheEntry>>> = OnceLock::new();
 
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
-    if text.trim().is_empty() {
+    let tagged = document::parse_text_tags(text)?;
+    if tagged.source.trim().is_empty() && tagged.spans.is_empty() {
         return Ok(Vec::new());
     }
 
+    let source = document::apply_legacy_text_tags(&tagged.source, &tagged.spans)?;
     render_system(
         BackendKind::Text,
-        document::build_text_document(text),
+        document::build_text_document(&source),
         scale,
     )
     .map(|output| output.meshes)
 }
 
 pub fn render_tex(tex: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
-    render_tex_marked(tex, scale, &[]).map(|output| output.meshes)
+    let tagged = document::parse_text_tags(tex)?;
+    let markers = tagged
+        .spans
+        .iter()
+        .enumerate()
+        .map(|(index, span)| SpanMarker {
+            id: document::text_tag_marker_id(index),
+            range: span.range.clone(),
+        })
+        .collect::<Vec<_>>();
+    let output = render_tex_marked(&tagged.source, scale, &markers)?;
+    Ok(apply_text_tags(output, &tagged))
 }
 
 pub fn render_tex_marked(tex: &str, scale: f32, markers: &[SpanMarker]) -> Result<RenderedOutput> {
@@ -79,13 +92,15 @@ pub fn render_tex_marked(tex: &str, scale: f32, markers: &[SpanMarker]) -> Resul
 }
 
 pub fn render_latex(body: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
-    if body.trim().is_empty() {
+    let tagged = document::parse_text_tags(body)?;
+    if tagged.source.trim().is_empty() && tagged.spans.is_empty() {
         return Ok(Vec::new());
     }
 
+    let source = document::apply_legacy_text_tags(&tagged.source, &tagged.spans)?;
     render_system(
         BackendKind::Latex,
-        document::build_latex_document(body),
+        document::build_latex_document(&source),
         scale,
     )
     .map(|output| output.meshes)
@@ -142,6 +157,25 @@ fn validate_scale(scale: f32) -> Result<()> {
     Ok(())
 }
 
+fn apply_text_tags(
+    output: RenderedOutput,
+    tagged: &document::TaggedSource,
+) -> Vec<Arc<Mesh>> {
+    let mut meshes = output.meshes;
+    for (index, span) in tagged.spans.iter().enumerate() {
+        let marker = document::text_tag_marker_id(index);
+        let Some(mesh_indices) = output.span_mesh_indices.get(&marker) else {
+            continue;
+        };
+        for &mesh_index in mesh_indices {
+            if let Some(mesh) = meshes.get_mut(mesh_index) {
+                Arc::make_mut(mesh).tag = span.tag.clone();
+            }
+        }
+    }
+    meshes
+}
+
 fn cache() -> &'static Mutex<HashMap<CacheKey, CacheEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -150,6 +184,7 @@ fn cache() -> &'static Mutex<HashMap<CacheKey, CacheEntry>> {
 mod tests {
     use super::*;
     use geo::simd::Float3;
+    use usvg::{Node, Tree};
 
     fn mesh_bounds(meshes: &[Arc<Mesh>]) -> Option<(Float3, Float3)> {
         let mut bounds: Option<(Float3, Float3)> = None;
@@ -175,6 +210,19 @@ mod tests {
             }
         }
         bounds
+    }
+
+    fn collect_svg_ids(group: &usvg::Group, ids: &mut Vec<String>) {
+        if !group.id().is_empty() {
+            ids.push(group.id().to_owned());
+        }
+        for child in group.children() {
+            match child {
+                Node::Group(group) => collect_svg_ids(group, ids),
+                Node::Path(path) if !path.id().is_empty() => ids.push(path.id().to_owned()),
+                _ => {}
+            }
+        }
     }
 
     #[test]
@@ -225,5 +273,42 @@ mod tests {
         assert!(render_tex("   ", 1.0).unwrap().is_empty());
         assert!(render_latex("", 1.0).unwrap().is_empty());
         assert!(render_latex("   ", 1.0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn tex_marked_spans_are_recovered_from_mathjax_svg() {
+        let source = document::build_mathjax_source(
+            "x+y",
+            &[SpanMarker {
+                id: "lhs".into(),
+                range: 0..1,
+            }],
+        )
+        .unwrap();
+        let svg = mathjax_svg::render_svg(&source, mathjax_svg::RenderOptions::new(36.0)).unwrap();
+        assert!(
+            svg.contains(r#"id="mc-span-lhs""#) || svg.contains(r#"id='mc-span-lhs'"#),
+            "raw MathJax SVG:\n{svg}"
+        );
+
+        let tree = Tree::from_str(&svg, &usvg::Options::default()).unwrap();
+        let mut ids = Vec::new();
+        collect_svg_ids(tree.root(), &mut ids);
+        assert!(
+            ids.iter().any(|id| id == "mc-span-lhs"),
+            "usvg ids: {ids:?}"
+        );
+
+        let rendered = render_tex_marked(
+            "x+y",
+            1.0,
+            &[SpanMarker {
+                id: "lhs".into(),
+                range: 0..1,
+            }],
+        )
+        .unwrap();
+        assert!(rendered.span_mesh_indices.contains_key("lhs"));
+        assert!(!rendered.span_mesh_indices["lhs"].is_empty());
     }
 }

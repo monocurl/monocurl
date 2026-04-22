@@ -14,14 +14,20 @@ pub(super) fn list_from<I: IntoIterator<Item = Value>>(values: I) -> Value {
     )))
 }
 
-pub(super) fn read_string(
-    executor: &Executor,
+pub(super) async fn read_string(
+    executor: &mut Executor,
     stack_idx: usize,
     index: i32,
     name: &'static str,
 ) -> Result<String, ExecutorError> {
-    crate::stringify_value(executor.state.stack(stack_idx).read_at(index).clone())
-        .map_err(|kind| ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, kind, name))
+    crate::stringify_value(executor, executor.state.stack(stack_idx).read_at(index).clone())
+        .await
+        .map_err(|error| match error {
+            ExecutorError::TypeError { got, .. } => {
+                ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, name)
+            }
+            other => other,
+        })
 }
 
 pub(super) fn read_int(
@@ -45,7 +51,7 @@ pub async fn expect_list(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let name = read_string(executor, stack_idx, -3, "name")?;
+    let name = read_string(executor, stack_idx, -3, "name").await?;
     let value = executor
         .state
         .stack(stack_idx)

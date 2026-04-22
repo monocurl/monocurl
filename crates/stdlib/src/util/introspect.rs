@@ -231,7 +231,7 @@ pub async fn runtime_error(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let message = read_string(executor, stack_idx, -1, "message")?;
+    let message = read_string(executor, stack_idx, -1, "message").await?;
     Err(ExecutorError::invalid_operation(message))
 }
 
@@ -247,21 +247,21 @@ pub async fn type_of(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 #[stdlib_func]
 pub async fn has_attr(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let target = executor.state.stack(stack_idx).read_at(-2).clone();
-    let attr_name = read_string(executor, stack_idx, -1, "name")?;
+    let attr_name = read_string(executor, stack_idx, -1, "name").await?;
     Ok(bool_value(has_attr_on_value(target, &attr_name)))
 }
 
 #[stdlib_func]
 pub async fn get_attr(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let target = executor.state.stack(stack_idx).read_at(-2).clone();
-    let attr_name = read_string(executor, stack_idx, -1, "name")?;
+    let attr_name = read_string(executor, stack_idx, -1, "name").await?;
     get_attr_from_value(target, &attr_name)
 }
 
 #[stdlib_func]
 pub async fn set_attr(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let target = executor.state.stack(stack_idx).read_at(-3).clone();
-    let attr_name = read_string(executor, stack_idx, -2, "name")?;
+    let attr_name = read_string(executor, stack_idx, -2, "name").await?;
     let rhs = executor.state.stack(stack_idx).read_at(-1).clone();
     let stack_id = executor.state.stack(stack_idx).stack_id;
 
