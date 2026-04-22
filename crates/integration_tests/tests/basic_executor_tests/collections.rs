@@ -71,6 +71,17 @@ fn test_exec_list_build_with_for() {
     r.assert_int(30);
 }
 
+#[test]
+fn test_to_string_joins_list_elements_recursively() {
+    let r = run_with_stdlib(
+        "
+        let result = to_string([\"A\", 2, [3, nil], 4.5])
+    ",
+        &["util"],
+    );
+    r.assert_string("A23nil4.5");
+}
+
 // -- operators --
 
 // -- collections: maps --

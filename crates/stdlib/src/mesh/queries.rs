@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
@@ -536,5 +536,11 @@ pub async fn mesh_contour_separate(
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
-    Ok(list_value(tree.flatten().into_iter().map(Value::Mesh)))
+    Ok(list_value(tree.flatten().into_iter().enumerate().map(
+        |(index, mesh)| {
+            let mut mesh = mesh.as_ref().clone();
+            mesh.tag = vec![index as isize];
+            Value::Mesh(Arc::new(mesh))
+        },
+    )))
 }

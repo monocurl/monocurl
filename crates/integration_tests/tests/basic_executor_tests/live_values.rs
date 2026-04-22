@@ -401,8 +401,8 @@ fn test_mesh_operator_filter_applies_predicate_to_subset() {
             retag{2} shift{delta: [4, 0, 0]} Circle(1)
         ]
         let shifted = shift{delta: 10 * 1r, filter: |tag| 1 in tag} scene
-        let x1 = mesh_center(tag_filter(shifted, 1))[0]
-        let x2 = mesh_center(tag_filter(shifted, 2))[0]
+        let x1 = mesh_center(tag_filter{1} shifted)[0]
+        let x2 = mesh_center(tag_filter{2} shifted)[0]
         let result = (abs(x1 - 10) < 0.001) + (abs(x2 - 4) < 0.001)
     ",
         &["mesh", "math"],
@@ -419,13 +419,77 @@ fn test_subset_map_applies_mapping_to_matching_subset() {
             retag{2} shift{delta: [4, 0, 0]} Circle(1)
         ]
         let shifted = subset_map{filter: |tag| 1 in tag, f: |m| shift{delta: 10 * 1r} m} scene
-        let x1 = mesh_center(tag_filter(shifted, 1))[0]
-        let x2 = mesh_center(tag_filter(shifted, 2))[0]
+        let x1 = mesh_center(tag_filter{1} shifted)[0]
+        let x2 = mesh_center(tag_filter{2} shifted)[0]
         let result = (abs(x1 - 10) < 0.001) + (abs(x2 - 4) < 0.001)
     ",
         &["mesh", "math"],
     );
     r.assert_int(2);
+}
+
+#[test]
+fn test_tag_split_is_exposed_in_mesh_stdlib() {
+    let r = run_with_stdlib(
+        "
+        let scene = [
+            retag{1} Circle(1),
+            retag{2} shift{delta: [4, 0, 0]} Circle(1)
+        ]
+        let all = tag_split(scene)
+        let filtered = tag_split(scene, |tag| 2 in tag)
+        let result =
+            (mesh_contour_count(all[0]) == 2) +
+            (mesh_contour_count(all[1]) == 0) +
+            (mesh_center(filtered[0])[0] > 0) +
+            (mesh_center(filtered[1])[0] < 1)
+    ",
+        &["mesh"],
+    );
+    r.assert_int(4);
+}
+
+#[test]
+fn test_contour_separate_operator_numbers_output_tags() {
+    let r = run_with_stdlib(
+        "
+        let scene = [
+            retag{8} shift{delta: [-2, 0, 0]} Circle(1),
+            retag{9} shift{delta: [2, 0, 0]} Circle(1)
+        ]
+        let separated = contour_separate{} scene
+        let left = tag_filter{0} separated
+        let right = tag_filter{1} separated
+        let result =
+            (mesh_center(left)[0] < 0) +
+            (mesh_center(right)[0] > 0) +
+            (len(mesh_tags(left)) == 1) +
+            (len(mesh_tags(right)) == 1) +
+            (0 in mesh_tags(left)) +
+            (1 in mesh_tags(right))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(6);
+}
+
+#[test]
+fn test_tag_filter_operator_reads_filtered_side() {
+    let r = run_with_stdlib(
+        "
+        let scene = [
+            retag{1} shift{delta: [-2, 0, 0]} Circle(1),
+            retag{2} shift{delta: [2, 0, 0]} Circle(1)
+        ]
+        let filtered = tag_filter{|tag| 2 in tag} scene
+        let result =
+            (mesh_center(filtered)[0] > 0) +
+            (len(mesh_tags(filtered)) == 1) +
+            (2 in mesh_tags(filtered))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
 }
 
 #[test]
@@ -523,6 +587,19 @@ fn test_label_matches_latex_next_to_geometry() {
             "label geometry diverged from latex next_to reference"
         );
     }
+}
+
+#[test]
+fn test_tex_and_latex_accept_list_string_inputs() {
+    let r = run_with_stdlib(
+        "
+        let tex = Tex([\"2\", \" + \", 4], 1)
+        let latex = Latex([\"$\", \"x^2\", \"$\"], 1)
+        let result = (len(mesh_triangle_set(tex)) > 0) + (len(mesh_triangle_set(latex)) > 0)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
 }
 
 #[test]

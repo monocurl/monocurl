@@ -3,22 +3,8 @@ use stdlib_macros::stdlib_func;
 
 #[stdlib_func]
 pub async fn to_string(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let s = match executor
-        .state
-        .stack(stack_idx)
-        .peek()
-        .clone()
-        .elide_lvalue()
-    {
-        Value::String(s) => s,
-        Value::Integer(n) => n.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Complex { re, im } => format!("{} + {}i", re, im),
-        Value::Nil => "nil".to_string(),
-        other => {
-            return Err(ExecutorError::type_error("primitive", other.type_name()));
-        }
-    };
+    let s = crate::stringify_value(executor.state.stack(stack_idx).peek().clone())
+        .map_err(|kind| ExecutorError::type_error(crate::STRING_COMPATIBLE_DESC, kind))?;
     Ok(Value::String(s))
 }
 

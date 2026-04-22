@@ -345,11 +345,10 @@ let normal_hint = operator |target, normal, filter = nil| {
     return [go(n: normal, level: 0), go(n: normal, level: 1)]
 }
 
-let retag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_retagged(target, |old| tag, filter)]
+let tag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_retagged(target, |old| tag, filter)]
 
 let textured = operator |target, image, filter = nil| [target, __monocurl__native__ op_retextured(target, image, filter)]
 let with_zindex = operator |target, z_index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, z_index, filter)]
-let with_z = operator |target, index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, index, filter)]
 let gloss = operator |target| [target, __monocurl__native__ op_gloss(target)]
 let point_map = operator |target, f, filter = nil| {
     let go = |level| __monocurl__native__ op_point_map(target, f, filter, level)
@@ -363,7 +362,6 @@ let uv_map = operator |target, f, filter = nil| {
     let go = |level| __monocurl__native__ op_uv_map(target, f, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let retagged = operator |target, f, filter = nil| [target, __monocurl__native__ op_retagged(target, f, filter)]
 let tag_map = operator |target, f| [target, __monocurl__native__ op_tag_map(target, f)]
 let subset_map = operator |target, filter, f| [target, __monocurl__native__ op_subset_map(target, filter, f)]
 let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_uprank(target, filter)]
@@ -430,8 +428,10 @@ let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 
     return [go(level: 0), go(level: 1)]
 }
 
-let tag_filter = |target, filter| __monocurl__native__ tag_filter(target, filter)
+let tag_filter = operator |target, filter| [target, __monocurl__native__ tag_filter(target, filter)]
+let tag_split = |target, filter = nil| __monocurl__native__ tag_split(target, filter)
 let mesh_collapse = |target| __monocurl__native__ mesh_collapse(target)
+let contour_separate = operator |target| [target, __monocurl__native__ mesh_contour_separate(target)]
 
 let trans = |start, end, t, path_arc = 0| {
     var aligned_start = 0
@@ -473,4 +473,3 @@ let mesh_vertex_set = |target| __monocurl__native__ mesh_vertex_set(target)
 let mesh_edge_set = |target| __monocurl__native__ mesh_edge_set(target)
 let mesh_triangle_set = |target| __monocurl__native__ mesh_triangle_set(target)
 let mesh_contour_count = |target| __monocurl__native__ mesh_contour_count(target)
-let mesh_contour_separate = |target| __monocurl__native__ mesh_contour_separate(target)

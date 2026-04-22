@@ -164,20 +164,8 @@ pub(super) fn read_string(
     index: i32,
     name: &'static str,
 ) -> Result<String, ExecutorError> {
-    match executor
-        .state
-        .stack(stack_idx)
-        .read_at(index)
-        .clone()
-        .elide_lvalue()
-    {
-        Value::String(value) => Ok(value),
-        other => Err(ExecutorError::type_error_for(
-            "string",
-            other.type_name(),
-            name,
-        )),
-    }
+    crate::stringify_value(executor.state.stack(stack_idx).read_at(index).clone())
+        .map_err(|kind| ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, kind, name))
 }
 
 pub(super) fn read_int(

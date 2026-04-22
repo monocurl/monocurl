@@ -83,6 +83,18 @@ fn test_exec_runtime_error_type_in_arithmetic() {
 }
 
 #[test]
+fn test_to_string_rejects_complex_values() {
+    let r = run_with_stdlib(
+        "
+        let result = to_string(2i)
+    ",
+        &["util"],
+    );
+    r.assert_error("expected string-compatible value");
+    r.assert_error("got complex");
+}
+
+#[test]
 fn test_exec_runtime_error_list_add_length_mismatch() {
     let r = run("
         let x = [[1], [2, 3]] + [[4], [5]]
