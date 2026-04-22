@@ -39,6 +39,34 @@ pub async fn write_lerp_value(
     write_tree_value(&start, &end, &state, t.clamp(0.0, 1.0))
 }
 
+#[stdlib_func]
+pub async fn flash_value(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let destination_value = executor.state.stack(stack_idx).read_at(-3).clone();
+    let destination = materialize_live_value(executor, &destination_value).await?;
+    let u = crate::read_float(executor, stack_idx, -2, "trail")? as f32;
+    let v = crate::read_float(executor, stack_idx, -1, "lead")? as f32;
+    if u > v {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "trail",
+            message: "must not exceed lead",
+        });
+    }
+
+    let embedded = prepare_flash_embed_triplet(&destination)?;
+    let Value::List(embedded) = embedded else {
+        return Err(ExecutorError::invalid_operation(
+            "invalid flash embed triplet",
+        ));
+    };
+    let start = executor::heap::with_heap(|h| h.get(embedded.elements()[0].key()).clone());
+    let end = executor::heap::with_heap(|h| h.get(embedded.elements()[1].key()).clone());
+    let state = executor::heap::with_heap(|h| h.get(embedded.elements()[2].key()).clone());
+    flash_tree_value(&start, &end, &state, u, v)
+}
+
 pub(super) fn prepare_write_embed_triplet(
     start: &Value,
     destination: &Value,
@@ -63,6 +91,23 @@ pub(super) fn prepare_write_embed_triplet(
         ends.push(value);
         states.push(Value::Nil);
     }
+
+    Ok(embed_triplet(
+        pack_value_tree(starts, prefer_single),
+        pack_value_tree(ends, prefer_single),
+        pack_value_tree(states, prefer_single),
+    ))
+}
+
+pub(super) fn prepare_flash_embed_triplet(destination: &Value) -> Result<Value, ExecutorError> {
+    let leaves = super::trans::contour_separated_leaves(destination)?;
+    let prefer_single = matches!(destination, Value::Mesh(_)) && leaves.len() <= 1;
+
+    let mut starts = Vec::with_capacity(leaves.len());
+    let mut ends = Vec::with_capacity(leaves.len());
+    let mut states = Vec::with_capacity(leaves.len());
+
+    push_write_group(&mut starts, &mut ends, &mut states, &leaves, false);
 
     Ok(embed_triplet(
         pack_value_tree(starts, prefer_single),
@@ -229,6 +274,87 @@ fn write_tree_value(
     }
 }
 
+fn flash_tree_value(
+    start: &Value,
+    end: &Value,
+    state: &Value,
+    u: f32,
+    v: f32,
+) -> Result<Value, ExecutorError> {
+    match start.clone().elide_lvalue_leader_rec() {
+        Value::Mesh(_start_mesh) => {
+            let end_mesh = match end.clone().elide_lvalue_leader_rec() {
+                Value::Mesh(mesh) => mesh,
+                other => {
+                    return Err(ExecutorError::type_error("mesh", other.type_name()));
+                }
+            };
+            match read_write_state(state)? {
+                WriteState::Constant => Ok(Value::Mesh(end_mesh)),
+                WriteState::Animated {
+                    subset_index,
+                    subset_count,
+                    reverse,
+                } => {
+                    if reverse {
+                        return Err(ExecutorError::invalid_operation(
+                            "flash does not support reverse write state",
+                        ));
+                    }
+                    Ok(Value::Mesh(Arc::new(flash_mesh(
+                        end_mesh.as_ref(),
+                        subset_index,
+                        subset_count,
+                        u,
+                        v,
+                    ))))
+                }
+            }
+        }
+        Value::List(start_list) => {
+            let Value::List(end_list) = end.clone().elide_lvalue_leader_rec() else {
+                return Err(ExecutorError::invalid_operation(format!(
+                    "cannot flash list with end {}",
+                    end.type_name()
+                )));
+            };
+            let Value::List(state_list) = state.clone().elide_lvalue_leader_rec() else {
+                return Err(ExecutorError::invalid_operation(format!(
+                    "cannot flash list with state {}",
+                    state.type_name()
+                )));
+            };
+            if start_list.len() != end_list.len() || start_list.len() != state_list.len() {
+                return Err(ExecutorError::invalid_operation(format!(
+                    "cannot flash lists of different lengths: {} vs {} vs {}",
+                    start_list.len(),
+                    end_list.len(),
+                    state_list.len()
+                )));
+            }
+
+            let mut out = Vec::with_capacity(start_list.len());
+            for ((start, end), state) in start_list
+                .elements()
+                .iter()
+                .zip(end_list.elements().iter())
+                .zip(state_list.elements().iter())
+            {
+                let start = executor::heap::with_heap(|h| h.get(start.key()).clone());
+                let end = executor::heap::with_heap(|h| h.get(end.key()).clone());
+                let state = executor::heap::with_heap(|h| h.get(state.key()).clone());
+                out.push(flash_tree_value(&start, &end, &state, u, v)?);
+            }
+            Ok(Value::List(Rc::new(
+                executor::value::container::List::new_with(
+                    out.into_iter().map(executor::heap::VRc::new).collect(),
+                ),
+            )))
+        }
+        other => Err(ExecutorError::type_error("mesh / list", other.type_name())),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct WriteWindow {
     start: f32,
@@ -242,6 +368,20 @@ struct WriteLineGroup {
 }
 
 fn write_mesh(mesh: &Mesh, subset_index: usize, subset_count: usize, t: f32) -> Mesh {
+    write_mesh_window(mesh, subset_index, subset_count, 0.0, t)
+}
+
+fn flash_mesh(mesh: &Mesh, subset_index: usize, subset_count: usize, u: f32, v: f32) -> Mesh {
+    write_mesh_window(mesh, subset_index, subset_count, u, v)
+}
+
+fn write_mesh_window(
+    mesh: &Mesh,
+    subset_index: usize,
+    subset_count: usize,
+    u: f32,
+    v: f32,
+) -> Mesh {
     let mut out = mesh.clone();
     out.uniform.alpha = mesh.uniform.alpha;
 
@@ -261,7 +401,8 @@ fn write_mesh(mesh: &Mesh, subset_index: usize, subset_count: usize, t: f32) -> 
                 base_end - WRITE_BOUNDARY_HEADSTART * anim_length
             },
         },
-        t,
+        u,
+        v,
     );
 
     let raw_line_end = base_end;
@@ -281,7 +422,8 @@ fn write_mesh(mesh: &Mesh, subset_index: usize, subset_count: usize, t: f32) -> 
             },
         },
         raw_line_end,
-        t,
+        u,
+        v,
     );
 
     write_tris(
@@ -295,26 +437,29 @@ fn write_mesh(mesh: &Mesh, subset_index: usize, subset_count: usize, t: f32) -> 
             },
             end: base_end,
         },
-        t,
+        u,
+        v,
     );
 
     debug_assert!(out.has_consistent_line_links());
     out
 }
 
-fn write_dots(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, t: f32) {
+fn write_dots(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, u: f32, v: f32) {
     if mesh.dots.is_empty() {
         return;
     }
 
-    if t < window.start {
+    if v < window.start || u > window.end {
         for dot in &mut out.dots {
             dot.col.w = 0.0;
         }
         return;
     }
 
-    let sub_t = normalize_window_time(t, window);
+    let sub_u = normalize_window_time(u, window);
+    let sub_v = normalize_window_time(v, window);
+    let sub_t = (sub_v - sub_u).clamp(0.0, 1.0);
     let unit_length =
         1.0 / (WRITE_SUBCONTOUR_LAG_RATIO * mesh.dots.len().saturating_sub(1) as f32 + 1.0);
     for (index, (src, dst)) in mesh.dots.iter().zip(out.dots.iter_mut()).enumerate() {
@@ -325,12 +470,12 @@ fn write_dots(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, t: f32) {
     }
 }
 
-fn write_lines(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, raw_end: f32, t: f32) {
+fn write_lines(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, raw_end: f32, u: f32, v: f32) {
     if mesh.lins.is_empty() {
         return;
     }
 
-    if t < window.start {
+    if v < window.start || u > window.end {
         for (src, dst) in mesh.lins.iter().zip(out.lins.iter_mut()) {
             dst.a.pos = src.a.pos;
             dst.b.pos = src.a.pos;
@@ -340,37 +485,16 @@ fn write_lines(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, raw_end: f32, t
         return;
     }
 
-    if t >= raw_end {
-        for (src, dst) in mesh.lins.iter().zip(out.lins.iter_mut()) {
-            dst.a.pos = src.a.pos;
-            dst.b.pos = src.b.pos;
-            dst.a.col.w = src.a.col.w;
-            dst.b.col.w = src.b.col.w;
-        }
-        return;
-    }
-
-    if t > window.end {
-        let overlap_t = ((t - window.end) / (raw_end - window.end).max(1e-6)).clamp(0.0, 1.0);
-        for (src, dst) in mesh.lins.iter().zip(out.lins.iter_mut()) {
-            dst.a.pos = src.a.pos;
-            dst.b.pos = src.b.pos;
-            dst.a.col.w = (1.0 - overlap_t) + overlap_t * src.a.col.w;
-            dst.b.col.w = (1.0 - overlap_t) + overlap_t * src.b.col.w;
-        }
-        return;
-    }
-
     let groups = write_line_groups(mesh);
-    let sub_t = normalize_window_time(t, window);
+    let sub_u = normalize_window_time(u, window);
+    let sub_v = normalize_window_time(v, window);
     let unit_length =
         1.0 / (WRITE_SUBCONTOUR_LAG_RATIO * groups.len().saturating_sub(1) as f32 + 1.0);
 
     for group in groups {
-        let full_t = ((sub_t
-            - group.phase_index as f32 * WRITE_SUBCONTOUR_LAG_RATIO * unit_length)
-            / unit_length)
-            .clamp(0.0, 1.0);
+        let phase_offset = group.phase_index as f32 * WRITE_SUBCONTOUR_LAG_RATIO * unit_length;
+        let full_u = ((sub_u - phase_offset) / unit_length).clamp(0.0, 1.0);
+        let full_v = ((sub_v - phase_offset) / unit_length).clamp(0.0, 1.0);
         let count = group.lines.len().max(1) as f32;
 
         for (ind, &line_idx) in group.lines.iter().enumerate() {
@@ -384,32 +508,47 @@ fn write_lines(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, raw_end: f32, t
                 src.b.pos,
                 segment_start,
                 segment_end,
-                full_t,
-                false,
+                full_u,
+                SegmentEndpoint::Start,
             );
             dst.b.pos = write_segment_endpoint(
                 src.a.pos,
                 src.b.pos,
                 segment_start,
                 segment_end,
-                full_t,
-                true,
+                full_v,
+                SegmentEndpoint::End,
             );
-            dst.a.col.w = 1.0;
-            dst.b.col.w = 1.0;
+            if v < raw_end {
+                dst.a.col.w = 1.0;
+                dst.b.col.w = 1.0;
+            } else {
+                dst.a.col.w = src.a.col.w;
+                dst.b.col.w = src.b.col.w;
+            }
+        }
+    }
+
+    if v > window.end && v < raw_end {
+        let overlap_t = ((v - window.end) / (raw_end - window.end).max(1e-6)).clamp(0.0, 1.0);
+        for (src, dst) in mesh.lins.iter().zip(out.lins.iter_mut()) {
+            dst.a.pos = src.a.pos;
+            dst.b.pos = src.b.pos;
+            dst.a.col.w = (1.0 - overlap_t) + overlap_t * src.a.col.w;
+            dst.b.col.w = (1.0 - overlap_t) + overlap_t * src.b.col.w;
         }
     }
 }
 
-fn write_tris(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, t: f32) {
+fn write_tris(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, u: f32, v: f32) {
     if mesh.tris.is_empty() {
         return;
     }
 
-    let sub_t = if t < window.start {
+    let sub_t = if v < window.start || u > window.end {
         0.0
     } else {
-        normalize_window_time(t, window)
+        (normalize_window_time(v, window) - normalize_window_time(u, window)).clamp(0.0, 1.0)
     };
     for (src, dst) in mesh.tris.iter().zip(out.tris.iter_mut()) {
         dst.a.col.w = src.a.col.w * sub_t;
@@ -426,23 +565,43 @@ fn normalize_window_time(t: f32, window: WriteWindow) -> f32 {
     }
 }
 
+#[derive(Clone, Copy)]
+enum SegmentEndpoint {
+    Start,
+    End,
+}
+
 fn write_segment_endpoint(
     a: Float3,
     b: Float3,
     segment_start: f32,
     segment_end: f32,
     full_t: f32,
-    use_end: bool,
+    endpoint: SegmentEndpoint,
 ) -> Float3 {
-    if segment_end < full_t {
-        if use_end { b } else { a }
-    } else if segment_start > full_t {
-        a
-    } else {
-        let local =
-            ((full_t - segment_start) / (segment_end - segment_start).max(1e-6)).clamp(0.0, 1.0);
-        let point = a.lerp(b, local);
-        if use_end { point } else { a }
+    match endpoint {
+        SegmentEndpoint::Start => {
+            if segment_start > full_t {
+                a
+            } else if segment_end < full_t {
+                b
+            } else {
+                let local = ((full_t - segment_start) / (segment_end - segment_start).max(1e-6))
+                    .clamp(0.0, 1.0);
+                a.lerp(b, local)
+            }
+        }
+        SegmentEndpoint::End => {
+            if segment_end < full_t {
+                b
+            } else if segment_start > full_t {
+                a
+            } else {
+                let local = ((full_t - segment_start) / (segment_end - segment_start).max(1e-6))
+                    .clamp(0.0, 1.0);
+                a.lerp(b, local)
+            }
+        }
     }
 }
 

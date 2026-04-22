@@ -58,6 +58,14 @@ fn test_imported_init_runtime_error_uses_import_span_when_no_root_frame_exists()
 }
 
 #[test]
+fn test_imported_user_library_allows_mesh_declaration() {
+    let imported = make_imported_bundle("mesh x = []", SectionType::UserLibrary, 0..0);
+    let r = run_anim_impl(&[("", SectionType::Slide)], 0, f64::INFINITY, &[imported]);
+    r.assert_ok();
+    assert_eq!(r.mesh_leaders().len(), 1, "expected imported mesh leader");
+}
+
+#[test]
 fn test_root_recorded_error_uses_latest_root_statement_span() {
     let src = "
         background = 0
@@ -934,7 +942,7 @@ fn test_delay_operator_wraps_animation_in_wait_block() {
 }
 
 #[test]
-fn test_highlight_composes_set_and_lerp_over_reference_target() {
+fn test_highlight_peaks_and_restores_reference_target() {
     let src = "
         mesh x = stroke{RED} Line([0, 0, 0], [1, 0, 0])
         play Highlight(&x, BLUE, 1)
@@ -959,44 +967,13 @@ fn test_highlight_composes_set_and_lerp_over_reference_target() {
 
     let line = mesh.lins.first().expect("expected highlighted line");
     assert!(
-        line.a.col.x > 0.05 && line.a.col.x < 0.95,
-        "expected red channel to be mid-fade, got {:?}",
+        line.a.col.x < 0.2,
+        "expected highlight midpoint to suppress red, got {:?}",
         line.a.col.to_array()
     );
     assert!(
-        line.a.col.z > 0.05 && line.a.col.z < 0.95,
-        "expected blue channel to be mid-fade, got {:?}",
-        line.a.col.to_array()
-    );
-}
-
-#[test]
-fn test_flash_composes_write_and_trailing_lerp_over_reference_target() {
-    let src = "
-        mesh x = stroke{RED} Line([0, 0, 0], [1, 0, 0])
-        play Flash(&x, 1)
-    ";
-
-    let mid = run_anim_impl(
-        &[(src, SectionType::Slide)],
-        0,
-        0.75,
-        &stdlib_bundles(["anim", "color", "mesh"]),
-    );
-    mid.assert_ok();
-
-    let leader = mid
-        .mesh_leaders()
-        .into_iter()
-        .next()
-        .expect("expected mesh leader");
-    let Value::Mesh(mesh) = &leader.current else {
-        panic!("expected current mesh");
-    };
-    let line = mesh.lins.first().expect("expected flashed line");
-    assert!(
-        line.a.col.w > 0.05 && line.a.col.w < 0.95,
-        "expected flash trail to be partially faded, got {:?}",
+        line.a.col.z > 0.55,
+        "expected highlight midpoint to reach blue, got {:?}",
         line.a.col.to_array()
     );
 
@@ -1016,11 +993,85 @@ fn test_flash_composes_write_and_trailing_lerp_over_reference_target() {
     let Value::Mesh(mesh) = &leader.current else {
         panic!("expected current mesh");
     };
+
+    let line = mesh.lins.first().expect("expected highlighted line");
+    assert!(
+        line.a.col.x > 0.85 && line.a.col.z < 0.25,
+        "expected highlight to restore original color, got {:?}",
+        line.a.col.to_array()
+    );
+}
+
+#[test]
+fn test_flash_traces_window_and_restores_reference_target() {
+    let src = "
+        mesh x = stroke{RED} Line([0, 0, 0], [1, 0, 0])
+        play Flash(&x, 1)
+    ";
+
+    let mid = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.5,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    mid.assert_ok();
+
+    let leader = mid
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut leaves);
+    let Some(Value::Mesh(mesh)) = leaves.first() else {
+        panic!("expected flashed leaf");
+    };
     let line = mesh.lins.first().expect("expected flashed line");
     assert!(
-        (line.a.col.w - 1.0).abs() < 1e-6,
-        "expected flash to restore original alpha, got {:?}",
-        line.a.col.to_array()
+        line.a.pos.x > 0.2 && line.a.pos.x < 0.45,
+        "expected flash trail to start inside the line, got {:?}",
+        line.a.pos.to_array()
+    );
+    assert!(
+        line.b.pos.x > 0.55 && line.b.pos.x < 0.8,
+        "expected flash lead to end inside the line, got {:?}",
+        line.b.pos.to_array()
+    );
+    assert!(
+        (line.a.col.w - 1.0).abs() < 1e-6 && (line.b.col.w - 1.0).abs() < 1e-6,
+        "expected flash window to stay fully opaque, got {:?} / {:?}",
+        line.a.col.to_array(),
+        line.b.col.to_array()
+    );
+
+    let end = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    );
+    end.assert_ok();
+
+    let leader = end
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut leaves);
+    let Some(Value::Mesh(mesh)) = leaves.first() else {
+        panic!("expected flashed leaf");
+    };
+    let line = mesh.lins.first().expect("expected flashed line");
+    assert!(
+        (line.a.pos.x - 0.0).abs() < 1e-6
+            && (line.b.pos.x - 1.0).abs() < 1e-6
+            && (line.a.col.w - 1.0).abs() < 1e-6
+            && (line.b.col.w - 1.0).abs() < 1e-6,
+        "expected flash to restore original line, got {:?} -> {:?}",
+        line.a.pos.to_array(),
+        line.b.pos.to_array()
     );
 }
 

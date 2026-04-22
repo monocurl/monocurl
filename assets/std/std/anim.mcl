@@ -116,38 +116,51 @@ let CameraLerp = |&camera, time = 1, rate = smooth| __monocurl__native__ camera_
 
 # indication animations
 
-# flash a mesh to `color` and back.
+let __flash_lead = |t| {
+    let u = smooth(t) * 1.35
+    if (u > 1) { return 1 }
+    return u
+}
+
+let __flash_trail = |t| {
+    let u = smooth(t) * 1.35 - 0.35
+    if (u < 0) { return 0 }
+    return u
+}
+
+let __flash_value = |target, phase, lead = __flash_lead, trail = __flash_trail| {
+    return __monocurl__native__ flash_value(target, trail(phase), lead(phase))
+}
+
+
+# highlight a mesh to `color` and back.
 let Highlight = |&value, color, time = 1, rate = smooth| anim {
     var highlighted = 0
     var original = 0
     var state = 0
     [highlighted, original, state] = __monocurl__native__ highlight_embed(value, value, color)
 
+    play Set(&value)
+
     value = highlighted
-    play Set()
+    play Trans(time / 2, [], 0, rate)
 
     value = original
-    play Trans(time, [], 0, rate)
+    play Trans(time / 2, [], 0, rate)
 }
 
-# brief "write then unwrite" over stroke of a mesh.
-let Flash = |&value, time = 1, lead = smooth, trail = smooth| anim {
-    var start = 0
-    var original = 0
-    var state = 0
-    [start, original, state] = __monocurl__native__ flash_embed(value, value)
+# brief moving write-window over stroke of a mesh.
+let Flash = |&value, time = 1, lead = __flash_lead, trail = __flash_trail| anim {
+    let original = value
 
-    value = start
-    play Set()
+    value = __flash_value(original, phase: 0, lead, trail)
+    play Set(&value)
 
-    value = original
-    play Write(time / 2, [], lead)
-
-    value = start
-    play Trans(time / 2, [], 0, trail)
+    value = __flash_value(original, phase: 1, lead, trail)
+    play Lerp(time, [&value], linear)
 
     value = original
-    play Set()
+    play Set(&value)
 }
 
 # transfer animations
@@ -156,37 +169,48 @@ let Flash = |&value, time = 1, lead = smooth, trail = smooth| anim {
 let Transfer = |&from, &into| anim {
     into = [into, from]
     from = []
-    play Set()
+    play Set([&from, &into])
 }
 
 let TransferSubset = |&from, &into, filter=nil| anim {
     let split = __monocurl__native__ tag_split(from, filter)
     into = [into, split[0]]
     from = split[1]
-    play Set()
+    play Set([&from, &into])
 }
 
 let CopySubset = |&from, &into, filter=nil| anim {
     let split = __monocurl__native__ tag_split(from, filter)
     into = [into, split[0]]
-    play Set()
+    play Set([&into])
 }
 
 let Copy = |&from, &into| anim {
     into = [into, from]
-    play Set()
+    play Set([&into])
 }
 
-# parallel with lag
-# start a list of animations in parallel, but offset consecutive ones.
+let TransSubsetTo = |&from, target, &into, filter=nil, time=1, path_arc = 0, rate = smooth| anim {
+    mesh aux = []
+    play TransferSubset(&from, &aux, filter)
+
+    aux = target
+    play Trans(time, &aux, path_arc, rate)
+
+    play Transfer(&aux, &into)
+}
+
+let TransSubsetCopy = |&from, target, &into, filter=nil, time=1, path_arc = 0, rate = smooth| anim {
+    mesh aux = []
+    play CopySubset(&from, &aux, filter)
+
+    aux = target
+    play Trans(time, &aux, path_arc, rate)
+
+    play Transfer(&aux, &into)
+}
 
 let LaggedMap = |anims, average_offset = 0.1, unit_map = smooth| __monocurl__native__ lagged_map(anims, average_offset, unit_map)
-
-# animation operators
-# play slow{2} Lerp(1)   → Lerp runs over 2 seconds
-# play fast{2} Lerp(2)   → Lerp runs over 1 second
-# play delay{0.5} Lerp(1) → 0.5s pause, then Lerp
-# play anim { play Wait(0.5); play Lerp(1) } → 0.5s pause, then Lerp
 
 let slow = operator |target, factor = 2| [target, __monocurl__native__ anim_time_scale(target, factor)]
 

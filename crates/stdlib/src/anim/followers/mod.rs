@@ -128,18 +128,6 @@ pub async fn highlight_embed(
 }
 
 #[stdlib_func]
-pub async fn flash_embed(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
-    let _start = executor.state.stack(stack_idx).read_at(-2).clone();
-    let destination_value = executor.state.stack(stack_idx).read_at(-1).clone();
-    let destination = materialize_live_value(executor, &destination_value).await?;
-    let start = map_mesh_tree(&destination, &mut write_start_mesh)?;
-    Ok(embed_triplet(start, destination, Value::Nil))
-}
-
-#[stdlib_func]
 pub async fn camera_lerp_anim(
     executor: &mut Executor,
     stack_idx: usize,

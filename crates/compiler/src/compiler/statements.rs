@@ -56,15 +56,10 @@ impl Compiler {
         };
         let is_library = self.current_section().flags.is_library;
         match vt {
-            VariableType::Param | VariableType::Mesh if is_library => {
-                let kind = match vt {
-                    VariableType::Param => "param",
-                    VariableType::Mesh => "mesh",
-                    _ => unreachable!(),
-                };
+            VariableType::Param if is_library => {
                 self.error(
                     span.clone(),
-                    &format!("'{kind}' declarations are not allowed in user libraries"),
+                    "'param' declarations are not allowed in user libraries",
                 );
             }
             VariableType::Param if self.frames.len() != 1 || self.frame().scopes.len() != 1 => {

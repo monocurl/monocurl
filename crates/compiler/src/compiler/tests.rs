@@ -62,16 +62,24 @@ mod test {
     }
 
     fn parse_stmts(src: &str) -> Vec<(Span8, Statement)> {
+        parse_stmts_as(src, SectionType::Slide)
+    }
+
+    fn parse_stmts_as(src: &str, section_type: SectionType) -> Vec<(Span8, Statement)> {
         use parser::parser::SectionParser;
 
         let tokens = lex(src);
         let text_rope = Rope::from_str(src);
-        let mut parser = SectionParser::new(tokens, text_rope, SectionType::Slide, None, None);
+        let mut parser = SectionParser::new(tokens, text_rope, section_type, None, None);
         parser.parse_statement_list()
     }
 
     fn compile_src(src: &str) -> CompileResult {
         compile_stmts(parse_stmts(src))
+    }
+
+    fn compile_src_as_section(src: &str, section_type: SectionType) -> CompileResult {
+        test_compile(&[make_bundle(parse_stmts_as(src, section_type), section_type)])
     }
 
     fn has_error(result: &CompileResult, fragment: &str) -> bool {
@@ -382,6 +390,21 @@ mod test {
             has_error(&result, "cannot mutate 'x'"),
             "imported var should become let"
         );
+    }
+
+    #[test]
+    fn test_mesh_declaration_allowed_in_user_library() {
+        let result = compile_src_as_section("mesh x = 1", SectionType::UserLibrary);
+        no_errors(&result);
+    }
+
+    #[test]
+    fn test_param_declaration_disallowed_in_user_library() {
+        let result = compile_src_as_section("param x = 1", SectionType::UserLibrary);
+        assert!(has_error(
+            &result,
+            "'param' declarations are not allowed in user libraries"
+        ));
     }
 
     #[test]
