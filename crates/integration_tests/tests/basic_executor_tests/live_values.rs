@@ -1,5 +1,58 @@
 use super::*;
 
+fn flatten_mesh_leaves(value: &Value, out: &mut Vec<std::sync::Arc<geo::mesh::Mesh>>) {
+    match elide_value_for_assert(value) {
+        Value::Mesh(mesh) => out.push(mesh.clone()),
+        Value::List(list) => {
+            for child in list.elements() {
+                let value = with_heap(|h| h.get(child.key()).clone());
+                flatten_mesh_leaves(&value, out);
+            }
+        }
+        other => panic!("expected mesh tree, got {}", other.type_name()),
+    }
+}
+
+fn mesh_signature(mesh: &geo::mesh::Mesh) -> String {
+    let dots = mesh
+        .dots
+        .iter()
+        .map(|dot| format!("{:.6},{:.6},{:.6}", dot.pos.x, dot.pos.y, dot.pos.z))
+        .collect::<Vec<_>>()
+        .join(";");
+    let lins = mesh
+        .lins
+        .iter()
+        .map(|lin| {
+            format!(
+                "{:.6},{:.6},{:.6}|{:.6},{:.6},{:.6}",
+                lin.a.pos.x, lin.a.pos.y, lin.a.pos.z, lin.b.pos.x, lin.b.pos.y, lin.b.pos.z
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    let tris = mesh
+        .tris
+        .iter()
+        .map(|tri| {
+            format!(
+                "{:.6},{:.6},{:.6}|{:.6},{:.6},{:.6}|{:.6},{:.6},{:.6}",
+                tri.a.pos.x,
+                tri.a.pos.y,
+                tri.a.pos.z,
+                tri.b.pos.x,
+                tri.b.pos.y,
+                tri.b.pos.z,
+                tri.c.pos.x,
+                tri.c.pos.y,
+                tri.c.pos.z
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(";");
+    format!("dots[{dots}]|lins[{lins}]|tris[{tris}]")
+}
+
 // -- COW: list element independence after aliasing --
 
 #[test]
@@ -404,11 +457,11 @@ fn test_to_side_and_to_corner_use_default_camera_when_omitted() {
 }
 
 #[test]
-fn test_label_places_tex_to_requested_side() {
+fn test_label_places_latex_to_requested_side() {
     let r = run_with_stdlib(
         "
         let target = Circle(1)
-        let right = Label(target, \"A^2\", 1, 1r)
+        let right = Label(target, \"A\", 1, 1r)
         let up = Label(target, \"B\", 1, 1u)
         let result = (mesh_center(right)[0] > mesh_right(target)[0]) + (mesh_center(up)[1] > mesh_up(target)[1])
     ",
@@ -428,6 +481,48 @@ fn test_label_preserves_cross_axis_alignment() {
         &["mesh", "math"],
     );
     r.assert_int(1);
+}
+
+#[test]
+fn test_label_matches_latex_next_to_geometry() {
+    let r = run_with_stdlib(
+        "
+        let target = Circle(1)
+        let label = Label(target, \"C\", 1, 1l)
+        let reference = next_to{target, 1l, 0.1} Latex(\"C\", 1)
+        let result = [label, reference]
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let Value::List(pair) = value else {
+        panic!("expected [label, reference], got {}", value.type_name());
+    };
+    assert_eq!(pair.elements().len(), 2, "expected exactly two mesh trees");
+
+    let label_value = with_heap(|h| h.get(pair.elements()[0].key()).clone());
+    let reference_value = with_heap(|h| h.get(pair.elements()[1].key()).clone());
+
+    let mut label_meshes = Vec::new();
+    flatten_mesh_leaves(&label_value, &mut label_meshes);
+    let mut reference_meshes = Vec::new();
+    flatten_mesh_leaves(&reference_value, &mut reference_meshes);
+
+    assert_eq!(
+        label_meshes.len(),
+        reference_meshes.len(),
+        "label/reference leaf count mismatch"
+    );
+
+    for (label_mesh, reference_mesh) in label_meshes.iter().zip(reference_meshes.iter()) {
+        assert_eq!(
+            mesh_signature(label_mesh),
+            mesh_signature(reference_mesh),
+            "label geometry diverged from latex next_to reference"
+        );
+    }
 }
 
 #[test]

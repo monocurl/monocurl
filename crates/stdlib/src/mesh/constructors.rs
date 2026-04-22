@@ -1215,8 +1215,8 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
         });
     }
 
-    let meshes = latex::render_tex(&str, scale).map_err(|error| {
-        ExecutorError::invalid_invocation(format!("tex render failed: {error:#}"))
+    let meshes = latex::render_latex(&str, scale).map_err(|error| {
+        ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
     })?;
     let mut label = MeshTree::List(meshes.into_iter().map(MeshTree::Mesh).collect());
     if label.iter().next().is_none() {

@@ -2823,6 +2823,7 @@ version = "0.1.0"
 dependencies = [
  "compiler",
  "executor",
+ "geo",
  "lexer",
  "parser",
  "smol",
