@@ -1367,6 +1367,34 @@ mod test {
     }
 
     #[test]
+    fn test_newline_before_dot_after_operator_chain_in_if_starts_new_statement() {
+        let content = "block {\n    if (labels) {\n        . w{} centered_at{} Tex(\"A\", 1)\n        . w{} centered_at{} Tex(\"B\", 1)\n    }\n}";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
+        let result = parser.parse_expr_best_effort();
+
+        let Expression::Block(block) = result.1 else {
+            panic!("expected block");
+        };
+        assert_eq!(block.body.len(), 1);
+
+        let Statement::If(if_stmt) = &block.body[0].1 else {
+            panic!("expected if statement");
+        };
+        assert_eq!(if_stmt.if_block.1.len(), 2);
+        for statement in &if_stmt.if_block.1 {
+            assert!(matches!(
+                statement.1,
+                Statement::Expression(Expression::BinaryOperator(BinaryOperator {
+                    op_type: BinaryOperatorType::DotAssign,
+                    ..
+                }))
+            ));
+        }
+    }
+
+    #[test]
     fn test_multiline_grouped_expression_allows_newline_before_close_paren() {
         let result = parse_stmt_test("let x = (\n    1\n)").unwrap();
 

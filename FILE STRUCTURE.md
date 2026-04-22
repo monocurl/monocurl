@@ -63,7 +63,7 @@
   - src/parser/mod.rs: parser module root; shared parser state/diagnostic structs, bracket precomputation, token-reading helpers, and top-level `Parser` / `SectionParser` definitions
   - src/parser/predicate.rs: token/state predicates used by the tolerant `try_all!` parser machinery and cursor-possibility emission
   - src/parser/statements.rs: section/statement-list parsing plus statement bodies, declarations, loop/if/play/return parsing, and identifier declarations
-  - src/parser/expressions.rs: precedence parser, postfix/property/subscript/invocation parsing, and lambda/block/anim expression parsing
+  - src/parser/expressions.rs: precedence parser, postfix/property/subscript/invocation parsing, and lambda/block/anim expression parsing; postfix parsing now preserves newline boundaries instead of consuming them, so a leading `.` on the next line is reliably parsed as a new dot-statement rather than accidental property access
   - src/parser/literals.rs: string/numeric/vector/map literal parsing helpers
   - src/parser/imports.rs: import DFS/preparse logic, file splitting into sections, cache-aware bundle assembly, and the public parse entrypoint
   - src/parser/tests.rs: parser unit tests split out of the module root

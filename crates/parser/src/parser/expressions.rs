@@ -138,17 +138,11 @@ impl SectionParser {
         let mut expr = Some(base);
 
         loop {
-            let mut saw_newline = false;
-            while self
+            if self
                 .tokens
                 .get(self.token_index)
                 .is_some_and(|(tok, _)| *tok == Token::Newline)
             {
-                saw_newline = true;
-                self.token_index += 1;
-            }
-
-            if saw_newline {
                 return expr.unwrap();
             }
 
