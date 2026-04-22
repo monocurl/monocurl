@@ -1,3 +1,5 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use super::*;
 
 #[test]
@@ -269,6 +271,175 @@ fn test_point_map_operator_lerp_blends_from_identity_embed() {
         "expected midpoint point-map x of 2, got {}",
         dot.pos.x
     );
+}
+
+#[test]
+fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_panic() {
+    let init = r#"
+        background = BLACK
+
+        let w = operator |op| color{WHITE} op
+        let Tri = |p, q, r, t|
+            fill{BLUE} stroke{WHITE} tag{t} Triangle(p, q, r)
+
+        let Left = |r, u, labels = 0| {
+            let ret = block {
+                . Tri(ORIGIN, [r, 0, 0], [0, u, 0], 0)
+                . Tri([r, 0, 0], [r + u, 0, 0], [r + u, r, 0], 1)
+                . Tri([r + u, r, 0], [r + u, r + u, 0], [u, r + u, 0], 2)
+                . Tri([u, r + u, 0], [0, r + u, 0], [0, u, 0], 3)
+                if (labels) {
+                    . w{} centered_at{[(u + r) / 2, (u + r) / 2, 0]} Tex("C^2", 1)
+                }
+            }
+
+            return centered_at{[-1.5, -0.5, 0]} scale{0.5} ret
+        }
+
+        let Right = |r, u, labels = 0| {
+            let ret = block {
+                . Tri([u, u, 0], [u, u + r, 0], [0, u, 0], 0)
+                . Tri([0, u, 0], [u, u + r, 0], [0, u + r, 0], 3)
+                . Tri([u, u, 0], [u, 0, 0], [u + r, 0, 0], 1)
+                . Tri([u + r, 0, 0], [u + r, u, 0], [u, u, 0], 2)
+                . centered_at{[(u + r) / 2, (u + r) / 2, 0]} stroke{WHITE} tag{[-1]} Rect([u + r, u + r])
+
+                if (labels) {
+                    . w{} centered_at{[u / 2, u / 2, 0]} Tex("A^2", 1)
+                    let x = 0
+                    . w{} centered_at{[u + r / 2, u + r / 2, 0]} Tex("B^2", 1)
+                }
+            }
+
+            return centered_at{[1.5, -0.5, 0]} scale{0.5} ret
+        }
+
+        let R = 2
+        let U = 1
+
+        mesh start = []
+        mesh left = []
+        mesh right = []
+        mesh equation = []
+        mesh c_transfer = []
+        mesh ab_transfer = []
+
+        let theorem =
+            centered_at{[0, 1, 0]} w{} Tex("\\pin1{C^2} = \\pin2{A^2} + \\pin3{B^2}", 1)
+    "#;
+
+    let slide0 = r#"
+        let t = Tri(ORIGIN, [R, 0, 0], [0, U, 0], 0)
+
+        start = [
+            t,
+            w{} Label(t, "C", 1, [U, R, 0]),
+            w{} Label(t, "A", 1, LEFT),
+            w{} Label(t, "B", 1, DOWN)
+        ]
+        play Fade(1, [], UP)
+    "#;
+
+    let slide1 = r#"
+        start = tag_filter{|t| len(t) > 0 and t[0] == 0} Left(R, U, 0)
+        play TagTrans(1)
+    "#;
+
+    let slide2 = r#"
+        play Transfer(&start, &left)
+
+        left = Left(r: R, u: U, labels: 0)
+        play Trans(1)
+    "#;
+
+    let slide3 = r#"
+        right = left
+        play Set()
+
+        right = Right(r: R, u: U, labels: 0)
+        play TagTrans(1.5)
+    "#;
+
+    let slide4 = r#"
+        left.labels = 1
+        right.labels = 1
+        play Trans(1)
+    "#;
+
+    let sections = [
+        (init, SectionType::Init),
+        (slide0, SectionType::Slide),
+        (slide1, SectionType::Slide),
+        (slide2, SectionType::Slide),
+        (slide3, SectionType::Slide),
+        (slide4, SectionType::Slide),
+    ];
+    let bundles = stdlib_bundles(["scene", "mesh", "anim", "util", "color", "math"]);
+
+    let (mut executor, user_slide_count) = match build_anim_executor(&sections, &bundles) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    smol::block_on(async {
+        for slide in 0..user_slide_count {
+            let target = executor.user_to_internal_timestamp(Timestamp::new(slide, f64::INFINITY));
+            match executor.seek_to(target).await {
+                SeekToResult::SeekedTo(_) => {}
+                SeekToResult::Error(e) => {
+                    panic!("unexpected seek error on slide {slide}: {e}");
+                }
+            }
+        }
+    });
+
+    for slide in 0..user_slide_count {
+        let playback = catch_unwind(AssertUnwindSafe(|| {
+            let (mut executor, _) =
+                build_anim_executor(&sections, &bundles).unwrap_or_else(|result| {
+                    panic!(
+                        "executor should build for playback, got errors: {:?}",
+                        result.errors
+                    )
+                });
+
+            let mut runtime_errors = Vec::new();
+            smol::block_on(async {
+                let start = executor.user_to_internal_timestamp(Timestamp::new(slide, 0.0));
+                match executor.seek_to(start).await {
+                    SeekToResult::SeekedTo(_) => {}
+                    SeekToResult::Error(e) => {
+                        runtime_errors.push(e.to_string());
+                        return;
+                    }
+                }
+
+                let max_slide = executor.total_sections();
+                loop {
+                    let current = executor.internal_to_user_timestamp(executor.state.timestamp);
+                    if current.slide > slide {
+                        break;
+                    }
+
+                    match executor.advance_playback(max_slide, 1.0 / 60.0).await {
+                        Ok(true) => {}
+                        Ok(false) => break,
+                        Err(e) => {
+                            runtime_errors.push(e.to_string());
+                            break;
+                        }
+                    }
+                }
+            });
+
+            runtime_errors
+        }))
+        .unwrap_or_else(|_| panic!("playback panicked on slide {slide}"));
+        assert!(
+            playback.is_empty(),
+            "unexpected playback runtime errors on slide {slide}: {playback:?}"
+        );
+    }
 }
 
 #[test]

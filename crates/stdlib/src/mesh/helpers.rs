@@ -953,6 +953,9 @@ fn tessellate_planar_loops_with_options(
             if line.a.pos != edge_start || line.b.pos != edge_end {
                 continue;
             }
+            if lins[line_idx].inv != -1 {
+                continue;
+            }
 
             set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_build::mesh_ref(line_idx));
             lins[line_idx].inv = mesh_build::mesh_ref(tri_idx);
@@ -999,6 +1002,26 @@ fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
 
     Some(contours)
 }
+
+fn clear_surface_boundary_links(mesh: &mut Mesh) {
+    let tri_count = mesh.tris.len();
+    let line_count = mesh.lins.len();
+
+    for line in &mut mesh.lins {
+        if decode_mesh_ref(line.inv).is_some_and(|idx| idx < tri_count) {
+            line.inv = -1;
+        }
+    }
+
+    for tri in &mut mesh.tris {
+        for edge_idx in 0..3 {
+            if decode_mesh_ref(tri_edge(tri, edge_idx)).is_some_and(|idx| idx < line_count) {
+                set_tri_edge(tri, edge_idx, -1);
+            }
+        }
+    }
+}
+
 pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
     let mut out = mesh.clone();
     if !out.tris.is_empty() {
@@ -1021,6 +1044,10 @@ pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
     let (lins, tris) = tessellate_planar_loops_with_options(&contours, normal, true)?;
     out.lins = lins;
     out.tris = tris;
+    if !out.has_consistent_topology() {
+        // keep the tessellated surface, but drop optional boundary ownership links
+        clear_surface_boundary_links(&mut out);
+    }
     debug_assert!(out.has_consistent_topology());
     Ok(Some(out))
 }
