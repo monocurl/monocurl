@@ -4,7 +4,10 @@ use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{mesh::Mesh, simd::Float3};
 use stdlib_macros::stdlib_func;
 
-use super::super::helpers::{list_value, materialize_live_value};
+use super::super::helpers::{
+    decompose_mesh_tree, list_value, materialize_live_value, pack_value_tree,
+    prefer_single_mesh_tree_value,
+};
 use super::{embed_triplet, write_start_mesh};
 
 const WRITE_STATE_KIND: i64 = 2;
@@ -17,10 +20,11 @@ pub async fn write_embed(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let _start = executor.state.stack(stack_idx).read_at(-2).clone();
+    let start_value = executor.state.stack(stack_idx).read_at(-2).clone();
     let destination_value = executor.state.stack(stack_idx).read_at(-1).clone();
+    let start = materialize_live_value(executor, &start_value).await?;
     let destination = materialize_live_value(executor, &destination_value).await?;
-    prepare_write_embed_triplet(&destination)
+    prepare_write_embed_triplet(&start, &destination)
 }
 
 #[stdlib_func]
@@ -28,65 +32,117 @@ pub async fn write_lerp_value(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
+    let start = executor.state.stack(stack_idx).read_at(-4).clone();
     let end = executor.state.stack(stack_idx).read_at(-3).clone();
     let state = executor.state.stack(stack_idx).read_at(-2).clone();
     let t = crate::read_float(executor, stack_idx, -1, "t")? as f32;
-    write_tree_value(&end, &state, t.clamp(0.0, 1.0))
+    write_tree_value(&start, &end, &state, t.clamp(0.0, 1.0))
 }
 
-pub(super) fn prepare_write_embed_triplet(destination: &Value) -> Result<Value, ExecutorError> {
-    let leaves = super::trans::contour_separated_leaves(destination)?;
+pub(super) fn prepare_write_embed_triplet(
+    start: &Value,
+    destination: &Value,
+) -> Result<Value, ExecutorError> {
+    let decomposition = decompose_mesh_tree(start, destination)?;
+    let insert_leaves = contour_separated_meshes(&decomposition.insert)?;
+    let delete_leaves = contour_separated_meshes(&decomposition.delete)?;
+    let prefer_single = prefer_single_mesh_tree_value(start, destination);
 
-    let mut starts = Vec::with_capacity(leaves.len());
-    let mut ends = Vec::with_capacity(leaves.len());
-    let mut states = Vec::with_capacity(leaves.len());
-    let total = leaves.len().max(1);
-    for (index, leaf) in leaves.iter().enumerate() {
-        starts.push(Value::Mesh(Arc::new(write_start_mesh(leaf.as_ref()))));
-        ends.push(Value::Mesh(leaf.clone()));
-        states.push(write_state(index, total));
-    }
+    let mut starts = Vec::with_capacity(
+        insert_leaves.len() + delete_leaves.len() + decomposition.constant.len(),
+    );
+    let mut ends = Vec::with_capacity(starts.capacity());
+    let mut states = Vec::with_capacity(starts.capacity());
 
-    if matches!(destination, Value::Mesh(_)) && leaves.len() <= 1 {
-        return Ok(embed_triplet(
-            starts.into_iter().next().unwrap_or_else(|| list_value([])),
-            ends.into_iter().next().unwrap_or_else(|| list_value([])),
-            states.into_iter().next().unwrap_or(Value::Nil),
-        ));
+    push_write_group(&mut starts, &mut ends, &mut states, &insert_leaves, false);
+    push_write_group(&mut starts, &mut ends, &mut states, &delete_leaves, true);
+
+    for mesh in decomposition.constant {
+        let value = Value::Mesh(mesh);
+        starts.push(value.clone());
+        ends.push(value);
+        states.push(Value::Nil);
     }
 
     Ok(embed_triplet(
-        list_value(starts),
-        list_value(ends),
-        list_value(states),
+        pack_value_tree(starts, prefer_single),
+        pack_value_tree(ends, prefer_single),
+        pack_value_tree(states, prefer_single),
     ))
 }
 
-fn write_state(index: usize, total: usize) -> Value {
+fn contour_separated_meshes(meshes: &[Arc<Mesh>]) -> Result<Vec<Arc<Mesh>>, ExecutorError> {
+    super::trans::contour_separated_leaves(&list_value(meshes.iter().cloned().map(Value::Mesh)))
+}
+
+fn push_write_group(
+    starts: &mut Vec<Value>,
+    ends: &mut Vec<Value>,
+    states: &mut Vec<Value>,
+    leaves: &[Arc<Mesh>],
+    reverse: bool,
+) {
+    let total = leaves.len().max(1);
+    for (index, leaf) in leaves.iter().enumerate() {
+        let hidden = Value::Mesh(Arc::new(write_start_mesh(leaf.as_ref())));
+        let visible = Value::Mesh(leaf.clone());
+        if reverse {
+            starts.push(visible);
+            ends.push(hidden);
+        } else {
+            starts.push(hidden);
+            ends.push(visible);
+        }
+        states.push(write_state(index, total, reverse));
+    }
+}
+
+enum WriteState {
+    Constant,
+    Animated {
+        subset_index: usize,
+        subset_count: usize,
+        reverse: bool,
+    },
+}
+
+fn write_state(index: usize, total: usize, reverse: bool) -> Value {
     list_value([
         Value::Integer(WRITE_STATE_KIND),
         Value::Integer(index as i64),
         Value::Integer(total as i64),
+        Value::Integer(reverse as i64),
     ])
 }
 
-fn read_write_state(value: &Value) -> Result<(usize, usize), ExecutorError> {
+fn read_write_state(value: &Value) -> Result<WriteState, ExecutorError> {
     match value {
-        Value::Nil => Ok((0, 1)),
-        Value::List(list) if list.len() == 3 => {
+        Value::Nil => Ok(WriteState::Constant),
+        Value::List(list) if matches!(list.len(), 3 | 4) => {
             let kind = executor::heap::with_heap(|h| h.get(list.elements()[0].key()).clone());
             let index = executor::heap::with_heap(|h| h.get(list.elements()[1].key()).clone());
             let total = executor::heap::with_heap(|h| h.get(list.elements()[2].key()).clone());
+            let reverse = if list.len() == 4 {
+                executor::heap::with_heap(|h| h.get(list.elements()[3].key()).clone())
+            } else {
+                Value::Integer(0)
+            };
             match (
                 kind.elide_lvalue_leader_rec(),
                 index.elide_lvalue_leader_rec(),
                 total.elide_lvalue_leader_rec(),
+                reverse.elide_lvalue_leader_rec(),
             ) {
                 (
                     Value::Integer(WRITE_STATE_KIND),
                     Value::Integer(index),
                     Value::Integer(total),
-                ) if index >= 0 && total > 0 => Ok((index as usize, total as usize)),
+                    Value::Integer(reverse),
+                ) if index >= 0 && total > 0 => Ok(WriteState::Animated {
+                    subset_index: index as usize,
+                    subset_count: total as usize,
+                    reverse: reverse != 0,
+                }),
                 _ => Err(ExecutorError::invalid_operation("invalid write state")),
             }
         }
@@ -94,37 +150,74 @@ fn read_write_state(value: &Value) -> Result<(usize, usize), ExecutorError> {
     }
 }
 
-fn write_tree_value(value: &Value, state: &Value, t: f32) -> Result<Value, ExecutorError> {
-    match value.clone().elide_lvalue_leader_rec() {
-        Value::Mesh(mesh) => {
-            let (subset_index, subset_count) = read_write_state(state)?;
-            Ok(Value::Mesh(Arc::new(write_mesh(
-                mesh.as_ref(),
-                subset_index,
-                subset_count,
-                t,
-            ))))
+fn write_tree_value(
+    start: &Value,
+    end: &Value,
+    state: &Value,
+    t: f32,
+) -> Result<Value, ExecutorError> {
+    match start.clone().elide_lvalue_leader_rec() {
+        Value::Mesh(start_mesh) => {
+            let end_mesh = match end.clone().elide_lvalue_leader_rec() {
+                Value::Mesh(mesh) => mesh,
+                other => {
+                    return Err(ExecutorError::type_error("mesh", other.type_name()));
+                }
+            };
+            match read_write_state(state)? {
+                WriteState::Constant => Ok(Value::Mesh(start_mesh)),
+                WriteState::Animated {
+                    subset_index,
+                    subset_count,
+                    reverse,
+                } => {
+                    let (mesh, write_t) = if reverse {
+                        (start_mesh.as_ref(), 1.0 - t)
+                    } else {
+                        (end_mesh.as_ref(), t)
+                    };
+                    Ok(Value::Mesh(Arc::new(write_mesh(
+                        mesh,
+                        subset_index,
+                        subset_count,
+                        write_t,
+                    ))))
+                }
+            }
         }
-        Value::List(list) => {
+        Value::List(start_list) => {
+            let Value::List(end_list) = end.clone().elide_lvalue_leader_rec() else {
+                return Err(ExecutorError::invalid_operation(format!(
+                    "cannot write list with end {}",
+                    end.type_name()
+                )));
+            };
             let Value::List(state_list) = state.clone().elide_lvalue_leader_rec() else {
                 return Err(ExecutorError::invalid_operation(format!(
                     "cannot write list with state {}",
                     state.type_name()
                 )));
             };
-            if list.len() != state_list.len() {
+            if start_list.len() != end_list.len() || start_list.len() != state_list.len() {
                 return Err(ExecutorError::invalid_operation(format!(
-                    "cannot write lists of different lengths: {} vs {}",
-                    list.len(),
+                    "cannot write lists of different lengths: {} vs {} vs {}",
+                    start_list.len(),
+                    end_list.len(),
                     state_list.len()
                 )));
             }
 
-            let mut out = Vec::with_capacity(list.len());
-            for (elem, state) in list.elements().iter().zip(state_list.elements().iter()) {
-                let elem = executor::heap::with_heap(|h| h.get(elem.key()).clone());
+            let mut out = Vec::with_capacity(start_list.len());
+            for ((start, end), state) in start_list
+                .elements()
+                .iter()
+                .zip(end_list.elements().iter())
+                .zip(state_list.elements().iter())
+            {
+                let start = executor::heap::with_heap(|h| h.get(start.key()).clone());
+                let end = executor::heap::with_heap(|h| h.get(end.key()).clone());
                 let state = executor::heap::with_heap(|h| h.get(state.key()).clone());
-                out.push(write_tree_value(&elem, &state, t)?);
+                out.push(write_tree_value(&start, &end, &state, t)?);
             }
             Ok(Value::List(Rc::new(
                 executor::value::container::List::new_with(
@@ -417,6 +510,7 @@ fn ordered_line_components(mesh: &Mesh) -> Vec<Vec<usize>> {
 mod tests {
     use std::sync::Arc;
 
+    use crate::anim::helpers::list_value;
     use executor::value::Value;
     use geo::{
         mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
@@ -518,7 +612,7 @@ mod tests {
             tag: vec![],
         };
 
-        let embedded = prepare_write_embed_triplet(&Value::Mesh(Arc::new(mesh)))
+        let embedded = prepare_write_embed_triplet(&list_value([]), &Value::Mesh(Arc::new(mesh)))
             .expect("write embed prep should succeed");
         let Value::List(embedded) = embedded else {
             panic!("expected embed triplet");

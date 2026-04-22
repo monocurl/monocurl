@@ -158,7 +158,6 @@ impl Element for Split {
     ) {
         paint_split_handle(layout, window, cx);
 
-
         self.second.paint(window, cx);
 
         window.paint_quad(fill(layout.divider_bounds, self.divider_color));

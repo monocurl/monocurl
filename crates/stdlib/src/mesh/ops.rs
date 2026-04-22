@@ -139,7 +139,12 @@ async fn read_camera_basis_or_default(
     index: i32,
     target: &'static str,
 ) -> Result<CameraBasis, ExecutorError> {
-    let value = executor.state.stack(stack_idx).read_at(index).clone().elide_lvalue();
+    let value = executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_lvalue();
     if matches!(value, Value::Nil) {
         Ok(CameraSnapshot::default().basis())
     } else {

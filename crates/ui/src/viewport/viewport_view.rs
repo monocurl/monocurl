@@ -8,9 +8,7 @@ use std::collections::HashMap;
 use gpui::*;
 
 use crate::{
-    services::ServiceManager,
-    state::execution_state::ExecutionState,
-    theme::ThemeSettings,
+    services::ServiceManager, state::execution_state::ExecutionState, theme::ThemeSettings,
 };
 
 use self::{

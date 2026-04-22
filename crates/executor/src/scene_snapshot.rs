@@ -208,9 +208,10 @@ async fn scene_field_value_with_version(
         .and_then(|entry| {
             let (version, prefer_root_init_span) =
                 match with_heap(|h| h.get(entry.leader_cell.key()).clone()) {
-                    Value::Leader(leader) => {
-                        (leader.follower_version, leader.last_modified_stack.is_none())
-                    }
+                    Value::Leader(leader) => (
+                        leader.follower_version,
+                        leader.last_modified_stack.is_none(),
+                    ),
                     _ => return None,
                 };
             Some((

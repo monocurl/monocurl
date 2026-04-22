@@ -46,7 +46,11 @@ pub(super) fn effective_durations(
         .collect()
 }
 
-pub(super) fn compute_slide_xs(slide_count: usize, durations: &[Option<f64>], zoom: f32) -> Vec<f32> {
+pub(super) fn compute_slide_xs(
+    slide_count: usize,
+    durations: &[Option<f64>],
+    zoom: f32,
+) -> Vec<f32> {
     let mut xs = Vec::with_capacity(slide_count);
     let mut x = PADDING_H;
     for i in 0..slide_count {

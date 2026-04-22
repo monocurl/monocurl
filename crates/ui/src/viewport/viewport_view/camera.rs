@@ -139,11 +139,7 @@ impl Viewport {
         self.copied_preview_camera.as_deref() == Some(summary)
     }
 
-    pub(super) fn mark_preview_camera_copied(
-        &mut self,
-        summary: String,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn mark_preview_camera_copied(&mut self, summary: String, cx: &mut Context<Self>) {
         self.copied_preview_camera = Some(summary);
         cx.notify();
     }
@@ -204,13 +200,14 @@ impl Viewport {
         };
 
         if self.is_presenting {
-            let mut state = self.presentation_camera.clone().unwrap_or_else(|| {
-                PresentationCameraState {
-                    current: scene_camera.clone(),
-                    reset_camera: scene_camera,
-                    pending_updates: VecDeque::new(),
-                }
-            });
+            let mut state =
+                self.presentation_camera
+                    .clone()
+                    .unwrap_or_else(|| PresentationCameraState {
+                        current: scene_camera.clone(),
+                        reset_camera: scene_camera,
+                        pending_updates: VecDeque::new(),
+                    });
             state.current = next_camera.clone();
             if state
                 .pending_updates

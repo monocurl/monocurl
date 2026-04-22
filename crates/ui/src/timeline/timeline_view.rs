@@ -175,9 +175,7 @@ impl Render for Timeline {
                                     return;
                                 }
                                 let gap_start = bx + SLIDE_W;
-                                if local_x >= gap_start
-                                    && local_x < gap_start + gw.max(MIN_GAP)
-                                {
+                                if local_x >= gap_start && local_x < gap_start + gw.max(MIN_GAP) {
                                     let t = ((local_x - gap_start) / (PX_PER_SEC * zoom)) as f64;
                                     services
                                         .update(cx, |s, _| s.seek_to(Timestamp::new(i, t)))

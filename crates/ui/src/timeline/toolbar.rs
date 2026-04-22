@@ -31,11 +31,11 @@ pub(super) fn render_toolbar(
             .h(px(TRANSPORT_BTN_H))
             .p(px(2.0))
             .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .hover(|s| s.opacity(0.6))
-                .child(transport_icon(icon, theme.timeline_transport_color))
+            .items_center()
+            .justify_center()
+            .cursor_pointer()
+            .hover(|s| s.opacity(0.6))
+            .child(transport_icon(icon, theme.timeline_transport_color))
     };
 
     let transport_controls = div()

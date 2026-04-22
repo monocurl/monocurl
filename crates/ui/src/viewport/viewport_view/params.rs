@@ -701,10 +701,9 @@ fn render_slider_1d(
                                             if let Some(value) = value {
                                                 services
                                                     .update(cx, |services, _| {
-                                                        services.update_parameters(HashMap::from([(
-                                                            name.clone(),
-                                                            value,
-                                                        )]))
+                                                        services.update_parameters(HashMap::from([
+                                                            (name.clone(), value),
+                                                        ]))
                                                     })
                                                     .ok();
                                             }
@@ -749,10 +748,9 @@ fn render_slider_1d(
                                             if let Some(value) = value {
                                                 services
                                                     .update(cx, |services, _| {
-                                                        services.update_parameters(HashMap::from([(
-                                                            name.clone(),
-                                                            value,
-                                                        )]))
+                                                        services.update_parameters(HashMap::from([
+                                                            (name.clone(), value),
+                                                        ]))
                                                     })
                                                     .ok();
                                             }
@@ -961,9 +959,12 @@ fn render_slider_2d(
                                                     if let Some(value) = value {
                                                         services
                                                             .update(cx, |services, _| {
-                                                                services.update_parameters(HashMap::from(
-                                                                    [(name.clone(), value)],
-                                                                ))
+                                                                services.update_parameters(
+                                                                    HashMap::from([(
+                                                                        name.clone(),
+                                                                        value,
+                                                                    )]),
+                                                                )
                                                             })
                                                             .ok();
                                                     }
@@ -984,7 +985,9 @@ fn render_slider_2d(
                                                     let dragging = weak_vp
                                                         .upgrade()
                                                         .map(|entity| {
-                                                            entity.read(cx).is_dragging(name.as_str())
+                                                            entity
+                                                                .read(cx)
+                                                                .is_dragging(name.as_str())
                                                         })
                                                         .unwrap_or(false);
                                                     if !dragging {
@@ -1008,9 +1011,12 @@ fn render_slider_2d(
                                                     if let Some(value) = value {
                                                         services
                                                             .update(cx, |services, _| {
-                                                                services.update_parameters(HashMap::from(
-                                                                    [(name.clone(), value)],
-                                                                ))
+                                                                services.update_parameters(
+                                                                    HashMap::from([(
+                                                                        name.clone(),
+                                                                        value,
+                                                                    )]),
+                                                                )
                                                             })
                                                             .ok();
                                                     }

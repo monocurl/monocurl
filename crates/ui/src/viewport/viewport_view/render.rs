@@ -11,8 +11,8 @@ use super::{
     camera::CameraDragMode,
     params::parameter_controls,
     style::{
-        PARAM_PANEL_W, PRES_BG, PRES_BORDER, PRES_PANEL_BG, PRES_TEXT, PRES_TOOLBAR_BG,
-        PRES_TOOLBAR_H, PRES_MUTED, RING_TRANSITION, lerp_f32, lerp_rgba, ring_style_for,
+        PARAM_PANEL_W, PRES_BG, PRES_BORDER, PRES_MUTED, PRES_PANEL_BG, PRES_TEXT, PRES_TOOLBAR_BG,
+        PRES_TOOLBAR_H, RING_TRANSITION, lerp_f32, lerp_rgba, ring_style_for,
     },
 };
 
@@ -118,13 +118,17 @@ impl Render for Viewport {
             slide_count.max(1)
         );
         let time_label = format!("{:.2}s", timestamp.time);
-        let params_button = render_toolbar_button("pres-params-btn", "Parameters", cx.listener(
-            |viewport, _, _, cx| viewport.toggle_params(cx),
-        ));
+        let params_button = render_toolbar_button(
+            "pres-params-btn",
+            "Parameters",
+            cx.listener(|viewport, _, _, cx| viewport.toggle_params(cx)),
+        );
         let reset_button = show_presentation_reset.then(|| {
-            render_small_toolbar_button("pres-camera-reset-btn", "Reset Camera", cx.listener(
-                |viewport, _, _, cx| viewport.sync_viewport_camera(cx),
-            ))
+            render_small_toolbar_button(
+                "pres-camera-reset-btn",
+                "Reset Camera",
+                cx.listener(|viewport, _, _, cx| viewport.sync_viewport_camera(cx)),
+            )
         });
 
         if self.show_params {
@@ -385,9 +389,11 @@ fn render_preview_camera_chrome(
 ) -> AnyElement {
     let reset_button = show_preview_reset
         .then(|| {
-            render_small_toolbar_button("viewport-camera-reset", "Reset Camera", cx.listener(
-                |viewport, _, _, cx| viewport.sync_viewport_camera(cx),
-            ))
+            render_small_toolbar_button(
+                "viewport-camera-reset",
+                "Reset Camera",
+                cx.listener(|viewport, _, _, cx| viewport.sync_viewport_camera(cx)),
+            )
             .into_any_element()
         })
         .unwrap_or_else(|| div().w(px(78.0)).into_any_element());
@@ -441,8 +447,7 @@ fn render_preview_copy_button(
         .text_color(PRES_TEXT);
 
     if copied {
-        button
-            .child("copied")
+        button.child("copied")
     } else {
         button
             .hover({

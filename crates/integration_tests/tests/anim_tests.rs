@@ -197,6 +197,59 @@ fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
     }
 }
 
+fn mesh_line_span(value: &Value) -> f32 {
+    let Value::Mesh(mesh) = value else {
+        panic!("expected mesh value");
+    };
+    mesh.lins
+        .iter()
+        .map(|lin| (lin.b.pos - lin.a.pos).len())
+        .fold(0.0, f32::max)
+}
+
+fn mesh_max_alpha(value: &Value) -> f32 {
+    let Value::Mesh(mesh) = value else {
+        panic!("expected mesh value");
+    };
+    let vertex_alpha = mesh
+        .dots
+        .iter()
+        .map(|dot| dot.col.w)
+        .chain(mesh.lins.iter().flat_map(|lin| [lin.a.col.w, lin.b.col.w]))
+        .chain(
+            mesh.tris
+                .iter()
+                .flat_map(|tri| [tri.a.col.w, tri.b.col.w, tri.c.col.w]),
+        )
+        .fold(0.0, f32::max);
+    vertex_alpha * mesh.uniform.alpha as f32
+}
+
+fn mesh_center_y(value: &Value) -> f32 {
+    let Value::Mesh(mesh) = value else {
+        panic!("expected mesh value");
+    };
+
+    let mut points = mesh
+        .dots
+        .iter()
+        .map(|dot| dot.pos)
+        .chain(mesh.lins.iter().flat_map(|lin| [lin.a.pos, lin.b.pos]))
+        .chain(
+            mesh.tris
+                .iter()
+                .flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]),
+        );
+    let first = points.next().expect("expected mesh geometry");
+    let mut min_y = first.y;
+    let mut max_y = first.y;
+    for point in points {
+        min_y = min_y.min(point.y);
+        max_y = max_y.max(point.y);
+    }
+    (min_y + max_y) / 2.0
+}
+
 async fn current_mesh_leader_value(executor: &mut Executor) -> Value {
     let entry = executor
         .state
@@ -1851,12 +1904,13 @@ fn test_init_scene_snapshot_type_error_uses_entire_init_section_span() {
         let keep = 1
     ";
 
-    let (mut executor, _user_slide_count) =
-        match build_anim_executor(&[(init_src, SectionType::Init), ("", SectionType::Slide)], &[])
-        {
-            Ok(data) => data,
-            Err(result) => panic!("failed to build executor: {:?}", result.errors),
-        };
+    let (mut executor, _user_slide_count) = match build_anim_executor(
+        &[(init_src, SectionType::Init), ("", SectionType::Slide)],
+        &[],
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("failed to build executor: {:?}", result.errors),
+    };
 
     smol::block_on(async {
         let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
@@ -1874,10 +1928,8 @@ fn test_init_scene_snapshot_type_error_uses_entire_init_section_span() {
     let expected_start = init_src
         .find("background = [1, 1, 1]")
         .expect("missing background assignment");
-    let expected_end = init_src
-        .find("let keep = 1")
-        .expect("missing keep binding")
-        + "let keep = 1".len();
+    let expected_end =
+        init_src.find("let keep = 1").expect("missing keep binding") + "let keep = 1".len();
     let expected = expected_start..expected_end;
 
     let runtime_error = executor
@@ -2315,6 +2367,168 @@ fn test_write_staggers_across_mesh_leaves() {
     assert!(
         second_len < 1e-6,
         "expected second leaf to still be hidden, got length {second_len}"
+    );
+}
+
+#[test]
+fn test_grow_animates_insertions_and_deletions_symmetrically() {
+    let src = r#"
+        let line = |y| Polyline([[0, y, 0], [2, y, 0]])
+
+        mesh x = [line(0), line(1)]
+        play Set([&x])
+
+        x = [line(0), line(2)]
+        play Grow([&x], 1, linear)
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.5,
+        &stdlib_bundles(["mesh", "anim"]),
+    );
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut leaves);
+    assert_eq!(leaves.len(), 3);
+
+    let mut spans = leaves
+        .into_iter()
+        .map(|leaf| (mesh_center_y(&leaf), mesh_line_span(&leaf)))
+        .collect::<Vec<_>>();
+    spans.sort_by(|lhs, rhs| lhs.0.total_cmp(&rhs.0));
+
+    assert!((spans[0].0 - 0.0).abs() < 1e-3);
+    assert!((spans[1].0 - 1.0).abs() < 1e-3);
+    assert!((spans[2].0 - 2.0).abs() < 1e-3);
+    assert!(
+        (spans[0].1 - 2.0).abs() < 1e-3,
+        "expected constant mesh to remain full length"
+    );
+    assert!(
+        spans[1].1 > 0.05 && spans[1].1 < 1.95,
+        "expected deleted mesh to be partially shrunk, got {}",
+        spans[1].1
+    );
+    assert!(
+        spans[2].1 > 0.05 && spans[2].1 < 1.95,
+        "expected inserted mesh to be partially grown, got {}",
+        spans[2].1
+    );
+}
+
+#[test]
+fn test_fade_animates_insertions_and_deletions_symmetrically() {
+    let src = r#"
+        let line = |y| Polyline([[0, y, 0], [2, y, 0]])
+
+        mesh x = [line(0), line(1)]
+        play Set([&x])
+
+        x = [line(0), line(2)]
+        play Fade([0, 0, 0], [&x], 1, linear)
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.5,
+        &stdlib_bundles(["mesh", "anim"]),
+    );
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut leaves);
+    assert_eq!(leaves.len(), 3);
+
+    let mut alphas = leaves
+        .into_iter()
+        .map(|leaf| (mesh_center_y(&leaf), mesh_max_alpha(&leaf)))
+        .collect::<Vec<_>>();
+    alphas.sort_by(|lhs, rhs| lhs.0.total_cmp(&rhs.0));
+
+    assert!((alphas[0].0 - 0.0).abs() < 1e-3);
+    assert!((alphas[1].0 - 1.0).abs() < 1e-3);
+    assert!((alphas[2].0 - 2.0).abs() < 1e-3);
+    assert!(
+        (alphas[0].1 - 1.0).abs() < 1e-3,
+        "expected constant mesh to remain fully opaque"
+    );
+    assert!(
+        alphas[1].1 > 0.2 && alphas[1].1 < 0.8,
+        "expected deleted mesh to be partially faded, got {}",
+        alphas[1].1
+    );
+    assert!(
+        alphas[2].1 > 0.2 && alphas[2].1 < 0.8,
+        "expected inserted mesh to be partially faded in, got {}",
+        alphas[2].1
+    );
+}
+
+#[test]
+fn test_write_animates_insertions_and_deletions_symmetrically() {
+    let src = r#"
+        let line = |y| Polyline([[0, y, 0], [2, y, 0]])
+
+        mesh x = [line(0), line(1)]
+        play Set([&x])
+
+        x = [line(0), line(2)]
+        play Write([&x], 1, linear)
+    "#;
+
+    let r = run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        0.5,
+        &stdlib_bundles(["mesh", "anim"]),
+    );
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut leaves);
+    assert_eq!(leaves.len(), 3);
+
+    let mut spans = leaves
+        .into_iter()
+        .map(|leaf| (mesh_center_y(&leaf), mesh_line_span(&leaf)))
+        .collect::<Vec<_>>();
+    spans.sort_by(|lhs, rhs| lhs.0.total_cmp(&rhs.0));
+
+    assert!((spans[0].0 - 0.0).abs() < 1e-3);
+    assert!((spans[1].0 - 1.0).abs() < 1e-3);
+    assert!((spans[2].0 - 2.0).abs() < 1e-3);
+    assert!(
+        (spans[0].1 - 2.0).abs() < 1e-3,
+        "expected constant mesh to remain full length"
+    );
+    assert!(
+        spans[1].1 > 0.05 && spans[1].1 < 1.95,
+        "expected deleted mesh to be partially unwritten, got {}",
+        spans[1].1
+    );
+    assert!(
+        spans[2].1 > 0.05 && spans[2].1 < 1.95,
+        "expected inserted mesh to be partially written, got {}",
+        spans[2].1
     );
 }
 

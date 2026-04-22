@@ -2,6 +2,8 @@ mod bend;
 mod trans;
 mod write;
 
+use std::sync::Arc;
+
 use executor::{error::ExecutorError, executor::Executor, state::LeaderKind, value::Value};
 use geo::{
     mesh::{Mesh, Uniforms},
@@ -10,28 +12,88 @@ use geo::{
 use stdlib_macros::stdlib_func;
 
 use super::helpers::{
-    build_lerp, collapse_mesh, fade_start_mesh, flatten_mesh_leaves, list_value, map_mesh_tree,
-    materialize_live_value, mesh_center, progression_from, read_time, resolve_targets,
+    build_lerp, collapse_mesh, decompose_mesh_tree, fade_start_mesh, list_value, map_mesh_tree,
+    materialize_live_value, mesh_center, pack_mesh_tree, prefer_single_mesh_tree_value,
+    progression_from, read_time, resolve_targets,
 };
 
 #[stdlib_func]
 pub async fn grow_embed(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let _start = executor.state.stack(stack_idx).read_at(-2).clone();
+    let start_value = executor.state.stack(stack_idx).read_at(-2).clone();
     let destination_value = executor.state.stack(stack_idx).read_at(-1).clone();
+    let start = materialize_live_value(executor, &start_value).await?;
     let destination = materialize_live_value(executor, &destination_value).await?;
-    let center = mesh_tree_center(&destination)?;
-    let start = map_mesh_tree(&destination, &mut |mesh| collapse_mesh(mesh, center))?;
-    Ok(embed_triplet(start, destination, Value::Nil))
+    let decomposition = decompose_mesh_tree(&start, &destination)?;
+    let insert_center = mesh_group_center(&decomposition.insert);
+    let delete_center = mesh_group_center(&decomposition.delete);
+    let prefer_single = prefer_single_mesh_tree_value(&start, &destination);
+
+    let start_tree = pack_mesh_tree(
+        decomposition
+            .insert
+            .iter()
+            .map(|mesh| Arc::new(collapse_mesh(mesh, insert_center)))
+            .chain(decomposition.delete.iter().cloned())
+            .chain(decomposition.constant.iter().cloned())
+            .collect(),
+        prefer_single,
+    );
+    let end_tree = pack_mesh_tree(
+        decomposition
+            .insert
+            .iter()
+            .cloned()
+            .chain(
+                decomposition
+                    .delete
+                    .iter()
+                    .map(|mesh| Arc::new(collapse_mesh(mesh, delete_center))),
+            )
+            .chain(decomposition.constant.iter().cloned())
+            .collect(),
+        prefer_single,
+    );
+
+    Ok(embed_triplet(start_tree, end_tree, Value::Nil))
 }
 
 #[stdlib_func]
 pub async fn fade_embed(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let _start = executor.state.stack(stack_idx).read_at(-3).clone();
+    let start_value = executor.state.stack(stack_idx).read_at(-3).clone();
     let destination_value = executor.state.stack(stack_idx).read_at(-2).clone();
+    let start = materialize_live_value(executor, &start_value).await?;
     let destination = materialize_live_value(executor, &destination_value).await?;
     let delta = read_vec3_value(executor.state.stack(stack_idx).read_at(-1).clone(), "delta")?;
-    let start = map_mesh_tree(&destination, &mut |mesh| fade_start_mesh(mesh, delta))?;
-    Ok(embed_triplet(start, destination, Value::Nil))
+    let decomposition = decompose_mesh_tree(&start, &destination)?;
+    let prefer_single = prefer_single_mesh_tree_value(&start, &destination);
+
+    let start_tree = pack_mesh_tree(
+        decomposition
+            .insert
+            .iter()
+            .map(|mesh| Arc::new(fade_start_mesh(mesh, delta)))
+            .chain(decomposition.delete.iter().cloned())
+            .chain(decomposition.constant.iter().cloned())
+            .collect(),
+        prefer_single,
+    );
+    let end_tree = pack_mesh_tree(
+        decomposition
+            .insert
+            .iter()
+            .cloned()
+            .chain(
+                decomposition
+                    .delete
+                    .iter()
+                    .map(|mesh| Arc::new(fade_start_mesh(mesh, delta))),
+            )
+            .chain(decomposition.constant.iter().cloned())
+            .collect(),
+        prefer_single,
+    );
+
+    Ok(embed_triplet(start_tree, end_tree, Value::Nil))
 }
 
 #[stdlib_func]
@@ -99,13 +161,11 @@ pub(super) fn embed_triplet(start: Value, destination: Value, state: Value) -> V
     list_value([start, destination, state])
 }
 
-pub(super) fn mesh_tree_center(value: &Value) -> Result<Float3, ExecutorError> {
-    let mut leaves = Vec::new();
-    flatten_mesh_leaves(value, &mut leaves)?;
+fn mesh_group_center(meshes: &[Arc<Mesh>]) -> Float3 {
     let mut min = None::<Float3>;
     let mut max = None::<Float3>;
-    for leaf in leaves {
-        let c = mesh_center(&leaf);
+    for mesh in meshes {
+        let c = mesh_center(mesh);
         min = Some(
             min.map(|m| Float3::new(m.x.min(c.x), m.y.min(c.y), m.z.min(c.z)))
                 .unwrap_or(c),
@@ -115,7 +175,7 @@ pub(super) fn mesh_tree_center(value: &Value) -> Result<Float3, ExecutorError> {
                 .unwrap_or(c),
         );
     }
-    Ok((min.unwrap_or(Float3::ZERO) + max.unwrap_or(Float3::ZERO)) / 2.0)
+    (min.unwrap_or(Float3::ZERO) + max.unwrap_or(Float3::ZERO)) / 2.0
 }
 
 pub(super) fn read_vec3_value(value: Value, name: &'static str) -> Result<Float3, ExecutorError> {

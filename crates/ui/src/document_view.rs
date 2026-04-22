@@ -8,9 +8,9 @@ use ui_cli_shared::doc_type::DocumentType;
 use crate::{
     actions::{
         CloseActiveDocument, EpsilonBackward, EpsilonForward, NextSlide, PrevSlide, Redo,
-        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart,
-        SyncViewportCamera, ToggleParamsPanel, TogglePlaying, TogglePresentationMode, Undo,
-        UnfocusEditor, ZoomIn, ZoomOut,
+        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, SyncViewportCamera,
+        ToggleParamsPanel, TogglePlaying, TogglePresentationMode, Undo, UnfocusEditor, ZoomIn,
+        ZoomOut,
     },
     components::split_pane::Split,
     editor::editor_view::Editor,

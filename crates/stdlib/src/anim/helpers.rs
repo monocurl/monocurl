@@ -10,7 +10,7 @@ use executor::{
 };
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex},
-    simd::{Float3, Float4},
+    simd::{Float2, Float3, Float4},
 };
 
 pub(super) fn read_time(
@@ -413,6 +413,72 @@ pub(super) fn flatten_mesh_leaves(
     }
 }
 
+pub(super) struct MeshTreeDecomposition {
+    pub insert: Vec<Arc<Mesh>>,
+    pub delete: Vec<Arc<Mesh>>,
+    pub constant: Vec<Arc<Mesh>>,
+}
+
+pub(super) fn prefer_single_mesh_tree_value(start: &Value, destination: &Value) -> bool {
+    matches!(start, Value::Mesh(_)) && matches!(destination, Value::Mesh(_))
+}
+
+pub(super) fn pack_value_tree(mut values: Vec<Value>, prefer_single: bool) -> Value {
+    if prefer_single && values.len() == 1 {
+        values.pop().unwrap_or_else(empty_mesh_tree)
+    } else {
+        list_value(values)
+    }
+}
+
+pub(super) fn pack_mesh_tree(meshes: Vec<Arc<Mesh>>, prefer_single: bool) -> Value {
+    pack_value_tree(meshes.into_iter().map(Value::Mesh).collect(), prefer_single)
+}
+
+pub(super) fn decompose_mesh_tree(
+    start: &Value,
+    destination: &Value,
+) -> Result<MeshTreeDecomposition, ExecutorError> {
+    let mut start_leaves = Vec::new();
+    flatten_mesh_leaves(start, &mut start_leaves)?;
+
+    let mut destination_leaves = Vec::new();
+    flatten_mesh_leaves(destination, &mut destination_leaves)?;
+
+    let mut matched_destinations = vec![false; destination_leaves.len()];
+    let mut constant = Vec::new();
+    let mut delete = Vec::new();
+
+    for start_mesh in start_leaves {
+        if let Some(dest_idx) =
+            destination_leaves
+                .iter()
+                .enumerate()
+                .position(|(idx, destination_mesh)| {
+                    !matched_destinations[idx]
+                        && meshes_exactly_equal(&start_mesh, destination_mesh)
+                })
+        {
+            matched_destinations[dest_idx] = true;
+            constant.push(start_mesh);
+        } else {
+            delete.push(start_mesh);
+        }
+    }
+
+    let insert = destination_leaves
+        .into_iter()
+        .enumerate()
+        .filter_map(|(idx, mesh)| (!matched_destinations[idx]).then_some(mesh))
+        .collect();
+
+    Ok(MeshTreeDecomposition {
+        insert,
+        delete,
+        constant,
+    })
+}
+
 pub(super) fn map_mesh_tree(
     value: &Value,
     f: &mut impl FnMut(&Mesh) -> Mesh,
@@ -605,4 +671,105 @@ pub(super) fn merge_transfer_value(dst: Value, transfer: Value) -> Value {
 
 pub(super) fn empty_mesh_tree() -> Value {
     list_value([])
+}
+
+fn meshes_exactly_equal(a: &Mesh, b: &Mesh) -> bool {
+    uniforms_exactly_equal(&a.uniform, &b.uniform)
+        && a.tag == b.tag
+        && a.dots.len() == b.dots.len()
+        && a.lins.len() == b.lins.len()
+        && a.tris.len() == b.tris.len()
+        && a.dots
+            .iter()
+            .zip(&b.dots)
+            .all(|(lhs, rhs)| dots_exactly_equal(lhs, rhs))
+        && a.lins
+            .iter()
+            .zip(&b.lins)
+            .all(|(lhs, rhs)| lines_exactly_equal(lhs, rhs))
+        && a.tris
+            .iter()
+            .zip(&b.tris)
+            .all(|(lhs, rhs)| tris_exactly_equal(lhs, rhs))
+}
+
+fn uniforms_exactly_equal(a: &geo::mesh::Uniforms, b: &geo::mesh::Uniforms) -> bool {
+    canonical_f64_bits(a.alpha) == canonical_f64_bits(b.alpha)
+        && a.img == b.img
+        && a.z_index == b.z_index
+}
+
+fn dots_exactly_equal(a: &Dot, b: &Dot) -> bool {
+    float3_exactly_equal(a.pos, b.pos)
+        && float3_exactly_equal(a.norm, b.norm)
+        && float4_exactly_equal(a.col, b.col)
+        && a.inv == b.inv
+        && a.anti == b.anti
+        && a.is_dom_sib == b.is_dom_sib
+}
+
+fn lines_exactly_equal(a: &Lin, b: &Lin) -> bool {
+    lin_vertices_exactly_equal(a.a, b.a)
+        && lin_vertices_exactly_equal(a.b, b.b)
+        && float3_exactly_equal(a.norm, b.norm)
+        && a.prev == b.prev
+        && a.next == b.next
+        && a.inv == b.inv
+        && a.anti == b.anti
+        && a.is_dom_sib == b.is_dom_sib
+}
+
+fn tris_exactly_equal(a: &Tri, b: &Tri) -> bool {
+    tri_vertices_exactly_equal(a.a, b.a)
+        && tri_vertices_exactly_equal(a.b, b.b)
+        && tri_vertices_exactly_equal(a.c, b.c)
+        && a.ab == b.ab
+        && a.bc == b.bc
+        && a.ca == b.ca
+        && a.anti == b.anti
+        && a.is_dom_sib == b.is_dom_sib
+}
+
+fn lin_vertices_exactly_equal(a: LinVertex, b: LinVertex) -> bool {
+    float3_exactly_equal(a.pos, b.pos) && float4_exactly_equal(a.col, b.col)
+}
+
+fn tri_vertices_exactly_equal(a: TriVertex, b: TriVertex) -> bool {
+    float3_exactly_equal(a.pos, b.pos)
+        && float4_exactly_equal(a.col, b.col)
+        && float2_exactly_equal(a.uv, b.uv)
+}
+
+fn float2_exactly_equal(a: Float2, b: Float2) -> bool {
+    canonical_f32_bits(a.x) == canonical_f32_bits(b.x)
+        && canonical_f32_bits(a.y) == canonical_f32_bits(b.y)
+}
+
+fn float3_exactly_equal(a: Float3, b: Float3) -> bool {
+    canonical_f32_bits(a.x) == canonical_f32_bits(b.x)
+        && canonical_f32_bits(a.y) == canonical_f32_bits(b.y)
+        && canonical_f32_bits(a.z) == canonical_f32_bits(b.z)
+}
+
+fn float4_exactly_equal(a: Float4, b: Float4) -> bool {
+    canonical_f32_bits(a.x) == canonical_f32_bits(b.x)
+        && canonical_f32_bits(a.y) == canonical_f32_bits(b.y)
+        && canonical_f32_bits(a.z) == canonical_f32_bits(b.z)
+        && canonical_f32_bits(a.w) == canonical_f32_bits(b.w)
+}
+
+fn canonical_f32_bits(value: f32) -> u32 {
+    if value == 0.0 {
+        0.0f32.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
+fn canonical_f64_bits(value: f64) -> u64 {
+    if value == 0.0 {
+        0.0f64.to_bits()
+    } else {
+        value.to_bits()
+    }
 }

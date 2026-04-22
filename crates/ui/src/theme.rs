@@ -262,7 +262,7 @@ impl Theme {
             timeline_active_border: rgba(0xE3C318),
             timeline_inactive_border: rgba(0x7C8391),
             timeline_connector: gpui::white().into(),
-            timeline_tick:  gpui::white().into(),
+            timeline_tick: gpui::white().into(),
             timeline_text: gpui::white().into(),
             timeline_subtext: rgba(0xC8C9CF),
             timeline_playhead: rgba(0xECECF1),
@@ -387,7 +387,6 @@ impl TextEditorStyles {
     pub fn dark() -> Self {
         // Nightfox-inspired editor palette.
         let nightfox_background: Rgba = rgba(0x192330);
-        let nightfox_bg1: Rgba = rgba(0x131A24);
         let nightfox_bg2: Rgba = rgba(0x1D2A35);
         let nightfox_fg: Rgba = rgba(0xCDCED2);
         let nightfox_subtle: Rgba = rgba(0x6E7481);
@@ -429,8 +428,8 @@ impl TextEditorStyles {
             gutter_active_color: nightfox_orange.into(),
             selection_color: hsla(0.59, 0.16, 0.32, 0.60),
             active_line_color: nightfox_bg2.into(),
-            scroll_color: nightfox_blue.into(),
-            scroll_background_color: nightfox_bg1.into(),
+            scroll_color: hsla(0.61, 0.09, 0.54, 0.30),
+            scroll_background_color: hsla(0.61, 0.08, 0.16, 0.18),
             popover_background_color: nightfox_background.into(),
             popover_border_color: nightfox_fg.into(),
             popover_shadow_color: hsla(0.0, 0.0, 0.0, 0.42),
