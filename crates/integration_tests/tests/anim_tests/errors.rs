@@ -336,7 +336,7 @@ fn test_fade_accepts_stateful_live_mesh_targets() {
 
         radius = 1.75
         spread = 5.0
-        play Fade([-1, 0, 0], [&reactive], 1.0, smooth)
+        play Fade(1.0, [&reactive], [-1, 0, 0], smooth)
     ";
 
     let (mut executor, _user_slide_count) = match build_anim_executor(
@@ -370,7 +370,7 @@ fn test_custom_lerp_accepts_stateful_live_mesh_targets() {
 
         radius = 1.75
         spread = 5.0
-        play PrimitiveAnim(1.0, [&reactive], smooth, nil, |a, b, state, t| b)
+        play PrimitiveAnim(1.0, [&reactive], nil, |a, b, state, t| b, smooth)
     ";
 
     let (mut executor, _user_slide_count) = match build_anim_executor(
@@ -719,7 +719,7 @@ fn test_grow_animates_insertions_and_deletions_symmetrically() {
         play Set([&x])
 
         x = [line(0), line(2)]
-        play Grow([&x], 1, linear)
+        play Grow(1, [&x], linear)
     "#;
 
     let r = run_anim_impl(
@@ -773,7 +773,7 @@ fn test_fade_animates_insertions_and_deletions_symmetrically() {
         play Set([&x])
 
         x = [line(0), line(2)]
-        play Fade([0, 0, 0], [&x], 1, linear)
+        play Fade(1, [&x], [0, 0, 0], linear)
     "#;
 
     let r = run_anim_impl(
@@ -827,7 +827,7 @@ fn test_write_animates_insertions_and_deletions_symmetrically() {
         play Set([&x])
 
         x = [line(0), line(2)]
-        play Write([&x], 1, linear)
+        play Write(1, [&x], linear)
     "#;
 
     let r = run_anim_impl(

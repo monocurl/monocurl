@@ -137,20 +137,20 @@ let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 
 
 # text / labels
 
-let Text = |text = "", scale = 1| __monocurl__native__ mk_text(text, scale)
+let Text = |text, scale = 1| __monocurl__native__ mk_text(text, scale)
 
-let Tex = |tex = "", scale = 1| __monocurl__native__ mk_tex(tex, scale)
+let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 
-let Latex = |latex = "", scale = 1| __monocurl__native__ mk_latex(latex, scale)
+let Latex = |latex, scale = 1| __monocurl__native__ mk_latex(latex, scale)
 
-let Brace = |target, dir = 1d| __monocurl__native__ mk_brace(target, dir)
+let Brace = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_brace(target, dir, buffer)
 
-let Measure = |target, dir = 1d| __monocurl__native__ mk_measure(target, dir)
+let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(target, dir, buffer)
 
-let Label = |target, str = "", scale = 1, dir = 1u|
-    __monocurl__native__ mk_label(target, str, scale, dir)
+let Label = |target, str, scale = 1, dir = 1u, buffer = 0.1|
+    __monocurl__native__ mk_label(target, str, scale, dir, buffer)
 
-let Number = |value = 0, precision = 2, scale = 1|
+let Number = |value, precision = 2, scale = 1|
     __monocurl__native__ mk_number(value, precision, scale)
 
 # graphing
@@ -266,7 +266,7 @@ let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 41], y_min_max_samples = [-
     return __monocurl__native__ mk_implicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
 }
 
-let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]], tags = [0, 1]| {
+let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]], tags = [[], []]| {
     var min = 0
     var max = 0
     var samples = 0
@@ -315,7 +315,7 @@ let rotate = operator |target, radians, axis = 1f, pivot = nil, filter = nil| {
     return [go(angle: 0), go(angle: radians)]
 }
 
-let fade = operator |target, opacity = 0, filter = nil| {
+let fade = operator |target, opacity, filter = nil| {
     let go = |o| __monocurl__native__ op_fade(target, o, filter)
     return [go(o: 1), go(o: opacity)]
 }

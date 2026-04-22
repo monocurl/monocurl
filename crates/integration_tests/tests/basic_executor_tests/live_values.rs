@@ -590,6 +590,34 @@ fn test_label_matches_latex_next_to_geometry() {
 }
 
 #[test]
+fn test_label_buffer_controls_offset_distance() {
+    let r = run_with_stdlib(
+        "
+        let target = Circle(1)
+        let near = mesh_center(Label(target, \"C\", 1, 1r, 0.1))
+        let far = mesh_center(Label(target, \"C\", 1, 1r, 0.6))
+        let result = far[0] > near[0]
+    ",
+        &["mesh"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_measure_buffer_controls_offset_distance() {
+    let r = run_with_stdlib(
+        "
+        let target = Line([-1, 0, 0], [1, 0, 0])
+        let near = mesh_center(Measure(target, 1u, 0.1))
+        let far = mesh_center(Measure(target, 1u, 0.6))
+        let result = far[1] > near[1]
+    ",
+        &["mesh"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
 fn test_tex_and_latex_accept_list_string_inputs() {
     let r = run_with_stdlib(
         "

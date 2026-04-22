@@ -21,8 +21,6 @@ const ARROW_HEAD_RADIUS_OVER_LENGTH: f32 = 0.4;
 const ARROW_STEM_RADIUS_OVER_HEAD_RADIUS: f32 = 0.33;
 const ARROW_HEAD_WIDTH_OVER_RADIUS: f32 = 1.2;
 const ARROW_HEAD_DEPTH_OVER_RADIUS: f32 = 2.1;
-const LABEL_BUFFER: f32 = 0.1;
-
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
     ExecutorError::invalid_invocation(format!("{kind} is too large ({actual}, limit {limit})"))
 }
@@ -105,6 +103,22 @@ fn read_text_scale(
         });
     }
     Ok(scale)
+}
+
+fn read_nonnegative_float(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<f32, ExecutorError> {
+    let value = crate::read_float(executor, stack_idx, index, name)? as f32;
+    if !value.is_finite() || value < 0.0 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: name,
+            message: "must be a non-negative finite number",
+        });
+    }
+    Ok(value)
 }
 
 fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
@@ -1135,11 +1149,11 @@ pub async fn mk_brace(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorErr
 
 #[stdlib_func]
 pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    const MEASURE_BUFFER: f32 = 0.15;
     const MEASURE_EXTRUSION: f32 = 0.05;
 
-    let tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
-    let direction = read_float3(executor, stack_idx, -1, "dir")?;
+    let tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let direction = read_float3(executor, stack_idx, -2, "dir")?;
+    let buffer = read_nonnegative_float(executor, stack_idx, -1, "buffer")?;
     if direction.len_sq() <= 1e-12 {
         return Err(ExecutorError::InvalidArgument {
             arg: "dir",
@@ -1169,9 +1183,9 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
         .unwrap_or(Float3::ZERO)
         .dot(left);
 
-    let forward_delta = direction * (cutoff + MEASURE_BUFFER - MEASURE_EXTRUSION);
-    let pivot_delta = direction * (cutoff + MEASURE_BUFFER);
-    let back_delta = direction * (cutoff + MEASURE_BUFFER + MEASURE_EXTRUSION);
+    let forward_delta = direction * (cutoff + buffer - MEASURE_EXTRUSION);
+    let pivot_delta = direction * (cutoff + buffer);
+    let back_delta = direction * (cutoff + buffer + MEASURE_EXTRUSION);
 
     let right_ortho = right * right_d;
     let left_ortho = left * left_d;
@@ -1204,10 +1218,11 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
 
 #[stdlib_func]
 pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let target = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
-    let str = read_string(executor, stack_idx, -3, "str")?;
-    let scale = read_text_scale(executor, stack_idx, -2, "scale")?;
-    let dir = read_float3(executor, stack_idx, -1, "dir")?;
+    let target = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
+    let str = read_string(executor, stack_idx, -4, "str")?;
+    let scale = read_text_scale(executor, stack_idx, -3, "scale")?;
+    let dir = read_float3(executor, stack_idx, -2, "dir")?;
+    let buffer = read_nonnegative_float(executor, stack_idx, -1, "buffer")?;
     if dir.len_sq() <= 1e-12 {
         return Err(ExecutorError::InvalidArgument {
             arg: "dir",
@@ -1236,7 +1251,7 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
         .unwrap_or(target_center)
         .dot(dir);
     let orth = (target_center - label_center) - dir * (target_center - label_center).dot(dir);
-    let delta = dir * (target_face - label_face + LABEL_BUFFER) + orth;
+    let delta = dir * (target_face - label_face + buffer) + orth;
 
     label.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |point| point + delta));
     Ok(label.into_value())

@@ -331,7 +331,7 @@ fn test_lerp_custom_lerp_lambda_shapes_value_interpolation() {
         "
         param x = 0
         x = 10
-        play PrimitiveAnim(2, [&x], linear, nil, |a, b, state, t| a + (b - a) * t * t)
+        play PrimitiveAnim(2, [&x], nil, |a, b, state, t| a + (b - a) * t * t, linear)
     ",
         1.0,
     );
@@ -588,7 +588,7 @@ fn test_tag_trans_handles_everything_intro_badges() {
             retag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
         ]
 
-        play TagTrans([&intro], 1.2, smoother, 0.6 * 1u)
+        play TagTrans(1.2, [&intro], 0.6 * 1u, smoother)
     "#;
 
     let r = run_anim_impl(
@@ -634,7 +634,7 @@ fn test_tag_trans_handles_everything_intro_after_operator_rewrite() {
             retag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
         ]
 
-        play TagTrans([&intro], 1.2, smoother, 0.6 * 1u)
+        play TagTrans(1.2, [&intro], 0.6 * 1u, smoother)
     "#;
 
     let r = run_anim_impl(
