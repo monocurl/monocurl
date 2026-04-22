@@ -6,6 +6,7 @@ impl SectionParser {
         Section {
             body,
             section_type: self.state.section_type,
+            name: None,
         }
     }
 

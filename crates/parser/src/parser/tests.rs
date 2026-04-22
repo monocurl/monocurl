@@ -1,9 +1,14 @@
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
     use lexer::{lexer::Lexer, token::Token};
     use structs::{rope::Rope, text::Span8};
 
-    use crate::{ast::*, parser::SectionParser};
+    use crate::{
+        ast::*,
+        parser::{Diagnostic, Parser, PreparsedFile, SectionParser},
+    };
 
     fn lex(content: &str) -> Vec<(Token, Span8)> {
         Lexer::token_stream(content.chars())
@@ -43,6 +48,22 @@ mod test {
         ret
     }
 
+    fn parse_root_test(content: &str) -> (Vec<Section>, Vec<Diagnostic>) {
+        let (bundle, artifacts) = Parser::parse_file(
+            &HashMap::new(),
+            PreparsedFile {
+                imports: vec![],
+                path: None,
+                text_rope: Rope::from_str(content),
+                root_import_span: None,
+                tokens: lex(content),
+                is_stdlib: false,
+            },
+            None,
+        );
+        (bundle.sections.clone(), artifacts.error_diagnostics)
+    }
+
     // Literal tests
     #[test]
     fn test_integer_literal() {
@@ -80,6 +101,41 @@ mod test {
         let result = parse_expr_test(r#""hello%nworld%t%"test%'""#);
         let expected = Expression::Literal(Literal::String("hello\nworld\t\"test'".to_string()));
         assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_root_slide_title_is_parsed_from_same_line_string() {
+        let (sections, errors) = parse_root_test("let a = 1\nslide \"Intro\"\nlet b = 2\n");
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].name, None);
+        assert_eq!(sections[1].name, Some("Intro".to_string()));
+        assert_eq!(sections[1].body.len(), 1);
+    }
+
+    #[test]
+    fn test_root_slide_string_on_next_line_is_not_title() {
+        let (sections, errors) = parse_root_test("slide\n\"Intro\"\n");
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[1].name, None);
+        assert_eq!(
+            sections[1].body,
+            vec![(
+                6..13,
+                Statement::Expression(Expression::Literal(Literal::String("Intro".to_string())))
+            )]
+        );
+    }
+
+    #[test]
+    fn test_root_slide_title_reports_malformed_string() {
+        let (sections, errors) = parse_root_test("slide \"unterminated\nlet x = 1\n");
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[1].name, None);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].title, "Illegal Slide Title");
+        assert_eq!(errors[0].message, "Malformed string literal");
     }
 
     #[test]

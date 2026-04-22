@@ -1,6 +1,35 @@
 use super::*;
 
 impl SectionParser {
+    pub(super) fn decode_string_literal(string: &str) -> std::result::Result<String, &'static str> {
+        let mut build = String::new();
+        let mut it = string.chars();
+        if it.next() != Some('"') {
+            return Err("Malformed string literal");
+        }
+
+        while let Some(curr) = it.next() {
+            if curr == '%' {
+                let next = it.next();
+                if let Some(map) = next.and_then(Self::escape_char_literal) {
+                    build.push(map);
+                } else {
+                    return Err("Illegal escape character");
+                }
+            } else if curr == '"' {
+                if it.next().is_some() {
+                    return Err("Malformed string literal");
+                } else {
+                    return Ok(build);
+                }
+            } else {
+                build.push(curr);
+            }
+        }
+
+        Err("Malformed string literal")
+    }
+
     pub(super) fn parse_basic_literal(
         &mut self,
         tok: Token,
@@ -36,35 +65,7 @@ impl SectionParser {
     pub(super) fn parse_string_literal(&mut self) -> SpanTagged<Expression> {
         self.parse_basic_literal(
             Token::StringLiteral,
-            |string| {
-                let mut build = String::new();
-                let mut it = string.chars();
-                if it.next() != Some('"') {
-                    return Err("Malformed string literal");
-                }
-
-                while let Some(curr) = it.next() {
-                    if curr == '%' {
-                        let next = it.next();
-                        if let Some(map) = next.and_then(Self::escape_char_literal) {
-                            build.push(map);
-                        } else {
-                            return Err("Illegal escape character");
-                        }
-                    } else if curr == '"' {
-                        // not the end
-                        if it.next().is_some() {
-                            return Err("Malformed string literal");
-                        } else {
-                            return Ok(Literal::String(build));
-                        }
-                    } else {
-                        build.push(curr);
-                    }
-                }
-
-                return Err("Malformed string literal");
-            },
+            |string| Self::decode_string_literal(string).map(Literal::String),
             Literal::String(String::new()),
         )
     }

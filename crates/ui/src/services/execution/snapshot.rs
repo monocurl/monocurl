@@ -144,6 +144,7 @@ impl ExecutionService {
             current_timestamp,
             status,
             slide_count: executor.real_slide_count(),
+            slide_names: executor.real_slide_names(),
             slide_durations: executor.real_slide_durations(),
             minimum_slide_durations: executor.real_minimum_slide_durations(),
             parameters: (playback_mode == PlaybackMode::Presentation).then_some(parameters),

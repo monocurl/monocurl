@@ -164,6 +164,7 @@ fn parse_section(src: &str, section_type: SectionType) -> (Section, Vec<String>)
         Section {
             body: stmts,
             section_type,
+            name: None,
         },
         errors,
     )

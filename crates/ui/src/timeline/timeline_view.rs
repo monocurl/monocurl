@@ -111,6 +111,7 @@ impl Render for Timeline {
         let current_time = exec.current_timestamp.time;
         let is_playing = exec.is_playing();
         let slide_count = exec.slide_count;
+        let slide_names = exec.slide_names.clone();
         let durations = exec.slide_durations.clone();
         let minimum_durations = exec.minimum_slide_durations.clone();
         let theme = ThemeSettings::theme(cx);
@@ -137,6 +138,7 @@ impl Render for Timeline {
             current_slide,
             current_time,
             slide_count,
+            slide_names,
             durations,
             minimum_durations,
             zoom,

@@ -182,6 +182,15 @@ impl Executor {
             .copied()
             .collect()
     }
+
+    pub fn real_slide_names(&self) -> Vec<Option<String>> {
+        self.bytecode
+            .sections
+            .iter()
+            .skip(self.bytecode.non_slide_sections())
+            .map(|section| section.name.clone())
+            .collect()
+    }
 }
 
 #[cfg(test)]

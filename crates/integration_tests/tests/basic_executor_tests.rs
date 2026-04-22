@@ -310,6 +310,7 @@ fn run_section_with_stdlib(
         sections: vec![Section {
             body: stmts,
             section_type,
+            name: None,
         }],
         root_import_span: None,
         was_cached: false,
@@ -415,6 +416,7 @@ fn stdlib_bundle(name: &str) -> Arc<SectionBundle> {
         sections: vec![Section {
             body: stmts,
             section_type: SectionType::StandardLibrary,
+            name: None,
         }],
         root_import_span: Some(0..0),
         was_cached: false,

@@ -471,6 +471,7 @@ impl Compiler {
             is_init: section.section_type == SectionType::Init,
             is_root_module: self.bundle_root_import_span.is_none(),
         });
+        bytecode.name = section.name.clone();
         bytecode.source_file_name = current_bundle.path.as_ref().and_then(|path| {
             path.file_name()
                 .map(|name| name.to_string_lossy().into_owned())

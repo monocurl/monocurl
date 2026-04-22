@@ -23,6 +23,7 @@ pub(super) fn render_track(
     current_slide: usize,
     current_time: f64,
     slide_count: usize,
+    slide_names: Vec<Option<String>>,
     durations: Vec<Option<f64>>,
     minimum_durations: Vec<Option<f64>>,
     zoom: f32,
@@ -42,6 +43,7 @@ pub(super) fn render_track(
         {
             let durations = durations.clone();
             let minimum_durations = minimum_durations.clone();
+            let slide_names = slide_names.clone();
             let font = font.clone();
             move |bounds, window, _cx| {
                 let effective = effective_durations(
@@ -90,7 +92,11 @@ pub(super) fn render_track(
 
                 let label_texts = (0..slide_count)
                     .map(|i| {
-                        let s = format!("Slide {}", i + 1);
+                        let s = slide_names
+                            .get(i)
+                            .and_then(|name| name.as_ref())
+                            .cloned()
+                            .unwrap_or_else(|| format!("Slide {}", i + 1));
                         ts.shape_line(
                             SharedString::from(s.clone()),
                             px(LABEL_FONT_SIZE),
