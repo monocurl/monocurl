@@ -66,6 +66,15 @@ fn recolor_mesh(mesh: &mut Mesh, color: geo::simd::Float4, level: f32) {
     }
 }
 
+fn transform_hint_normal(normal: Float3, x_unit: Float3, y_unit: Float3, z_unit: Float3) -> Float3 {
+    let mapped = x_unit * normal.x + y_unit * normal.y + z_unit * normal.z;
+    if mapped.len_sq() > 1e-12 {
+        mapped.normalize()
+    } else {
+        normal
+    }
+}
+
 fn viewport_half_extents(depth: f32) -> (f32, f32) {
     let depth = depth.max(executor::camera::MIN_CAMERA_NEAR);
     let tan_half_fov = (DEFAULT_CAMERA_FOV * 0.5).tan().max(0.05);
@@ -1487,7 +1496,15 @@ pub async fn op_in_space(
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         blend_mesh_positions(mesh, level, |p| {
             axis_center + x_unit * p.x + y_unit * p.y + z_unit * p.z
-        })
+        });
+        for dot in &mut mesh.dots {
+            let target = transform_hint_normal(dot.norm, x_unit, y_unit, z_unit);
+            dot.norm = dot.norm.lerp(target, level);
+        }
+        for lin in &mut mesh.lins {
+            let target = transform_hint_normal(lin.norm, x_unit, y_unit, z_unit);
+            lin.norm = lin.norm.lerp(target, level);
+        }
     })
     .await?;
     Ok(tree.into_value())

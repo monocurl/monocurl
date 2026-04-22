@@ -384,12 +384,11 @@ pub async fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 
 #[stdlib_func]
 pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -4, "center")?;
-    let radius = crate::read_float(executor, stack_idx, -3, "radius")? as f32;
-    let samples = read_int(executor, stack_idx, -2, "samples")?.max(3) as usize;
+    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
+    let samples = read_int(executor, stack_idx, -1, "samples")?.max(3) as usize;
     ensure_limit("circle samples", samples, MAX_POLYGON_POINTS)?;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    let (x, y, normal) = polygon_basis(normal);
+    let (x, y, normal) = polygon_basis(Float3::Z);
     let points: Vec<_> = (0..samples)
         .map(|i| {
             let theta = std::f32::consts::TAU * i as f32 / samples as f32;
@@ -402,12 +401,11 @@ pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -4, "center")?;
-    let inner = crate::read_float(executor, stack_idx, -3, "inner")? as f32;
-    let outer = crate::read_float(executor, stack_idx, -2, "outer")? as f32;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
+    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let inner = crate::read_float(executor, stack_idx, -2, "inner")? as f32;
+    let outer = crate::read_float(executor, stack_idx, -1, "outer")? as f32;
     let samples = 64usize;
-    let (x, y, normal) = polygon_basis(normal);
+    let (x, y, normal) = polygon_basis(Float3::Z);
     let inner_pts: Vec<_> = (0..samples)
         .map(|i| {
             let theta = std::f32::consts::TAU * i as f32 / samples as f32;
@@ -428,9 +426,9 @@ pub async fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Val
 
 #[stdlib_func]
 pub async fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -3, "center")?;
-    let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
+    let center = read_float3(executor, stack_idx, -2, "center")?;
+    let width = crate::read_float(executor, stack_idx, -1, "width")? as f32;
+    let normal = Float3::Z;
     let half = width / 2.0;
     let (x, y, _) = polygon_basis(normal);
     let corners = vec![
@@ -445,10 +443,10 @@ pub async fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -4, "center")?;
-    let width = crate::read_float(executor, stack_idx, -3, "width")? as f32;
-    let height = crate::read_float(executor, stack_idx, -2, "height")? as f32;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
+    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
+    let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
+    let normal = Float3::Z;
     let (x, y, _) = polygon_basis(normal);
     let corners = vec![
         center - x * (width / 2.0) - y * (height / 2.0),
@@ -465,12 +463,11 @@ pub async fn mk_regular_polygon(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -4, "center")?;
-    let n = read_int(executor, stack_idx, -3, "n")?.max(3) as usize;
+    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let n = read_int(executor, stack_idx, -2, "n")?.max(3) as usize;
     ensure_limit("regular polygon sides", n, MAX_POLYGON_POINTS)?;
-    let radius = crate::read_float(executor, stack_idx, -2, "circumradius")? as f32;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    let (x, y, normal) = polygon_basis(normal);
+    let radius = crate::read_float(executor, stack_idx, -1, "circumradius")? as f32;
+    let (x, y, normal) = polygon_basis(Float3::Z);
     let points: Vec<_> = (0..n)
         .map(|i| {
             let theta = std::f32::consts::TAU * i as f32 / n as f32;
@@ -528,12 +525,11 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_arc(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -5, "center")?;
-    let radius = crate::read_float(executor, stack_idx, -4, "radius")? as f32;
-    let theta0 = crate::read_float(executor, stack_idx, -3, "theta0")? as f32;
-    let theta1 = crate::read_float(executor, stack_idx, -2, "theta1")? as f32;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    let (x, y, normal) = polygon_basis(normal);
+    let center = read_float3(executor, stack_idx, -4, "center")?;
+    let radius = crate::read_float(executor, stack_idx, -3, "radius")? as f32;
+    let theta0 = crate::read_float(executor, stack_idx, -2, "theta0")? as f32;
+    let theta1 = crate::read_float(executor, stack_idx, -1, "theta1")? as f32;
+    let (x, y, normal) = polygon_basis(Float3::Z);
     let steps = (((theta1 - theta0).abs() / std::f32::consts::TAU) * 64.0).ceil() as usize + 2;
     ensure_limit("arc samples", steps, MAX_CURVE_SAMPLES)?;
     let points: Vec<_> = (0..steps)
@@ -829,16 +825,15 @@ pub async fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 
 #[stdlib_func]
 pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let major = crate::read_float(executor, stack_idx, -5, "major_radius")? as f32;
-    let minor = crate::read_float(executor, stack_idx, -4, "minor_radius")? as f32;
-    let normal = read_float3(executor, stack_idx, -3, "normal")?;
+    let major = crate::read_float(executor, stack_idx, -4, "major_radius")? as f32;
+    let minor = crate::read_float(executor, stack_idx, -3, "minor_radius")? as f32;
     let major_samples = read_int(executor, stack_idx, -2, "major_samples")?.max(3) as usize;
     let minor_samples = read_int(executor, stack_idx, -1, "minor_samples")?.max(3) as usize;
     ensure_limit("torus major samples", major_samples, MAX_POLYGON_POINTS)?;
     ensure_limit("torus minor samples", minor_samples, MAX_POLYGON_POINTS)?;
     let torus_quads = checked_product("torus cells", major_samples, minor_samples, MAX_GRID_CELLS)?;
     ensure_surface_triangles("torus triangles", torus_quads.saturating_mul(2))?;
-    let (x, y, n) = polygon_basis(normal);
+    let (x, y, n) = polygon_basis(Float3::Z);
     let mut vertices = Vec::with_capacity(major_samples * minor_samples);
 
     let point = |u: usize, v: usize| {
@@ -880,11 +875,10 @@ pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_plane(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let normal = read_float3(executor, stack_idx, -4, "normal")?;
     let dist = crate::read_float(executor, stack_idx, -3, "dist")? as f32;
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
-    let (_, _, n) = polygon_basis(normal);
+    let (_, _, n) = polygon_basis(Float3::Z);
     let center = n * dist;
     let (x, y, _) = polygon_basis(n);
     let corners = vec![
@@ -957,11 +951,11 @@ pub async fn mk_half_vector(
 
 #[stdlib_func]
 pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let image = read_string(executor, stack_idx, -5, "name")?;
-    let center = read_float3(executor, stack_idx, -4, "center")?;
-    let width = crate::read_float(executor, stack_idx, -3, "width")? as f32;
-    let height = crate::read_float(executor, stack_idx, -2, "height")? as f32;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
+    let image = read_string(executor, stack_idx, -4, "name")?;
+    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
+    let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
+    let normal = Float3::Z;
     let (x, y, _) = polygon_basis(normal);
     let corners = [
         center - x * (width / 2.0) - y * (height / 2.0),
@@ -1442,8 +1436,7 @@ pub async fn mk_polar_axis(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -10, "center")?;
-    let normal = read_float3(executor, stack_idx, -9, "normal")?;
+    let center = read_float3(executor, stack_idx, -9, "center")?;
     let theta_min = crate::read_float(executor, stack_idx, -8, "theta_min")? as f32;
     let theta_max = crate::read_float(executor, stack_idx, -7, "theta_max")? as f32;
     let theta_step = crate::read_float(executor, stack_idx, -6, "theta_step")?
@@ -1465,7 +1458,7 @@ pub async fn mk_polar_axis(
         tick_count(theta_min, theta_max, theta_step),
         MAX_AXIS_TICKS,
     )?;
-    let (x, y, normal) = polygon_basis(normal);
+    let (x, y, normal) = polygon_basis(Float3::Z);
     let mut lins = Vec::new();
 
     let mut r = radius_min.max(radius_step);

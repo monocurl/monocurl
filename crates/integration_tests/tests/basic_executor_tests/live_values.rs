@@ -53,6 +53,12 @@ fn mesh_signature(mesh: &geo::mesh::Mesh) -> String {
     format!("dots[{dots}]|lins[{lins}]|tris[{tris}]")
 }
 
+fn float3_approx_eq(actual: geo::simd::Float3, expected: geo::simd::Float3, eps: f32) -> bool {
+    (actual.x - expected.x).abs() <= eps
+        && (actual.y - expected.y).abs() <= eps
+        && (actual.z - expected.z).abs() <= eps
+}
+
 // -- COW: list element independence after aliasing --
 
 #[test]
@@ -615,6 +621,53 @@ fn test_measure_buffer_controls_offset_distance() {
         &["mesh"],
     );
     r.assert_int(1);
+}
+
+#[test]
+fn test_in_space_transforms_line_normals() {
+    let r = run_with_stdlib(
+        "
+        let result = mesh_normal(in_space{[0, 0, 0], 1r, 1f, 1u} Line([0, 0, 0], [1, 0, 0]), 0.5)
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    match &r.value {
+        Some(Value::List(list)) => {
+            let coords: Vec<_> = list
+                .elements()
+                .iter()
+                .map(|elem| with_heap(|h| h.get(elem.key()).clone()))
+                .collect();
+            let actual = geo::simd::Float3::new(
+                match coords[0] {
+                    Value::Integer(n) => n as f32,
+                    Value::Float(f) => f as f32,
+                    ref other => panic!("expected number, got {}", other.type_name()),
+                },
+                match coords[1] {
+                    Value::Integer(n) => n as f32,
+                    Value::Float(f) => f as f32,
+                    ref other => panic!("expected number, got {}", other.type_name()),
+                },
+                match coords[2] {
+                    Value::Integer(n) => n as f32,
+                    Value::Float(f) => f as f32,
+                    ref other => panic!("expected number, got {}", other.type_name()),
+                },
+            );
+            assert!(
+                float3_approx_eq(actual, geo::simd::Float3::Y, 1e-4),
+                "expected transformed normal to be +Y, got {:?}",
+                actual.to_array()
+            );
+        }
+        other => panic!(
+            "expected list normal result, got {}",
+            other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+        ),
+    }
 }
 
 #[test]
