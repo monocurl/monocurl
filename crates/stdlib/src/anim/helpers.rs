@@ -4,7 +4,7 @@ use crate::read_float;
 use executor::{
     error::ExecutorError,
     executor::Executor,
-    heap::{VRc, heap_replace, with_heap, with_heap_mut},
+    heap::{VRc, with_heap},
     state::LeaderKind,
     value::{Value, container::List, leader::Leader, primitive_anim::PrimitiveAnim},
 };
@@ -202,40 +202,6 @@ pub(super) fn resolve_targets(
     Ok(out)
 }
 
-pub(super) fn leader_from_cell(cell: &VRc) -> Result<Leader, ExecutorError> {
-    let value = with_heap(|h| h.get(cell.key()).clone());
-    match value {
-        Value::Leader(leader) => Ok(leader),
-        other => Err(ExecutorError::type_error("leader", other.type_name())),
-    }
-}
-
-pub(super) fn follower_value(cell: &VRc) -> Result<Value, ExecutorError> {
-    let leader = leader_from_cell(cell)?;
-    Ok(with_heap(|h| h.get(leader.follower_rc.key()).clone()))
-}
-
-pub(super) fn replace_leader_and_follower(
-    executor: &Executor,
-    stack_idx: usize,
-    cell: &VRc,
-    value: Value,
-) -> Result<(), ExecutorError> {
-    let leader = leader_from_cell(cell)?;
-    let follower = value.clone().to_follower_stateful();
-    heap_replace(leader.leader_rc.key(), value);
-    heap_replace(leader.follower_rc.key(), follower);
-    let stack_id = executor.state.stack_id(stack_idx);
-    with_heap_mut(|h| {
-        if let Value::Leader(leader) = &mut *h.get_mut(cell.key()) {
-            leader.leader_version += 1;
-            leader.follower_version += 1;
-            leader.last_modified_stack = Some(stack_id);
-        }
-    });
-    Ok(())
-}
-
 pub(super) fn build_lerp(
     targets: &[VRc],
     time: f64,
@@ -249,12 +215,6 @@ pub(super) fn build_lerp(
         progression,
         embed,
         lerp,
-    })
-}
-
-pub(super) fn build_set(targets: &[VRc]) -> Value {
-    Value::PrimitiveAnim(PrimitiveAnim::Set {
-        candidates: Box::new(targets_to_value(targets)),
     })
 }
 
@@ -640,33 +600,6 @@ pub(super) fn materialize_live_value<'a>(
             other => materialize_current_value(&other),
         }
     })
-}
-
-pub(super) fn merge_transfer_value(dst: Value, transfer: Value) -> Value {
-    match dst.elide_lvalue_leader_rec() {
-        Value::List(dst_list) if dst_list.is_empty() => transfer,
-        Value::List(dst_list) => match transfer {
-            Value::List(src_list) => {
-                let mut out = Vec::with_capacity(dst_list.len() + src_list.len());
-                for elem in dst_list.elements() {
-                    out.push(with_heap(|h| h.get(elem.key()).clone()));
-                }
-                for elem in src_list.elements() {
-                    out.push(with_heap(|h| h.get(elem.key()).clone()));
-                }
-                list_value(out)
-            }
-            other => {
-                let mut out = Vec::with_capacity(dst_list.len() + 1);
-                for elem in dst_list.elements() {
-                    out.push(with_heap(|h| h.get(elem.key()).clone()));
-                }
-                out.push(other);
-                list_value(out)
-            }
-        },
-        _ => transfer,
-    }
 }
 
 pub(super) fn empty_mesh_tree() -> Value {

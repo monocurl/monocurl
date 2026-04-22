@@ -23,9 +23,23 @@ pub enum StaticAnalysisData {
     OperatorInvocation,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoCompleteCategory {
     Keyword,
+    Variable,
+    Function,
+    Operator,
+}
+
+impl AutoCompleteCategory {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Keyword => "keyword",
+            Self::Variable => "variable",
+            Self::Function => "function",
+            Self::Operator => "operator",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

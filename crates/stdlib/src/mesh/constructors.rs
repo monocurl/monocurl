@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use executor::{error::ExecutorError, executor::Executor, value::Value};
-use geo::simd::{Float2, Float3, Float4};
+use geo::{
+    mesh_build::SurfaceVertex,
+    simd::{Float2, Float3, Float4},
+};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
@@ -81,6 +84,26 @@ fn open_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
 
 fn mesh_ref(idx: usize) -> i32 {
     super::helpers::mesh_ref(idx)
+}
+
+fn latex_meshes_to_value(meshes: Vec<std::sync::Arc<geo::mesh::Mesh>>) -> Value {
+    list_value(meshes.into_iter().map(Value::Mesh))
+}
+
+fn read_text_scale(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<f32, ExecutorError> {
+    let scale = crate::read_float(executor, stack_idx, index, name)? as f32;
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: name,
+            message: "must be a positive finite number",
+        });
+    }
+    Ok(scale)
 }
 
 fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
@@ -1075,13 +1098,33 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn mk_text(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("text glyphs via the embedded font")
+pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let text = read_string(executor, stack_idx, -2, "text")?;
+    let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
+    let meshes = latex::render_text(&text, scale).map_err(|error| {
+        ExecutorError::invalid_invocation(format!("text render failed: {error:#}"))
+    })?;
+    Ok(latex_meshes_to_value(meshes))
 }
 
 #[stdlib_func]
-pub async fn mk_tex(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("tex / mathjax rendered glyphs")
+pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let tex = read_string(executor, stack_idx, -2, "tex")?;
+    let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
+    let meshes = latex::render_tex(&tex, scale).map_err(|error| {
+        ExecutorError::invalid_invocation(format!("tex render failed: {error:#}"))
+    })?;
+    Ok(latex_meshes_to_value(meshes))
+}
+
+#[stdlib_func]
+pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let latex = read_string(executor, stack_idx, -2, "latex")?;
+    let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
+    let meshes = latex::render_latex(&latex, scale).map_err(|error| {
+        ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
+    })?;
+    Ok(latex_meshes_to_value(meshes))
 }
 
 #[stdlib_func]

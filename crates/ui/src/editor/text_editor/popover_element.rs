@@ -425,6 +425,7 @@ impl PopoverElement {
                         let index_copy = *index;
                         let item1 = ac.items[*index].clone();
                         let head = item1.head.clone();
+                        let category = item1.category;
                         let is_selected = *index == ac.selected_index;
 
                         let ac_copy = autocomplete_state.clone();
@@ -459,14 +460,25 @@ impl PopoverElement {
                                         );
                                     });
                                 })
-                                .child(div().flex().items_center().child(
-                                    Self::render_highlighted_text(
-                                        &head,
-                                        highlights,
-                                        is_selected,
-                                        styles,
-                                    ),
-                                )),
+                                .child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .justify_between()
+                                        .gap(px(12.0))
+                                        .child(div().flex_1().child(Self::render_highlighted_text(
+                                            &head,
+                                            highlights,
+                                            is_selected,
+                                            styles,
+                                        )))
+                                        .child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(styles.popover_inactive_argument_color)
+                                                .child(category.label()),
+                                        ),
+                                ),
                         )
                     })),
             )

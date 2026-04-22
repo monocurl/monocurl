@@ -7,6 +7,7 @@ edition = "2024"
 executor.workspace = true
 geo.workspace = true
 inventory.workspace = true
+latex.workspace = true
 libtess2.workspace = true
 smallvec.workspace = true
 stdlib-macros.workspace = true

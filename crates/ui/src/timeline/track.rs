@@ -51,7 +51,9 @@ pub(super) fn render_track(
                     current_slide,
                     current_time,
                 );
-                let explicit: Vec<bool> = durations.iter().map(|d| d.is_some()).collect();
+                let explicit = (0..slide_count)
+                    .map(|i| durations.get(i).is_some_and(|d| d.is_some()))
+                    .collect();
 
                 let slide_xs = compute_slide_xs(slide_count, &effective, zoom);
                 let gap_ws = compute_gap_ws(slide_count, &effective, zoom);
@@ -168,7 +170,7 @@ pub(super) fn render_track(
 
             for i in 0..slide_count {
                 let bx = slide_xs[i];
-                let border_color: Hsla = if explicit[i] {
+                let border_color: Hsla = if explicit.get(i).copied().unwrap_or(false) {
                     theme.timeline_active_border
                 } else {
                     theme.timeline_inactive_border

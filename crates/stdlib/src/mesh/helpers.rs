@@ -15,6 +15,7 @@ use executor::{
 };
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
+    mesh_build::{self, BoundaryEdge, IndexedLineMesh, IndexedSurface, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
 use libtess2::{TessellationOptions, WindingRule};
@@ -32,33 +33,6 @@ pub(super) enum MeshTree {
 pub(super) enum TagFilter {
     Exact(HashSet<isize>),
     Predicate(Rc<Lambda>),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct SurfaceVertex {
-    pub pos: Float3,
-    pub col: Float4,
-    pub uv: Float2,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct BoundaryEdge {
-    pub a_col: Float4,
-    pub b_col: Float4,
-    pub norm: Float3,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct IndexedSurface {
-    pub vertices: Vec<SurfaceVertex>,
-    pub faces: Vec<[usize; 3]>,
-    pub boundary_edges: HashMap<(usize, usize), BoundaryEdge>,
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct IndexedLineMesh {
-    pub vertices: Vec<SurfaceVertex>,
-    pub segments: Vec<[usize; 2]>,
 }
 
 impl MeshTree {
@@ -726,23 +700,7 @@ pub(crate) fn mesh_position_groups(mesh: &Mesh) -> Vec<usize> {
 }
 
 pub(super) fn mesh_ref(idx: usize) -> i32 {
-    -2 - idx as i32
-}
-
-pub(super) fn shift_line_refs(lines: &mut [Lin], delta: usize) {
-    let delta = delta as i32;
-    for line in lines {
-        for value in [
-            &mut line.prev,
-            &mut line.next,
-            &mut line.inv,
-            &mut line.anti,
-        ] {
-            if *value >= 0 {
-                *value += delta;
-            }
-        }
-    }
+    mesh_build::mesh_ref(idx)
 }
 
 pub(super) fn push_open_polyline(
@@ -750,28 +708,7 @@ pub(super) fn push_open_polyline(
     points: &[Float3],
     normal: Float3,
 ) -> Range<usize> {
-    let start = out.len();
-    if points.len() < 2 {
-        return start..start;
-    }
-
-    let mut lines: Vec<_> = points
-        .windows(2)
-        .enumerate()
-        .map(|(i, w)| {
-            let mut lin = default_lin(w[0], w[1], normal);
-            lin.prev = if i == 0 { -1 } else { i as i32 - 1 };
-            lin.next = if i + 1 == points.len() - 1 {
-                -1
-            } else {
-                i as i32 + 1
-            };
-            lin
-        })
-        .collect();
-    shift_line_refs(&mut lines, start);
-    out.extend(lines);
-    start..out.len()
+    mesh_build::push_open_polyline(out, points, normal, default_ink())
 }
 
 pub(crate) fn push_closed_polyline(
@@ -779,21 +716,7 @@ pub(crate) fn push_closed_polyline(
     points: &[Float3],
     normal: Float3,
 ) -> Range<usize> {
-    let start = out.len();
-    if points.len() < 2 {
-        return start..start;
-    }
-
-    let mut lines = Vec::with_capacity(points.len());
-    for i in 0..points.len() {
-        let mut lin = default_lin(points[i], points[(i + 1) % points.len()], normal);
-        lin.prev = ((i + points.len() - 1) % points.len()) as i32;
-        lin.next = ((i + 1) % points.len()) as i32;
-        lines.push(lin);
-    }
-    shift_line_refs(&mut lines, start);
-    out.extend(lines);
-    start..out.len()
+    mesh_build::push_closed_polyline(out, points, normal, default_ink())
 }
 
 pub(crate) fn build_indexed_surface(
@@ -801,104 +724,11 @@ pub(crate) fn build_indexed_surface(
     faces: &[[usize; 3]],
     boundary_edges: &HashMap<(usize, usize), BoundaryEdge>,
 ) -> (Vec<Lin>, Vec<Tri>) {
-    let mut tris: Vec<_> = faces
-        .iter()
-        .map(|face| Tri {
-            a: TriVertex {
-                pos: vertices[face[0]].pos,
-                col: vertices[face[0]].col,
-                uv: vertices[face[0]].uv,
-            },
-            b: TriVertex {
-                pos: vertices[face[1]].pos,
-                col: vertices[face[1]].col,
-                uv: vertices[face[1]].uv,
-            },
-            c: TriVertex {
-                pos: vertices[face[2]].pos,
-                col: vertices[face[2]].col,
-                uv: vertices[face[2]].uv,
-            },
-            ab: -1,
-            bc: -1,
-            ca: -1,
-            anti: -1,
-            is_dom_sib: false,
-        })
-        .collect();
-
-    let mut edge_map = HashMap::<(usize, usize), (usize, usize, usize, usize)>::new();
-    for (tri_idx, face) in faces.iter().enumerate() {
-        for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
-            .into_iter()
-            .enumerate()
-        {
-            let key = canonical_index_edge_key(a, b);
-            if let Some((other_tri, other_edge, _, _)) = edge_map.remove(&key) {
-                set_tri_edge(&mut tris[tri_idx], edge_idx, other_tri as i32);
-                set_tri_edge(&mut tris[other_tri], other_edge, tri_idx as i32);
-            } else {
-                edge_map.insert(key, (tri_idx, edge_idx, a, b));
-            }
-        }
-    }
-
-    let mut boundary_items: Vec<_> = edge_map.into_values().collect();
-    boundary_items.sort_unstable_by_key(|(tri_idx, edge_idx, _, _)| (*tri_idx, *edge_idx));
-
-    let mut lins = Vec::with_capacity(boundary_items.len());
-    let mut edge_to_line = HashMap::<(usize, usize), usize>::with_capacity(boundary_items.len());
-    for (tri_idx, edge_idx, a, b) in boundary_items {
-        let template = boundary_edges
-            .get(&(a, b))
-            .copied()
-            .unwrap_or(BoundaryEdge {
-                a_col: vertices[a].col,
-                b_col: vertices[b].col,
-                norm: Float3::ZERO,
-            });
-        let line_idx = lins.len();
-        let mut line = default_lin(vertices[a].pos, vertices[b].pos, template.norm);
-        line.a.col = template.a_col;
-        line.b.col = template.b_col;
-        line.inv = mesh_ref(tri_idx);
-        set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_ref(line_idx));
-        lins.push(line);
-        edge_to_line.insert((a, b), line_idx);
-    }
-
-    let mut incoming = HashMap::<usize, Vec<usize>>::new();
-    let mut outgoing = HashMap::<usize, Vec<usize>>::new();
-    for (&(a, b), &line_idx) in &edge_to_line {
-        outgoing.entry(a).or_default().push(line_idx);
-        incoming.entry(b).or_default().push(line_idx);
-    }
-
-    for (&(a, b), &line_idx) in &edge_to_line {
-        lins[line_idx].prev = incoming
-            .get(&a)
-            .and_then(|candidates| (candidates.len() == 1).then_some(candidates[0] as i32))
-            .unwrap_or(-1);
-        lins[line_idx].next = outgoing
-            .get(&b)
-            .and_then(|candidates| (candidates.len() == 1).then_some(candidates[0] as i32))
-            .unwrap_or(-1);
-    }
-
-    (lins, tris)
+    mesh_build::build_indexed_surface(vertices, faces, boundary_edges)
 }
 
 pub(super) fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]]) -> Vec<Tri> {
-    let vertices: Vec<_> = vertices
-        .iter()
-        .copied()
-        .map(|pos| SurfaceVertex {
-            pos,
-            col: default_ink(),
-            uv: Float2::ZERO,
-        })
-        .collect();
-    build_indexed_surface(&vertices, faces, &HashMap::new()).1
+    mesh_build::build_indexed_tris(vertices, faces, default_ink())
 }
 
 pub(crate) fn mesh_to_indexed_surface(mesh: &Mesh) -> IndexedSurface {
@@ -1082,7 +912,7 @@ fn tessellate_planar_loops_with_options(
     let mut boundary_edges = HashMap::<(usize, usize), usize>::new();
     let mut source_offset = 0usize;
     for contour in &contours {
-        let range = push_closed_polyline(&mut lins, contour, normal);
+        let range = mesh_build::push_closed_polyline(&mut lins, contour, normal, default_ink());
         for i in 0..contour.len() {
             boundary_edges.insert(
                 canonical_index_edge_key(
@@ -1105,11 +935,11 @@ fn tessellate_planar_loops_with_options(
             normalize_input,
         },
     )
-    .map_err(|err| {
-        ExecutorError::invalid_operation(format!("failed to tessellate polygon: {err}"))
+    .map_err(|error| {
+        ExecutorError::invalid_operation(format!("failed to tessellate polygon: {error}"))
     })?;
 
-    let mut tris = build_indexed_tris(&tess.vertices, &tess.triangles);
+    let mut tris = mesh_build::build_indexed_tris(&tess.vertices, &tess.triangles, default_ink());
     for (tri_idx, face) in tess.triangles.iter().enumerate() {
         for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
             .into_iter()
@@ -1136,8 +966,8 @@ fn tessellate_planar_loops_with_options(
                 continue;
             }
 
-            set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_ref(line_idx));
-            lins[line_idx].inv = mesh_ref(tri_idx);
+            set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_build::mesh_ref(line_idx));
+            lins[line_idx].inv = mesh_build::mesh_ref(tri_idx);
         }
     }
 

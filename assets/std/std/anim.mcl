@@ -153,9 +153,21 @@ let Flash = |&value, time = 1, lead = smooth, trail = smooth| anim {
 # transfer animations
 # move / duplicate content from one leader into another, keyed by tag.
 
-let Transfer = |from, into| __monocurl__native__ transfer_anim(from, into)
+let Transfer = |&from, &into| anim {
+    into = [into, from]
+    from = []
+    play Set()
+}
 
-let Copy = |from, into| __monocurl__native__ copy_anim(from, into)
+let TransferSubset = |&from, &into, filter=nil| anim {
+    # from = __monocurl__native__ subset_by_tag(from, tags)
+    play Set()
+}
+
+let Copy = |&from, &into| anim {
+    into = [into, from]
+    play Set()
+}
 
 # parallel with lag
 # start a list of animations in parallel, but offset consecutive ones.

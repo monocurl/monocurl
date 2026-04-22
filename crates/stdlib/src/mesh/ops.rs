@@ -9,7 +9,11 @@ use executor::{
     heap::with_heap,
     value::Value,
 };
-use geo::{mesh::Mesh, simd::Float3};
+use geo::{
+    mesh::Mesh,
+    mesh_build::{BoundaryEdge, IndexedSurface, SurfaceVertex},
+    simd::Float3,
+};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;

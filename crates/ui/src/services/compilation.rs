@@ -43,6 +43,84 @@ pub struct CompilationService {
     sm_tx: UnboundedSender<ServiceManagerMessage>,
 }
 
+fn token_autocomplete_category(token: &Token) -> AutoCompleteCategory {
+    match token {
+        Token::StatefulReference
+        | Token::Plus
+        | Token::Minus
+        | Token::Multiply
+        | Token::Power
+        | Token::Divide
+        | Token::IntegerDivide
+        | Token::KeyValueMap
+        | Token::Assign
+        | Token::DotAssign
+        | Token::Eq
+        | Token::Ne
+        | Token::Lt
+        | Token::Le
+        | Token::Gt
+        | Token::Ge
+        | Token::And
+        | Token::Not
+        | Token::Or
+        | Token::In
+        | Token::Pipe
+        | Token::Dot
+        | Token::Append
+        | Token::Comma
+        | Token::Reference
+        | Token::LParen
+        | Token::RParen
+        | Token::LBracket
+        | Token::RBracket
+        | Token::LFlower
+        | Token::RFlower
+        | Token::Semicolon => AutoCompleteCategory::Operator,
+        Token::Illegal
+        | Token::Newline
+        | Token::Whitespace
+        | Token::Comment
+        | Token::Block
+        | Token::Import
+        | Token::Break
+        | Token::Continue
+        | Token::Return
+        | Token::If
+        | Token::Else
+        | Token::For
+        | Token::While
+        | Token::Operator
+        | Token::Let
+        | Token::Var
+        | Token::Mesh
+        | Token::Param
+        | Token::Anim
+        | Token::Play
+        | Token::Slide
+        | Token::Nil
+        | Token::Native
+        | Token::IntegerLiteral
+        | Token::FloatLiteral
+        | Token::StringLiteral
+        | Token::ArgumentLabel
+        | Token::Identifier => AutoCompleteCategory::Keyword,
+    }
+}
+
+fn identifier_autocomplete_category(
+    identifier_type: &CursorIdentifierType,
+) -> AutoCompleteCategory {
+    match identifier_type {
+        CursorIdentifierType::Lambda => AutoCompleteCategory::Function,
+        CursorIdentifierType::Operator => AutoCompleteCategory::Operator,
+        CursorIdentifierType::Let
+        | CursorIdentifierType::Var
+        | CursorIdentifierType::Mesh
+        | CursorIdentifierType::Param => AutoCompleteCategory::Variable,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BatchCompileAction {
     None,
@@ -209,6 +287,7 @@ impl CompilationService {
             s: impl Into<String>,
             replacement: impl Into<String>,
             cursor_delta: usize,
+            category: AutoCompleteCategory,
         ) -> AutoCompleteItem {
             let replacement = replacement.into();
             let rlen = replacement.len();
@@ -223,7 +302,7 @@ impl CompilationService {
                     row: 0,
                     col: rlen - cursor_delta,
                 },
-                category: AutoCompleteCategory::Keyword,
+                category,
             }
         }
 
@@ -235,7 +314,12 @@ impl CompilationService {
                     Token::If | Token::While | Token::For => (s.to_string() + " ()", 1),
                     _ => (s.to_string() + " ", 0),
                 };
-                suggestions.push(suggestion(s, replacement, delta));
+                suggestions.push(suggestion(
+                    s,
+                    replacement,
+                    delta,
+                    token_autocomplete_category(token),
+                ));
             }
         }
 
@@ -246,7 +330,12 @@ impl CompilationService {
                     CursorIdentifierType::Operator => (ident.name.clone() + "{}", 1),
                     _ => (ident.name.clone(), 0),
                 };
-                suggestions.push(suggestion(&ident.name, replacement, delta))
+                suggestions.push(suggestion(
+                    &ident.name,
+                    replacement,
+                    delta,
+                    identifier_autocomplete_category(&ident.identifier_type),
+                ))
             }
         }
 
@@ -473,5 +562,38 @@ impl CompilationService {
                 .await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_categories_split_keywords_and_operators() {
+        assert_eq!(
+            token_autocomplete_category(&Token::If),
+            AutoCompleteCategory::Keyword
+        );
+        assert_eq!(
+            token_autocomplete_category(&Token::Plus),
+            AutoCompleteCategory::Operator
+        );
+    }
+
+    #[test]
+    fn identifier_categories_split_functions_variables_and_operators() {
+        assert_eq!(
+            identifier_autocomplete_category(&CursorIdentifierType::Lambda),
+            AutoCompleteCategory::Function
+        );
+        assert_eq!(
+            identifier_autocomplete_category(&CursorIdentifierType::Param),
+            AutoCompleteCategory::Variable
+        );
+        assert_eq!(
+            identifier_autocomplete_category(&CursorIdentifierType::Operator),
+            AutoCompleteCategory::Operator
+        );
     }
 }
