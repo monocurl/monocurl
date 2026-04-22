@@ -105,6 +105,11 @@ impl Compiler {
                         Instruction::PushDereference { stack_delta: delta },
                         span.clone(),
                     );
+                } else if sym.var_type == VariableType::Reference {
+                    self.emit_push(
+                        Instruction::PushDeepCopy { stack_delta: delta },
+                        span.clone(),
+                    );
                 } else {
                     self.emit_copy(delta, span.clone());
                 }

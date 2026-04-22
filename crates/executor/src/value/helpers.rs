@@ -19,7 +19,7 @@ impl Value {
         }
     }
 
-    fn may_need_lvalue_elision(&self) -> bool {
+    fn may_need_lvalue_leader_elision(&self) -> bool {
         self.is_lvalue() || matches!(self, Value::List(_) | Value::Leader(_))
     }
 
@@ -37,7 +37,7 @@ impl Value {
                 let needs_work = list
                     .elements
                     .iter()
-                    .any(|key| with_heap(|h| h.get(key.key()).may_need_lvalue_elision()));
+                    .any(|key| with_heap(|h| h.get(key.key()).may_need_lvalue_leader_elision()));
                 if !needs_work {
                     return Value::List(list);
                 }
@@ -46,7 +46,7 @@ impl Value {
                 for i in 0..list_mut.elements.len() {
                     let key = list_mut.elements[i].clone();
                     let val = with_heap(|h| h.get(key.key()).clone());
-                    if !val.may_need_lvalue_elision() {
+                    if !val.may_need_lvalue_leader_elision() {
                         continue;
                     }
                     let elided = val.elide_lvalue_leader_rec();

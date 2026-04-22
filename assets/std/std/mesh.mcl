@@ -95,10 +95,10 @@ let Plane = |normal = 1u, dist = 0, size = [4, 4]| {
 
 # visual / graphical
 
-let Bezier = |control_points = []|
+let Bezier = |control_points|
     __monocurl__native__ mk_bezier(control_points)
 
-let Vector = |tail = [0, 0, 0], delta = 1r, normal = 1f|
+let Vector = |delta = 1r, tail = [0, 0, 0], normal = 1f|
     __monocurl__native__ mk_vector(tail, delta, normal)
 
 let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1f|

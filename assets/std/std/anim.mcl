@@ -160,7 +160,15 @@ let Transfer = |&from, &into| anim {
 }
 
 let TransferSubset = |&from, &into, filter=nil| anim {
-    # from = __monocurl__native__ subset_by_tag(from, tags)
+    let split = __monocurl__native__ tag_split(from, filter)
+    into = [into, split[0]]
+    from = split[1]
+    play Set()
+}
+
+let CopySubset = |&from, &into, filter=nil| anim {
+    let split = __monocurl__native__ tag_split(from, filter)
+    into = [into, split[0]]
     play Set()
 }
 

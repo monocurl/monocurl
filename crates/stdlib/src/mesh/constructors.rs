@@ -21,6 +21,7 @@ const ARROW_HEAD_RADIUS_OVER_LENGTH: f32 = 0.4;
 const ARROW_STEM_RADIUS_OVER_HEAD_RADIUS: f32 = 0.33;
 const ARROW_HEAD_WIDTH_OVER_RADIUS: f32 = 1.2;
 const ARROW_HEAD_DEPTH_OVER_RADIUS: f32 = 2.1;
+const LABEL_BUFFER: f32 = 0.1;
 
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
     ExecutorError::invalid_invocation(format!("{kind} is too large ({actual}, limit {limit})"))
@@ -1202,8 +1203,43 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn mk_label(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("text label attached to a mesh in a direction")
+pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let target = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
+    let str = read_string(executor, stack_idx, -3, "str")?;
+    let scale = read_text_scale(executor, stack_idx, -2, "scale")?;
+    let dir = read_float3(executor, stack_idx, -1, "dir")?;
+    if dir.len_sq() <= 1e-12 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "dir",
+            message: "must be non-zero",
+        });
+    }
+
+    let meshes = latex::render_tex(&str, scale).map_err(|error| {
+        ExecutorError::invalid_invocation(format!("tex render failed: {error:#}"))
+    })?;
+    let mut label = MeshTree::List(meshes.into_iter().map(MeshTree::Mesh).collect());
+    if label.iter().next().is_none() {
+        return Ok(label.into_value());
+    }
+
+    let dir = dir.normalize();
+    let target_center = tree_center(&target).ok_or(ExecutorError::InvalidArgument {
+        arg: "target",
+        message: "mesh tree must contain at least one vertex",
+    })?;
+    let label_center = tree_center(&label).unwrap_or(Float3::ZERO);
+    let label_face = extremal_point(&label, -dir)
+        .unwrap_or(label_center)
+        .dot(dir);
+    let target_face = extremal_point(&target, dir)
+        .unwrap_or(target_center)
+        .dot(dir);
+    let orth = (target_center - label_center) - dir * (target_center - label_center).dot(dir);
+    let delta = dir * (target_face - label_face + LABEL_BUFFER) + orth;
+
+    label.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |point| point + delta));
+    Ok(label.into_value())
 }
 
 #[stdlib_func]

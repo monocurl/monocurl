@@ -105,6 +105,24 @@ pub async fn tag_filter(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
+pub async fn tag_split(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
+    let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
+    let (matched, unmatched) = match filter.as_ref() {
+        Some(filter) => split_tree_by_tag_filter(executor, tree, filter).await?,
+        None => (Some(tree), None),
+    };
+    Ok(list_value([
+        matched
+            .map(MeshTree::into_value)
+            .unwrap_or_else(|| list_value([])),
+        unmatched
+            .map(MeshTree::into_value)
+            .unwrap_or_else(|| list_value([])),
+    ]))
+}
+
+#[stdlib_func]
 pub async fn mesh_collapse(
     executor: &mut Executor,
     stack_idx: usize,

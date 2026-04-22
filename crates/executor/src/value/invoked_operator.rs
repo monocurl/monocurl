@@ -113,11 +113,31 @@ impl InvokedOperator {
 
 /// split a `[initial, modified]` list returned by an operator lambda.
 pub fn extract_operator_result(result: Value) -> Result<(Value, Value), ExecutorError> {
+    fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
+        let cached = cell.take();
+        let cloned = cached.as_ref().map(|value| (**value).clone());
+        cell.set(cached);
+        cloned
+    }
+
     match result {
         Value::List(list) if list.elements.len() == 2 => {
             use crate::heap::with_heap;
             let initial = with_heap(|h| h.get(list.elements[0].key()).clone());
             let modified = with_heap(|h| h.get(list.elements[1].key()).clone());
+            Ok((initial, modified))
+        }
+        Value::InvokedOperator(inv) => {
+            let initial = clone_cached_value(&inv.cache.unmodified).ok_or_else(|| {
+                ExecutorError::invalid_invocation(
+                    "live operator result is missing its cached initial value",
+                )
+            })?;
+            let modified = clone_cached_value(&inv.cache.cached_result).ok_or_else(|| {
+                ExecutorError::invalid_invocation(
+                    "live operator result is missing its cached modified value",
+                )
+            })?;
             Ok((initial, modified))
         }
         Value::List(ref list) => Err(ExecutorError::invalid_invocation(format!(

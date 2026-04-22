@@ -83,7 +83,7 @@ impl Executor {
                 if matches!(rhs, Value::Stateful(_)) {
                     return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
-                heap_replace(key, rhs);
+                heap_replace(key, rhs.elide_lvalue_leader_rec());
             }
         }
 

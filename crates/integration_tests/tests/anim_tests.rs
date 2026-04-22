@@ -1,7 +1,7 @@
 // animation test framework and tests
 // covers: slide durations, leader values, multi-slide scenes, stdlib usage
 
-use std::{f64, fs, path::Path, rc::Rc, sync::Arc};
+use std::{cell::Cell, f64, fs, path::Path, rc::Rc, sync::Arc};
 
 use compiler::cache::CompilerCache;
 use executor::{
@@ -14,6 +14,7 @@ use executor::{
     value::{
         Value,
         container::{HashableKey, List, Map},
+        stateful::stateful_cache_valid,
     },
 };
 use lexer::{lexer::Lexer, token::Token};
@@ -185,6 +186,13 @@ fn stdlib_bundles<const N: usize>(names: [&str; N]) -> [Arc<SectionBundle>; N] {
 }
 
 fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
+    fn clone_cached(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
+        let cached = cell.take();
+        let cloned = cached.as_ref().map(|value| (**value).clone());
+        cell.set(cached);
+        cloned
+    }
+
     match value {
         Value::Mesh(mesh) => out.push(Value::Mesh(mesh.clone())),
         Value::List(list) => {
@@ -193,8 +201,57 @@ fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
                 mesh_tree_leaves(&elem, out);
             }
         }
+        Value::InvokedOperator(inv) => {
+            if let Some(value) = clone_cached(&inv.cache.cached_result) {
+                mesh_tree_leaves(&value, out);
+            }
+        }
+        Value::InvokedFunction(inv) => {
+            if let Some(value) = clone_cached(&inv.cache.0) {
+                mesh_tree_leaves(&value, out);
+            }
+        }
+        Value::Lvalue(vrc) => {
+            let value = with_heap(|h| h.get(vrc.key()).clone());
+            mesh_tree_leaves(&value, out);
+        }
+        Value::WeakLvalue(vweak) => {
+            let value = with_heap(|h| h.get(vweak.key()).clone());
+            mesh_tree_leaves(&value, out);
+        }
+        Value::Leader(leader) => {
+            let value = with_heap(|h| h.get(leader.leader_rc.key()).clone());
+            mesh_tree_leaves(&value, out);
+        }
+        Value::Stateful(stateful) => {
+            if let Some(value) = stateful_cache_valid(stateful) {
+                mesh_tree_leaves(&value, out);
+            }
+        }
         _ => {}
     }
+}
+
+fn mesh_leaf_primary_tags(value: &Value) -> Vec<isize> {
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(value, &mut leaves);
+    leaves
+        .into_iter()
+        .map(|leaf| {
+            let Value::Mesh(mesh) = leaf else {
+                panic!("expected mesh leaf");
+            };
+            *mesh.tag.first().unwrap_or(&-1)
+        })
+        .collect()
+}
+
+fn sort_tag_sets(mut sets: Vec<Vec<isize>>) -> Vec<Vec<isize>> {
+    for set in &mut sets {
+        set.sort_unstable();
+    }
+    sets.sort();
+    sets
 }
 
 fn mesh_line_span(value: &Value) -> f32 {
@@ -1146,10 +1203,10 @@ fn test_lerp_custom_lerp_lambda_shapes_value_interpolation() {
 fn test_trans_anim_interpolates_meshes_without_generic_mesh_lerp() {
     let r = run_anim_impl(
         &[
-            ("mesh x = Circle()", SectionType::Init),
+            ("mesh x = Circle(1)", SectionType::Init),
             (
                 "
-                x = Square()
+                x = Square(1)
                 play Trans()
             ",
                 SectionType::Slide,
@@ -1586,10 +1643,10 @@ fn test_bend_anim_interpolates_polyline_meshes() {
 fn test_fade_anim_materializes_live_operator_meshes() {
     let r = run_anim_impl(
         &[
-            ("mesh x = Circle()", SectionType::Init),
+            ("mesh x = Circle(1)", SectionType::Init),
             (
                 "
-                x = shift{1r} Circle()
+                x = shift{1r} Circle(1)
                 play Fade()
             ",
                 SectionType::Slide,
@@ -2310,7 +2367,7 @@ fn test_write_then_trans_polyline_to_square() {
 
         play Write()
 
-        x = Square()
+        x = Square(1)
 
         play Trans()
     "#;
@@ -2368,6 +2425,79 @@ fn test_write_staggers_across_mesh_leaves() {
         second_len < 1e-6,
         "expected second leaf to still be hidden, got length {second_len}"
     );
+}
+
+#[test]
+fn test_transfer_subset_moves_only_matching_tags() {
+    let r = run_anim_impl(
+        &[
+            (
+                "
+                mesh from = [
+                    retag{1} Circle(0.5),
+                    retag{2} shift{delta: [2, 0, 0]} Circle(0.5),
+                    retag{3} shift{delta: [4, 0, 0]} Circle(0.5)
+                ]
+                mesh into = []
+            ",
+                SectionType::Init,
+            ),
+            (
+                "play TransferSubset(&from, &into, [1, 3])",
+                SectionType::Slide,
+            ),
+        ],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "mesh"]),
+    );
+    r.assert_ok();
+
+    let mesh_leaders = r.mesh_leaders();
+    assert_eq!(mesh_leaders.len(), 2, "expected from/into mesh leaders");
+    let current_sets = sort_tag_sets(
+        mesh_leaders
+            .iter()
+            .map(|leader| mesh_leaf_primary_tags(&leader.current))
+            .collect(),
+    );
+    assert_eq!(current_sets, vec![vec![1, 3], vec![2]]);
+}
+
+#[test]
+fn test_copy_subset_keeps_source_and_copies_predicate_match() {
+    let r = run_anim_impl(
+        &[
+            (
+                "
+                mesh from = [
+                    retag{1} Circle(0.5),
+                    retag{2} shift{delta: [2, 0, 0]} Circle(0.5)
+                ]
+                mesh into = [retag{9} shift{delta: [4, 0, 0]} Circle(0.5)]
+            ",
+                SectionType::Init,
+            ),
+            (
+                "play CopySubset(&from, &into, |tag| 2 in tag)",
+                SectionType::Slide,
+            ),
+        ],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "mesh"]),
+    );
+    r.assert_ok();
+
+    let mesh_leaders = r.mesh_leaders();
+    assert_eq!(mesh_leaders.len(), 2, "expected from/into mesh leaders");
+    let current_sets = sort_tag_sets(
+        mesh_leaders
+            .iter()
+            .map(|leader| mesh_leaf_primary_tags(&leader.current))
+            .collect(),
+    );
+    assert_eq!(current_sets, vec![vec![1, 2], vec![2, 9]]);
 }
 
 #[test]
@@ -2552,19 +2682,22 @@ fn test_write_reveals_boundary_before_fill() {
         .into_iter()
         .next()
         .expect("expected mesh leader");
-    let Value::Mesh(mesh) = &leader.current else {
-        panic!("expected current mesh");
-    };
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut leaves);
+    assert!(!leaves.is_empty(), "expected current mesh leaves");
 
-    let max_line_len = mesh
-        .lins
+    let max_line_len = leaves.iter().map(mesh_line_span).fold(0.0, f32::max);
+    let max_fill_alpha = leaves
         .iter()
-        .map(|lin| (lin.b.pos - lin.a.pos).len())
-        .fold(0.0, f32::max);
-    let max_fill_alpha = mesh
-        .tris
-        .iter()
-        .map(|tri| tri.a.col.w.max(tri.b.col.w).max(tri.c.col.w))
+        .map(|leaf| {
+            let Value::Mesh(mesh) = leaf else {
+                panic!("expected mesh leaf");
+            };
+            mesh.tris
+                .iter()
+                .map(|tri| tri.a.col.w.max(tri.b.col.w).max(tri.c.col.w))
+                .fold(0.0, f32::max)
+        })
         .fold(0.0, f32::max);
 
     assert!(max_line_len > 0.01, "expected boundary to be visible");

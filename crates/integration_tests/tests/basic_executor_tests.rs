@@ -1264,6 +1264,21 @@ fn test_exec_operator_chain_same_operator_multiple_times() {
 }
 
 #[test]
+fn test_exec_operator_may_return_live_operator() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let wrap = operator |target, amount| {
+            return add{amount} target
+        }
+        let x = 40
+        let result = wrap{2} x
+    ");
+    r.assert_elided_int(42);
+}
+
+#[test]
 fn test_exec_labeled_operator_arg_readable() {
     let r = run("
         let add = operator |target, amount| {
@@ -2096,7 +2111,7 @@ fn test_mesh_operator_filter_applies_predicate_to_subset() {
             retag{1} Circle(1),
             retag{2} shift{delta: [4, 0, 0]} Circle(1)
         ]
-        let shifted = shift{delta: 10 * 1r, filter: |tag| tag == 1} scene
+        let shifted = shift{delta: 10 * 1r, filter: |tag| 1 in tag} scene
         let x1 = mesh_center(tag_filter(shifted, 1))[0]
         let x2 = mesh_center(tag_filter(shifted, 2))[0]
         let result = (abs(x1 - 10) < 0.001) + (abs(x2 - 4) < 0.001)
@@ -2114,7 +2129,7 @@ fn test_subset_map_applies_mapping_to_matching_subset() {
             retag{1} Circle(1),
             retag{2} shift{delta: [4, 0, 0]} Circle(1)
         ]
-        let shifted = subset_map{filter: |tag| tag == 1, f: |m| shift{delta: 10 * 1r} m} scene
+        let shifted = subset_map{filter: |tag| 1 in tag, f: |m| shift{delta: 10 * 1r} m} scene
         let x1 = mesh_center(tag_filter(shifted, 1))[0]
         let x2 = mesh_center(tag_filter(shifted, 2))[0]
         let result = (abs(x1 - 10) < 0.001) + (abs(x2 - 4) < 0.001)
@@ -2150,6 +2165,33 @@ fn test_to_side_and_to_corner_use_default_camera_when_omitted() {
         &["mesh"],
     );
     r.assert_int(4);
+}
+
+#[test]
+fn test_label_places_tex_to_requested_side() {
+    let r = run_with_stdlib(
+        "
+        let target = Circle(1)
+        let right = Label(target, \"A^2\", 1, 1r)
+        let up = Label(target, \"B\", 1, 1u)
+        let result = (mesh_center(right)[0] > mesh_right(target)[0]) + (mesh_center(up)[1] > mesh_up(target)[1])
+    ",
+        &["mesh"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_label_preserves_cross_axis_alignment() {
+    let r = run_with_stdlib(
+        "
+        let target = shift{delta: [2, 3, 0]} Circle(1)
+        let left = Label(target, \"C\", 1, 1l)
+        let result = abs(mesh_center(left)[1] - mesh_center(target)[1]) < 0.001
+    ",
+        &["mesh", "math"],
+    );
+    r.assert_int(1);
 }
 
 #[test]

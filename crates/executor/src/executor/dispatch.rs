@@ -93,6 +93,16 @@ impl Executor {
                     .promote_to_leader(stack_idx, LeaderKind::Param, name);
             }
 
+            Instruction::PushDeepCopy { stack_delta } => {
+                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
+                let lvalue_resolved = val.elide_lvalue_leader_rec();
+
+                if let Value::Stateful(_) = lvalue_resolved {
+                    return ExecSingle::Error(ExecutorError::direct_stateful_copy());
+                }
+
+                self.state.stack_mut(stack_idx).push(lvalue_resolved);
+            }
             Instruction::PushCopy {
                 stack_delta,
                 mutable,

@@ -1323,6 +1323,43 @@ pub(super) fn filter_tree_by_tag(tree: MeshTree, tags: &HashSet<isize>) -> Optio
     }
 }
 
+fn pack_tree_children(children: Vec<MeshTree>) -> Option<MeshTree> {
+    match children.len() {
+        0 => None,
+        1 => children.into_iter().next(),
+        _ => Some(MeshTree::List(children)),
+    }
+}
+
+pub(super) fn split_tree_by_tag(
+    tree: MeshTree,
+    tags: &HashSet<isize>,
+) -> (Option<MeshTree>, Option<MeshTree>) {
+    match tree {
+        MeshTree::Mesh(mesh) => {
+            if mesh.tag.iter().any(|tag| tags.contains(tag)) {
+                (Some(MeshTree::Mesh(mesh)), None)
+            } else {
+                (None, Some(MeshTree::Mesh(mesh)))
+            }
+        }
+        MeshTree::List(children) => {
+            let mut matched = Vec::new();
+            let mut unmatched = Vec::new();
+            for child in children {
+                let (child_matched, child_unmatched) = split_tree_by_tag(child, tags);
+                if let Some(child_matched) = child_matched {
+                    matched.push(child_matched);
+                }
+                if let Some(child_unmatched) = child_unmatched {
+                    unmatched.push(child_unmatched);
+                }
+            }
+            (pack_tree_children(matched), pack_tree_children(unmatched))
+        }
+    }
+}
+
 pub(super) async fn mesh_matches_tag_filter(
     executor: &mut Executor,
     filter: &TagFilter,
@@ -1331,16 +1368,15 @@ pub(super) async fn mesh_matches_tag_filter(
     match filter {
         TagFilter::Exact(tags) => Ok(mesh.tag.iter().any(|tag| tags.contains(tag))),
         TagFilter::Predicate(lambda) => {
-            for &tag in &mesh.tag {
-                let value = executor
-                    .invoke_lambda(lambda, vec![Value::Integer(tag as i64)])
-                    .await?;
-                let value = value.elide_wrappers(executor).await?;
-                if value.check_truthy()? {
-                    return Ok(true);
-                }
-            }
-            Ok(false)
+            let tags = list_value(
+                mesh.tag
+                    .iter()
+                    .copied()
+                    .map(|tag| Value::Integer(tag as i64)),
+            );
+            let value = executor.invoke_lambda(lambda, vec![tags]).await?;
+            let value = value.elide_wrappers(executor).await?;
+            value.check_truthy()
         }
     }
 }
@@ -1363,6 +1399,51 @@ pub(super) async fn invoke_callable(
         }
     };
     raw.elide_wrappers(executor).await
+}
+
+pub(super) fn split_tree_by_tag_filter<'a>(
+    executor: &'a mut Executor,
+    tree: MeshTree,
+    filter: &'a TagFilter,
+) -> Pin<Box<dyn Future<Output = Result<(Option<MeshTree>, Option<MeshTree>), ExecutorError>> + 'a>>
+{
+    Box::pin(async move {
+        match tree {
+            tree @ MeshTree::Mesh(_) => match filter {
+                TagFilter::Exact(tags) => Ok(split_tree_by_tag(tree, tags)),
+                TagFilter::Predicate(_) => {
+                    let MeshTree::Mesh(mesh) = tree else {
+                        unreachable!()
+                    };
+                    let keep = mesh_matches_tag_filter(executor, filter, &mesh).await?;
+                    if keep {
+                        Ok((Some(MeshTree::Mesh(mesh)), None))
+                    } else {
+                        Ok((None, Some(MeshTree::Mesh(mesh))))
+                    }
+                }
+            },
+            MeshTree::List(children) => {
+                if let TagFilter::Exact(tags) = filter {
+                    return Ok(split_tree_by_tag(MeshTree::List(children), tags));
+                }
+
+                let mut matched = Vec::new();
+                let mut unmatched = Vec::new();
+                for child in children {
+                    let (child_matched, child_unmatched) =
+                        split_tree_by_tag_filter(executor, child, filter).await?;
+                    if let Some(child_matched) = child_matched {
+                        matched.push(child_matched);
+                    }
+                    if let Some(child_unmatched) = child_unmatched {
+                        unmatched.push(child_unmatched);
+                    }
+                }
+                Ok((pack_tree_children(matched), pack_tree_children(unmatched)))
+            }
+        }
+    })
 }
 
 pub(super) fn filter_tree_by_tag_filter<'a>(

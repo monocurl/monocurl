@@ -52,6 +52,9 @@ pub enum Instruction {
     // sync all leader followers to their leader values; emitted at end of init section
     SyncAllLeaders,
 
+    PushDeepCopy {
+        stack_delta: i32,
+    },
     // pops old tos if flag is true
     // used for map
     PushCopy {
