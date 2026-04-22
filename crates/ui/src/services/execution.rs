@@ -44,6 +44,7 @@ pub struct ExecutionSnapshot {
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,
     pub slide_count: usize,
+    pub slide_names: Vec<Option<String>>,
     pub slide_durations: Vec<Option<f64>>,
     pub minimum_slide_durations: Vec<Option<f64>>,
     pub parameters: Option<ParameterSnapshot>,

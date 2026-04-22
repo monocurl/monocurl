@@ -1,5 +1,10 @@
 use super::*;
 
+struct RootSectionTokens {
+    tokens: Vec<(Token, Span8)>,
+    name: Option<String>,
+}
+
 impl Parser {
     pub(super) fn import_err(span: Span8, message: &str) -> Diagnostic {
         Diagnostic {
@@ -138,6 +143,51 @@ impl Parser {
         (section, parser.artifacts)
     }
 
+    fn split_root_sections(
+        tokens: Vec<(Token, Span8)>,
+        text_rope: &Rope<TextAggregate>,
+    ) -> (Vec<RootSectionTokens>, ParseArtifacts) {
+        let mut sections = vec![RootSectionTokens {
+            tokens: Vec::new(),
+            name: None,
+        }];
+        let mut artifacts = ParseArtifacts::default();
+        let mut token_index = 0;
+
+        while token_index < tokens.len() {
+            if tokens[token_index].0 != Token::Slide {
+                sections
+                    .last_mut()
+                    .unwrap()
+                    .tokens
+                    .push(tokens[token_index].clone());
+                token_index += 1;
+                continue;
+            }
+
+            sections.push(RootSectionTokens {
+                tokens: Vec::new(),
+                name: None,
+            });
+            token_index += 1;
+
+            if let Some((Token::StringLiteral, span)) = tokens.get(token_index) {
+                let raw: String = text_rope.iterator_range(span.clone()).collect();
+                match SectionParser::decode_string_literal(&raw) {
+                    Ok(name) => sections.last_mut().unwrap().name = Some(name),
+                    Err(message) => artifacts.error_diagnostics.push(Diagnostic {
+                        span: span.clone(),
+                        title: "Illegal Slide Title".into(),
+                        message: message.into(),
+                    }),
+                }
+                token_index += 1;
+            }
+        }
+
+        (sections, artifacts)
+    }
+
     pub(super) fn parse_file(
         currently_parsed: &HashMap<PathBuf, Arc<SectionBundle>>,
         f: PreparsedFile,
@@ -153,17 +203,9 @@ impl Parser {
             .collect();
 
         if f.root_import_span.is_none() {
-            // split file by "slide" token
-            let sections = f.tokens.into_iter().fold(vec![vec![]], |mut acc, token| {
-                if token.0 == Token::Slide {
-                    acc.push(vec![]);
-                } else {
-                    acc.last_mut().unwrap().push(token);
-                }
-                acc
-            });
-
+            let (sections, split_artifacts) = Self::split_root_sections(f.tokens, &f.text_rope);
             let mut artifacts = ParseArtifacts::default();
+            artifacts.extend(split_artifacts);
             let mut parsed_sections = vec![];
             for (i, section) in sections.into_iter().enumerate() {
                 let stype = if i == 0 {
@@ -171,14 +213,15 @@ impl Parser {
                 } else {
                     SectionType::Slide
                 };
-                let (section, sub_artifacts) = Self::parse_section(
-                    section,
+                let (mut parsed_section, sub_artifacts) = Self::parse_section(
+                    section.tokens,
                     f.text_rope.clone(),
                     stype,
                     cursor.clone(),
                     f.root_import_span.clone(),
                 );
-                parsed_sections.push(section);
+                parsed_section.name = section.name;
+                parsed_sections.push(parsed_section);
                 artifacts.extend(sub_artifacts);
             }
 

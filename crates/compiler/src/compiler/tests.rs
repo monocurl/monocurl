@@ -40,6 +40,7 @@ mod test {
             sections: vec![Section {
                 body: stmts,
                 section_type,
+                name: None,
             }],
             root_import_span: None,
             was_cached: false,
@@ -95,6 +96,26 @@ mod test {
             let msgs: Vec<_> = result.errors.iter().map(|e| e.message.as_str()).collect();
             panic!("expected no errors, got: {:?}", msgs);
         }
+    }
+
+    #[test]
+    fn test_section_name_is_written_to_bytecode() {
+        let bundle = Arc::new(SectionBundle {
+            file_path: Some(PathBuf::new()),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section {
+                body: parse_stmts("let x = 1"),
+                section_type: SectionType::Slide,
+                name: Some("Intro".into()),
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+
+        let result = test_compile(&[bundle]);
+        no_errors(&result);
+        assert_eq!(result.bytecode.sections[1].name.as_deref(), Some("Intro"));
     }
 
     #[test]
@@ -328,6 +349,7 @@ mod test {
                     value: s(Expression::Literal(Literal::Int(7))),
                 }))],
                 section_type: SectionType::UserLibrary,
+                name: None,
             }],
             root_import_span: None,
             was_cached: false,
@@ -341,6 +363,7 @@ mod test {
                     IdentifierReference::Value("x".into()),
                 )))],
                 section_type: SectionType::Slide,
+                name: None,
             }],
             root_import_span: None,
             was_cached: false,
@@ -362,6 +385,7 @@ mod test {
                     value: s(Expression::Literal(Literal::Int(0))),
                 }))],
                 section_type: SectionType::UserLibrary,
+                name: None,
             }],
             root_import_span: None,
             was_cached: false,
@@ -381,6 +405,7 @@ mod test {
                     },
                 )))],
                 section_type: SectionType::Slide,
+                name: None,
             }],
             root_import_span: None,
             was_cached: false,

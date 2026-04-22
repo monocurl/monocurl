@@ -17,6 +17,7 @@ pub struct ExecutionState {
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,
     /// cached duration of each slide; None if the slide hasn't been fully executed yet
+    pub slide_names: Vec<Option<String>>,
     pub slide_durations: Vec<Option<f64>>,
     pub minimum_slide_durations: Vec<Option<f64>>,
     pub parameters: Option<ParameterSnapshot>,
@@ -33,6 +34,7 @@ impl Default for ExecutionState {
             parameter_state: HashMap::new(),
             current_timestamp: Timestamp::default(),
             status: ExecutionStatus::Paused,
+            slide_names: Vec::new(),
             slide_durations: Vec::new(),
             minimum_slide_durations: Vec::new(),
             parameters: None,
@@ -61,6 +63,7 @@ impl ExecutionState {
         }
         self.current_timestamp = snapshot.current_timestamp;
         self.status = snapshot.status;
+        self.slide_names = snapshot.slide_names;
         // causes visual glitches if in seek mode
         if snapshot.status != ExecutionStatus::Seeking {
             self.slide_durations = snapshot.slide_durations;

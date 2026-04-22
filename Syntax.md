@@ -173,6 +173,10 @@ All this means is a pause / cache point. Stuff before the first slide is special
 # previous animations
 slide
 # current slide animations
+
+# optional same-line title for the timeline
+slide "Intro"
+# current slide animations
 ```
 
 ## Import

@@ -42,6 +42,7 @@ impl SectionBundle {
 pub struct Section {
     pub body: Vec<SpanTagged<Statement>>,
     pub section_type: SectionType,
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
