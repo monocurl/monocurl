@@ -141,6 +141,19 @@ fn test_exec_mesh_leader_labeled_attribute_binary_ops_elide_leader() {
 }
 
 #[test]
+fn test_exec_mesh_leader_labeled_attribute_power_elide_leader() {
+    let r = run_section(
+        "
+        let hello = |origin, radius| origin + radius
+        mesh base = hello(origin: 4, radius: 2)
+        let result = base.origin ^ 2
+    ",
+        SectionType::Slide,
+    );
+    r.assert_float(16.0);
+}
+
+#[test]
 fn test_exec_labeled_operator_mutation_updates_downstream_value() {
     let r = run("
         let add = operator |target, amount| {

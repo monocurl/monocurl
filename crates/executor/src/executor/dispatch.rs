@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
-use bytecode::Instruction;
+use bytecode::{CopyValueMode, Instruction};
 
 use crate::{
     error::ExecutorError,
-    heap::with_heap,
+    heap::{with_heap, with_heap_mut},
     state::LeaderKind,
     value::{
         Value,
@@ -105,24 +105,24 @@ impl Executor {
             }
             Instruction::PushCopy {
                 stack_delta,
-                mutable,
+                copy_mode,
                 pop_tos,
             } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let lvalue_resolved = if mutable {
-                    val.force_elide_lvalue()
-                } else {
-                    val.elide_lvalue().elide_leader()
+                let copied = match copy_mode {
+                    CopyValueMode::Read => val.elide_lvalue().elide_leader(),
+                    CopyValueMode::Reference => val.force_elide_lvalue(),
+                    CopyValueMode::Raw => val,
                 };
 
-                if let Value::Stateful(_) = lvalue_resolved {
+                if let Value::Stateful(_) = copied {
                     return ExecSingle::Error(ExecutorError::direct_stateful_copy());
                 }
 
                 if pop_tos {
                     self.state.stack_mut(stack_idx).pop();
                 }
-                self.state.stack_mut(stack_idx).push(lvalue_resolved);
+                self.state.stack_mut(stack_idx).push(copied);
             }
             Instruction::PushLvalue {
                 stack_delta,
@@ -283,6 +283,29 @@ impl Executor {
 
             Instruction::NativeInvoke { index, arg_count } => {
                 return self.exec_native_invoke(stack_idx, index, arg_count).await;
+            }
+            Instruction::IncrementByOne { stack_delta } => {
+                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
+                let Some(key) = val.as_lvalue_key() else {
+                    return ExecSingle::Error(ExecutorError::type_error("lvalue", val.type_name()));
+                };
+                let result = with_heap_mut(|heap| {
+                    let mut cell = heap.get_mut(key);
+                    match &mut *cell {
+                        Value::Integer(n) => {
+                            *n += 1;
+                            Ok(())
+                        }
+                        Value::Float(f) => {
+                            *f += 1.0;
+                            Ok(())
+                        }
+                        other => Err(ExecutorError::type_error("int / float", other.type_name())),
+                    }
+                });
+                if let Err(err) = result {
+                    return ExecSingle::Error(err);
+                }
             }
 
             Instruction::Play => {

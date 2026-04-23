@@ -392,18 +392,35 @@ impl Executor {
                 Value::InvokedFunction(ref inv) => {
                     let label_idx = inv.body.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
-                        let arg_val = inv.body.arguments[arg_idx].clone();
-                        let arg_ref = VRc::new(arg_val);
-                        with_heap_mut(|h| {
-                            if let Value::InvokedFunction(inv_mut) = &mut *h.get_mut(base_key) {
-                                Rc::make_mut(&mut inv_mut.body).arguments[arg_idx] =
-                                    Value::Lvalue(arg_ref.clone());
-                                inv_mut.cache.0.take();
-                            }
-                        });
-                        self.state
-                            .stack_mut(stack_idx)
-                            .push(Value::WeakLvalue(arg_ref.downgrade()));
+                        if inv
+                            .body
+                            .boxed_arguments
+                            .get(arg_idx)
+                            .copied()
+                            .unwrap_or(false)
+                        {
+                            let key = inv.body.arguments[arg_idx]
+                                .as_lvalue_key()
+                                .expect("boxed live function arg must stay addressable");
+                            self.state
+                                .stack_mut(stack_idx)
+                                .push(Value::WeakLvalue(VWeak::from(key)));
+                        } else {
+                            let arg_val = inv.body.arguments[arg_idx].clone();
+                            let arg_ref = VRc::new(arg_val);
+                            with_heap_mut(|h| {
+                                if let Value::InvokedFunction(inv_mut) = &mut *h.get_mut(base_key) {
+                                    let body = Rc::make_mut(&mut inv_mut.body);
+                                    body.arguments[arg_idx] = Value::Lvalue(arg_ref.clone());
+                                    body.boxed_arguments.resize(body.arguments.len(), false);
+                                    body.boxed_arguments[arg_idx] = true;
+                                    inv_mut.cache.0.take();
+                                }
+                            });
+                            self.state
+                                .stack_mut(stack_idx)
+                                .push(Value::WeakLvalue(arg_ref.downgrade()));
+                        }
                     } else {
                         return ExecSingle::Error(ExecutorError::missing_labeled_argument(
                             attr_name.clone(),
@@ -413,33 +430,62 @@ impl Executor {
                 Value::InvokedOperator(ref inv) => {
                     let label_idx = inv.body.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
-                        let arg_val = inv.body.arguments[arg_idx].clone();
-                        let arg_ref = VRc::new(arg_val);
-                        with_heap_mut(|h| {
-                            if let Value::InvokedOperator(inv_mut) = &mut *h.get_mut(base_key) {
-                                Rc::make_mut(&mut inv_mut.body).arguments[arg_idx] =
-                                    Value::Lvalue(arg_ref.clone());
-                                inv_mut.cache.cached_result.take();
-                                inv_mut.cache.unmodified.take();
-                            }
-                        });
-                        self.state
-                            .stack_mut(stack_idx)
-                            .push(Value::WeakLvalue(arg_ref.downgrade()));
+                        if inv
+                            .body
+                            .boxed_arguments
+                            .get(arg_idx)
+                            .copied()
+                            .unwrap_or(false)
+                        {
+                            let key = inv.body.arguments[arg_idx]
+                                .as_lvalue_key()
+                                .expect("boxed live operator arg must stay addressable");
+                            self.state
+                                .stack_mut(stack_idx)
+                                .push(Value::WeakLvalue(VWeak::from(key)));
+                        } else {
+                            let arg_val = inv.body.arguments[arg_idx].clone();
+                            let arg_ref = VRc::new(arg_val);
+                            with_heap_mut(|h| {
+                                if let Value::InvokedOperator(inv_mut) = &mut *h.get_mut(base_key) {
+                                    let body = Rc::make_mut(&mut inv_mut.body);
+                                    body.arguments[arg_idx] = Value::Lvalue(arg_ref.clone());
+                                    body.boxed_arguments.resize(body.arguments.len(), false);
+                                    body.boxed_arguments[arg_idx] = true;
+                                    inv_mut.cache.cached_result.take();
+                                    inv_mut.cache.unmodified.take();
+                                }
+                            });
+                            self.state
+                                .stack_mut(stack_idx)
+                                .push(Value::WeakLvalue(arg_ref.downgrade()));
+                        }
                     } else {
-                        let operand_ref =
-                            VRc::new(inv.body.operand.as_ref().clone().elide_lvalue());
-                        with_heap_mut(|h| {
-                            if let Value::InvokedOperator(inv_mut) = &mut *h.get_mut(base_key) {
-                                Rc::make_mut(&mut inv_mut.body).operand =
-                                    Box::new(Value::Lvalue(operand_ref.clone()));
-                                inv_mut.cache.cached_result.take();
-                                inv_mut.cache.unmodified.take();
-                            }
-                        });
-                        self.state
-                            .stack_mut(stack_idx)
-                            .push(Value::WeakLvalue(operand_ref.downgrade()));
+                        if inv.body.boxed_operand {
+                            let key = inv
+                                .body
+                                .operand
+                                .as_ref()
+                                .as_lvalue_key()
+                                .expect("boxed live operator operand must stay addressable");
+                            self.state
+                                .stack_mut(stack_idx)
+                                .push(Value::WeakLvalue(VWeak::from(key)));
+                        } else {
+                            let operand_ref = VRc::new(inv.body.operand.as_ref().clone());
+                            with_heap_mut(|h| {
+                                if let Value::InvokedOperator(inv_mut) = &mut *h.get_mut(base_key) {
+                                    let body = Rc::make_mut(&mut inv_mut.body);
+                                    body.operand = Box::new(Value::Lvalue(operand_ref.clone()));
+                                    body.boxed_operand = true;
+                                    inv_mut.cache.cached_result.take();
+                                    inv_mut.cache.unmodified.take();
+                                }
+                            });
+                            self.state
+                                .stack_mut(stack_idx)
+                                .push(Value::WeakLvalue(operand_ref.downgrade()));
+                        }
                         return self.exec_attribute(stack_idx, section_idx, true, string_index);
                     }
                 }

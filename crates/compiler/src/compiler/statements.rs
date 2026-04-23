@@ -109,7 +109,12 @@ impl Compiler {
                 );
             }
         }
-        self.define_symbol(&d.identifier.1.0, vt, SymbolFunctionInfo::from(&d.value.1));
+        self.define_symbol(
+            &d.identifier.1.0,
+            vt,
+            SymbolFunctionInfo::from(&d.value.1),
+            false,
+        );
     }
 
     pub(super) fn compile_while(&mut self, w: &While, span: &Span8) {
@@ -162,7 +167,12 @@ impl Compiler {
             },
             container_span.clone(),
         );
-        self.define_symbol("\x00iter", VariableType::Let, SymbolFunctionInfo::None);
+        self.define_symbol(
+            "\x00iter",
+            VariableType::Let,
+            SymbolFunctionInfo::None,
+            false,
+        );
 
         self.emit_push_int(0, span.clone());
         let idx_pos = self.stack_depth() - 1;
@@ -172,7 +182,12 @@ impl Compiler {
             },
             span.clone(),
         );
-        self.define_symbol("\x00idx", VariableType::Var, SymbolFunctionInfo::None);
+        self.define_symbol(
+            "\x00idx",
+            VariableType::Var,
+            SymbolFunctionInfo::None,
+            false,
+        );
 
         let condition_ip = self.instruction_pointer();
         let loop_stack = self.stack_depth();
@@ -216,7 +231,12 @@ impl Compiler {
             container_span.clone(),
         );
         self.dec_stack(1);
-        self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
+        self.define_symbol(
+            &f.var_name.1.0,
+            VariableType::Let,
+            SymbolFunctionInfo::None,
+            false,
+        );
         self.emit(
             Instruction::ConvertVar {
                 allow_stateful: false,
@@ -241,17 +261,9 @@ impl Compiler {
             self.patch_jump(patch, increment_ip);
         }
 
-        // idx = idx + 1
+        // idx += 1
         let d = self.stack_delta(idx_pos);
-        self.emit_lvalue(d, span.clone());
-        let d = self.stack_delta(idx_pos);
-        self.emit_copy(d, span.clone());
-        self.emit_push_int(1, span.clone());
-        self.emit(Instruction::Add, span.clone());
-        self.dec_stack(1);
-        self.emit(Instruction::Assign, span.clone());
-        self.dec_stack(1);
-        self.emit_pops(1, span.clone()); // discard assign result, depth = loop_stack
+        self.emit(Instruction::IncrementByOne { stack_delta: d }, span.clone());
 
         self.emit_jump_to(condition_ip, span.clone());
 
@@ -287,6 +299,7 @@ impl Compiler {
             "\x00range_current",
             VariableType::Var,
             SymbolFunctionInfo::None,
+            false,
         );
 
         self.compile_val(&stop.1, &stop.0);
@@ -301,6 +314,7 @@ impl Compiler {
             "\x00range_stop",
             VariableType::Let,
             SymbolFunctionInfo::None,
+            false,
         );
 
         let condition_ip = self.instruction_pointer();
@@ -326,7 +340,12 @@ impl Compiler {
         self.push_scope();
         let d = self.stack_delta(current_pos);
         self.emit_copy(d, start.0.clone());
-        self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
+        self.define_symbol(
+            &f.var_name.1.0,
+            VariableType::Let,
+            SymbolFunctionInfo::None,
+            false,
+        );
         self.emit(
             Instruction::ConvertVar {
                 allow_stateful: false,
@@ -351,15 +370,7 @@ impl Compiler {
         }
 
         let d = self.stack_delta(current_pos);
-        self.emit_lvalue(d, span.clone());
-        let d = self.stack_delta(current_pos);
-        self.emit_copy(d, span.clone());
-        self.emit_push_int(1, span.clone());
-        self.emit(Instruction::Add, span.clone());
-        self.dec_stack(1);
-        self.emit(Instruction::Assign, span.clone());
-        self.dec_stack(1);
-        self.emit_pops(1, span.clone());
+        self.emit(Instruction::IncrementByOne { stack_delta: d }, span.clone());
 
         self.emit_jump_to(condition_ip, span.clone());
 

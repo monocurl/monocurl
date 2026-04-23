@@ -49,6 +49,19 @@ impl Executor {
             return ExecSingle::Continue;
         }
 
+        let lhs = elide_lvalue_leader_shallow(lhs);
+        let rhs = elide_lvalue_leader_shallow(rhs);
+
+        if is_plain_numeric(&lhs) && is_plain_numeric(&rhs) {
+            return match eval_binary(&lhs, &rhs, op) {
+                Ok(val) => {
+                    self.state.stack_mut(stack_idx).push(val);
+                    ExecSingle::Continue
+                }
+                Err(e) => ExecSingle::Error(e),
+            };
+        }
+
         let lhs = match lhs.elide_wrappers(self).await {
             Ok(val) => val,
             Err(e) => return ExecSingle::Error(e),
@@ -92,6 +105,19 @@ impl Executor {
         val.check_truthy()
             .map(|truthy| Value::Integer(!truthy as i64))
     }
+}
+
+#[inline(always)]
+fn elide_lvalue_leader_shallow(value: Value) -> Value {
+    value.elide_lvalue().elide_leader()
+}
+
+#[inline(always)]
+fn is_plain_numeric(value: &Value) -> bool {
+    matches!(
+        value,
+        Value::Integer(_) | Value::Float(_) | Value::Complex { .. }
+    )
 }
 
 /// promote a pair of values so mixed int/float/complex operations work.

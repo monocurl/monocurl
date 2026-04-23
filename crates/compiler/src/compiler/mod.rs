@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bytecode::{
-    AnimPrototype, Bytecode, Instruction, InstructionAnnotation, LambdaPrototype, SectionBytecode,
-    SectionFlags,
+    AnimPrototype, Bytecode, CopyValueMode, Instruction, InstructionAnnotation, LambdaPrototype,
+    SectionBytecode, SectionFlags,
 };
 use free_vars::{free_lvalue_refs_expr, free_vars_expr, free_vars_stmts};
 use parser::ast::{
@@ -135,6 +135,7 @@ pub struct Symbol {
     imported: bool,
     declared_in_stdlib: bool,
     stack_position: usize,
+    preserve_lvalues_on_copy: bool,
     // how the symbol looks like to the current bundle
     // may appear as let, even though declared as var
     pub var_type: VariableType,
@@ -333,7 +334,7 @@ impl Compiler {
             );
             let name_index = self.intern_string(var);
             self.emit(Instruction::ConvertParam { name_index }, 0..0);
-            self.define_symbol(var, VariableType::Param, SymbolFunctionInfo::None);
+            self.define_symbol(var, VariableType::Param, SymbolFunctionInfo::None, false);
         }
 
         self.emit(Instruction::EndOfExecutionHead, 0..0);
@@ -588,9 +589,20 @@ impl Compiler {
     fn emit_copy(&mut self, stack_delta: i32, span: Span8) {
         self.emit_push(
             Instruction::PushCopy {
+                copy_mode: CopyValueMode::Read,
                 stack_delta,
                 pop_tos: false,
-                mutable: false,
+            },
+            span,
+        );
+    }
+
+    fn emit_raw_copy(&mut self, stack_delta: i32, span: Span8) {
+        self.emit_push(
+            Instruction::PushCopy {
+                copy_mode: CopyValueMode::Raw,
+                stack_delta,
+                pop_tos: false,
             },
             span,
         );
@@ -599,12 +611,21 @@ impl Compiler {
     fn emit_copy_ref(&mut self, stack_delta: i32, span: Span8) {
         self.emit_push(
             Instruction::PushCopy {
+                copy_mode: CopyValueMode::Reference,
                 stack_delta,
                 pop_tos: false,
-                mutable: true,
             },
             span,
         );
+    }
+
+    fn emit_symbol_copy(&mut self, symbol: &Symbol, span: Span8) {
+        let stack_delta = self.stack_delta(symbol.stack_position);
+        if symbol.preserve_lvalues_on_copy {
+            self.emit_raw_copy(stack_delta, span);
+        } else {
+            self.emit_copy(stack_delta, span);
+        }
     }
 
     fn emit_lvalue(&mut self, stack_delta: i32, span: Span8) {
@@ -689,6 +710,7 @@ impl Compiler {
         name: &str,
         var_type: VariableType,
         function_info: SymbolFunctionInfo,
+        preserve_lvalues_on_copy: bool,
     ) {
         let position = self.stack_depth() - 1;
         let declared_in_stdlib = self.current_section().flags.is_stdlib;
@@ -698,6 +720,7 @@ impl Compiler {
                 name: name.to_string(),
                 declared_in_stdlib,
                 stack_position: position,
+                preserve_lvalues_on_copy,
                 var_type,
                 function_info,
                 imported: false,
@@ -711,6 +734,7 @@ impl Compiler {
         var_type: VariableType,
         function_info: SymbolFunctionInfo,
         position: usize,
+        preserve_lvalues_on_copy: bool,
     ) {
         let declared_in_stdlib = self.current_section().flags.is_stdlib;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
@@ -719,6 +743,7 @@ impl Compiler {
                 name: name.to_string(),
                 declared_in_stdlib,
                 stack_position: position,
+                preserve_lvalues_on_copy,
                 var_type,
                 function_info,
                 imported: false,

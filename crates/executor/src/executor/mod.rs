@@ -21,9 +21,7 @@ use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
 pub(crate) use self::invoke::{fill_defaults, prepare_eager_call_args};
-use self::memory::{
-    EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker,
-};
+use self::memory::{EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker};
 
 pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
 
@@ -81,7 +79,10 @@ impl Executor {
             cache,
             yielder: PeriodicYielder::default(),
             text_render_quality: TextRenderQuality::Normal,
-            memory_checker: PeriodicMemoryChecker::new(EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD),
+            memory_checker: PeriodicMemoryChecker::new(
+                EXECUTOR_HEAP_SLOT_LIMIT,
+                MEMORY_CHECK_PERIOD,
+            ),
         }
     }
 
@@ -161,7 +162,7 @@ impl Executor {
         let section_idx = ip.0 as usize;
         let instr_idx = ip.1 as usize;
 
-        let instr = self.bytecode.sections[section_idx].instructions[instr_idx].clone();
+        let instr = self.bytecode.sections[section_idx].instructions[instr_idx];
 
         self.state.stack_mut(stack_idx).ip = (section_idx as u16, (instr_idx + 1) as u32);
 

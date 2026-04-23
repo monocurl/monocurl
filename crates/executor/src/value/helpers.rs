@@ -10,6 +10,7 @@ use super::{
 };
 
 impl Value {
+    #[inline(always)]
     pub fn check_truthy(&self) -> Result<bool, ExecutorError> {
         match self {
             Value::Integer(n) => Ok(*n != 0),
@@ -19,6 +20,7 @@ impl Value {
         }
     }
 
+    #[inline(always)]
     fn may_need_lvalue_leader_elision(&self) -> bool {
         self.is_lvalue() || matches!(self, Value::List(_) | Value::Leader(_))
     }
@@ -64,6 +66,7 @@ impl Value {
     }
 
     /// read through an lvalue or weak lvalue
+    #[inline(always)]
     pub fn elide_lvalue(self) -> Value {
         match self {
             Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()),
@@ -92,6 +95,7 @@ impl Value {
         }
     }
 
+    #[inline(always)]
     pub fn elide_leader(self) -> Value {
         match self {
             Value::Leader(ref leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
@@ -99,6 +103,7 @@ impl Value {
         }
     }
 
+    #[inline(always)]
     pub fn force_elide_lvalue(&self) -> Value {
         match self {
             Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()),
@@ -108,6 +113,7 @@ impl Value {
     }
 
     /// try to get the underlying HeapKey (upgrading weak refs).
+    #[inline(always)]
     pub fn as_lvalue_key(&self) -> Option<HeapKey> {
         match self {
             Value::Lvalue(vrc) => Some(vrc.key()),
@@ -116,6 +122,7 @@ impl Value {
         }
     }
 
+    #[inline(always)]
     pub fn is_lvalue(&self) -> bool {
         matches!(self, Value::Lvalue(_) | Value::WeakLvalue(_))
     }

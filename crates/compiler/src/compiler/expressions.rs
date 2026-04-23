@@ -111,7 +111,7 @@ impl Compiler {
                         span.clone(),
                     );
                 } else {
-                    self.emit_copy(delta, span.clone());
+                    self.emit_symbol_copy(&sym, span.clone());
                 }
             }
             IdentifierReference::StatefulReference(_) => {
@@ -220,9 +220,9 @@ impl Compiler {
         }
         self.emit(
             Instruction::PushCopy {
+                copy_mode: CopyValueMode::Read,
                 pop_tos: true,
                 stack_delta: -1,
-                mutable: false,
             },
             span.clone(),
         );
@@ -349,12 +349,6 @@ impl Compiler {
         // but it also guarantees deepest first ordering for references
         for (_, arg) in &l.arguments.1 {
             self.compile_val(&arg.1, &arg.0);
-            self.emit(
-                Instruction::ConvertVar {
-                    allow_stateful: stateful,
-                },
-                arg.0.clone(),
-            );
         }
         self.compile_expr(false, Some(&l.arguments), &l.lambda.1, &l.lambda.0);
 
@@ -392,20 +386,8 @@ impl Compiler {
         let invoke_span = o.operator.0.start..o.arguments.0.end;
 
         self.compile_val(&o.operand.1, &o.operand.0);
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: true,
-            },
-            o.operand.0.clone(),
-        );
         for (_, arg) in &o.arguments.1 {
             self.compile_val(&arg.1, &arg.0);
-            self.emit(
-                Instruction::ConvertVar {
-                    allow_stateful: true,
-                },
-                arg.0.clone(),
-            );
         }
         self.compile_expr(false, Some(&o.arguments), &o.operator.1, &o.operator.0);
 

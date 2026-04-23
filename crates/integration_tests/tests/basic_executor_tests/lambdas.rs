@@ -54,6 +54,29 @@ fn test_exec_lambda_default_arg_overridden() {
 }
 
 #[test]
+fn test_exec_reference_default_arg_omitted() {
+    let r = run("
+        let base = 7
+        let read = |&x = base| x + 1
+        let result = read()
+    ");
+    r.assert_int(8);
+}
+
+#[test]
+fn test_exec_reference_default_arg_mutation_is_error() {
+    let r = run("
+        let base = 7
+        let write = |&x = base| {
+            x = 1
+            return []
+        }
+        write()
+    ");
+    r.assert_error("cannot assign");
+}
+
+#[test]
 fn test_exec_mod_preserves_integer_result_for_integer_inputs() {
     let r = run_section(
         "
@@ -202,6 +225,39 @@ fn test_exec_lambda_returns_lambda() {
         let result = add5(37)
     ");
     r.assert_int(42);
+}
+
+#[test]
+fn test_exec_lambda_by_value_preserves_passed_reference() {
+    let r = run("
+        param x = 1
+        let passthrough = |a| a
+        let set = |&y| {
+            y = 7
+            return []
+        }
+        set(passthrough(&x))
+        let result = *x
+    ");
+    r.assert_int(7);
+}
+
+#[test]
+fn test_exec_lambda_capture_preserves_passed_reference() {
+    let r = run("
+        param x = 1
+        let passthrough = |a| {
+            let inner = || a
+            return inner()
+        }
+        let set = |&y| {
+            y = 7
+            return []
+        }
+        set(passthrough(&x))
+        let result = *x
+    ");
+    r.assert_int(7);
 }
 
 #[test]

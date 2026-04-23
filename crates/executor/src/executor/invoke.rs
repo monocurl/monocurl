@@ -45,7 +45,7 @@ impl Executor {
         let defaults: SmallVec<[Value; 1]> = stack.var_stack
             [start + capture_count as usize..stack_len]
             .iter()
-            .map(|def| Value::Lvalue(VRc::new(def.clone())))
+            .cloned()
             .collect();
         stack.pop_n(total_pop);
 
@@ -54,6 +54,7 @@ impl Executor {
             captures,
             required_args: proto.required_args as u16,
             defaults,
+            reference_args: proto.reference_args,
         });
         self.state.stack_mut(stack_idx).push(Value::Lambda(lambda));
     }
@@ -121,6 +122,11 @@ impl Executor {
                 operator: false,
             });
         }
+        if !stateful
+            && let Some(error) = self.ensure_non_stateful_lambda_args(stack_idx, num_args as usize)
+        {
+            return ExecSingle::Error(error);
+        }
 
         if stateful {
             let labels = if labeled {
@@ -182,9 +188,13 @@ impl Executor {
             stack.pop_n(n);
 
             let full_args = fill_defaults(args, &lambda);
+            let prepared_args = match prepare_eager_call_args(full_args.iter().cloned(), &lambda) {
+                Ok(args) => args,
+                Err(error) => return ExecSingle::Error(error),
+            };
 
             match self
-                .eagerly_invoke_lambda(&lambda, &full_args, Some(stack_idx))
+                .eagerly_invoke_lambda(&lambda, &prepared_args, Some(stack_idx))
                 .await
             {
                 Ok(result_val) => {
@@ -322,9 +332,14 @@ impl Executor {
             let mut full_args = vec![operand.clone()];
             full_args.extend(args.iter().cloned());
             let full_args = fill_defaults(full_args, &operator.0);
+            let prepared_args =
+                match prepare_eager_call_args(full_args.iter().cloned(), &operator.0) {
+                    Ok(args) => args,
+                    Err(error) => return ExecSingle::Error(error),
+                };
 
             match self
-                .eagerly_invoke_lambda(&operator.0, &full_args, Some(stack_idx))
+                .eagerly_invoke_lambda(&operator.0, &prepared_args, Some(stack_idx))
                 .await
             {
                 Ok(raw) => match extract_operator_result(raw) {
@@ -365,9 +380,14 @@ impl Executor {
             let mut full_args = vec![operand.clone()];
             full_args.extend(args.iter().cloned());
             let full_args = fill_defaults(full_args, &operator.0);
+            let prepared_args =
+                match prepare_eager_call_args(full_args.iter().cloned(), &operator.0) {
+                    Ok(args) => args,
+                    Err(error) => return ExecSingle::Error(error),
+                };
 
             match self
-                .eagerly_invoke_lambda(&operator.0, &full_args, Some(stack_idx))
+                .eagerly_invoke_lambda(&operator.0, &prepared_args, Some(stack_idx))
                 .await
             {
                 Ok(raw) => match extract_operator_result(raw) {
@@ -461,8 +481,18 @@ impl Executor {
 
         {
             let stack = self.state.stack_mut(stack_idx);
-            for def in &lambda.defaults[pushed_args - lambda.required_args as usize..] {
-                stack.push(def.clone());
+            let arg_start = stack.stack_len() - pushed_args;
+            for arg_idx in 0..pushed_args {
+                let slot_idx = arg_start + arg_idx;
+                let arg = stack.var_stack[slot_idx].clone();
+                stack.var_stack[slot_idx] = prepare_lambda_argument(lambda, arg_idx, arg);
+            }
+
+            let missing = lambda.total_args().saturating_sub(pushed_args);
+            let default_start = lambda.defaults.len().saturating_sub(missing);
+            for (default_idx, def) in lambda.defaults[default_start..].iter().enumerate() {
+                let arg_idx = pushed_args + default_idx;
+                stack.push(prepare_lambda_argument(lambda, arg_idx, def.clone()));
             }
             for cap in &lambda.captures {
                 stack.push(cap.clone());
@@ -575,11 +605,6 @@ impl Executor {
 
             let first_args = args[0].as_ref();
             let prepared_first = prepare_eager_call_args(first_args.iter().cloned(), lambda)?;
-            let mut owned_arg_slots = first_args
-                .iter()
-                .map(|arg| !arg.is_lvalue())
-                .collect::<Vec<_>>();
-            owned_arg_slots.resize(full_arg_len, false);
             {
                 let stack = self.state.stack_mut(temp_idx);
                 stack
@@ -594,12 +619,7 @@ impl Executor {
 
             let mut results = Vec::with_capacity(args.len());
             for call_args in args {
-                self.reseed_eager_many_stack(
-                    temp_idx,
-                    lambda,
-                    call_args.as_ref(),
-                    &mut owned_arg_slots,
-                );
+                self.reseed_eager_many_stack(temp_idx, lambda, call_args.as_ref());
 
                 loop {
                     self.tick_yielder().await;
@@ -659,13 +679,7 @@ impl Executor {
         })
     }
 
-    fn reseed_eager_many_stack(
-        &mut self,
-        stack_idx: usize,
-        lambda: &Lambda,
-        args: &[Value],
-        owned_arg_slots: &mut [bool],
-    ) {
+    fn reseed_eager_many_stack(&mut self, stack_idx: usize, lambda: &Lambda, args: &[Value]) {
         let stack = self.state.stack_mut(stack_idx);
         stack.truncate_to_retained_prefix();
         stack.ip = lambda.ip;
@@ -674,42 +688,28 @@ impl Executor {
         stack.conditional_flag = false;
         stack.active_child_count = 0;
 
-        for (idx, arg) in args.iter().enumerate() {
-            match arg.clone() {
-                Value::Lvalue(vrc) => {
-                    stack.var_stack[idx] = Value::Lvalue(vrc);
-                    owned_arg_slots[idx] = false;
-                }
-                Value::WeakLvalue(vweak) => {
-                    stack.var_stack[idx] = Value::WeakLvalue(vweak);
-                    owned_arg_slots[idx] = false;
-                }
-                other => {
-                    if owned_arg_slots[idx] {
-                        match &stack.var_stack[idx] {
-                            Value::Lvalue(vrc) => {
-                                heap_replace(vrc.key(), other);
-                            }
-                            Value::WeakLvalue(vweak) => {
-                                heap_replace(vweak.key(), other);
-                            }
-                            _ => {
-                                stack.var_stack[idx] = Value::Lvalue(VRc::new(other));
-                            }
-                        }
-                    } else {
-                        stack.var_stack[idx] = Value::Lvalue(VRc::new(other));
-                    }
-                    owned_arg_slots[idx] = true;
-                }
-            }
-        }
+        for idx in 0..lambda.total_args() {
+            let value = if idx < args.len() {
+                args[idx].clone()
+            } else {
+                lambda.defaults[idx - lambda.required_args as usize].clone()
+            };
 
-        let default_start = args.len().saturating_sub(lambda.required_args as usize);
-        for (idx, default) in lambda.defaults[default_start..].iter().enumerate() {
-            let slot_idx = args.len() + idx;
-            stack.var_stack[slot_idx] = default.clone();
-            owned_arg_slots[slot_idx] = false;
+            if lambda.arg_is_reference(idx) {
+                match &stack.var_stack[idx] {
+                    Value::Lvalue(vrc) => {
+                        heap_replace(vrc.key(), value);
+                    }
+                    Value::WeakLvalue(vweak) => {
+                        heap_replace(vweak.key(), value);
+                    }
+                    _ => {
+                        stack.var_stack[idx] = wrap_reference_argument(value);
+                    }
+                }
+            } else {
+                stack.var_stack[idx] = value;
+            }
         }
     }
 
@@ -764,6 +764,19 @@ impl Executor {
         }
         ExecSingle::Continue
     }
+
+    fn ensure_non_stateful_lambda_args(
+        &self,
+        stack_idx: usize,
+        num_args: usize,
+    ) -> Option<ExecutorError> {
+        let stack = self.state.stack(stack_idx);
+        let stack_len = stack.stack_len();
+        stack.var_stack[stack_len - num_args..]
+            .iter()
+            .any(|arg| matches!(arg, Value::Stateful(_)))
+            .then_some(ExecutorError::stateful_illegal_assignment())
+    }
 }
 
 fn validate_eager_arg_count(arg_count: usize, lambda: &Lambda) -> Result<(), ExecutorError> {
@@ -784,6 +797,20 @@ fn validate_eager_arg_count(arg_count: usize, lambda: &Lambda) -> Result<(), Exe
         });
     }
     Ok(())
+}
+
+#[inline(always)]
+fn wrap_reference_argument(arg: Value) -> Value {
+    Value::Lvalue(VRc::new(arg))
+}
+
+#[inline(always)]
+fn prepare_lambda_argument(lambda: &Lambda, arg_idx: usize, arg: Value) -> Value {
+    if lambda.arg_is_reference(arg_idx) {
+        wrap_reference_argument(arg)
+    } else {
+        arg
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -987,7 +1014,7 @@ impl Executor {
 
 #[inline]
 pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value> {
-    let total = lambda.required_args as usize + lambda.defaults.len();
+    let total = lambda.total_args();
     if args.len() < total {
         let missing = total - args.len();
         let default_start = lambda.defaults.len().saturating_sub(missing);
@@ -1001,35 +1028,33 @@ pub(crate) fn prepare_eager_call_args(
     args: impl IntoIterator<Item = Value>,
     lambda: &Lambda,
 ) -> Result<SmallVec<[Value; 4]>, ExecutorError> {
-    let mut prepared = SmallVec::<[Value; 4]>::new();
-    prepared.extend(args.into_iter().map(|arg| {
-        if arg.is_lvalue() {
-            arg
-        } else {
-            Value::Lvalue(VRc::new(arg))
-        }
-    }));
+    let mut raw = SmallVec::<[Value; 4]>::new();
+    raw.extend(args);
     let minimum = lambda.required_args as usize;
-    let maximum = minimum + lambda.defaults.len();
-    if prepared.len() < minimum {
+    let maximum = lambda.total_args();
+    if raw.len() < minimum {
         return Err(ExecutorError::TooFewArguments {
             minimum,
-            got: prepared.len(),
+            got: raw.len(),
             operator: false,
         });
     }
-    if prepared.len() > maximum {
+    if raw.len() > maximum {
         return Err(ExecutorError::TooManyArguments {
             maximum,
-            got: prepared.len(),
+            got: raw.len(),
             operator: false,
         });
     }
-    let total = lambda.required_args as usize + lambda.defaults.len();
-    if prepared.len() < total {
-        let missing = total - prepared.len();
+    if raw.len() < maximum {
+        let missing = maximum - raw.len();
         let default_start = lambda.defaults.len().saturating_sub(missing);
-        prepared.extend(lambda.defaults[default_start..].iter().cloned());
+        raw.extend(lambda.defaults[default_start..].iter().cloned());
+    }
+
+    let mut prepared = SmallVec::<[Value; 4]>::with_capacity(raw.len());
+    for (arg_idx, arg) in raw.into_iter().enumerate() {
+        prepared.push(prepare_lambda_argument(lambda, arg_idx, arg));
     }
     Ok(prepared)
 }

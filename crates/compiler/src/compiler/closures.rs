@@ -27,13 +27,21 @@ impl Compiler {
 
         let mut required_args: u32 = 0;
         let mut default_count: u32 = 0;
+        let mut reference_args = Vec::with_capacity(l.args.len());
         for (i, arg) in l.args.iter().enumerate() {
             let vt = if arg.must_be_reference {
                 VariableType::Reference
             } else {
                 VariableType::Let
             };
-            self.register_symbol(&arg.identifier.1.0, vt, SymbolFunctionInfo::None, i);
+            reference_args.push(arg.must_be_reference);
+            self.register_symbol(
+                &arg.identifier.1.0,
+                vt,
+                SymbolFunctionInfo::None,
+                i,
+                !arg.must_be_reference,
+            );
             if arg.default_value.is_some() {
                 default_count += 1;
             } else {
@@ -42,7 +50,7 @@ impl Compiler {
         }
         self.frame_mut().stack_depth = l.args.len();
 
-        self.register_capture_symbols(&captures);
+        self.register_capture_symbols(&captures, true);
 
         match &l.body.1 {
             LambdaBody::Inline(expr) => {
@@ -76,7 +84,7 @@ impl Compiler {
 
         self.end_closure_frame(jump_idx);
 
-        self.compile_captures(&captures, false, span);
+        self.compile_captures(&captures, false, true, span);
 
         for arg in &l.args {
             if let Some(ref default) = arg.default_value {
@@ -104,6 +112,7 @@ impl Compiler {
                 ip: body_ip,
                 required_args,
                 default_arg_count: default_count,
+                reference_args,
             });
 
         let cap16 = captures.len() as u16;
@@ -127,11 +136,11 @@ impl Compiler {
         let captures = self.compute_block_captures(&b.body);
 
         let (jump_idx, body_ip) = self.begin_closure_frame(FrameKind::Block, span);
-        self.register_capture_symbols(&captures);
+        self.register_capture_symbols(&captures, true);
         self.compile_block_body(&b.body, span);
         self.end_closure_frame(jump_idx);
 
-        self.compile_captures(&captures, true, span);
+        self.compile_captures(&captures, true, false, span);
 
         let proto_idx = self.current_section().lambda_prototypes.len() as u32;
         let section = self.section_index();
@@ -142,6 +151,7 @@ impl Compiler {
                 ip: body_ip,
                 required_args: 0,
                 default_arg_count: 0,
+                reference_args: Vec::new(),
             });
 
         let cap16 = captures.len() as u16;
@@ -169,7 +179,7 @@ impl Compiler {
         let captures = self.compute_block_captures(&a.body);
 
         let (jump_idx, body_ip) = self.begin_closure_frame(FrameKind::Anim, span);
-        self.register_capture_symbols(&captures);
+        self.register_capture_symbols(&captures, true);
 
         {
             self.push_scope();
@@ -179,7 +189,7 @@ impl Compiler {
         }
         self.end_closure_frame(jump_idx);
 
-        self.compile_captures(&captures, false, span);
+        self.compile_captures(&captures, false, false, span);
 
         let proto_idx = self.current_section().anim_prototypes.len() as u32;
         let section = self.section_index();
@@ -209,13 +219,18 @@ impl Compiler {
         (jump_idx, body_ip)
     }
 
-    pub(super) fn register_capture_symbols(&mut self, captures: &[Arc<Symbol>]) {
+    pub(super) fn register_capture_symbols(
+        &mut self,
+        captures: &[Arc<Symbol>],
+        preserve_let_captures_on_copy: bool,
+    ) {
         for (i, cap) in captures.iter().enumerate() {
             self.register_symbol(
                 &cap.name,
                 cap.var_type,
                 cap.function_info.clone(),
                 self.frame().stack_depth + i,
+                preserve_let_captures_on_copy && cap.var_type == VariableType::Let,
             );
         }
         self.frame_mut().stack_depth += captures.len();
@@ -230,14 +245,14 @@ impl Compiler {
         &mut self,
         captures: &[Arc<Symbol>],
         immediately_invoked: bool,
+        _capture_let_by_value: bool,
         span: &Span8,
     ) {
         for cap in captures {
-            let stack_delta = self.stack_delta(cap.stack_position);
-            if !immediately_invoked
-                && matches!(cap.var_type, VariableType::Reference | VariableType::Let)
-            {
-                // optimize out the ephemeral
+            if cap.var_type == VariableType::Let {
+                self.emit_symbol_copy(cap, span.clone());
+            } else if !immediately_invoked && cap.var_type == VariableType::Reference {
+                let stack_delta = self.stack_delta(cap.stack_position);
                 self.emit_copy_ref(stack_delta, span.clone());
                 self.emit(
                     Instruction::ConvertVar {
@@ -246,8 +261,10 @@ impl Compiler {
                     span.clone(),
                 );
             } else if immediately_invoked {
+                let stack_delta = self.stack_delta(cap.stack_position);
                 self.emit_lvalue(stack_delta, span.clone());
             } else {
+                let stack_delta = self.stack_delta(cap.stack_position);
                 self.emit_lvalue_ephemeral(stack_delta, span.clone());
             }
         }
@@ -262,7 +279,7 @@ impl Compiler {
             },
             span.clone(),
         );
-        self.define_symbol("_", VariableType::Var, SymbolFunctionInfo::None);
+        self.define_symbol("_", VariableType::Var, SymbolFunctionInfo::None, false);
         self.compile_statements(stmts);
         let underscore_pos = self.lookup("_", None, None).unwrap().stack_position;
         let d = self.stack_delta(underscore_pos);

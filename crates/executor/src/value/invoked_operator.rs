@@ -4,7 +4,7 @@ use smallvec::SmallVec;
 
 use crate::{
     error::ExecutorError,
-    executor::{Executor, fill_defaults},
+    executor::{Executor, fill_defaults, prepare_eager_call_args},
     value::Value,
 };
 
@@ -14,7 +14,9 @@ use super::rc_cached::RcCached;
 pub struct InvokedOperatorBody {
     pub operator: Box<Value>,
     pub operand: Box<Value>,
+    pub boxed_operand: bool,
     pub arguments: SmallVec<[Value; 8]>,
+    pub boxed_arguments: SmallVec<[bool; 8]>,
     pub labels: SmallVec<[(usize, String); 4]>,
 }
 
@@ -52,17 +54,41 @@ pub fn make_invoked_operator(
     initial: Value,
     modified: Value,
 ) -> InvokedOperator {
+    let mut boxed_arguments = SmallVec::with_capacity(arguments.len());
+    boxed_arguments.resize(arguments.len(), false);
     RcCached {
         body: Rc::new(InvokedOperatorBody {
             operator: Box::new(operator),
             operand: Box::new(operand),
+            boxed_operand: false,
             arguments,
+            boxed_arguments,
             labels,
         }),
         cache: InvOpCache {
             unmodified: Cell::new(Some(Box::new(initial))),
             cached_result: Cell::new(Some(Box::new(modified))),
         },
+    }
+}
+
+#[inline(always)]
+fn normalize_operand(body: &InvokedOperatorBody) -> Value {
+    let operand = body.operand.as_ref().clone();
+    if body.boxed_operand {
+        operand.elide_lvalue()
+    } else {
+        operand
+    }
+}
+
+#[inline(always)]
+fn normalize_argument(body: &InvokedOperatorBody, arg_idx: usize) -> Value {
+    let arg = body.arguments[arg_idx].clone();
+    if body.boxed_arguments.get(arg_idx).copied().unwrap_or(false) {
+        arg.elide_lvalue()
+    } else {
+        arg
     }
 }
 
@@ -90,13 +116,17 @@ impl InvokedOperator {
                     };
 
                     let mut full_args = Vec::with_capacity(this.body.arguments.len() + 1);
-                    full_args.push(this.body.operand.as_ref().clone());
-                    full_args.extend(this.body.arguments.iter().cloned());
+                    full_args.push(normalize_operand(&this.body));
+                    full_args.extend(
+                        (0..this.body.arguments.len())
+                            .map(|arg_idx| normalize_argument(&this.body, arg_idx)),
+                    );
                     let full_args = fill_defaults(full_args, &operator.0);
+                    let prepared_args = prepare_eager_call_args(full_args, &operator.0)?;
                     let trace_parent_idx = Some(executor.state.last_stack_idx);
 
                     let raw = executor
-                        .eagerly_invoke_lambda(&operator.0, &full_args, trace_parent_idx)
+                        .eagerly_invoke_lambda(&operator.0, &prepared_args, trace_parent_idx)
                         .await?;
                     let (initial, modified) = extract_operator_result(raw)?;
                     let initial = executor.materialize_cached_value(initial).await?;

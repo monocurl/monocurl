@@ -2,7 +2,7 @@
 mod test {
     use std::{path::PathBuf, sync::Arc};
 
-    use bytecode::Instruction;
+    use bytecode::{CopyValueMode, Instruction};
     use lexer::lexer::Lexer;
     use lexer::token::Token;
     use parser::ast::{
@@ -481,6 +481,13 @@ mod test {
                 .any(|instr| matches!(instr, Instruction::Lt)),
             "optimized stdlib range loop should use a counted comparison"
         );
+        assert!(
+            section
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::IncrementByOne { .. })),
+            "optimized stdlib range loop should use the dedicated induction increment opcode"
+        );
     }
 
     #[test]
@@ -786,9 +793,9 @@ mod test {
         assert_eq!(
             sec.instructions[1],
             Instruction::PushCopy {
+                copy_mode: CopyValueMode::Raw,
                 stack_delta: -1,
                 pop_tos: false,
-                mutable: false
             }
         );
         assert_eq!(sec.instructions[2], Instruction::Return { stack_delta: -1 });
@@ -809,6 +816,42 @@ mod test {
         assert_eq!(sec.lambda_prototypes.len(), 1);
         assert_eq!(sec.lambda_prototypes[0].required_args, 1);
         assert_eq!(sec.lambda_prototypes[0].default_arg_count, 0);
+        assert_eq!(sec.lambda_prototypes[0].reference_args, vec![false]);
         assert_eq!(sec.lambda_prototypes[0].ip, 1);
+    }
+
+    #[test]
+    fn test_lambda_prototype_tracks_reference_args() {
+        let result = compile_src("let f = |&x, y = 1, &z = 2| x");
+        no_errors(&result);
+
+        let sec = &result.bytecode.sections[1];
+        assert_eq!(sec.lambda_prototypes.len(), 1);
+        assert_eq!(
+            sec.lambda_prototypes[0].reference_args,
+            vec![true, false, true]
+        );
+    }
+
+    #[test]
+    fn test_lambda_invoke_does_not_box_plain_args() {
+        let result = compile_src(
+            "
+            let f = |a| a
+            let y = f(1)
+        ",
+        );
+        no_errors(&result);
+
+        let sec = &result.bytecode.sections[1];
+        let convert_vars = sec
+            .instructions
+            .iter()
+            .filter(|instr| matches!(instr, Instruction::ConvertVar { .. }))
+            .count();
+        assert_eq!(
+            convert_vars, 2,
+            "only the two let declarations should box values"
+        );
     }
 }

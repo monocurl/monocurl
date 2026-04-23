@@ -244,6 +244,20 @@ fn test_labeled_nested_mutation_recomputes_live_value() {
 }
 
 #[test]
+fn test_labeled_mutation_recomputes_native_math_arg() {
+    let r = run_with_stdlib(
+        "
+        let wave = |theta| sin(theta)
+        var inv = wave(theta: 0)
+        inv.theta = 1
+        let result = inv > 0
+    ",
+        &["math"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
 fn test_labeled_aliases_keep_independent_live_results() {
     let r = run("
         let f = |x, y| x + y

@@ -8,6 +8,7 @@ pub struct LambdaPrototype {
     pub ip: u32,
     pub required_args: u32,
     pub default_arg_count: u32,
+    pub reference_args: Vec<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,7 +17,15 @@ pub struct AnimPrototype {
     pub ip: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CopyValueMode {
+    Read,
+    Reference,
+    Raw,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Instruction {
     /* push constants */
     PushNil,
@@ -58,8 +67,8 @@ pub enum Instruction {
     // pops old tos if flag is true
     // used for map
     PushCopy {
+        copy_mode: CopyValueMode,
         pop_tos: bool,
-        mutable: bool,
         stack_delta: i32,
     },
     PushLvalue {
@@ -79,12 +88,12 @@ pub enum Instruction {
         string_index: u32,
     },
 
-    // pops capture_count lvalues + prototype.default_arg_count values, pushes lambda
+    // pops capture_count captured values + prototype.default_arg_count default values, pushes lambda
     MakeLambda {
         capture_count: u16,
         prototype_index: u32,
     },
-    // pops capture_count lvalues, pushes anim
+    // pops capture_count captured values, pushes anim
     MakeAnim {
         capture_count: u16,
         prototype_index: u32,
@@ -124,6 +133,10 @@ pub enum Instruction {
     NativeInvoke {
         index: u16,
         arg_count: u16,
+    },
+
+    IncrementByOne {
+        stack_delta: i32,
     },
 
     Play,
