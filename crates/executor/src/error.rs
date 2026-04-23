@@ -37,10 +37,6 @@ pub enum ExecutorError {
     PlayInLabeledInvocation,
     StackOverflow,
     TooManyActiveAnimations,
-    MemoryLimitExceeded {
-        used: u64,
-        limit: u64,
-    },
     VirtualHeapLimitExceeded {
         used: usize,
         limit: usize,
@@ -270,13 +266,6 @@ impl fmt::Display for ExecutorError {
                 write!(f, "play inside labeled invocation is not allowed")
             }
             Self::StackOverflow => write!(f, "stack overflow: call depth limit exceeded"),
-            Self::MemoryLimitExceeded { used, limit } => {
-                write!(
-                    f,
-                    "memory limit exceeded: process is using {} bytes, limit is {} bytes",
-                    used, limit
-                )
-            }
             Self::VirtualHeapLimitExceeded { used, limit } => {
                 write!(
                     f,

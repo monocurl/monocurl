@@ -205,13 +205,17 @@ fn span_dom_id(id: &str) -> String {
 fn parse_text_tag_spec(source: &str) -> Result<Vec<isize>> {
     let source = source.trim();
     if source.is_empty() {
-        bail!("\\text_tag requires at least one tag component");
+        return Ok(Vec::new());
     }
 
     let source = source
         .strip_prefix('[')
         .and_then(|inner| inner.strip_suffix(']'))
         .unwrap_or(source);
+    let source = source.trim();
+    if source.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut out = Vec::new();
     for part in source.split(',') {
         let part = part.trim();
@@ -219,10 +223,6 @@ fn parse_text_tag_spec(source: &str) -> Result<Vec<isize>> {
             bail!("\\text_tag contains an empty tag component");
         }
         out.push(part.parse()?);
-    }
-
-    if out.is_empty() {
-        bail!("\\text_tag requires at least one tag component");
     }
     Ok(out)
 }
@@ -304,11 +304,12 @@ mod tests {
 
     #[test]
     fn parse_text_tags_strips_wrappers_and_tracks_ranges() {
-        let parsed = parse_text_tags(r"\text_tag{1}{x^2} + \text_tag{[2, 3]}{y}").unwrap();
+        let parsed =
+            parse_text_tags(r"\text_tag{1}{x^2} + \text_tag{[2, 3]}{y} + \text_tag{}{z}").unwrap();
         assert_eq!(
             parsed,
             TaggedSource {
-                source: "x^2 + y".into(),
+                source: "x^2 + y + z".into(),
                 spans: vec![
                     TaggedSpan {
                         tag: vec![1],
@@ -317,6 +318,10 @@ mod tests {
                     TaggedSpan {
                         tag: vec![2, 3],
                         range: 6..7,
+                    },
+                    TaggedSpan {
+                        tag: Vec::new(),
+                        range: 10..11,
                     },
                 ],
             }

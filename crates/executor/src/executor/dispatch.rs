@@ -17,7 +17,7 @@ use crate::{
 use super::{ExecSingle, Executor, ops::BinOp};
 
 impl Executor {
-    #[inline]
+    #[inline(always)]
     pub(super) async fn execute_instr(
         &mut self,
         section_idx: usize,
@@ -112,7 +112,7 @@ impl Executor {
                 let lvalue_resolved = if mutable {
                     val.force_elide_lvalue()
                 } else {
-                    val.force_elide_lvalue().elide_leader()
+                    val.elide_lvalue().elide_leader()
                 };
 
                 if let Value::Stateful(_) = lvalue_resolved {

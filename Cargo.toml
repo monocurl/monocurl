@@ -44,7 +44,6 @@ futures = "0.3.31"
 smol = "2.0.2"
 itertools = "0.14.0"
 wide = "0.7"
-sysinfo = "0.31.4"
 cc = "1.2.41"
 tiny-skia-path = "0.11.4"
 usvg = "0.45.1"
@@ -73,3 +72,6 @@ stdlib = { path = "crates/stdlib" }
 structs = { path = "crates/structs" }
 ui = { path = "crates/ui" }
 ui_cli_shared = { path = "crates/ui_cli_shared" }
+
+[profile.release]
+lto = true

@@ -29,19 +29,13 @@ async fn read_text_tag_component(
 
 async fn read_text_tag(executor: &mut Executor, value: Value) -> Result<Vec<isize>, ExecutorError> {
     let resolved = value.elide_wrappers(executor).await?;
-    let tag = match resolved {
+    Ok(match resolved {
         Value::Integer(value) => vec![isize::try_from(value).map_err(|_| {
             ExecutorError::invalid_invocation("text tag component is out of range for isize")
         })?],
         Value::List(list) => read_text_tag_list(executor, list).await?,
         other => return Err(ExecutorError::type_error("int / list", other.type_name())),
-    };
-    if tag.is_empty() {
-        return Err(ExecutorError::invalid_invocation(
-            "text tag list must not be empty",
-        ));
-    }
-    Ok(tag)
+    })
 }
 
 async fn read_text_tag_list(

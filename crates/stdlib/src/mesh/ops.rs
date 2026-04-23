@@ -14,6 +14,7 @@ use geo::{
     mesh_build::{BoundaryEdge, IndexedSurface, SurfaceVertex},
     simd::Float3,
 };
+use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
@@ -569,57 +570,54 @@ pub async fn op_point_map(
                     if !keep {
                         return Ok(());
                     }
+                    let positions = {
+                        let mesh = Arc::make_mut(arc);
+                        let mut positions = Vec::with_capacity(
+                            mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3,
+                        );
+                        positions.extend(mesh.dots.iter().map(|dot| dot.pos));
+                        for lin in &mesh.lins {
+                            positions.push(lin.a.pos);
+                            positions.push(lin.b.pos);
+                        }
+                        for tri in &mesh.tris {
+                            positions.push(tri.a.pos);
+                            positions.push(tri.b.pos);
+                            positions.push(tri.c.pos);
+                        }
+                        positions
+                    };
+                    let args = positions
+                        .iter()
+                        .map(|pos| smallvec![point_value(*pos)])
+                        .collect::<Vec<SmallVec<[Value; 2]>>>();
+                    let mapped = invoke_callable_many(executor, func, &args, "f")
+                        .await?
+                        .into_iter()
+                        .map(|value| float3_from_value(value, "f"))
+                        .collect::<Result<Vec<_>, _>>()?;
                     let mesh = Arc::make_mut(arc);
+                    let mut mapped_iter = mapped.into_iter();
                     for dot in &mut mesh.dots {
                         let original = dot.pos;
-                        let mapped = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(original)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        dot.pos = original.lerp(mapped, level);
+                        dot.pos = original.lerp(mapped_iter.next().unwrap(), level);
                     }
                     for lin in &mut mesh.lins {
                         let original = lin.a.pos;
-                        let mapped = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(original)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        lin.a.pos = original.lerp(mapped, level);
+                        lin.a.pos = original.lerp(mapped_iter.next().unwrap(), level);
 
                         let original = lin.b.pos;
-                        let mapped = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(original)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        lin.b.pos = original.lerp(mapped, level);
+                        lin.b.pos = original.lerp(mapped_iter.next().unwrap(), level);
                     }
                     for tri in &mut mesh.tris {
                         let original = tri.a.pos;
-                        let mapped = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(original)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.a.pos = original.lerp(mapped, level);
+                        tri.a.pos = original.lerp(mapped_iter.next().unwrap(), level);
 
                         let original = tri.b.pos;
-                        let mapped = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(original)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.b.pos = original.lerp(mapped, level);
+                        tri.b.pos = original.lerp(mapped_iter.next().unwrap(), level);
 
                         let original = tri.c.pos;
-                        let mapped = float3_from_value(
-                            invoke_callable(executor, func, vec![point_value(original)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.c.pos = original.lerp(mapped, level);
+                        tri.c.pos = original.lerp(mapped_iter.next().unwrap(), level);
                     }
                     Ok(())
                 }
@@ -673,57 +671,54 @@ pub async fn op_color_map(
                     if !keep {
                         return Ok(());
                     }
+                    let positions = {
+                        let mesh = Arc::make_mut(arc);
+                        let mut positions = Vec::with_capacity(
+                            mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3,
+                        );
+                        positions.extend(mesh.dots.iter().map(|dot| dot.pos));
+                        for lin in &mesh.lins {
+                            positions.push(lin.a.pos);
+                            positions.push(lin.b.pos);
+                        }
+                        for tri in &mesh.tris {
+                            positions.push(tri.a.pos);
+                            positions.push(tri.b.pos);
+                            positions.push(tri.c.pos);
+                        }
+                        positions
+                    };
+                    let args = positions
+                        .iter()
+                        .map(|pos| smallvec![point_value(*pos)])
+                        .collect::<Vec<SmallVec<[Value; 2]>>>();
+                    let mapped = invoke_callable_many(executor, func, &args, "f")
+                        .await?
+                        .into_iter()
+                        .map(|value| float4_from_value(value, "f"))
+                        .collect::<Result<Vec<_>, _>>()?;
                     let mesh = Arc::make_mut(arc);
+                    let mut mapped_iter = mapped.into_iter();
                     for dot in &mut mesh.dots {
                         let original = dot.col;
-                        let mapped = float4_from_value(
-                            invoke_callable(executor, func, vec![point_value(dot.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        dot.col = original.lerp(mapped, level);
+                        dot.col = original.lerp(mapped_iter.next().unwrap(), level);
                     }
                     for lin in &mut mesh.lins {
                         let original = lin.a.col;
-                        let mapped = float4_from_value(
-                            invoke_callable(executor, func, vec![point_value(lin.a.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        lin.a.col = original.lerp(mapped, level);
+                        lin.a.col = original.lerp(mapped_iter.next().unwrap(), level);
 
                         let original = lin.b.col;
-                        let mapped = float4_from_value(
-                            invoke_callable(executor, func, vec![point_value(lin.b.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        lin.b.col = original.lerp(mapped, level);
+                        lin.b.col = original.lerp(mapped_iter.next().unwrap(), level);
                     }
                     for tri in &mut mesh.tris {
                         let original = tri.a.col;
-                        let mapped = float4_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.a.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.a.col = original.lerp(mapped, level);
+                        tri.a.col = original.lerp(mapped_iter.next().unwrap(), level);
 
                         let original = tri.b.col;
-                        let mapped = float4_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.b.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.b.col = original.lerp(mapped, level);
+                        tri.b.col = original.lerp(mapped_iter.next().unwrap(), level);
 
                         let original = tri.c.col;
-                        let mapped = float4_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.c.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.c.col = original.lerp(mapped, level);
+                        tri.c.col = original.lerp(mapped_iter.next().unwrap(), level);
                     }
                     Ok(())
                 }
@@ -774,31 +769,36 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                     if !keep {
                         return Ok(());
                     }
+                    let positions = {
+                        let mesh = Arc::make_mut(arc);
+                        let mut positions = Vec::with_capacity(mesh.tris.len() * 3);
+                        for tri in &mesh.tris {
+                            positions.push(tri.a.pos);
+                            positions.push(tri.b.pos);
+                            positions.push(tri.c.pos);
+                        }
+                        positions
+                    };
+                    let args = positions
+                        .iter()
+                        .map(|pos| smallvec![point_value(*pos)])
+                        .collect::<Vec<SmallVec<[Value; 2]>>>();
+                    let mapped = invoke_callable_many(executor, func, &args, "f")
+                        .await?
+                        .into_iter()
+                        .map(|value| float2_from_value(value, "f"))
+                        .collect::<Result<Vec<_>, _>>()?;
                     let mesh = Arc::make_mut(arc);
+                    let mut mapped_iter = mapped.into_iter();
                     for tri in &mut mesh.tris {
                         let original = tri.a.uv;
-                        let mapped = float2_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.a.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.a.uv = original.lerp(mapped, level);
+                        tri.a.uv = original.lerp(mapped_iter.next().unwrap(), level);
 
                         let original = tri.b.uv;
-                        let mapped = float2_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.b.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.b.uv = original.lerp(mapped, level);
+                        tri.b.uv = original.lerp(mapped_iter.next().unwrap(), level);
 
                         let original = tri.c.uv;
-                        let mapped = float2_from_value(
-                            invoke_callable(executor, func, vec![point_value(tri.c.pos)], "f")
-                                .await?,
-                            "f",
-                        )?;
-                        tri.c.uv = original.lerp(mapped, level);
+                        tri.c.uv = original.lerp(mapped_iter.next().unwrap(), level);
                     }
                     Ok(())
                 }

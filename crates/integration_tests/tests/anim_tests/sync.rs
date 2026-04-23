@@ -1250,16 +1250,16 @@ fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
 fn test_tag_trans_handles_everything_intro_badges() {
     let src = r#"
         let soft = |c, a = 0.22| with_alpha(c, a)
-        let badge = |shape, color, tag = 0| retag{tag} fill{soft(color)} stroke{color} shape
+        let badge = |shape, color, t = 0| tag{t} fill{soft(color)} stroke{color} shape
 
         mesh intro = [
             badge(shift{delta: [-5.5, 2.6, 0]} Circle(radius: 0.7), RED, 1),
             badge(shift{delta: [-3.5, 2.6, 0]} Square(width: 1.2), BLUE, 2),
             badge(Triangle([1.5, 1.8, 0], [2.5, 3.4, 0], [3.3, 1.7, 0]), GREEN, 3),
             badge(shift{delta: [5.3, 2.6, 0]} RegularPolygon(n: 6, circumradius: 0.8), PURPLE, 4),
-            retag{5} stroke{ORANGE} Arrow([-6.0, -2.6, 0], [-3.4, -2.6, 0]),
-            retag{6} stroke{TEAL} shift{delta: [0, -2.6, 0]} Arc(radius: 1.15, theta: [0, 3.141592653589793]),
-            retag{7} stroke{MAGENTA} Capsule([3.6, -3.0, 0], [6.2, -2.2, 0], [0.22, 0.22])
+            tag{5} stroke{ORANGE} Arrow([-6.0, -2.6, 0], [-3.4, -2.6, 0]),
+            tag{6} stroke{TEAL} shift{delta: [0, -2.6, 0]} Arc(radius: 1.15, theta: [0, 3.141592653589793]),
+            tag{7} stroke{MAGENTA} Capsule([3.6, -3.0, 0], [6.2, -2.2, 0], [0.22, 0.22])
         ]
 
         play Set([&intro])
@@ -1269,9 +1269,9 @@ fn test_tag_trans_handles_everything_intro_badges() {
             badge(shift{delta: [-1.9, 2.5, 0]} RegularPolygon(n: 5, circumradius: 0.9), RED, 1),
             badge(Capsule([0.8, 1.8, 0], [3.2, 3.0, 0], [0.28, 0.54]), BLUE, 2),
             badge(shift{delta: [5.2, 2.6, 0]} Annulus(inner: 0.34, outer: 0.82), GREEN, 3),
-            retag{5} stroke{ORANGE} Arrow([-6.0, -2.4, 0], [-2.8, -2.0, 0]),
-            retag{6} stroke{TEAL} shift{delta: [0, -2.5, 0]} Arc(radius: 1.3, theta: [0.2, 3.2]),
-            retag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
+            tag{5} stroke{ORANGE} Arrow([-6.0, -2.4, 0], [-2.8, -2.0, 0]),
+            tag{6} stroke{TEAL} shift{delta: [0, -2.5, 0]} Arc(radius: 1.3, theta: [0.2, 3.2]),
+            tag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
         ]
 
         play TagTrans(1.2, [&intro], 0.6 * 1u, smoother)
@@ -1290,16 +1290,16 @@ fn test_tag_trans_handles_everything_intro_badges() {
 fn test_tag_trans_handles_everything_intro_after_operator_rewrite() {
     let src = r#"
         let soft = |c, a = 0.22| with_alpha(c, a)
-        let badge = |shape, color, tag = 0| retag{tag} fill{soft(color)} stroke{color} shape
+        let badge = |shape, color, t = 0| tag{t} fill{soft(color)} stroke{color} shape
 
         mesh intro = [
             badge(shift{[5.5, 2.6, 0]} Circle(0.7), RED, 1),
             badge(shift{[-3.5, 2.6, 0]} Square(1.2), BLUE, 2),
             badge(Triangle([1.5, 1.8, 0], [2.5, 3.4, 0], [3.3, 1.7, 0]), GREEN, 3),
             badge(shift{[5.3, 2.6, 0]} RegularPolygon(6, 0.8), PURPLE, 4),
-            retag{5} stroke{ORANGE} Arrow([-6.0, -2.6, 0], [-3.4, -2.6, 0]),
-            retag{6} stroke{TEAL} shift{[0, -2.6, 0]} Arc(1.15, [0, 3.141592653589793]),
-            retag{7} stroke{MAGENTA} Capsule([3.6, -3.0, 0], [6.2, -2.2, 0], [0.22, 0.22])
+            tag{5} stroke{ORANGE} Arrow([-6.0, -2.6, 0], [-3.4, -2.6, 0]),
+            tag{6} stroke{TEAL} shift{[0, -2.6, 0]} Arc(1.15, [0, 3.141592653589793]),
+            tag{7} stroke{MAGENTA} Capsule([3.6, -3.0, 0], [6.2, -2.2, 0], [0.22, 0.22])
         ]
 
         intro = point_map{|p| [p[0], p[1] + 0.25 * sin(1.7 * p[0]), p[2]]}
@@ -1315,9 +1315,9 @@ fn test_tag_trans_handles_everything_intro_after_operator_rewrite() {
             badge(shift{[-1.9, 2.5, 0]} RegularPolygon(5, 0.9), RED, 1),
             badge(Capsule([0.8, 1.8, 0], [3.2, 3.0, 0], [0.28, 0.54]), BLUE, 2),
             badge(shift{[5.2, 2.6, 0]} Annulus(0.34, 0.82), GREEN, 3),
-            retag{5} stroke{ORANGE} Arrow([-6.0, -2.4, 0], [-2.8, -2.0, 0]),
-            retag{6} stroke{TEAL} shift{[0, -2.5, 0]} Arc(1.3, [0.2, 3.2]),
-            retag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
+            tag{5} stroke{ORANGE} Arrow([-6.0, -2.4, 0], [-2.8, -2.0, 0]),
+            tag{6} stroke{TEAL} shift{[0, -2.5, 0]} Arc(1.3, [0.2, 3.2]),
+            tag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
         ]
 
         play TagTrans(1.2, [&intro], 0.6 * 1u, smoother)

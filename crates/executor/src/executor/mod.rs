@@ -22,8 +22,7 @@ use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
 pub(crate) use self::invoke::{fill_defaults, prepare_eager_call_args};
 use self::memory::{
-    EXECUTOR_HEAP_SLOT_LIMIT, EXECUTOR_MEMORY_LIMIT_BYTES, MEMORY_CHECK_PERIOD,
-    PeriodicMemoryChecker,
+    EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker,
 };
 
 pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
@@ -82,14 +81,11 @@ impl Executor {
             cache,
             yielder: PeriodicYielder::default(),
             text_render_quality: TextRenderQuality::Normal,
-            memory_checker: PeriodicMemoryChecker::new(
-                EXECUTOR_MEMORY_LIMIT_BYTES,
-                EXECUTOR_HEAP_SLOT_LIMIT,
-                MEMORY_CHECK_PERIOD,
-            ),
+            memory_checker: PeriodicMemoryChecker::new(EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD),
         }
     }
 
+    #[inline]
     pub(crate) async fn tick_yielder(&mut self) {
         self.yielder.tick().await;
     }
@@ -153,6 +149,7 @@ impl Executor {
         self.text_render_quality
     }
 
+    #[inline(always)]
     pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
         self.state.last_stack_idx = stack_idx;
 

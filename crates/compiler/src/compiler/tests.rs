@@ -10,6 +10,7 @@ mod test {
         IdentifierReference, LambdaArg, LambdaBody, LambdaDefinition, Literal, Section,
         SectionBundle, SectionType, Statement, VariableType,
     };
+    use stdlib::registry::registry;
     use structs::rope::Rope;
     use structs::text::Span8;
 
@@ -414,6 +415,128 @@ mod test {
         assert!(
             has_error(&result, "cannot mutate 'x'"),
             "imported var should become let"
+        );
+    }
+
+    #[test]
+    fn test_for_stdlib_range_uses_counted_loop_lowering() {
+        let bundle0 = Arc::new(SectionBundle {
+            file_path: Some(PathBuf::new()),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section {
+                body: parse_stmts_as(
+                    "let range = |start, stop| start",
+                    SectionType::StandardLibrary,
+                ),
+                section_type: SectionType::StandardLibrary,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+        let bundle1 = Arc::new(SectionBundle {
+            file_path: Some(PathBuf::new()),
+            file_index: 1,
+            imported_files: vec![0],
+            sections: vec![Section {
+                body: parse_stmts(
+                    "
+                    var sum = 0
+                    for (i in range(0, 4)) {
+                        sum = sum + i
+                    }
+                ",
+                ),
+                section_type: SectionType::Slide,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+
+        let result = test_compile(&[bundle0, bundle1]);
+        no_errors(&result);
+
+        let vector_len_idx = registry().index_of("vector_len") as u16;
+        let section = &result.bytecode.sections[2];
+        assert!(
+            !section
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::Subscript { .. })),
+            "optimized stdlib range loop should not subscript a materialized list"
+        );
+        assert!(
+            !section.instructions.iter().any(|instr| matches!(
+                instr,
+                Instruction::NativeInvoke { index, .. } if *index == vector_len_idx
+            )),
+            "optimized stdlib range loop should not call vector_len"
+        );
+        assert!(
+            section
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::Lt)),
+            "optimized stdlib range loop should use a counted comparison"
+        );
+    }
+
+    #[test]
+    fn test_for_shadowed_range_keeps_generic_lowering() {
+        let bundle0 = Arc::new(SectionBundle {
+            file_path: Some(PathBuf::new()),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section {
+                body: parse_stmts_as(
+                    "let range = |start, stop| start",
+                    SectionType::StandardLibrary,
+                ),
+                section_type: SectionType::StandardLibrary,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+        let bundle1 = Arc::new(SectionBundle {
+            file_path: Some(PathBuf::new()),
+            file_index: 1,
+            imported_files: vec![0],
+            sections: vec![Section {
+                body: parse_stmts(
+                    "
+                    let range = |start, stop| [start, stop]
+                    for (i in range(0, 4)) {
+                    }
+                ",
+                ),
+                section_type: SectionType::Slide,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+
+        let result = test_compile(&[bundle0, bundle1]);
+        no_errors(&result);
+
+        let vector_len_idx = registry().index_of("vector_len") as u16;
+        let section = &result.bytecode.sections[2];
+        assert!(
+            section
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::Subscript { .. })),
+            "shadowed range should keep the generic list iteration path"
+        );
+        assert!(
+            section.instructions.iter().any(|instr| matches!(
+                instr,
+                Instruction::NativeInvoke { index, .. } if *index == vector_len_idx
+            )),
+            "shadowed range should still measure the produced list"
         );
     }
 

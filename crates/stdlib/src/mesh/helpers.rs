@@ -359,6 +359,37 @@ pub(super) fn int_from_value(value: Value, name: &'static str) -> Result<i64, Ex
     }
 }
 
+pub(super) fn read_tags(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<Vec<isize>, ExecutorError> {
+    match executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_lvalue_leader_rec()
+    {
+        Value::Integer(tag) => Ok(vec![tag as isize]),
+        Value::Float(tag) if tag.fract() == 0.0 => Ok(vec![tag as isize]),
+        Value::List(list) => list
+            .elements()
+            .iter()
+            .map(|key| {
+                int_from_value(with_heap(|h| h.get(key.key()).clone()), name)
+                    .map(|tag| tag as isize)
+            })
+            .collect(),
+        other => Err(ExecutorError::type_error_for(
+            "int / list",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
 pub(super) fn read_float3_list(
     executor: &Executor,
     stack_idx: usize,
@@ -1400,6 +1431,37 @@ pub(super) async fn invoke_callable(
         }
     };
     raw.elide_wrappers(executor).await
+}
+
+pub(super) async fn invoke_callable_many<A>(
+    executor: &mut Executor,
+    callable: &Value,
+    args: &[A],
+    name: &'static str,
+) -> Result<Vec<Value>, ExecutorError>
+where
+    A: AsRef<[Value]>,
+{
+    let raw: Vec<Value> = match callable.clone().elide_lvalue() {
+        Value::Lambda(lambda) => {
+            executor
+                .eagerly_invoke_lambda_many(&lambda, args, None)
+                .await?
+        }
+        Value::Operator(operator) => {
+            executor
+                .eagerly_invoke_lambda_many(&operator.0, args, None)
+                .await?
+        }
+        other => {
+            return Err(ExecutorError::type_error_for(
+                "lambda / operator",
+                other.type_name(),
+                name,
+            ));
+        }
+    };
+    Ok(raw)
 }
 
 pub(super) fn split_tree_by_tag_filter<'a>(

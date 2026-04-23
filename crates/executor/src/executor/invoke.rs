@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
-    heap::{VRc, with_heap},
+    heap::{VRc, heap_replace, with_heap},
     state::MAX_CALL_DEPTH,
     value::{
         Value,
@@ -22,6 +22,7 @@ use smallvec::SmallVec;
 use super::{ExecSingle, Executor};
 
 impl Executor {
+    #[inline]
     pub(super) fn exec_make_lambda(
         &mut self,
         stack_idx: usize,
@@ -57,6 +58,7 @@ impl Executor {
         self.state.stack_mut(stack_idx).push(Value::Lambda(lambda));
     }
 
+    #[inline]
     pub(super) fn exec_make_anim(
         &mut self,
         stack_idx: usize,
@@ -80,6 +82,7 @@ impl Executor {
             .push(Value::AnimBlock(anim_block));
     }
 
+    #[inline]
     pub(super) async fn exec_lambda_invoke(
         &mut self,
         stack_idx: usize,
@@ -207,6 +210,7 @@ impl Executor {
         }
     }
 
+    #[inline]
     pub(super) async fn exec_operator_invoke(
         &mut self,
         stack_idx: usize,
@@ -396,6 +400,7 @@ impl Executor {
         }
     }
 
+    #[inline]
     pub(super) async fn exec_native_invoke(
         &mut self,
         stack_idx: usize,
@@ -413,6 +418,7 @@ impl Executor {
         }
     }
 
+    #[inline]
     pub(super) fn exec_return(&mut self, stack_idx: usize, stack_delta: i32) -> ExecSingle {
         let ret_val = self.state.stack_mut(stack_idx).pop();
 
@@ -429,7 +435,7 @@ impl Executor {
                 "internal error: return stack underflow",
             ));
         }
-        stack.pop_n(to_pop);
+        stack.pop_n_retaining_prefix(to_pop);
         stack.push(ret_val);
 
         let ret_ip = self.state.stack_mut(stack_idx).call_stack.pop();
@@ -442,6 +448,7 @@ impl Executor {
         }
     }
 
+    #[inline(always)]
     fn setup_lambda_call(
         &mut self,
         stack_idx: usize,
@@ -469,6 +476,7 @@ impl Executor {
         ExecSingle::Continue
     }
 
+    #[inline]
     pub(crate) fn eagerly_invoke_lambda<'a>(
         &'a mut self,
         lambda: &'a Lambda,
@@ -532,6 +540,113 @@ impl Executor {
         })
     }
 
+    pub fn eagerly_invoke_lambda_many<'a, A>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        args: &'a [A],
+        trace_parent_idx: Option<usize>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Value>, ExecutorError>> + 'a>>
+    where
+        A: AsRef<[Value]> + 'a,
+    {
+        Box::pin(async move {
+            if args.is_empty() {
+                return Ok(Vec::new());
+            }
+            for call_args in args {
+                validate_eager_arg_count(call_args.as_ref().len(), lambda)?;
+            }
+            if self.state.call_depth >= MAX_CALL_DEPTH {
+                self.state.last_stack_idx =
+                    trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                return Err(ExecutorError::StackOverflow);
+            }
+            self.state.call_depth += 1;
+
+            let temp_idx = self
+                .state
+                .alloc_stack(lambda.ip, None, trace_parent_idx)
+                .map_err(|_| {
+                    self.state.last_stack_idx =
+                        trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                    ExecutorError::TooManyActiveAnimations
+                })?;
+            let full_arg_len = lambda.required_args as usize + lambda.defaults.len();
+
+            let first_args = args[0].as_ref();
+            let prepared_first = prepare_eager_call_args(first_args.iter().cloned(), lambda)?;
+            let mut owned_arg_slots = first_args
+                .iter()
+                .map(|arg| !arg.is_lvalue())
+                .collect::<Vec<_>>();
+            owned_arg_slots.resize(full_arg_len, false);
+            {
+                let stack = self.state.stack_mut(temp_idx);
+                stack
+                    .var_stack
+                    .reserve(prepared_first.len() + lambda.captures.len());
+                stack.var_stack.extend(prepared_first);
+                for cap in &lambda.captures {
+                    stack.push(cap.clone());
+                }
+                stack.set_retained_prefix_len(full_arg_len + lambda.captures.len());
+            }
+
+            let mut results = Vec::with_capacity(args.len());
+            for call_args in args {
+                self.reseed_eager_many_stack(
+                    temp_idx,
+                    lambda,
+                    call_args.as_ref(),
+                    &mut owned_arg_slots,
+                );
+
+                loop {
+                    self.tick_yielder().await;
+
+                    match self.execute_one(temp_idx).await {
+                        ExecSingle::Continue => {}
+                        ExecSingle::EndOfHead => {
+                            let raw = if self.state.stack(temp_idx).stack_len()
+                                > self.state.stack(temp_idx).retained_prefix_len
+                            {
+                                self.state.stack_mut(temp_idx).pop()
+                            } else {
+                                Value::Nil
+                            };
+                            let result = match self.materialize_cached_value(raw).await {
+                                Ok(result) => result,
+                                Err(e) => {
+                                    self.state.free_stack(temp_idx);
+                                    self.state.call_depth -= 1;
+                                    return Err(e);
+                                }
+                            };
+                            results.push(result);
+                            break;
+                        }
+                        ExecSingle::Play => {
+                            self.state.free_stack(temp_idx);
+                            self.state.call_depth -= 1;
+                            return Err(ExecutorError::PlayInLabeledInvocation);
+                        }
+                        ExecSingle::Error(e) => {
+                            self.state.free_stack(temp_idx);
+                            self.state.call_depth -= 1;
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+
+            self.state.free_stack(temp_idx);
+            self.state.last_stack_idx =
+                trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+            self.state.call_depth -= 1;
+            Ok(results)
+        })
+    }
+
     pub fn invoke_lambda<'a>(
         &'a mut self,
         lambda: &'a Lambda,
@@ -544,6 +659,61 @@ impl Executor {
         })
     }
 
+    fn reseed_eager_many_stack(
+        &mut self,
+        stack_idx: usize,
+        lambda: &Lambda,
+        args: &[Value],
+        owned_arg_slots: &mut [bool],
+    ) {
+        let stack = self.state.stack_mut(stack_idx);
+        stack.truncate_to_retained_prefix();
+        stack.ip = lambda.ip;
+        stack.call_stack.clear();
+        stack.label_buffer.clear();
+        stack.conditional_flag = false;
+        stack.active_child_count = 0;
+
+        for (idx, arg) in args.iter().enumerate() {
+            match arg.clone() {
+                Value::Lvalue(vrc) => {
+                    stack.var_stack[idx] = Value::Lvalue(vrc);
+                    owned_arg_slots[idx] = false;
+                }
+                Value::WeakLvalue(vweak) => {
+                    stack.var_stack[idx] = Value::WeakLvalue(vweak);
+                    owned_arg_slots[idx] = false;
+                }
+                other => {
+                    if owned_arg_slots[idx] {
+                        match &stack.var_stack[idx] {
+                            Value::Lvalue(vrc) => {
+                                heap_replace(vrc.key(), other);
+                            }
+                            Value::WeakLvalue(vweak) => {
+                                heap_replace(vweak.key(), other);
+                            }
+                            _ => {
+                                stack.var_stack[idx] = Value::Lvalue(VRc::new(other));
+                            }
+                        }
+                    } else {
+                        stack.var_stack[idx] = Value::Lvalue(VRc::new(other));
+                    }
+                    owned_arg_slots[idx] = true;
+                }
+            }
+        }
+
+        let default_start = args.len().saturating_sub(lambda.required_args as usize);
+        for (idx, default) in lambda.defaults[default_start..].iter().enumerate() {
+            let slot_idx = args.len() + idx;
+            stack.var_stack[slot_idx] = default.clone();
+            owned_arg_slots[slot_idx] = false;
+        }
+    }
+
+    #[inline]
     fn drain_labels(
         &mut self,
         stack_idx: usize,
@@ -594,6 +764,26 @@ impl Executor {
         }
         ExecSingle::Continue
     }
+}
+
+fn validate_eager_arg_count(arg_count: usize, lambda: &Lambda) -> Result<(), ExecutorError> {
+    let minimum = lambda.required_args as usize;
+    let maximum = minimum + lambda.defaults.len();
+    if arg_count < minimum {
+        return Err(ExecutorError::TooFewArguments {
+            minimum,
+            got: arg_count,
+            operator: false,
+        });
+    }
+    if arg_count > maximum {
+        return Err(ExecutorError::TooManyArguments {
+            maximum,
+            got: arg_count,
+            operator: false,
+        });
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -795,6 +985,7 @@ impl Executor {
     }
 }
 
+#[inline]
 pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value> {
     let total = lambda.required_args as usize + lambda.defaults.len();
     if args.len() < total {
@@ -805,6 +996,7 @@ pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value>
     args
 }
 
+#[inline]
 pub(crate) fn prepare_eager_call_args(
     args: impl IntoIterator<Item = Value>,
     lambda: &Lambda,

@@ -148,10 +148,13 @@ impl RuntimeState {
     }
 
     async fn playback_iteration(&mut self, sm_tx: &UnboundedSender<ServiceManagerMessage>) {
+        let last_update = self.last_update_at;
         let tick_started_at = Instant::now();
         let elapsed = (tick_started_at - self.last_update_at).as_secs_f64();
         let target_dt = self.playback_mode.default_time_interval().max(elapsed);
         let max_slide = self.max_slide();
+
+        self.last_update_at = Instant::now();
 
         match self.executor.advance_playback(max_slide, target_dt).await {
             Ok(true) => {}
@@ -169,10 +172,7 @@ impl RuntimeState {
         let scene_snapshot = self.capture_scene_snapshot().await.ok().flatten();
         self.emit_snapshot(sm_tx, false, scene_snapshot).await;
 
-        let full_elapsed = Instant::now()
-            .duration_since(self.last_update_at)
-            .as_secs_f64();
-        self.last_update_at = Instant::now();
+        let full_elapsed = Instant::now().duration_since(last_update).as_secs_f64();
         if self.is_playing && target_dt > full_elapsed {
             Timer::after(Duration::from_secs_f64(target_dt - full_elapsed)).await;
         }

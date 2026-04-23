@@ -15,7 +15,7 @@ use geo::{
 };
 use image::RgbaImage;
 
-use crate::{RenderSize, RenderStyle, SceneRenderData, mesh_fingerprint};
+use crate::{RenderSize, RenderStyle, RenderView, SceneRenderData, mesh_fingerprint};
 
 const TARGET_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Bgra8Unorm;
 const TEXTURE_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Rgba8Unorm;
@@ -130,6 +130,7 @@ struct CameraParams {
     up: [f32; 4],
     forward: [f32; 4],
     clip: [f32; 4],
+    viewport: [f32; 4],
 }
 
 #[repr(C)]
@@ -270,13 +271,13 @@ impl BladeRenderer {
     pub(crate) fn render(
         &mut self,
         scene: &SceneRenderData,
-        size: RenderSize,
+        view: RenderView,
     ) -> Result<RgbaImage> {
         self.frame_index += 1;
         let frame_index = self.frame_index;
 
         self.command_encoder.start();
-        self.ensure_target(size);
+        self.ensure_target(view.output_size);
 
         let mut items = Vec::with_capacity(scene.meshes.len());
         for (order, mesh) in scene.meshes.iter().enumerate() {
@@ -302,11 +303,11 @@ impl BladeRenderer {
         self.flush_pending_uploads();
         self.draw_meshes(
             &items,
-            size,
+            view,
             scene.camera.basis(),
             Some(scene.background.color),
         );
-        self.copy_target_to_readback(size);
+        self.copy_target_to_readback(view.output_size);
 
         let sync_point = self.gpu.submit(&mut self.command_encoder);
         self.upload_belt.flush(&sync_point);
@@ -315,7 +316,7 @@ impl BladeRenderer {
             "timed out waiting for renderer GPU work"
         );
 
-        let image = self.readback_image(size)?;
+        let image = self.readback_image(view.output_size)?;
         self.prune_caches(frame_index);
         Ok(image)
     }
@@ -621,7 +622,7 @@ impl BladeRenderer {
     fn draw_meshes(
         &mut self,
         items: &[MeshWorkItem],
-        size: RenderSize,
+        view: RenderView,
         basis: CameraBasis,
         background: Option<(f32, f32, f32, f32)>,
     ) {
@@ -638,7 +639,8 @@ impl BladeRenderer {
         }
 
         let target = self.target.as_ref().expect("target should exist");
-        let camera = CameraParams::from_basis(basis, size);
+        let camera = CameraParams::from_basis(basis, view);
+        let size = view.output_size;
         let mut z_offset = 0.0;
         let color_target = match target.color_msaa_view {
             Some(msaa_view) => gpu::RenderTarget {
@@ -1011,8 +1013,14 @@ impl CachedMesh {
 }
 
 impl CameraParams {
-    fn from_basis(basis: CameraBasis, size: RenderSize) -> Self {
-        let aspect = size.width.max(1) as f32 / size.height.max(1) as f32;
+    fn from_basis(basis: CameraBasis, view: RenderView) -> Self {
+        let output_size = view.output_size;
+        let projection_size = view.projection_size;
+        let aspect = projection_size.width.max(1) as f32 / projection_size.height.max(1) as f32;
+        let viewport_scale_x =
+            projection_size.width.max(1) as f32 / output_size.width.max(1) as f32;
+        let viewport_scale_y =
+            projection_size.height.max(1) as f32 / output_size.height.max(1) as f32;
         Self {
             position: float4_from_xyz(basis.position.x, basis.position.y, basis.position.z, 0.0),
             right: float4_from_xyz(basis.right.x, basis.right.y, basis.right.z, 0.0),
@@ -1024,6 +1032,7 @@ impl CameraParams {
                 (basis.fov * 0.5).tan().max(0.05),
                 aspect.max(0.1),
             ],
+            viewport: [viewport_scale_x, viewport_scale_y, 0.0, 0.0],
         }
     }
 }

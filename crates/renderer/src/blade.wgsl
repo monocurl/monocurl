@@ -8,6 +8,7 @@ struct CameraParams {
     up: vec4<f32>,
     forward: vec4<f32>,
     clip: vec4<f32>,
+    viewport: vec4<f32>,
 }
 
 struct TriShaderParams {
@@ -126,12 +127,13 @@ fn project_camera(model: vec3<f32>, camera: CameraParams, depth_bias: f32) -> Pr
 
     let tan_half_fov = max(camera.clip.z, 0.05);
     let aspect = max(camera.clip.w, 0.1);
+    let viewport_scale = max(camera.viewport.xy, vec2<f32>(1e-6));
     let near = camera.clip.x;
     let far = max(camera.clip.y, near + 0.0001);
 
     let clip_w = camera_z;
-    let clip_x = camera_x / (tan_half_fov * aspect);
-    let clip_y = camera_y / tan_half_fov;
+    let clip_x = camera_x / (tan_half_fov * aspect) * viewport_scale.x;
+    let clip_y = camera_y / tan_half_fov * viewport_scale.y;
     let clip_z = far * camera_z / (far - near) - (far * near) / (far - near);
 
     var clip = vec4<f32>(clip_x, clip_y, clip_z, clip_w);

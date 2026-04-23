@@ -171,9 +171,9 @@ impl Theme {
             document_background: chrome_background,
             viewport_background: chrome_background,
             viewport_stage_background: rgba(0xFAFBFD),
-            viewport_status_playing: rgba(0x11111B),
+            viewport_status_playing: rgba(0x8C8FA1),
             viewport_status_loading: rgba(0x1E66F5),
-            viewport_status_paused: rgba(0x11111B),
+            viewport_status_paused: rgba(0x8C8FA1),
             viewport_status_runtime_error: rgba(0x8839EF),
             viewport_status_compile_error: rgba(0xD20F39),
 
@@ -227,9 +227,9 @@ impl Theme {
             document_background: chrome_background,
             viewport_background: chrome_background,
             viewport_stage_background: rgba(0x121720),
-            viewport_status_playing: rgba(0xFFFFFF),
+            viewport_status_playing: rgba(0x7C8391),
             viewport_status_loading: rgba(0x1E66F5),
-            viewport_status_paused: rgba(0xFFFFFF),
+            viewport_status_paused: rgba(0x7C8391),
             viewport_status_runtime_error: rgba(0xC18FFF),
             viewport_status_compile_error: rgba(0xF07A7A),
 

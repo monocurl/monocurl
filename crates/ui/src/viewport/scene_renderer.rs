@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use gpui::{Bounds, Pixels, RenderImage, Window};
 use image::Frame;
-use renderer::{RenderSize, Renderer, RgbaImage, SceneRenderData, scene_fingerprint};
+use renderer::{RenderSize, RenderView, Renderer, RgbaImage, SceneRenderData, scene_fingerprint};
 
 #[derive(Default)]
 pub struct SceneImageCache {
@@ -15,15 +15,16 @@ impl SceneImageCache {
         &mut self,
         renderer: &mut Renderer,
         scene: &SceneRenderData,
-        bounds: Bounds<Pixels>,
+        output_bounds: Bounds<Pixels>,
+        projection_bounds: Bounds<Pixels>,
         scale_factor: f32,
         window: &mut Window,
     ) -> Option<Arc<RenderImage>> {
-        let key = SceneImageKey::new(scene, bounds, scale_factor);
+        let key = SceneImageKey::new(scene, output_bounds, projection_bounds, scale_factor);
         if self.key.as_ref() == Some(&key) {
             return self.image.clone();
         }
-        if key.pixel_size.is_empty() {
+        if key.view.is_empty() {
             if let Some(previous) = self.image.take() {
                 let _ = window.drop_image(previous);
             }
@@ -32,7 +33,7 @@ impl SceneImageCache {
         }
 
         let image = renderer
-            .render(scene, key.pixel_size)
+            .render_view(scene, key.view)
             .ok()
             .map(gpui_image_from_rgba)
             .map(Arc::new)?;
@@ -48,20 +49,34 @@ impl SceneImageCache {
 #[derive(Clone, PartialEq)]
 struct SceneImageKey {
     scene: u64,
-    pixel_size: RenderSize,
+    view: RenderView,
 }
 
 impl SceneImageKey {
-    fn new(scene: &SceneRenderData, bounds: Bounds<Pixels>, scale_factor: f32) -> Self {
-        let width = (f32::from(bounds.size.width) * scale_factor)
+    fn new(
+        scene: &SceneRenderData,
+        output_bounds: Bounds<Pixels>,
+        projection_bounds: Bounds<Pixels>,
+        scale_factor: f32,
+    ) -> Self {
+        let output_width = (f32::from(output_bounds.size.width) * scale_factor)
             .ceil()
             .max(0.0) as u32;
-        let height = (f32::from(bounds.size.height) * scale_factor)
+        let output_height = (f32::from(output_bounds.size.height) * scale_factor)
+            .ceil()
+            .max(0.0) as u32;
+        let projection_width = (f32::from(projection_bounds.size.width) * scale_factor)
+            .ceil()
+            .max(0.0) as u32;
+        let projection_height = (f32::from(projection_bounds.size.height) * scale_factor)
             .ceil()
             .max(0.0) as u32;
         Self {
             scene: scene_fingerprint(scene),
-            pixel_size: RenderSize::new(width, height),
+            view: RenderView::new(
+                RenderSize::new(output_width, output_height),
+                RenderSize::new(projection_width, projection_height),
+            ),
         }
     }
 }

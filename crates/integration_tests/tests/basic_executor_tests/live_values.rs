@@ -342,17 +342,17 @@ fn test_util_type_predicates_cover_callable_variants() {
         let op = operator |target| [target, target]
         let live_f = f(arg: 1, 2)
         let live_op = op{} 1
-        let result = is_float(1.5)
-            + is_number(2)
-            + is_list([1, 2])
-            + is_function(f)
-            + is_function(live_f)
-            + is_operator(op)
-            + is_operator(live_op)
-            + is_callable(f)
-            + is_callable(live_op)
-            + is_live_function(live_f)
-            + is_live_operator(live_op)
+        let result = is_float(1.5) +
+              is_number(2) +
+              is_list([1, 2]) +
+              is_function(f) +
+              is_function(live_f) +
+              is_operator(op) +
+              is_operator(live_op) +
+              is_callable(f) +
+              is_callable(live_op) +
+              is_live_function(live_f) +
+              is_live_operator(live_op)
     ",
         &["util"],
     );
@@ -403,8 +403,8 @@ fn test_mesh_operator_filter_applies_predicate_to_subset() {
     let r = run_with_stdlib(
         "
         let scene = [
-            retag{1} Circle(1),
-            retag{2} shift{delta: [4, 0, 0]} Circle(1)
+            tag{1} Circle(1),
+            tag{2} shift{delta: [4, 0, 0]} Circle(1)
         ]
         let shifted = shift{delta: 10 * 1r, filter: |tag| 1 in tag} scene
         let x1 = mesh_center(tag_filter{1} shifted)[0]
@@ -417,12 +417,24 @@ fn test_mesh_operator_filter_applies_predicate_to_subset() {
 }
 
 #[test]
+fn test_point_map_batches_distinct_vertex_results() {
+    let r = run_with_stdlib(
+        "
+        let shifted = point_map{|p| p + [1, 0, 0]} Line([0, 0, 0], [2, 0, 0])
+        let result = mesh_center(shifted)
+    ",
+        &["mesh"],
+    );
+    r.assert_float_list_approx(&[2.0, 0.0, 0.0], 1e-9);
+}
+
+#[test]
 fn test_subset_map_applies_mapping_to_matching_subset() {
     let r = run_with_stdlib(
         "
         let scene = [
-            retag{1} Circle(1),
-            retag{2} shift{delta: [4, 0, 0]} Circle(1)
+            tag{1} Circle(1),
+            tag{2} shift{delta: [4, 0, 0]} Circle(1)
         ]
         let shifted = subset_map{filter: |tag| 1 in tag, f: |m| shift{delta: 10 * 1r} m} scene
         let x1 = mesh_center(tag_filter{1} shifted)[0]
@@ -439,8 +451,8 @@ fn test_tag_split_is_exposed_in_mesh_stdlib() {
     let r = run_with_stdlib(
         "
         let scene = [
-            retag{1} Circle(1),
-            retag{2} shift{delta: [4, 0, 0]} Circle(1)
+            tag{1} Circle(1),
+            tag{2} shift{delta: [4, 0, 0]} Circle(1)
         ]
         let all = tag_split(scene)
         let filtered = tag_split(scene, |tag| 2 in tag)
@@ -460,8 +472,8 @@ fn test_contour_separate_operator_numbers_output_tags() {
     let r = run_with_stdlib(
         "
         let scene = [
-            retag{8} shift{delta: [-2, 0, 0]} Circle(1),
-            retag{9} shift{delta: [2, 0, 0]} Circle(1)
+            tag{8} shift{delta: [-2, 0, 0]} Circle(1),
+            tag{9} shift{delta: [2, 0, 0]} Circle(1)
         ]
         let separated = contour_separate{} scene
         let left = tag_filter{0} separated
@@ -484,8 +496,8 @@ fn test_tag_filter_operator_reads_filtered_side() {
     let r = run_with_stdlib(
         "
         let scene = [
-            retag{1} shift{delta: [-2, 0, 0]} Circle(1),
-            retag{2} shift{delta: [2, 0, 0]} Circle(1)
+            tag{1} shift{delta: [-2, 0, 0]} Circle(1),
+            tag{2} shift{delta: [2, 0, 0]} Circle(1)
         ]
         let filtered = tag_filter{|tag| 2 in tag} scene
         let result =
@@ -690,6 +702,7 @@ fn test_text_tag_operator_tags_text_backends() {
         let tex = Tex([text_tag{1} \"x\", \" + \", text_tag{[2, 3, 4]} \"y\"], 1)
         let text = Text([text_tag{5} \"hello\"], 1)
         let latex = Latex([text_tag{[6, 7]} \"$z$\"], 1)
+        let empty = Text([text_tag{[]} \"blank\"], 1)
         let result =
             (1 in mesh_tags(tex)) +
             (2 in mesh_tags(tex)) +
@@ -697,11 +710,12 @@ fn test_text_tag_operator_tags_text_backends() {
             (4 in mesh_tags(tex)) +
             (5 in mesh_tags(text)) +
             (6 in mesh_tags(latex)) +
-            (7 in mesh_tags(latex))
+            (7 in mesh_tags(latex)) +
+            (len(mesh_tags(empty)) == 0)
     ",
-        &["mesh"],
+        &["mesh", "util"],
     );
-    r.assert_int(7);
+    r.assert_int(8);
 }
 
 #[test]
@@ -763,6 +777,25 @@ fn test_explicit_func_diff_accepts_custom_tags() {
 }
 
 #[test]
+fn test_explicit_func_diff_accepts_tag_lists() {
+    let r = run_with_stdlib(
+        "
+        let f = |x| 1
+        let g = |x| 0
+        let fill0 = [0.3, 0.8, 0.3, 0.5]
+        let fill1 = [0.8, 0.3, 0.3, 0.5]
+        let fills = [fill0, fill1]
+        let custom_tags = [[7, 8], [9, 10]]
+        let diff = ExplicitFuncDiff(f, g, [-1, 1, 16], fills, custom_tags)
+        let tags = sort(mesh_tags(diff))
+        let result = (len(tags) == 4) + (tags[0] == 7) + (tags[1] == 8) + (tags[2] == 9) + (tags[3] == 10)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(5);
+}
+
+#[test]
 fn test_explicit_func_diff_connects_same_sign_strip() {
     let r = run_with_stdlib(
         "
@@ -812,6 +845,18 @@ fn test_explicit_func_reports_named_bad_sample_range_argument() {
     r.assert_error("invalid argument 'x_min_max_samples'");
     r.assert_error("expected list of length 3");
     r.assert_error("got int");
+}
+
+#[test]
+fn test_explicit_func_batches_distinct_sample_values() {
+    let r = run_with_stdlib(
+        "
+        let curve = ExplicitFunc(|x| x, [0, 4, 5])
+        let result = len(mesh_vertex_set(curve))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(5);
 }
 
 #[test]

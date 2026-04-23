@@ -3,7 +3,7 @@
 # constructors keep geometry-focused args only.
 # shiftable primitives are authored at the origin; use `shift` to place them.
 # styling/tagging is handled after construction via operators like
-# `stroke`, `fill`, `dotted`, and `retag`.
+# `stroke`, `fill`, `dotted`, and `tag`.
 
 # primitive constructors
 

@@ -133,6 +133,7 @@ impl SymbolFunctionInfo {
 pub struct Symbol {
     pub name: String,
     imported: bool,
+    declared_in_stdlib: bool,
     stack_position: usize,
     // how the symbol looks like to the current bundle
     // may appear as let, even though declared as var
@@ -690,10 +691,12 @@ impl Compiler {
         function_info: SymbolFunctionInfo,
     ) {
         let position = self.stack_depth() - 1;
+        let declared_in_stdlib = self.current_section().flags.is_stdlib;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
             Arc::new(Symbol {
                 name: name.to_string(),
+                declared_in_stdlib,
                 stack_position: position,
                 var_type,
                 function_info,
@@ -709,10 +712,12 @@ impl Compiler {
         function_info: SymbolFunctionInfo,
         position: usize,
     ) {
+        let declared_in_stdlib = self.current_section().flags.is_stdlib;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
             Arc::new(Symbol {
                 name: name.to_string(),
+                declared_in_stdlib,
                 stack_position: position,
                 var_type,
                 function_info,

@@ -9,6 +9,7 @@ use geo::{
     mesh_build::SurfaceVertex,
     simd::{Float2, Float3, Float4},
 };
+use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
@@ -1014,30 +1015,29 @@ pub async fn mk_color_grid(
     ensure_surface_triangles("color grid triangles", cell_count.saturating_mul(2))?;
     let mut vertices = Vec::<SurfaceVertex>::new();
     let mut faces = Vec::<[usize; 3]>::new();
+    let mut positions = Vec::with_capacity(x_samples * y_samples);
+    let mut color_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
     for ix in 0..x_samples {
         for iy in 0..y_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             let pos = Float3::new(x, y, 0.0);
-            let col = float4_from_value(
-                invoke_callable(
-                    executor,
-                    &color_at,
-                    vec![point_value(pos), sample_index_value(ix, iy)],
-                    "color_at",
-                )
-                .await?,
-                "color_at",
-            )?;
-            vertices.push(SurfaceVertex {
-                pos,
-                col,
-                uv: Float2::ZERO,
-            });
+            positions.push(pos);
+            color_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
         }
+    }
+    let colors = invoke_callable_many(executor, &color_at, &color_args, "color_at").await?;
+    for (pos, color) in positions.into_iter().zip(colors) {
+        vertices.push(SurfaceVertex {
+            pos,
+            col: float4_from_value(color, "color_at")?,
+            uv: Float2::ZERO,
+        });
     }
     let grid_vertex = |ix: usize, iy: usize| ix * y_samples + iy;
 
+    let mut centers = Vec::with_capacity(nx * ny);
+    let mut mask_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(nx * ny);
     for ix in 0..nx {
         for iy in 0..ny {
             let xa = x0 + (x1 - x0) * ix as f32 / nx as f32;
@@ -1045,20 +1045,22 @@ pub async fn mk_color_grid(
             let ya = y0 + (y1 - y0) * iy as f32 / ny as f32;
             let yb = y0 + (y1 - y0) * (iy + 1) as f32 / ny as f32;
             let center = Float3::new((xa + xb) / 2.0, (ya + yb) / 2.0, 0.0);
-            if !invoke_callable(executor, &mask, vec![point_value(center)], "mask")
-                .await?
-                .check_truthy()?
-            {
-                continue;
-            }
-
-            let a = grid_vertex(ix, iy);
-            let b = grid_vertex(ix + 1, iy);
-            let c = grid_vertex(ix + 1, iy + 1);
-            let d = grid_vertex(ix, iy + 1);
-            faces.push([a, b, c]);
-            faces.push([a, c, d]);
+            centers.push((ix, iy));
+            mask_args.push(smallvec![point_value(center)]);
         }
+    }
+    let mask_values = invoke_callable_many(executor, &mask, &mask_args, "mask").await?;
+    for ((ix, iy), mask_value) in centers.into_iter().zip(mask_values) {
+        if !mask_value.check_truthy()? {
+            continue;
+        }
+
+        let a = grid_vertex(ix, iy);
+        let b = grid_vertex(ix + 1, iy);
+        let c = grid_vertex(ix + 1, iy + 1);
+        let d = grid_vertex(ix, iy + 1);
+        faces.push([a, b, c]);
+        faces.push([a, c, d]);
     }
 
     let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
@@ -1091,28 +1093,25 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let nx = x_samples.saturating_sub(1).max(1);
     let ny = y_samples.saturating_sub(1).max(1);
 
+    let mut samples = Vec::with_capacity(sample_count);
+    let mut mask_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(sample_count);
     for ix in 0..x_samples {
         for iy in 0..y_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             let pos = Float3::new(x, y, 0.0);
-            if !invoke_callable(executor, &mask, vec![point_value(pos)], "mask")
-                .await?
-                .check_truthy()?
-            {
-                continue;
-            }
-            out.push(
-                invoke_callable(
-                    executor,
-                    &mesh_at,
-                    vec![point_value(pos), sample_index_value(ix, iy)],
-                    "mesh_at",
-                )
-                .await?,
-            );
+            samples.push((pos, ix, iy));
+            mask_args.push(smallvec![point_value(pos)]);
         }
     }
+    let mask_values = invoke_callable_many(executor, &mask, &mask_args, "mask").await?;
+    let mut mesh_args = Vec::<SmallVec<[Value; 2]>>::new();
+    for ((pos, ix, iy), mask_value) in samples.into_iter().zip(mask_values) {
+        if mask_value.check_truthy()? {
+            mesh_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
+        }
+    }
+    out.extend(invoke_callable_many(executor, &mesh_at, &mesh_args, "mesh_at").await?);
 
     Ok(list_value(out))
 }
@@ -1517,18 +1516,20 @@ pub async fn mk_parametric(
     let t1 = crate::read_float(executor, stack_idx, -2, "t1")?;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(2) as usize;
     ensure_limit("parametric samples", samples, MAX_CURVE_SAMPLES)?;
-    let mut points = Vec::with_capacity(samples);
+    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(samples);
     for i in 0..samples {
         let t = if samples == 1 {
             t0
         } else {
             t0 + (t1 - t0) * i as f64 / (samples - 1) as f64
         };
-        points.push(float3_from_value(
-            invoke_callable(executor, &f, vec![Value::Float(t)], "f").await?,
-            "f",
-        )?);
+        args.push(smallvec![Value::Float(t)]);
     }
+    let values = invoke_callable_many(executor, &f, &args, "f").await?;
+    let points = values
+        .into_iter()
+        .map(|value| float3_from_value(value, "f"))
+        .collect::<Result<Vec<_>, _>>()?;
     let normal = points
         .windows(3)
         .find_map(|w| {
@@ -1558,10 +1559,17 @@ pub async fn mk_explicit(
     let x1 = crate::read_float(executor, stack_idx, -2, "x1")?;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(2) as usize;
     ensure_limit("explicit samples", samples, MAX_CURVE_SAMPLES)?;
-    let mut points = Vec::with_capacity(samples);
+    let mut xs = Vec::with_capacity(samples);
+    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(samples);
     for i in 0..samples {
         let x = x0 + (x1 - x0) * i as f64 / (samples - 1) as f64;
-        let y = match invoke_callable(executor, &f, vec![Value::Float(x)], "f").await? {
+        xs.push(x);
+        args.push(smallvec![Value::Float(x)]);
+    }
+    let values = invoke_callable_many(executor, &f, &args, "f").await?;
+    let mut points = Vec::with_capacity(samples);
+    for (x, value) in xs.into_iter().zip(values) {
+        let y = match value {
             Value::Float(v) => v as f32,
             Value::Integer(v) => v as f32,
             other => {
@@ -1603,30 +1611,30 @@ pub async fn mk_explicit2d(
     let cell_count = ensure_grid_cells("explicit surface cells", nx, ny)?;
     ensure_surface_triangles("explicit surface triangles", cell_count.saturating_mul(2))?;
     let mut grid = vec![vec![Float3::ZERO; y_samples]; x_samples];
-    for (ix, col) in grid.iter_mut().enumerate() {
-        for (iy, point) in col.iter_mut().enumerate() {
+    let mut coords = Vec::with_capacity(x_samples * y_samples);
+    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
+    for ix in 0..x_samples {
+        for iy in 0..y_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
-            let z = match invoke_callable(
-                executor,
-                &f,
-                vec![Value::Float(x as f64), Value::Float(y as f64)],
-                "f",
-            )
-            .await?
-            {
-                Value::Float(v) => v as f32,
-                Value::Integer(v) => v as f32,
-                other => {
-                    return Err(ExecutorError::type_error_for(
-                        "float",
-                        other.type_name(),
-                        "f",
-                    ));
-                }
-            };
-            *point = Float3::new(x, y, z);
+            coords.push((ix, iy, x, y));
+            args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
         }
+    }
+    let values = invoke_callable_many(executor, &f, &args, "f").await?;
+    for ((ix, iy, x, y), value) in coords.into_iter().zip(values) {
+        let z = match value {
+            Value::Float(v) => v as f32,
+            Value::Integer(v) => v as f32,
+            other => {
+                return Err(ExecutorError::type_error_for(
+                    "float",
+                    other.type_name(),
+                    "f",
+                ));
+            }
+        };
+        grid[ix][iy] = Float3::new(x, y, z);
     }
     let index = |ix: usize, iy: usize| ix * (ny + 1) + iy;
     let vertices: Vec<_> = grid.iter().flat_map(|col| col.iter().copied()).collect();
@@ -1670,29 +1678,29 @@ pub async fn mk_implicit2d(
     let ny = y_samples - 1;
     ensure_grid_cells("implicit surface cells", nx, ny)?;
     let mut vals = vec![vec![0.0f32; y_samples]; x_samples];
-    for (ix, col) in vals.iter_mut().enumerate() {
-        for (iy, val) in col.iter_mut().enumerate() {
+    let mut coords = Vec::with_capacity(x_samples * y_samples);
+    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
+    for ix in 0..x_samples {
+        for iy in 0..y_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
-            *val = match invoke_callable(
-                executor,
-                &f,
-                vec![Value::Float(x as f64), Value::Float(y as f64)],
-                "f",
-            )
-            .await?
-            {
-                Value::Float(v) => v as f32,
-                Value::Integer(v) => v as f32,
-                other => {
-                    return Err(ExecutorError::type_error_for(
-                        "float",
-                        other.type_name(),
-                        "f",
-                    ));
-                }
-            };
+            coords.push((ix, iy));
+            args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
         }
+    }
+    let values = invoke_callable_many(executor, &f, &args, "f").await?;
+    for ((ix, iy), value) in coords.into_iter().zip(values) {
+        vals[ix][iy] = match value {
+            Value::Float(v) => v as f32,
+            Value::Integer(v) => v as f32,
+            other => {
+                return Err(ExecutorError::type_error_for(
+                    "float",
+                    other.type_name(),
+                    "f",
+                ));
+            }
+        };
     }
 
     let mut lins = Vec::new();
@@ -1756,14 +1764,22 @@ pub async fn mk_explicit_diff(
     )?;
     let fill0 = read_float4(executor, stack_idx, -4, "fill0")?;
     let fill1 = read_float4(executor, stack_idx, -3, "fill1")?;
-    let tag0 = read_int(executor, stack_idx, -2, "tag0")? as isize;
-    let tag1 = read_int(executor, stack_idx, -1, "tag1")? as isize;
+    let tag0 = read_tags(executor, stack_idx, -2, "tag0")?;
+    let tag1 = read_tags(executor, stack_idx, -1, "tag1")?;
 
     let mut upper = Vec::with_capacity(samples);
     let mut lower = Vec::with_capacity(samples);
+    let mut xs = Vec::with_capacity(samples);
+    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(samples);
     for i in 0..samples {
         let x = x0 + (x1 - x0) * i as f64 / (samples - 1) as f64;
-        let yf = match invoke_callable(executor, &f, vec![Value::Float(x)], "f").await? {
+        xs.push(x);
+        args.push(smallvec![Value::Float(x)]);
+    }
+    let upper_values = invoke_callable_many(executor, &f, &args, "f").await?;
+    let lower_values = invoke_callable_many(executor, &g, &args, "g").await?;
+    for ((x, upper_value), lower_value) in xs.into_iter().zip(upper_values).zip(lower_values) {
+        let yf = match upper_value {
             Value::Float(v) => v as f32,
             Value::Integer(v) => v as f32,
             other => {
@@ -1774,7 +1790,7 @@ pub async fn mk_explicit_diff(
                 ));
             }
         };
-        let yg = match invoke_callable(executor, &g, vec![Value::Float(x)], "g").await? {
+        let yg = match lower_value {
             Value::Float(v) => v as f32,
             Value::Integer(v) => v as f32,
             other => {
@@ -1847,13 +1863,13 @@ pub async fn mk_explicit_diff(
     let (pos_lins, pos_tris) = build_region(pos_verts, pos_faces, fill0);
     let (neg_lins, neg_tris) = build_region(neg_verts, neg_faces, fill1);
 
-    let make_tagged_mesh = |lins, tris, tag: isize| {
+    let make_tagged_mesh = |lins, tris, tag: Vec<isize>| {
         let mesh = geo::mesh::Mesh {
             dots: vec![],
             lins,
             tris,
             uniform: geo::mesh::Uniforms::default(),
-            tag: vec![tag],
+            tag,
         };
         mesh.debug_assert_consistent_topology();
         Value::Mesh(std::sync::Arc::new(mesh))

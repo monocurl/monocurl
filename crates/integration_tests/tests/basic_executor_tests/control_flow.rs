@@ -225,3 +225,34 @@ fn test_exec_nested_loops() {
     ");
     r.assert_int(6);
 }
+
+#[test]
+fn test_exec_for_loop_stdlib_range_sum() {
+    let r = run_with_stdlib(
+        "
+        var sum = 0
+        for (i in range(0, 5)) {
+            sum = sum + i
+        }
+        let result = sum
+    ",
+        &["util"],
+    );
+    r.assert_int(10);
+}
+
+#[test]
+fn test_exec_for_loop_shadowed_range_stays_generic() {
+    let r = run_with_stdlib(
+        "
+        let range = |a, b| [10, 20]
+        var sum = 0
+        for (i in range(0, 5)) {
+            sum = sum + i
+        }
+        let result = sum
+    ",
+        &["util"],
+    );
+    r.assert_int(30);
+}

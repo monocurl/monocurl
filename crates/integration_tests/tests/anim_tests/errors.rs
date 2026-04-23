@@ -652,9 +652,9 @@ fn test_transfer_subset_moves_only_matching_tags() {
             (
                 "
                 mesh from = [
-                    retag{1} Circle(0.5),
-                    retag{2} shift{delta: [2, 0, 0]} Circle(0.5),
-                    retag{3} shift{delta: [4, 0, 0]} Circle(0.5)
+                    tag{1} Circle(0.5),
+                    tag{2} shift{delta: [2, 0, 0]} Circle(0.5),
+                    tag{3} shift{delta: [4, 0, 0]} Circle(0.5)
                 ]
                 mesh into = []
             ",
@@ -689,10 +689,10 @@ fn test_copy_subset_keeps_source_and_copies_predicate_match() {
             (
                 "
                 mesh from = [
-                    retag{1} Circle(0.5),
-                    retag{2} shift{delta: [2, 0, 0]} Circle(0.5)
+                    tag{1} Circle(0.5),
+                    tag{2} shift{delta: [2, 0, 0]} Circle(0.5)
                 ]
-                mesh into = [retag{9} shift{delta: [4, 0, 0]} Circle(0.5)]
+                mesh into = [tag{9} shift{delta: [4, 0, 0]} Circle(0.5)]
             ",
                 SectionType::Init,
             ),

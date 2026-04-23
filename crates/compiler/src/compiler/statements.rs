@@ -141,6 +141,14 @@ impl Compiler {
     }
 
     pub(super) fn compile_for(&mut self, f: &For, span: &Span8) {
+        if let Some([start, stop]) = self.stdlib_range_bounds(&f.container.1) {
+            self.compile_for_stdlib_range(f, &start, &stop, span);
+        } else {
+            self.compile_generic_for(f, span);
+        }
+    }
+
+    fn compile_generic_for(&mut self, f: &For, span: &Span8) {
         // desugars for v in container  ->  while idx < len(container)
         self.push_scope();
         let container_span = f.container.0.clone();
@@ -255,6 +263,140 @@ impl Compiler {
         }
 
         self.pop_scope(span.clone()); // removes iter and idx
+    }
+
+    fn compile_for_stdlib_range(
+        &mut self,
+        f: &For,
+        start: &SpanTagged<Expression>,
+        stop: &SpanTagged<Expression>,
+        span: &Span8,
+    ) {
+        // desugars for i in range(a, b) -> current = a; stop = b; while current < stop { let i = current; ...; current = current + 1 }
+        self.push_scope();
+
+        self.compile_val(&start.1, &start.0);
+        let current_pos = self.stack_depth() - 1;
+        self.emit(
+            Instruction::ConvertVar {
+                allow_stateful: false,
+            },
+            start.0.clone(),
+        );
+        self.define_symbol(
+            "\x00range_current",
+            VariableType::Var,
+            SymbolFunctionInfo::None,
+        );
+
+        self.compile_val(&stop.1, &stop.0);
+        let stop_pos = self.stack_depth() - 1;
+        self.emit(
+            Instruction::ConvertVar {
+                allow_stateful: false,
+            },
+            stop.0.clone(),
+        );
+        self.define_symbol(
+            "\x00range_stop",
+            VariableType::Let,
+            SymbolFunctionInfo::None,
+        );
+
+        let condition_ip = self.instruction_pointer();
+        let loop_stack = self.stack_depth();
+
+        let d = self.stack_delta(current_pos);
+        self.emit_copy(d, start.0.clone());
+        let d = self.stack_delta(stop_pos);
+        self.emit_copy(d, stop.0.clone());
+        self.emit(Instruction::Lt, span.clone());
+        self.dec_stack(1);
+
+        self.emit(Instruction::Not, span.clone());
+        let exit_jump = self.emit_cond_jump_patch(span.clone());
+
+        self.frame_mut().loop_contexts.push(LoopContext {
+            continue_target: None,
+            stack_depth_at_loop: loop_stack,
+            break_patches: Vec::new(),
+            continue_patches: Vec::new(),
+        });
+
+        self.push_scope();
+        let d = self.stack_delta(current_pos);
+        self.emit_copy(d, start.0.clone());
+        self.define_symbol(&f.var_name.1.0, VariableType::Let, SymbolFunctionInfo::None);
+        self.emit(
+            Instruction::ConvertVar {
+                allow_stateful: false,
+            },
+            span.clone(),
+        );
+
+        self.compile_statements(&f.body.1);
+        self.pop_scope(span.clone());
+
+        let increment_ip = self.instruction_pointer();
+        let cont_patches = std::mem::take(
+            &mut self
+                .frame_mut()
+                .loop_contexts
+                .last_mut()
+                .unwrap()
+                .continue_patches,
+        );
+        for patch in cont_patches {
+            self.patch_jump(patch, increment_ip);
+        }
+
+        let d = self.stack_delta(current_pos);
+        self.emit_lvalue(d, span.clone());
+        let d = self.stack_delta(current_pos);
+        self.emit_copy(d, span.clone());
+        self.emit_push_int(1, span.clone());
+        self.emit(Instruction::Add, span.clone());
+        self.dec_stack(1);
+        self.emit(Instruction::Assign, span.clone());
+        self.dec_stack(1);
+        self.emit_pops(1, span.clone());
+
+        self.emit_jump_to(condition_ip, span.clone());
+
+        let loop_end = self.instruction_pointer();
+        self.patch_jump(exit_jump, loop_end);
+        let ctx = self.frame_mut().loop_contexts.pop().unwrap();
+        for patch in ctx.break_patches {
+            self.patch_jump(patch, loop_end);
+        }
+
+        self.pop_scope(span.clone());
+    }
+
+    fn stdlib_range_bounds(
+        &mut self,
+        container: &Expression,
+    ) -> Option<[SpanTagged<Expression>; 2]> {
+        let Expression::LambdaInvocation(inv) = container else {
+            return None;
+        };
+        let Expression::IdentifierReference(IdentifierReference::Value(name)) = &*inv.lambda.1
+        else {
+            return None;
+        };
+        if name != "range" {
+            return None;
+        }
+
+        let sym = self.lookup(name, None, None)?;
+        if !sym.declared_in_stdlib {
+            return None;
+        }
+
+        match inv.arguments.1.as_slice() {
+            [(None, start), (None, stop)] => Some([start.clone(), stop.clone()]),
+            _ => None,
+        }
     }
 
     pub(super) fn compile_if(&mut self, i: &If, span: &Span8) {

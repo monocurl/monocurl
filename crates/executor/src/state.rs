@@ -17,6 +17,7 @@ use crate::{
 pub struct ExecutionStack {
     pub stack_id: usize,
     pub var_stack: Vec<Value>,
+    pub retained_prefix_len: usize,
     pub ip: InstructionPointer,
     pub call_stack: Vec<InstructionPointer>,
     pub label_buffer: SmallVec<[u32; 8]>,
@@ -51,6 +52,7 @@ impl ExecutionStack {
         Self {
             stack_id,
             var_stack: Vec::new(),
+            retained_prefix_len: 0,
             ip,
             call_stack: Vec::new(),
             label_buffer: SmallVec::new(),
@@ -85,6 +87,21 @@ impl ExecutionStack {
     pub fn pop_n(&mut self, n: usize) {
         let new_len = self.var_stack.len() - n;
         self.var_stack.truncate(new_len);
+    }
+
+    pub fn pop_n_retaining_prefix(&mut self, n: usize) {
+        let new_len = self.var_stack.len() - n;
+        self.var_stack
+            .truncate(new_len.max(self.retained_prefix_len));
+    }
+
+    pub fn set_retained_prefix_len(&mut self, len: usize) {
+        debug_assert!(len <= self.var_stack.len());
+        self.retained_prefix_len = len;
+    }
+
+    pub fn truncate_to_retained_prefix(&mut self) {
+        self.var_stack.truncate(self.retained_prefix_len);
     }
 }
 

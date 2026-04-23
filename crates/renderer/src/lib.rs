@@ -65,6 +65,29 @@ impl RenderSize {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RenderView {
+    pub output_size: RenderSize,
+    pub projection_size: RenderSize,
+}
+
+impl RenderView {
+    pub const fn new(output_size: RenderSize, projection_size: RenderSize) -> Self {
+        Self {
+            output_size,
+            projection_size,
+        }
+    }
+
+    pub const fn full(size: RenderSize) -> Self {
+        Self::new(size, size)
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.output_size.is_empty() || self.projection_size.is_empty()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderStyle {
     pub line_width_px: f32,
@@ -118,14 +141,20 @@ impl Renderer {
     /// construction accepts that container, but callers should treat the raw bytes
     /// as BGRA rather than semantic RGBA.
     pub fn render(&mut self, scene: &SceneRenderData, size: RenderSize) -> Result<RgbaImage> {
-        if size.is_empty() {
-            return Ok(RgbaImage::new(size.width, size.height));
-        }
+        self.render_view(scene, RenderView::full(size))
+    }
 
+    pub fn render_view(&mut self, scene: &SceneRenderData, view: RenderView) -> Result<RgbaImage> {
+        if view.is_empty() {
+            return Ok(RgbaImage::new(
+                view.output_size.width,
+                view.output_size.height,
+            ));
+        }
         self.blade
             .as_mut()
             .map_err(|error| anyhow!("blade renderer unavailable: {error}"))?
-            .render(scene, size)
+            .render(scene, view)
     }
 }
 

@@ -65,14 +65,13 @@ pub fn render_text_with_quality(
         return Ok(Vec::new());
     }
 
-    let source = document::apply_legacy_text_tags(&tagged.source, &tagged.spans)?;
-    render_system(
+    render_tagged_system(
         BackendKind::Text,
-        document::build_text_document(&source),
+        &tagged,
         scale,
         quality,
+        document::build_text_document,
     )
-    .map(|output| output.meshes)
 }
 
 pub fn render_tex(tex: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
@@ -90,14 +89,13 @@ pub fn render_tex_with_quality(
     }
 
     if system::is_available() {
-        let source = document::apply_legacy_text_tags(&tagged.source, &tagged.spans)?;
-        return render_system(
+        return render_tagged_system(
             BackendKind::Tex,
-            document::build_tex_document(&source),
+            &tagged,
             scale,
             quality,
-        )
-        .map(|output| output.meshes);
+            document::build_tex_document,
+        );
     }
 
     let markers = tagged
@@ -161,14 +159,13 @@ pub fn render_latex_with_quality(
         return Ok(Vec::new());
     }
 
-    let source = document::apply_legacy_text_tags(&tagged.source, &tagged.spans)?;
-    render_system(
+    render_tagged_system(
         BackendKind::Latex,
-        document::build_latex_document(&source),
+        &tagged,
         scale,
         quality,
+        document::build_latex_document,
     )
-    .map(|output| output.meshes)
 }
 
 fn render_system(
@@ -186,6 +183,30 @@ fn render_system(
             svg_import_options(quality),
         )
     })
+}
+
+fn render_tagged_system<F>(
+    backend: BackendKind,
+    tagged: &document::TaggedSource,
+    scale: f32,
+    quality: RenderQuality,
+    build_document: F,
+) -> Result<Vec<Arc<Mesh>>>
+where
+    F: FnOnce(&str) -> String,
+{
+    let marker_spans = tagged
+        .spans
+        .iter()
+        .enumerate()
+        .map(|(index, span)| document::TaggedSpan {
+            tag: vec![index as isize + 1],
+            range: span.range.clone(),
+        })
+        .collect::<Vec<_>>();
+    let source = document::apply_legacy_text_tags(&tagged.source, &marker_spans)?;
+    let output = render_system(backend, build_document(&source), scale, quality)?;
+    Ok(apply_system_text_tags(output, &tagged.spans))
 }
 
 fn render_cached<F>(
@@ -290,6 +311,27 @@ fn apply_text_tags(output: RenderedOutput, tagged: &document::TaggedSource) -> V
                 Arc::make_mut(mesh).tag = span.tag.clone();
             }
         }
+    }
+    meshes
+}
+
+fn apply_system_text_tags(
+    output: RenderedOutput,
+    spans: &[document::TaggedSpan],
+) -> Vec<Arc<Mesh>> {
+    let mut meshes = output.meshes;
+    for mesh in &mut meshes {
+        let Some(&tag) = mesh.tag.first() else {
+            continue;
+        };
+        if mesh.tag.len() != 1 || tag <= 0 {
+            continue;
+        }
+        let marker_index = (tag - 1) as usize;
+        let Some(span) = spans.get(marker_index) else {
+            continue;
+        };
+        Arc::make_mut(mesh).tag = span.tag.clone();
     }
     meshes
 }

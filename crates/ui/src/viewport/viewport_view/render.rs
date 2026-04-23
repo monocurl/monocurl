@@ -9,17 +9,34 @@ use super::{
     params::parameter_controls,
     style::{
         PARAM_PANEL_W, PRES_BG, PRES_BORDER, PRES_MUTED, PRES_PANEL_BG, PRES_TEXT, PRES_TOOLBAR_BG,
-        PRES_TOOLBAR_H, RING_TRANSITION, lerp_f32, lerp_rgba, ring_style_for, with_alpha,
+        PRES_TOOLBAR_H, RING_TRANSITION, RingStyle, lerp_f32, lerp_rgba, ring_style_for,
     },
 };
 
 const VIEWPORT_FRAME_ASPECT: f32 = 16.0 / 9.0;
-const VIEWPORT_FRAME_MARGIN_MIN: f32 = 18.0;
-const VIEWPORT_FRAME_MARGIN_MAX: f32 = 34.0;
-const VIEWPORT_FRAME_BORDER_PX: f32 = 1.0;
-const VIEWPORT_OVERSCAN_SCRIM_ALPHA: f32 = 0.76;
-const VIEWPORT_OVERSCAN_BLACK_MIX: f32 = 0.78;
-const VIEWPORT_FRAME_BORDER_ALPHA: f32 = 0.22;
+const VIEWPORT_FRAME_PADDING: f32 = 35.0;
+const VIEWPORT_PREVIEW_CHROME_INSET_X: f32 = 8.0;
+const VIEWPORT_PREVIEW_CHROME_INSET_Y: f32 = 6.0;
+const VIEWPORT_OVERSCAN_SCRIM: Rgba = Rgba {
+    r: 0.5,
+    g: 0.5,
+    b: 0.5,
+    a: 0.6,
+};
+
+#[derive(Clone, Copy)]
+enum SceneStageMode {
+    Preview { ring_style: RingStyle },
+    Presentation,
+}
+
+#[derive(Clone, Copy)]
+struct SceneStageLayout {
+    image_bounds: Bounds<Pixels>,
+    interaction_bounds: Bounds<Pixels>,
+    projection_bounds: Bounds<Pixels>,
+    preview_ring: Option<RingStyle>,
+}
 
 impl Render for Viewport {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -65,9 +82,38 @@ impl Render for Viewport {
             }
         }
         let ring_style = self.ring_style.expect("ring style should be initialized");
+
+        if !self.is_presenting {
+            let preview_chrome = render_preview_camera_chrome(
+                show_preview_reset,
+                preview_camera_summary,
+                preview_camera_copied,
+                weak_vp.clone(),
+                cx,
+            );
+            return div()
+                .relative()
+                .size_full()
+                .bg(theme.viewport_background)
+                .child(render_scene_stage(
+                    scene,
+                    theme.viewport_stage_background,
+                    SceneStageMode::Preview { ring_style },
+                    weak_vp.clone(),
+                ))
+                .child(
+                    div()
+                        .absolute()
+                        .top(px(VIEWPORT_PREVIEW_CHROME_INSET_Y))
+                        .left(px(VIEWPORT_PREVIEW_CHROME_INSET_X))
+                        .right(px(VIEWPORT_PREVIEW_CHROME_INSET_X))
+                        .child(preview_chrome),
+                )
+                .into_any_element();
+        }
+
         let previous_ring = self.ring_previous;
         let ring_animation_id = format!("viewport-ring-{}", self.ring_animation_nonce);
-
         let stage = div()
             .flex()
             .flex_1()
@@ -77,7 +123,7 @@ impl Render for Viewport {
             .child(render_scene_stage(
                 scene,
                 theme.viewport_stage_background,
-                !self.is_presenting,
+                SceneStageMode::Presentation,
                 weak_vp.clone(),
             ))
             .with_animation(
@@ -89,32 +135,6 @@ impl Render for Viewport {
                         .p(px(lerp_f32(previous_ring.width, ring_style.width, delta)))
                 },
             );
-
-        if !self.is_presenting {
-            let preview_chrome = render_preview_camera_chrome(
-                show_preview_reset,
-                preview_camera_summary,
-                preview_camera_copied,
-                weak_vp.clone(),
-                cx,
-            );
-            return div()
-                .flex()
-                .flex_col()
-                .size_full()
-                .bg(theme.viewport_background)
-                .p(px(24.0))
-                .child(preview_chrome)
-                .child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(stage),
-                )
-                .into_any_element();
-        }
 
         let services_weak: WeakEntity<ServiceManager> = self.services.downgrade();
         let controls = parameter_controls(self, params.as_ref(), services_weak, weak_vp.clone());
@@ -268,7 +288,7 @@ impl Render for Viewport {
 fn render_scene_stage(
     scene: SceneRenderData,
     stage_background: Rgba,
-    show_overscan_frame: bool,
+    mode: SceneStageMode,
     weak_vp: WeakEntity<Viewport>,
 ) -> impl IntoElement {
     div()
@@ -281,31 +301,14 @@ fn render_scene_stage(
                 let scene = scene.clone();
                 let weak_vp = weak_vp.clone();
                 move |_, bounds: Bounds<Pixels>, window, _cx| {
-                    let frame_bounds = show_overscan_frame
-                        .then(|| preview_frame_bounds(bounds))
-                        .unwrap_or(bounds);
-                    let overscan_image = show_overscan_frame
-                        .then(|| {
-                            weak_vp
-                                .update(_cx, |viewport, _cx| {
-                                    viewport.scene_overscan_image_cache.image_for(
-                                        &mut viewport.renderer,
-                                        &scene,
-                                        bounds,
-                                        window.scale_factor(),
-                                        window,
-                                    )
-                                })
-                                .ok()
-                                .flatten()
-                        })
-                        .flatten();
-                    let frame_image = weak_vp
+                    let layout = scene_stage_layout(bounds, mode);
+                    let scene_image = weak_vp
                         .update(_cx, |viewport, _cx| {
-                            viewport.scene_frame_image_cache.image_for(
+                            viewport.scene_image_cache.image_for(
                                 &mut viewport.renderer,
                                 &scene,
-                                frame_bounds,
+                                layout.image_bounds,
+                                layout.projection_bounds,
                                 window.scale_factor(),
                                 window,
                             )
@@ -313,31 +316,25 @@ fn render_scene_stage(
                         .ok()
                         .flatten();
 
-                    if let Some(image) = overscan_image {
-                        let _ = window.paint_image(bounds, Corners::all(px(0.0)), image, 0, false);
-                    }
-                    if show_overscan_frame {
-                        paint_overscan_mask(window, bounds, frame_bounds, stage_background);
-                    }
-                    if let Some(image) = frame_image {
+                    if let Some(image) = scene_image {
                         let _ = window.paint_image(
-                            frame_bounds,
+                            layout.image_bounds,
                             Corners::all(px(0.0)),
                             image,
                             0,
                             false,
                         );
                     }
-                    if show_overscan_frame {
-                        paint_frame_border(window, frame_bounds, stage_background);
+                    if let Some(ring_style) = layout.preview_ring {
+                        let frame_bounds = layout.interaction_bounds;
+                        paint_overscan_mask(window, bounds, frame_bounds);
+                        paint_preview_frame_border(window, frame_bounds, ring_style);
                     }
 
                     {
                         let weak_vp = weak_vp.clone();
                         window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
-                            let frame_bounds = show_overscan_frame
-                                .then(|| preview_frame_bounds(bounds))
-                                .unwrap_or(bounds);
+                            let frame_bounds = scene_stage_layout(bounds, mode).interaction_bounds;
                             if phase != DispatchPhase::Bubble
                                 || !frame_bounds.contains(&event.position)
                             {
@@ -369,9 +366,7 @@ fn render_scene_stage(
                     {
                         let weak_vp = weak_vp.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
-                            let frame_bounds = show_overscan_frame
-                                .then(|| preview_frame_bounds(bounds))
-                                .unwrap_or(bounds);
+                            let frame_bounds = scene_stage_layout(bounds, mode).interaction_bounds;
                             if phase != DispatchPhase::Bubble {
                                 return;
                             }
@@ -410,21 +405,37 @@ fn render_scene_stage(
         )
 }
 
-fn preview_frame_bounds(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+fn scene_stage_layout(bounds: Bounds<Pixels>, mode: SceneStageMode) -> SceneStageLayout {
+    match mode {
+        SceneStageMode::Preview { ring_style } => {
+            let frame_bounds = aspect_frame_bounds(bounds, VIEWPORT_FRAME_PADDING);
+            SceneStageLayout {
+                image_bounds: bounds,
+                interaction_bounds: frame_bounds,
+                projection_bounds: frame_bounds,
+                preview_ring: Some(ring_style),
+            }
+        }
+        SceneStageMode::Presentation => {
+            let frame_bounds = aspect_frame_bounds(bounds, 0.0);
+            SceneStageLayout {
+                image_bounds: frame_bounds,
+                interaction_bounds: frame_bounds,
+                projection_bounds: frame_bounds,
+                preview_ring: None,
+            }
+        }
+    }
+}
+
+fn aspect_frame_bounds(bounds: Bounds<Pixels>, padding: f32) -> Bounds<Pixels> {
     let width = f32::from(bounds.size.width).max(1.0);
     let height = f32::from(bounds.size.height).max(1.0);
-    let margin =
-        (width.min(height) * 0.035).clamp(VIEWPORT_FRAME_MARGIN_MIN, VIEWPORT_FRAME_MARGIN_MAX);
-    let available_width = (width - margin * 2.0).max(1.0);
-    let available_height = (height - margin * 2.0).max(1.0);
-    let available_aspect = available_width / available_height;
+    let available_width = (width - padding * 2.0).max(1.0);
+    let available_height = (height - padding * 2.0).max(1.0);
 
-    let (frame_width, frame_height) = if available_aspect > VIEWPORT_FRAME_ASPECT {
-        (available_height * VIEWPORT_FRAME_ASPECT, available_height)
-    } else {
-        (available_width, available_width / VIEWPORT_FRAME_ASPECT)
-    };
-
+    let frame_width = available_width.min(available_height * VIEWPORT_FRAME_ASPECT);
+    let frame_height = frame_width / VIEWPORT_FRAME_ASPECT;
     let offset_x = (width - frame_width) * 0.5;
     let offset_y = (height - frame_height) * 0.5;
     Bounds::new(
@@ -436,31 +447,12 @@ fn preview_frame_bounds(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
     )
 }
 
-fn paint_overscan_mask(
-    window: &mut Window,
-    bounds: Bounds<Pixels>,
-    frame_bounds: Bounds<Pixels>,
-    stage_background: Rgba,
-) {
-    let scrim = with_alpha(
-        lerp_rgba(
-            stage_background,
-            Rgba {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            },
-            VIEWPORT_OVERSCAN_BLACK_MIX,
-        ),
-        VIEWPORT_OVERSCAN_SCRIM_ALPHA,
-    );
-
+fn paint_overscan_mask(window: &mut Window, bounds: Bounds<Pixels>, frame_bounds: Bounds<Pixels>) {
     let left_w = frame_bounds.origin.x - bounds.origin.x;
     if left_w > px(0.0) {
         window.paint_quad(fill(
             Bounds::new(bounds.origin, size(left_w, bounds.size.height)),
-            scrim,
+            VIEWPORT_OVERSCAN_SCRIM,
         ));
     }
 
@@ -472,7 +464,7 @@ fn paint_overscan_mask(
                 point(right_x, bounds.origin.y),
                 size(right_w, bounds.size.height),
             ),
-            scrim,
+            VIEWPORT_OVERSCAN_SCRIM,
         ));
     }
 
@@ -483,7 +475,7 @@ fn paint_overscan_mask(
                 point(frame_bounds.origin.x, bounds.origin.y),
                 size(frame_bounds.size.width, top_h),
             ),
-            scrim,
+            VIEWPORT_OVERSCAN_SCRIM,
         ));
     }
 
@@ -495,26 +487,21 @@ fn paint_overscan_mask(
                 point(frame_bounds.origin.x, bottom_y),
                 size(frame_bounds.size.width, bottom_h),
             ),
-            scrim,
+            VIEWPORT_OVERSCAN_SCRIM,
         ));
     }
 }
 
-fn paint_frame_border(window: &mut Window, frame_bounds: Bounds<Pixels>, stage_background: Rgba) {
-    let border = with_alpha(
-        lerp_rgba(
-            stage_background,
-            Rgba {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            },
-            0.55,
-        ),
-        VIEWPORT_FRAME_BORDER_ALPHA,
-    );
-    let border_px = px(VIEWPORT_FRAME_BORDER_PX);
+fn paint_preview_frame_border(
+    window: &mut Window,
+    frame_bounds: Bounds<Pixels>,
+    ring_style: RingStyle,
+) {
+    if ring_style.width <= 0.0 || ring_style.color.a <= f32::EPSILON {
+        return;
+    }
+
+    let border_px = px(ring_style.width.max(1.0));
     let top = Bounds::new(
         frame_bounds.origin,
         size(frame_bounds.size.width, border_px),
@@ -538,7 +525,7 @@ fn paint_frame_border(window: &mut Window, frame_bounds: Bounds<Pixels>, stage_b
         size(border_px, frame_bounds.size.height),
     );
     for edge in [top, bottom, left, right] {
-        window.paint_quad(fill(edge, border));
+        window.paint_quad(fill(edge, ring_style.color));
     }
 }
 
@@ -618,7 +605,6 @@ fn render_preview_camera_chrome(
         .items_center()
         .h(px(24.0))
         .pl(px(4.0))
-        .pb(px(8.0))
         .child(reset_button)
         .child(div().w(px(18.0)))
         .child(
