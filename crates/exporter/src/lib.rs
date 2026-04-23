@@ -62,9 +62,15 @@ impl Default for ExportSettings {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ImageExportTimestamp {
+    Exact(Timestamp),
+    SceneEnd,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExportKind {
-    Image { timestamp: Timestamp },
+    Image { timestamp: ImageExportTimestamp },
     Video,
 }
 
@@ -179,7 +185,9 @@ pub fn export_scene(
     cancel_flag: Arc<AtomicBool>,
     mut on_progress: impl FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
-    smol::block_on(async { export_scene_async(request, cancel_flag.as_ref(), &mut on_progress).await })
+    smol::block_on(async {
+        export_scene_async(request, cancel_flag.as_ref(), &mut on_progress).await
+    })
 }
 
 async fn export_scene_async(
@@ -285,7 +293,13 @@ fn prepare_scene(
     }
     check_cancelled(cancel_flag)?;
 
-    emit_progress_checked(cancel_flag, on_progress, "Compiling scene", completed + 1, total)?;
+    emit_progress_checked(
+        cancel_flag,
+        on_progress,
+        "Compiling scene",
+        completed + 1,
+        total,
+    )?;
 
     let mut compiler_cache = CompilerCache::default();
     let compile_result = compile(&mut compiler_cache, None, &bundles);
@@ -310,11 +324,18 @@ async fn export_image(
     mut prepared: PreparedScene,
     output_path: PathBuf,
     settings: ExportSettings,
-    timestamp: Timestamp,
+    timestamp: ImageExportTimestamp,
     cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
     emit_progress_checked(cancel_flag, on_progress, "Rendering frame", 2, 4)?;
+
+    let timestamp = match timestamp {
+        ImageExportTimestamp::Exact(timestamp) => timestamp,
+        ImageExportTimestamp::SceneEnd => {
+            resolve_scene_end_timestamp(&mut prepared.executor, &prepared.root_text_rope).await?
+        }
+    };
 
     let mut renderer = Renderer::try_new(RenderOptions::default())
         .context("failed to initialize blade renderer")?;
@@ -341,6 +362,19 @@ async fn export_image(
         output_path,
         frames_written: 1,
     })
+}
+
+async fn resolve_scene_end_timestamp(
+    executor: &mut Executor,
+    root_text_rope: &Rope<TextAggregate>,
+) -> Result<Timestamp> {
+    let internal = seek_internal_timestamp(
+        executor,
+        Timestamp::new(executor.total_sections(), f64::INFINITY),
+        root_text_rope,
+    )
+    .await?;
+    Ok(executor.internal_to_user_timestamp(internal))
 }
 
 async fn export_video(

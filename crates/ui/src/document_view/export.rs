@@ -9,6 +9,7 @@ use std::{
 
 use exporter::{
     ExportKind as SceneExportKind, ExportOutcome, ExportProgress, ExportRequest, ExportSettings,
+    ImageExportTimestamp,
 };
 
 use super::*;
@@ -119,7 +120,7 @@ impl DocumentView {
             output_path,
             kind: match kind {
                 RequestedExport::Image => SceneExportKind::Image {
-                    timestamp: current_timestamp,
+                    timestamp: ImageExportTimestamp::Exact(current_timestamp),
                 },
                 RequestedExport::Video => SceneExportKind::Video,
             },

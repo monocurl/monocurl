@@ -68,7 +68,7 @@ pub struct Uniforms {
 }
 
 pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 1.0;
-pub const DEFAULT_STROKE_RADIUS: f32 = 1.0;
+pub const DEFAULT_STROKE_RADIUS: f32 = 2.0;
 pub const DEFAULT_DOT_RADIUS: f32 = 4.0;
 pub const DEFAULT_DOT_VERTEX_COUNT: u16 = 8;
 pub const DEFAULT_SMOOTH: bool = false;

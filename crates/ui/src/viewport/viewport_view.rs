@@ -36,7 +36,8 @@ pub struct Viewport {
     ring_previous: RingStyle,
     ring_animation_nonce: usize,
     renderer: Renderer,
-    scene_image_cache: SceneImageCache,
+    scene_frame_image_cache: SceneImageCache,
+    scene_overscan_image_cache: SceneImageCache,
 }
 
 impl Viewport {
@@ -74,7 +75,8 @@ impl Viewport {
             },
             ring_animation_nonce: 0,
             renderer: Renderer::default(),
-            scene_image_cache: SceneImageCache::default(),
+            scene_frame_image_cache: SceneImageCache::default(),
+            scene_overscan_image_cache: SceneImageCache::default(),
         };
 
         cx.spawn(async move |weak, cx| {

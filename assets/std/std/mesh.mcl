@@ -164,7 +164,7 @@ let Axis1d = |center = [0, 0, 0], axis = 1r, normal = 1f, range = [-5, 5], unit 
     return __monocurl__native__ mk_axis1d(center, axis, normal, min, max, unit, tick_step, label, label_rate)
 }
 
-let Axis2d = |center = [0, 0, 0], axes = [1r, 1u], x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], labels = [|v| v, |v| v], label_rates = [1, 1], grid = 0| {
+let Axis2d = |center = [0, 0, 0], x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], labels = [|v| v, |v| v], label_rates = [1, 1], axes = [1r, 1u], grid = 0| {
     var x_axis = 0
     var y_axis = 0
     var x_min = 0
@@ -187,7 +187,7 @@ let Axis2d = |center = [0, 0, 0], axes = [1r, 1u], x = [-5, 5, 1, 1], y = [-5, 5
     return __monocurl__native__ mk_axis2d(center, x_axis, y_axis, x_min, x_max, x_unit, x_tick_step, y_min, y_max, y_unit, y_tick_step, x_label, x_label_rate, y_label, y_label_rate, grid)
 }
 
-let Axis3d = |center = [0, 0, 0], axes = [1r, 1u, 1f], x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], z = [-5, 5, 1, 1], labels = [|v| v, |v| v, |v| v], grid = 0| {
+let Axis3d = |center = [0, 0, 0], x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], z = [-5, 5, 1, 1], labels = [|v| v, |v| v, |v| v], axes = [1r, 1u, 1f], grid = 0| {
     var x_axis = 0
     var y_axis = 0
     var z_axis = 0

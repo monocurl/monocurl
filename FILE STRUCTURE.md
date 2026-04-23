@@ -1,6 +1,7 @@
 - bytecode: contains the enum of the Monocurl VM bytecode
   - src/lib.rs: Instruction / prototype definitions plus SectionBytecode metadata (flags, instruction annotations, source file name, imported-bundle display index)
-- cli: binary crate that contains the gluing logic for the monocurl cli
+- cli: binary crate for the `monocurl` command-line interface
+  - src/main.rs: hand-rolled CLI parser and help text for `help` / `image` / `video`, output-path normalization, small export-resolution presets, and terminal progress rendering layered over the shared exporter crate
 - compiler: converts AST into bytecode, performs static analysis
   - src/compiler/mod.rs: compiler module root; shared symbol/compile-result types, the `compile(...)` entrypoint, compiler-frame state, and bundle/section emission helpers
   - src/compiler/cursor.rs: cursor-visible symbol enumeration for autocomplete plus root-reference tracking metadata used by signature hints
@@ -50,7 +51,7 @@
   - src/lib.rs: shared `boa_engine` worker thread and public `render_svg` API; patches the vendored wrapper bundle to route host logging through `globalThis.__host_log`, force `fontCache: none`, and inject a custom `\cssId{...}{...}` TeX macro that wraps the parsed body in an `mstyle` with an `id`, so Monocurl can recover per-span SVG geometry without relying on the missing upstream MathJax `html` extension
   - vendor/mathjax_svg_rs_js/dist: vendored MIT-licensed MathJax wrapper bundle (`index.js`, `NOTICE.txt`) consumed by the embedded JS runtime instead of a Node/browser dependency
 - geo: helper routines for execution (a lot of lib monocurl will reference these routines).
-  - src/mesh.rs: core mesh structs (`Dot`, `Lin`, `Tri`, `Mesh`, `Uniforms`), lightweight per-mesh render metadata such as alpha/texture/z-order, and topology invariant validation helpers; topology is expected to be authored by constructors/ops rather than inferred from geometry
+  - src/mesh.rs: core mesh structs (`Dot`, `Lin`, `Tri`, `Mesh`, `Uniforms`), lightweight per-mesh render metadata such as alpha/texture/z-order, slightly heavier default stroke width for non-text meshes, and topology invariant validation helpers; topology is expected to be authored by constructors/ops rather than inferred from geometry
   - src/mesh_build.rs: shared geometry-authoring helpers extracted out of stdlib, including colored line/polyline assembly, boundary-edge/indexed-surface structs, and topology-preserving indexed-surface reconstruction used by both stdlib mesh ops and the latex crate
 - libtess2: safe Rust wrapper over a vendored copy of the upstream libtess2 tessellator
   - src/lib.rs: `Float3`-based contour input, tessellation options/error types, opt-in contour normalization for degenerate/redundant loop sets before triangulation, and safe triangle output extraction from `TESStesselator`
@@ -118,7 +119,7 @@
     - viewport_view.rs: thin root module for the interactive viewport; owns the `Viewport` state struct plus the public constructor/toggle API, and wires together the split submodules below
     - viewport_view/camera.rs: viewport-local camera interaction and synchronization state, including preview detachment, orbit/pan drag behavior, presentation-mode `UpdateParameter("camera", ...)` writes, reset-to-scene behavior, and scene-camera-version snap-back logic
     - viewport_view/params.rs: presentation parameter drag state, slider/plane rendering, hidden-param filtering, live bound tracking, and fixed-step overdrag updates
-    - viewport_view/render.rs: top-level viewport composition and `Render` impl, including scene stage assembly, preview camera chrome, reset buttons, and presentation chrome/layout
+    - viewport_view/render.rs: top-level viewport composition and `Render` impl, including scene stage assembly, preview camera chrome, reset buttons, presentation chrome/layout, and the Monocurl-1.0-style preview treatment where a fixed inner frame is rendered sharply while a second overscan render is dimmed outside that frame instead of being hard clipped
     - viewport_view/style.rs: viewport-local colors, sizing constants, ring animation helpers, and other styling/configuration constants shared across the split viewport modules
   - src/document_view: document-view module split by responsibility
     - mod.rs: module root; keybinding registration, shared `DocumentView` / `OpenDocument` structs, export-overlay state, and small shared helpers

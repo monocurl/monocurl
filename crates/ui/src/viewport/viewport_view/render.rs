@@ -9,9 +9,17 @@ use super::{
     params::parameter_controls,
     style::{
         PARAM_PANEL_W, PRES_BG, PRES_BORDER, PRES_MUTED, PRES_PANEL_BG, PRES_TEXT, PRES_TOOLBAR_BG,
-        PRES_TOOLBAR_H, RING_TRANSITION, lerp_f32, lerp_rgba, ring_style_for,
+        PRES_TOOLBAR_H, RING_TRANSITION, lerp_f32, lerp_rgba, ring_style_for, with_alpha,
     },
 };
+
+const VIEWPORT_FRAME_ASPECT: f32 = 16.0 / 9.0;
+const VIEWPORT_FRAME_MARGIN_MIN: f32 = 18.0;
+const VIEWPORT_FRAME_MARGIN_MAX: f32 = 34.0;
+const VIEWPORT_FRAME_BORDER_PX: f32 = 1.0;
+const VIEWPORT_OVERSCAN_SCRIM_ALPHA: f32 = 0.76;
+const VIEWPORT_OVERSCAN_BLACK_MIX: f32 = 0.78;
+const VIEWPORT_FRAME_BORDER_ALPHA: f32 = 0.22;
 
 impl Render for Viewport {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -69,6 +77,7 @@ impl Render for Viewport {
             .child(render_scene_stage(
                 scene,
                 theme.viewport_stage_background,
+                !self.is_presenting,
                 weak_vp.clone(),
             ))
             .with_animation(
@@ -259,6 +268,7 @@ impl Render for Viewport {
 fn render_scene_stage(
     scene: SceneRenderData,
     stage_background: Rgba,
+    show_overscan_frame: bool,
     weak_vp: WeakEntity<Viewport>,
 ) -> impl IntoElement {
     div()
@@ -271,22 +281,66 @@ fn render_scene_stage(
                 let scene = scene.clone();
                 let weak_vp = weak_vp.clone();
                 move |_, bounds: Bounds<Pixels>, window, _cx| {
-                    if let Ok(Some(image)) = weak_vp.update(_cx, |viewport, _cx| {
-                        viewport.scene_image_cache.image_for(
-                            &mut viewport.renderer,
-                            &scene,
-                            bounds,
-                            window.scale_factor(),
-                            window,
-                        )
-                    }) {
+                    let frame_bounds = show_overscan_frame
+                        .then(|| preview_frame_bounds(bounds))
+                        .unwrap_or(bounds);
+                    let overscan_image = show_overscan_frame
+                        .then(|| {
+                            weak_vp
+                                .update(_cx, |viewport, _cx| {
+                                    viewport.scene_overscan_image_cache.image_for(
+                                        &mut viewport.renderer,
+                                        &scene,
+                                        bounds,
+                                        window.scale_factor(),
+                                        window,
+                                    )
+                                })
+                                .ok()
+                                .flatten()
+                        })
+                        .flatten();
+                    let frame_image = weak_vp
+                        .update(_cx, |viewport, _cx| {
+                            viewport.scene_frame_image_cache.image_for(
+                                &mut viewport.renderer,
+                                &scene,
+                                frame_bounds,
+                                window.scale_factor(),
+                                window,
+                            )
+                        })
+                        .ok()
+                        .flatten();
+
+                    if let Some(image) = overscan_image {
                         let _ = window.paint_image(bounds, Corners::all(px(0.0)), image, 0, false);
+                    }
+                    if show_overscan_frame {
+                        paint_overscan_mask(window, bounds, frame_bounds, stage_background);
+                    }
+                    if let Some(image) = frame_image {
+                        let _ = window.paint_image(
+                            frame_bounds,
+                            Corners::all(px(0.0)),
+                            image,
+                            0,
+                            false,
+                        );
+                    }
+                    if show_overscan_frame {
+                        paint_frame_border(window, frame_bounds, stage_background);
                     }
 
                     {
                         let weak_vp = weak_vp.clone();
                         window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
-                            if phase != DispatchPhase::Bubble || !bounds.contains(&event.position) {
+                            let frame_bounds = show_overscan_frame
+                                .then(|| preview_frame_bounds(bounds))
+                                .unwrap_or(bounds);
+                            if phase != DispatchPhase::Bubble
+                                || !frame_bounds.contains(&event.position)
+                            {
                                 return;
                             }
                             let mode = match event.button {
@@ -294,12 +348,16 @@ fn render_scene_stage(
                                 MouseButton::Left => CameraDragMode::Orbit,
                                 _ => return,
                             };
+                            let local_position = point(
+                                event.position.x - frame_bounds.origin.x,
+                                event.position.y - frame_bounds.origin.y,
+                            );
                             weak_vp
                                 .update(cx, |viewport, cx| {
                                     viewport.begin_camera_drag(
                                         mode,
-                                        event.position,
-                                        bounds.size,
+                                        local_position,
+                                        frame_bounds.size,
                                         cx,
                                     );
                                 })
@@ -311,12 +369,19 @@ fn render_scene_stage(
                     {
                         let weak_vp = weak_vp.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                            let frame_bounds = show_overscan_frame
+                                .then(|| preview_frame_bounds(bounds))
+                                .unwrap_or(bounds);
                             if phase != DispatchPhase::Bubble {
                                 return;
                             }
+                            let local_position = point(
+                                event.position.x - frame_bounds.origin.x,
+                                event.position.y - frame_bounds.origin.y,
+                            );
                             weak_vp
                                 .update(cx, |viewport, cx| {
-                                    viewport.update_camera_drag(event.position, cx);
+                                    viewport.update_camera_drag(local_position, cx);
                                 })
                                 .ok();
                         });
@@ -343,6 +408,138 @@ fn render_scene_stage(
             })
             .size_full(),
         )
+}
+
+fn preview_frame_bounds(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    let width = f32::from(bounds.size.width).max(1.0);
+    let height = f32::from(bounds.size.height).max(1.0);
+    let margin =
+        (width.min(height) * 0.035).clamp(VIEWPORT_FRAME_MARGIN_MIN, VIEWPORT_FRAME_MARGIN_MAX);
+    let available_width = (width - margin * 2.0).max(1.0);
+    let available_height = (height - margin * 2.0).max(1.0);
+    let available_aspect = available_width / available_height;
+
+    let (frame_width, frame_height) = if available_aspect > VIEWPORT_FRAME_ASPECT {
+        (available_height * VIEWPORT_FRAME_ASPECT, available_height)
+    } else {
+        (available_width, available_width / VIEWPORT_FRAME_ASPECT)
+    };
+
+    let offset_x = (width - frame_width) * 0.5;
+    let offset_y = (height - frame_height) * 0.5;
+    Bounds::new(
+        point(
+            bounds.origin.x + px(offset_x),
+            bounds.origin.y + px(offset_y),
+        ),
+        size(px(frame_width), px(frame_height)),
+    )
+}
+
+fn paint_overscan_mask(
+    window: &mut Window,
+    bounds: Bounds<Pixels>,
+    frame_bounds: Bounds<Pixels>,
+    stage_background: Rgba,
+) {
+    let scrim = with_alpha(
+        lerp_rgba(
+            stage_background,
+            Rgba {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+            VIEWPORT_OVERSCAN_BLACK_MIX,
+        ),
+        VIEWPORT_OVERSCAN_SCRIM_ALPHA,
+    );
+
+    let left_w = frame_bounds.origin.x - bounds.origin.x;
+    if left_w > px(0.0) {
+        window.paint_quad(fill(
+            Bounds::new(bounds.origin, size(left_w, bounds.size.height)),
+            scrim,
+        ));
+    }
+
+    let right_x = frame_bounds.origin.x + frame_bounds.size.width;
+    let right_w = bounds.origin.x + bounds.size.width - right_x;
+    if right_w > px(0.0) {
+        window.paint_quad(fill(
+            Bounds::new(
+                point(right_x, bounds.origin.y),
+                size(right_w, bounds.size.height),
+            ),
+            scrim,
+        ));
+    }
+
+    let top_h = frame_bounds.origin.y - bounds.origin.y;
+    if top_h > px(0.0) {
+        window.paint_quad(fill(
+            Bounds::new(
+                point(frame_bounds.origin.x, bounds.origin.y),
+                size(frame_bounds.size.width, top_h),
+            ),
+            scrim,
+        ));
+    }
+
+    let bottom_y = frame_bounds.origin.y + frame_bounds.size.height;
+    let bottom_h = bounds.origin.y + bounds.size.height - bottom_y;
+    if bottom_h > px(0.0) {
+        window.paint_quad(fill(
+            Bounds::new(
+                point(frame_bounds.origin.x, bottom_y),
+                size(frame_bounds.size.width, bottom_h),
+            ),
+            scrim,
+        ));
+    }
+}
+
+fn paint_frame_border(window: &mut Window, frame_bounds: Bounds<Pixels>, stage_background: Rgba) {
+    let border = with_alpha(
+        lerp_rgba(
+            stage_background,
+            Rgba {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+            0.55,
+        ),
+        VIEWPORT_FRAME_BORDER_ALPHA,
+    );
+    let border_px = px(VIEWPORT_FRAME_BORDER_PX);
+    let top = Bounds::new(
+        frame_bounds.origin,
+        size(frame_bounds.size.width, border_px),
+    );
+    let bottom = Bounds::new(
+        point(
+            frame_bounds.origin.x,
+            frame_bounds.origin.y + frame_bounds.size.height - border_px,
+        ),
+        size(frame_bounds.size.width, border_px),
+    );
+    let left = Bounds::new(
+        frame_bounds.origin,
+        size(border_px, frame_bounds.size.height),
+    );
+    let right = Bounds::new(
+        point(
+            frame_bounds.origin.x + frame_bounds.size.width - border_px,
+            frame_bounds.origin.y,
+        ),
+        size(border_px, frame_bounds.size.height),
+    );
+    for edge in [top, bottom, left, right] {
+        window.paint_quad(fill(edge, border));
+    }
 }
 
 fn render_toolbar_button(

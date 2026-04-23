@@ -88,10 +88,6 @@ impl DocumentView {
         let is_error = self.export_overlay.error.is_some();
         let is_success = self.export_overlay.succeeded();
         let is_cancelled = self.export_overlay.cancelled();
-        let overlay_bg = Rgba {
-            a: 0.78,
-            ..theme.document_background
-        };
         let bar_bg = Rgba {
             a: 0.14,
             ..theme.text_primary
@@ -227,23 +223,18 @@ impl DocumentView {
         Some(
             div()
                 .absolute()
-                .top(px(0.0))
-                .left(px(0.0))
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(overlay_bg)
+                .right(px(16.0))
+                .bottom(px(16.0))
                 .child(
                     div()
-                        .w(relative(0.4))
+                        .w(px(420.0))
                         .min_w(px(320.0))
                         .max_w(px(520.0))
-                        .p_4()
+                        .p_3()
                         .flex()
                         .flex_col()
-                        .gap(px(12.0))
-                        .rounded(px(8.0))
+                        .gap(px(10.0))
+                        .rounded(px(10.0))
                         .border_1()
                         .border_color(theme.navbar_border)
                         .bg(theme.tab_active_background)
@@ -251,28 +242,14 @@ impl DocumentView {
                             window.prevent_default();
                             cx.stop_propagation();
                         })
-                        .child(div().text_lg().text_color(theme.text_primary).child(title))
-                        .child(div().flex().flex_col().gap(px(4.0)).children(status_lines))
-                        .children(output_path)
                         .child(
                             div()
                                 .flex()
-                                .flex_col()
-                                .gap(px(6.0))
-                                .child(
-                                    div()
-                                        .h(px(8.0))
-                                        .w_full()
-                                        .rounded(px(999.0))
-                                        .bg(bar_bg)
-                                        .child(
-                                            div()
-                                                .h_full()
-                                                .w(relative(progress))
-                                                .rounded(px(999.0))
-                                                .bg(bar_fill),
-                                        ),
-                                )
+                                .flex_row()
+                                .justify_between()
+                                .items_start()
+                                .gap(px(12.0))
+                                .child(div().text_sm().text_color(theme.text_primary).child(title))
                                 .children(counter.map(|counter| {
                                     div()
                                         .text_xs()
@@ -281,6 +258,24 @@ impl DocumentView {
                                         .into_any_element()
                                 })),
                         )
+                        .child(div().flex().flex_col().gap(px(4.0)).children(status_lines))
+                        .child(
+                            div().flex().flex_col().gap(px(6.0)).child(
+                                div()
+                                    .h(px(8.0))
+                                    .w_full()
+                                    .rounded(px(999.0))
+                                    .bg(bar_bg)
+                                    .child(
+                                        div()
+                                            .h_full()
+                                            .w(relative(progress))
+                                            .rounded(px(999.0))
+                                            .bg(bar_fill),
+                                    ),
+                            ),
+                        )
+                        .children(output_path)
                         .child(
                             div()
                                 .flex()
