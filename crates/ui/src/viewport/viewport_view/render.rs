@@ -1,10 +1,7 @@
 use gpui::*;
+use renderer::SceneRenderData;
 
-use crate::{
-    services::ServiceManager,
-    theme::ThemeSettings,
-    viewport::scene_renderer::{SceneRenderData, paint_scene, rgba_from_tuple},
-};
+use crate::{services::ServiceManager, theme::ThemeSettings};
 
 use super::{
     Viewport,
@@ -41,7 +38,7 @@ impl Render for Viewport {
         let show_presentation_reset = self.should_show_presentation_reset(&scene_camera);
         let weak_vp = cx.weak_entity();
         let scene = SceneRenderData {
-            background_color: rgba_from_tuple(background.color),
+            background,
             camera: display_camera,
             meshes,
         };
@@ -274,7 +271,17 @@ fn render_scene_stage(
                 let scene = scene.clone();
                 let weak_vp = weak_vp.clone();
                 move |_, bounds: Bounds<Pixels>, window, _cx| {
-                    paint_scene(&scene, bounds, window);
+                    if let Ok(Some(image)) = weak_vp.update(_cx, |viewport, _cx| {
+                        viewport.scene_image_cache.image_for(
+                            &mut viewport.renderer,
+                            &scene,
+                            bounds,
+                            window.scale_factor(),
+                            window,
+                        )
+                    }) {
+                        let _ = window.paint_image(bounds, Corners::all(px(0.0)), image, 0, false);
+                    }
 
                     {
                         let weak_vp = weak_vp.clone();

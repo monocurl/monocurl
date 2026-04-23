@@ -30,3 +30,5 @@ schemars.workspace = true
 uuid.workspace = true
 futures.workspace = true
 smol.workspace = true
+renderer.workspace = true
+image = "0.25.5"

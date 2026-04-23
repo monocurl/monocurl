@@ -224,6 +224,14 @@ pub(super) fn write_start_mesh(mesh: &Mesh) -> Mesh {
 pub(super) fn lerp_uniforms(start: &Uniforms, end: &Uniforms, t: f32) -> Uniforms {
     Uniforms {
         alpha: start.alpha + (end.alpha - start.alpha) * t as f64,
+        stroke_miter_radius_scale: start.stroke_miter_radius_scale
+            + (end.stroke_miter_radius_scale - start.stroke_miter_radius_scale) * t,
+        stroke_radius: start.stroke_radius + (end.stroke_radius - start.stroke_radius) * t,
+        dot_radius: start.dot_radius + (end.dot_radius - start.dot_radius) * t,
+        dot_vertex_count: ((1.0 - t) * start.dot_vertex_count as f32
+            + t * end.dot_vertex_count as f32) as u16,
+        smooth: if t < 0.5 { start.smooth } else { end.smooth },
+        gloss: start.gloss + (end.gloss - start.gloss) * t,
         ..end.clone()
     }
 }

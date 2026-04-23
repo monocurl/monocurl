@@ -6,9 +6,11 @@ mod style;
 use std::collections::HashMap;
 
 use gpui::*;
+use renderer::Renderer;
 
 use crate::{
     services::ServiceManager, state::execution_state::ExecutionState, theme::ThemeSettings,
+    viewport::scene_renderer::SceneImageCache,
 };
 
 use self::{
@@ -33,6 +35,8 @@ pub struct Viewport {
     ring_style: Option<RingStyle>,
     ring_previous: RingStyle,
     ring_animation_nonce: usize,
+    renderer: Renderer,
+    scene_image_cache: SceneImageCache,
 }
 
 impl Viewport {
@@ -69,6 +73,8 @@ impl Viewport {
                 width: 0.0,
             },
             ring_animation_nonce: 0,
+            renderer: Renderer::default(),
+            scene_image_cache: SceneImageCache::default(),
         };
 
         cx.spawn(async move |weak, cx| {
