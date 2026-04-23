@@ -1,5 +1,22 @@
 use super::*;
 
+fn extract_number_signature_list(result: &ExecResult) -> Vec<String> {
+    result.assert_ok();
+    let value = result.value.as_ref().expect("expected result value");
+    let Value::List(list) = elide_value_for_assert(value) else {
+        panic!("expected list result");
+    };
+
+    list.elements()
+        .iter()
+        .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
+            Value::Float(value) => format!("f:{:016x}", value.to_bits()),
+            Value::Integer(value) => format!("i:{value}"),
+            other => panic!("expected numeric list element, got {}", other.type_name()),
+        })
+        .collect()
+}
+
 // -- literals and arithmetic --
 
 #[test]
@@ -95,6 +112,37 @@ fn test_exec_float_integer_division_returns_int() {
 fn test_exec_power() {
     let r = run("let x = 2 ^ 10");
     r.assert_float(1024.0);
+}
+
+#[test]
+fn test_random_is_deterministic_across_runs() {
+    let src = "let result = [random(), random(), randint(0, 100)]";
+    let first = run_with_stdlib(src, &["math"]);
+    let second = run_with_stdlib(src, &["math"]);
+
+    let first_bits = extract_number_signature_list(&first);
+    let second_bits = extract_number_signature_list(&second);
+
+    assert_ne!(first_bits[0], first_bits[1], "random sequence should advance");
+    assert_eq!(first_bits, second_bits, "random sequence should be deterministic");
+}
+
+#[test]
+fn test_random_requires_root_frame() {
+    let r = run_with_stdlib("
+        let f = || random()
+        let result = f()
+    ", &["math"]);
+    r.assert_error("root frame");
+}
+
+#[test]
+fn test_random_default_argument_requires_root_frame() {
+    let r = run_with_stdlib("
+        let f = |x = random()| x
+        let result = f()
+    ", &["math"]);
+    r.assert_error("root frame");
 }
 
 #[test]

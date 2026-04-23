@@ -84,6 +84,41 @@ mod test {
         test_compile(&[make_bundle(parse_stmts_as(src, section_type), section_type)])
     }
 
+    fn compile_with_random_stdlib(src: &str) -> CompileResult {
+        let stdlib_bundle = Arc::new(SectionBundle {
+            file_path: Some(PathBuf::from("std.math.mcl")),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section {
+                body: parse_stmts_as(
+                    "
+                    let random = |low = 0, high = 1| 0
+                    let randint = |low, high| 0
+                    ",
+                    SectionType::StandardLibrary,
+                ),
+                section_type: SectionType::StandardLibrary,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+        let root_bundle = Arc::new(SectionBundle {
+            file_path: Some(PathBuf::from("scene.mcl")),
+            file_index: 1,
+            imported_files: vec![0],
+            sections: vec![Section {
+                body: parse_stmts(src),
+                section_type: SectionType::Slide,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+
+        test_compile(&[stdlib_bundle, root_bundle])
+    }
+
     fn has_error(result: &CompileResult, fragment: &str) -> bool {
         result.errors.iter().any(|e| e.message.contains(fragment))
     }
@@ -332,6 +367,46 @@ mod test {
             },
         )))];
         no_errors(&compile_stmts(stmts));
+    }
+
+    #[test]
+    fn test_random_call_allowed_at_root_frame() {
+        let result = compile_with_random_stdlib("let x = random()");
+        no_errors(&result);
+    }
+
+    #[test]
+    fn test_random_call_rejected_inside_lambda_body() {
+        let result = compile_with_random_stdlib(
+            "
+            let f = || random()
+            let x = f()
+            ",
+        );
+        assert!(has_error(&result, "root frame"));
+    }
+
+    #[test]
+    fn test_random_call_rejected_inside_default_argument() {
+        let result = compile_with_random_stdlib(
+            "
+            let f = |x = random()| x
+            let y = f()
+            ",
+        );
+        assert!(has_error(&result, "root frame"));
+    }
+
+    #[test]
+    fn test_random_alias_rejected_inside_lambda_body() {
+        let result = compile_with_random_stdlib(
+            "
+            let r = random
+            let f = || r()
+            let x = f()
+            ",
+        );
+        assert!(has_error(&result, "root frame"));
     }
 
     // -- cross-bundle import tests --

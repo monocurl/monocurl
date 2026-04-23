@@ -92,26 +92,13 @@ pub async fn is_prime(executor: &mut Executor, stack_idx: usize) -> Result<Value
     Ok(Value::Integer(prime as i64))
 }
 
-fn rand_f64() -> f64 {
-    use std::cell::Cell;
-    thread_local!(static STATE: Cell<u64> = const { Cell::new(0x9E37_79B9_7F4A_7C15) });
-    STATE.with(|s| {
-        let mut x = s.get().wrapping_add(0x9E37_79B9_7F4A_7C15);
-        s.set(x);
-        x ^= x >> 30;
-        x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
-        x ^= x >> 27;
-        x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
-        x ^= x >> 31;
-        (x >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
-    })
-}
-
 #[stdlib_func]
 pub async fn random(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let low = crate::read_float(executor, stack_idx, -2, "low")?;
     let high = crate::read_float(executor, stack_idx, -1, "high")?;
-    Ok(Value::Float(low + rand_f64() * (high - low)))
+    Ok(Value::Float(
+        low + executor.state.next_random_f64() * (high - low),
+    ))
 }
 
 #[stdlib_func]
@@ -125,5 +112,7 @@ pub async fn randint(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         });
     }
     let span = (high - low) as f64;
-    Ok(Value::Integer(low + (rand_f64() * span) as i64))
+    Ok(Value::Integer(
+        low + (executor.state.next_random_f64() * span) as i64,
+    ))
 }

@@ -109,12 +109,7 @@ impl Compiler {
                 );
             }
         }
-        self.define_symbol(
-            &d.identifier.1.0,
-            vt,
-            SymbolFunctionInfo::from(&d.value.1),
-            false,
-        );
+        self.define_declared_symbol(&d.identifier.1.0, vt, &d.value.1, false);
     }
 
     pub(super) fn compile_while(&mut self, w: &While, span: &Span8) {

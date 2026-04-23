@@ -99,7 +99,9 @@ impl Compiler {
                     );
                 }
 
-                self.compile_val(&default.1, &default.0);
+                self.with_deferred_expr_context(|this| {
+                    this.compile_val(&default.1, &default.0);
+                });
             }
         }
 
@@ -225,10 +227,8 @@ impl Compiler {
         preserve_let_captures_on_copy: bool,
     ) {
         for (i, cap) in captures.iter().enumerate() {
-            self.register_symbol(
-                &cap.name,
-                cap.var_type,
-                cap.function_info.clone(),
+            self.register_symbol_like(
+                cap,
                 self.frame().stack_depth + i,
                 preserve_let_captures_on_copy && cap.var_type == VariableType::Let,
             );

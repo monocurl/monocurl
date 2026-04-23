@@ -340,6 +340,17 @@ impl Compiler {
 
 impl Compiler {
     pub(super) fn compile_lambda_invoke(&mut self, l: &LambdaInvocation, span: &Span8) {
+        if matches!(
+            self.special_function_for_expr(&l.lambda.1),
+            Some(SpecialFunction::RootFrameRandom)
+        ) && !self.root_frame_special_calls_allowed()
+        {
+            self.error(
+                span.clone(),
+                "randomness may only be called from the root frame",
+            );
+        }
+
         let labeled = l.arguments.1.iter().any(|(lbl, _)| lbl.is_some());
         let stateful =
             is_stateful(&l.lambda.1) || l.arguments.1.iter().any(|(_, a)| is_stateful(&a.1));

@@ -179,16 +179,27 @@ mod tests {
     use super::Executor;
     use crate::{error::ExecutorError, heap::with_heap, state::LeaderKind, value::Value};
 
-    fn empty_executor() -> Executor {
+    fn executor_with_sections(flags: &[SectionFlags]) -> Executor {
         Executor::new(
-            Bytecode::new(vec![Arc::new(SectionBytecode::new(SectionFlags {
-                is_stdlib: false,
-                is_library: false,
-                is_init: false,
-                is_root_module: true,
-            }))]),
+            Bytecode::new(
+                flags
+                    .iter()
+                    .cloned()
+                    .map(SectionBytecode::new)
+                    .map(Arc::new)
+                    .collect(),
+            ),
             Vec::new(),
         )
+    }
+
+    fn empty_executor() -> Executor {
+        executor_with_sections(&[SectionFlags {
+            is_stdlib: false,
+            is_library: false,
+            is_init: false,
+            is_root_module: true,
+        }])
     }
 
     #[test]

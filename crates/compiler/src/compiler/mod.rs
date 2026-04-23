@@ -136,10 +136,16 @@ pub struct Symbol {
     declared_in_stdlib: bool,
     stack_position: usize,
     preserve_lvalues_on_copy: bool,
+    special_function: Option<SpecialFunction>,
     // how the symbol looks like to the current bundle
     // may appear as let, even though declared as var
     pub var_type: VariableType,
     pub function_info: SymbolFunctionInfo,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SpecialFunction {
+    RootFrameRandom,
 }
 
 #[derive(Clone)]
@@ -216,6 +222,7 @@ struct Compiler {
 
     // of the current bundle
     bundle_root_import_span: Option<Span8>,
+    deferred_expr_depth: usize,
 }
 
 impl Compiler {
@@ -239,6 +246,7 @@ impl Compiler {
             cursor_identifier_set: HashSet::new(),
             possible_cursor_identifiers: Vec::new(),
             references: Vec::new(),
+            deferred_expr_depth: 0,
         }
     }
 
@@ -721,6 +729,7 @@ impl Compiler {
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                special_function: None,
                 var_type,
                 function_info,
                 imported: false,
@@ -744,11 +753,83 @@ impl Compiler {
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                special_function: None,
                 var_type,
                 function_info,
                 imported: false,
             }),
         );
+    }
+
+    fn register_symbol_like(
+        &mut self,
+        symbol: &Symbol,
+        position: usize,
+        preserve_lvalues_on_copy: bool,
+    ) {
+        self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
+            symbol.name.clone(),
+            Arc::new(Symbol {
+                name: symbol.name.clone(),
+                imported: false,
+                declared_in_stdlib: symbol.declared_in_stdlib,
+                stack_position: position,
+                preserve_lvalues_on_copy,
+                special_function: symbol.special_function,
+                var_type: symbol.var_type,
+                function_info: symbol.function_info.clone(),
+            }),
+        );
+    }
+
+    fn define_declared_symbol(
+        &mut self,
+        name: &str,
+        var_type: VariableType,
+        value: &Expression,
+        preserve_lvalues_on_copy: bool,
+    ) {
+        let position = self.stack_depth() - 1;
+        let declared_in_stdlib = self.current_section().flags.is_stdlib;
+        let special_function = self
+            .special_function_for_expr(value)
+            .or_else(|| match (declared_in_stdlib, name) {
+                (true, "random" | "randint") => Some(SpecialFunction::RootFrameRandom),
+                _ => None,
+            });
+
+        self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
+            name.to_string(),
+            Arc::new(Symbol {
+                name: name.to_string(),
+                imported: false,
+                declared_in_stdlib,
+                stack_position: position,
+                preserve_lvalues_on_copy,
+                special_function,
+                var_type,
+                function_info: SymbolFunctionInfo::from(value),
+            }),
+        );
+    }
+
+    fn special_function_for_expr(&mut self, expr: &Expression) -> Option<SpecialFunction> {
+        match expr {
+            Expression::IdentifierReference(ir) => self
+                .lookup(ident_ref_name(ir), None, None)
+                .and_then(|symbol| symbol.special_function),
+            _ => None,
+        }
+    }
+
+    fn root_frame_special_calls_allowed(&self) -> bool {
+        self.frame().kind == FrameKind::Root && self.deferred_expr_depth == 0
+    }
+
+    fn with_deferred_expr_context(&mut self, f: impl FnOnce(&mut Self)) {
+        self.deferred_expr_depth += 1;
+        f(self);
+        self.deferred_expr_depth -= 1;
     }
 
     fn lookup(

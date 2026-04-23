@@ -207,6 +207,7 @@ pub struct ExecutionState {
     pub timestamp: Timestamp,
     pub pending_playback_time: f64,
     pub last_stack_idx: usize,
+    rng_state: u64,
 
     global_stack_counter: usize,
     global_primitive_anim_counter: usize,
@@ -231,12 +232,16 @@ pub struct ExecutionState {
 
 impl ExecutionState {
     pub const ROOT_STACK_ID: usize = 0;
+    const RNG_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
+    const RNG_TIMESTAMP_BASIS: u64 = 0xA076_1D64_78BD_642F;
 
     pub fn new() -> Self {
+        let timestamp = Timestamp::default();
         let mut ret = Self {
-            timestamp: Timestamp::default(),
+            timestamp,
             pending_playback_time: 0.0,
             last_stack_idx: Self::ROOT_STACK_ID,
+            rng_state: Self::seed_random_state(timestamp),
             global_stack_counter: 0,
             global_primitive_anim_counter: 0,
             alive_stack_count: 0,
@@ -261,6 +266,41 @@ impl ExecutionState {
         ret.execution_heads = heads;
 
         ret
+    }
+
+    #[inline]
+    fn mix_random_bits(mut x: u64) -> u64 {
+        x ^= x >> 30;
+        x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        x ^= x >> 27;
+        x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+        x ^ (x >> 31)
+    }
+
+    #[inline]
+    fn seed_random_state(timestamp: Timestamp) -> u64 {
+        let slide = timestamp.slide as u64;
+        let time_bits = timestamp.time.to_bits();
+        Self::mix_random_bits(
+            Self::RNG_TIMESTAMP_BASIS
+                ^ slide.rotate_left(17)
+                ^ time_bits.rotate_right(11),
+        )
+    }
+
+    #[inline]
+    pub fn next_random_u64(&mut self) -> u64 {
+        let timestamp_salt = Self::seed_random_state(self.timestamp);
+        self.rng_state = self
+            .rng_state
+            .wrapping_add(timestamp_salt)
+            .wrapping_add(Self::RNG_GAMMA);
+        Self::mix_random_bits(self.rng_state)
+    }
+
+    #[inline]
+    pub fn next_random_f64(&mut self) -> f64 {
+        (self.next_random_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
 
     pub fn alloc_stack(
@@ -498,5 +538,17 @@ mod tests {
         assert!(state.is_stack_id_ancestor_of_stack(trace_stack_id, trace_idx));
         assert!(state.is_stack_id_ancestor_of_stack(child_stack_id, trace_idx));
         assert!(state.is_stack_id_ancestor_of_stack(ExecutionState::ROOT_STACK_ID, trace_idx));
+    }
+
+    #[test]
+    fn random_sequence_advances_and_survives_clone() {
+        let mut state = ExecutionState::new();
+
+        let first = state.next_random_u64();
+        let second = state.next_random_u64();
+        assert_ne!(first, second);
+
+        let mut cloned = state.clone();
+        assert_eq!(state.next_random_u64(), cloned.next_random_u64());
     }
 }

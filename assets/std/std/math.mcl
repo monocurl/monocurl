@@ -78,8 +78,8 @@ let gcd       = |n, m| __monocurl__native__ gcd(n, m)
 let lcm       = |n, m| __monocurl__native__ lcm(n, m)
 let is_prime  = |n| __monocurl__native__ is_prime(n)
 
-# scene-load-time randomness. calling these inside a lambda body that may be
-# re-evaluated will make the animation non-deterministic; prefer top-level use.
+# deterministic scene randomness backed by executor state. these may only be
+# called from the root frame; using them inside lambda bodies/defaults errors.
 let random  = |low = 0, high = 1| __monocurl__native__ random(low, high)
 let randint = |low, high|         __monocurl__native__ randint(low, high)
 
