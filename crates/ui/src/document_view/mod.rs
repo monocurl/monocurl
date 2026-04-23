@@ -1,5 +1,10 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, atomic::AtomicBool},
+};
 
+use exporter::EXPORT_CANCELLED_MESSAGE;
 use gpui::*;
 use structs::rope::{Attribute, Rope, TextAggregate};
 
@@ -40,6 +45,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-l", SyncViewportCamera, None),
         KeyBinding::new("escape", TogglePresentationMode, Some("presenter")),
         KeyBinding::new("escape", UnfocusEditor, Some("!presenter")),
+        KeyBinding::new("left", PrevSlide, Some("presenter")),
+        KeyBinding::new("right", NextSlide, Some("presenter")),
         KeyBinding::new("space", TogglePlaying, Some("!editor")),
         KeyBinding::new("shift-space", TogglePlaying, Some("!editor")),
         KeyBinding::new("secondary-shift-space,", TogglePlaying, None),
@@ -103,6 +110,13 @@ impl RequestedExport {
         }
     }
 
+    fn canceled_title(self) -> &'static str {
+        match self {
+            Self::Image => "Image Export Canceled",
+            Self::Video => "Video Export Canceled",
+        }
+    }
+
     fn extension(self) -> &'static str {
         match self {
             Self::Image => "png",
@@ -122,6 +136,7 @@ impl RequestedExport {
 struct ExportOverlayState {
     kind: Option<RequestedExport>,
     running: bool,
+    cancel_requested: bool,
     message: String,
     completed: usize,
     total: usize,
@@ -134,6 +149,7 @@ impl ExportOverlayState {
         Self {
             kind: Some(kind),
             running: true,
+            cancel_requested: false,
             message: format!("Starting {} export", kind.action_label().to_lowercase()),
             completed: 0,
             total: 0,
@@ -157,6 +173,10 @@ impl ExportOverlayState {
     fn succeeded(&self) -> bool {
         !self.running && self.error.is_none() && self.output_path.is_some()
     }
+
+    fn cancelled(&self) -> bool {
+        !self.running && self.error.as_deref() == Some(EXPORT_CANCELLED_MESSAGE)
+    }
 }
 
 pub struct DocumentView {
@@ -177,6 +197,7 @@ pub struct DocumentView {
     timeline: Entity<Timeline>,
 
     export_overlay: ExportOverlayState,
+    export_cancel_flag: Option<Arc<AtomicBool>>,
     export_poll_task: Option<Task<()>>,
 
     focus_handle: FocusHandle,

@@ -1,4 +1,13 @@
-use std::{collections::HashMap, fs::File, io::BufWriter, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::BufWriter,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use compiler::{
@@ -7,7 +16,7 @@ use compiler::{
 };
 use executor::{
     error::{RuntimeCallFrame, RuntimeError},
-    executor::{Executor, SeekToResult},
+    executor::{Executor, SeekToResult, TextRenderQuality},
     time::Timestamp,
 };
 use image::ImageFormat;
@@ -16,19 +25,23 @@ use mp4::{
     AvcConfig, Bytes, FourCC, MediaConfig, Mp4Config, Mp4Sample, Mp4Writer, TrackConfig, TrackType,
 };
 use openh264::{
-    encoder::{BitRate, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod, UsageType},
+    encoder::{
+        BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod,
+        RateControlMode, UsageType,
+    },
     formats::{BgraSliceU8, YUVBuffer},
 };
 use parser::{
     import_context::ParseImportContext,
     parser::{Diagnostic, Parser},
 };
-use renderer::{BackendKind, RenderOptions, RenderSize, Renderer, RgbaImage, SceneRenderData};
+use renderer::{RenderOptions, RenderSize, Renderer, RgbaImage, SceneRenderData};
 use stdlib::registry::registry;
 use structs::rope::{Attribute, RLEData, Rope, TextAggregate};
 
-pub const DEFAULT_EXPORT_SIZE: RenderSize = RenderSize::new(1920, 1080);
-pub const DEFAULT_VIDEO_FPS: u32 = 30;
+pub const DEFAULT_EXPORT_SIZE: RenderSize = RenderSize::new(1960, 1080);
+pub const DEFAULT_VIDEO_FPS: u32 = 60;
+pub const EXPORT_CANCELLED_MESSAGE: &str = "Export canceled";
 
 const MP4_TRACK_ID: u32 = 1;
 const MP4_FRAME_DURATION: u32 = 1000;
@@ -38,7 +51,6 @@ const MP4_MINOR_VERSION: u32 = 512;
 pub struct ExportSettings {
     pub render_size: RenderSize,
     pub fps: u32,
-    pub backend: BackendKind,
 }
 
 impl Default for ExportSettings {
@@ -46,7 +58,6 @@ impl Default for ExportSettings {
         Self {
             render_size: DEFAULT_EXPORT_SIZE,
             fps: DEFAULT_VIDEO_FPS,
-            backend: BackendKind::Auto,
         }
     }
 }
@@ -95,6 +106,38 @@ struct PreparedScene {
     root_text_rope: Rope<TextAggregate>,
 }
 
+struct PartialOutputCleanup {
+    path: PathBuf,
+    active: bool,
+    keep: bool,
+}
+
+impl PartialOutputCleanup {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            active: false,
+            keep: false,
+        }
+    }
+
+    fn arm(&mut self) {
+        self.active = true;
+    }
+
+    fn keep(&mut self) {
+        self.keep = true;
+    }
+}
+
+impl Drop for PartialOutputCleanup {
+    fn drop(&mut self) {
+        if self.active && !self.keep {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 struct EncodedSample {
     bytes: Vec<u8>,
     is_sync: bool,
@@ -133,13 +176,15 @@ impl AvcParameterSets {
 
 pub fn export_scene(
     request: ExportRequest,
+    cancel_flag: Arc<AtomicBool>,
     mut on_progress: impl FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
-    smol::block_on(async { export_scene_async(request, &mut on_progress).await })
+    smol::block_on(async { export_scene_async(request, cancel_flag.as_ref(), &mut on_progress).await })
 }
 
 async fn export_scene_async(
     request: ExportRequest,
+    cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
     ensure!(
@@ -147,11 +192,13 @@ async fn export_scene_async(
         "render size must be non-zero"
     );
     ensure!(request.settings.fps > 0, "video fps must be non-zero");
+    check_cancelled(cancel_flag)?;
 
     if let Some(parent) = request.output_path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create export directory {}", parent.display()))?;
     }
+    check_cancelled(cancel_flag)?;
 
     match request.kind {
         ExportKind::Image { timestamp } => {
@@ -159,6 +206,7 @@ async fn export_scene_async(
                 &request.root_text,
                 request.root_user_path.as_ref(),
                 &request.open_documents,
+                cancel_flag,
                 on_progress,
                 0,
                 4,
@@ -168,6 +216,7 @@ async fn export_scene_async(
                 request.output_path,
                 request.settings,
                 timestamp,
+                cancel_flag,
                 on_progress,
             )
             .await
@@ -177,11 +226,19 @@ async fn export_scene_async(
                 &request.root_text,
                 request.root_user_path.as_ref(),
                 &request.open_documents,
+                cancel_flag,
                 on_progress,
                 0,
                 0,
             )?;
-            export_video(prepared, request.output_path, request.settings, on_progress).await
+            export_video(
+                prepared,
+                request.output_path,
+                request.settings,
+                cancel_flag,
+                on_progress,
+            )
+            .await
         }
     }
 }
@@ -190,11 +247,12 @@ fn prepare_scene(
     root_text: &str,
     root_user_path: Option<&PathBuf>,
     open_documents: &HashMap<PathBuf, String>,
+    cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
     completed: usize,
     total: usize,
 ) -> Result<PreparedScene> {
-    emit_progress(on_progress, "Parsing scene", completed, total);
+    emit_progress_checked(cancel_flag, on_progress, "Parsing scene", completed, total)?;
 
     let root_text_rope = Rope::from_str(root_text);
     let root_lex_rope = lex_rope_from_str(root_text);
@@ -225,8 +283,9 @@ fn prepare_scene(
             format_parse_diagnostics(&parse_artifacts.error_diagnostics, &root_text_rope)
         );
     }
+    check_cancelled(cancel_flag)?;
 
-    emit_progress(on_progress, "Compiling scene", completed + 1, total);
+    emit_progress_checked(cancel_flag, on_progress, "Compiling scene", completed + 1, total)?;
 
     let mut compiler_cache = CompilerCache::default();
     let compile_result = compile(&mut compiler_cache, None, &bundles);
@@ -236,9 +295,13 @@ fn prepare_scene(
             format_compile_errors(&compile_result.errors, &root_text_rope)
         );
     }
+    check_cancelled(cancel_flag)?;
+
+    let mut executor = Executor::new(compile_result.bytecode, registry().func_table());
+    executor.set_text_render_quality(TextRenderQuality::High);
 
     Ok(PreparedScene {
-        executor: Executor::new(compile_result.bytecode, registry().func_table()),
+        executor,
         root_text_rope,
     })
 }
@@ -248,14 +311,13 @@ async fn export_image(
     output_path: PathBuf,
     settings: ExportSettings,
     timestamp: Timestamp,
+    cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
-    emit_progress(on_progress, "Rendering frame", 2, 4);
+    emit_progress_checked(cancel_flag, on_progress, "Rendering frame", 2, 4)?;
 
-    let mut renderer = Renderer::new(RenderOptions {
-        backend: settings.backend,
-        ..Default::default()
-    });
+    let mut renderer = Renderer::try_new(RenderOptions::default())
+        .context("failed to initialize blade renderer")?;
 
     let frame = render_frame(
         &mut prepared.executor,
@@ -265,14 +327,15 @@ async fn export_image(
         settings.render_size,
     )
     .await?;
+    check_cancelled(cancel_flag)?;
 
-    emit_progress(on_progress, "Writing image", 3, 4);
+    emit_progress_checked(cancel_flag, on_progress, "Writing image", 3, 4)?;
 
     bgra_to_rgba(frame)
         .save_with_format(&output_path, ImageFormat::Png)
         .with_context(|| format!("failed to write image export {}", output_path.display()))?;
 
-    emit_progress(on_progress, "Finished image export", 4, 4);
+    emit_progress_checked(cancel_flag, on_progress, "Finished image export", 4, 4)?;
 
     Ok(ExportOutcome {
         output_path,
@@ -284,13 +347,15 @@ async fn export_video(
     mut prepared: PreparedScene,
     output_path: PathBuf,
     settings: ExportSettings,
+    cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
-    emit_progress(on_progress, "Evaluating timeline", 0, 0);
+    emit_progress_checked(cancel_flag, on_progress, "Evaluating timeline", 0, 0)?;
 
-    let video_size = even_size(settings.render_size);
+    let video_size = h264_size(settings.render_size);
     let slide_durations =
         precompute_slide_durations(&mut prepared.executor, &prepared.root_text_rope).await?;
+    check_cancelled(cancel_flag)?;
     let frame_targets = build_frame_targets(&slide_durations, settings.fps);
     ensure!(!frame_targets.is_empty(), "scene has no slides to export");
 
@@ -300,15 +365,18 @@ async fn export_video(
         .checked_mul(MP4_FRAME_DURATION)
         .ok_or_else(|| anyhow!("mp4 timescale overflow"))?;
 
-    let mut renderer = Renderer::new(RenderOptions {
-        backend: settings.backend,
-        ..Default::default()
-    });
+    let mut renderer = Renderer::try_new(RenderOptions::default())
+        .context("failed to initialize blade renderer")?;
     let mut encoder = Encoder::with_api_config(
         openh264::OpenH264API::from_source(),
         EncoderConfig::new()
             .skip_frames(false)
-            .usage_type(UsageType::ScreenContentNonRealTime)
+            .rate_control_mode(RateControlMode::Bufferbased)
+            .complexity(Complexity::High)
+            // The vendored OpenH264 encoder only validates the realtime screen mode here.
+            .usage_type(UsageType::ScreenContentRealTime)
+            .adaptive_quantization(false)
+            .background_detection(false)
             .max_frame_rate(FrameRate::from_hz(settings.fps as f32))
             .bitrate(BitRate::from_bps(video_bitrate(video_size, settings.fps)))
             .intra_frame_period(IntraFramePeriod::from_num_frames(settings.fps * 2)),
@@ -316,16 +384,18 @@ async fn export_video(
     .context("failed to initialize H.264 encoder")?;
 
     let mut parameter_sets = AvcParameterSets::default();
+    let mut cleanup = PartialOutputCleanup::new(output_path.clone());
     let mut writer = None;
     let mut sample_start_time = 0_u64;
 
     for (index, timestamp) in frame_targets.iter().copied().enumerate() {
-        emit_progress(
+        emit_progress_checked(
+            cancel_flag,
             on_progress,
             format!("Rendering frame {} of {}", index + 1, frame_targets.len()),
             index,
             total_steps,
-        );
+        )?;
 
         let frame = render_frame(
             &mut prepared.executor,
@@ -335,14 +405,27 @@ async fn export_video(
             video_size,
         )
         .await?;
+        check_cancelled(cancel_flag)?;
 
         let encoded = encode_video_sample(&frame, video_size, &mut encoder, &mut parameter_sets)
-            .context("failed to encode H.264 sample")?;
+            .with_context(|| {
+                format!(
+                    "failed to encode H.264 sample at slide {} time {:.3} ({}x{})",
+                    timestamp.slide, timestamp.time, video_size.width, video_size.height
+                )
+            })?;
+        check_cancelled(cancel_flag)?;
 
         if writer.is_none() {
+            ensure!(
+                parameter_sets.ready(),
+                "encoder did not emit SPS/PPS parameter sets for the initial video sample"
+            );
+            check_cancelled(cancel_flag)?;
             let file = File::create(&output_path).with_context(|| {
                 format!("failed to create video export {}", output_path.display())
             })?;
+            cleanup.arm();
             writer = Some(start_mp4_writer(
                 BufWriter::new(file),
                 mp4_timescale,
@@ -365,29 +448,33 @@ async fn export_video(
                 },
             )
             .with_context(|| format!("failed to write mp4 sample {}", index + 1))?;
+        check_cancelled(cancel_flag)?;
 
         sample_start_time += u64::from(MP4_FRAME_DURATION);
     }
 
-    emit_progress(
+    emit_progress_checked(
+        cancel_flag,
         on_progress,
         "Finalizing video",
         frame_targets.len(),
         total_steps,
-    );
+    )?;
 
     writer
         .as_mut()
         .ok_or_else(|| anyhow!("video export produced no encoded samples"))?
         .write_end()
         .with_context(|| format!("failed to finalize video export {}", output_path.display()))?;
+    cleanup.keep();
 
-    emit_progress(
+    emit_progress_checked(
+        cancel_flag,
         on_progress,
         "Finished video export",
         total_steps,
         total_steps,
-    );
+    )?;
 
     Ok(ExportOutcome {
         output_path,
@@ -570,10 +657,6 @@ fn encode_video_sample(
         !bytes.is_empty(),
         "encoder did not emit any video NAL units for the current frame"
     );
-    ensure!(
-        parameter_sets.ready(),
-        "encoder did not emit SPS/PPS parameter sets"
-    );
 
     Ok(EncodedSample {
         bytes,
@@ -590,13 +673,25 @@ fn parse_fourcc(value: &str) -> FourCC {
 fn video_bitrate(size: RenderSize, fps: u32) -> u32 {
     let pixels_per_second = u64::from(size.width) * u64::from(size.height) * u64::from(fps);
     (pixels_per_second * 2)
-        .clamp(2_000_000, 20_000_000)
+        .clamp(8_000_000, 40_000_000)
         .try_into()
         .expect("clamped bitrate should fit in u32")
 }
 
-fn even_size(size: RenderSize) -> RenderSize {
-    RenderSize::new(size.width + size.width % 2, size.height + size.height % 2)
+fn h264_size(size: RenderSize) -> RenderSize {
+    RenderSize::new(
+        align_dimension(size.width, 16),
+        align_dimension(size.height, 16),
+    )
+}
+
+fn align_dimension(value: u32, alignment: u32) -> u32 {
+    let remainder = value % alignment;
+    if remainder == 0 {
+        value
+    } else {
+        value + (alignment - remainder)
+    }
 }
 
 fn lex_rope_from_str(text: &str) -> Rope<Attribute<Token>> {
@@ -620,6 +715,25 @@ fn emit_progress(
         completed,
         total,
     });
+}
+
+fn emit_progress_checked(
+    cancel_flag: &AtomicBool,
+    on_progress: &mut dyn FnMut(ExportProgress),
+    message: impl Into<String>,
+    completed: usize,
+    total: usize,
+) -> Result<()> {
+    check_cancelled(cancel_flag)?;
+    emit_progress(on_progress, message, completed, total);
+    Ok(())
+}
+
+fn check_cancelled(cancel_flag: &AtomicBool) -> Result<()> {
+    if cancel_flag.load(Ordering::Relaxed) {
+        bail!(EXPORT_CANCELLED_MESSAGE);
+    }
+    Ok(())
 }
 
 fn bgra_to_rgba(mut frame: RgbaImage) -> RgbaImage {

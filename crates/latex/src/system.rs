@@ -2,6 +2,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    sync::OnceLock,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -10,6 +11,11 @@ use anyhow::{Context, Result, anyhow, bail};
 const TEX_BASENAME: &str = "monocurl";
 
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
+static AVAILABLE: OnceLock<bool> = OnceLock::new();
+
+pub(crate) fn is_available() -> bool {
+    *AVAILABLE.get_or_init(|| command_available("latex") && command_available("dvisvgm"))
+}
 
 pub(crate) fn render_svg_document(document: &str) -> Result<String> {
     let temp_dir = TempDir::new()?;
@@ -48,6 +54,14 @@ pub(crate) fn render_svg_document(document: &str) -> Result<String> {
 
     fs::read_to_string(&svg_path)
         .with_context(|| format!("failed to read generated SVG `{}`", svg_path.display()))
+}
+
+fn command_available(command: &str) -> bool {
+    match Command::new(command).arg("--version").output() {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => true,
+    }
 }
 
 fn run_command(command: &str, args: Vec<String>) -> Result<()> {

@@ -42,6 +42,10 @@ pub(crate) fn build_text_document(text: &str) -> String {
     format!("{LATEX_PREAMBLE}{SHARED_MACROS}\\begin{{document}}\n{text}{LATEX_POSTAMBLE}")
 }
 
+pub(crate) fn build_tex_document(tex: &str) -> String {
+    format!("{LATEX_PREAMBLE}{SHARED_MACROS}\\begin{{document}}\n\\[\n{tex}\n\\]{LATEX_POSTAMBLE}")
+}
+
 pub(crate) fn build_latex_document(body: &str) -> String {
     format!("{LATEX_PREAMBLE}{SHARED_MACROS}\\begin{{document}}\n{body}{LATEX_POSTAMBLE}")
 }
@@ -270,13 +274,19 @@ fn legacy_text_tag_open(tag: &[isize]) -> String {
 mod tests {
     use super::{
         SpanMarker, TaggedSource, TaggedSpan, apply_legacy_text_tags, build_mathjax_source,
-        build_text_document, parse_text_tags,
+        build_tex_document, build_text_document, parse_text_tags,
     };
 
     #[test]
     fn text_document_keeps_raw_input() {
         let doc = build_text_document("hello");
         assert!(doc.contains("\nhello\n"));
+    }
+
+    #[test]
+    fn tex_document_wraps_input_in_display_math() {
+        let doc = build_tex_document("x^2");
+        assert!(doc.contains("\n\\[\nx^2\n\\]\n"));
     }
 
     #[test]

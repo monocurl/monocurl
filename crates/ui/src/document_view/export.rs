@@ -1,5 +1,9 @@
 use std::{
-    sync::mpsc::{self, TryRecvError},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc::{self, TryRecvError},
+    },
     time::Duration,
 };
 
@@ -123,15 +127,17 @@ impl DocumentView {
         };
 
         let (tx, rx) = mpsc::channel();
+        let cancel_flag = Arc::new(AtomicBool::new(false));
         self.export_overlay = ExportOverlayState::start(kind);
+        self.export_cancel_flag = Some(cancel_flag.clone());
         cx.notify();
 
         std::thread::spawn(move || {
             let progress_tx = tx.clone();
-            let result = exporter::export_scene(request, move |progress| {
+            let result = exporter::export_scene(request, cancel_flag, move |progress| {
                 let _ = progress_tx.send(ExportThreadMessage::Progress(progress));
             })
-            .map_err(|error| error.to_string());
+            .map_err(format_export_error);
             let _ = tx.send(ExportThreadMessage::Finished(result));
         });
 
@@ -175,7 +181,9 @@ impl DocumentView {
     ) -> bool {
         match message {
             ExportThreadMessage::Progress(progress) => {
-                self.export_overlay.message = progress.message;
+                if !self.export_overlay.cancel_requested {
+                    self.export_overlay.message = progress.message;
+                }
                 self.export_overlay.completed = progress.completed;
                 self.export_overlay.total = progress.total;
                 cx.notify();
@@ -199,20 +207,73 @@ impl DocumentView {
 
     fn finish_export_with_error(&mut self, error: String, cx: &mut Context<Self>) {
         self.export_overlay.running = false;
+        self.export_overlay.cancel_requested = false;
         self.export_overlay.error = Some(error);
         self.export_overlay.output_path = None;
+        self.export_cancel_flag = None;
         self.export_poll_task = None;
         cx.notify();
     }
 
     fn finish_export_with_success(&mut self, outcome: ExportOutcome, cx: &mut Context<Self>) {
         self.export_overlay.running = false;
+        self.export_overlay.cancel_requested = false;
         self.export_overlay.error = None;
         self.export_overlay.output_path = Some(outcome.output_path.clone());
         self.export_overlay.completed =
             self.export_overlay.total.max(self.export_overlay.completed);
         self.export_overlay.message = format!("Saved to {}", outcome.output_path.display());
+        self.export_cancel_flag = None;
         self.export_poll_task = None;
+        cx.notify();
+    }
+
+    pub(super) fn request_cancel_export(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.export_overlay.running || self.export_overlay.cancel_requested {
+            return;
+        }
+
+        let Some(kind) = self.export_overlay.kind else {
+            return;
+        };
+        let confirm = window.prompt(
+            PromptLevel::Warning,
+            &format!("Cancel {} Export?", kind.action_label()),
+            Some("The current export will stop and any partial output file will be discarded."),
+            &[
+                PromptButton::Cancel("Keep Exporting".into()),
+                PromptButton::Ok("Cancel Export".into()),
+            ],
+            cx,
+        );
+
+        cx.spawn(async move |this, app| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
+
+            if confirm.await == Ok(1) {
+                let _ = app.update(move |app| {
+                    let _ = this.update(app, |this, cx| {
+                        this.confirm_cancel_export(cx);
+                    });
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn confirm_cancel_export(&mut self, cx: &mut Context<Self>) {
+        if !self.export_overlay.running || self.export_overlay.cancel_requested {
+            return;
+        }
+
+        if let Some(cancel_flag) = &self.export_cancel_flag {
+            cancel_flag.store(true, Ordering::Relaxed);
+        }
+
+        self.export_overlay.cancel_requested = true;
+        self.export_overlay.message = "Cancelling export...".into();
         cx.notify();
     }
 
@@ -238,8 +299,34 @@ impl DocumentView {
     }
 
     pub(super) fn clear_export_state(&mut self, cx: &mut Context<Self>) {
+        self.export_cancel_flag = None;
         self.export_overlay = ExportOverlayState::default();
         self.export_poll_task = None;
         cx.notify();
     }
+}
+
+fn format_export_error(error: anyhow::Error) -> String {
+    if error
+        .chain()
+        .any(|cause| cause.to_string() == EXPORT_CANCELLED_MESSAGE)
+    {
+        return EXPORT_CANCELLED_MESSAGE.to_string();
+    }
+
+    let mut chain = error.chain();
+    let Some(head) = chain.next() else {
+        return "Export failed".to_string();
+    };
+
+    let mut lines = vec![head.to_string()];
+    for cause in chain {
+        let cause = cause.to_string();
+        if lines.last().is_some_and(|line| line == &cause) {
+            continue;
+        }
+        lines.push(format!("caused by: {cause}"));
+    }
+
+    lines.join("\n")
 }

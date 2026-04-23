@@ -17,6 +17,12 @@ const MATHJAX_UNITS_PER_EM: f32 = 1000.0;
 const SYSTEM_SVG_UNITS_AT_SCALE_1: f32 = 36.0;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum RenderQuality {
+    Normal,
+    High,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum BackendKind {
     Text,
     Tex,
@@ -28,6 +34,7 @@ struct CacheKey {
     backend: BackendKind,
     source: String,
     scale_bits: u32,
+    quality: RenderQuality,
 }
 
 #[derive(Clone)]
@@ -45,6 +52,14 @@ pub struct RenderedOutput {
 static CACHE: OnceLock<Mutex<HashMap<CacheKey, CacheEntry>>> = OnceLock::new();
 
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
+    render_text_with_quality(text, scale, RenderQuality::Normal)
+}
+
+pub fn render_text_with_quality(
+    text: &str,
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
     let tagged = document::parse_text_tags(text)?;
     if tagged.source.trim().is_empty() && tagged.spans.is_empty() {
         return Ok(Vec::new());
@@ -55,12 +70,36 @@ pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
         BackendKind::Text,
         document::build_text_document(&source),
         scale,
+        quality,
     )
     .map(|output| output.meshes)
 }
 
 pub fn render_tex(tex: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
+    render_tex_with_quality(tex, scale, RenderQuality::Normal)
+}
+
+pub fn render_tex_with_quality(
+    tex: &str,
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
     let tagged = document::parse_text_tags(tex)?;
+    if tagged.source.trim().is_empty() && tagged.spans.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    if system::is_available() {
+        let source = document::apply_legacy_text_tags(&tagged.source, &tagged.spans)?;
+        return render_system(
+            BackendKind::Tex,
+            document::build_tex_document(&source),
+            scale,
+            quality,
+        )
+        .map(|output| output.meshes);
+    }
+
     let markers = tagged
         .spans
         .iter()
@@ -70,11 +109,20 @@ pub fn render_tex(tex: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
             range: span.range.clone(),
         })
         .collect::<Vec<_>>();
-    let output = render_tex_marked(&tagged.source, scale, &markers)?;
+    let output = render_tex_marked_with_quality(&tagged.source, scale, &markers, quality)?;
     Ok(apply_text_tags(output, &tagged))
 }
 
 pub fn render_tex_marked(tex: &str, scale: f32, markers: &[SpanMarker]) -> Result<RenderedOutput> {
+    render_tex_marked_with_quality(tex, scale, markers, RenderQuality::Normal)
+}
+
+pub fn render_tex_marked_with_quality(
+    tex: &str,
+    scale: f32,
+    markers: &[SpanMarker],
+    quality: RenderQuality,
+) -> Result<RenderedOutput> {
     validate_scale(scale)?;
     if tex.trim().is_empty() && markers.is_empty() {
         return Ok(RenderedOutput {
@@ -83,15 +131,31 @@ pub fn render_tex_marked(tex: &str, scale: f32, markers: &[SpanMarker]) -> Resul
         });
     }
 
+    if system::is_available() {
+        return render_tex_marked_system(tex, scale, markers, quality);
+    }
+
     let source = document::build_mathjax_source(tex, markers)?;
     let font_size = FONT_SIZE_AT_SCALE_1 * scale as f64;
-    render_cached(BackendKind::Tex, source, scale, |source| {
+    render_cached(BackendKind::Tex, source, scale, quality, |source| {
         let svg = mathjax_svg::render_svg(&source, mathjax_svg::RenderOptions::new(font_size))?;
-        svg::import(&svg, font_size as f32 / MATHJAX_UNITS_PER_EM)
+        svg::import(
+            &svg,
+            font_size as f32 / MATHJAX_UNITS_PER_EM,
+            svg_import_options(quality),
+        )
     })
 }
 
 pub fn render_latex(body: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
+    render_latex_with_quality(body, scale, RenderQuality::Normal)
+}
+
+pub fn render_latex_with_quality(
+    body: &str,
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
     let tagged = document::parse_text_tags(body)?;
     if tagged.source.trim().is_empty() && tagged.spans.is_empty() {
         return Ok(Vec::new());
@@ -102,15 +166,25 @@ pub fn render_latex(body: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
         BackendKind::Latex,
         document::build_latex_document(&source),
         scale,
+        quality,
     )
     .map(|output| output.meshes)
 }
 
-fn render_system(backend: BackendKind, source: String, scale: f32) -> Result<RenderedOutput> {
+fn render_system(
+    backend: BackendKind,
+    source: String,
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<RenderedOutput> {
     validate_scale(scale)?;
-    render_cached(backend, source, scale, |source| {
+    render_cached(backend, source, scale, quality, |source| {
         let svg = system::render_svg_document(&source)?;
-        svg::import(&svg, scale / SYSTEM_SVG_UNITS_AT_SCALE_1)
+        svg::import(
+            &svg,
+            scale / SYSTEM_SVG_UNITS_AT_SCALE_1,
+            svg_import_options(quality),
+        )
     })
 }
 
@@ -118,6 +192,7 @@ fn render_cached<F>(
     backend: BackendKind,
     source: String,
     scale: f32,
+    quality: RenderQuality,
     render: F,
 ) -> Result<RenderedOutput>
 where
@@ -127,6 +202,7 @@ where
         backend,
         source: source.clone(),
         scale_bits: scale.to_bits(),
+        quality,
     };
 
     if let Some(entry) = cache().lock().unwrap().get(&key).cloned() {
@@ -148,6 +224,51 @@ where
         meshes: entry.meshes.iter().cloned().collect(),
         span_mesh_indices: (*entry.span_mesh_indices).clone(),
     })
+}
+
+fn render_tex_marked_system(
+    tex: &str,
+    scale: f32,
+    markers: &[SpanMarker],
+    quality: RenderQuality,
+) -> Result<RenderedOutput> {
+    let tagged_markers = markers
+        .iter()
+        .enumerate()
+        .map(|(index, marker)| document::TaggedSpan {
+            tag: vec![index as isize + 1],
+            range: marker.range.clone(),
+        })
+        .collect::<Vec<_>>();
+    let source = document::apply_legacy_text_tags(tex, &tagged_markers)?;
+    let mut output = render_system(
+        BackendKind::Tex,
+        document::build_tex_document(&source),
+        scale,
+        quality,
+    )?;
+    let mut span_mesh_indices = HashMap::new();
+
+    for (mesh_index, mesh) in output.meshes.iter_mut().enumerate() {
+        let Some(&tag) = mesh.tag.first() else {
+            continue;
+        };
+        if mesh.tag.len() != 1 || tag <= 0 {
+            continue;
+        }
+        let marker_index = (tag - 1) as usize;
+        let Some(marker) = markers.get(marker_index) else {
+            continue;
+        };
+        span_mesh_indices
+            .entry(marker.id.clone())
+            .or_insert_with(Vec::new)
+            .push(mesh_index);
+        Arc::make_mut(mesh).tag.clear();
+    }
+
+    output.span_mesh_indices = span_mesh_indices;
+    Ok(output)
 }
 
 fn validate_scale(scale: f32) -> Result<()> {
@@ -175,6 +296,15 @@ fn apply_text_tags(output: RenderedOutput, tagged: &document::TaggedSource) -> V
 
 fn cache() -> &'static Mutex<HashMap<CacheKey, CacheEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn svg_import_options(quality: RenderQuality) -> svg::ImportOptions {
+    svg::ImportOptions {
+        curve_sampling: match quality {
+            RenderQuality::Normal => svg::CurveSampling::Normal,
+            RenderQuality::High => svg::CurveSampling::High,
+        },
+    }
 }
 
 #[cfg(test)]

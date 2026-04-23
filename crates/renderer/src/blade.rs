@@ -1046,20 +1046,22 @@ fn build_triangle_vertices(mesh: &Mesh) -> Vec<TriVertexPod> {
 fn build_line_vertices(mesh: &Mesh) -> Vec<LineVertexPod> {
     let mut lines = Vec::with_capacity(mesh.lins.len() * LINE_VERTICES_PER_INSTANCE as usize);
     for (line_idx, line) in mesh.lins.iter().enumerate() {
-        let source = match line_inverse_index(mesh, line.inv) {
+        let (source_idx, source) = match line_inverse_index(mesh, line.inv) {
             Some(inv_idx) if line_idx > inv_idx => continue,
             Some(inv_idx) if !line_visible(line) && line_visible(&mesh.lins[inv_idx]) => {
-                &mesh.lins[inv_idx]
+                (inv_idx, &mesh.lins[inv_idx])
             }
-            _ => line,
+            _ => (line_idx, line),
         };
 
         if !line_visible(source) {
             continue;
         }
 
-        let prev = line_neighbor(mesh, source.prev).unwrap_or(source);
-        let next = line_neighbor(mesh, source.next).unwrap_or(source);
+        let prev = resolved_line_neighbor(mesh, source_idx, source.prev, NeighborDirection::Prev)
+            .unwrap_or(source);
+        let next = resolved_line_neighbor(mesh, source_idx, source.next, NeighborDirection::Next)
+            .unwrap_or(source);
         let tangent = source.b.pos - source.a.pos;
         let prev_tangent = source.a.pos - prev.a.pos;
         let next_tangent = next.b.pos - source.b.pos;
@@ -1076,6 +1078,63 @@ fn build_line_vertices(mesh: &Mesh) -> Vec<LineVertexPod> {
     lines
 }
 
+#[derive(Clone, Copy)]
+enum NeighborDirection {
+    Prev,
+    Next,
+}
+
+fn resolved_line_neighbor(
+    mesh: &Mesh,
+    line_idx: usize,
+    explicit: i32,
+    direction: NeighborDirection,
+) -> Option<&geo::mesh::Lin> {
+    if let Some(neighbor) = line_neighbor(mesh, explicit)
+        .filter(|neighbor| line_neighbor_matches(&mesh.lins[line_idx], neighbor, direction))
+    {
+        return Some(neighbor);
+    }
+
+    let current = &mesh.lins[line_idx];
+    let inverse_idx = line_inverse_index(mesh, current.inv);
+    let candidates = mesh
+        .lins
+        .iter()
+        .enumerate()
+        .filter(|(candidate_idx, candidate)| {
+            *candidate_idx != line_idx
+                && Some(*candidate_idx) != inverse_idx
+                && line_visible(candidate)
+                && line_neighbor_matches(current, candidate, direction)
+        })
+        .map(|(_, candidate)| candidate)
+        .collect::<Vec<_>>();
+
+    if candidates.len() == 1 {
+        Some(candidates[0])
+    } else {
+        None
+    }
+}
+
+fn line_neighbor_matches(
+    current: &geo::mesh::Lin,
+    candidate: &geo::mesh::Lin,
+    direction: NeighborDirection,
+) -> bool {
+    match direction {
+        NeighborDirection::Prev => {
+            same_position(candidate.b.pos, current.a.pos)
+                && !same_position(candidate.a.pos, current.b.pos)
+        }
+        NeighborDirection::Next => {
+            same_position(candidate.a.pos, current.b.pos)
+                && !same_position(candidate.b.pos, current.a.pos)
+        }
+    }
+}
+
 fn line_neighbor(mesh: &Mesh, index: i32) -> Option<&geo::mesh::Lin> {
     (index >= 0)
         .then_some(index as usize)
@@ -1090,6 +1149,10 @@ fn line_inverse_index(mesh: &Mesh, index: i32) -> Option<usize> {
 
 fn line_visible(line: &geo::mesh::Lin) -> bool {
     line.a.col.w > f32::EPSILON || line.b.col.w > f32::EPSILON
+}
+
+fn same_position(a: Float3, b: Float3) -> bool {
+    (a - b).len_sq() <= 1e-12
 }
 
 fn build_dot_instances(mesh: &Mesh) -> Vec<DotInstancePod> {
@@ -1394,6 +1457,39 @@ mod tests {
         assert_eq!(vertices[0].pos, [1.0, 0.0, 0.0, 0.0]);
         assert_eq!(vertices[5].pos, [0.0, 0.0, 0.0, 0.0]);
         assert_eq!(vertices[0].col[3], 1.0);
+    }
+
+    #[test]
+    fn line_vertices_infer_missing_neighbors_from_shared_endpoints() {
+        let mesh = Mesh {
+            dots: Vec::new(),
+            tris: Vec::new(),
+            lins: vec![
+                test_line(
+                    Float3::new(0.0, 0.0, 0.0),
+                    Float3::new(0.0, 1.0, 0.0),
+                    -1,
+                    -1,
+                    -1,
+                    1.0,
+                ),
+                test_line(
+                    Float3::new(0.0, 1.0, 0.0),
+                    Float3::new(1.0, 1.0, 0.0),
+                    -1,
+                    -1,
+                    -1,
+                    1.0,
+                ),
+            ],
+            uniform: Uniforms::default(),
+            tag: Vec::new(),
+        };
+
+        let vertices = build_line_vertices(&mesh);
+        assert_eq!(vertices.len(), (LINE_VERTICES_PER_INSTANCE * 2) as usize);
+        assert_eq!(vertices[5].prev_tangent, [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(vertices[6].prev_tangent, [0.0, 1.0, 0.0, 0.0]);
     }
 
     fn test_line(a: Float3, b: Float3, inv: i32, prev: i32, next: i32, alpha: f32) -> Lin {

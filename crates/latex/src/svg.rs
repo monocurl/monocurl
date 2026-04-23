@@ -12,22 +12,36 @@ use usvg::{FillRule, Node, Paint, Path as SvgPath, Tree};
 
 use crate::document;
 
-const CURVE_SAMPLE_SPACING: f32 = 32.0;
+pub(crate) const DEFAULT_TEXT_STROKE_RADIUS: f32 = 0.55;
+const NORMAL_CURVE_SAMPLE_SPACING: f32 = 24.0;
+const HIGH_QUALITY_CURVE_SAMPLE_SPACING: f32 = 14.0;
 const MIN_CURVE_SAMPLES: usize = 4;
-const MAX_CURVE_SAMPLES: usize = 64;
+const NORMAL_MAX_CURVE_SAMPLES: usize = 96;
+const HIGH_QUALITY_MAX_CURVE_SAMPLES: usize = 160;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CurveSampling {
+    Normal,
+    High,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ImportOptions {
+    pub curve_sampling: CurveSampling,
+}
 
 pub(crate) struct RenderedSvg {
     pub meshes: Vec<Mesh>,
     pub span_mesh_indices: HashMap<String, Vec<usize>>,
 }
 
-pub(crate) fn import(svg: &str, unit_scale: f32) -> Result<RenderedSvg> {
+pub(crate) fn import(svg: &str, unit_scale: f32, options: ImportOptions) -> Result<RenderedSvg> {
     let tree = Tree::from_str(svg, &usvg::Options::default())?;
     let mut rendered = RenderedSvg {
         meshes: Vec::new(),
         span_mesh_indices: HashMap::new(),
     };
-    collect_group(tree.root(), None, 1.0, unit_scale, &mut rendered)?;
+    collect_group(tree.root(), None, 1.0, unit_scale, options, &mut rendered)?;
     Ok(rendered)
 }
 
@@ -36,6 +50,7 @@ fn collect_group(
     inherited_span: Option<&str>,
     inherited_opacity: f32,
     unit_scale: f32,
+    options: ImportOptions,
     rendered: &mut RenderedSvg,
 ) -> Result<()> {
     let span = document::strip_span_prefix(group.id()).or(inherited_span);
@@ -43,8 +58,10 @@ fn collect_group(
 
     for child in group.children() {
         match child {
-            Node::Group(group) => collect_group(group, span, opacity, unit_scale, rendered)?,
-            Node::Path(path) => collect_path(path, span, opacity, unit_scale, rendered)?,
+            Node::Group(group) => {
+                collect_group(group, span, opacity, unit_scale, options, rendered)?
+            }
+            Node::Path(path) => collect_path(path, span, opacity, unit_scale, options, rendered)?,
             _ => {}
         }
     }
@@ -57,6 +74,7 @@ fn collect_path(
     inherited_span: Option<&str>,
     inherited_opacity: f32,
     unit_scale: f32,
+    options: ImportOptions,
     rendered: &mut RenderedSvg,
 ) -> Result<()> {
     if !path.is_visible() {
@@ -73,7 +91,7 @@ fn collect_path(
             let (tag, color) =
                 decode_tag_and_color(*color, fill.opacity().get() * inherited_opacity);
             let even_odd = matches!(fill.rule(), FillRule::EvenOdd);
-            let contours = extract_contours(path.data(), path.abs_transform(), unit_scale);
+            let contours = extract_contours(path.data(), path.abs_transform(), unit_scale, options);
             if !contours.is_empty() {
                 push_mesh(
                     filled_contours(&contours, color, tag, even_odd)?,
@@ -89,7 +107,8 @@ fn collect_path(
             if let Some(stroked_path) = path.data().stroke(&stroke.to_tiny_skia(), 1.0) {
                 let (tag, color) =
                     decode_tag_and_color(*color, stroke.opacity().get() * inherited_opacity);
-                let contours = extract_contours(&stroked_path, path.abs_transform(), unit_scale);
+                let contours =
+                    extract_contours(&stroked_path, path.abs_transform(), unit_scale, options);
                 if !contours.is_empty() {
                     push_mesh(
                         filled_contours(&contours, color, tag, false)?,
@@ -120,6 +139,7 @@ fn extract_contours(
     path: &Path,
     transform: tiny_skia_path::Transform,
     unit_scale: f32,
+    options: ImportOptions,
 ) -> Vec<Vec<Float3>> {
     let mut contours = Vec::new();
     let mut current = Vec::new();
@@ -152,7 +172,7 @@ fn extract_contours(
                 let control = map_point(ctrl, transform, unit_scale);
                 let end = map_point(point, transform, unit_scale);
                 let approx_length = (control - cursor).len() + (end - control).len();
-                let samples = curve_samples(approx_length);
+                let samples = curve_samples(approx_length, options);
                 for i in 1..=samples {
                     let t = i as f32 / samples as f32;
                     let mt = 1.0 - t;
@@ -171,7 +191,7 @@ fn extract_contours(
                 let approx_length = (control_a - cursor).len()
                     + (control_b - control_a).len()
                     + (end - control_b).len();
-                let samples = curve_samples(approx_length);
+                let samples = curve_samples(approx_length, options);
                 for i in 1..=samples {
                     let t = i as f32 / samples as f32;
                     let mt = 1.0 - t;
@@ -200,10 +220,18 @@ fn map_point(point: Point, transform: tiny_skia_path::Transform, unit_scale: f32
     Float3::new(point.x * unit_scale, -point.y * unit_scale, 0.0)
 }
 
-fn curve_samples(approx_length: f32) -> usize {
-    (approx_length / CURVE_SAMPLE_SPACING)
+fn curve_samples(approx_length: f32, options: ImportOptions) -> usize {
+    let (spacing, max_samples) = match options.curve_sampling {
+        CurveSampling::Normal => (NORMAL_CURVE_SAMPLE_SPACING, NORMAL_MAX_CURVE_SAMPLES),
+        CurveSampling::High => (
+            HIGH_QUALITY_CURVE_SAMPLE_SPACING,
+            HIGH_QUALITY_MAX_CURVE_SAMPLES,
+        ),
+    };
+
+    (approx_length / spacing)
         .ceil()
-        .clamp(MIN_CURVE_SAMPLES as f32, MAX_CURVE_SAMPLES as f32) as usize
+        .clamp(MIN_CURVE_SAMPLES as f32, max_samples as f32) as usize
 }
 
 fn push_unique_point(points: &mut Vec<Float3>, point: Float3) {
@@ -260,7 +288,10 @@ fn filled_contours(
         dots: Vec::new(),
         lins,
         tris,
-        uniform: Uniforms::default(),
+        uniform: Uniforms {
+            stroke_radius: DEFAULT_TEXT_STROKE_RADIUS,
+            ..Uniforms::default()
+        },
         tag,
     };
     mesh.debug_assert_consistent_topology();
@@ -324,7 +355,14 @@ mod tests {
     #[test]
     fn imports_basic_mathjax_tex_with_consistent_topology() {
         let svg = mathjax_svg::render_svg("2 + 4", mathjax_svg::RenderOptions::new(36.0)).unwrap();
-        let rendered = import(&svg, 1.0 / super::super::MATHJAX_UNITS_PER_EM).unwrap();
+        let rendered = import(
+            &svg,
+            1.0 / super::super::MATHJAX_UNITS_PER_EM,
+            ImportOptions {
+                curve_sampling: CurveSampling::Normal,
+            },
+        )
+        .unwrap();
 
         assert!(!rendered.meshes.is_empty());
         assert!(rendered.meshes.iter().all(Mesh::has_consistent_topology));

@@ -5,7 +5,7 @@ use std::{
 };
 
 use executor::{
-    executor::{Executor, SeekToResult},
+    executor::{Executor, SeekToResult, TextRenderQuality},
     scene_snapshot::SceneSnapshot,
     time::Timestamp,
 };
@@ -75,6 +75,10 @@ impl RuntimeState {
                 );
                 self.is_playing = false;
                 self.playback_mode = playback_mode;
+                self.executor.set_text_render_quality(match playback_mode {
+                    PlaybackMode::Presentation => TextRenderQuality::High,
+                    PlaybackMode::Preview => TextRenderQuality::Normal,
+                });
                 self.executor.clear_cache();
                 self.target = self
                     .executor

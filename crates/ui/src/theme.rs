@@ -21,8 +21,8 @@ const fn hsla(h: f32, s: f32, l: f32, a: f32) -> Hsla {
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ThemeMode {
-    #[default]
     Light,
+    #[default]
     Dark,
 }
 

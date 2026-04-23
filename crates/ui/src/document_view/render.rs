@@ -69,6 +69,7 @@ impl DocumentView {
             viewport: viewport.clone(),
             timeline,
             export_overlay: ExportOverlayState::default(),
+            export_cancel_flag: None,
             export_poll_task: None,
             focus_handle: cx.focus_handle(),
         }
@@ -86,6 +87,7 @@ impl DocumentView {
         let progress = self.export_overlay.progress_ratio();
         let is_error = self.export_overlay.error.is_some();
         let is_success = self.export_overlay.succeeded();
+        let is_cancelled = self.export_overlay.cancelled();
         let overlay_bg = Rgba {
             a: 0.78,
             ..theme.document_background
@@ -94,11 +96,19 @@ impl DocumentView {
             a: 0.14,
             ..theme.text_primary
         };
-        let bar_fill = if is_error { theme.danger } else { theme.accent };
+        let bar_fill = if is_cancelled {
+            theme.text_muted
+        } else if is_error {
+            theme.danger
+        } else {
+            theme.accent
+        };
         let title = if self.export_overlay.running {
             kind.progress_title()
         } else if is_success {
             kind.success_title()
+        } else if is_cancelled {
+            kind.canceled_title()
         } else {
             kind.failure_title()
         };
@@ -110,6 +120,16 @@ impl DocumentView {
         } else {
             self.export_overlay.message.clone()
         };
+        let status_lines = status
+            .lines()
+            .map(|line| {
+                div()
+                    .text_sm()
+                    .text_color(theme.text_muted)
+                    .child(line.to_string())
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
         let counter = (self.export_overlay.total > 0).then(|| {
             format!(
                 "{} / {}",
@@ -137,10 +157,48 @@ impl DocumentView {
                 .hover(|style| style.opacity(0.9))
                 .cursor_pointer()
                 .child(kind.open_label())
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_click(cx.listener(|this, _, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
                     this.open_export_output(cx);
                 }))
                 .into_any_element()
+        });
+        let cancel_button = self.export_overlay.running.then(|| {
+            if self.export_overlay.cancel_requested {
+                div()
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .rounded(px(4.0))
+                    .border_1()
+                    .border_color(theme.navbar_border)
+                    .text_sm()
+                    .text_color(theme.text_muted)
+                    .child("Cancelling...")
+                    .into_any_element()
+            } else {
+                div()
+                    .id("cancel-export-overlay")
+                    .px(px(10.0))
+                    .py(px(4.0))
+                    .rounded(px(4.0))
+                    .border_1()
+                    .border_color(theme.navbar_border)
+                    .text_sm()
+                    .text_color(theme.text_primary)
+                    .hover({
+                        let hover = theme.row_hover_overlay;
+                        move |style| style.bg(hover)
+                    })
+                    .cursor_pointer()
+                    .child("Cancel")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.request_cancel_export(window, cx);
+                    }))
+                    .into_any_element()
+            }
         });
         let dismiss = (!self.export_overlay.running).then(|| {
             div()
@@ -158,7 +216,9 @@ impl DocumentView {
                 })
                 .cursor_pointer()
                 .child("Dismiss")
-                .on_click(cx.listener(|this, _, _, cx| {
+                .on_click(cx.listener(|this, _, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
                     this.clear_export_state(cx);
                 }))
                 .into_any_element()
@@ -187,8 +247,12 @@ impl DocumentView {
                         .border_1()
                         .border_color(theme.navbar_border)
                         .bg(theme.tab_active_background)
+                        .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                        })
                         .child(div().text_lg().text_color(theme.text_primary).child(title))
-                        .child(div().text_sm().text_color(theme.text_muted).child(status))
+                        .child(div().flex().flex_col().gap(px(4.0)).children(status_lines))
                         .children(output_path)
                         .child(
                             div()
@@ -223,6 +287,7 @@ impl DocumentView {
                                 .flex_row()
                                 .gap(px(8.0))
                                 .justify_end()
+                                .children(cancel_button)
                                 .children(open_button)
                                 .children(dismiss),
                         ),

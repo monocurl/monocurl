@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use executor::{error::ExecutorError, executor::Executor, value::Value};
+use executor::{
+    error::ExecutorError,
+    executor::{Executor, TextRenderQuality},
+    value::Value,
+};
 use geo::{
     mesh_build::SurfaceVertex,
     simd::{Float2, Float3, Float4},
@@ -119,6 +123,13 @@ fn read_nonnegative_float(
         });
     }
     Ok(value)
+}
+
+fn text_render_quality(executor: &Executor) -> latex::RenderQuality {
+    match executor.text_render_quality() {
+        TextRenderQuality::Normal => latex::RenderQuality::Normal,
+        TextRenderQuality::High => latex::RenderQuality::High,
+    }
 }
 
 fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
@@ -1110,9 +1121,10 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
 pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let text = read_string(executor, stack_idx, -2, "text").await?;
     let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
-    let meshes = latex::render_text(&text, scale).map_err(|error| {
-        ExecutorError::invalid_invocation(format!("text render failed: {error:#}"))
-    })?;
+    let meshes = latex::render_text_with_quality(&text, scale, text_render_quality(executor))
+        .map_err(|error| {
+            ExecutorError::invalid_invocation(format!("text render failed: {error:#}"))
+        })?;
     Ok(latex_meshes_to_value(meshes))
 }
 
@@ -1120,9 +1132,10 @@ pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let tex = read_string(executor, stack_idx, -2, "tex").await?;
     let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
-    let meshes = latex::render_tex(&tex, scale).map_err(|error| {
-        ExecutorError::invalid_invocation(format!("tex render failed: {error:#}"))
-    })?;
+    let meshes = latex::render_tex_with_quality(&tex, scale, text_render_quality(executor))
+        .map_err(|error| {
+            ExecutorError::invalid_invocation(format!("tex render failed: {error:#}"))
+        })?;
     Ok(latex_meshes_to_value(meshes))
 }
 
@@ -1130,9 +1143,10 @@ pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let latex = read_string(executor, stack_idx, -2, "latex").await?;
     let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
-    let meshes = latex::render_latex(&latex, scale).map_err(|error| {
-        ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
-    })?;
+    let meshes = latex::render_latex_with_quality(&latex, scale, text_render_quality(executor))
+        .map_err(|error| {
+            ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
+        })?;
     Ok(latex_meshes_to_value(meshes))
 }
 
@@ -1224,9 +1238,10 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
         });
     }
 
-    let meshes = latex::render_latex(&str, scale).map_err(|error| {
-        ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
-    })?;
+    let meshes = latex::render_latex_with_quality(&str, scale, text_render_quality(executor))
+        .map_err(|error| {
+            ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
+        })?;
     let mut label = MeshTree::List(meshes.into_iter().map(MeshTree::Mesh).collect());
     if label.iter().next().is_none() {
         return Ok(label.into_value());

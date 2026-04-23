@@ -1,5 +1,4 @@
 mod blade;
-mod software;
 
 use std::{
     collections::hash_map::DefaultHasher,
@@ -7,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot, SceneSnapshot};
 use geo::{
     mesh::{Dot, Lin, Mesh, Tri},
@@ -15,7 +14,7 @@ use geo::{
 };
 pub use image::RgbaImage;
 
-use crate::{blade::BladeRenderer, software::SoftwareRenderer};
+use crate::blade::BladeRenderer;
 
 #[derive(Clone, Debug)]
 pub struct SceneRenderData {
@@ -81,88 +80,36 @@ impl Default for RenderStyle {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BackendKind {
-    Auto,
-    Blade,
-    Software,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderOptions {
-    pub backend: BackendKind,
     pub style: RenderStyle,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
         Self {
-            backend: BackendKind::Auto,
             style: RenderStyle::default(),
         }
     }
 }
 
 pub struct Renderer {
-    backend: Backend,
-}
-
-enum Backend {
-    Blade(BladeRenderer),
-    Software(SoftwareRenderer),
-}
-
-impl Backend {
-    fn kind(&self) -> BackendKind {
-        match self {
-            Self::Blade(_) => BackendKind::Blade,
-            Self::Software(_) => BackendKind::Software,
-        }
-    }
-
-    fn render(&mut self, scene: &SceneRenderData, size: RenderSize) -> Result<RgbaImage> {
-        match self {
-            Self::Blade(renderer) => renderer.render(scene, size),
-            Self::Software(renderer) => renderer.render(scene, size),
-        }
-    }
+    blade: Result<BladeRenderer, String>,
 }
 
 impl Renderer {
     pub fn new(options: RenderOptions) -> Self {
-        match Self::try_new(options) {
-            Ok(renderer) => renderer,
-            Err(error) => {
-                log::warn!(
-                    "renderer backend initialization failed for {:?}: {error:#}; falling back to software renderer",
-                    options.backend
-                );
-                Self {
-                    backend: Backend::Software(SoftwareRenderer::new(options.style)),
-                }
-            }
-        }
+        let blade = BladeRenderer::new(options.style).map_err(|error| {
+            log::error!("blade renderer initialization failed: {error:#}");
+            format!("{error:#}")
+        });
+        Self { blade }
     }
 
     pub fn try_new(options: RenderOptions) -> Result<Self> {
-        let backend = match options.backend {
-            BackendKind::Auto => match BladeRenderer::new(options.style) {
-                Ok(renderer) => Backend::Blade(renderer),
-                Err(error) => {
-                    log::warn!(
-                        "blade renderer unavailable: {error:#}; using software renderer instead"
-                    );
-                    Backend::Software(SoftwareRenderer::new(options.style))
-                }
-            },
-            BackendKind::Blade => Backend::Blade(BladeRenderer::new(options.style)?),
-            BackendKind::Software => Backend::Software(SoftwareRenderer::new(options.style)),
-        };
-        Ok(Self { backend })
-    }
-
-    pub fn backend_kind(&self) -> BackendKind {
-        self.backend.kind()
+        Ok(Self {
+            blade: Ok(BladeRenderer::new(options.style)?),
+        })
     }
 
     /// Returns a frame encoded in GPUI-compatible BGRA byte order.
@@ -175,7 +122,10 @@ impl Renderer {
             return Ok(RgbaImage::new(size.width, size.height));
         }
 
-        self.backend.render(scene, size)
+        self.blade
+            .as_mut()
+            .map_err(|error| anyhow!("blade renderer unavailable: {error}"))?
+            .render(scene, size)
     }
 }
 
@@ -298,16 +248,13 @@ mod tests {
         simd::{Float2, Float3, Float4},
     };
 
-    use crate::{
-        BackendKind, RenderOptions, RenderSize, Renderer, SceneRenderData, scene_fingerprint,
-    };
+    use crate::{RenderOptions, RenderSize, Renderer, SceneRenderData, scene_fingerprint};
 
     #[test]
     fn renders_background_when_scene_is_empty() {
-        let mut renderer = Renderer::new(RenderOptions {
-            backend: BackendKind::Software,
-            ..RenderOptions::default()
-        });
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
         let scene = SceneRenderData {
             background: BackgroundSnapshot {
                 color: (0.25, 0.5, 0.75, 1.0),
@@ -328,10 +275,9 @@ mod tests {
 
     #[test]
     fn higher_z_index_wins_for_overlapping_geometry() {
-        let mut renderer = Renderer::new(RenderOptions {
-            backend: BackendKind::Software,
-            ..RenderOptions::default()
-        });
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
         let scene = SceneRenderData {
             background: BackgroundSnapshot::default(),
             camera: CameraSnapshot::default(),

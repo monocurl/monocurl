@@ -47,6 +47,13 @@ pub enum SeekToResult {
     SeekedTo(Timestamp),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TextRenderQuality {
+    #[default]
+    Normal,
+    High,
+}
+
 /// result of executing a single instruction
 pub(crate) enum ExecSingle {
     Continue,
@@ -61,6 +68,7 @@ pub struct Executor {
     pub(crate) native_funcs: Vec<StdlibFunc>,
     pub(crate) cache: ExecutionCache,
     pub(crate) yielder: PeriodicYielder,
+    text_render_quality: TextRenderQuality,
     memory_checker: PeriodicMemoryChecker,
 }
 
@@ -73,6 +81,7 @@ impl Executor {
             native_funcs,
             cache,
             yielder: PeriodicYielder::default(),
+            text_render_quality: TextRenderQuality::Normal,
             memory_checker: PeriodicMemoryChecker::new(
                 EXECUTOR_MEMORY_LIMIT_BYTES,
                 EXECUTOR_HEAP_SLOT_LIMIT,
@@ -134,6 +143,14 @@ impl Executor {
             }
         });
         Ok(())
+    }
+
+    pub fn set_text_render_quality(&mut self, quality: TextRenderQuality) {
+        self.text_render_quality = quality;
+    }
+
+    pub fn text_render_quality(&self) -> TextRenderQuality {
+        self.text_render_quality
     }
 
     pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
