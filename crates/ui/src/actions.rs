@@ -7,7 +7,9 @@ actions!(
     [
         SaveActiveDocumentCustomPath,
         SaveActiveDocument,
-        CloseActiveDocument
+        CloseActiveDocument,
+        ExportImage,
+        ExportVideo
     ]
 );
 

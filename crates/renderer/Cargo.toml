@@ -8,11 +8,11 @@ anyhow.workspace = true
 executor.workspace = true
 geo.workspace = true
 log.workspace = true
+image.workspace = true
 blade-graphics = "0.7.0"
 blade-macros = "0.3.0"
 blade-util = "0.3.0"
 bytemuck = { version = "1.25", features = ["derive"] }
-image = "0.25.5"
 
 [dev-dependencies]
 naga = { version = "25.0.1", features = ["wgsl-in"] }

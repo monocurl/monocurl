@@ -22,7 +22,9 @@ const TEXTURE_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Rgba8Unorm;
 const DEPTH_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Depth32Float;
 const MAX_FRAME_TIME_MS: u32 = 10_000;
 const DEPTH_STEP: f32 = 1e-6;
+const DESIRED_MSAA_SAMPLE_COUNT: u32 = 4;
 const DEFAULT_LINE_MITER_SCALE: f32 = 1.0;
+const LINE_VERTICES_PER_INSTANCE: u32 = 6;
 const REFERENCE_WIDTH: f32 = 1480.0;
 const WHITE_TEXTURE: [u8; 4] = [255, 255, 255, 255];
 
@@ -33,6 +35,7 @@ pub(crate) struct BladeRenderer {
     texture_sampler: gpu::Sampler,
     upload_belt: BufferBelt,
     white_texture: CachedTexture,
+    line_index_buffer: Option<IndexedBuffer>,
     dot_index_buffers: HashMap<u16, IndexedBuffer>,
     target: Option<OffscreenTarget>,
     mesh_cache: HashMap<usize, CachedMesh>,
@@ -40,6 +43,7 @@ pub(crate) struct BladeRenderer {
     pending_buffer_uploads: Vec<PendingBufferUpload>,
     pending_texture_uploads: Vec<PendingTextureUpload>,
     style: RenderStyle,
+    sample_count: u32,
     frame_index: u64,
 }
 
@@ -54,6 +58,8 @@ struct OffscreenTarget {
     size: RenderSize,
     color: gpu::Texture,
     color_view: gpu::TextureView,
+    color_msaa: Option<gpu::Texture>,
+    color_msaa_view: Option<gpu::TextureView>,
     depth: gpu::Texture,
     depth_view: gpu::TextureView,
     readback: gpu::Buffer,
@@ -157,13 +163,12 @@ struct TriVertexPod {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-struct LineInstancePod {
-    prev_pos: [f32; 4],
-    a_pos: [f32; 4],
-    b_pos: [f32; 4],
-    next_pos: [f32; 4],
-    a_col: [f32; 4],
-    b_col: [f32; 4],
+struct LineVertexPod {
+    pos: [f32; 4],
+    col: [f32; 4],
+    tangent: [f32; 4],
+    prev_tangent: [f32; 4],
+    extrude: [f32; 4],
 }
 
 #[repr(C)]
@@ -191,7 +196,7 @@ struct TrianglesData {
 struct LinesData {
     line_camera: CameraParams,
     line_params: LineShaderParams,
-    line_instances: gpu::BufferPiece,
+    line_vertices: gpu::BufferPiece,
 }
 
 #[derive(blade_macros::ShaderData)]
@@ -213,7 +218,8 @@ impl BladeRenderer {
             }
             .map_err(|error| anyhow!("{error:?}"))?,
         );
-        let pipelines = Pipelines::new(&gpu);
+        let sample_count = choose_sample_count(&gpu);
+        let pipelines = Pipelines::new(&gpu, sample_count);
         let command_encoder = gpu.create_command_encoder(gpu::CommandEncoderDesc {
             name: "renderer-offscreen",
             buffer_count: 2,
@@ -238,6 +244,7 @@ impl BladeRenderer {
                 alignment: 64,
             }),
             white_texture,
+            line_index_buffer: None,
             dot_index_buffers: HashMap::new(),
             target: None,
             mesh_cache: HashMap::new(),
@@ -245,8 +252,17 @@ impl BladeRenderer {
             pending_buffer_uploads: Vec::new(),
             pending_texture_uploads: Vec::new(),
             style,
+            sample_count,
             frame_index: 0,
         };
+        renderer.line_index_buffer = renderer
+            .create_buffer_with_upload("renderer-line-indices", &build_line_indices())
+            .map(|buffer| IndexedBuffer {
+                buffer: buffer.buffer,
+                count: buffer.count,
+            })
+            .ok_or_else(|| anyhow!("failed to create line index buffer"))?
+            .into();
         renderer.initialize_white_texture()?;
         Ok(renderer)
     }
@@ -284,8 +300,12 @@ impl BladeRenderer {
         items.sort_by_key(|item| (item.z_index, item.order));
 
         self.flush_pending_uploads();
-        self.draw_background(scene.background.color);
-        self.draw_meshes(&items, size, scene.camera.basis());
+        self.draw_meshes(
+            &items,
+            size,
+            scene.camera.basis(),
+            Some(scene.background.color),
+        );
         self.copy_target_to_readback(size);
 
         let sync_point = self.gpu.submit(&mut self.command_encoder);
@@ -336,6 +356,9 @@ impl BladeRenderer {
             if let Some(target) = &mut self.target {
                 if target.needs_init {
                     self.command_encoder.init_texture(target.color);
+                    if let Some(color_msaa) = target.color_msaa {
+                        self.command_encoder.init_texture(color_msaa);
+                    }
                     self.command_encoder.init_texture(target.depth);
                     target.needs_init = false;
                 }
@@ -368,13 +391,39 @@ impl BladeRenderer {
             },
         );
 
+        let (color_msaa, color_msaa_view) = if self.sample_count > 1 {
+            let texture = self.gpu.create_texture(gpu::TextureDesc {
+                name: "renderer-color-msaa",
+                format: TARGET_FORMAT,
+                size: extent(size),
+                array_layer_count: 1,
+                mip_level_count: 1,
+                sample_count: self.sample_count,
+                dimension: gpu::TextureDimension::D2,
+                usage: gpu::TextureUsage::TARGET,
+                external: None,
+            });
+            let view = self.gpu.create_texture_view(
+                texture,
+                gpu::TextureViewDesc {
+                    name: "renderer-color-msaa-view",
+                    format: TARGET_FORMAT,
+                    dimension: gpu::ViewDimension::D2,
+                    subresources: &Default::default(),
+                },
+            );
+            (Some(texture), Some(view))
+        } else {
+            (None, None)
+        };
+
         let depth = self.gpu.create_texture(gpu::TextureDesc {
             name: "renderer-depth",
             format: DEPTH_FORMAT,
             size: extent(size),
             array_layer_count: 1,
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: self.sample_count,
             dimension: gpu::TextureDimension::D2,
             usage: gpu::TextureUsage::TARGET,
             external: None,
@@ -396,11 +445,16 @@ impl BladeRenderer {
         });
 
         self.command_encoder.init_texture(color);
+        if let Some(color_msaa) = color_msaa {
+            self.command_encoder.init_texture(color_msaa);
+        }
         self.command_encoder.init_texture(depth);
         self.target = Some(OffscreenTarget {
             size,
             color,
             color_view,
+            color_msaa,
+            color_msaa_view,
             depth,
             depth_view,
             readback,
@@ -423,7 +477,7 @@ impl BladeRenderer {
 
         let triangles =
             self.create_buffer_with_upload("renderer-triangles", &build_triangle_vertices(mesh));
-        let lines = self.create_buffer_with_upload("renderer-lines", &build_line_instances(mesh));
+        let lines = self.create_buffer_with_upload("renderer-lines", &build_line_vertices(mesh));
         let dots = self.create_buffer_with_upload("renderer-dots", &build_dot_instances(mesh));
 
         self.mesh_cache.insert(
@@ -564,33 +618,14 @@ impl BladeRenderer {
         }
     }
 
-    fn draw_background(&mut self, color: (f32, f32, f32, f32)) {
-        let target = self.target.as_ref().expect("target should exist");
-        let mut pass = self.command_encoder.render(
-            "renderer-background",
-            gpu::RenderTargetSet {
-                colors: &[gpu::RenderTarget {
-                    view: target.color_view,
-                    init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack),
-                    finish_op: gpu::FinishOp::Store,
-                }],
-                depth_stencil: None,
-            },
-        );
-        let mut encoder = pass.with(&self.pipelines.background);
-        encoder.bind(
-            0,
-            &BackgroundData {
-                background: BackgroundParams {
-                    color: [color.0, color.1, color.2, color.3],
-                },
-            },
-        );
-        encoder.draw(0, 4, 0, 1);
-    }
-
-    fn draw_meshes(&mut self, items: &[MeshWorkItem], size: RenderSize, basis: CameraBasis) {
-        if items.is_empty() {
+    fn draw_meshes(
+        &mut self,
+        items: &[MeshWorkItem],
+        size: RenderSize,
+        basis: CameraBasis,
+        background: Option<(f32, f32, f32, f32)>,
+    ) {
+        if items.is_empty() && background.is_none() {
             return;
         }
 
@@ -605,14 +640,22 @@ impl BladeRenderer {
         let target = self.target.as_ref().expect("target should exist");
         let camera = CameraParams::from_basis(basis, size);
         let mut z_offset = 0.0;
+        let color_target = match target.color_msaa_view {
+            Some(msaa_view) => gpu::RenderTarget {
+                view: msaa_view,
+                init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack),
+                finish_op: gpu::FinishOp::ResolveTo(target.color_view),
+            },
+            None => gpu::RenderTarget {
+                view: target.color_view,
+                init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack),
+                finish_op: gpu::FinishOp::Store,
+            },
+        };
         let mut pass = self.command_encoder.render(
             "renderer-scene",
             gpu::RenderTargetSet {
-                colors: &[gpu::RenderTarget {
-                    view: target.color_view,
-                    init_op: gpu::InitOp::Load,
-                    finish_op: gpu::FinishOp::Store,
-                }],
+                colors: &[color_target],
                 depth_stencil: Some(gpu::RenderTarget {
                     view: target.depth_view,
                     init_op: gpu::InitOp::Clear(gpu::TextureColor::White),
@@ -620,6 +663,19 @@ impl BladeRenderer {
                 }),
             },
         );
+
+        if let Some(color) = background {
+            let mut encoder = pass.with(&self.pipelines.background);
+            encoder.bind(
+                0,
+                &BackgroundData {
+                    background: BackgroundParams {
+                        color: [color.0, color.1, color.2, color.3],
+                    },
+                },
+            );
+            encoder.draw(0, 4, 0, 1);
+        }
 
         for item in items {
             let Some(buffers) = self.mesh_cache.get(&item.key) else {
@@ -662,6 +718,9 @@ impl BladeRenderer {
             if let Some(lines) = buffers.lines.as_ref() {
                 let line_radius = mesh_line_radius_px(item.mesh.as_ref(), size, self.style);
                 if line_radius > f32::EPSILON {
+                    let Some(index_buffer) = self.line_index_buffer.as_ref() else {
+                        continue;
+                    };
                     let mut encoder = pass.with(&self.pipelines.lines);
                     encoder.bind(
                         0,
@@ -681,10 +740,17 @@ impl BladeRenderer {
                                     0.0,
                                 ],
                             },
-                            line_instances: lines.buffer.into(),
+                            line_vertices: lines.buffer.into(),
                         },
                     );
-                    encoder.draw(0, 6, 0, lines.count);
+                    encoder.draw_indexed(
+                        index_buffer.buffer.into(),
+                        gpu::IndexType::U16,
+                        index_buffer.count,
+                        0,
+                        0,
+                        lines.count / LINE_VERTICES_PER_INSTANCE,
+                    );
                     z_offset += DEPTH_STEP;
                 }
             }
@@ -788,6 +854,9 @@ impl BladeRenderer {
         if let Some(target) = self.target.take() {
             destroy_offscreen_target(&self.gpu, target);
         }
+        if let Some(index_buffer) = self.line_index_buffer.take() {
+            self.gpu.destroy_buffer(index_buffer.buffer);
+        }
         for (_, index_buffer) in self.dot_index_buffers.drain() {
             self.gpu.destroy_buffer(index_buffer.buffer);
         }
@@ -812,7 +881,7 @@ impl Drop for BladeRenderer {
 }
 
 impl Pipelines {
-    fn new(gpu: &gpu::Context) -> Self {
+    fn new(gpu: &gpu::Context, sample_count: u32) -> Self {
         use gpu::ShaderData as _;
 
         let shader = gpu.create_shader(gpu::ShaderDesc {
@@ -824,7 +893,7 @@ impl Pipelines {
         shader.check_struct_size::<LineShaderParams>();
         shader.check_struct_size::<DotShaderParams>();
         shader.check_struct_size::<TriVertexPod>();
-        shader.check_struct_size::<LineInstancePod>();
+        shader.check_struct_size::<LineVertexPod>();
         shader.check_struct_size::<DotInstancePod>();
 
         let alpha_target = [gpu::ColorTargetState {
@@ -858,7 +927,10 @@ impl Pipelines {
                 depth_stencil: None,
                 fragment: Some(shader.at("fs_background")),
                 color_targets: &replace_target,
-                multisample_state: Default::default(),
+                multisample_state: gpu::MultisampleState {
+                    sample_count,
+                    ..Default::default()
+                },
             }),
             triangles: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
                 name: "renderer-triangles",
@@ -874,7 +946,10 @@ impl Pipelines {
                 depth_stencil: Some(depth_stencil.clone()),
                 fragment: Some(shader.at("fs_triangle")),
                 color_targets: &alpha_target,
-                multisample_state: Default::default(),
+                multisample_state: gpu::MultisampleState {
+                    sample_count,
+                    ..Default::default()
+                },
             }),
             lines: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
                 name: "renderer-lines",
@@ -882,13 +957,16 @@ impl Pipelines {
                 vertex: shader.at("vs_line"),
                 vertex_fetches: &[],
                 primitive: gpu::PrimitiveState {
-                    topology: gpu::PrimitiveTopology::TriangleStrip,
+                    topology: gpu::PrimitiveTopology::TriangleList,
                     ..Default::default()
                 },
                 depth_stencil: Some(depth_stencil.clone()),
                 fragment: Some(shader.at("fs_line")),
                 color_targets: &alpha_target,
-                multisample_state: Default::default(),
+                multisample_state: gpu::MultisampleState {
+                    sample_count,
+                    ..Default::default()
+                },
             }),
             dots: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
                 name: "renderer-dots",
@@ -902,7 +980,10 @@ impl Pipelines {
                 depth_stencil: Some(depth_stencil),
                 fragment: Some(shader.at("fs_dot")),
                 color_targets: &alpha_target,
-                multisample_state: Default::default(),
+                multisample_state: gpu::MultisampleState {
+                    sample_count,
+                    ..Default::default()
+                },
             }),
         }
     }
@@ -962,8 +1043,8 @@ fn build_triangle_vertices(mesh: &Mesh) -> Vec<TriVertexPod> {
     vertices
 }
 
-fn build_line_instances(mesh: &Mesh) -> Vec<LineInstancePod> {
-    let mut lines = Vec::with_capacity(mesh.lins.len());
+fn build_line_vertices(mesh: &Mesh) -> Vec<LineVertexPod> {
+    let mut lines = Vec::with_capacity(mesh.lins.len() * LINE_VERTICES_PER_INSTANCE as usize);
     for (line_idx, line) in mesh.lins.iter().enumerate() {
         let source = match line_inverse_index(mesh, line.inv) {
             Some(inv_idx) if line_idx > inv_idx => continue,
@@ -979,14 +1060,18 @@ fn build_line_instances(mesh: &Mesh) -> Vec<LineInstancePod> {
 
         let prev = line_neighbor(mesh, source.prev).unwrap_or(source);
         let next = line_neighbor(mesh, source.next).unwrap_or(source);
-        lines.push(LineInstancePod {
-            prev_pos: float4_from_xyz(prev.a.pos.x, prev.a.pos.y, prev.a.pos.z, 0.0),
-            a_pos: float4_from_xyz(source.a.pos.x, source.a.pos.y, source.a.pos.z, 0.0),
-            b_pos: float4_from_xyz(source.b.pos.x, source.b.pos.y, source.b.pos.z, 0.0),
-            next_pos: float4_from_xyz(next.b.pos.x, next.b.pos.y, next.b.pos.z, 0.0),
-            a_col: float4_from_float4(source.a.col),
-            b_col: float4_from_float4(source.b.col),
-        });
+        let tangent = source.b.pos - source.a.pos;
+        let prev_tangent = source.a.pos - prev.a.pos;
+        let next_tangent = next.b.pos - source.b.pos;
+
+        lines.extend([
+            line_vertex(source.a.pos, source.a.col, tangent, prev_tangent, 1.0),
+            line_vertex(source.a.pos, source.a.col, tangent, tangent, 0.0),
+            line_vertex(source.a.pos, source.a.col, tangent, tangent, 1.0),
+            line_vertex(source.b.pos, source.b.col, tangent, tangent, 0.0),
+            line_vertex(source.b.pos, source.b.col, tangent, tangent, 1.0),
+            line_vertex(source.b.pos, source.b.col, tangent, next_tangent, 1.0),
+        ]);
     }
     lines
 }
@@ -1021,6 +1106,22 @@ fn build_dot_instances(mesh: &Mesh) -> Vec<DotInstancePod> {
     dots
 }
 
+fn line_vertex(
+    pos: Float3,
+    col: Float4,
+    tangent: Float3,
+    prev_tangent: Float3,
+    extrude: f32,
+) -> LineVertexPod {
+    LineVertexPod {
+        pos: float4_from_xyz(pos.x, pos.y, pos.z, 0.0),
+        col: float4_from_float4(col),
+        tangent: float4_from_xyz(tangent.x, tangent.y, tangent.z, 0.0),
+        prev_tangent: float4_from_xyz(prev_tangent.x, prev_tangent.y, prev_tangent.z, 0.0),
+        extrude: [extrude, 0.0, 0.0, 0.0],
+    }
+}
+
 fn tri_vertex(vertex: geo::mesh::TriVertex, normal: Float3) -> TriVertexPod {
     TriVertexPod {
         pos: float4_from_xyz(vertex.pos.x, vertex.pos.y, vertex.pos.z, 0.0),
@@ -1048,6 +1149,10 @@ fn build_dot_indices(vertex_count: u16) -> Vec<u16> {
         indices.push(i + 1);
     }
     indices
+}
+
+fn build_line_indices() -> [u16; 12] {
+    [0, 2, 1, 1, 2, 4, 1, 4, 3, 3, 4, 5]
 }
 
 fn mesh_line_radius_px(mesh: &Mesh, size: RenderSize, style: RenderStyle) -> f32 {
@@ -1123,9 +1228,24 @@ fn destroy_texture(gpu: &gpu::Context, texture: CachedTexture) {
 fn destroy_offscreen_target(gpu: &gpu::Context, target: OffscreenTarget) {
     gpu.destroy_texture_view(target.color_view);
     gpu.destroy_texture(target.color);
+    if let Some(color_msaa_view) = target.color_msaa_view {
+        gpu.destroy_texture_view(color_msaa_view);
+    }
+    if let Some(color_msaa) = target.color_msaa {
+        gpu.destroy_texture(color_msaa);
+    }
     gpu.destroy_texture_view(target.depth_view);
     gpu.destroy_texture(target.depth);
     gpu.destroy_buffer(target.readback);
+}
+
+fn choose_sample_count(gpu: &gpu::Context) -> u32 {
+    let supported = gpu.capabilities().sample_count_mask;
+    if supported & DESIRED_MSAA_SAMPLE_COUNT != 0 {
+        DESIRED_MSAA_SAMPLE_COUNT
+    } else {
+        1
+    }
 }
 
 fn extent(size: RenderSize) -> gpu::Extent {
@@ -1146,7 +1266,7 @@ fn float4_from_float4(value: Float4) -> [f32; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::build_line_instances;
+    use super::{LINE_VERTICES_PER_INSTANCE, build_line_vertices};
     use geo::{
         mesh::{Lin, LinVertex, Mesh, Uniforms},
         simd::{Float3, Float4},
@@ -1161,7 +1281,7 @@ mod tests {
     fn blade_shader_parses_and_validates() {
         let source = include_str!("blade.wgsl");
         assert!(source.contains("struct TriVertexPod"));
-        assert!(source.contains("struct LineInstancePod"));
+        assert!(source.contains("struct LineVertexPod"));
         assert!(source.contains("struct DotInstancePod"));
 
         let module = wgsl::parse_str(source).expect("blade.wgsl should parse successfully");
@@ -1212,7 +1332,7 @@ mod tests {
     }
 
     #[test]
-    fn line_instances_render_inverse_pairs_once_even_without_dominant_sibling_flags() {
+    fn line_vertices_render_inverse_pairs_once_even_without_dominant_sibling_flags() {
         let mesh = Mesh {
             dots: Vec::new(),
             tris: Vec::new(),
@@ -1238,12 +1358,12 @@ mod tests {
             tag: Vec::new(),
         };
 
-        let instances = build_line_instances(&mesh);
-        assert_eq!(instances.len(), 1);
+        let vertices = build_line_vertices(&mesh);
+        assert_eq!(vertices.len(), LINE_VERTICES_PER_INSTANCE as usize);
     }
 
     #[test]
-    fn line_instances_fall_back_to_visible_inverse_sibling() {
+    fn line_vertices_fall_back_to_visible_inverse_sibling() {
         let mesh = Mesh {
             dots: Vec::new(),
             tris: Vec::new(),
@@ -1269,11 +1389,11 @@ mod tests {
             tag: Vec::new(),
         };
 
-        let instances = build_line_instances(&mesh);
-        assert_eq!(instances.len(), 1);
-        assert_eq!(instances[0].a_pos, [1.0, 0.0, 0.0, 0.0]);
-        assert_eq!(instances[0].b_pos, [0.0, 0.0, 0.0, 0.0]);
-        assert_eq!(instances[0].a_col[3], 1.0);
+        let vertices = build_line_vertices(&mesh);
+        assert_eq!(vertices.len(), LINE_VERTICES_PER_INSTANCE as usize);
+        assert_eq!(vertices[0].pos, [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(vertices[5].pos, [0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(vertices[0].col[3], 1.0);
     }
 
     fn test_line(a: Float3, b: Float3, inv: i32, prev: i32, next: i32, alpha: f32) -> Lin {

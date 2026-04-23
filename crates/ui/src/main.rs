@@ -2,9 +2,9 @@ use std::borrow::Cow;
 
 use crate::{
     actions::{
-        Copy, Cut, EpsilonBackward, EpsilonForward, NextSlide, Paste, PrevSlide, Quit, Redo,
-        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, TogglePlaying,
-        TogglePresentationMode, Undo,
+        Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide, Paste,
+        PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd,
+        SceneStart, TogglePlaying, TogglePresentationMode, Undo,
     },
     editor::text_editor,
     theme::ThemeSettings,
@@ -65,6 +65,9 @@ impl MonocurlLauncher {
                 items: vec![
                     MenuItem::action("Save", SaveActiveDocument),
                     MenuItem::action("Save As", SaveActiveDocumentCustomPath),
+                    MenuItem::separator(),
+                    MenuItem::action("Export as Image", ExportImage),
+                    MenuItem::action("Export as Video", ExportVideo),
                     MenuItem::separator(),
                     MenuItem::action("Present", TogglePresentationMode),
                 ],

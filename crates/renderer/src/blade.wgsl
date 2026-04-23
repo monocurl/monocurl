@@ -31,13 +31,12 @@ struct TriVertexPod {
     uv: vec4<f32>,
 }
 
-struct LineInstancePod {
-    prev_pos: vec4<f32>,
-    a_pos: vec4<f32>,
-    b_pos: vec4<f32>,
-    next_pos: vec4<f32>,
-    a_col: vec4<f32>,
-    b_col: vec4<f32>,
+struct LineVertexPod {
+    pos: vec4<f32>,
+    col: vec4<f32>,
+    tangent: vec4<f32>,
+    prev_tangent: vec4<f32>,
+    extrude: vec4<f32>,
 }
 
 struct DotInstancePod {
@@ -78,7 +77,7 @@ var<storage, read> tri_vertices: array<TriVertexPod>;
 
 var<uniform> line_camera: CameraParams;
 var<uniform> line_params: LineShaderParams;
-var<storage, read> line_instances: array<LineInstancePod>;
+var<storage, read> line_vertices: array<LineVertexPod>;
 
 var<uniform> dot_camera: CameraParams;
 var<uniform> dot_params: DotShaderParams;
@@ -91,9 +90,9 @@ const QUAD_POSITIONS: array<vec2<f32>, 4> = array<vec2<f32>, 4>(
     vec2<f32>(1.0, 1.0),
 );
 
-const LINE_VERTEX_ORDER: array<u32, 6> = array<u32, 6>(0u, 2u, 1u, 4u, 3u, 5u);
 const LIGHT_SRC: vec3<f32> = vec3<f32>(1.0, 1.0, 0.0);
 const GAMMA: f32 = 3.0;
+const ALPHA_CUTOFF: f32 = 1.0 / 255.0;
 
 fn world_to_camera(world: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     let relative = world - camera.position.xyz;
@@ -109,6 +108,14 @@ fn normal_to_camera(normal: vec3<f32>, camera: CameraParams) -> vec3<f32> {
         dot(normal, camera.right.xyz),
         dot(normal, camera.up.xyz),
         dot(normal, camera.forward.xyz),
+    );
+}
+
+fn vector_to_camera(vector: vec3<f32>, camera: CameraParams) -> vec3<f32> {
+    return vec3<f32>(
+        dot(vector, camera.right.xyz),
+        dot(vector, camera.up.xyz),
+        dot(vector, camera.forward.xyz),
     );
 }
 
@@ -181,7 +188,11 @@ fn fs_triangle(in: TriOut) -> @location(0) vec4<f32> {
     let gloss = max(tri_params.values.z, 0.0);
     let specular = gloss * pow(max(dot(light_dir, normal), 0.0), GAMMA);
     let lit_rgb = in.color.rgb + (vec3<f32>(1.0) - in.color.rgb) * specular;
-    return vec4<f32>(lit_rgb * sampled.rgb, in.color.a * sampled.a * tri_params.values.x);
+    let alpha = in.color.a * sampled.a * tri_params.values.x;
+    if (alpha <= ALPHA_CUTOFF) {
+        discard;
+    }
+    return vec4<f32>(lit_rgb * sampled.rgb, alpha);
 }
 
 @vertex
@@ -189,36 +200,17 @@ fn vs_line(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32,
 ) -> ColorOut {
-    let instance = line_instances[instance_index];
-    let model_prev = world_to_camera(instance.prev_pos.xyz, line_camera);
-    let model_a = world_to_camera(instance.a_pos.xyz, line_camera);
-    let model_b = world_to_camera(instance.b_pos.xyz, line_camera);
-    let model_next = world_to_camera(instance.next_pos.xyz, line_camera);
+    let vertex = line_vertices[instance_index * 6u + vertex_index];
+    let model = world_to_camera(vertex.pos.xyz, line_camera);
 
     let viewport = max(line_params.viewport_and_line_width.xy, vec2<f32>(1.0));
     let radius_px = max(line_params.viewport_and_line_width.z, 0.0);
-    let tangent = model_b - model_a;
-    let prev_tangent = model_a - model_prev;
-    let next_tangent = model_next - model_b;
+    let tangent = vector_to_camera(vertex.tangent.xyz, line_camera);
+    let prev_tangent = vector_to_camera(vertex.prev_tangent.xyz, line_camera);
+    let extrude = vertex.extrude.x;
 
-    let logical_vertex = LINE_VERTEX_ORDER[vertex_index];
-    let t = select(0.0, 1.0, logical_vertex >= 3u);
-    let sub = logical_vertex % 3u;
-    let extrude = select(0.0, 1.0, sub != 0u);
-
-    var previous = tangent;
-    if (logical_vertex == 1u) {
-        previous = prev_tangent;
-    }
-    var current = tangent;
-    if (logical_vertex == 5u) {
-        current = next_tangent;
-    }
-    let base_model = mix(model_a, model_b, t);
-    let color = mix(instance.a_col, instance.b_col, t);
-
-    let used_normal = safe_normalize3(cross(current, vec3<f32>(0.0, 0.0, 1.0)));
-    let prev_normal = safe_normalize3(cross(previous, vec3<f32>(0.0, 0.0, 1.0)));
+    let used_normal = safe_normalize3(cross(tangent, vec3<f32>(0.0, 0.0, 1.0)));
+    let prev_normal = safe_normalize3(cross(prev_tangent, vec3<f32>(0.0, 0.0, 1.0)));
     let miter_clip = 0.5 * (prev_normal + used_normal);
     let miter_dot = dot(miter_clip, used_normal);
     var unclipped = vec3<f32>(0.0);
@@ -227,23 +219,26 @@ fn vs_line(
     }
     let tan_half_fov = max(line_camera.clip.z, 0.05);
     let aspect = max(line_camera.clip.w, 0.1);
-    let scale = 2.0 * radius_px * base_model.z * tan_half_fov * aspect / viewport.x * extrude;
+    let scale = 2.0 * radius_px * model.z * tan_half_fov * aspect / viewport.x * extrude;
     let max_miter_scale = max(line_params.depth_bias.y, 0.0);
     let unclipped_length_sq = dot(unclipped, unclipped);
     var full_normal = unclipped * scale;
     if (dot(miter_clip, miter_clip) <= 1e-6 || unclipped_length_sq > max_miter_scale * max_miter_scale) {
         full_normal = miter_clip * scale;
     }
-    let projected = project_camera(base_model + full_normal, line_camera, line_params.depth_bias.x);
+    let projected = project_camera(model + full_normal, line_camera, line_params.depth_bias.x);
 
     var out: ColorOut;
     out.pos = projected.clip;
-    out.color = vec4<f32>(color.rgb, color.a * line_params.viewport_and_line_width.w);
+    out.color = vec4<f32>(vertex.col.rgb, vertex.col.a * line_params.viewport_and_line_width.w);
     return out;
 }
 
 @fragment
 fn fs_line(in: ColorOut) -> @location(0) vec4<f32> {
+    if (in.color.a <= ALPHA_CUTOFF) {
+        discard;
+    }
     return in.color;
 }
 
@@ -270,5 +265,8 @@ fn vs_dot(
 
 @fragment
 fn fs_dot(in: DotOut) -> @location(0) vec4<f32> {
+    if (in.color.a <= ALPHA_CUTOFF) {
+        discard;
+    }
     return in.color;
 }

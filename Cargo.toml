@@ -48,6 +48,9 @@ sysinfo = "0.31.4"
 cc = "1.2.41"
 tiny-skia-path = "0.11.4"
 usvg = "0.45.1"
+image = "0.25.5"
+mp4 = "0.14.0"
+openh264 = "0.9.3"
 
 gpui = { path = "../gpui/crates/gpui" }
 
