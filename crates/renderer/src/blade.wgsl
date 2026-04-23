@@ -112,8 +112,7 @@ fn normal_to_camera(normal: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     );
 }
 
-fn project(world: vec3<f32>, camera: CameraParams, depth_bias: f32) -> ProjectedPoint {
-    let model = world_to_camera(world, camera);
+fn project_camera(model: vec3<f32>, camera: CameraParams, depth_bias: f32) -> ProjectedPoint {
     let camera_x = model.x;
     let camera_y = model.y;
     let camera_z = model.z;
@@ -135,11 +134,15 @@ fn project(world: vec3<f32>, camera: CameraParams, depth_bias: f32) -> Projected
     return ProjectedPoint(clip, clip.xy * inv_w);
 }
 
-fn safe_normal(v: vec2<f32>) -> vec2<f32> {
+fn project(world: vec3<f32>, camera: CameraParams, depth_bias: f32) -> ProjectedPoint {
+    return project_camera(world_to_camera(world, camera), camera, depth_bias);
+}
+
+fn safe_normalize3(v: vec3<f32>) -> vec3<f32> {
     if (dot(v, v) > 1e-6) {
-        return normalize(vec2<f32>(-v.y, v.x));
+        return normalize(v);
     }
-    return vec2<f32>(0.0, 1.0);
+    return vec3<f32>(0.0);
 }
 
 @vertex
@@ -187,79 +190,54 @@ fn vs_line(
     @builtin(instance_index) instance_index: u32,
 ) -> ColorOut {
     let instance = line_instances[instance_index];
-    let projected_prev = project(instance.prev_pos.xyz, line_camera, line_params.depth_bias.x);
-    let projected_a = project(instance.a_pos.xyz, line_camera, line_params.depth_bias.x);
-    let projected_b = project(instance.b_pos.xyz, line_camera, line_params.depth_bias.x);
-    let projected_next = project(instance.next_pos.xyz, line_camera, line_params.depth_bias.x);
+    let model_prev = world_to_camera(instance.prev_pos.xyz, line_camera);
+    let model_a = world_to_camera(instance.a_pos.xyz, line_camera);
+    let model_b = world_to_camera(instance.b_pos.xyz, line_camera);
+    let model_next = world_to_camera(instance.next_pos.xyz, line_camera);
 
     let viewport = max(line_params.viewport_and_line_width.xy, vec2<f32>(1.0));
     let radius_px = max(line_params.viewport_and_line_width.z, 0.0);
-    let prev_px = projected_prev.ndc * viewport * 0.5;
-    let a_px = projected_a.ndc * viewport * 0.5;
-    let b_px = projected_b.ndc * viewport * 0.5;
-    let next_px = projected_next.ndc * viewport * 0.5;
-    let tangent_px = b_px - a_px;
+    let tangent = model_b - model_a;
+    let prev_tangent = model_a - model_prev;
+    let next_tangent = model_next - model_b;
 
     let logical_vertex = LINE_VERTEX_ORDER[vertex_index];
-    var base = projected_a;
-    var base_px = a_px;
-    var color = instance.a_col;
-    var prev_tangent_px = tangent_px;
-    var extrude = 1.0;
+    let t = select(0.0, 1.0, logical_vertex >= 3u);
+    let sub = logical_vertex % 3u;
+    let extrude = select(0.0, 1.0, sub != 0u);
 
-    switch logical_vertex {
-        case 0u: {
-            prev_tangent_px = a_px - prev_px;
-        }
-        case 1u: {
-            extrude = 0.0;
-        }
-        case 2u: {
-        }
-        case 3u: {
-            base = projected_b;
-            base_px = b_px;
-            color = instance.b_col;
-            extrude = 0.0;
-        }
-        case 4u: {
-            base = projected_b;
-            base_px = b_px;
-            color = instance.b_col;
-        }
-        default: {
-            base = projected_b;
-            base_px = b_px;
-            color = instance.b_col;
-            prev_tangent_px = next_px - b_px;
-        }
+    var previous = tangent;
+    if (logical_vertex == 1u) {
+        previous = prev_tangent;
     }
+    var current = tangent;
+    if (logical_vertex == 5u) {
+        current = next_tangent;
+    }
+    let base_model = mix(model_a, model_b, t);
+    let color = mix(instance.a_col, instance.b_col, t);
 
-    let used_normal = safe_normal(tangent_px);
-    let prev_normal = safe_normal(prev_tangent_px);
+    let used_normal = safe_normalize3(cross(current, vec3<f32>(0.0, 0.0, 1.0)));
+    let prev_normal = safe_normalize3(cross(previous, vec3<f32>(0.0, 0.0, 1.0)));
     let miter_clip = 0.5 * (prev_normal + used_normal);
     let miter_dot = dot(miter_clip, used_normal);
-
-    var unclipped = used_normal;
+    var unclipped = vec3<f32>(0.0);
     if (abs(miter_dot) > 1e-6) {
         unclipped = miter_clip / miter_dot;
     }
-
-    let max_miter_scale = max(line_params.depth_bias.y, 1.0);
+    let tan_half_fov = max(line_camera.clip.z, 0.05);
+    let aspect = max(line_camera.clip.w, 0.1);
+    let scale = 2.0 * radius_px * base_model.z * tan_half_fov * aspect / viewport.x * extrude;
+    let max_miter_scale = max(line_params.depth_bias.y, 0.0);
     let unclipped_length_sq = dot(unclipped, unclipped);
-    var offset_dir = unclipped;
+    var full_normal = unclipped * scale;
     if (dot(miter_clip, miter_clip) <= 1e-6 || unclipped_length_sq > max_miter_scale * max_miter_scale) {
-        offset_dir = miter_clip;
-        if (dot(offset_dir, offset_dir) <= 1e-6) {
-            offset_dir = used_normal;
-        }
+        full_normal = miter_clip * scale;
     }
-    let offset_px = offset_dir * radius_px * extrude;
-    let offset_ndc = offset_px * vec2<f32>(2.0 / viewport.x, 2.0 / viewport.y);
+    let projected = project_camera(base_model + full_normal, line_camera, line_params.depth_bias.x);
 
     var out: ColorOut;
-    let position_xy = (base_px * vec2<f32>(2.0 / viewport.x, 2.0 / viewport.y) + offset_ndc) * base.clip.w;
-    out.pos = vec4<f32>(position_xy, base.clip.z, base.clip.w);
+    out.pos = projected.clip;
     out.color = vec4<f32>(color.rgb, color.a * line_params.viewport_and_line_width.w);
     return out;
 }

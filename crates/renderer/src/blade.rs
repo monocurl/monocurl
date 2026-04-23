@@ -10,7 +10,7 @@ use blade_util::{BufferBelt, BufferBeltDescriptor};
 use bytemuck::{Pod, Zeroable};
 use executor::camera::CameraBasis;
 use geo::{
-    mesh::{DEFAULT_STROKE_MITER_RADIUS_SCALE, Mesh},
+    mesh::Mesh,
     simd::{Float3, Float4},
 };
 use image::RgbaImage;
@@ -1061,9 +1061,7 @@ fn mesh_line_radius_px(mesh: &Mesh, size: RenderSize, style: RenderStyle) -> f32
 
 fn mesh_line_miter_scale(mesh: &Mesh) -> f32 {
     if mesh.uniform.stroke_miter_radius_scale.is_finite() {
-        mesh.uniform
-            .stroke_miter_radius_scale
-            .max(DEFAULT_STROKE_MITER_RADIUS_SCALE)
+        mesh.uniform.stroke_miter_radius_scale.max(0.0)
     } else {
         DEFAULT_LINE_MITER_SCALE
     }
