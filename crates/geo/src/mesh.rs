@@ -57,14 +57,34 @@ pub struct Tri {
 #[derive(Debug, Clone)]
 pub struct Uniforms {
     pub alpha: f64,
+    pub stroke_miter_radius_scale: f32,
+    pub stroke_radius: f32,
+    pub dot_radius: f32,
+    pub dot_vertex_count: u16,
+    pub smooth: bool,
+    pub gloss: f32,
     pub img: Option<PathBuf>,
     pub z_index: i32,
 }
+
+pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 1.0;
+pub const DEFAULT_STROKE_RADIUS: f32 = 1.0;
+pub const DEFAULT_DOT_RADIUS: f32 = 4.0;
+pub const DEFAULT_DOT_VERTEX_COUNT: u16 = 8;
+pub const DEFAULT_SMOOTH: bool = false;
+pub const DEFAULT_GLOSS: f32 = 0.0;
+pub const GLOSSY_GLOSS: f32 = 0.5;
 
 impl Default for Uniforms {
     fn default() -> Self {
         Self {
             alpha: 1.0,
+            stroke_miter_radius_scale: DEFAULT_STROKE_MITER_RADIUS_SCALE,
+            stroke_radius: DEFAULT_STROKE_RADIUS,
+            dot_radius: DEFAULT_DOT_RADIUS,
+            dot_vertex_count: DEFAULT_DOT_VERTEX_COUNT,
+            smooth: DEFAULT_SMOOTH,
+            gloss: DEFAULT_GLOSS,
             img: None,
             z_index: 0,
         }

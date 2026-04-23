@@ -533,9 +533,13 @@ pub async fn op_with_zindex(
 
 #[stdlib_func]
 pub async fn op_gloss(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    read_mesh_tree_arg(executor, stack_idx, -1, "target")
-        .await
-        .map(MeshTree::into_value)
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
+    let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
+    tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
+        mesh.uniform.gloss = geo::mesh::GLOSSY_GLOSS;
+    })
+    .await?;
+    Ok(tree.into_value())
 }
 
 #[stdlib_func]

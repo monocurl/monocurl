@@ -1,271 +1,71 @@
-use std::{cmp::Ordering, sync::Arc};
+use std::sync::Arc;
 
-use executor::{camera::CameraBasis, scene_snapshot::CameraSnapshot};
-use geo::{
-    mesh::{Dot, Lin, Mesh, Tri},
-    simd::{Float3, Float4},
-};
-use gpui::*;
+use gpui::{Bounds, Pixels, RenderImage, Window};
+use image::Frame;
+use renderer::{RenderSize, Renderer, RgbaImage, SceneRenderData, scene_fingerprint};
 
-const DOT_RADIUS: f32 = 3.5;
-const EDGE_WIDTH: f32 = 1.0;
-const TRANSPARENT: Rgba = Rgba {
-    r: 0.0,
-    g: 0.0,
-    b: 0.0,
-    a: 0.0,
-};
-
-#[derive(Clone)]
-pub struct SceneRenderData {
-    pub background_color: Rgba,
-    pub camera: CameraSnapshot,
-    pub meshes: Vec<Arc<Mesh>>,
+#[derive(Default)]
+pub struct SceneImageCache {
+    key: Option<SceneImageKey>,
+    image: Option<Arc<RenderImage>>,
 }
 
-#[derive(Clone, Copy)]
-struct ProjectedPoint {
-    point: Point<Pixels>,
-    depth: f32,
-}
-
-enum DrawPrimitive {
-    Triangle {
-        points: [Point<Pixels>; 3],
-        color: Rgba,
-    },
-    Line {
-        points: [Point<Pixels>; 2],
-        color: Rgba,
-        width: Pixels,
-    },
-    Dot {
-        center: Point<Pixels>,
-        color: Rgba,
-    },
-}
-
-struct DrawItem {
-    z_index: i32,
-    depth: f32,
-    primitive: DrawPrimitive,
-}
-
-pub fn paint_scene(scene: &SceneRenderData, bounds: Bounds<Pixels>, window: &mut Window) {
-    window.paint_quad(fill(bounds, scene.background_color));
-
-    let basis = scene.camera.basis();
-    let mut items = Vec::new();
-    for mesh in &scene.meshes {
-        collect_mesh_draw_items(mesh, basis, bounds, &mut items);
-    }
-
-    items.sort_by(|a, b| {
-        a.z_index
-            .cmp(&b.z_index)
-            .then_with(|| b.depth.partial_cmp(&a.depth).unwrap_or(Ordering::Equal))
-    });
-
-    for item in items {
-        paint_draw_item(item, window);
-    }
-}
-
-pub fn rgba_from_tuple(color: (f32, f32, f32, f32)) -> Rgba {
-    Rgba {
-        r: color.0.clamp(0.0, 1.0),
-        g: color.1.clamp(0.0, 1.0),
-        b: color.2.clamp(0.0, 1.0),
-        a: color.3.clamp(0.0, 1.0),
-    }
-}
-
-fn collect_mesh_draw_items(
-    mesh: &Mesh,
-    basis: CameraBasis,
-    bounds: Bounds<Pixels>,
-    items: &mut Vec<DrawItem>,
-) {
-    if mesh.uniform.alpha <= 0.0 {
-        return;
-    }
-
-    let alpha = mesh.uniform.alpha as f32;
-    for tri in &mesh.tris {
-        collect_triangle_draw_items(tri, alpha, mesh.uniform.z_index, basis, bounds, items);
-    }
-    for lin in &mesh.lins {
-        collect_line_draw_item(lin, alpha, mesh.uniform.z_index, basis, bounds, items);
-    }
-    for dot in &mesh.dots {
-        collect_dot_draw_item(dot, alpha, mesh.uniform.z_index, basis, bounds, items);
-    }
-}
-
-fn collect_triangle_draw_items(
-    tri: &Tri,
-    alpha: f32,
-    z_index: i32,
-    basis: CameraBasis,
-    bounds: Bounds<Pixels>,
-    items: &mut Vec<DrawItem>,
-) {
-    let Some(a) = project_point(tri.a.pos, basis, bounds) else {
-        return;
-    };
-    let Some(b) = project_point(tri.b.pos, basis, bounds) else {
-        return;
-    };
-    let Some(c) = project_point(tri.c.pos, basis, bounds) else {
-        return;
-    };
-
-    let depth = (a.depth + b.depth + c.depth) / 3.0;
-    let fill_color = rgba_from_color((tri.a.col + tri.b.col + tri.c.col) / 3.0, alpha);
-    items.push(DrawItem {
-        z_index,
-        depth,
-        primitive: DrawPrimitive::Triangle {
-            points: [a.point, b.point, c.point],
-            color: fill_color,
-        },
-    });
-}
-
-fn collect_line_draw_item(
-    lin: &Lin,
-    alpha: f32,
-    z_index: i32,
-    basis: CameraBasis,
-    bounds: Bounds<Pixels>,
-    items: &mut Vec<DrawItem>,
-) {
-    let Some(a) = project_point(lin.a.pos, basis, bounds) else {
-        return;
-    };
-    let Some(b) = project_point(lin.b.pos, basis, bounds) else {
-        return;
-    };
-
-    items.push(DrawItem {
-        z_index,
-        depth: (a.depth + b.depth) / 2.0,
-        primitive: DrawPrimitive::Line {
-            points: [a.point, b.point],
-            color: rgba_from_color((lin.a.col + lin.b.col) / 2.0, alpha),
-            width: px(EDGE_WIDTH),
-        },
-    });
-}
-
-fn collect_dot_draw_item(
-    dot: &Dot,
-    alpha: f32,
-    z_index: i32,
-    basis: CameraBasis,
-    bounds: Bounds<Pixels>,
-    items: &mut Vec<DrawItem>,
-) {
-    let Some(projected) = project_point(dot.pos, basis, bounds) else {
-        return;
-    };
-
-    items.push(DrawItem {
-        z_index,
-        depth: projected.depth,
-        primitive: DrawPrimitive::Dot {
-            center: projected.point,
-            color: rgba_from_color(dot.col, alpha),
-        },
-    });
-}
-
-fn project_point(
-    world: Float3,
-    basis: CameraBasis,
-    bounds: Bounds<Pixels>,
-) -> Option<ProjectedPoint> {
-    let relative = world - basis.position;
-    let camera_x = relative.dot(basis.right);
-    let camera_y = relative.dot(basis.up);
-    let camera_z = relative.dot(basis.forward);
-
-    if camera_z < basis.near || camera_z > basis.far {
-        return None;
-    }
-
-    let aspect = f32::from(bounds.size.width) / f32::from(bounds.size.height).max(1.0);
-    let (ndc_x, ndc_y) = {
-        let tan_half_fov = (basis.fov * 0.5).tan().max(0.05);
-        (
-            camera_x / (camera_z * tan_half_fov * aspect.max(0.1)),
-            camera_y / (camera_z * tan_half_fov),
-        )
-    };
-
-    if !ndc_x.is_finite() || !ndc_y.is_finite() {
-        return None;
-    }
-
-    let width = f32::from(bounds.size.width);
-    let height = f32::from(bounds.size.height);
-    let screen_x = width * (0.5 + 0.5 * ndc_x);
-    let screen_y = height * (0.5 - 0.5 * ndc_y);
-
-    Some(ProjectedPoint {
-        point: point(
-            bounds.origin.x + px(screen_x),
-            bounds.origin.y + px(screen_y),
-        ),
-        depth: camera_z,
-    })
-}
-
-fn paint_draw_item(item: DrawItem, window: &mut Window) {
-    match item.primitive {
-        DrawPrimitive::Triangle { points, color } => {
-            let mut builder = PathBuilder::fill();
-            builder.move_to(points[0]);
-            builder.line_to(points[1]);
-            builder.line_to(points[2]);
-            builder.line_to(points[0]);
-            if let Ok(path) = builder.build() {
-                window.paint_path(path, color);
+impl SceneImageCache {
+    pub fn image_for(
+        &mut self,
+        renderer: &mut Renderer,
+        scene: &SceneRenderData,
+        bounds: Bounds<Pixels>,
+        scale_factor: f32,
+        window: &mut Window,
+    ) -> Option<Arc<RenderImage>> {
+        let key = SceneImageKey::new(scene, bounds, scale_factor);
+        if self.key.as_ref() == Some(&key) {
+            return self.image.clone();
+        }
+        if key.pixel_size.is_empty() {
+            if let Some(previous) = self.image.take() {
+                let _ = window.drop_image(previous);
             }
+            self.key = Some(key);
+            return None;
         }
-        DrawPrimitive::Line {
-            points,
-            color,
-            width,
-        } => {
-            let mut builder = PathBuilder::stroke(width);
-            builder.move_to(points[0]);
-            builder.line_to(points[1]);
-            if let Ok(path) = builder.build() {
-                window.paint_path(path, color);
-            }
+
+        let image = renderer
+            .render(scene, key.pixel_size)
+            .ok()
+            .map(gpui_image_from_rgba)
+            .map(Arc::new)?;
+
+        if let Some(previous) = self.image.replace(image.clone()) {
+            let _ = window.drop_image(previous);
         }
-        DrawPrimitive::Dot { center, color } => {
-            window.paint_quad(quad(
-                Bounds::new(
-                    point(center.x - px(DOT_RADIUS), center.y - px(DOT_RADIUS)),
-                    size(px(DOT_RADIUS * 2.0), px(DOT_RADIUS * 2.0)),
-                ),
-                px(DOT_RADIUS),
-                color,
-                px(0.0),
-                TRANSPARENT,
-                BorderStyle::Solid,
-            ));
+        self.key = Some(key);
+        Some(image)
+    }
+}
+
+#[derive(Clone, PartialEq)]
+struct SceneImageKey {
+    scene: u64,
+    pixel_size: RenderSize,
+}
+
+impl SceneImageKey {
+    fn new(scene: &SceneRenderData, bounds: Bounds<Pixels>, scale_factor: f32) -> Self {
+        let width = (f32::from(bounds.size.width) * scale_factor)
+            .ceil()
+            .max(0.0) as u32;
+        let height = (f32::from(bounds.size.height) * scale_factor)
+            .ceil()
+            .max(0.0) as u32;
+        Self {
+            scene: scene_fingerprint(scene),
+            pixel_size: RenderSize::new(width, height),
         }
     }
 }
 
-fn rgba_from_color(color: Float4, alpha_scale: f32) -> Rgba {
-    Rgba {
-        r: color.x.clamp(0.0, 1.0),
-        g: color.y.clamp(0.0, 1.0),
-        b: color.z.clamp(0.0, 1.0),
-        a: (color.w * alpha_scale).clamp(0.0, 1.0),
-    }
+fn gpui_image_from_rgba(image: RgbaImage) -> RenderImage {
+    RenderImage::new([Frame::new(image)])
 }

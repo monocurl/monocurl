@@ -4483,6 +4483,18 @@ dependencies = [
 [[package]]
 name = "renderer"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blade-graphics",
+ "blade-macros",
+ "blade-util",
+ "bytemuck",
+ "executor",
+ "geo",
+ "image",
+ "log",
+ "naga",
+]
 
 [[package]]
 name = "resvg"
@@ -5811,11 +5823,13 @@ dependencies = [
  "futures",
  "geo",
  "gpui",
+ "image",
  "latex",
  "lexer",
  "log",
  "open",
  "parser",
+ "renderer",
  "schemars",
  "serde",
  "serde_json",
