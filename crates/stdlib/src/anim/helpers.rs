@@ -536,7 +536,7 @@ pub(super) fn collapse_mesh(mesh: &Mesh, center: Float3) -> Mesh {
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
     };
-    debug_assert!(mesh.has_consistent_topology());
+    mesh.debug_assert_consistent_topology();
     mesh
 }
 
@@ -555,7 +555,7 @@ pub(super) fn fade_start_mesh(mesh: &Mesh, delta: Float3) -> Mesh {
         tri.c.pos = tri.c.pos - delta;
     }
     out.uniform.alpha = 0.0;
-    debug_assert!(out.has_consistent_topology());
+    out.debug_assert_consistent_topology();
     out
 }
 

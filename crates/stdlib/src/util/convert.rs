@@ -74,15 +74,22 @@ pub async fn text_tag_encode(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let target = crate::stringify_value(executor, executor.state.stack(stack_idx).read_at(-2).clone())
-        .await
-        .map_err(|error| match error {
-            ExecutorError::TypeError { got, .. } => {
-                ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, "target")
-            }
-            other => other,
-        })?;
-    let tag = read_text_tag(executor, executor.state.stack(stack_idx).read_at(-1).clone()).await?;
+    let target = crate::stringify_value(
+        executor,
+        executor.state.stack(stack_idx).read_at(-2).clone(),
+    )
+    .await
+    .map_err(|error| match error {
+        ExecutorError::TypeError { got, .. } => {
+            ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, "target")
+        }
+        other => other,
+    })?;
+    let tag = read_text_tag(
+        executor,
+        executor.state.stack(stack_idx).read_at(-1).clone(),
+    )
+    .await?;
     Ok(Value::String(format_text_tag(&tag, &target)))
 }
 

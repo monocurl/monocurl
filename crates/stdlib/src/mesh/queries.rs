@@ -137,7 +137,7 @@ pub async fn mesh_collapse(
     for mesh in iter {
         append_mesh_into(&mut out, mesh);
     }
-    debug_assert!(out.has_consistent_topology());
+    out.debug_assert_consistent_topology();
     Ok(Value::Mesh(out.into()))
 }
 

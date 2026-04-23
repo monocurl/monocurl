@@ -157,10 +157,7 @@ fn validate_scale(scale: f32) -> Result<()> {
     Ok(())
 }
 
-fn apply_text_tags(
-    output: RenderedOutput,
-    tagged: &document::TaggedSource,
-) -> Vec<Arc<Mesh>> {
+fn apply_text_tags(output: RenderedOutput, tagged: &document::TaggedSource) -> Vec<Arc<Mesh>> {
     let mut meshes = output.meshes;
     for (index, span) in tagged.spans.iter().enumerate() {
         let marker = document::text_tag_marker_id(index);

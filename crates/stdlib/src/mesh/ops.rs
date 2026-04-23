@@ -309,8 +309,11 @@ pub async fn op_scale(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let factor = read_scale_factor(executor, stack_idx, -2, "factor")?;
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
+    let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
+        return Ok(tree.into_value());
+    };
+    let center = tree_center(&view).unwrap_or(Float3::ZERO);
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        let center = mesh_center(mesh).unwrap_or(Float3::ZERO);
         transform_mesh_positions(mesh, |p| center + (p - center) * factor);
     })
     .await?;
@@ -997,7 +1000,7 @@ pub async fn op_uprank(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             Ok(None) => {}
             Err(err) => tessellation_error = Some(err),
         }
-        debug_assert!(mesh.has_consistent_topology());
+        mesh.debug_assert_consistent_topology();
     })
     .await?;
     if let Some(err) = tessellation_error {
@@ -1055,7 +1058,7 @@ pub async fn op_downrank(
                 .collect();
             mesh.lins.clear();
         }
-        debug_assert!(mesh.has_consistent_topology());
+        mesh.debug_assert_consistent_topology();
     })
     .await?;
     Ok(tree.into_value())
@@ -1132,7 +1135,7 @@ pub async fn op_subdivide(
             }
             mesh.lins = lins;
         }
-        debug_assert!(mesh.has_consistent_topology());
+        mesh.debug_assert_consistent_topology();
     })
     .await?;
 
@@ -1158,7 +1161,7 @@ pub async fn op_tesselated(
             mesh.lins = lins;
             mesh.tris = tris;
         }
-        debug_assert!(mesh.has_consistent_topology());
+        mesh.debug_assert_consistent_topology();
     })
     .await?;
     Ok(tree.into_value())
@@ -1215,7 +1218,7 @@ pub async fn op_extrude(executor: &mut Executor, stack_idx: usize) -> Result<Val
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
         mesh.lins = lins;
         mesh.tris = tris;
-        debug_assert!(mesh.has_consistent_topology());
+        mesh.debug_assert_consistent_topology();
     })
     .await?;
     if let Some(err) = extrude_error {
@@ -1287,7 +1290,7 @@ pub async fn op_revolve(executor: &mut Executor, stack_idx: usize) -> Result<Val
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
         mesh.lins = lins;
         mesh.tris = tris;
-        debug_assert!(mesh.has_consistent_topology());
+        mesh.debug_assert_consistent_topology();
     })
     .await?;
     if let Some(err) = revolve_error {

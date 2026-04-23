@@ -20,14 +20,17 @@ pub(super) async fn read_string(
     index: i32,
     name: &'static str,
 ) -> Result<String, ExecutorError> {
-    crate::stringify_value(executor, executor.state.stack(stack_idx).read_at(index).clone())
-        .await
-        .map_err(|error| match error {
-            ExecutorError::TypeError { got, .. } => {
-                ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, name)
-            }
-            other => other,
-        })
+    crate::stringify_value(
+        executor,
+        executor.state.stack(stack_idx).read_at(index).clone(),
+    )
+    .await
+    .map_err(|error| match error {
+        ExecutorError::TypeError { got, .. } => {
+            ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, name)
+        }
+        other => other,
+    })
 }
 
 pub(super) fn read_int(

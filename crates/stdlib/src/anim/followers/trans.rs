@@ -116,6 +116,7 @@ struct ClosedContour {
     points: Vec<Float3>,
     colors: Vec<Float4>,
     normal: Float3,
+    #[allow(dead_code)]
     signed_area: f32,
 }
 
@@ -520,7 +521,7 @@ fn extract_component_mesh(
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
     };
-    debug_assert!(component.has_consistent_topology());
+    component.debug_assert_consistent_topology();
     component
 }
 
@@ -724,8 +725,8 @@ fn prepare_planar_trans_mesh_pair(
         append_closed_contour(&mut end_mesh, &sampled_end);
     }
 
-    debug_assert!(start_mesh.has_consistent_topology());
-    debug_assert!(end_mesh.has_consistent_topology());
+    start_mesh.debug_assert_consistent_topology();
+    end_mesh.debug_assert_consistent_topology();
     Ok(Some((
         start_mesh,
         end_mesh,
@@ -810,10 +811,6 @@ fn align_closed_contours(
         (end.clone(), start.clone())
     };
 
-    if large.signed_area * small.signed_area < 0.0 {
-        reverse_closed_contour(&mut small);
-    }
-
     let large_pivot = choose_anchor_edge(&large, &small);
     let small_pivot = best_matching_edge(&large, &small, large_pivot);
     rotate_vec(&mut large.points, large_pivot);
@@ -828,12 +825,6 @@ fn align_closed_contours(
     } else {
         (sampled_small, large)
     }
-}
-
-fn reverse_closed_contour(contour: &mut ClosedContour) {
-    contour.points.reverse();
-    contour.colors.reverse();
-    contour.signed_area = -contour.signed_area;
 }
 
 fn split_closed_contour_to_count(contour: &ClosedContour, target_segments: usize) -> ClosedContour {
@@ -1044,7 +1035,7 @@ fn conform_samples_to_template(
             uniform: uniform.clone(),
             tag: tag.to_vec(),
         };
-        debug_assert!(out.has_consistent_topology());
+        out.debug_assert_consistent_topology();
         return out;
     }
 
@@ -1061,7 +1052,7 @@ fn conform_samples_to_template(
         line.b.col = b_col;
         slot += 2;
     }
-    debug_assert!(out.has_consistent_topology());
+    out.debug_assert_consistent_topology();
     out
 }
 
@@ -1231,7 +1222,7 @@ fn canonicalize_surface_template(mesh: &Mesh) -> Mesh {
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
     };
-    debug_assert!(out.has_consistent_topology());
+    out.debug_assert_consistent_topology();
     out
 }
 
@@ -1535,7 +1526,7 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
         tag: source.tag.clone(),
     };
 
-    debug_assert!(out.has_consistent_topology());
+    out.debug_assert_consistent_topology();
     out
 }
 
@@ -1923,7 +1914,7 @@ fn conform_path_to_template(
         slot += 3;
     }
 
-    debug_assert!(out.has_consistent_topology());
+    out.debug_assert_consistent_topology();
     out
 }
 
@@ -2166,7 +2157,7 @@ fn mesh_patharc_lerp(
         uniform: lerp_uniforms(&start.uniform, &end.uniform, t),
         tag: end.tag.clone(),
     };
-    debug_assert!(mesh.has_consistent_topology());
+    mesh.debug_assert_consistent_topology();
     Ok(mesh)
 }
 
@@ -2212,7 +2203,7 @@ fn planar_mesh_patharc_lerp(
         uniform: boundary.uniform,
         tag: boundary.tag,
     };
-    debug_assert!(mesh.has_consistent_topology());
+    mesh.debug_assert_consistent_topology();
     Ok(mesh)
 }
 
@@ -2307,7 +2298,8 @@ mod tests {
     use crate::mesh::helpers::tessellate_planar_loops;
 
     use super::{
-        ClosedContour, append_closed_contour, extract_closed_contours, pair_leaf_indices_by_tag,
+        ClosedContour, append_closed_contour, canonicalize_surface_template,
+        extract_closed_contours, pair_leaf_indices_by_tag, planar_mesh_patharc_lerp,
         prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair, same_mesh_topology,
         split_mesh_contours, vec3_patharc_lerp,
     };
@@ -2545,6 +2537,106 @@ mod tests {
             / contours[1].points.len() as f32;
 
         assert!(first_center.x < second_center.x);
+    }
+
+    #[test]
+    fn prepare_planar_trans_mesh_pair_handles_mismatched_loop_counts() {
+        let source = tessellated_mesh(&[vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ]]);
+        let target = annulus_mesh(0.35, 0.8, 16);
+
+        let prepared =
+            prepare_planar_trans_mesh_pair(&source, &target).expect("planar prep should succeed");
+
+        let Some((prepared_start, prepared_end, _)) = prepared else {
+            panic!("mismatched loops should still use planar prep");
+        };
+        assert!(prepared_start.has_consistent_topology());
+        assert!(prepared_end.has_consistent_topology());
+        assert!(same_mesh_topology(&prepared_start, &prepared_end));
+    }
+
+    #[test]
+    fn planar_mesh_patharc_lerp_preserves_hole_winding_for_mismatched_loops() {
+        let source = tessellated_mesh(&[vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ]]);
+        let target = annulus_mesh(0.35, 0.8, 32);
+
+        let Some((prepared_start, prepared_end, _)) =
+            prepare_planar_trans_mesh_pair(&source, &target).expect("planar prep should succeed")
+        else {
+            panic!("mismatched loops should still use planar prep");
+        };
+
+        let mesh = planar_mesh_patharc_lerp(
+            &prepared_start,
+            &prepared_end,
+            Float4::ONE,
+            Float4::ONE,
+            1.0,
+            Float3::ZERO,
+        )
+        .expect("planar lerp should succeed");
+
+        let contours = extract_closed_contours(&mesh).expect("lerped mesh should stay closed");
+        let positive = contours
+            .iter()
+            .filter(|contour| contour.signed_area > 0.0)
+            .count();
+        let negative = contours
+            .iter()
+            .filter(|contour| contour.signed_area < 0.0)
+            .count();
+
+        assert_eq!(contours.len(), 2);
+        assert_eq!(positive, 1);
+        assert_eq!(negative, 1);
+    }
+
+    #[test]
+    fn canonicalize_surface_template_preserves_fill_separate_from_stroke() {
+        let mut mesh = tessellated_mesh(&[vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ]]);
+
+        for line in &mut mesh.lins {
+            line.a.col = Float4::ONE;
+            line.b.col = Float4::ONE;
+        }
+        let clear = Float4::ZERO;
+        for tri in &mut mesh.tris {
+            tri.a.col = clear;
+            tri.b.col = clear;
+            tri.c.col = clear;
+        }
+
+        let rebuilt = canonicalize_surface_template(&mesh);
+
+        assert!(
+            rebuilt
+                .tris
+                .iter()
+                .all(|tri| tri.a.col == clear && tri.b.col == clear && tri.c.col == clear),
+            "rebuilt surface should preserve transparent fill"
+        );
+        assert!(
+            rebuilt
+                .lins
+                .iter()
+                .all(|line| line.a.col == Float4::ONE && line.b.col == Float4::ONE),
+            "rebuilt surface should preserve stroke color"
+        );
     }
 
     #[test]

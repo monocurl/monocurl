@@ -1840,7 +1840,7 @@ pub async fn mk_explicit_diff(
             uniform: geo::mesh::Uniforms::default(),
             tag: vec![tag],
         };
-        debug_assert!(mesh.has_consistent_topology());
+        mesh.debug_assert_consistent_topology();
         Value::Mesh(std::sync::Arc::new(mesh))
     };
 

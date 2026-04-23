@@ -1,6 +1,9 @@
 #![doc = include_str!("../README.md")]
 
-use std::{collections::HashSet, error::Error, ffi::c_int, fmt, mem::size_of, ptr::NonNull, slice};
+use std::{
+    collections::HashSet, error::Error, f32::consts::PI, ffi::c_int, fmt, mem::size_of,
+    ptr::NonNull, slice,
+};
 
 pub use geo::simd::Float3;
 
@@ -356,11 +359,196 @@ fn canonical_contour_key(contour: &[Float3]) -> Vec<[u32; 3]> {
 
 pub fn normalize_contours(contours: &[Vec<Float3>]) -> Vec<Vec<Float3>> {
     let mut seen = HashSet::<Vec<[u32; 3]>>::new();
+    let mut normalized: Vec<Vec<Float3>> = Vec::new();
+
+    'contours: for contour in contours {
+        if !seen.insert(canonical_contour_key(contour)) {
+            continue;
+        }
+
+        for existing in &normalized {
+            if contours_nearly_duplicate(existing, contour) {
+                continue 'contours;
+            }
+        }
+
+        normalized.push(contour.clone());
+    }
+
+    normalized
+}
+
+fn contour_bounds_diag(contour: &[Float3]) -> f32 {
+    let Some((&first, rest)) = contour.split_first() else {
+        return 0.0;
+    };
+
+    let (min, max) = rest
+        .iter()
+        .copied()
+        .fold((first, first), |(mut min, mut max), point| {
+            min.x = min.x.min(point.x);
+            min.y = min.y.min(point.y);
+            min.z = min.z.min(point.z);
+            max.x = max.x.max(point.x);
+            max.y = max.y.max(point.y);
+            max.z = max.z.max(point.z);
+            (min, max)
+        });
+    (max - min).len()
+}
+
+fn aligned_contour_max_dist_sq(
+    lhs: &[Float3],
+    rhs: &[Float3],
+    reverse_rhs: bool,
+    shift: usize,
+) -> f32 {
+    let len = lhs.len();
+    let mut worst = 0.0f32;
+    for (idx, lhs_point) in lhs.iter().enumerate() {
+        let rhs_idx = if reverse_rhs {
+            (len + shift - idx % len) % len
+        } else {
+            (idx + shift) % len
+        };
+        worst = worst.max((*lhs_point - rhs[rhs_idx]).len_sq());
+    }
+    worst
+}
+
+fn contours_nearly_duplicate(lhs: &[Float3], rhs: &[Float3]) -> bool {
+    if lhs.len() != rhs.len() || lhs.is_empty() {
+        return false;
+    }
+
+    let scale = contour_bounds_diag(lhs).max(contour_bounds_diag(rhs));
+    let tolerance = 1e-4 + scale * 1e-3;
+    let tolerance_sq = tolerance * tolerance;
+
+    (0..lhs.len()).any(|shift| {
+        aligned_contour_max_dist_sq(lhs, rhs, false, shift) <= tolerance_sq
+            || aligned_contour_max_dist_sq(lhs, rhs, true, shift) <= tolerance_sq
+    })
+}
+
+fn polygon_basis(normal: Float3) -> (Float3, Float3, Float3) {
+    let normal = if normal.len_sq() == 0.0 {
+        Float3::Z
+    } else {
+        normal.normalize()
+    };
+    let seed = if normal.z.abs() < 0.9 {
+        Float3::Z
+    } else {
+        Float3::X
+    };
+    let x = normal.cross(seed).normalize();
+    let y = normal.cross(x).normalize();
+    (x, y, normal)
+}
+
+fn inferred_batch_normal(contours: &[Vec<Float3>], preferred: Option<Float3>) -> Float3 {
+    if let Some(normal) = preferred.filter(|normal| normal.len_sq() > 0.0) {
+        return normal.normalize();
+    }
+
     contours
         .iter()
-        .filter(|contour| seen.insert(canonical_contour_key(contour)))
-        .cloned()
+        .find_map(|contour| {
+            let area_normal = contour
+                .iter()
+                .copied()
+                .zip(contour.iter().copied().cycle().skip(1))
+                .take(contour.len())
+                .fold(Float3::ZERO, |acc, (a, b)| acc + a.cross(b));
+            (area_normal.len_sq() > 1e-8).then_some(area_normal.normalize())
+        })
+        .unwrap_or(Float3::Z)
+}
+
+#[cfg(test)]
+fn signed_area_2d(points: &[(f32, f32)]) -> f32 {
+    points
+        .iter()
+        .copied()
+        .zip(points.iter().copied().cycle().skip(1))
+        .take(points.len())
+        .fold(0.0, |area, ((ax, ay), (bx, by))| area + ax * by - ay * bx)
+        * 0.5
+}
+
+fn separate_contours_with_sources(
+    contours: &[(usize, Vec<Float3>)],
+    normal: Option<Float3>,
+) -> Vec<(usize, Vec<Float3>)> {
+    if contours.len() <= 1 {
+        return contours.to_vec();
+    }
+
+    let contour_points: Vec<_> = contours
+        .iter()
+        .map(|(_, contour)| contour.clone())
+        .collect();
+    let (basis_x, basis_y, _) = polygon_basis(inferred_batch_normal(&contour_points, normal));
+    let contour_count = contours.len() as f32;
+
+    contours
+        .iter()
+        .enumerate()
+        .map(|(q, (contour_idx, contour))| {
+            if q == 0 {
+                return (*contour_idx, contour.clone());
+            }
+
+            let theta = 2.0 * PI * q as f32 * (contour_count - 1.0) / contour_count;
+            let delta = basis_x * (theta.cos() * 3e-3) + basis_y * (theta.sin() * 3e-3);
+            (
+                *contour_idx,
+                contour.iter().map(|point| *point + delta).collect(),
+            )
+        })
         .collect()
+}
+
+fn triangulate_batch(
+    contours: &[(usize, Vec<Float3>)],
+    source_offsets: &[usize],
+    mut options: TessellationOptions,
+) -> Result<Tessellation, TessError> {
+    let original_vertices = contours
+        .iter()
+        .flat_map(|(_, contour)| contour.iter().copied())
+        .collect::<Vec<_>>();
+    let contours = if options.normalize_input {
+        separate_contours_with_sources(contours, options.normal)
+    } else {
+        contours.to_vec()
+    };
+
+    let mut tessellator = Tessellator::new()?;
+    let mut local_to_global_source = Vec::new();
+    for (contour_idx, contour) in &contours {
+        tessellator.add_contour(contour)?;
+        let offset = source_offsets[*contour_idx];
+        local_to_global_source.extend((0..contour.len()).map(|vertex_idx| offset + vertex_idx));
+    }
+
+    options.normalize_input = false;
+    let mut tessellation = tessellator.tessellate(options)?;
+    for source in &mut tessellation.source_vertex_indices {
+        *source = source.and_then(|local_idx| local_to_global_source.get(local_idx).copied());
+    }
+    for (vertex, source) in tessellation
+        .vertices
+        .iter_mut()
+        .zip(tessellation.source_vertex_indices.iter().copied())
+    {
+        if let Some(source) = source {
+            *vertex = original_vertices[source];
+        }
+    }
+    Ok(tessellation)
 }
 
 pub fn triangulate<I, C>(
@@ -371,23 +559,29 @@ where
     I: IntoIterator<Item = C>,
     C: AsRef<[Float3]>,
 {
-    let mut tessellator = Tessellator::new()?;
-    if options.normalize_input {
-        let normalized = normalize_contours(
-            &contours
-                .into_iter()
-                .map(|contour| contour.as_ref().to_vec())
-                .collect::<Vec<_>>(),
-        );
-        for contour in &normalized {
-            tessellator.add_contour(contour)?;
-        }
-    } else {
-        for contour in contours {
-            tessellator.add_contour(contour.as_ref())?;
-        }
+    let contours: Vec<_> = contours
+        .into_iter()
+        .map(|contour| contour.as_ref().to_vec())
+        .collect();
+    if contours.is_empty() {
+        return Ok(Tessellation {
+            vertices: Vec::new(),
+            source_vertex_indices: Vec::new(),
+            triangles: Vec::new(),
+        });
     }
-    tessellator.tessellate(options)
+
+    let source_offsets: Vec<_> = contours
+        .iter()
+        .scan(0usize, |offset, contour| {
+            let current = *offset;
+            *offset += contour.len();
+            Some(current)
+        })
+        .collect();
+
+    let indexed_contours = contours.into_iter().enumerate().collect::<Vec<_>>();
+    triangulate_batch(&indexed_contours, &source_offsets, options)
 }
 
 fn triangle_index(index: raw::TESSindex) -> Result<usize, TessError> {
@@ -499,5 +693,156 @@ mod tests {
         .unwrap();
 
         assert!(!tessellation.triangles.is_empty());
+    }
+
+    #[test]
+    fn normalize_contours_dedupes_nearly_identical_rotations() {
+        let base = vec![
+            Float3::new(0.0, 0.0, 0.0),
+            Float3::new(1.0, 0.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(0.0, 1.0, 0.0),
+        ];
+        let near = vec![
+            Float3::new(1.0 + 2e-5, 1.0 - 2e-5, 0.0),
+            Float3::new(-1e-5, 1.0 + 1e-5, 0.0),
+            Float3::new(1e-5, -1e-5, 0.0),
+            Float3::new(1.0 - 2e-5, 2e-5, 0.0),
+        ];
+
+        let normalized = normalize_contours(&[base, near]);
+
+        assert_eq!(normalized.len(), 1);
+    }
+
+    #[test]
+    fn separate_contours_preserves_authored_winding() {
+        let outer = vec![
+            Float3::new(-2.0, -2.0, 0.0),
+            Float3::new(2.0, -2.0, 0.0),
+            Float3::new(2.0, 2.0, 0.0),
+            Float3::new(-2.0, 2.0, 0.0),
+        ];
+        let hole = vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+        ];
+
+        let separated = separate_contours_with_sources(
+            &[(0, outer.clone()), (1, hole.clone())],
+            Some(Float3::Z),
+        );
+        let outer_area = signed_area_2d(
+            &separated[0]
+                .1
+                .iter()
+                .map(|point| (point.x, point.y))
+                .collect::<Vec<_>>(),
+        );
+        let hole_area = signed_area_2d(
+            &separated[1]
+                .1
+                .iter()
+                .map(|point| (point.x, point.y))
+                .collect::<Vec<_>>(),
+        );
+
+        assert!(outer_area * hole_area < 0.0);
+    }
+
+    #[test]
+    fn triangulates_nearly_identical_squares_in_separate_batches_when_normalized() {
+        let base = vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ];
+        let near = vec![
+            Float3::new(-0.99, -1.0, 0.0),
+            Float3::new(1.01, -1.0, 0.0),
+            Float3::new(1.01, 1.0, 0.0),
+            Float3::new(-0.99, 1.0, 0.0),
+        ];
+
+        let tessellation = triangulate(
+            [base.as_slice(), near.as_slice()],
+            TessellationOptions {
+                winding_rule: WindingRule::NonZero,
+                constrained_delaunay: true,
+                normalize_input: true,
+                ..TessellationOptions::default()
+            },
+        )
+        .unwrap();
+
+        let mut source_indices = tessellation
+            .source_vertex_indices
+            .iter()
+            .copied()
+            .flatten()
+            .collect::<Vec<_>>();
+        source_indices.sort_unstable();
+        source_indices.dedup();
+
+        assert!(tessellation.triangles.len() >= 4);
+        assert_eq!(source_indices, vec![0, 1, 2, 3, 4, 5, 6, 7]);
+    }
+
+    fn point_in_triangle_2d(point: (f32, f32), a: Float3, b: Float3, c: Float3) -> bool {
+        let cross = |p0: (f32, f32), p1: (f32, f32), p2: (f32, f32)| {
+            (p1.0 - p0.0) * (p2.1 - p0.1) - (p1.1 - p0.1) * (p2.0 - p0.0)
+        };
+        let a2 = (a.x, a.y);
+        let b2 = (b.x, b.y);
+        let c2 = (c.x, c.y);
+        let s1 = cross(a2, b2, point);
+        let s2 = cross(b2, c2, point);
+        let s3 = cross(c2, a2, point);
+        (s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0) || (s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)
+    }
+
+    #[test]
+    fn triangulate_preserves_hole_winding_for_nested_opposite_winding_contours() {
+        let outer = vec![
+            Float3::new(-2.0, -2.0, 0.0),
+            Float3::new(2.0, -2.0, 0.0),
+            Float3::new(2.0, 2.0, 0.0),
+            Float3::new(-2.0, 2.0, 0.0),
+        ];
+        let mut hole = vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ];
+        hole.reverse();
+
+        let tessellation = triangulate(
+            [outer.as_slice(), hole.as_slice()],
+            TessellationOptions {
+                winding_rule: WindingRule::NonZero,
+                constrained_delaunay: true,
+                normalize_input: true,
+                ..TessellationOptions::default()
+            },
+        )
+        .unwrap();
+
+        let center_is_filled = tessellation.triangles.iter().any(|face| {
+            point_in_triangle_2d(
+                (0.0, 0.0),
+                tessellation.vertices[face[0]],
+                tessellation.vertices[face[1]],
+                tessellation.vertices[face[2]],
+            )
+        });
+
+        assert!(
+            !center_is_filled,
+            "nested inner contour should stay excluded when authored as a hole"
+        );
     }
 }

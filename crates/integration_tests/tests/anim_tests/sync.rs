@@ -1,6 +1,7 @@
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use super::*;
+use geo::mesh::Mesh;
 
 #[test]
 fn test_set_syncs_only_explicit_candidates() {
@@ -443,6 +444,165 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
 }
 
 #[test]
+fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
+    let init = r#"
+        background = BLACK
+
+        let w = operator |op| color{WHITE} op
+        let Tri = |p, q, r, t|
+            fill{BLUE} stroke{WHITE} tag{t} Triangle(p, q, r)
+
+        let C2_TAG = 100
+        let A2_TAG = 101
+        let B2_TAG = 102
+
+        let Left = |r, u, labels = 0| {
+            let ret = block {
+                . Tri(ORIGIN, [r, 0, 0], [0, u, 0], 0)
+                . Tri([r, 0, 0], [r + u, 0, 0], [r + u, r, 0], 1)
+                . Tri([r + u, r, 0], [r + u, r + u, 0], [u, r + u, 0], 2)
+                . Tri([u, r + u, 0], [0, r + u, 0], [0, u, 0], 3)
+                if (labels) {
+                   . w{} tag{C2_TAG} centered_at{[(u + r) / 2, (u + r) / 2, 0]} Tex("C^2", 1)
+               }
+            }
+
+            return centered_at{[-1.5, -0.5, 0]} scale{0.5} ret
+        }
+
+        let Right = |r, u, labels = 0| {
+            let ret = block {
+                . Tri([u, u, 0], [u, u + r, 0], [0, u, 0], 0)
+                . Tri([0, u, 0], [u, u + r, 0], [0, u + r, 0], 3)
+                . Tri([u, u, 0], [u, 0, 0], [u + r, 0, 0], 1)
+                . Tri([u + r, 0, 0], [u + r, u, 0], [u, u, 0], 2)
+                . centered_at{[(u + r) / 2, (u + r) / 2, 0]} stroke{WHITE} tag{[-1]} Rect([u + r, u + r])
+
+                if (labels) {
+                   . w{} tag{A2_TAG} centered_at{[u / 2, u / 2, 0]} Tex("A^2", 1)
+                   let x = 0
+                   . w{} tag{B2_TAG} centered_at{[u + r / 2, u + r / 2, 0]} Tex("B^2", 1)
+               }
+            }
+
+            return centered_at{[1.5, -0.5, 0]} scale{0.5} ret
+        }
+
+        let R = 2
+        let U = 1
+
+        mesh start = []
+        mesh left = []
+        mesh right = []
+        mesh equation = []
+        mesh c_transfer = []
+        mesh ab_transfer = []
+
+        let theorem =
+            centered_at{[0, 1, 0]} w{} Tex("\text_tag{1}{C^2} = \text_tag{2}{A^2} + \text_tag{3}{B^2}", 1)
+    "#;
+
+    let slide0 = r#"
+        let t = Tri(ORIGIN, [R, 0, 0], [0, U, 0], 0)
+
+        start = [
+            t,
+            w{} Label(t, "C", 1, [U, R, 0]),
+            w{} Label(t, "A", 1, LEFT),
+            w{} Label(t, "B", 1, DOWN)
+        ]
+        play Fade(1, [], UP)
+    "#;
+
+    let slide1 = r#"
+        start = tag_filter{|t| len(t) > 0 and t[0] == 0} Left(R, U, 0)
+        play TagTrans(1)
+    "#;
+
+    let slide2 = r#"
+        play Transfer(&start, &left)
+
+        left = Left(r: R, u: U, labels: 0)
+        play Trans(1)
+    "#;
+
+    let slide3 = r#"
+        right = left
+        play Set()
+
+        right = Right(r: R, u: U, labels: 0)
+        play TagTrans(1.5)
+    "#;
+
+    let slide4 = r#"
+        left.labels = 1
+        right.labels = 1
+        play TagTrans(1)
+
+        let rs = [0 -> 2, 1 -> 2, 2 -> 0.75, 4 -> 0.75]
+        let us = [0 -> 1, 1 -> 2, 2 -> 0.75, 4 -> 2]
+
+        var last_time = 0
+        for (time in map_keys(rs)) {
+            left.r = rs[time]
+            right.r = rs[time]
+            left.u = us[time]
+            right.u = us[time]
+
+            play Lerp(time - last_time)
+            last_time = time
+        }
+    "#;
+
+    let slide5 = r#"
+        equation = tag_filter{|t| len(t) == 0} theorem
+
+        let w = Write(1, [&equation])
+        let tl = TransSubsetTo(&left, tag_filter{|t| 1 in t} theorem, &c_transfer, |tag| C2_TAG in tag)
+        let ta = TransSubsetTo(&right, tag_filter{|t| 2 in t} theorem, &ab_transfer, |tag| A2_TAG in tag or B2_TAG in tag)
+
+        play [
+            Write(1, [&equation]),
+            tl, ta
+        ]
+    "#;
+
+    let bundles = stdlib_bundles(["scene", "mesh", "anim", "util", "color", "math"]);
+    let sections = [
+        (init, SectionType::Init),
+        (slide0, SectionType::Slide),
+        (slide1, SectionType::Slide),
+        (slide2, SectionType::Slide),
+        (slide3, SectionType::Slide),
+        (slide4, SectionType::Slide),
+        (slide5, SectionType::Slide),
+    ];
+    let (mut executor, _) = build_anim_executor(&sections, &bundles)
+        .unwrap_or_else(|result| panic!("executor should build, got errors: {:?}", result.errors));
+
+    smol::block_on(async {
+        let prefinal = executor.user_to_internal_timestamp(Timestamp::new(4, f64::INFINITY));
+        match executor.seek_to(prefinal).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("seek failed at prefinal slide end: {e}"),
+        }
+
+        for step in 0..=240 {
+            let t = step as f64 / 240.0;
+            let internal = executor.user_to_internal_timestamp(Timestamp::new(5, t));
+            match executor.seek_to(internal).await {
+                SeekToResult::SeekedTo(_) => {}
+                SeekToResult::Error(e) => panic!("seek failed at final slide t={t}: {e}"),
+            }
+            executor
+                .capture_stable_scene_snapshot()
+                .await
+                .unwrap_or_else(|e| panic!("snapshot failed at final slide t={t}: {e}"));
+        }
+    });
+}
+
+#[test]
 fn test_lerp_auto_deduces_detached_followers() {
     let r = run_anim_with_stdlib_at(
         "
@@ -531,6 +691,361 @@ fn test_trans_anim_interpolates_meshes_without_generic_mesh_lerp() {
         &stdlib_bundles(["anim", "color", "math", "mesh"]),
     );
     r.assert_ok();
+}
+
+#[test]
+fn test_trans_preserves_fill_separate_from_stroke_at_midpoint() {
+    let src = "
+        mesh x = fill{BLUE} stroke{WHITE} Square(2)
+        play Set()
+
+        x = fill{CLEAR} stroke{WHITE} Rect([2, 2])
+        play Trans(1)
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        match executor.seek_to(mid).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = &current else {
+        panic!("expected current mesh value");
+    };
+    let tri = mesh.tris.first().expect("expected surface during trans");
+    let fill = tri.a.col;
+
+    assert!(
+        fill.z >= fill.x && fill.z >= fill.y && fill.x < 0.8 && fill.y < 0.8,
+        "expected midpoint fill to stay distinct from white stroke, got {:?}",
+        fill.to_array()
+    );
+    assert!(
+        fill.w > 0.0 && fill.w < 1.0,
+        "expected midpoint fill alpha to fade toward clear, got {:?}",
+        fill.to_array()
+    );
+}
+
+fn assert_single_slide_scene_stays_stable<const N: usize>(
+    src: &str,
+    bundles: [&str; N],
+    steps: usize,
+) {
+    let (mut executor, _) =
+        match build_anim_executor(&[(src, SectionType::Slide)], &stdlib_bundles(bundles)) {
+            Ok(data) => data,
+            Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+        };
+
+    smol::block_on(async {
+        for step in 0..=steps {
+            let t = step as f64 / steps as f64;
+            let ts = executor.user_to_internal_timestamp(Timestamp::new(0, t));
+            match executor.seek_to(ts).await {
+                SeekToResult::SeekedTo(_) => {}
+                SeekToResult::Error(e) => panic!("seek failed at t={t}: {e}"),
+            }
+            executor
+                .capture_stable_scene_snapshot()
+                .await
+                .unwrap_or_else(|e| panic!("snapshot failed at t={t}: {e}"));
+        }
+    });
+}
+
+fn closed_line_contour_signed_areas(mesh: &Mesh) -> Vec<f32> {
+    if mesh.lins.is_empty() {
+        return Vec::new();
+    }
+
+    let mut visited = vec![false; mesh.lins.len()];
+    let mut areas = Vec::new();
+    for start in 0..mesh.lins.len() {
+        if visited[start] {
+            continue;
+        }
+
+        let mut points = Vec::new();
+        let mut cursor = start;
+        loop {
+            assert!(
+                !visited[cursor],
+                "line contours should not revisit line[{cursor}] while walking"
+            );
+            visited[cursor] = true;
+            points.push(mesh.lins[cursor].a.pos);
+
+            let next = mesh.lins[cursor].next as usize;
+            assert!(
+                next < mesh.lins.len(),
+                "line[{cursor}] has invalid next {}",
+                mesh.lins[cursor].next
+            );
+            cursor = next;
+            if cursor == start {
+                break;
+            }
+        }
+
+        let area = points
+            .iter()
+            .copied()
+            .zip(points.iter().copied().cycle().skip(1))
+            .take(points.len())
+            .fold(0.0, |acc, (a, b)| acc + a.x * b.y - a.y * b.x)
+            * 0.5;
+        areas.push(area);
+    }
+    areas
+}
+
+fn mesh_bounds(mesh: &Mesh) -> Option<(geo::simd::Float3, geo::simd::Float3)> {
+    let mut points = mesh
+        .dots
+        .iter()
+        .map(|dot| dot.pos)
+        .chain(mesh.lins.iter().flat_map(|lin| [lin.a.pos, lin.b.pos]))
+        .chain(
+            mesh.tris
+                .iter()
+                .flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]),
+        );
+    let first = points.next()?;
+    let (min, max) = points.fold((first, first), |(mut min, mut max), point| {
+        min.x = min.x.min(point.x);
+        min.y = min.y.min(point.y);
+        min.z = min.z.min(point.z);
+        max.x = max.x.max(point.x);
+        max.y = max.y.max(point.y);
+        max.z = max.z.max(point.z);
+        (min, max)
+    });
+    Some((min, max))
+}
+
+fn mesh_box_center(mesh: &Mesh) -> geo::simd::Float3 {
+    let (min, max) = mesh_bounds(mesh).expect("expected mesh geometry");
+    (min + max) / 2.0
+}
+
+fn value_tree_box_center(value: &Value) -> geo::simd::Float3 {
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(value, &mut leaves);
+    let mut meshes = leaves.into_iter().map(|leaf| {
+        let Value::Mesh(mesh) = leaf else {
+            panic!("expected mesh leaf");
+        };
+        mesh
+    });
+    let first = meshes.next().expect("expected at least one mesh leaf");
+    let (mut min, mut max) = mesh_bounds(&first).expect("expected mesh geometry");
+    for mesh in meshes {
+        let (leaf_min, leaf_max) = mesh_bounds(&mesh).expect("expected mesh geometry");
+        min.x = min.x.min(leaf_min.x);
+        min.y = min.y.min(leaf_min.y);
+        min.z = min.z.min(leaf_min.z);
+        max.x = max.x.max(leaf_max.x);
+        max.y = max.y.max(leaf_max.y);
+        max.z = max.z.max(leaf_max.z);
+    }
+    (min + max) / 2.0
+}
+
+fn value_leaf_box_centers(value: &Value) -> Vec<geo::simd::Float3> {
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(value, &mut leaves);
+    leaves
+        .into_iter()
+        .map(|leaf| {
+            let Value::Mesh(mesh) = leaf else {
+                panic!("expected mesh leaf");
+            };
+            mesh_box_center(&mesh)
+        })
+        .collect()
+}
+
+#[test]
+fn test_text_trans_between_strings_stays_stable() {
+    let src = "
+        mesh start = Text(\"Hello World\", 1)
+
+        start = Text(\"What about now!\", 1)
+        play Trans()
+    ";
+
+    assert_single_slide_scene_stays_stable(src, ["anim", "mesh"], 120);
+}
+
+#[test]
+fn test_scale_scales_text_about_global_tree_center() {
+    let sections = [
+        (
+            "
+            mesh start = Text(\"Hello World\", 1)
+            play Set()
+        ",
+            SectionType::Slide,
+        ),
+        (
+            "
+            start = scale{4} start
+            play Set()
+        ",
+            SectionType::Slide,
+        ),
+    ];
+    let (mut executor, _) = match build_anim_executor(&sections, &stdlib_bundles(["mesh", "anim"]))
+    {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let (plain_value, scaled_value) = smol::block_on(async {
+        let plain_ts = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(plain_ts).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("seek failed at plain text state: {e}"),
+        }
+        let plain = current_mesh_leader_value(&mut executor).await;
+
+        let scaled_ts = executor.user_to_internal_timestamp(Timestamp::new(1, f64::INFINITY));
+        match executor.seek_to(scaled_ts).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("seek failed at scaled text state: {e}"),
+        }
+        let scaled = current_mesh_leader_value(&mut executor).await;
+        (plain, scaled)
+    });
+
+    let plain_center = value_tree_box_center(&plain_value);
+    let scaled_center = value_tree_box_center(&scaled_value);
+    assert!(
+        (plain_center - scaled_center).len() < 1e-3,
+        "expected global tree center to stay fixed, got plain {:?} scaled {:?}",
+        plain_center.to_array(),
+        scaled_center.to_array()
+    );
+
+    let plain_leaf_centers = value_leaf_box_centers(&plain_value);
+    let scaled_leaf_centers = value_leaf_box_centers(&scaled_value);
+    assert_eq!(plain_leaf_centers.len(), scaled_leaf_centers.len());
+
+    let mut saw_offset_leaf = false;
+    for (plain_leaf, scaled_leaf) in plain_leaf_centers.iter().zip(&scaled_leaf_centers) {
+        let plain_delta = *plain_leaf - plain_center;
+        let scaled_delta = *scaled_leaf - scaled_center;
+        if plain_delta.len() <= 1e-3 {
+            continue;
+        }
+
+        saw_offset_leaf = true;
+        assert!(
+            (scaled_delta - plain_delta * 4.0).len() < 1e-2,
+            "expected leaf center displacement to scale globally, plain {:?} scaled {:?}",
+            plain_delta.to_array(),
+            scaled_delta.to_array()
+        );
+    }
+
+    assert!(
+        saw_offset_leaf,
+        "expected at least one leaf away from the tree center"
+    );
+}
+
+#[test]
+fn test_text_trans_h_to_b_preserves_hole_winding_at_end() {
+    let src = "
+        mesh start = Text(\"H\", 1)
+
+        start = Text(\"b\", 1)
+        play Trans()
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let end = executor.user_to_internal_timestamp(Timestamp::new(0, 1.0));
+        match executor.seek_to(end).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("seek failed at end: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&current, &mut leaves);
+    assert_eq!(leaves.len(), 1, "expected one leaf for a single glyph");
+
+    let Value::Mesh(mesh) = &leaves[0] else {
+        panic!("expected mesh leaf");
+    };
+    let areas = closed_line_contour_signed_areas(mesh);
+    let positive = areas.iter().filter(|area| **area > 0.0).count();
+    let negative = areas.iter().filter(|area| **area < 0.0).count();
+
+    assert_eq!(
+        areas.len(),
+        2,
+        "expected outer contour plus one hole, got {areas:?}"
+    );
+    assert_eq!(positive, 1, "expected one positive contour, got {areas:?}");
+    assert_eq!(negative, 1, "expected one negative contour, got {areas:?}");
+}
+
+#[test]
+fn test_tex_trans_between_strings_stays_stable() {
+    let src = "
+        mesh start = Tex(\"Hello World\", 1)
+
+        start = Tex(\"What about now!\", 1)
+        play Trans()
+    ";
+
+    assert_single_slide_scene_stays_stable(src, ["anim", "mesh"], 120);
+}
+
+#[test]
+fn test_text_trans_between_hole_heavy_strings_stays_stable() {
+    let src = "
+        mesh start = Text(\"B80QDPAB8\", 1)
+
+        start = Text(\"OQ8BPD0QB\", 1)
+        play Trans()
+    ";
+
+    assert_single_slide_scene_stays_stable(src, ["anim", "mesh"], 90);
+}
+
+#[test]
+fn test_tex_trans_between_hole_heavy_strings_stays_stable() {
+    let src = "
+        mesh start = Tex(\"B80QDPAB8\", 1)
+
+        start = Tex(\"OQ8BPD0QB\", 1)
+        play Trans()
+    ";
+
+    assert_single_slide_scene_stays_stable(src, ["anim", "mesh"], 90);
 }
 
 #[test]

@@ -263,7 +263,7 @@ fn filled_contours(
         uniform: Uniforms::default(),
         tag,
     };
-    debug_assert!(mesh.has_consistent_topology());
+    mesh.debug_assert_consistent_topology();
     Ok(mesh)
 }
 

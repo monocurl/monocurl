@@ -164,14 +164,17 @@ pub(super) async fn read_string(
     index: i32,
     name: &'static str,
 ) -> Result<String, ExecutorError> {
-    crate::stringify_value(executor, executor.state.stack(stack_idx).read_at(index).clone())
-        .await
-        .map_err(|error| match error {
-            ExecutorError::TypeError { got, .. } => {
-                ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, name)
-            }
-            other => other,
-        })
+    crate::stringify_value(
+        executor,
+        executor.state.stack(stack_idx).read_at(index).clone(),
+    )
+    .await
+    .map_err(|error| match error {
+        ExecutorError::TypeError { got, .. } => {
+            ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, name)
+        }
+        other => other,
+    })
 }
 
 pub(super) fn read_int(
@@ -753,20 +756,6 @@ pub(crate) fn mesh_to_indexed_surface(mesh: &Mesh) -> IndexedSurface {
     for (idx, dot) in mesh.dots.iter().enumerate() {
         assign_vertex(groups[dot_slot(idx)], dot.pos, dot.col, Float2::ZERO);
     }
-    for (idx, lin) in mesh.lins.iter().enumerate() {
-        assign_vertex(
-            groups[line_a_slot(mesh, idx)],
-            lin.a.pos,
-            lin.a.col,
-            Float2::ZERO,
-        );
-        assign_vertex(
-            groups[line_b_slot(mesh, idx)],
-            lin.b.pos,
-            lin.b.col,
-            Float2::ZERO,
-        );
-    }
     for (idx, tri) in mesh.tris.iter().enumerate() {
         assign_vertex(
             groups[tri_a_slot(mesh, idx)],
@@ -785,6 +774,20 @@ pub(crate) fn mesh_to_indexed_surface(mesh: &Mesh) -> IndexedSurface {
             tri.c.pos,
             tri.c.col,
             tri.c.uv,
+        );
+    }
+    for (idx, lin) in mesh.lins.iter().enumerate() {
+        assign_vertex(
+            groups[line_a_slot(mesh, idx)],
+            lin.a.pos,
+            lin.a.col,
+            Float2::ZERO,
+        );
+        assign_vertex(
+            groups[line_b_slot(mesh, idx)],
+            lin.b.pos,
+            lin.b.col,
+            Float2::ZERO,
         );
     }
 
@@ -1009,25 +1012,6 @@ fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
     Some(contours)
 }
 
-fn clear_surface_boundary_links(mesh: &mut Mesh) {
-    let tri_count = mesh.tris.len();
-    let line_count = mesh.lins.len();
-
-    for line in &mut mesh.lins {
-        if decode_mesh_ref(line.inv).is_some_and(|idx| idx < tri_count) {
-            line.inv = -1;
-        }
-    }
-
-    for tri in &mut mesh.tris {
-        for edge_idx in 0..3 {
-            if decode_mesh_ref(tri_edge(tri, edge_idx)).is_some_and(|idx| idx < line_count) {
-                set_tri_edge(tri, edge_idx, -1);
-            }
-        }
-    }
-}
-
 pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
     let mut out = mesh.clone();
     if !out.tris.is_empty() {
@@ -1050,11 +1034,7 @@ pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
     let (lins, tris) = tessellate_planar_loops_with_options(&contours, normal, true)?;
     out.lins = lins;
     out.tris = tris;
-    if !out.has_consistent_topology() {
-        // keep the tessellated surface, but drop optional boundary ownership links
-        clear_surface_boundary_links(&mut out);
-    }
-    debug_assert!(out.has_consistent_topology());
+    out.debug_assert_consistent_topology();
     Ok(Some(out))
 }
 
@@ -1066,7 +1046,7 @@ pub(super) fn mesh_from_parts(dots: Vec<Dot>, lins: Vec<Lin>, tris: Vec<Tri>) ->
         uniform: Uniforms::default(),
         tag: vec![],
     };
-    debug_assert!(mesh.has_consistent_topology());
+    mesh.debug_assert_consistent_topology();
     Value::Mesh(Arc::new(mesh))
 }
 
@@ -1606,16 +1586,10 @@ mod tests {
 
     use super::{push_closed_polyline, uprank_mesh};
 
-    fn duplicate_square_mesh(copies: usize) -> Mesh {
+    fn mesh_from_contours(contours: &[Vec<Float3>]) -> Mesh {
         let mut lins = Vec::new();
-        let square = [
-            Float3::new(-1.0, -1.0, 0.0),
-            Float3::new(1.0, -1.0, 0.0),
-            Float3::new(1.0, 1.0, 0.0),
-            Float3::new(-1.0, 1.0, 0.0),
-        ];
-        for _ in 0..copies {
-            push_closed_polyline(&mut lins, &square, Float3::Z);
+        for contour in contours {
+            push_closed_polyline(&mut lins, contour, Float3::Z);
         }
 
         Mesh {
@@ -1627,9 +1601,51 @@ mod tests {
         }
     }
 
+    fn square(center_x: f32, center_y: f32, half_extent: f32) -> Vec<Float3> {
+        vec![
+            Float3::new(center_x - half_extent, center_y - half_extent, 0.0),
+            Float3::new(center_x + half_extent, center_y - half_extent, 0.0),
+            Float3::new(center_x + half_extent, center_y + half_extent, 0.0),
+            Float3::new(center_x - half_extent, center_y + half_extent, 0.0),
+        ]
+    }
+
     #[test]
     fn uprank_handles_many_duplicate_contours() {
-        let mesh = duplicate_square_mesh(8);
+        let mesh = mesh_from_contours(&vec![square(0.0, 0.0, 1.0); 8]);
+        let upranked = uprank_mesh(&mesh).expect("uprank should succeed");
+        let upranked = upranked.expect("closed contours should uprank");
+
+        assert!(!upranked.tris.is_empty());
+        assert!(upranked.has_consistent_topology());
+    }
+
+    #[test]
+    fn uprank_handles_nearly_overlapping_duplicate_contours() {
+        let mesh = mesh_from_contours(&[
+            square(0.0, 0.0, 1.0),
+            square(0.01, 0.0, 1.0),
+            square(-0.01, 0.0, 1.0),
+        ]);
+        let upranked = uprank_mesh(&mesh).expect("uprank should succeed");
+        let upranked = upranked.expect("closed contours should uprank");
+
+        assert!(!upranked.tris.is_empty());
+        assert!(upranked.has_consistent_topology());
+    }
+
+    #[test]
+    fn uprank_handles_duplicate_annulus_families() {
+        let mut hole_a = square(0.0, 0.0, 0.6);
+        hole_a.reverse();
+        let mut hole_b = square(0.02, 0.0, 0.6);
+        hole_b.reverse();
+        let mesh = mesh_from_contours(&[
+            square(0.0, 0.0, 1.2),
+            hole_a,
+            square(0.02, 0.0, 1.2),
+            hole_b,
+        ]);
         let upranked = uprank_mesh(&mesh).expect("uprank should succeed");
         let upranked = upranked.expect("closed contours should uprank");
 
