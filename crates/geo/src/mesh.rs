@@ -67,8 +67,8 @@ pub struct Uniforms {
     pub z_index: i32,
 }
 
-pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 1.0;
-pub const DEFAULT_STROKE_RADIUS: f32 = 10.0;
+pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 4.0;
+pub const DEFAULT_STROKE_RADIUS: f32 = 2.0;
 pub const DEFAULT_DOT_RADIUS: f32 = 4.0;
 pub const DEFAULT_DOT_VERTEX_COUNT: u16 = 8;
 pub const DEFAULT_SMOOTH: bool = false;
@@ -769,14 +769,7 @@ mod tests {
                 line(q, r, 0, 2, mesh_ref(0)),
                 line(r, p, 1, -1, mesh_ref(0)),
             ],
-            tris: vec![tri(
-                p,
-                q,
-                r,
-                mesh_ref(0),
-                mesh_ref(1),
-                mesh_ref(2),
-            )],
+            tris: vec![tri(p, q, r, mesh_ref(0), mesh_ref(1), mesh_ref(2))],
             uniform: Uniforms::default(),
             tag: vec![],
         };
@@ -799,14 +792,7 @@ mod tests {
                 line(q, r, 0, 2, mesh_ref(0)),
                 line(r, p, 1, 0, mesh_ref(0)),
             ],
-            tris: vec![tri(
-                p,
-                q,
-                r,
-                mesh_ref(0),
-                mesh_ref(1),
-                mesh_ref(2),
-            )],
+            tris: vec![tri(p, q, r, mesh_ref(0), mesh_ref(1), mesh_ref(2))],
             uniform: Uniforms::default(),
             tag: vec![],
         };
