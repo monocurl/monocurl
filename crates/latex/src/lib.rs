@@ -16,6 +16,18 @@ const FONT_SIZE_AT_SCALE_1: f64 = 36.0;
 const MATHJAX_UNITS_PER_EM: f32 = 1000.0;
 const SYSTEM_SVG_UNITS_AT_SCALE_1: f32 = 36.0;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SystemBackendStatus {
+    pub latex: bool,
+    pub dvisvgm: bool,
+}
+
+impl SystemBackendStatus {
+    pub fn is_available(self) -> bool {
+        self.latex && self.dvisvgm
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum RenderQuality {
     Normal,
@@ -50,6 +62,10 @@ pub struct RenderedOutput {
 }
 
 static CACHE: OnceLock<Mutex<HashMap<CacheKey, CacheEntry>>> = OnceLock::new();
+
+pub fn system_backend_status() -> SystemBackendStatus {
+    system::backend_status()
+}
 
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
     render_text_with_quality(text, scale, RenderQuality::Normal)

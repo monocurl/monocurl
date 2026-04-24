@@ -94,7 +94,7 @@ pub(super) fn compute_track_width(slide_count: usize, durations: &[Option<f64>],
 ///
 /// `time == 0.0` is treated specially — `f64::MIN_POSITIVE` counts as
 /// already-started and falls through to `Some((slide, time))`.
-pub(super) fn visual_slide_time(
+pub(crate) fn visual_slide_time(
     current_slide: usize,
     current_time: f64,
     durations: &[Option<f64>],

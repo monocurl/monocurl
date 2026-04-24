@@ -1,7 +1,7 @@
 use gpui::*;
 use renderer::SceneRenderData;
 
-use crate::{services::ServiceManager, theme::ThemeSettings};
+use crate::{services::ServiceManager, theme::ThemeSettings, timeline::visual_slide_time};
 
 use super::{
     Viewport,
@@ -41,13 +41,14 @@ struct SceneStageLayout {
 impl Render for Viewport {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
-        let (status, params, timestamp, slide_count, background, scene_camera, meshes) = {
+        let (status, params, timestamp, slide_count, durations, background, scene_camera, meshes) = {
             let execution = self.execution_state.read(cx);
             (
                 execution.status,
                 execution.parameters.clone(),
                 execution.current_timestamp,
                 execution.slide_count,
+                execution.slide_durations.clone(),
                 execution.background,
                 execution.camera.clone(),
                 execution.meshes.clone(),
@@ -144,12 +145,14 @@ impl Render for Viewport {
 
         let services_weak: WeakEntity<ServiceManager> = self.services.downgrade();
         let controls = parameter_controls(self, params.as_ref(), services_weak, weak_vp.clone());
-        let slide_label = format!(
-            "Slide {} / {}",
-            (timestamp.slide + 1).min(slide_count.max(1)),
-            slide_count.max(1)
-        );
-        let time_label = format!("{:.2}s", timestamp.time);
+        let (slide_label, time_label) =
+            match visual_slide_time(timestamp.slide, timestamp.time, &durations) {
+                None => (format!("Slide 0 / {}", slide_count.max(1)), "0.00s".to_string()),
+                Some((slide, time)) => (
+                    format!("Slide {} / {}", (slide + 1).min(slide_count.max(1)), slide_count.max(1)),
+                    format!("{:.2}s", time),
+                ),
+            };
         let params_button = render_toolbar_button(
             "pres-params-btn",
             "Parameters",

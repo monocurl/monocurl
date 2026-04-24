@@ -21,10 +21,7 @@ impl MonocurlWindow {
         })
         .detach();
 
-        Self {
-            state: state,
-            home: home,
-        }
+        Self { state: state, home: home }
     }
 
     pub fn render_screen(&self, view: impl IntoElement, cx: &Context<Self>) -> impl IntoElement {

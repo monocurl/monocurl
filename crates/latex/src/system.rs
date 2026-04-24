@@ -8,13 +8,22 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 
+use crate::SystemBackendStatus;
+
 const TEX_BASENAME: &str = "monocurl";
 
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
-static AVAILABLE: OnceLock<bool> = OnceLock::new();
+static AVAILABLE: OnceLock<SystemBackendStatus> = OnceLock::new();
 
 pub(crate) fn is_available() -> bool {
-    *AVAILABLE.get_or_init(|| command_available("latex") && command_available("dvisvgm"))
+    backend_status().is_available()
+}
+
+pub(crate) fn backend_status() -> SystemBackendStatus {
+    *AVAILABLE.get_or_init(|| SystemBackendStatus {
+        latex: command_available("latex"),
+        dvisvgm: command_available("dvisvgm"),
+    })
 }
 
 pub(crate) fn render_svg_document(document: &str) -> Result<String> {
