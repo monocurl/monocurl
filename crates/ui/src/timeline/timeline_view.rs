@@ -83,6 +83,7 @@ impl Timeline {
             exec.current_timestamp.time,
             &slide_xs,
             &gap_ws,
+            &effective,
             zoom,
         );
 
@@ -132,6 +133,7 @@ impl Render for Timeline {
             current_slide,
             slide_count,
             current_time,
+            &effective_for_seek,
             cx,
         );
         let track = render_track(
@@ -162,10 +164,14 @@ impl Render for Timeline {
                         let services = self.services.downgrade();
                         let scroll = self.scroll.clone();
                         move |event, _window, cx| {
+                            if slide_count == 0 {
+                                return;
+                            }
                             let bounds = scroll.bounds();
                             let scroll_offset = scroll.offset();
                             let local_x =
                                 f32::from(event.position.x - bounds.origin.x - scroll_offset.x);
+                            let last = slide_count - 1;
 
                             for i in 0..slide_count {
                                 let bx = slide_xs[i];
@@ -177,10 +183,15 @@ impl Render for Timeline {
                                     return;
                                 }
                                 let gap_start = bx + SLIDE_W;
-                                if local_x >= gap_start && local_x < gap_start + gw.max(MIN_GAP) {
+                                let gap_end = if i == last {
+                                    f32::INFINITY
+                                } else {
+                                    gap_start + gw.max(MIN_GAP)
+                                };
+                                if local_x >= gap_start && local_x < gap_end {
                                     let t = ((local_x - gap_start) / (PX_PER_SEC * zoom)) as f64;
                                     services
-                                        .update(cx, |s, _| s.seek_to(Timestamp::new(i, t)))
+                                        .update(cx, |s, _| s.seek_to(Timestamp::new(i, t.max(0.0))))
                                         .ok();
                                     return;
                                 }

@@ -60,8 +60,14 @@ pub(super) fn render_track(
                 let slide_xs = compute_slide_xs(slide_count, &effective, zoom);
                 let gap_ws = compute_gap_ws(slide_count, &effective, zoom);
                 let painted_gap_ws = compute_painted_gap_ws(slide_count, &effective, zoom);
-                let playhead_x =
-                    compute_playhead_x(current_slide, current_time, &slide_xs, &gap_ws, zoom);
+                let playhead_x = compute_playhead_x(
+                    current_slide,
+                    current_time,
+                    &slide_xs,
+                    &gap_ws,
+                    &effective,
+                    zoom,
+                );
                 let vert_offset = (f32::from(bounds.size.height) - CONTENT_H).max(0.0) / 2.0;
 
                 let ts = window.text_system();

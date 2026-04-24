@@ -24,6 +24,10 @@ impl Executor {
     pub async fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
 
+        // a fully played slide must be distinguishable from an unentered one, so
+        // snap its cached end-time to at least `MIN_POSITIVE` even when nothing
+        // in the slide actually advanced time
+        self.state.timestamp.time = self.state.timestamp.time.max(f64::MIN_POSITIVE);
         self.save_cache();
 
         let mut heads = BTreeSet::new();
@@ -79,6 +83,10 @@ impl Executor {
                     {
                         self.advance_section().await;
                     } else {
+                        // distinguish a played-zero-length terminal slide from
+                        // the pre-entry state
+                        self.state.timestamp.time =
+                            self.state.timestamp.time.max(f64::MIN_POSITIVE);
                         self.save_cache();
                         return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
                     }

@@ -7,7 +7,7 @@ use crate::{
 
 use super::{
     icons::{TRANSPORT_BTN_H, TRANSPORT_BTN_W, TransportIcon, transport_icon},
-    metrics::{TOOLBAR_H, ZOOM_LEVELS},
+    metrics::{TOOLBAR_H, ZOOM_LEVELS, visual_slide_time},
     timeline_view::Timeline,
 };
 
@@ -17,6 +17,7 @@ pub(super) fn render_toolbar(
     current_slide: usize,
     slide_count: usize,
     current_time: f64,
+    durations: &[Option<f64>],
     cx: &mut Context<Timeline>,
 ) -> impl IntoElement {
     let theme = ThemeSettings::theme(cx);
@@ -81,6 +82,15 @@ pub(super) fn render_toolbar(
             })
         });
 
+    let (slide_label, time_label) =
+        match visual_slide_time(current_slide, current_time, durations) {
+            None => (format!("Slide 0 / {}", slide_count), "0.00s".to_string()),
+            Some((slide, time)) => (
+                format!("Slide {} / {}", (slide + 1).min(slide_count), slide_count),
+                format!("{:.2}s", time),
+            ),
+        };
+
     let center_group = div()
         .flex()
         .flex_row()
@@ -91,17 +101,13 @@ pub(super) fn render_toolbar(
             div()
                 .text_color(theme.timeline_text)
                 .text_size(px(11.0))
-                .child(format!(
-                    "Slide {} / {}",
-                    (current_slide + 1).min(slide_count),
-                    slide_count
-                )),
+                .child(slide_label),
         )
         .child(
             div()
                 .text_color(theme.timeline_text)
                 .text_size(px(11.0))
-                .child(format!("{:.2}s", current_time)),
+                .child(time_label),
         );
 
     let zoom_group = div()
