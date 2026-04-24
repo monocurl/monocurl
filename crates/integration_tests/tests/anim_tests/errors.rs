@@ -523,12 +523,17 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
 #[test]
 fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
     let src = r#"
-        let entity = |center, theta| {
+        let outline = |center| {
             let outline = (
                 stroke{WHITE}
                 fill{CLEAR}
                 shift{delta: center} Circle(2)
             )
+            return [outline]
+        }
+
+        let entity = |center, theta| {
+            let outline = outline(center)
             let r = 0.25
             let y = r * sin(theta)
             let x = r * cos(theta)
@@ -539,11 +544,10 @@ fn test_lerp_live_mesh_length_mismatch_uses_play_span() {
             return [outline, point]
         }
 
-        mesh left = entity(2l, theta: 0)
-        mesh right = entity(2r, theta: 0)
+        mesh left = outline(2l)
 
         let duration = 10
-        left.theta = right.theta = duration * 4
+        left = entity(2l, theta: duration * 4)
 
         play Lerp(duration, [], identity)
     "#;

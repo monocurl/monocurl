@@ -126,6 +126,7 @@ impl Executor {
             .iter()
             .find(|param| param.name == name)
             .ok_or_else(|| ExecutorError::unknown_parameter(name))?;
+        let value = value.elide_lvalue().elide_leader();
 
         let leader_cell_key = param.leader_cell.key();
         let leader_value_key = param.leader_value;
@@ -237,5 +238,36 @@ mod tests {
         let mut executor = empty_executor();
         let error = executor.update_parameter("missing", Value::Integer(1));
         assert!(matches!(error, Err(ExecutorError::UnknownParameter(_))));
+    }
+
+    #[test]
+    fn update_parameter_elides_top_level_lvalue_value() {
+        let mut executor = empty_executor();
+        executor
+            .state
+            .stack_mut(crate::state::ExecutionState::ROOT_STACK_ID)
+            .push(Value::Integer(5));
+        executor.state.promote_to_leader(
+            crate::state::ExecutionState::ROOT_STACK_ID,
+            LeaderKind::Param,
+            "speed".into(),
+        );
+
+        executor
+            .update_parameter(
+                "speed",
+                Value::Lvalue(crate::heap::VRc::new(Value::Float(2.5))),
+            )
+            .unwrap();
+
+        let param = &executor.state.active_params[0];
+        match with_heap(|h| h.get(param.leader_value).clone()) {
+            Value::Float(value) => assert_eq!(value, 2.5),
+            other => panic!("expected float leader value, got {}", other.type_name()),
+        }
+        match with_heap(|h| h.get(param.follower_value).clone()) {
+            Value::Float(value) => assert_eq!(value, 2.5),
+            other => panic!("expected float follower value, got {}", other.type_name()),
+        }
     }
 }

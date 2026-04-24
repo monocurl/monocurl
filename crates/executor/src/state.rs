@@ -282,9 +282,7 @@ impl ExecutionState {
         let slide = timestamp.slide as u64;
         let time_bits = timestamp.time.to_bits();
         Self::mix_random_bits(
-            Self::RNG_TIMESTAMP_BASIS
-                ^ slide.rotate_left(17)
-                ^ time_bits.rotate_right(11),
+            Self::RNG_TIMESTAMP_BASIS ^ slide.rotate_left(17) ^ time_bits.rotate_right(11),
         )
     }
 
@@ -404,7 +402,7 @@ impl ExecutionState {
     /// promote TOS to a leader-follower variable (mesh/param).
     pub fn promote_to_leader(&mut self, stack_idx: usize, kind: LeaderKind, name: String) {
         let stack = self.stack_mut(stack_idx);
-        let init_val = stack.pop();
+        let init_val = stack.pop().elide_lvalue().elide_leader();
 
         let leader_key = heap_alloc(init_val.clone());
         let follower_init = match kind {
@@ -516,6 +514,29 @@ mod tests {
             state.leaders[0].follower_value,
             state.active_params[0].follower_value
         );
+    }
+
+    #[test]
+    fn promote_to_leader_elides_top_level_lvalue_init() {
+        let mut state = ExecutionState::new();
+        state
+            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .push(Value::Lvalue(crate::heap::VRc::new(Value::Integer(7))));
+
+        state.promote_to_leader(
+            ExecutionState::ROOT_STACK_ID,
+            LeaderKind::Param,
+            "speed".into(),
+        );
+
+        let leader_key = state.leaders[0].leader_value;
+        match with_heap(|h| h.get(leader_key).clone()) {
+            Value::Integer(7) => {}
+            other => panic!(
+                "expected top-level lvalue to be elided, got {}",
+                other.type_name()
+            ),
+        }
     }
 
     #[test]

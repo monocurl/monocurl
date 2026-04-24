@@ -18,6 +18,15 @@ fn bool_value(value: bool) -> Value {
     Value::Integer(i64::from(value))
 }
 
+fn follow_heap_lvalues(mut key: executor::heap::HeapKey) -> (executor::heap::HeapKey, Value) {
+    let mut value = with_heap(|h| h.get(key).clone());
+    while let Some(next_key) = value.as_lvalue_key() {
+        key = next_key;
+        value = with_heap(|h| h.get(key).clone());
+    }
+    (key, value)
+}
+
 fn read_elided_value(executor: &Executor, stack_idx: usize, index: i32) -> Value {
     executor
         .state
@@ -105,33 +114,63 @@ fn get_attr_from_value(value: Value, attr_name: &str) -> Result<Value, ExecutorE
 }
 
 fn set_attr_on_stateful(
-    stateful: &Stateful,
+    stateful: &mut Stateful,
     attr_name: &str,
     rhs: &Value,
     stack_id: usize,
 ) -> Result<(), ExecutorError> {
-    match &stateful.body.root {
-        StatefulNode::LabeledCall { labels, args, .. } => {
-            if let Some((arg_idx, _)) = labels.iter().find(|(_, label)| label == attr_name) {
-                heap_replace(args[*arg_idx].key(), rhs.clone());
-            } else {
-                return Err(ExecutorError::missing_labeled_argument(attr_name));
-            }
-        }
-        StatefulNode::LabeledOperatorCall {
-            labels,
-            operand,
-            extra_args,
-            ..
-        } => {
-            if let Some((arg_idx, _)) = labels.iter().find(|(_, label)| label == attr_name) {
-                heap_replace(extra_args[*arg_idx].key(), rhs.clone());
-            } else {
-                set_attr_in_heap(operand.key(), attr_name, rhs, stack_id)?;
-            }
-        }
+    enum Target {
+        Call(usize),
+        OperatorArg(usize),
+        OperatorOperand,
+    }
+
+    let target = match &stateful.body.root {
+        StatefulNode::LabeledCall { labels, .. } => labels
+            .iter()
+            .find_map(|(arg_idx, label)| (label == attr_name).then_some(Target::Call(*arg_idx)))
+            .ok_or_else(|| ExecutorError::missing_labeled_argument(attr_name))?,
+        StatefulNode::LabeledOperatorCall { labels, .. } => labels
+            .iter()
+            .find_map(|(arg_idx, label)| {
+                (label == attr_name).then_some(Target::OperatorArg(*arg_idx))
+            })
+            .unwrap_or(Target::OperatorOperand),
         _ => {
             return Err(ExecutorError::CannotAttribute("stateful expression"));
+        }
+    };
+
+    match target {
+        Target::Call(arg_idx) => {
+            let key = {
+                let body = Rc::make_mut(&mut stateful.body);
+                let StatefulNode::LabeledCall { args, .. } = &mut body.root else {
+                    unreachable!();
+                };
+                args[arg_idx].make_mut()
+            };
+            heap_replace(key, rhs.clone());
+        }
+        Target::OperatorArg(arg_idx) => {
+            let key = {
+                let body = Rc::make_mut(&mut stateful.body);
+                let StatefulNode::LabeledOperatorCall { extra_args, .. } = &mut body.root else {
+                    unreachable!();
+                };
+                extra_args[arg_idx].make_mut()
+            };
+            heap_replace(key, rhs.clone());
+        }
+        Target::OperatorOperand => {
+            let key = {
+                let body = Rc::make_mut(&mut stateful.body);
+                let StatefulNode::LabeledOperatorCall { operand, .. } = &mut body.root else {
+                    unreachable!();
+                };
+                operand.make_mut()
+            };
+            set_attr_in_heap(key, attr_name, rhs, stack_id)?;
         }
     }
 
@@ -159,7 +198,14 @@ fn set_attr_on_value(
                 return Err(ExecutorError::missing_labeled_argument(attr_name));
             };
 
-            Rc::make_mut(&mut inv.body).arguments[arg_idx] = rhs.clone();
+            let key = {
+                let body = Rc::make_mut(&mut inv.body);
+                let key = body.arguments[arg_idx].make_mut_lvalue();
+                body.boxed_arguments.resize(body.arguments.len(), false);
+                body.boxed_arguments[arg_idx] = true;
+                key
+            };
+            heap_replace(key, rhs.clone());
             inv.cache.0.take();
             Ok(())
         }
@@ -170,19 +216,26 @@ fn set_attr_on_value(
                 .iter()
                 .find_map(|(arg_idx, label)| (label == attr_name).then_some(*arg_idx))
             {
-                Rc::make_mut(&mut inv.body).arguments[arg_idx] = rhs.clone();
+                let key = {
+                    let body = Rc::make_mut(&mut inv.body);
+                    let key = body.arguments[arg_idx].make_mut_lvalue();
+                    body.boxed_arguments.resize(body.arguments.len(), false);
+                    body.boxed_arguments[arg_idx] = true;
+                    key
+                };
+                heap_replace(key, rhs.clone());
                 invalidate_invoked_operator_cache(inv);
                 return Ok(());
             }
 
-            set_attr_on_value(
-                Rc::make_mut(&mut inv.body).operand.as_mut(),
-                attr_name,
-                rhs,
-                stack_id,
-            )?;
+            let key = {
+                let body = Rc::make_mut(&mut inv.body);
+                let key = body.operand.as_mut().make_mut_lvalue();
+                body.boxed_operand = true;
+                key
+            };
             invalidate_invoked_operator_cache(inv);
-            Ok(())
+            set_attr_in_heap(key, attr_name, rhs, stack_id)
         }
         Value::Stateful(stateful) => set_attr_on_stateful(stateful, attr_name, rhs, stack_id),
         _ => Err(ExecutorError::CannotAttribute(value.type_name())),
@@ -195,7 +248,7 @@ fn set_attr_in_heap(
     rhs: &Value,
     stack_id: usize,
 ) -> Result<(), ExecutorError> {
-    let base = with_heap(|h| h.get(key).clone());
+    let (key, base) = follow_heap_lvalues(key);
 
     if let Value::Leader(leader) = base {
         with_heap_mut(|h| {

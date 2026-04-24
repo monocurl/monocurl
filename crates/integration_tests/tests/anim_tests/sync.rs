@@ -190,15 +190,179 @@ fn test_lerp_of_mesh_operator_variants_after_label_mutation() {
 }
 
 #[test]
-fn test_stroke_operator_lerp_blends_from_identity_embed() {
+fn test_lerp_midpoint_interpolates_live_function_label_mutation() {
     let src = "
+        let make = |pos| centered_at{pos} Dot()
+
+        mesh x = make(pos: ORIGIN)
+        play Set()
+
+        x.pos = 2r
+        play Lerp(1)
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "math", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        match executor.seek_to(mid).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = &current else {
+        panic!("expected current mesh value");
+    };
+    let dot = mesh.dots.first().expect("expected midpoint dot");
+    assert!(
+        (dot.pos.x - 1.0).abs() < 1e-3,
+        "expected midpoint x near 1, got {}",
+        dot.pos.x
+    );
+}
+
+#[test]
+fn test_lerp_midpoint_interpolates_live_operator_label_mutation() {
+    let src = "
+        mesh x = centered_at{center: ORIGIN} Dot()
+        play Set()
+
+        x.center = 2r
+        play Lerp(1)
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "math", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        match executor.seek_to(mid).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = &current else {
+        panic!("expected current mesh value");
+    };
+    let dot = mesh.dots.first().expect("expected midpoint dot");
+    assert!(
+        (dot.pos.x - 1.0).abs() < 1e-3,
+        "expected midpoint x near 1, got {}",
+        dot.pos.x
+    );
+}
+
+#[test]
+fn test_second_lerp_after_live_operator_mutation_keeps_previous_follower_state() {
+    let src = "
+        mesh x = centered_at{center: ORIGIN} Dot()
+        play Set()
+
+        x.center = 2r
+        play Lerp(1)
+
+        x.center = 4r
+        play Lerp(1)
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "math", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 1.5));
+        match executor.seek_to(mid).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = &current else {
+        panic!("expected current mesh value");
+    };
+    let dot = mesh.dots.first().expect("expected midpoint dot");
+    assert!(
+        (dot.pos.x - 3.0).abs() < 1e-3,
+        "expected second midpoint x near 3, got {}",
+        dot.pos.x
+    );
+}
+
+#[test]
+fn test_second_lerp_after_live_function_mutation_keeps_previous_follower_state() {
+    let src = "
+        let make = |pos| centered_at{pos} Dot()
+
+        mesh x = make(pos: ORIGIN)
+        play Set()
+
+        x.pos = 2r
+        play Lerp(1)
+
+        x.pos = 4r
+        play Lerp(1)
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "math", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 1.5));
+        match executor.seek_to(mid).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = &current else {
+        panic!("expected current mesh value");
+    };
+    let dot = mesh.dots.first().expect("expected midpoint dot");
+    assert!(
+        (dot.pos.x - 3.0).abs() < 1e-3,
+        "expected second midpoint x near 3, got {}",
+        dot.pos.x
+    );
+}
+
+#[test]
+fn test_stroke_operator_lerp_blends_from_identity_embed() {
+    let init = "
         mesh x = shift{1r} Circle(1)
+    ";
+    let slide = "
         x = stroke{RED} x
         play Lerp()
     ";
 
     let (mut executor, _) = match build_anim_executor(
-        &[(src, SectionType::Slide)],
+        &[(init, SectionType::Init), (slide, SectionType::Slide)],
         &stdlib_bundles(["anim", "color", "mesh"]),
     ) {
         Ok(data) => data,
@@ -239,14 +403,16 @@ fn test_stroke_operator_lerp_blends_from_identity_embed() {
 
 #[test]
 fn test_point_map_operator_lerp_blends_from_identity_embed() {
-    let src = "
+    let init = "
         mesh x = shift{1r} Dot()
+    ";
+    let slide = "
         x = point_map{|p| p + 2r} x
         play Lerp()
     ";
 
     let (mut executor, _) = match build_anim_executor(
-        &[(src, SectionType::Slide)],
+        &[(init, SectionType::Init), (slide, SectionType::Slide)],
         &stdlib_bundles(["anim", "mesh"]),
     ) {
         Ok(data) => data,
@@ -840,6 +1006,23 @@ fn mesh_box_center(mesh: &Mesh) -> geo::simd::Float3 {
     (min + max) / 2.0
 }
 
+fn mesh_abs_y_sum(mesh: &Mesh) -> f32 {
+    mesh.dots
+        .iter()
+        .map(|dot| dot.pos.y.abs())
+        .chain(
+            mesh.lins
+                .iter()
+                .flat_map(|lin| [lin.a.pos.y.abs(), lin.b.pos.y.abs()]),
+        )
+        .chain(
+            mesh.tris
+                .iter()
+                .flat_map(|tri| [tri.a.pos.y.abs(), tri.b.pos.y.abs(), tri.c.pos.y.abs()]),
+        )
+        .sum()
+}
+
 fn value_tree_box_center(value: &Value) -> geo::simd::Float3 {
     let mut leaves = Vec::new();
     mesh_tree_leaves(value, &mut leaves);
@@ -967,6 +1150,94 @@ fn test_scale_scales_text_about_global_tree_center() {
 }
 
 #[test]
+fn test_lerp_midpoint_interpolates_explicit_func_mesh_after_init_sync() {
+    let init = "
+        let n = 50
+        let samples = 256
+
+        let ws = |a, b, x| {
+            var s = 0
+            var i = 0
+            while (i < n) {
+                s = s + a ^ i * cos((b ^ i) * PI * x)
+                i = i + 1
+            }
+            return s
+        }
+
+        let Weierstrass = |a, b| {
+            return stroke{BLUE} ExplicitFunc(
+                |x| ws(a, b, x),
+                [-4, 4, samples]
+            )
+        }
+
+        mesh w = Weierstrass(a: 0.5, b: 0.1)
+    ";
+
+    let slide = "
+        w.b = 4
+        play Lerp(4)
+    ";
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(init, SectionType::Init), (slide, SectionType::Slide)],
+        &stdlib_bundles(["anim", "color", "math", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let (start_sum, mid_sum, end_sum) = smol::block_on(async {
+        let start_ts = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0));
+        match executor.seek_to(start_ts).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected start seek error: {e}"),
+        }
+        let start = current_mesh_leader_value(&mut executor).await;
+
+        let mid_ts = executor.user_to_internal_timestamp(Timestamp::new(0, 2.0));
+        match executor.seek_to(mid_ts).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected midpoint seek error: {e}"),
+        }
+        let mid = current_mesh_leader_value(&mut executor).await;
+
+        let end_ts = executor.user_to_internal_timestamp(Timestamp::new(0, 4.0));
+        match executor.seek_to(end_ts).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected end seek error: {e}"),
+        }
+        let end = current_mesh_leader_value(&mut executor).await;
+
+        let Value::Mesh(start) = start else {
+            panic!("expected start mesh value");
+        };
+        let Value::Mesh(mid) = mid else {
+            panic!("expected midpoint mesh value");
+        };
+        let Value::Mesh(end) = end else {
+            panic!("expected end mesh value");
+        };
+
+        (
+            mesh_abs_y_sum(&start),
+            mesh_abs_y_sum(&mid),
+            mesh_abs_y_sum(&end),
+        )
+    });
+
+    assert!(
+        (mid_sum - start_sum).abs() > 1e-2,
+        "expected midpoint mesh to differ from start, got start={start_sum} mid={mid_sum}"
+    );
+    assert!(
+        (mid_sum - end_sum).abs() > 1e-2,
+        "expected midpoint mesh to differ from end, got mid={mid_sum} end={end_sum}"
+    );
+}
+
+#[test]
 fn test_text_trans_h_to_b_preserves_hole_winding_at_end() {
     let src = "
         mesh start = Text(\"H\", 1)
@@ -1089,14 +1360,21 @@ fn test_trans_square_to_circle_midpoint_keeps_boundary_off_origin() {
 #[test]
 fn test_trans_filled_square_to_clear_circle_fades_fill() {
     let r = run_anim_impl(
-        &[(
-            "
+        &[
+            (
+                "
                 mesh x = fill{WHITE} Square(2)
+            ",
+                SectionType::Init,
+            ),
+            (
+                "
                 x = stroke{WHITE} fill{CLEAR} Circle(1)
                 play Trans()
             ",
-            SectionType::Slide,
-        )],
+                SectionType::Slide,
+            ),
+        ],
         0,
         0.5,
         &stdlib_bundles(["anim", "color", "mesh"]),
@@ -1216,14 +1494,21 @@ fn test_trans_with_more_source_leaves_keeps_all_pairs_mid_animation() {
 #[test]
 fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
     let r = run_anim_impl(
-        &[(
-            "
+        &[
+            (
+                "
                 mesh x = Sphere(1, 0)
+            ",
+                SectionType::Init,
+            ),
+            (
+                "
                 x = Triangle([0, 0, 0], [1, 0, 0], [0, 1, 0])
                 play Trans()
             ",
-            SectionType::Slide,
-        )],
+                SectionType::Slide,
+            ),
+        ],
         0,
         0.5,
         &stdlib_bundles(["anim", "mesh"]),

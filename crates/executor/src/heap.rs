@@ -148,6 +148,14 @@ impl VRc {
         heap_retain(key);
         VRc(key)
     }
+
+    pub fn make_mut(&mut self) -> HeapKey {
+        if heap_ref_count(self.0) > 1 {
+            let value = with_heap(|h| h.get(self.0).clone());
+            *self = VRc::new(value);
+        }
+        self.0
+    }
 }
 
 impl VWeak {

@@ -34,6 +34,7 @@ pub enum StatefulNode {
     },
 }
 
+#[derive(Clone)]
 pub struct StatefulBody {
     /// non-owning HeapKeys to leader cells (LeaderEntry owns the VRc)
     pub roots: Vec<HeapKey>,

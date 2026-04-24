@@ -2,18 +2,24 @@ use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
-    heap::{HeapKey, VRc, VWeak, heap_ref_count, heap_replace, with_heap, with_heap_mut},
+    heap::{HeapKey, VRc, VWeak, heap_replace, with_heap, with_heap_mut},
     state::LeaderKind,
-    value::{Value, container::HashableKey, stateful::StatefulNode},
+    value::{
+        Value,
+        container::HashableKey,
+        stateful::{StatefulNode, reset_stateful_cache},
+    },
 };
 
 use super::{ExecSingle, Executor};
 
-fn is_empty_mesh_value(value: &Value) -> bool {
-    matches!(
-        value.clone().elide_lvalue_leader_rec(),
-        Value::List(list) if list.is_empty()
-    )
+fn follow_heap_lvalues(mut key: HeapKey) -> (HeapKey, Value) {
+    let mut value = with_heap(|h| h.get(key).clone());
+    while let Some(next_key) = value.as_lvalue_key() {
+        key = next_key;
+        value = with_heap(|h| h.get(key).clone());
+    }
+    (key, value)
 }
 
 impl Executor {
@@ -49,28 +55,15 @@ impl Executor {
             None => return ExecSingle::Error(ExecutorError::CannotAssignTo(lhs.type_name())),
         };
 
-        let target = with_heap(|h| h.get(key).clone());
+        let (key, target) = follow_heap_lvalues(key);
 
         match target {
             Value::Leader(leader) => {
+                let rhs = rhs.elide_lvalue().elide_leader();
                 if matches!(rhs, Value::Stateful(_)) && leader.kind != LeaderKind::Mesh {
                     return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
                 let stack_id = self.state.stack(stack_idx).stack_id;
-                if leader.kind == LeaderKind::Mesh {
-                    let follower = with_heap(|h| h.get(leader.follower_rc.key()).clone());
-                    if is_empty_mesh_value(&follower) {
-                        let current = with_heap(|h| h.get(leader.leader_rc.key()).clone());
-                        if !is_empty_mesh_value(&current) {
-                            heap_replace(leader.follower_rc.key(), current.to_follower_stateful());
-                            with_heap_mut(|h| {
-                                if let Value::Leader(l) = &mut *h.get_mut(key) {
-                                    l.follower_version += 1;
-                                }
-                            });
-                        }
-                    }
-                }
                 heap_replace(leader.leader_rc.key(), rhs);
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(key) {
@@ -136,7 +129,7 @@ impl Executor {
             return ExecSingle::Error(ExecutorError::stateful_cannot_append());
         }
 
-        let base_val = with_heap(|h| h.get(key).clone());
+        let (key, base_val) = follow_heap_lvalues(key);
         match base_val {
             Value::List(mut list) => {
                 Rc::make_mut(&mut list).elements.push(VRc::new(rhs));
@@ -167,8 +160,7 @@ impl Executor {
                 }
             };
 
-            // update last_modified_stack if base is a leader
-            let base_val = with_heap(|h| h.get(base_key).clone());
+            let (base_key, base_val) = follow_heap_lvalues(base_key);
             if let Value::Leader(_) = &base_val {
                 let stack_id = self.state.stack(stack_idx).stack_id;
                 with_heap_mut(|h| {
@@ -180,7 +172,7 @@ impl Executor {
             }
 
             match base_val {
-                Value::List(list) => {
+                Value::List(mut list) => {
                     let Value::Integer(idx) = index else {
                         return ExecSingle::Error(ExecutorError::type_error(
                             "int",
@@ -195,87 +187,35 @@ impl Executor {
                         });
                     }
 
-                    with_heap_mut(|h| {
-                        let Value::List(list_mut) = &mut *h.get_mut(base_key) else {
-                            unreachable!();
-                        };
-                        Rc::make_mut(list_mut);
-                    });
-
-                    let elem_ref = with_heap(|h| match &*h.get(base_key) {
-                        Value::List(list) => list.elements[idx].clone(),
-                        _ => unreachable!(),
-                    });
-                    let elem_ref = if heap_ref_count(elem_ref.key()) > 1 {
-                        let val = with_heap(|h| h.get(elem_ref.key()).clone());
-                        let new_ref = VRc::new(val);
-                        let _old_ref = with_heap_mut(|h| {
-                            let Value::List(list_mut) = &mut *h.get_mut(base_key) else {
-                                unreachable!();
-                            };
-                            std::mem::replace(
-                                &mut Rc::make_mut(list_mut).elements[idx],
-                                new_ref.clone(),
-                            )
-                        });
-                        new_ref
-                    } else {
-                        elem_ref
-                    };
+                    let key = Rc::make_mut(&mut list).elements[idx].make_mut();
+                    heap_replace(base_key, Value::List(list));
 
                     self.state
                         .stack_mut(stack_idx)
-                        .push(Value::WeakLvalue(elem_ref.downgrade()));
+                        .push(Value::WeakLvalue(VWeak::from(key)));
                 }
-                Value::Map(_) => {
+                Value::Map(mut map) => {
                     let key_hash = match HashableKey::try_from_value(&index) {
                         Ok(k) => k,
                         Err(e) => return ExecSingle::Error(e),
                     };
 
-                    with_heap_mut(|h| {
-                        let Value::Map(map_mut) = &mut *h.get_mut(base_key) else {
-                            unreachable!();
-                        };
-                        Rc::make_mut(map_mut);
-                    });
-
-                    let existing = with_heap(|h| match &*h.get(base_key) {
-                        Value::Map(map) => map.get(&key_hash).cloned(),
-                        _ => unreachable!(),
-                    });
-
-                    let elem_ref = match existing {
-                        Some(val_ref) if heap_ref_count(val_ref.key()) > 1 => {
-                            let val = with_heap(|h| h.get(val_ref.key()).clone());
-                            let new_ref = VRc::new(val);
-                            let _old_ref = with_heap_mut(|h| {
-                                let Value::Map(map_mut) = &mut *h.get_mut(base_key) else {
-                                    unreachable!();
-                                };
-                                let map = Rc::make_mut(map_mut);
-                                std::mem::replace(
-                                    map.entries.get_mut(&key_hash).unwrap(),
-                                    new_ref.clone(),
-                                )
-                            });
-                            new_ref
-                        }
-                        Some(val_ref) => val_ref,
-                        None => {
-                            let new_ref = VRc::new(Value::Nil);
-                            with_heap_mut(|h| {
-                                let Value::Map(map_mut) = &mut *h.get_mut(base_key) else {
-                                    unreachable!();
-                                };
-                                Rc::make_mut(map_mut).insert(key_hash, new_ref.clone());
-                            });
-                            new_ref
+                    let key = {
+                        let map = Rc::make_mut(&mut map);
+                        match map.get_mut(&key_hash) {
+                            Some(value_ref) => value_ref.make_mut(),
+                            None => {
+                                let new_ref = VRc::new(Value::Nil);
+                                let key = new_ref.key();
+                                map.insert(key_hash, new_ref);
+                                key
+                            }
                         }
                     };
+                    heap_replace(base_key, Value::Map(map));
                     self.state
                         .stack_mut(stack_idx)
-                        .push(Value::WeakLvalue(elem_ref.downgrade()));
+                        .push(Value::WeakLvalue(VWeak::from(key)));
                 }
                 Value::Leader(leader) => {
                     // push a weak lvalue for the leader's inner slot, then recurse
@@ -371,7 +311,7 @@ impl Executor {
                 }
             };
 
-            let base_val = with_heap(|h| h.get(base_key).clone());
+            let (base_key, base_val) = follow_heap_lvalues(base_key);
             if let Value::Leader(_) = &base_val {
                 let stack_id = self.state.stack(stack_idx).stack_id;
                 with_heap_mut(|h| {
@@ -389,113 +329,77 @@ impl Executor {
                         .push(Value::Lvalue(leader.leader_rc.clone()));
                     return self.exec_attribute(stack_idx, section_idx, true, string_index);
                 }
-                Value::InvokedFunction(ref inv) => {
+                Value::InvokedFunction(mut inv) => {
                     let label_idx = inv.body.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
-                        if inv
-                            .body
-                            .boxed_arguments
-                            .get(arg_idx)
-                            .copied()
-                            .unwrap_or(false)
-                        {
-                            let key = inv.body.arguments[arg_idx]
-                                .as_lvalue_key()
-                                .expect("boxed live function arg must stay addressable");
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(VWeak::from(key)));
-                        } else {
-                            let arg_val = inv.body.arguments[arg_idx].clone();
-                            let arg_ref = VRc::new(arg_val);
-                            with_heap_mut(|h| {
-                                if let Value::InvokedFunction(inv_mut) = &mut *h.get_mut(base_key) {
-                                    let body = Rc::make_mut(&mut inv_mut.body);
-                                    body.arguments[arg_idx] = Value::Lvalue(arg_ref.clone());
-                                    body.boxed_arguments.resize(body.arguments.len(), false);
-                                    body.boxed_arguments[arg_idx] = true;
-                                    inv_mut.cache.0.take();
-                                }
-                            });
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(arg_ref.downgrade()));
-                        }
+                        let key = {
+                            let body = Rc::make_mut(&mut inv.body);
+                            let key = body.arguments[arg_idx].make_mut_lvalue();
+                            body.boxed_arguments.resize(body.arguments.len(), false);
+                            body.boxed_arguments[arg_idx] = true;
+                            key
+                        };
+                        inv.cache.0.take();
+                        heap_replace(base_key, Value::InvokedFunction(inv));
+                        self.state
+                            .stack_mut(stack_idx)
+                            .push(Value::WeakLvalue(VWeak::from(key)));
                     } else {
                         return ExecSingle::Error(ExecutorError::missing_labeled_argument(
                             attr_name.clone(),
                         ));
                     }
                 }
-                Value::InvokedOperator(ref inv) => {
+                Value::InvokedOperator(mut inv) => {
                     let label_idx = inv.body.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
-                        if inv
-                            .body
-                            .boxed_arguments
-                            .get(arg_idx)
-                            .copied()
-                            .unwrap_or(false)
-                        {
-                            let key = inv.body.arguments[arg_idx]
-                                .as_lvalue_key()
-                                .expect("boxed live operator arg must stay addressable");
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(VWeak::from(key)));
-                        } else {
-                            let arg_val = inv.body.arguments[arg_idx].clone();
-                            let arg_ref = VRc::new(arg_val);
-                            with_heap_mut(|h| {
-                                if let Value::InvokedOperator(inv_mut) = &mut *h.get_mut(base_key) {
-                                    let body = Rc::make_mut(&mut inv_mut.body);
-                                    body.arguments[arg_idx] = Value::Lvalue(arg_ref.clone());
-                                    body.boxed_arguments.resize(body.arguments.len(), false);
-                                    body.boxed_arguments[arg_idx] = true;
-                                    inv_mut.cache.cached_result.take();
-                                    inv_mut.cache.unmodified.take();
-                                }
-                            });
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(arg_ref.downgrade()));
-                        }
+                        let key = {
+                            let body = Rc::make_mut(&mut inv.body);
+                            let key = body.arguments[arg_idx].make_mut_lvalue();
+                            body.boxed_arguments.resize(body.arguments.len(), false);
+                            body.boxed_arguments[arg_idx] = true;
+                            key
+                        };
+                        inv.cache.cached_result.take();
+                        inv.cache.unmodified.take();
+                        heap_replace(base_key, Value::InvokedOperator(inv));
+                        self.state
+                            .stack_mut(stack_idx)
+                            .push(Value::WeakLvalue(VWeak::from(key)));
                     } else {
-                        if inv.body.boxed_operand {
-                            let key = inv
-                                .body
-                                .operand
-                                .as_ref()
-                                .as_lvalue_key()
-                                .expect("boxed live operator operand must stay addressable");
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(VWeak::from(key)));
-                        } else {
-                            let operand_ref = VRc::new(inv.body.operand.as_ref().clone());
-                            with_heap_mut(|h| {
-                                if let Value::InvokedOperator(inv_mut) = &mut *h.get_mut(base_key) {
-                                    let body = Rc::make_mut(&mut inv_mut.body);
-                                    body.operand = Box::new(Value::Lvalue(operand_ref.clone()));
-                                    body.boxed_operand = true;
-                                    inv_mut.cache.cached_result.take();
-                                    inv_mut.cache.unmodified.take();
-                                }
-                            });
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(operand_ref.downgrade()));
-                        }
+                        let key = {
+                            let body = Rc::make_mut(&mut inv.body);
+                            let key = body.operand.as_mut().make_mut_lvalue();
+                            body.boxed_operand = true;
+                            key
+                        };
+                        inv.cache.cached_result.take();
+                        inv.cache.unmodified.take();
+                        heap_replace(base_key, Value::InvokedOperator(inv));
+                        self.state
+                            .stack_mut(stack_idx)
+                            .push(Value::WeakLvalue(VWeak::from(key)));
                         return self.exec_attribute(stack_idx, section_idx, true, string_index);
                     }
                 }
-                Value::Stateful(ref stateful) => match &stateful.body.root {
-                    StatefulNode::LabeledCall { labels, args, .. } => {
+                Value::Stateful(mut stateful) => match &stateful.body.root {
+                    StatefulNode::LabeledCall {
+                        labels, args: _, ..
+                    } => {
                         let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                         if let Some(&(arg_idx, _)) = label_idx {
+                            let key = {
+                                let body = Rc::make_mut(&mut stateful.body);
+                                let StatefulNode::LabeledCall { args, .. } = &mut body.root else {
+                                    unreachable!();
+                                };
+                                args[arg_idx].make_mut()
+                            };
+                            reset_stateful_cache(&stateful);
+                            heap_replace(base_key, Value::Stateful(stateful));
                             self.state
                                 .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(args[arg_idx].downgrade()));
+                                .push(Value::WeakLvalue(VWeak::from(key)));
                         } else {
                             return ExecSingle::Error(ExecutorError::missing_labeled_argument(
                                 attr_name.clone(),
@@ -504,19 +408,41 @@ impl Executor {
                     }
                     StatefulNode::LabeledOperatorCall {
                         labels,
-                        operand,
-                        extra_args,
+                        operand: _,
+                        extra_args: _,
                         ..
                     } => {
                         let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                         if let Some(&(arg_idx, _)) = label_idx {
+                            let key = {
+                                let body = Rc::make_mut(&mut stateful.body);
+                                let StatefulNode::LabeledOperatorCall { extra_args, .. } =
+                                    &mut body.root
+                                else {
+                                    unreachable!();
+                                };
+                                extra_args[arg_idx].make_mut()
+                            };
+                            reset_stateful_cache(&stateful);
+                            heap_replace(base_key, Value::Stateful(stateful));
                             self.state
                                 .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(extra_args[arg_idx].downgrade()));
+                                .push(Value::WeakLvalue(VWeak::from(key)));
                         } else {
+                            let key = {
+                                let body = Rc::make_mut(&mut stateful.body);
+                                let StatefulNode::LabeledOperatorCall { operand, .. } =
+                                    &mut body.root
+                                else {
+                                    unreachable!();
+                                };
+                                operand.make_mut()
+                            };
+                            reset_stateful_cache(&stateful);
+                            heap_replace(base_key, Value::Stateful(stateful));
                             self.state
                                 .stack_mut(stack_idx)
-                                .push(Value::Lvalue(operand.clone()));
+                                .push(Value::WeakLvalue(VWeak::from(key)));
                             return self.exec_attribute(stack_idx, section_idx, true, string_index);
                         }
                     }

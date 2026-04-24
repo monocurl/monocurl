@@ -1,7 +1,7 @@
 use crate::{
     error::ExecutorError,
     executor::Executor,
-    heap::{HeapKey, with_heap},
+    heap::{HeapKey, VRc, with_heap},
 };
 
 use super::{
@@ -119,6 +119,26 @@ impl Value {
             Value::Lvalue(vrc) => Some(vrc.key()),
             Value::WeakLvalue(vweak) => Some(vweak.key()),
             _ => None,
+        }
+    }
+
+    pub fn make_mut_lvalue(&mut self) -> HeapKey {
+        match self {
+            Value::Lvalue(vrc) => vrc.make_mut(),
+            Value::WeakLvalue(vweak) => {
+                let value = with_heap(|h| h.get(vweak.key()).clone());
+                let vrc = VRc::new(value);
+                let key = vrc.key();
+                *self = Value::Lvalue(vrc);
+                key
+            }
+            _ => {
+                let value = std::mem::replace(self, Value::Nil);
+                let vrc = VRc::new(value);
+                let key = vrc.key();
+                *self = Value::Lvalue(vrc);
+                key
+            }
         }
     }
 
