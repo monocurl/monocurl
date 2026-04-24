@@ -144,3 +144,62 @@ fn test_ref_lambda_called_with_value_reports_runtime_error_instead_of_panicking(
     ");
     r.assert_error("cannot assign");
 }
+
+#[test]
+fn test_ref_lambda_returning_anim_can_be_played_multiple_times() {
+    let r = run("
+        param cam = 0
+
+        let View = |&camera_ref, at| anim {
+            camera_ref = at
+        }
+
+        play View(&cam, 4)
+        play View(&cam, 5)
+
+        let result = *cam
+    ");
+    r.assert_int(5);
+}
+
+#[test]
+fn test_nested_ref_anim_invocation_can_be_played_multiple_times() {
+    let r = run("
+        param cam = 0
+
+        let CameraLerp = |&camera_ref, time = 1| anim {
+            camera_ref = time
+        }
+
+        let View = |&camera_ref, at| anim {
+            camera_ref = at
+            play CameraLerp(&camera_ref, 3)
+        }
+
+        play View(&cam, 4)
+        play View(&cam, 5)
+
+        let result = *cam
+    ");
+    r.assert_int(3);
+}
+
+#[test]
+fn test_camera_lerp_view_lambda_can_be_played_multiple_times() {
+    let r = run_with_stdlib(
+        "
+        mesh cam = DEFAULT_CAMERA
+
+        let View = |&camera_ref, at| anim {
+            play CameraLerp(&camera_ref, 3)
+        }
+
+        play View(&cam, 4)
+        play View(&cam, 5)
+
+        let result = 1
+    ",
+        &["scene", "anim"],
+    );
+    r.assert_int(1);
+}

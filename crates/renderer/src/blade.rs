@@ -23,7 +23,7 @@ const DEPTH_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Depth32Float;
 const MAX_FRAME_TIME_MS: u32 = 10_000;
 const DEPTH_STEP: f32 = 1e-6;
 const DESIRED_MSAA_SAMPLE_COUNT: u32 = 4;
-const DEFAULT_LINE_MITER_SCALE: f32 = 1.0;
+const DEFAULT_LINE_MITER_SCALE: f32 = 4.0;
 const LINE_VERTICES_PER_INSTANCE: u32 = 6;
 const REFERENCE_WIDTH: f32 = 1480.0;
 const WHITE_TEXTURE: [u8; 4] = [255, 255, 255, 255];
@@ -942,7 +942,7 @@ impl Pipelines {
                 primitive: gpu::PrimitiveState {
                     topology: gpu::PrimitiveTopology::TriangleList,
                     front_face: gpu::FrontFace::Ccw,
-                    cull_mode: Some(gpu::Face::Back),
+                    cull_mode: None,
                     ..Default::default()
                 },
                 depth_stencil: Some(depth_stencil.clone()),

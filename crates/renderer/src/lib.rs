@@ -273,7 +273,7 @@ mod tests {
 
     use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot};
     use geo::{
-        mesh::{Mesh, Tri, TriVertex, Uniforms},
+        mesh::{Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
         simd::{Float2, Float3, Float4},
     };
 
@@ -344,6 +344,177 @@ mod tests {
         assert_ne!(before, after);
     }
 
+    #[test]
+    fn renders_standalone_line_pixels() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::new(line_mesh(Float4::new(1.0, 0.0, 0.0, 1.0)))],
+        };
+
+        let image = renderer.render(&scene, RenderSize::new(128, 128)).unwrap();
+        let red_pixels = image
+            .pixels()
+            .filter(|pixel| {
+                let [b, g, r, a] = pixel.0;
+                a > 0 && r > 48 && r > b.saturating_add(24) && r > g.saturating_add(24)
+            })
+            .count();
+
+        assert!(
+            red_pixels > 0,
+            "expected standalone line render to produce visible red pixels"
+        );
+    }
+
+    #[test]
+    fn renders_stroked_triangle_pixels() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::new(stroked_triangle_mesh(
+                Float4::new(0.0, 0.0, 1.0, 1.0),
+                Float4::new(1.0, 0.0, 0.0, 1.0),
+            ))],
+        };
+
+        let image = renderer.render(&scene, RenderSize::new(128, 128)).unwrap();
+        let red_pixels = image
+            .pixels()
+            .filter(|pixel| {
+                let [b, g, r, a] = pixel.0;
+                a > 0 && r > 48 && r > b.saturating_add(24) && r > g.saturating_add(24)
+            })
+            .count();
+        let blue_pixels = image
+            .pixels()
+            .filter(|pixel| {
+                let [b, g, r, a] = pixel.0;
+                a > 0 && b > 48 && b > r.saturating_add(24) && b > g.saturating_add(24)
+            })
+            .count();
+
+        assert!(
+            blue_pixels > 0,
+            "expected stroked triangle render to produce visible blue fill pixels"
+        );
+        assert!(
+            red_pixels > 0,
+            "expected stroked triangle render to produce visible red stroke pixels"
+        );
+    }
+
+    #[test]
+    fn renders_clockwise_triangle_pixels() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let mut triangle = flat_triangle_mesh(Float4::new(0.0, 1.0, 0.0, 1.0), 0);
+        std::mem::swap(&mut triangle.tris[0].b, &mut triangle.tris[0].c);
+
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::new(triangle)],
+        };
+
+        let image = renderer.render(&scene, RenderSize::new(128, 128)).unwrap();
+        let green_pixels = image
+            .pixels()
+            .filter(|pixel| {
+                let [b, g, r, a] = pixel.0;
+                a > 0 && g > 48 && g > r.saturating_add(24) && g > b.saturating_add(24)
+            })
+            .count();
+
+        assert!(
+            green_pixels > 0,
+            "expected clockwise triangle winding to remain visible"
+        );
+    }
+
+    #[test]
+    fn linked_polyline_adds_corner_pixels_over_disconnected_segments() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let joined = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::new(elbow_line_mesh(
+                true,
+                Float4::new(1.0, 0.0, 0.0, 1.0),
+            ))],
+        };
+        let disconnected = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::new(elbow_line_mesh(
+                false,
+                Float4::new(1.0, 0.0, 0.0, 1.0),
+            ))],
+        };
+
+        let joined_image = renderer.render(&joined, RenderSize::new(128, 128)).unwrap();
+        let disconnected_image = renderer
+            .render(&disconnected, RenderSize::new(128, 128))
+            .unwrap();
+
+        let joined_red = count_red_pixels(&joined_image);
+        let disconnected_red = count_red_pixels(&disconnected_image);
+
+        assert!(
+            joined_red > disconnected_red,
+            "expected linked polyline join to add visible corner pixels, got joined={joined_red} disconnected={disconnected_red}"
+        );
+    }
+
+    #[test]
+    fn linked_polyline_populates_outer_corner_miter_region() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(1024, 1024);
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::new(elbow_line_mesh(
+                true,
+                Float4::new(1.0, 0.0, 0.0, 1.0),
+            ))],
+        };
+
+        let image = renderer.render(&scene, size).unwrap();
+        let joint = screen_point(Float3::new(-0.35, -0.35, 0.0), size);
+        let outer_corner_red = image
+            .enumerate_pixels()
+            .filter(|(x, y, pixel)| {
+                let dx = *x as i32 - joint.0;
+                let dy = *y as i32 - joint.1;
+                let [b, g, r, a] = pixel.0;
+                dx <= -8
+                    && dx >= -14
+                    && dy >= 8
+                    && dy <= 14
+                    && a > 0
+                    && r > 48
+                    && r > b.saturating_add(24)
+                    && r > g.saturating_add(24)
+            })
+            .count();
+
+        assert!(
+            outer_corner_red > 0,
+            "expected linked polyline to populate the miter-only outer corner region"
+        );
+    }
+
     fn flat_triangle_mesh(color: Float4, z_index: i32) -> Mesh {
         Mesh {
             dots: Vec::new(),
@@ -381,6 +552,181 @@ mod tests {
                 img: None,
                 z_index,
             },
+            tag: Vec::new(),
+        }
+    }
+
+    fn count_red_pixels(image: &image::RgbaImage) -> usize {
+        image
+            .pixels()
+            .filter(|pixel| {
+                let [b, g, r, a] = pixel.0;
+                a > 0 && r > 48 && r > b.saturating_add(24) && r > g.saturating_add(24)
+            })
+            .count()
+    }
+
+    fn screen_point(world: Float3, size: RenderSize) -> (i32, i32) {
+        let camera = CameraSnapshot::default();
+        let basis = camera.basis();
+        let relative = world - basis.position;
+        let model_x = relative.dot(basis.right);
+        let model_y = relative.dot(basis.up);
+        let model_z = relative.dot(basis.forward);
+        let tan_half_fov = (basis.fov * 0.5).tan().max(0.05);
+        let aspect = size.width.max(1) as f32 / size.height.max(1) as f32;
+        let ndc_x = model_x / (model_z * tan_half_fov * aspect);
+        let ndc_y = model_y / (model_z * tan_half_fov);
+        let x = ((ndc_x + 1.0) * 0.5 * size.width as f32).round() as i32;
+        let y = ((1.0 - (ndc_y + 1.0) * 0.5) * size.height as f32).round() as i32;
+        (x, y)
+    }
+
+    fn line_mesh(color: Float4) -> Mesh {
+        Mesh {
+            dots: Vec::new(),
+            lins: vec![Lin {
+                a: LinVertex {
+                    pos: Float3::new(-0.5, 0.0, 0.0),
+                    col: color,
+                },
+                b: LinVertex {
+                    pos: Float3::new(0.5, 0.0, 0.0),
+                    col: color,
+                },
+                norm: Float3::Z,
+                prev: -1,
+                next: -1,
+                inv: -1,
+                anti: -1,
+                is_dom_sib: false,
+            }],
+            tris: Vec::new(),
+            uniform: Uniforms::default(),
+            tag: Vec::new(),
+        }
+    }
+
+    fn elbow_line_mesh(linked: bool, color: Float4) -> Mesh {
+        let (first_next, second_prev) = if linked { (1, 0) } else { (-1, -1) };
+        Mesh {
+            dots: Vec::new(),
+            lins: vec![
+                Lin {
+                    a: LinVertex {
+                        pos: Float3::new(-0.35, 0.35, 0.0),
+                        col: color,
+                    },
+                    b: LinVertex {
+                        pos: Float3::new(-0.35, -0.35, 0.0),
+                        col: color,
+                    },
+                    norm: Float3::Z,
+                    prev: -1,
+                    next: first_next,
+                    inv: -1,
+                    anti: -1,
+                    is_dom_sib: false,
+                },
+                Lin {
+                    a: LinVertex {
+                        pos: Float3::new(-0.35, -0.35, 0.0),
+                        col: color,
+                    },
+                    b: LinVertex {
+                        pos: Float3::new(0.35, -0.35, 0.0),
+                        col: color,
+                    },
+                    norm: Float3::Z,
+                    prev: second_prev,
+                    next: -1,
+                    inv: -1,
+                    anti: -1,
+                    is_dom_sib: false,
+                },
+            ],
+            tris: Vec::new(),
+            uniform: Uniforms::default(),
+            tag: Vec::new(),
+        }
+    }
+
+    fn stroked_triangle_mesh(fill: Float4, stroke: Float4) -> Mesh {
+        Mesh {
+            dots: Vec::new(),
+            lins: vec![
+                Lin {
+                    a: LinVertex {
+                        pos: Float3::new(-0.5, -0.5, 0.0),
+                        col: stroke,
+                    },
+                    b: LinVertex {
+                        pos: Float3::new(0.5, -0.5, 0.0),
+                        col: stroke,
+                    },
+                    norm: Float3::Z,
+                    prev: 2,
+                    next: 1,
+                    inv: -1,
+                    anti: -1,
+                    is_dom_sib: false,
+                },
+                Lin {
+                    a: LinVertex {
+                        pos: Float3::new(0.5, -0.5, 0.0),
+                        col: stroke,
+                    },
+                    b: LinVertex {
+                        pos: Float3::new(-0.5, 0.5, 0.0),
+                        col: stroke,
+                    },
+                    norm: Float3::Z,
+                    prev: 0,
+                    next: 2,
+                    inv: -1,
+                    anti: -1,
+                    is_dom_sib: false,
+                },
+                Lin {
+                    a: LinVertex {
+                        pos: Float3::new(-0.5, 0.5, 0.0),
+                        col: stroke,
+                    },
+                    b: LinVertex {
+                        pos: Float3::new(-0.5, -0.5, 0.0),
+                        col: stroke,
+                    },
+                    norm: Float3::Z,
+                    prev: 1,
+                    next: 0,
+                    inv: -1,
+                    anti: -1,
+                    is_dom_sib: false,
+                },
+            ],
+            tris: vec![Tri {
+                a: TriVertex {
+                    pos: Float3::new(-0.5, -0.5, 0.0),
+                    col: fill,
+                    uv: Float2::new(0.0, 0.0),
+                },
+                b: TriVertex {
+                    pos: Float3::new(0.5, -0.5, 0.0),
+                    col: fill,
+                    uv: Float2::new(1.0, 0.0),
+                },
+                c: TriVertex {
+                    pos: Float3::new(-0.5, 0.5, 0.0),
+                    col: fill,
+                    uv: Float2::new(0.0, 1.0),
+                },
+                ab: -2,
+                bc: -3,
+                ca: -4,
+                anti: -1,
+                is_dom_sib: false,
+            }],
+            uniform: Uniforms::default(),
             tag: Vec::new(),
         }
     }

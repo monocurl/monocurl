@@ -60,6 +60,7 @@ impl RuntimeState {
                     let old_user_timestamp = self.executor.internal_to_user_timestamp(self.target);
                     self.executor.update_bytecode(bytecode);
                     self.target = self.executor.user_to_internal_timestamp(old_user_timestamp);
+                    self.executor.restore_live_state_to_cache_point(self.target);
                     self.has_compiler_error = false;
                 } else {
                     self.has_compiler_error = true;
@@ -317,5 +318,57 @@ impl ExecutionService {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use executor::{state::ExecutionState, value::Value};
+    use structs::rope::{Rope, TextAggregate};
+
+    use super::{RuntimeState, default_bytecode};
+    use crate::services::execution::ExecutionMessage;
+
+    #[test]
+    fn update_bytecode_restores_live_executor_state_to_cache_point() {
+        let mut runtime = RuntimeState::new();
+
+        let child = runtime
+            .executor
+            .state
+            .alloc_stack((0, 0), Some(ExecutionState::ROOT_STACK_ID), None)
+            .expect("child stack");
+        runtime
+            .executor
+            .state
+            .stack_mut(child)
+            .push(Value::Integer(7));
+        runtime.executor.state.execution_heads.insert(child);
+
+        runtime.apply_message(ExecutionMessage::UpdateBytecode {
+            bytecode: Some(default_bytecode()),
+            root_text_rope: Rope::<TextAggregate>::default(),
+            version: 1,
+        });
+
+        assert_eq!(runtime.executor.state.alive_stack_count, 1);
+        assert_eq!(
+            runtime
+                .executor
+                .state
+                .execution_heads
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![ExecutionState::ROOT_STACK_ID]
+        );
+        assert_eq!(
+            runtime
+                .executor
+                .state
+                .stack(ExecutionState::ROOT_STACK_ID)
+                .stack_len(),
+            0
+        );
     }
 }

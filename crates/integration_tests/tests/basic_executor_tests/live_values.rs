@@ -535,6 +535,29 @@ fn test_dashed_operator_preserves_surface_fill_while_replacing_strokes() {
 }
 
 #[test]
+fn test_gloss_operator_defaults_filter_to_nil() {
+    let r = run_with_stdlib(
+        "
+        let result = gloss{} Triangle([0, 0, 0], [1, 0, 0], [0, 1, 0])
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+
+    assert_eq!(meshes.len(), 1, "expected one glossed triangle mesh");
+    assert_eq!(meshes[0].tris.len(), 1, "expected triangle geometry");
+    assert_eq!(
+        meshes[0].uniform.gloss.to_bits(),
+        geo::mesh::GLOSSY_GLOSS.to_bits(),
+        "expected gloss operator to enable glossy shading"
+    );
+}
+
+#[test]
 fn test_tag_filter_operator_reads_filtered_side() {
     let r = run_with_stdlib(
         "

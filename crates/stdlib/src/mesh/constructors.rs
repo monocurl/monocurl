@@ -329,7 +329,9 @@ mod tests {
     use executor::value::Value;
     use geo::simd::Float3;
 
-    use super::{closed_polyline, fan_tris, mesh_ref, open_polyline, triangle_mesh, vector_like_mesh};
+    use super::{
+        closed_polyline, fan_tris, mesh_ref, open_polyline, triangle_mesh, vector_like_mesh,
+    };
 
     #[test]
     fn closed_polyline_sets_reciprocal_links() {
@@ -370,8 +372,7 @@ mod tests {
 
     #[test]
     fn triangle_mesh_sets_closed_boundary_links() {
-        let Value::Mesh(mesh) = triangle_mesh(Float3::ZERO, Float3::X, Float3::Y, Float3::Z)
-        else {
+        let Value::Mesh(mesh) = triangle_mesh(Float3::ZERO, Float3::X, Float3::Y, Float3::Z) else {
             panic!("expected mesh");
         };
 

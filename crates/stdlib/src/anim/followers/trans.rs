@@ -2742,24 +2742,9 @@ mod tests {
     #[test]
     fn prepare_trans_mesh_pair_handles_clockwise_triangle_to_annulus() {
         let mut lins = vec![
-            line(
-                Float3::new(1.5, 1.8, 0.0),
-                Float3::new(2.5, 3.4, 0.0),
-                2,
-                1,
-            ),
-            line(
-                Float3::new(2.5, 3.4, 0.0),
-                Float3::new(3.3, 1.7, 0.0),
-                0,
-                2,
-            ),
-            line(
-                Float3::new(3.3, 1.7, 0.0),
-                Float3::new(1.5, 1.8, 0.0),
-                1,
-                0,
-            ),
+            line(Float3::new(1.5, 1.8, 0.0), Float3::new(2.5, 3.4, 0.0), 2, 1),
+            line(Float3::new(2.5, 3.4, 0.0), Float3::new(3.3, 1.7, 0.0), 0, 2),
+            line(Float3::new(3.3, 1.7, 0.0), Float3::new(1.5, 1.8, 0.0), 1, 0),
         ];
         let mut triangle = tri(
             Float3::new(1.5, 1.8, 0.0),

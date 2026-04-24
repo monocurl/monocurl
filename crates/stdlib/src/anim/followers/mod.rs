@@ -4,7 +4,7 @@ mod write;
 
 use std::sync::Arc;
 
-use executor::{error::ExecutorError, executor::Executor, state::LeaderKind, value::Value};
+use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
     mesh::{Mesh, Uniforms},
     simd::Float3,
@@ -12,9 +12,8 @@ use geo::{
 use stdlib_macros::stdlib_func;
 
 use super::helpers::{
-    build_lerp, collapse_mesh, decompose_mesh_tree, fade_start_mesh, list_value, map_mesh_tree,
+    collapse_mesh, decompose_mesh_tree, fade_start_mesh, list_value, map_mesh_tree,
     materialize_live_value, mesh_center, pack_mesh_tree, prefer_single_mesh_tree_value,
-    progression_from, read_time, resolve_targets,
 };
 
 #[stdlib_func]
@@ -125,24 +124,6 @@ pub async fn highlight_embed(
         mesh
     })?;
     Ok(embed_triplet(highlighted, destination, Value::Nil))
-}
-
-#[stdlib_func]
-pub async fn camera_lerp_anim(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
-    let candidates = executor.state.stack(stack_idx).read_at(-3).clone();
-    let time = read_time(executor, stack_idx, -2)?;
-    let rate = executor.state.stack(stack_idx).read_at(-1).clone();
-    let targets = resolve_targets(executor, stack_idx, &candidates, Some(LeaderKind::Param))?;
-    Ok(build_lerp(
-        &targets,
-        time,
-        progression_from(rate),
-        None,
-        None,
-    ))
 }
 
 pub(super) fn embed_triplet(start: Value, destination: Value, state: Value) -> Value {

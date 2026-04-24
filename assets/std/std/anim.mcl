@@ -111,27 +111,10 @@ let TagBend = |time = 1, meshes = [], rate = smooth| {
     return PrimitiveAnim(time, meshes, embed, lerp, rate)
 }
 
-# camera-aware lerp that slerps the orientation to avoid gimbal lock.
-let CameraLerp = |&camera, time = 1, rate = smooth| __monocurl__native__ camera_lerp_anim(camera, time, rate)
+# camera-aware lerp over the camera leader.
+let CameraLerp = |&camera, time = 1, rate = smooth| Lerp(time, [&camera], rate)
 
 # indication animations
-
-let __flash_lead = |t| {
-    let u = smooth(t) * 1.35
-    if (u > 1) { return 1 }
-    return u
-}
-
-let __flash_trail = |t| {
-    let u = smooth(t) * 1.35 - 0.35
-    if (u < 0) { return 0 }
-    return u
-}
-
-let __flash_value = |target, phase, lead = __flash_lead, trail = __flash_trail| {
-    return __monocurl__native__ flash_value(target, trail(phase), lead(phase))
-}
-
 
 # highlight a mesh to `color` and back.
 let Highlight = |&value, color, time = 1, rate = smooth| anim {
@@ -143,24 +126,47 @@ let Highlight = |&value, color, time = 1, rate = smooth| anim {
     play Set(&value)
 
     value = highlighted
-    play Trans(time / 2, [], 0, rate)
+    play Trans(time / 2, [&value], 0, rate)
 
     value = original
-    play Trans(time / 2, [], 0, rate)
+    play Trans(time / 2, [&value], 0, rate)
 }
 
 # brief moving write-window over stroke of a mesh.
-let Flash = |&value, time = 1, lead = __flash_lead, trail = __flash_trail| anim {
-    let original = value
+let Flash = |&value, time = 1, lead = nil, trail = nil| {
+    let lead_fn = |t| {
+        if (__monocurl__native__ is_nil(lead)) {
+            let u = smooth(t) * 1.35
+            if (u > 1) { return 1 }
+            return u
+        }
+        return lead(t)
+    }
 
-    value = __flash_value(original, phase: 0, lead, trail)
-    play Set(&value)
+    let trail_fn = |t| {
+        if (__monocurl__native__ is_nil(trail)) {
+            let u = smooth(t) * 1.35 - 0.35
+            if (u < 0) { return 0 }
+            return u
+        }
+        return trail(t)
+    }
 
-    value = __flash_value(original, phase: 1, lead, trail)
-    play Lerp(time, [&value], linear)
+    let flash_value = |target, phase| {
+        return __monocurl__native__ flash_value(target, trail_fn(phase), lead_fn(phase))
+    }
 
-    value = original
-    play Set(&value)
+    return anim {
+        let original = value
+        value = flash_value(original, phase: 0)
+        play Set(&value)
+
+        value = flash_value(original, phase: 1)
+        play Lerp(time, [&value], linear)
+
+        value = original
+        play Set(&value)
+    }
 }
 
 # transfer animations

@@ -47,6 +47,28 @@ impl ExecutionCache {
 }
 
 impl Executor {
+    fn restore_latest_cache_before_or_reset(&mut self, target: Timestamp) {
+        let latest = self
+            .cache
+            .entries
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(_, entry)| {
+                let entry = entry.as_ref()?;
+                (entry.state_after.as_ref().timestamp <= target)
+                    .then(|| (entry.state_after.clone(), entry.heap_snap.clone()))
+            });
+
+        if let Some((state_after, heap_snap)) = latest {
+            self.restore_cached_state(&state_after, &heap_snap);
+        } else {
+            self.state = ExecutionState::new();
+        }
+
+        self.state.pending_playback_time = 0.0;
+    }
+
     fn restore_cached_state(
         &mut self,
         state_after: &RawHeapSnapshot<ExecutionState>,
@@ -118,6 +140,10 @@ impl Executor {
         self.state = ExecutionState::new();
     }
 
+    pub fn restore_live_state_to_cache_point(&mut self, target: Timestamp) {
+        self.restore_latest_cache_before_or_reset(target);
+    }
+
     // given a target, find the first cache point that we can base off of
     pub(crate) async fn rebase_at_cache_point(&mut self, target: Timestamp) {
         let valid_state = !self.state.has_errors();
@@ -127,22 +153,9 @@ impl Executor {
             // just start from here
             self.state.pending_playback_time = 0.0;
             return;
-        } else {
-            let latest = self.cache.entries.iter().rfind(|en| {
-                en.is_some() && en.as_ref().unwrap().state_after.as_ref().timestamp <= target
-            });
-
-            if let Some(en) = latest {
-                let entry = en.as_ref().unwrap();
-                let state_after = entry.state_after.clone();
-                let heap_snap = entry.heap_snap.clone();
-                self.restore_cached_state(&state_after, &heap_snap);
-            } else {
-                self.state = ExecutionState::new();
-            }
         }
 
-        self.state.pending_playback_time = 0.0;
+        self.restore_latest_cache_before_or_reset(target);
     }
 
     // called right before advance to next section
@@ -496,5 +509,64 @@ mod tests {
                 other.type_name()
             ),
         }
+    }
+
+    #[test]
+    fn restore_live_state_to_cache_point_discards_transient_live_state_only() {
+        let bytecode = bytecode_with_sections(&[
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: true,
+                is_root_module: true,
+            },
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: false,
+                is_root_module: true,
+            },
+        ]);
+
+        let mut executor = Executor::new(bytecode, Vec::new());
+        executor.state.timestamp = Timestamp::new(1, 0.0);
+        executor
+            .state
+            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .push(Value::Integer(5));
+        executor.save_cache();
+
+        let child = executor
+            .state
+            .alloc_stack((0, 0), Some(ExecutionState::ROOT_STACK_ID), None)
+            .expect("child stack");
+        executor.state.execution_heads.insert(child);
+        executor.state.stack_mut(child).push(Value::Integer(9));
+        executor
+            .state
+            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .pop();
+        executor
+            .state
+            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .push(Value::Integer(11));
+
+        executor.restore_live_state_to_cache_point(Timestamp::new(1, 0.5));
+
+        assert!(executor.cache.entries[1].is_some());
+        assert_eq!(executor.state.alive_stack_count, 1);
+        assert_eq!(
+            executor
+                .state
+                .execution_heads
+                .iter()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![ExecutionState::ROOT_STACK_ID]
+        );
+        assert!(matches!(
+            executor.state.stack(ExecutionState::ROOT_STACK_ID).peek(),
+            Value::Integer(5)
+        ));
     }
 }
