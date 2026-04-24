@@ -101,6 +101,14 @@ impl Viewport {
         self.preview_camera = None;
         self.copied_preview_camera = None;
         self.presentation_camera = None;
+        if presenting {
+            let hidden_ring = RingStyle {
+                color: TRANSPARENT,
+                width: 0.0,
+            };
+            self.ring_style = Some(hidden_ring);
+            self.ring_previous = hidden_ring;
+        }
         if !presenting {
             self.show_params = false;
             self.drag_state = None;

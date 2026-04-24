@@ -1,4 +1,6 @@
 use super::*;
+use geo::simd::Float4;
+use std::path::PathBuf;
 
 #[test]
 fn test_wait_negative_time_error() {
@@ -63,6 +65,109 @@ fn test_imported_user_library_allows_mesh_declaration() {
     let r = run_anim_impl(&[("", SectionType::Slide)], 0, f64::INFINITY, &[imported]);
     r.assert_ok();
     assert_eq!(r.mesh_leaders().len(), 1, "expected imported mesh leader");
+}
+
+#[test]
+fn test_image_relative_path_resolves_against_scene_file() {
+    let scene_path = PathBuf::from("/tmp/monocurl-image-path-tests/scene.mcl");
+    let src = r#"
+        mesh x = Image("textures/foo.png", [0, 0, 0], [1, 1])
+        play Set()
+    "#;
+
+    let (mut executor, _) = match build_anim_executor_with_file_path(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "mesh"]),
+        Some(scene_path.clone()),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("failed to build executor: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = current else {
+        panic!("expected mesh value");
+    };
+    let expected = scene_path.parent().unwrap().join("textures/foo.png");
+    assert_eq!(mesh.uniform.img.as_ref(), Some(&expected));
+    assert!(
+        mesh.tris.iter().all(|tri| {
+            tri.a.col == Float4::ONE && tri.b.col == Float4::ONE && tri.c.col == Float4::ONE
+        }),
+        "expected image quad triangles to use white tint"
+    );
+    let image_vertices = mesh
+        .tris
+        .iter()
+        .flat_map(|tri| [tri.a, tri.b, tri.c])
+        .collect::<Vec<_>>();
+    assert!(
+        image_vertices
+            .iter()
+            .any(|vertex| (vertex.pos.y - 0.5).abs() < 1e-6 && vertex.uv.y.abs() < 1e-6),
+        "expected top edge of image quad to map to v=0"
+    );
+    assert!(
+        image_vertices
+            .iter()
+            .any(|vertex| (vertex.pos.y + 0.5).abs() < 1e-6 && (vertex.uv.y - 1.0).abs() < 1e-6),
+        "expected bottom edge of image quad to map to v=1"
+    );
+}
+
+#[test]
+fn test_textured_relative_path_resolves_against_scene_file() {
+    let scene_path = PathBuf::from("/tmp/monocurl-image-path-tests/textured/scene.mcl");
+    let src = r#"
+        mesh x = textured{image: "textures/foo.png"} Circle(1)
+        play Set()
+    "#;
+
+    let (mut executor, _) = match build_anim_executor_with_file_path(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "mesh"]),
+        Some(scene_path.clone()),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("failed to build executor: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let Value::Mesh(mesh) = current else {
+        panic!("expected mesh value");
+    };
+    let expected = scene_path.parent().unwrap().join("textures/foo.png");
+    assert_eq!(mesh.uniform.img.as_ref(), Some(&expected));
+}
+
+#[test]
+fn test_relative_image_path_without_scene_file_errors() {
+    let r = run_anim_impl(
+        &[(
+            r#"mesh x = Image("textures/foo.png", [0, 0, 0], [1, 1])"#,
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "mesh"]),
+    );
+    r.assert_error("relative image path 'textures/foo.png' requires a scene file path");
 }
 
 #[test]

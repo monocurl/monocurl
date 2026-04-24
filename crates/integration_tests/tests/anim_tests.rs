@@ -1,7 +1,13 @@
 // animation test framework and tests
 // covers: slide durations, leader values, multi-slide scenes, stdlib usage
 
-use std::{cell::Cell, f64, fs, path::Path, rc::Rc, sync::Arc};
+use std::{
+    cell::Cell,
+    f64, fs,
+    path::{Path, PathBuf},
+    rc::Rc,
+    sync::Arc,
+};
 
 use compiler::cache::CompilerCache;
 use executor::{
@@ -368,6 +374,14 @@ fn build_anim_executor(
     slides: &[(&str, SectionType)],
     stdlib_bundles: &[Arc<SectionBundle>],
 ) -> Result<(Executor, usize), AnimResult> {
+    build_anim_executor_with_file_path(slides, stdlib_bundles, None)
+}
+
+fn build_anim_executor_with_file_path(
+    slides: &[(&str, SectionType)],
+    stdlib_bundles: &[Arc<SectionBundle>],
+    file_path: Option<PathBuf>,
+) -> Result<(Executor, usize), AnimResult> {
     let mut all_errors: Vec<String> = Vec::new();
     let mut sections: Vec<Section> = Vec::new();
     for (src, section_type) in slides {
@@ -389,7 +403,7 @@ fn build_anim_executor(
     let imported_files: Vec<usize> = (0..stdlib_bundles.len()).collect();
 
     let user_bundle = Arc::new(SectionBundle {
-        file_path: None,
+        file_path,
         file_index: 0,
         imported_files,
         sections,

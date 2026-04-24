@@ -140,12 +140,7 @@ pub(super) fn ring_style_for(
     is_presenting: bool,
     theme: Theme,
 ) -> RingStyle {
-    if is_presenting
-        && !matches!(
-            status,
-            ExecutionStatus::RuntimeError | ExecutionStatus::CompileError
-        )
-    {
+    if is_presenting {
         return RingStyle {
             color: with_alpha(theme.viewport_status_ring(status), 0.0),
             width: 0.0,

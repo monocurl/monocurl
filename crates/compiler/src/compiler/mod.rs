@@ -482,6 +482,7 @@ impl Compiler {
             is_root_module: self.bundle_root_import_span.is_none(),
         });
         bytecode.name = section.name.clone();
+        bytecode.source_file_path = current_bundle.path.clone();
         bytecode.source_file_name = current_bundle.path.as_ref().and_then(|path| {
             path.file_name()
                 .map(|name| name.to_string_lossy().into_owned())
@@ -791,12 +792,12 @@ impl Compiler {
     ) {
         let position = self.stack_depth() - 1;
         let declared_in_stdlib = self.current_section().flags.is_stdlib;
-        let special_function = self
-            .special_function_for_expr(value)
-            .or_else(|| match (declared_in_stdlib, name) {
-                (true, "random" | "randint") => Some(SpecialFunction::RootFrameRandom),
-                _ => None,
-            });
+        let special_function =
+            self.special_function_for_expr(value)
+                .or_else(|| match (declared_in_stdlib, name) {
+                    (true, "random" | "randint") => Some(SpecialFunction::RootFrameRandom),
+                    _ => None,
+                });
 
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),

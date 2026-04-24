@@ -10,9 +10,9 @@ use executor::{
     value::Value,
 };
 use geo::{
-    mesh::Mesh,
+    mesh::{Lin, Mesh},
     mesh_build::{BoundaryEdge, IndexedSurface, SurfaceVertex},
-    simd::Float3,
+    simd::{Float3, Float4},
 };
 use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
@@ -293,6 +293,279 @@ fn subdivide_indexed_surface(surface: &IndexedSurface) -> IndexedSurface {
     }
 }
 
+fn clear_surface_line_refs(mesh: &mut Mesh) {
+    for tri in &mut mesh.tris {
+        for edge in [&mut tri.ab, &mut tri.bc, &mut tri.ca] {
+            if *edge < -1 {
+                *edge = -1;
+            }
+        }
+    }
+}
+
+fn linked_prev(lines: &[Lin], idx: usize) -> Option<usize> {
+    let prev = lines[idx].prev;
+    (prev >= 0)
+        .then_some(prev as usize)
+        .filter(|&prev| prev < lines.len() && lines[prev].next == idx as i32)
+}
+
+fn linked_next(lines: &[Lin], idx: usize) -> Option<usize> {
+    let next = lines[idx].next;
+    (next >= 0)
+        .then_some(next as usize)
+        .filter(|&next| next < lines.len() && lines[next].prev == idx as i32)
+}
+
+fn line_paths(lines: &[Lin]) -> Vec<Vec<usize>> {
+    let mut visited = vec![false; lines.len()];
+    let mut out = Vec::new();
+
+    let mut walk_path = |start: usize, visited: &mut [bool]| {
+        let mut path = Vec::new();
+        let mut cursor = start;
+        loop {
+            if visited[cursor] {
+                break;
+            }
+            visited[cursor] = true;
+            path.push(cursor);
+
+            let Some(next) = linked_next(lines, cursor) else {
+                break;
+            };
+            if next == start || visited[next] {
+                break;
+            }
+            cursor = next;
+        }
+
+        if !path.is_empty() {
+            out.push(path);
+        }
+    };
+
+    for idx in 0..lines.len() {
+        if visited[idx] || linked_prev(lines, idx).is_some() {
+            continue;
+        }
+        walk_path(idx, &mut visited);
+    }
+
+    for idx in 0..lines.len() {
+        if visited[idx] {
+            continue;
+        }
+        walk_path(idx, &mut visited);
+    }
+
+    out
+}
+
+fn snap_line_t(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    if t <= 1e-5 {
+        0.0
+    } else if (1.0 - t).abs() <= 1e-5 {
+        1.0
+    } else {
+        t
+    }
+}
+
+fn push_dashed_segment(
+    out: &mut Vec<Lin>,
+    current_piece_last: &mut Option<usize>,
+    template: &Lin,
+    t0: f32,
+    t1: f32,
+) {
+    let t0 = snap_line_t(t0);
+    let t1 = snap_line_t(t1);
+    if (t1 - t0).abs() <= 1e-6 {
+        return;
+    }
+
+    let point_at = |start: Float3, end: Float3, t: f32| match t {
+        0.0 => start,
+        1.0 => end,
+        _ => start.lerp(end, t),
+    };
+    let color_at = |start: Float4, end: Float4, t: f32| match t {
+        0.0 => start,
+        1.0 => end,
+        _ => start.lerp(end, t),
+    };
+
+    let mut segment = default_lin(
+        point_at(template.a.pos, template.b.pos, t0),
+        point_at(template.a.pos, template.b.pos, t1),
+        template.norm,
+    );
+    segment.a.col = color_at(template.a.col, template.b.col, t0);
+    segment.b.col = color_at(template.a.col, template.b.col, t1);
+
+    if let Some(prev) = *current_piece_last {
+        if float3_key(out[prev].b.pos) == float3_key(segment.a.pos)
+            && float3_key(out[prev].norm) == float3_key(segment.norm)
+        {
+            segment.prev = prev as i32;
+            out[prev].next = out.len() as i32;
+        }
+    }
+
+    *current_piece_last = Some(out.len());
+    out.push(segment);
+}
+
+fn dashed_lines(source_lines: &[Lin], dash_length: f32, gap_length: f32, offset: f32) -> Vec<Lin> {
+    let period = dash_length + gap_length;
+    let mut out = Vec::new();
+
+    for path in line_paths(source_lines) {
+        let mut current_piece_last = None;
+        let mut distance = 0.0f32;
+
+        for &line_idx in &path {
+            let line = &source_lines[line_idx];
+            let length = (line.b.pos - line.a.pos).len();
+            if length <= 1e-6 {
+                continue;
+            }
+
+            let mut local = 0.0f32;
+            while local < length - 1e-6 {
+                let global = distance + local;
+                let phase = (global + offset).rem_euclid(period);
+
+                if phase < dash_length - 1e-6 || gap_length <= 1e-6 {
+                    let visible = (dash_length - phase).max(0.0).min(length - local);
+                    if visible <= 1e-6 {
+                        break;
+                    }
+                    push_dashed_segment(
+                        &mut out,
+                        &mut current_piece_last,
+                        line,
+                        local / length,
+                        (local + visible) / length,
+                    );
+                    local += visible;
+                } else {
+                    current_piece_last = None;
+                    let hidden = (period - phase).max(1e-6).min(length - local);
+                    local += hidden;
+                }
+            }
+
+            distance += length;
+        }
+    }
+
+    out
+}
+
+fn stroke_source_lines(mesh: &Mesh) -> Vec<Lin> {
+    if !mesh.lins.is_empty() {
+        return mesh.lins.clone();
+    }
+    if mesh.tris.is_empty() {
+        return Vec::new();
+    }
+
+    let surface = mesh_to_indexed_surface(mesh);
+    build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges)
+        .0
+        .into_iter()
+        .map(|mut line| {
+            line.inv = -1;
+            line
+        })
+        .collect()
+}
+
+fn dashed_mesh(mesh: &Mesh, dash_length: f32, gap_length: f32, offset: f32) -> MeshTree {
+    let dashed_lins = dashed_lines(&stroke_source_lines(mesh), dash_length, gap_length, offset);
+    let has_base_geometry = !mesh.dots.is_empty() || !mesh.tris.is_empty();
+
+    if !has_base_geometry {
+        if dashed_lins.is_empty() {
+            return MeshTree::Mesh(Arc::new(mesh.clone()));
+        }
+
+        let dashed = Mesh {
+            dots: Vec::new(),
+            lins: dashed_lins,
+            tris: Vec::new(),
+            uniform: mesh.uniform.clone(),
+            tag: mesh.tag.clone(),
+        };
+        dashed.debug_assert_consistent_topology();
+        return MeshTree::Mesh(Arc::new(dashed));
+    }
+
+    let mut children = Vec::with_capacity(2);
+
+    let mut base = mesh.clone();
+    if !base.lins.is_empty() {
+        base.lins.clear();
+    }
+    if !base.tris.is_empty() {
+        clear_surface_line_refs(&mut base);
+    }
+    base.debug_assert_consistent_topology();
+    children.push(MeshTree::Mesh(Arc::new(base)));
+
+    if !dashed_lins.is_empty() {
+        let dashed = Mesh {
+            dots: Vec::new(),
+            lins: dashed_lins,
+            tris: Vec::new(),
+            uniform: mesh.uniform.clone(),
+            tag: mesh.tag.clone(),
+        };
+        dashed.debug_assert_consistent_topology();
+        children.push(MeshTree::Mesh(Arc::new(dashed)));
+    }
+
+    MeshTree::List(children)
+}
+
+fn dashed_tree<'a>(
+    executor: &'a mut Executor,
+    tree: MeshTree,
+    dash_length: f32,
+    gap_length: f32,
+    offset: f32,
+    filter: Option<&'a TagFilter>,
+) -> Pin<Box<dyn Future<Output = Result<MeshTree, ExecutorError>> + 'a>> {
+    Box::pin(async move {
+        match tree {
+            MeshTree::Mesh(mesh) => {
+                let keep = match filter {
+                    Some(filter) => mesh_matches_tag_filter(executor, filter, &mesh).await?,
+                    None => true,
+                };
+                if keep {
+                    Ok(dashed_mesh(&mesh, dash_length, gap_length, offset))
+                } else {
+                    Ok(MeshTree::Mesh(mesh))
+                }
+            }
+            MeshTree::List(children) => {
+                let mut out = Vec::with_capacity(children.len());
+                for child in children {
+                    out.push(
+                        dashed_tree(executor, child, dash_length, gap_length, offset, filter)
+                            .await?,
+                    );
+                }
+                Ok(MeshTree::List(out))
+            }
+        }
+    })
+}
+
 #[stdlib_func]
 pub async fn op_shift(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
@@ -512,9 +785,10 @@ pub async fn op_retextured(
 ) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let image = read_string(executor, stack_idx, -2, "image").await?;
+    let image = resolve_image_path(executor, stack_idx, &image)?;
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        mesh.uniform.img = Some(image.clone().into());
+        mesh.uniform.img = Some(image.clone());
     })
     .await?;
     Ok(tree.into_value())
@@ -1077,6 +1351,39 @@ pub async fn op_wireframe(
 }
 
 #[stdlib_func]
+pub async fn op_dashed(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let tree = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
+    let dash_length = crate::read_float(executor, stack_idx, -4, "dash_length")? as f32;
+    let gap_length = crate::read_float(executor, stack_idx, -3, "gap_length")? as f32;
+    let offset = crate::read_float(executor, stack_idx, -2, "offset")? as f32;
+    let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
+
+    if dash_length <= 1e-6 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "dash_length",
+            message: "dash length must be positive",
+        });
+    }
+    if gap_length < 0.0 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "gap_length",
+            message: "gap length must be non-negative",
+        });
+    }
+
+    dashed_tree(
+        executor,
+        tree,
+        dash_length,
+        gap_length,
+        offset,
+        filter.as_ref(),
+    )
+    .await
+    .map(MeshTree::into_value)
+}
+
+#[stdlib_func]
 pub async fn op_subdivide(
     executor: &mut Executor,
     stack_idx: usize,
@@ -1527,8 +1834,8 @@ mod tests {
     };
 
     use super::{
-        BoundaryEdge, IndexedSurface, SurfaceVertex, build_indexed_surface, recolor_mesh,
-        subdivide_indexed_surface,
+        BoundaryEdge, IndexedSurface, MeshTree, SurfaceVertex, build_indexed_surface, dashed_lines,
+        dashed_mesh, default_lin, push_dashed_segment, recolor_mesh, subdivide_indexed_surface,
     };
 
     fn square_surface() -> IndexedSurface {
@@ -1719,5 +2026,100 @@ mod tests {
         assert!(approx_eq(mesh.tris[0].a.col, target));
         assert!(approx_eq(mesh.tris[0].b.col, target));
         assert!(approx_eq(mesh.tris[0].c.col, target));
+    }
+
+    #[test]
+    fn dashed_lines_keep_continuous_visible_piece_links() {
+        let mut first = default_lin(Float3::ZERO, Float3::X, Float3::Z);
+        let mut second = default_lin(Float3::X, Float3::new(2.0, 0.0, 0.0), Float3::Z);
+        first.next = 1;
+        second.prev = 0;
+
+        let dashed = dashed_lines(&[first, second], 1.5, 0.5, 0.0);
+        let mesh = Mesh {
+            dots: vec![],
+            lins: dashed.clone(),
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+
+        assert_eq!(dashed.len(), 2);
+        assert_eq!(dashed[0].next, 1);
+        assert_eq!(dashed[1].prev, 0);
+        assert_eq!(dashed[0].a.pos, Float3::ZERO);
+        assert_eq!(dashed[0].b.pos, Float3::X);
+        assert_eq!(dashed[1].a.pos, Float3::X);
+        assert_eq!(dashed[1].b.pos, Float3::new(1.5, 0.0, 0.0));
+        assert!(mesh.has_consistent_topology());
+    }
+
+    #[test]
+    fn dashed_segments_only_link_when_endpoints_match() {
+        let mut out = Vec::new();
+        let mut current_piece_last = None;
+        let first = default_lin(Float3::ZERO, Float3::X, Float3::Z);
+        let second = default_lin(
+            Float3::new(2.0, 0.0, 0.0),
+            Float3::new(3.0, 0.0, 0.0),
+            Float3::Z,
+        );
+
+        push_dashed_segment(&mut out, &mut current_piece_last, &first, 0.0, 1.0);
+        push_dashed_segment(&mut out, &mut current_piece_last, &second, 0.0, 1.0);
+
+        assert_eq!(out[0].next, -1);
+        assert_eq!(out[1].prev, -1);
+    }
+
+    #[test]
+    fn dashed_segments_snap_near_endpoints_before_linking() {
+        let mut out = Vec::new();
+        let mut current_piece_last = None;
+        let first = default_lin(Float3::ZERO, Float3::X, Float3::Z);
+        let second = default_lin(Float3::X, Float3::new(2.0, 0.0, 0.0), Float3::Z);
+
+        push_dashed_segment(&mut out, &mut current_piece_last, &first, 0.0, 0.99999994);
+        push_dashed_segment(&mut out, &mut current_piece_last, &second, 0.0, 0.5);
+
+        assert_eq!(out[0].b.pos, Float3::X);
+        assert_eq!(out[0].next, 1);
+        assert_eq!(out[1].prev, 0);
+        assert_eq!(out[1].a.pos, Float3::X);
+    }
+
+    #[test]
+    fn dashed_surface_splits_fill_and_stroke_meshes() {
+        let surface = square_surface();
+        let (lins, tris) =
+            build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
+        let mesh = Mesh {
+            dots: vec![],
+            lins,
+            tris,
+            uniform: Uniforms::default(),
+            tag: vec![7],
+        };
+
+        let MeshTree::List(children) = dashed_mesh(&mesh, 0.6, 0.4, 0.0) else {
+            panic!("expected dashed surface to split into child meshes");
+        };
+        assert_eq!(children.len(), 2);
+
+        let MeshTree::Mesh(base) = &children[0] else {
+            panic!("expected base mesh");
+        };
+        let MeshTree::Mesh(stroke) = &children[1] else {
+            panic!("expected dashed stroke mesh");
+        };
+
+        assert_eq!(base.tris.len(), mesh.tris.len());
+        assert!(base.lins.is_empty());
+        assert!(stroke.tris.is_empty());
+        assert!(stroke.lins.len() > mesh.lins.len());
+        assert_eq!(base.tag, mesh.tag);
+        assert_eq!(stroke.tag, mesh.tag);
+        assert!(base.has_consistent_topology());
+        assert!(stroke.has_consistent_topology());
     }
 }

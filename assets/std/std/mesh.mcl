@@ -3,7 +3,7 @@
 # constructors keep geometry-focused args only.
 # shiftable primitives are authored at the origin; use `shift` to place them.
 # styling/tagging is handled after construction via operators like
-# `stroke`, `fill`, `dotted`, and `tag`.
+# `stroke`, `fill`, `dotted`, `dashed`, and `tag`.
 
 # primitive constructors
 
@@ -369,6 +369,17 @@ let subset_map = operator |target, filter, f| [target, __monocurl__native__ op_s
 let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_uprank(target, filter)]
 let downrank = operator |target, filter = nil| [target, __monocurl__native__ op_downrank(target, filter)]
 let wireframe = operator |target, filter = nil| [target, __monocurl__native__ op_wireframe(target, filter)]
+let dashed = operator |target, lengths = [0.2, 0.1], offset = 0, filter = nil| {
+    var dash = 0
+    var gap = 0
+    if (__monocurl__native__ is_list(lengths)) {
+        [dash, gap] = __monocurl__native__ expect_list("lengths", lengths, 2)
+    } else {
+        dash = lengths
+        gap = lengths
+    }
+    return [target, __monocurl__native__ op_dashed(target, dash, gap, offset, filter)]
+}
 let subdivide = operator |target, factor = 2, filter = nil| [__monocurl__native__ op_subdivide(target, 1, filter), __monocurl__native__ op_subdivide(target, factor, filter)]
 let tesselated = operator |target, depth = 1, filter = nil| [__monocurl__native__ op_tesselated(target, 0, filter), __monocurl__native__ op_tesselated(target, depth, filter)]
 let extrude = operator |target, delta, filter = nil| [__monocurl__native__ op_extrude(target, [0, 0, 0], filter), __monocurl__native__ op_extrude(target, delta, filter)]

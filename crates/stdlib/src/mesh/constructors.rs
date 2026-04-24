@@ -86,6 +86,18 @@ fn open_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
     out
 }
 
+fn triangle_mesh(p: Float3, q: Float3, r: Float3, normal: Float3) -> Value {
+    let mut lins = closed_polyline(&[p, q, r], normal);
+    let mut tri = default_tri(p, q, r);
+    tri.ab = mesh_ref(0);
+    tri.bc = mesh_ref(1);
+    tri.ca = mesh_ref(2);
+    for lin in &mut lins {
+        lin.inv = mesh_ref(0);
+    }
+    mesh_from_parts(vec![], lins, vec![tri])
+}
+
 fn mesh_ref(idx: usize) -> i32 {
     super::helpers::mesh_ref(idx)
 }
@@ -317,7 +329,7 @@ mod tests {
     use executor::value::Value;
     use geo::simd::Float3;
 
-    use super::{closed_polyline, fan_tris, mesh_ref, open_polyline, vector_like_mesh};
+    use super::{closed_polyline, fan_tris, mesh_ref, open_polyline, triangle_mesh, vector_like_mesh};
 
     #[test]
     fn closed_polyline_sets_reciprocal_links() {
@@ -354,6 +366,21 @@ mod tests {
         assert_eq!(lines[1].inv, mesh_ref(0));
         assert_eq!(lines[2].inv, mesh_ref(1));
         assert_eq!(lines[3].inv, mesh_ref(1));
+    }
+
+    #[test]
+    fn triangle_mesh_sets_closed_boundary_links() {
+        let Value::Mesh(mesh) = triangle_mesh(Float3::ZERO, Float3::X, Float3::Y, Float3::Z)
+        else {
+            panic!("expected mesh");
+        };
+
+        assert_eq!(mesh.lins.len(), 3);
+        for (i, line) in mesh.lins.iter().enumerate() {
+            assert_eq!(mesh.lins[line.prev as usize].next, i as i32);
+            assert_eq!(mesh.lins[line.next as usize].prev, i as i32);
+            assert_eq!(line.inv, mesh_ref(0));
+        }
     }
 
     #[test]
@@ -620,19 +647,7 @@ pub async fn mk_triangle(
     let q = read_float3(executor, stack_idx, -3, "q")?;
     let r = read_float3(executor, stack_idx, -2, "r")?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
-    let mut lins = vec![
-        default_lin(p, q, normal),
-        default_lin(q, r, normal),
-        default_lin(r, p, normal),
-    ];
-    let mut tri = default_tri(p, q, r);
-    tri.ab = mesh_ref(0);
-    tri.bc = mesh_ref(1);
-    tri.ca = mesh_ref(2);
-    for lin in &mut lins {
-        lin.inv = mesh_ref(0);
-    }
-    Ok(mesh_from_parts(vec![], lins, vec![tri]))
+    Ok(triangle_mesh(p, q, r, normal))
 }
 
 #[stdlib_func]
@@ -964,6 +979,7 @@ pub async fn mk_half_vector(
 #[stdlib_func]
 pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let image = read_string(executor, stack_idx, -4, "name").await?;
+    let image = resolve_image_path(executor, stack_idx, &image)?;
     let center = read_float3(executor, stack_idx, -3, "center")?;
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
@@ -981,7 +997,15 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
         _ => unreachable!(),
     };
     set_triangle_uv_rect(&mut mesh, corners[0], corners[2], x, y);
-    mesh.uniform.img = Some(image.into());
+    for tri in &mut mesh.tris {
+        tri.a.uv.y = 1.0 - tri.a.uv.y;
+        tri.b.uv.y = 1.0 - tri.b.uv.y;
+        tri.c.uv.y = 1.0 - tri.c.uv.y;
+        tri.a.col = Float4::ONE;
+        tri.b.col = Float4::ONE;
+        tri.c.col = Float4::ONE;
+    }
+    mesh.uniform.img = Some(image);
     Ok(Value::Mesh(std::sync::Arc::new(mesh)))
 }
 
@@ -1215,10 +1239,7 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
         right_pivot,
         right_back,
     ];
-    let lins = points
-        .windows(2)
-        .map(|segment| default_lin(segment[0], segment[1], normal))
-        .collect();
+    let lins = open_polyline(&points, normal);
 
     Ok(mesh_from_parts(vec![], lins, vec![]))
 }

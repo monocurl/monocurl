@@ -506,6 +506,35 @@ fn test_contour_separate_operator_numbers_output_tags() {
 }
 
 #[test]
+fn test_dashed_operator_splits_line_mesh_by_pattern() {
+    let r = run_with_stdlib(
+        "
+        let dashed_line = dashed{lengths: [0.2, 0.1]} Line([0, 0, 0], [1, 0, 0])
+        let result = (mesh_rank(dashed_line) == 1) + (len(mesh_edge_set(dashed_line)) == 4)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_dashed_operator_preserves_surface_fill_while_replacing_strokes() {
+    let r = run_with_stdlib(
+        "
+        let solid = Square(2)
+        let dashed_square = dashed{lengths: [0.6, 0.4]} solid
+        let result =
+            (mesh_rank(dashed_square) == 2) +
+            (mesh_contour_count(dashed_square) == 2) +
+            (len(mesh_triangle_set(dashed_square)) == len(mesh_triangle_set(solid))) +
+            (len(mesh_edge_set(dashed_square)) > len(mesh_edge_set(solid)))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(4);
+}
+
+#[test]
 fn test_tag_filter_operator_reads_filtered_side() {
     let r = run_with_stdlib(
         "

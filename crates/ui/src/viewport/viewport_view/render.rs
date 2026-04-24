@@ -62,6 +62,12 @@ impl Render for Viewport {
             .is_some_and(|summary| self.is_preview_camera_copied(summary));
         let show_presentation_reset = self.should_show_presentation_reset(&scene_camera);
         let weak_vp = cx.weak_entity();
+        let presentation_stage_background = Rgba {
+            r: background.color.0,
+            g: background.color.1,
+            b: background.color.2,
+            a: background.color.3,
+        };
         let scene = SceneRenderData {
             background,
             camera: display_camera,
@@ -122,7 +128,7 @@ impl Render for Viewport {
             .p(px(ring_style.width))
             .child(render_scene_stage(
                 scene,
-                theme.viewport_stage_background,
+                presentation_stage_background,
                 SceneStageMode::Presentation,
                 weak_vp.clone(),
             ))

@@ -2,6 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     ops::Range,
+    path::{Path, PathBuf},
     pin::Pin,
     rc::Rc,
     sync::Arc,
@@ -175,6 +176,65 @@ pub(super) async fn read_string(
         }
         other => other,
     })
+}
+
+fn image_source_path<'a>(executor: &'a Executor, stack_idx: usize) -> Option<&'a Path> {
+    let mut fallback = None;
+    let mut cursor = Some(stack_idx);
+
+    while let Some(idx) = cursor {
+        let current_section = executor.section_bytecode(executor.state.stack_ip(idx).0 as usize);
+        if let Some(path) = current_section.source_file_path.as_deref() {
+            if !current_section.flags.is_stdlib {
+                return Some(path);
+            }
+            fallback.get_or_insert(path);
+        }
+
+        for ip in executor.state.stack_call_stack(idx).iter().rev() {
+            let caller_section = executor.section_bytecode(ip.0 as usize);
+            if let Some(path) = caller_section.source_file_path.as_deref() {
+                if !caller_section.flags.is_stdlib {
+                    return Some(path);
+                }
+                fallback.get_or_insert(path);
+            }
+        }
+
+        cursor = executor
+            .state
+            .stack_trace_parent_idx(idx)
+            .or_else(|| executor.state.stack_parent_idx(idx));
+    }
+
+    fallback
+}
+
+pub(super) fn resolve_image_path(
+    executor: &Executor,
+    stack_idx: usize,
+    raw_path: &str,
+) -> Result<PathBuf, ExecutorError> {
+    let image_path = PathBuf::from(raw_path);
+    if image_path.is_absolute() {
+        return Ok(image_path);
+    }
+
+    let Some(source_path) = image_source_path(executor, stack_idx) else {
+        return Err(ExecutorError::invalid_operation(format!(
+            "relative image path '{}' requires a scene file path",
+            image_path.display()
+        )));
+    };
+    if source_path.as_os_str().is_empty() {
+        return Err(ExecutorError::invalid_operation(format!(
+            "relative image path '{}' requires a scene file path",
+            image_path.display()
+        )));
+    }
+
+    let base_dir = source_path.parent().unwrap_or(Path::new(""));
+    Ok(base_dir.join(image_path))
 }
 
 pub(super) fn read_int(

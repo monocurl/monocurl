@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use structs::text::Span8;
 
@@ -193,6 +193,7 @@ pub struct SectionBytecode {
     pub flags: SectionFlags,
     pub name: Option<String>,
     pub source_file_name: Option<String>,
+    pub source_file_path: Option<PathBuf>,
     pub import_display_index: Option<usize>,
     pub instructions: Vec<Instruction>,
     pub annotations: Vec<InstructionAnnotation>,
@@ -209,6 +210,7 @@ impl SectionBytecode {
             flags,
             name: None,
             source_file_name: None,
+            source_file_path: None,
             import_display_index: None,
             instructions: Vec::new(),
             annotations: Vec::new(),

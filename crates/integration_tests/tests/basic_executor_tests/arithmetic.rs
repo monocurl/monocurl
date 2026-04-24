@@ -123,25 +123,37 @@ fn test_random_is_deterministic_across_runs() {
     let first_bits = extract_number_signature_list(&first);
     let second_bits = extract_number_signature_list(&second);
 
-    assert_ne!(first_bits[0], first_bits[1], "random sequence should advance");
-    assert_eq!(first_bits, second_bits, "random sequence should be deterministic");
+    assert_ne!(
+        first_bits[0], first_bits[1],
+        "random sequence should advance"
+    );
+    assert_eq!(
+        first_bits, second_bits,
+        "random sequence should be deterministic"
+    );
 }
 
 #[test]
 fn test_random_requires_root_frame() {
-    let r = run_with_stdlib("
+    let r = run_with_stdlib(
+        "
         let f = || random()
         let result = f()
-    ", &["math"]);
+    ",
+        &["math"],
+    );
     r.assert_error("root frame");
 }
 
 #[test]
 fn test_random_default_argument_requires_root_frame() {
-    let r = run_with_stdlib("
+    let r = run_with_stdlib(
+        "
         let f = |x = random()| x
         let result = f()
-    ", &["math"]);
+    ",
+        &["math"],
+    );
     r.assert_error("root frame");
 }
 

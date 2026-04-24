@@ -68,7 +68,7 @@ pub struct Uniforms {
 }
 
 pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 1.0;
-pub const DEFAULT_STROKE_RADIUS: f32 = 2.0;
+pub const DEFAULT_STROKE_RADIUS: f32 = 10.0;
 pub const DEFAULT_DOT_RADIUS: f32 = 4.0;
 pub const DEFAULT_DOT_VERTEX_COUNT: u16 = 8;
 pub const DEFAULT_SMOOTH: bool = false;
@@ -250,6 +250,9 @@ impl Mesh {
                 return Some(mismatch);
             }
             if let Some(mismatch) = line_inverse_mismatch(self, line_idx) {
+                return Some(mismatch);
+            }
+            if let Some(mismatch) = line_triangle_boundary_mismatch(self, line_idx) {
                 return Some(mismatch);
             }
 
@@ -555,6 +558,29 @@ fn line_inverse_mismatch(mesh: &Mesh, line_idx: usize) -> Option<String> {
     None
 }
 
+fn line_triangle_boundary_mismatch(mesh: &Mesh, line_idx: usize) -> Option<String> {
+    let line = mesh.lins[line_idx];
+    let Some(tri_idx) = decode_ref(line.inv) else {
+        return None;
+    };
+    if tri_idx >= mesh.tris.len() {
+        return None;
+    }
+    if line.prev < 0 {
+        return Some(format!(
+            "line[{line_idx}] is owned by tri[{tri_idx}] but prev = {} does not reference a boundary line",
+            line.prev
+        ));
+    }
+    if line.next < 0 {
+        return Some(format!(
+            "line[{line_idx}] is owned by tri[{tri_idx}] but next = {} does not reference a boundary line",
+            line.next
+        ));
+    }
+    None
+}
+
 fn tri_edge_name(edge_idx: usize) -> &'static str {
     match edge_idx {
         0 => "ab",
@@ -664,5 +690,127 @@ fn canonical_bits(value: f32) -> u32 {
         0.0f32.to_bits()
     } else {
         value.to_bits()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::mesh_build::mesh_ref;
+
+    use super::{Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms};
+    use crate::simd::{Float2, Float3, Float4};
+
+    fn line(a: Float3, b: Float3, prev: i32, next: i32, inv: i32) -> Lin {
+        Lin {
+            a: LinVertex {
+                pos: a,
+                col: Float4::ONE,
+            },
+            b: LinVertex {
+                pos: b,
+                col: Float4::ONE,
+            },
+            norm: Float3::Z,
+            prev,
+            next,
+            inv,
+            anti: -1,
+            is_dom_sib: false,
+        }
+    }
+
+    fn tri(a: Float3, b: Float3, c: Float3, ab: i32, bc: i32, ca: i32) -> Tri {
+        Tri {
+            a: TriVertex {
+                pos: a,
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            b: TriVertex {
+                pos: b,
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            c: TriVertex {
+                pos: c,
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            },
+            ab,
+            bc,
+            ca,
+            anti: -1,
+            is_dom_sib: false,
+        }
+    }
+
+    #[test]
+    fn standalone_open_line_can_omit_neighbors() {
+        let mesh = Mesh {
+            dots: vec![],
+            lins: vec![line(Float3::ZERO, Float3::X, -1, -1, -1)],
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+
+        assert!(mesh.has_consistent_topology());
+    }
+
+    #[test]
+    fn triangle_boundary_lines_require_prev_and_next_links() {
+        let p = Float3::ZERO;
+        let q = Float3::X;
+        let r = Float3::Y;
+        let mesh = Mesh {
+            dots: vec![],
+            lins: vec![
+                line(p, q, -1, 1, mesh_ref(0)),
+                line(q, r, 0, 2, mesh_ref(0)),
+                line(r, p, 1, -1, mesh_ref(0)),
+            ],
+            tris: vec![tri(
+                p,
+                q,
+                r,
+                mesh_ref(0),
+                mesh_ref(1),
+                mesh_ref(2),
+            )],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+
+        let report = mesh
+            .topology_mismatch_report()
+            .expect("surface boundary gap should be reported");
+        assert!(report.contains("does not reference a boundary line"));
+    }
+
+    #[test]
+    fn triangle_boundary_lines_pass_when_closed() {
+        let p = Float3::ZERO;
+        let q = Float3::X;
+        let r = Float3::Y;
+        let mesh = Mesh {
+            dots: vec![],
+            lins: vec![
+                line(p, q, 2, 1, mesh_ref(0)),
+                line(q, r, 0, 2, mesh_ref(0)),
+                line(r, p, 1, 0, mesh_ref(0)),
+            ],
+            tris: vec![tri(
+                p,
+                q,
+                r,
+                mesh_ref(0),
+                mesh_ref(1),
+                mesh_ref(2),
+            )],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+
+        assert!(mesh.has_consistent_topology());
     }
 }
