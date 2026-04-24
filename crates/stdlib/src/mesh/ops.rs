@@ -811,10 +811,11 @@ pub async fn op_with_zindex(
 
 #[stdlib_func]
 pub async fn op_gloss(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -2, "target").await?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let gloss = crate::read_float(executor, stack_idx, -2, "gloss")? as f32;
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        mesh.uniform.gloss = geo::mesh::GLOSSY_GLOSS;
+        mesh.uniform.gloss = gloss.max(0.0);
     })
     .await?;
     Ok(tree.into_value())

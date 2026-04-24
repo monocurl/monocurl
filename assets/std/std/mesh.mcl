@@ -351,7 +351,7 @@ let tag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_
 
 let textured = operator |target, image, filter = nil| [target, __monocurl__native__ op_retextured(target, image, filter)]
 let with_zindex = operator |target, z_index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, z_index, filter)]
-let gloss = operator |target, filter = nil| [target, __monocurl__native__ op_gloss(target, filter)]
+let gloss = operator |target, amount = 0.5, filter = nil| [target, __monocurl__native__ op_gloss(target, amount, filter)]
 let point_map = operator |target, f, filter = nil| {
     let go = |level| __monocurl__native__ op_point_map(target, f, filter, level)
     return [go(level: 0), go(level: 1)]

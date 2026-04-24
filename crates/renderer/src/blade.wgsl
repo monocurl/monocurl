@@ -186,7 +186,7 @@ fn vs_triangle(@builtin(vertex_index) vertex_index: u32) -> TriOut {
 fn fs_triangle(in: TriOut) -> @location(0) vec4<f32> {
     let sampled = textureSample(t_color, s_color, in.uv);
     let normal = normalize(in.normal);
-    let light_dir = normalize(LIGHT_SRC - in.model);
+    let light_dir = normalize(in.model - LIGHT_SRC);
     let gloss = max(tri_params.values.z, 0.0);
     let specular = gloss * pow(max(dot(light_dir, normal), 0.0), GAMMA);
     let lit_rgb = in.color.rgb + (vec3<f32>(1.0) - in.color.rgb) * specular;
