@@ -10,7 +10,7 @@ use crate::{
     },
 };
 
-pub const DEFAULT_CAMERA_FOV: f32 = 0.698_131_7;
+pub const DEFAULT_CAMERA_FOV: f32 = 1.024_778_9;
 pub const DEFAULT_CAMERA_ASPECT: f32 = 16.0 / 9.0;
 pub const MIN_CAMERA_NEAR: f32 = 0.01;
 

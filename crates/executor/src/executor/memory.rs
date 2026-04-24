@@ -1,6 +1,6 @@
 use crate::{error::ExecutorError, heap::with_heap};
 
-pub(super) const EXECUTOR_HEAP_SLOT_LIMIT: usize = 1 << 20;
+pub(super) const EXECUTOR_HEAP_SLOT_LIMIT: usize = 1 << 24;
 pub(super) const MEMORY_CHECK_PERIOD: u32 = 32_768;
 
 pub(super) struct PeriodicMemoryChecker {

@@ -27,7 +27,7 @@ use mp4::{
 use openh264::{
     encoder::{
         BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod,
-        RateControlMode, UsageType,
+        QpRange, RateControlMode, UsageType,
     },
     formats::{BgraSliceU8, YUVBuffer},
 };
@@ -39,7 +39,7 @@ use renderer::{RenderOptions, RenderSize, Renderer, RgbaImage, SceneRenderData};
 use stdlib::registry::registry;
 use structs::rope::{Attribute, RLEData, Rope, TextAggregate};
 
-pub const DEFAULT_EXPORT_SIZE: RenderSize = RenderSize::new(1960, 1080);
+pub const DEFAULT_EXPORT_SIZE: RenderSize = RenderSize::new(1920, 1080);
 pub const DEFAULT_VIDEO_FPS: u32 = 60;
 pub const EXPORT_CANCELLED_MESSAGE: &str = "Export canceled";
 
@@ -386,7 +386,12 @@ async fn export_video(
 ) -> Result<ExportOutcome> {
     emit_progress_checked(cancel_flag, on_progress, "Evaluating timeline", 0, 0)?;
 
-    let video_size = h264_size(settings.render_size);
+    ensure!(
+        settings.render_size.width % 2 == 0 && settings.render_size.height % 2 == 0,
+        "video render size must use even dimensions for H.264 export"
+    );
+
+    let video_size = settings.render_size;
     let slide_durations =
         precompute_slide_durations(&mut prepared.executor, &prepared.root_text_rope).await?;
     check_cancelled(cancel_flag)?;
@@ -405,15 +410,15 @@ async fn export_video(
         openh264::OpenH264API::from_source(),
         EncoderConfig::new()
             .skip_frames(false)
-            .rate_control_mode(RateControlMode::Bufferbased)
+            .rate_control_mode(RateControlMode::Quality)
             .complexity(Complexity::High)
-            // The vendored OpenH264 encoder only validates the realtime screen mode here.
             .usage_type(UsageType::ScreenContentRealTime)
             .adaptive_quantization(false)
             .background_detection(false)
             .max_frame_rate(FrameRate::from_hz(settings.fps as f32))
             .bitrate(BitRate::from_bps(video_bitrate(video_size, settings.fps)))
-            .intra_frame_period(IntraFramePeriod::from_num_frames(settings.fps * 2)),
+            .qp(video_qp_range(video_size))
+            .intra_frame_period(IntraFramePeriod::from_num_frames(settings.fps)),
     )
     .context("failed to initialize H.264 encoder")?;
 
@@ -421,6 +426,7 @@ async fn export_video(
     let mut cleanup = PartialOutputCleanup::new(output_path.clone());
     let mut writer = None;
     let mut sample_start_time = 0_u64;
+    let mut previous_slide = None;
 
     for (index, timestamp) in frame_targets.iter().copied().enumerate() {
         emit_progress_checked(
@@ -430,6 +436,10 @@ async fn export_video(
             index,
             total_steps,
         )?;
+
+        if index > 0 && previous_slide != Some(timestamp.slide) {
+            encoder.force_intra_frame();
+        }
 
         let frame = render_frame(
             &mut prepared.executor,
@@ -485,6 +495,7 @@ async fn export_video(
         check_cancelled(cancel_flag)?;
 
         sample_start_time += u64::from(MP4_FRAME_DURATION);
+        previous_slide = Some(timestamp.slide);
     }
 
     emit_progress_checked(
@@ -706,25 +717,20 @@ fn parse_fourcc(value: &str) -> FourCC {
 
 fn video_bitrate(size: RenderSize, fps: u32) -> u32 {
     let pixels_per_second = u64::from(size.width) * u64::from(size.height) * u64::from(fps);
-    (pixels_per_second * 2)
-        .clamp(8_000_000, 40_000_000)
+    ((pixels_per_second * 3) / 2)
+        .clamp(36_000_000, 240_000_000)
         .try_into()
         .expect("clamped bitrate should fit in u32")
 }
 
-fn h264_size(size: RenderSize) -> RenderSize {
-    RenderSize::new(
-        align_dimension(size.width, 16),
-        align_dimension(size.height, 16),
-    )
-}
-
-fn align_dimension(value: u32, alignment: u32) -> u32 {
-    let remainder = value % alignment;
-    if remainder == 0 {
-        value
+fn video_qp_range(size: RenderSize) -> QpRange {
+    let pixels = u64::from(size.width) * u64::from(size.height);
+    if pixels <= 1280_u64 * 720 {
+        QpRange::new(10, 20)
+    } else if pixels <= 1920_u64 * 1080 {
+        QpRange::new(10, 22)
     } else {
-        value + (alignment - remainder)
+        QpRange::new(10, 24)
     }
 }
 
