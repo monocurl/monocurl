@@ -21,6 +21,8 @@ use geo::{
 };
 use libtess2::{TessellationOptions, WindingRule};
 
+const NORMAL_EPSILON: f32 = 1e-6;
+
 fn default_ink() -> Float4 {
     Float4::new(0.0, 0.0, 0.0, 1.0)
 }
@@ -989,19 +991,27 @@ fn tessellate_planar_loops_with_options(
     if contours.is_empty() {
         return Ok((Vec::new(), Vec::new()));
     }
+    let normal = resolve_planar_normal(&contours, normal);
 
-    let mut lins = Vec::new();
-    let mut boundary_edges = HashMap::<(usize, usize), usize>::new();
+    let mut source_boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
     let mut source_offset = 0usize;
     for contour in &contours {
-        let range = mesh_build::push_closed_polyline(&mut lins, contour, normal, default_ink());
         for i in 0..contour.len() {
-            boundary_edges.insert(
-                canonical_index_edge_key(
-                    source_offset + i,
-                    source_offset + (i + 1) % contour.len(),
-                ),
-                range.start + i,
+            let a = source_offset + i;
+            let b = source_offset + (i + 1) % contour.len();
+            let edge = BoundaryEdge {
+                a_col: default_ink(),
+                b_col: default_ink(),
+                norm: normal,
+            };
+            source_boundary_edges.insert((a, b), edge);
+            source_boundary_edges.insert(
+                (b, a),
+                BoundaryEdge {
+                    a_col: edge.b_col,
+                    b_col: edge.a_col,
+                    norm: edge.norm,
+                },
             );
         }
         source_offset += contour.len();
@@ -1021,47 +1031,74 @@ fn tessellate_planar_loops_with_options(
         ExecutorError::invalid_operation(format!("failed to tessellate polygon: {error}"))
     })?;
 
-    let mut tris = mesh_build::build_indexed_tris_with_open_boundaries(
-        &tess.vertices,
-        &tess.triangles,
-        default_ink(),
-    );
-    for (tri_idx, face) in tess.triangles.iter().enumerate() {
-        for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
-            .into_iter()
-            .enumerate()
-        {
-            if tri_edge(&tris[tri_idx], edge_idx) >= 0 {
-                continue;
-            }
+    let surface_vertices: Vec<_> = tess
+        .vertices
+        .iter()
+        .copied()
+        .map(|pos| SurfaceVertex {
+            pos,
+            col: default_ink(),
+            uv: Float2::ZERO,
+        })
+        .collect();
 
-            let Some(source_a) = tess.source_vertex_indices[a] else {
-                continue;
+    let mut boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
+    for face in &tess.triangles {
+        for (a, b) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])].into_iter() {
+            let edge = match (tess.source_vertex_indices[a], tess.source_vertex_indices[b]) {
+                (Some(source_a), Some(source_b)) => source_boundary_edges
+                    .get(&(source_a, source_b))
+                    .copied()
+                    .unwrap_or(BoundaryEdge {
+                        a_col: default_ink(),
+                        b_col: default_ink(),
+                        norm: normal,
+                    }),
+                _ => BoundaryEdge {
+                    a_col: default_ink(),
+                    b_col: default_ink(),
+                    norm: normal,
+                },
             };
-            let Some(source_b) = tess.source_vertex_indices[b] else {
-                continue;
-            };
-            let Some(&line_idx) = boundary_edges.get(&canonical_index_edge_key(source_a, source_b))
-            else {
-                continue;
-            };
-
-            let line = lins[line_idx];
-            let (edge_start, edge_end) = tri_edge_positions(&tris[tri_idx], edge_idx);
-            if line.a.pos != edge_start || line.b.pos != edge_end {
-                continue;
-            }
-            if lins[line_idx].inv != -1 {
-                continue;
-            }
-
-            set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_build::mesh_ref(line_idx));
-            lins[line_idx].inv = mesh_build::mesh_ref(tri_idx);
+            boundary_edges.insert((a, b), edge);
         }
     }
 
-    Ok((lins, tris))
+    Ok(build_indexed_surface(
+        &surface_vertices,
+        &tess.triangles,
+        &boundary_edges,
+    ))
 }
+
+fn resolve_planar_normal(contours: &[Vec<Float3>], requested: Float3) -> Float3 {
+    normalize_nonzero(requested)
+        .or_else(|| contour_area_normal(contours))
+        .unwrap_or(Float3::Z)
+}
+
+fn first_nonzero_line_normal(lines: &[Lin]) -> Option<Float3> {
+    lines.iter().find_map(|line| normalize_nonzero(line.norm))
+}
+
+fn contour_area_normal(contours: &[Vec<Float3>]) -> Option<Float3> {
+    let normal =
+        contours
+            .iter()
+            .filter(|contour| contour.len() >= 3)
+            .fold(Float3::ZERO, |acc, contour| {
+                acc + (0..contour.len()).fold(Float3::ZERO, |sum, idx| {
+                    sum + contour[idx].cross(contour[(idx + 1) % contour.len()])
+                })
+            });
+    normalize_nonzero(normal)
+}
+
+fn normalize_nonzero(vec: Float3) -> Option<Float3> {
+    let len = vec.len();
+    (len > NORMAL_EPSILON).then_some(vec / len)
+}
+
 fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
     let primary_lines: Vec<_> = mesh
         .lins
@@ -1132,7 +1169,9 @@ pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
         return Ok(None);
     };
 
-    let normal = out.lins.first().map(|line| line.norm).unwrap_or(Float3::Z);
+    let normal = first_nonzero_line_normal(&out.lins)
+        .or_else(|| contour_area_normal(&contours))
+        .unwrap_or(Float3::Z);
     let (lins, tris) = tessellate_planar_loops_with_options(&contours, normal, true)?;
     out.lins = lins;
     out.tris = tris;
@@ -1335,37 +1374,6 @@ pub(super) fn triangle_key(a: Float3, b: Float3, c: Float3) -> [[u32; 3]; 3] {
     let mut key = [float3_key(a), float3_key(b), float3_key(c)];
     key.sort_unstable();
     key
-}
-
-fn canonical_index_edge_key(a: usize, b: usize) -> (usize, usize) {
-    if a <= b { (a, b) } else { (b, a) }
-}
-
-fn set_tri_edge(tri: &mut Tri, edge_idx: usize, value: i32) {
-    match edge_idx {
-        0 => tri.ab = value,
-        1 => tri.bc = value,
-        2 => tri.ca = value,
-        _ => unreachable!(),
-    }
-}
-
-fn tri_edge(tri: &Tri, edge_idx: usize) -> i32 {
-    match edge_idx {
-        0 => tri.ab,
-        1 => tri.bc,
-        2 => tri.ca,
-        _ => unreachable!(),
-    }
-}
-
-fn tri_edge_positions(tri: &Tri, edge_idx: usize) -> (Float3, Float3) {
-    match edge_idx {
-        0 => (tri.a.pos, tri.b.pos),
-        1 => (tri.b.pos, tri.c.pos),
-        2 => (tri.c.pos, tri.a.pos),
-        _ => unreachable!(),
-    }
 }
 
 pub(super) fn bounds_of(tree: &MeshTree) -> Option<(Float3, Float3)> {
@@ -1721,7 +1729,7 @@ mod tests {
 
     use super::{
         mesh_from_parts, mesh_position_groups, mesh_ref, mesh_to_indexed_lines,
-        push_closed_polyline, uprank_mesh,
+        push_closed_polyline, tessellate_planar_loops, uprank_mesh,
     };
 
     fn mesh_from_contours(contours: &[Vec<Float3>]) -> Mesh {
@@ -1746,6 +1754,15 @@ mod tests {
             Float3::new(center_x + half_extent, center_y + half_extent, 0.0),
             Float3::new(center_x - half_extent, center_y + half_extent, 0.0),
         ]
+    }
+
+    fn mesh_from_tessellated(contours: &[Vec<Float3>], normal: Float3) -> Mesh {
+        let (lins, tris) =
+            tessellate_planar_loops(contours, normal).expect("polygon tessellation should succeed");
+        let Value::Mesh(mesh) = mesh_from_parts(Vec::new(), lins, tris) else {
+            panic!("expected mesh");
+        };
+        mesh.as_ref().clone()
     }
 
     #[test]
@@ -1811,6 +1828,67 @@ mod tests {
         assert!(mesh.lins.iter().all(|line| line.inv != -1));
         assert!(mesh.dots.iter().all(|dot| dot.inv != -1));
         assert_eq!(mesh_to_indexed_lines(&mesh).segments.len(), 1);
+    }
+
+    #[test]
+    fn tessellated_planar_polygons_have_consistent_boundary_topology() {
+        let mut inner = square(0.0, 0.0, 0.4);
+        inner.reverse();
+        let cases = [
+            (
+                "quad with reversed normal",
+                vec![square(0.0, 0.0, 1.0)],
+                -Float3::Z,
+            ),
+            (
+                "concave polygon",
+                vec![vec![
+                    Float3::new(-1.0, -1.0, 0.0),
+                    Float3::new(1.0, -1.0, 0.0),
+                    Float3::new(0.35, 0.0, 0.0),
+                    Float3::new(1.0, 1.0, 0.0),
+                    Float3::new(-1.0, 1.0, 0.0),
+                ]],
+                Float3::Z,
+            ),
+            (
+                "polygon with a hole",
+                vec![square(0.0, 0.0, 1.0), inner],
+                Float3::Z,
+            ),
+        ];
+
+        for (name, contours, normal) in cases {
+            let mesh = mesh_from_tessellated(&contours, normal);
+
+            assert!(!mesh.tris.is_empty(), "{name} should produce triangles");
+            assert!(
+                mesh.has_consistent_topology(),
+                "{name}: {}",
+                mesh.topology_mismatch_report()
+                    .unwrap_or_else(|| "no mismatch report".into())
+            );
+            assert!(
+                mesh.lins.iter().all(|line| line.inv < -1),
+                "{name}: every boundary line should be owned by a triangle"
+            );
+        }
+    }
+
+    #[test]
+    fn uprank_recovers_planar_normal_when_first_boundary_normal_is_zero() {
+        let mut mesh = mesh_from_contours(&[square(0.0, 0.0, 1.0)]);
+        mesh.lins[0].norm = Float3::ZERO;
+
+        let upranked = uprank_mesh(&mesh).expect("uprank should succeed");
+        let upranked = upranked.expect("closed contours should uprank");
+
+        assert!(!upranked.tris.is_empty());
+        assert!(upranked.has_consistent_topology());
+        assert!(
+            upranked.lins.iter().all(|line| line.norm == Float3::Z),
+            "upranked boundary normals should use the nonzero planar normal"
+        );
     }
 
     #[test]

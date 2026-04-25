@@ -61,7 +61,9 @@ impl ExecutionState {
         if let Some(meshes) = snapshot.meshes {
             self.meshes = meshes;
         }
-        self.current_timestamp = snapshot.current_timestamp;
+        if !matches!(snapshot.status, ExecutionStatus::Seeking) {
+            self.current_timestamp = snapshot.current_timestamp;
+        }
         self.status = snapshot.status;
         self.slide_names = snapshot.slide_names;
         // causes visual glitches if in seek mode

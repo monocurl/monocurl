@@ -1017,6 +1017,7 @@ dependencies = [
  "env_logger",
  "executor",
  "exporter",
+ "latex",
  "log",
  "renderer",
 ]

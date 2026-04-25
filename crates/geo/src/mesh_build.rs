@@ -128,7 +128,7 @@ pub fn build_indexed_surface(
     boundary_items.sort_unstable_by_key(|(tri_idx, edge_idx, _, _)| (*tri_idx, *edge_idx));
 
     let mut lins = Vec::with_capacity(boundary_items.len());
-    let mut line_vertices = Vec::with_capacity(boundary_items.len());
+    let mut line_edges = Vec::with_capacity(boundary_items.len());
     for (tri_idx, edge_idx, a, b) in boundary_items {
         let template = boundary_edges
             .get(&(a, b))
@@ -149,26 +149,10 @@ pub fn build_indexed_surface(
         edge.inv = mesh_ref(tri_idx);
         set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_ref(line_idx));
         lins.push(edge);
-        line_vertices.push((a, b));
+        line_edges.push((tri_idx, edge_idx));
     }
 
-    let mut incoming = HashMap::<usize, Vec<usize>>::new();
-    let mut outgoing = HashMap::<usize, Vec<usize>>::new();
-    for (line_idx, &(a, b)) in line_vertices.iter().enumerate() {
-        outgoing.entry(a).or_default().push(line_idx);
-        incoming.entry(b).or_default().push(line_idx);
-    }
-
-    for (line_idx, &(a, b)) in line_vertices.iter().enumerate() {
-        lins[line_idx].prev = incoming
-            .get(&a)
-            .and_then(|candidates| (candidates.len() == 1).then_some(candidates[0] as i32))
-            .unwrap_or(-1);
-        lins[line_idx].next = outgoing
-            .get(&b)
-            .and_then(|candidates| (candidates.len() == 1).then_some(candidates[0] as i32))
-            .unwrap_or(-1);
-    }
+    link_boundary_loops(&mut lins, &tris, faces, &line_edges);
 
     (lins, tris)
 }
@@ -273,6 +257,70 @@ fn set_tri_edge(tri: &mut Tri, edge_idx: usize, value: i32) {
     }
 }
 
+fn link_boundary_loops(
+    lins: &mut [Lin],
+    tris: &[Tri],
+    faces: &[[usize; 3]],
+    line_edges: &[(usize, usize)],
+) {
+    for (line_idx, &(tri_idx, edge_idx)) in line_edges.iter().enumerate() {
+        let Some(next_idx) = next_boundary_line(tris, faces, tri_idx, edge_idx) else {
+            continue;
+        };
+        lins[line_idx].next = next_idx as i32;
+        lins[next_idx].prev = line_idx as i32;
+    }
+}
+
+fn next_boundary_line(
+    tris: &[Tri],
+    faces: &[[usize; 3]],
+    start_tri_idx: usize,
+    start_edge_idx: usize,
+) -> Option<usize> {
+    let mut tri_idx = start_tri_idx;
+    let mut edge_idx = start_edge_idx;
+    for _ in 0..tris.len().saturating_mul(3) {
+        let next_edge_idx = (edge_idx + 1) % 3;
+        let edge_ref = tri_edge(&tris[tri_idx], next_edge_idx);
+        if let Some(line_idx) = decode_mesh_ref(edge_ref) {
+            return Some(line_idx);
+        }
+
+        let next_tri_idx = (edge_ref >= 0).then_some(edge_ref as usize)?;
+        let (a, b) = face_edge(faces[tri_idx], next_edge_idx);
+        edge_idx = find_directed_edge(faces[next_tri_idx], b, a)?;
+        tri_idx = next_tri_idx;
+    }
+    None
+}
+
+fn tri_edge(tri: &Tri, edge_idx: usize) -> i32 {
+    match edge_idx {
+        0 => tri.ab,
+        1 => tri.bc,
+        2 => tri.ca,
+        _ => unreachable!(),
+    }
+}
+
+fn face_edge(face: [usize; 3], edge_idx: usize) -> (usize, usize) {
+    match edge_idx {
+        0 => (face[0], face[1]),
+        1 => (face[1], face[2]),
+        2 => (face[2], face[0]),
+        _ => unreachable!(),
+    }
+}
+
+fn find_directed_edge(face: [usize; 3], a: usize, b: usize) -> Option<usize> {
+    (0..3).find(|&edge_idx| face_edge(face, edge_idx) == (a, b))
+}
+
+fn decode_mesh_ref(value: i32) -> Option<usize> {
+    (value < -1).then_some((-value - 2) as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -341,6 +389,55 @@ mod tests {
         assert!(mesh.has_consistent_topology());
         assert_eq!(mesh.tris[0].ab, -2);
         assert_eq!(mesh.tris[1].ab, -5);
+    }
+
+    #[test]
+    fn build_indexed_surface_links_boundary_loops_through_repeated_vertices() {
+        let white = Float4::ONE;
+        let vertices = vec![
+            SurfaceVertex {
+                pos: Float3::new(0.0, 0.0, 0.0),
+                col: white,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(1.0, 0.0, 0.0),
+                col: white,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(0.0, 1.0, 0.0),
+                col: white,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(-1.0, 0.0, 0.0),
+                col: white,
+                uv: Float2::ZERO,
+            },
+            SurfaceVertex {
+                pos: Float3::new(0.0, -1.0, 0.0),
+                col: white,
+                uv: Float2::ZERO,
+            },
+        ];
+        let faces = vec![[0, 1, 2], [0, 3, 4]];
+
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        let mesh = Mesh {
+            dots: Vec::new(),
+            lins,
+            tris,
+            uniform: Default::default(),
+            tag: Vec::new(),
+        };
+
+        assert!(mesh.has_consistent_topology());
+        assert!(
+            mesh.lins
+                .iter()
+                .all(|line| line.prev >= 0 && line.next >= 0)
+        );
     }
 
     #[test]

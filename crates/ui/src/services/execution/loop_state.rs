@@ -148,7 +148,7 @@ impl RuntimeState {
     }
 
     async fn playback_iteration(&mut self, sm_tx: &UnboundedSender<ServiceManagerMessage>) {
-        let last_update = self.last_update_at;
+        let mut last_update = self.last_update_at;
         let tick_started_at = Instant::now();
         let elapsed = (tick_started_at - self.last_update_at).as_secs_f64();
         let target_dt = self.playback_mode.default_time_interval().max(elapsed);
@@ -161,6 +161,8 @@ impl RuntimeState {
             Ok(false) => {
                 self.checked_advance_section().await;
                 self.is_playing = false;
+                // on slide advances, allow "lag"
+                last_update = Instant::now();
             }
             Err(_) => {
                 self.cancel_runtime_work();

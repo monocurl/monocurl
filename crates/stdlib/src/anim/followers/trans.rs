@@ -15,6 +15,8 @@ use crate::mesh::helpers::{
 use super::super::helpers::{self, list_value, materialize_live_value, mesh_center};
 use super::{embed_triplet, lerp_uniforms, read_path_arc_value};
 
+const NORMAL_EPSILON: f32 = 1e-6;
+
 #[stdlib_func]
 pub async fn trans_embed(
     executor: &mut Executor,
@@ -740,6 +742,7 @@ fn extract_closed_contours(mesh: &Mesh) -> Option<Vec<ClosedContour>> {
 
         let mut points = Vec::new();
         let mut colors = Vec::new();
+        let mut line_indices = Vec::new();
         let mut cursor = start;
         loop {
             if visited[cursor] {
@@ -748,6 +751,7 @@ fn extract_closed_contours(mesh: &Mesh) -> Option<Vec<ClosedContour>> {
 
             let line = mesh.lins[cursor];
             visited[cursor] = true;
+            line_indices.push(cursor);
             points.push(line.a.pos);
             colors.push(line.a.col);
 
@@ -765,7 +769,7 @@ fn extract_closed_contours(mesh: &Mesh) -> Option<Vec<ClosedContour>> {
             }
         }
 
-        let normal = mesh.lins[start].norm;
+        let normal = closed_contour_normal(&mesh.lins, &line_indices, &points);
         contours.push(ClosedContour {
             signed_area: signed_contour_area(&points, normal),
             points,
@@ -943,11 +947,28 @@ fn append_closed_contour(mesh: &mut Mesh, contour: &ClosedContour) {
 }
 
 fn signed_contour_area(points: &[Float3], normal: Float3) -> f32 {
-    let mut area = 0.0;
+    raw_contour_area_normal(points).dot(normal) * 0.5
+}
+
+fn closed_contour_normal(lines: &[Lin], line_indices: &[usize], points: &[Float3]) -> Float3 {
+    line_indices
+        .iter()
+        .find_map(|&idx| normalize_nonzero(lines[idx].norm))
+        .or_else(|| normalize_nonzero(raw_contour_area_normal(points)))
+        .unwrap_or(Float3::Z)
+}
+
+fn raw_contour_area_normal(points: &[Float3]) -> Float3 {
+    let mut normal = Float3::ZERO;
     for i in 0..points.len() {
-        area += points[i].cross(points[(i + 1) % points.len()]).dot(normal);
+        normal = normal + points[i].cross(points[(i + 1) % points.len()]);
     }
-    area * 0.5
+    normal
+}
+
+fn normalize_nonzero(vec: Float3) -> Option<Float3> {
+    let len = vec.len();
+    (len > NORMAL_EPSILON).then_some(vec / len)
 }
 
 fn mesh_vertex_samples(mesh: &Mesh) -> Vec<(Float3, Float4)> {
@@ -2214,7 +2235,6 @@ fn planar_mesh_patharc_lerp(
         for (line, template) in lins.iter_mut().zip(&boundary.lins) {
             line.a.col = template.a.col;
             line.b.col = template.b.col;
-            line.norm = template.norm;
         }
     }
 
@@ -2586,6 +2606,51 @@ mod tests {
         assert!(prepared_start.has_consistent_topology());
         assert!(prepared_end.has_consistent_topology());
         assert!(same_mesh_topology(&prepared_start, &prepared_end));
+    }
+
+    #[test]
+    fn planar_trans_recovers_zero_first_boundary_normal() {
+        let mut source = tessellated_mesh(&[vec![
+            Float3::new(-1.0, -1.0, 0.0),
+            Float3::new(1.0, -1.0, 0.0),
+            Float3::new(1.0, 1.0, 0.0),
+            Float3::new(-1.0, 1.0, 0.0),
+        ]]);
+        source.lins[0].norm = Float3::ZERO;
+        let target = tessellated_mesh(&[vec![
+            Float3::new(-1.2, -0.8, 0.0),
+            Float3::new(1.2, -0.8, 0.0),
+            Float3::new(1.2, 0.8, 0.0),
+            Float3::new(-1.2, 0.8, 0.0),
+        ]]);
+
+        let contours = extract_closed_contours(&source).expect("source should extract as closed");
+        assert_eq!(contours[0].normal, Float3::Z);
+
+        let Some((prepared_start, prepared_end, _)) =
+            prepare_planar_trans_mesh_pair(&source, &target).expect("planar prep should succeed")
+        else {
+            panic!("closed planar meshes should use planar prep");
+        };
+
+        assert!(
+            prepared_start
+                .lins
+                .iter()
+                .all(|line| line.norm == Float3::Z)
+        );
+        let mesh = planar_mesh_patharc_lerp(
+            &prepared_start,
+            &prepared_end,
+            Float4::ONE,
+            Float4::ONE,
+            0.5,
+            Float3::ZERO,
+        )
+        .expect("planar lerp should succeed");
+
+        assert!(mesh.has_consistent_topology());
+        assert!(mesh.lins.iter().all(|line| line.norm == Float3::Z));
     }
 
     #[test]

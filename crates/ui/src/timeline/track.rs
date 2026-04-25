@@ -3,9 +3,9 @@ use gpui::*;
 use crate::theme::{FontSet, Theme};
 
 use super::metrics::{
-    CONTENT_H, DUR_FONT_SIZE, LABEL_FONT_SIZE, LABEL_GAP, PADDING_V, PX_PER_SEC, SLIDE_H, SLIDE_W,
     compute_gap_ws, compute_painted_gap_ws, compute_playhead_x, compute_slide_xs,
-    compute_track_width, effective_durations,
+    compute_track_width, effective_durations, CONTENT_H, DUR_FONT_SIZE, LABEL_FONT_SIZE, LABEL_GAP,
+    LABEL_LINE_H, LABEL_MAX_LINES, LABEL_TEXT_H, PADDING_V, PX_PER_SEC, SLIDE_H, SLIDE_W,
 };
 
 struct TrackPrepaint {
@@ -16,7 +16,6 @@ struct TrackPrepaint {
     explicit: Vec<bool>,
     vert_offset: f32,
     dur_texts: Vec<ShapedLine>,
-    label_texts: Vec<ShapedLine>,
 }
 
 pub(super) fn render_track(
@@ -37,13 +36,13 @@ pub(super) fn render_track(
         current_time,
     );
     let track_w = compute_track_width(slide_count, &effective_for_width, zoom);
+    let slide_xs_for_labels = compute_slide_xs(slide_count, &effective_for_width, zoom);
     let font = font(FontSet::UI);
 
     let track = canvas(
         {
             let durations = durations.clone();
             let minimum_durations = minimum_durations.clone();
-            let slide_names = slide_names.clone();
             let font = font.clone();
             move |bounds, window, _cx| {
                 let effective = effective_durations(
@@ -96,22 +95,6 @@ pub(super) fn render_track(
                     })
                     .collect();
 
-                let label_texts = (0..slide_count)
-                    .map(|i| {
-                        let s = slide_names
-                            .get(i)
-                            .and_then(|name| name.as_ref())
-                            .cloned()
-                            .unwrap_or_else(|| format!("Slide {}", i + 1));
-                        ts.shape_line(
-                            SharedString::from(s.clone()),
-                            px(LABEL_FONT_SIZE),
-                            &[make_run(&s, theme.timeline_text)],
-                            None,
-                        )
-                    })
-                    .collect();
-
                 TrackPrepaint {
                     slide_xs,
                     painted_gap_ws,
@@ -120,7 +103,6 @@ pub(super) fn render_track(
                     explicit,
                     vert_offset,
                     dur_texts,
-                    label_texts,
                 }
             }
         },
@@ -133,7 +115,6 @@ pub(super) fn render_track(
                 explicit,
                 vert_offset,
                 dur_texts,
-                label_texts,
             } = prepaint;
             let ox = bounds.origin.x;
             let oy_full = bounds.origin.y;
@@ -211,17 +192,6 @@ pub(super) fn render_track(
                         cx,
                     );
                 }
-
-                if let Some(shaped) = label_texts.get(i) {
-                    let tx = bx + (SLIDE_W - f32::from(shaped.width)) / 2.0;
-                    let ty = PADDING_V + SLIDE_H + LABEL_GAP;
-                    let _ = shaped.paint(
-                        point(ox + px(tx), oy + px(ty)),
-                        px(LABEL_FONT_SIZE + 2.0),
-                        window,
-                        cx,
-                    );
-                }
             }
 
             window.paint_quad(fill(
@@ -236,5 +206,48 @@ pub(super) fn render_track(
     .w(px(track_w))
     .h_full();
 
-    div().flex_none().w(px(track_w)).h_full().child(track)
+    let labels = (0..slide_count).map(|i| {
+        let label = slide_names
+            .get(i)
+            .and_then(|name| name.as_ref())
+            .cloned()
+            .unwrap_or_else(|| format!("Slide {}", i + 1));
+        div()
+            .absolute()
+            .left(px(slide_xs_for_labels[i]))
+            .top(px(PADDING_V + SLIDE_H + LABEL_GAP))
+            .w(px(SLIDE_W))
+            .h(px(LABEL_TEXT_H))
+            .overflow_hidden()
+            .text_ellipsis()
+            .line_clamp(LABEL_MAX_LINES)
+            .text_center()
+            .text_color(theme.timeline_text)
+            .text_size(px(LABEL_FONT_SIZE))
+            .line_height(px(LABEL_LINE_H))
+            .child(label)
+    });
+
+    div()
+        .flex_none()
+        .relative()
+        .w(px(track_w))
+        .h_full()
+        .child(track)
+        .child(
+            div()
+                .absolute()
+                .left(px(0.0))
+                .top(px(0.0))
+                .size_full()
+                .flex()
+                .items_center()
+                .child(
+                    div()
+                        .relative()
+                        .w(px(track_w))
+                        .h(px(CONTENT_H))
+                        .children(labels),
+                ),
+        )
 }

@@ -24,6 +24,8 @@ fn main() {
         .filter_level(log::LevelFilter::Info)
         .init();
 
+    warn_if_system_latex_unavailable();
+
     match parse_cli(env::args_os().skip(1).collect()) {
         Ok(CliAction::Help(topic)) => {
             println!("{}", help_text(topic));
@@ -40,6 +42,47 @@ fn main() {
             eprintln!("Use `monocurl help` for usage.");
             process::exit(2);
         }
+    }
+}
+
+fn warn_if_system_latex_unavailable() {
+    let status = latex::system_backend_status();
+    if status.is_available() {
+        return;
+    }
+
+    eprintln!("warning: system LaTeX tools not found");
+    eprintln!(
+        "Missing on PATH: {}. Monocurl will use a limited MathJax fallback for Tex(...); Text(...) and Latex(...) still require the system LaTeX toolchain.",
+        missing_latex_tools(status),
+    );
+    eprintln!("Install LaTeX: {}", latex_install_url());
+    eprintln!();
+}
+
+fn latex_install_url() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "https://tug.org/mactex/"
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        "https://miktex.org/download"
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        "https://www.latex-project.org/get/"
+    }
+}
+
+fn missing_latex_tools(status: latex::SystemBackendStatus) -> &'static str {
+    match (status.latex, status.dvisvgm) {
+        (true, true) => "",
+        (false, true) => "latex",
+        (true, false) => "dvisvgm",
+        (false, false) => "latex and dvisvgm",
     }
 }
 

@@ -12,5 +12,6 @@ anyhow.workspace = true
 env_logger.workspace = true
 executor.workspace = true
 exporter.workspace = true
+latex.workspace = true
 log.workspace = true
 renderer.workspace = true
