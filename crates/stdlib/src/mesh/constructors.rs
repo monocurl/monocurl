@@ -20,6 +20,10 @@ const MAX_AXIS_TICKS: usize = 1 << 12;
 const MAX_GRID_CELLS: usize = 1 << 16;
 const MAX_FIELD_SAMPLES: usize = 1 << 16;
 const MAX_SURFACE_TRIANGLES: usize = 1 << 17;
+const AXIS_TITLE_SCALE: f32 = 0.6;
+const AXIS_TICK_LABEL_SCALE: f32 = 0.5;
+const AXIS_TITLE_BUFFER: f32 = 0.18;
+const AXIS_TICK_LABEL_BUFFER: f32 = 0.08;
 const DEFAULT_ARROW_PATH_SAMPLES: usize = 64;
 const MAX_ARROW_HEAD_RADIUS: f32 = 0.065;
 const ARROW_HEAD_RADIUS_OVER_LENGTH: f32 = 0.4;
@@ -60,6 +64,39 @@ fn tick_count(min: f32, max: f32, step: f32) -> usize {
     } else {
         (((max - min) / step).ceil() as usize).saturating_add(1)
     }
+}
+
+fn axis_tick_values(min: f32, max: f32, step: f32) -> Vec<(i64, f32)> {
+    if max < min {
+        return Vec::new();
+    }
+
+    let first = (min / step).ceil() as i64;
+    let last = (max / step).floor() as i64;
+    (first..=last)
+        .map(|tick| (tick, tick as f32 * step))
+        .collect()
+}
+
+fn format_axis_number(value: f32) -> String {
+    let value = if value.abs() < 1e-6 { 0.0 } else { value };
+    let abs = value.abs();
+    if abs >= 10_000.0 || (abs > 0.0 && abs < 0.001) {
+        return format!("{value:.4e}");
+    }
+
+    let mut out = format!("{value:.6}");
+    while out.contains('.') && out.ends_with('0') {
+        out.pop();
+    }
+    if out.ends_with('.') {
+        out.pop();
+    }
+    if out == "-0" {
+        out.clear();
+        out.push('0');
+    }
+    out
 }
 
 fn point_samples(samples: i64) -> usize {
@@ -151,6 +188,167 @@ fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
     } else {
         fallback
     }
+}
+
+async fn read_optional_string(
+    executor: &mut Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<Option<String>, ExecutorError> {
+    let value = executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_wrappers(executor)
+        .await?;
+    if matches!(value, Value::Nil) {
+        return Ok(None);
+    }
+
+    crate::stringify_value(executor, value)
+        .await
+        .map(Some)
+        .map_err(|error| match error {
+            ExecutorError::TypeError { got, .. } => {
+                ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, name)
+            }
+            other => other,
+        })
+}
+
+fn read_label_rate(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<usize, ExecutorError> {
+    let value = read_int(executor, stack_idx, index, name)?;
+    if value < 0 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: name,
+            message: "must be non-negative",
+        });
+    }
+    Ok(value as usize)
+}
+
+fn axis_text_basis(right: Float3, normal: Float3) -> (Float3, Float3, Float3) {
+    let normal = normalize_or(normal, Float3::Z);
+    let projected_right = right - normal * right.dot(normal);
+    let right = if projected_right.len_sq() > 1e-8 {
+        projected_right.normalize()
+    } else {
+        polygon_basis(normal).0
+    };
+    let up = normalize_or(normal.cross(right), polygon_basis(normal).1);
+    (right, up, normal)
+}
+
+fn orient_text_tree(tree: &mut MeshTree, right: Float3, normal: Float3) {
+    let (right, up, normal) = axis_text_basis(right, normal);
+    tree.for_each_mut(&mut |mesh| {
+        transform_mesh_positions(mesh, |p| right * p.x + up * p.y + normal * p.z)
+    });
+}
+
+fn place_tree_next_to_point(tree: &mut MeshTree, anchor: Float3, dir: Float3, buffer: f32) {
+    let dir = normalize_or(dir, Float3::X);
+    let center = tree_center(tree).unwrap_or(Float3::ZERO);
+    let label_face = extremal_point(tree, -dir).unwrap_or(center).dot(dir);
+    let orth = (anchor - center) - dir * (anchor - center).dot(dir);
+    let delta = dir * (anchor.dot(dir) + buffer - label_face) + orth;
+    tree.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |p| p + delta));
+}
+
+fn render_axis_tex_tree(
+    executor: &Executor,
+    tex: &str,
+    scale: f32,
+    name: &'static str,
+) -> Result<Option<MeshTree>, ExecutorError> {
+    let meshes = latex::render_tex_with_quality(tex, scale, text_render_quality(executor))
+        .map_err(|error| {
+            ExecutorError::invalid_invocation(format!("{name} render failed: {error:#}"))
+        })?;
+    if meshes.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(MeshTree::List(
+            meshes.into_iter().map(MeshTree::Mesh).collect(),
+        )))
+    }
+}
+
+fn axis_result(axis_mesh: Value, labels: Vec<Value>) -> Value {
+    if labels.is_empty() {
+        axis_mesh
+    } else {
+        list_value(std::iter::once(axis_mesh).chain(labels))
+    }
+}
+
+async fn push_axis_title(
+    executor: &Executor,
+    out: &mut Vec<Value>,
+    label: Option<String>,
+    anchor: Float3,
+    dir: Float3,
+    text_right: Float3,
+    normal: Float3,
+) -> Result<(), ExecutorError> {
+    let Some(label) = label else {
+        return Ok(());
+    };
+    let Some(mut tree) = render_axis_tex_tree(executor, &label, AXIS_TITLE_SCALE, "axis label")?
+    else {
+        return Ok(());
+    };
+    orient_text_tree(&mut tree, text_right, normal);
+    place_tree_next_to_point(&mut tree, anchor, dir, AXIS_TITLE_BUFFER);
+    out.push(tree.into_value());
+    Ok(())
+}
+
+async fn push_axis_tick_labels(
+    executor: &Executor,
+    out: &mut Vec<Value>,
+    ticks: &[(i64, f32)],
+    center: Float3,
+    axis: Float3,
+    unit: f32,
+    side: Float3,
+    text_right: Float3,
+    normal: Float3,
+    label_rate: usize,
+    label_zero: bool,
+) -> Result<(), ExecutorError> {
+    if label_rate == 0 {
+        return Ok(());
+    }
+
+    let label_rate = label_rate as i64;
+    for &(tick, value) in ticks {
+        if tick % label_rate != 0 || (!label_zero && value.abs() <= 1e-4) {
+            continue;
+        }
+        let text = format_axis_number(value);
+        let Some(mut tree) =
+            render_axis_tex_tree(executor, &text, AXIS_TICK_LABEL_SCALE, "axis tick label")?
+        else {
+            continue;
+        };
+        orient_text_tree(&mut tree, text_right, normal);
+        place_tree_next_to_point(
+            &mut tree,
+            center + axis * (value * unit),
+            side,
+            AXIS_TICK_LABEL_BUFFER,
+        );
+        out.push(tree.into_value());
+    }
+    Ok(())
 }
 
 fn resolve_arrow_plane_normal(tangent: Float3, normal: Float3) -> Float3 {
@@ -1303,6 +1501,8 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let tick_step = crate::read_float(executor, stack_idx, -3, "tick_step")?
         .abs()
         .max(1e-3) as f32;
+    let label = read_optional_string(executor, stack_idx, -2, "label").await?;
+    let label_rate = read_label_rate(executor, stack_idx, -1, "label_rate")?;
     ensure_limit(
         "axis ticks",
         tick_count(min, max, tick_step),
@@ -1317,22 +1517,47 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         }
     };
     let tick_half = 0.08 * unit.max(0.2);
+    let ticks = axis_tick_values(min, max, tick_step);
     let mut lins = vec![default_lin(
         center + axis * (min * unit),
         center + axis * (max * unit),
         normal,
     )];
-    let mut v = (min / tick_step).ceil() * tick_step;
-    while v <= max + 1e-4 {
+    for &(_, v) in &ticks {
         let p = center + axis * (v * unit);
         lins.push(default_lin(
             p - tick_dir * tick_half,
             p + tick_dir * tick_half,
             normal,
         ));
-        v += tick_step;
     }
-    Ok(mesh_from_parts(vec![], lins, vec![]))
+    let axis_mesh = mesh_from_parts(vec![], lins, vec![]);
+    let mut labels = Vec::new();
+    push_axis_tick_labels(
+        executor,
+        &mut labels,
+        &ticks,
+        center,
+        axis,
+        unit,
+        -tick_dir,
+        axis,
+        normal,
+        label_rate,
+        true,
+    )
+    .await?;
+    push_axis_title(
+        executor,
+        &mut labels,
+        label,
+        center + axis * (max * unit),
+        axis,
+        axis,
+        normal,
+    )
+    .await?;
+    Ok(axis_result(axis_mesh, labels))
 }
 
 #[stdlib_func]
@@ -1352,6 +1577,10 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let y_tick = crate::read_float(executor, stack_idx, -6, "y_tick")?
         .abs()
         .max(1e-3) as f32;
+    let x_label = read_optional_string(executor, stack_idx, -5, "x_label").await?;
+    let x_label_rate = read_label_rate(executor, stack_idx, -4, "x_label_rate")?;
+    let y_label = read_optional_string(executor, stack_idx, -3, "y_label").await?;
+    let y_label_rate = read_label_rate(executor, stack_idx, -2, "y_label_rate")?;
     let grid = read_flag(executor, stack_idx, -1, "grid")?;
     ensure_limit(
         "axis x ticks",
@@ -1365,6 +1594,8 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     )?;
     let normal = x_axis.cross(y_axis).normalize();
     let tick_half = 0.06 * x_unit.min(y_unit).max(0.2);
+    let x_ticks = axis_tick_values(x_min, x_max, x_tick);
+    let y_ticks = axis_tick_values(y_min, y_max, y_tick);
     let mut lins = vec![
         default_lin(
             center + x_axis * (x_min * x_unit),
@@ -1377,8 +1608,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             normal,
         ),
     ];
-    let mut x = (x_min / x_tick).ceil() * x_tick;
-    while x <= x_max + 1e-4 {
+    for &(_, x) in &x_ticks {
         let p = center + x_axis * (x * x_unit);
         lins.push(default_lin(
             p - y_axis * tick_half,
@@ -1392,10 +1622,8 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                 normal,
             ));
         }
-        x += x_tick;
     }
-    let mut y = (y_min / y_tick).ceil() * y_tick;
-    while y <= y_max + 1e-4 {
+    for &(_, y) in &y_ticks {
         let p = center + y_axis * (y * y_unit);
         lins.push(default_lin(
             p - x_axis * tick_half,
@@ -1409,62 +1637,245 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                 normal,
             ));
         }
-        y += y_tick;
     }
-    Ok(mesh_from_parts(vec![], lins, vec![]))
+    let axis_mesh = mesh_from_parts(vec![], lins, vec![]);
+    let mut labels = Vec::new();
+    push_axis_tick_labels(
+        executor,
+        &mut labels,
+        &x_ticks,
+        center,
+        x_axis,
+        x_unit,
+        -y_axis,
+        x_axis,
+        normal,
+        x_label_rate,
+        true,
+    )
+    .await?;
+    push_axis_tick_labels(
+        executor,
+        &mut labels,
+        &y_ticks,
+        center,
+        y_axis,
+        y_unit,
+        -x_axis,
+        x_axis,
+        normal,
+        y_label_rate,
+        false,
+    )
+    .await?;
+    push_axis_title(
+        executor,
+        &mut labels,
+        x_label,
+        center + x_axis * (x_max * x_unit),
+        x_axis,
+        x_axis,
+        normal,
+    )
+    .await?;
+    push_axis_title(
+        executor,
+        &mut labels,
+        y_label,
+        center + y_axis * (y_max * y_unit),
+        y_axis,
+        x_axis,
+        normal,
+    )
+    .await?;
+    Ok(axis_result(axis_mesh, labels))
 }
 
 #[stdlib_func]
 pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -18, "center")?;
-    let x_axis = read_float3(executor, stack_idx, -17, "x_axis")?.normalize();
-    let y_axis = read_float3(executor, stack_idx, -16, "y_axis")?.normalize();
-    let z_axis = read_float3(executor, stack_idx, -15, "z_axis")?.normalize();
-    let x_min = crate::read_float(executor, stack_idx, -14, "x_min")? as f32;
-    let x_max = crate::read_float(executor, stack_idx, -13, "x_max")? as f32;
-    let x_unit = crate::read_float(executor, stack_idx, -12, "x_unit")? as f32;
-    let y_min = crate::read_float(executor, stack_idx, -10, "y_min")? as f32;
-    let y_max = crate::read_float(executor, stack_idx, -9, "y_max")? as f32;
-    let y_unit = crate::read_float(executor, stack_idx, -8, "y_unit")? as f32;
-    let z_min = crate::read_float(executor, stack_idx, -6, "z_min")? as f32;
-    let z_max = crate::read_float(executor, stack_idx, -5, "z_max")? as f32;
-    let z_unit = crate::read_float(executor, stack_idx, -4, "z_unit")? as f32;
+    let center = read_float3(executor, stack_idx, -23, "center")?;
+    let x_axis = read_float3(executor, stack_idx, -22, "x_axis")?.normalize();
+    let y_axis = read_float3(executor, stack_idx, -21, "y_axis")?.normalize();
+    let z_axis = read_float3(executor, stack_idx, -20, "z_axis")?.normalize();
+    let x_min = crate::read_float(executor, stack_idx, -19, "x_min")? as f32;
+    let x_max = crate::read_float(executor, stack_idx, -18, "x_max")? as f32;
+    let x_unit = crate::read_float(executor, stack_idx, -17, "x_unit")? as f32;
+    let x_tick = crate::read_float(executor, stack_idx, -16, "x_tick")?
+        .abs()
+        .max(1e-3) as f32;
+    let y_min = crate::read_float(executor, stack_idx, -15, "y_min")? as f32;
+    let y_max = crate::read_float(executor, stack_idx, -14, "y_max")? as f32;
+    let y_unit = crate::read_float(executor, stack_idx, -13, "y_unit")? as f32;
+    let y_tick = crate::read_float(executor, stack_idx, -12, "y_tick")?
+        .abs()
+        .max(1e-3) as f32;
+    let z_min = crate::read_float(executor, stack_idx, -11, "z_min")? as f32;
+    let z_max = crate::read_float(executor, stack_idx, -10, "z_max")? as f32;
+    let z_unit = crate::read_float(executor, stack_idx, -9, "z_unit")? as f32;
+    let z_tick = crate::read_float(executor, stack_idx, -8, "z_tick")?
+        .abs()
+        .max(1e-3) as f32;
+    let x_label = read_optional_string(executor, stack_idx, -7, "x_label").await?;
+    let x_label_rate = read_label_rate(executor, stack_idx, -6, "x_label_rate")?;
+    let y_label = read_optional_string(executor, stack_idx, -5, "y_label").await?;
+    let y_label_rate = read_label_rate(executor, stack_idx, -4, "y_label_rate")?;
+    let z_label = read_optional_string(executor, stack_idx, -3, "z_label").await?;
+    let z_label_rate = read_label_rate(executor, stack_idx, -2, "z_label_rate")?;
     let grid = read_flag(executor, stack_idx, -1, "grid")?;
+    ensure_limit(
+        "axis x ticks",
+        tick_count(x_min, x_max, x_tick),
+        MAX_AXIS_TICKS,
+    )?;
+    ensure_limit(
+        "axis y ticks",
+        tick_count(y_min, y_max, y_tick),
+        MAX_AXIS_TICKS,
+    )?;
+    ensure_limit(
+        "axis z ticks",
+        tick_count(z_min, z_max, z_tick),
+        MAX_AXIS_TICKS,
+    )?;
+    let xy_normal = normalize_or(x_axis.cross(y_axis), z_axis);
+    let z_normal = normalize_or(x_axis.cross(z_axis), xy_normal);
+    let tick_half = 0.06 * x_unit.min(y_unit).min(z_unit).max(0.2);
+    let x_ticks = axis_tick_values(x_min, x_max, x_tick);
+    let y_ticks = axis_tick_values(y_min, y_max, y_tick);
+    let z_ticks = axis_tick_values(z_min, z_max, z_tick);
     let mut lins = vec![
         default_lin(
             center + x_axis * (x_min * x_unit),
             center + x_axis * (x_max * x_unit),
-            Float3::Z,
+            xy_normal,
         ),
         default_lin(
             center + y_axis * (y_min * y_unit),
             center + y_axis * (y_max * y_unit),
-            Float3::Z,
+            xy_normal,
         ),
         default_lin(
             center + z_axis * (z_min * z_unit),
             center + z_axis * (z_max * z_unit),
-            Float3::Z,
+            z_normal,
         ),
     ];
+    for &(_, x) in &x_ticks {
+        let p = center + x_axis * (x * x_unit);
+        lins.push(default_lin(
+            p - y_axis * tick_half,
+            p + y_axis * tick_half,
+            xy_normal,
+        ));
+    }
+    for &(_, y) in &y_ticks {
+        let p = center + y_axis * (y * y_unit);
+        lins.push(default_lin(
+            p - x_axis * tick_half,
+            p + x_axis * tick_half,
+            xy_normal,
+        ));
+    }
+    for &(_, z) in &z_ticks {
+        let p = center + z_axis * (z * z_unit);
+        lins.push(default_lin(
+            p - x_axis * tick_half,
+            p + x_axis * tick_half,
+            z_normal,
+        ));
+    }
     if grid {
         lins.push(default_lin(
             center + x_axis * (x_min * x_unit),
             center + x_axis * (x_max * x_unit) + y_axis * (y_max * y_unit),
-            Float3::Z,
+            xy_normal,
         ));
         lins.push(default_lin(
             center + y_axis * (y_min * y_unit),
             center + y_axis * (y_max * y_unit) + z_axis * (z_max * z_unit),
-            Float3::Z,
+            xy_normal,
         ));
         lins.push(default_lin(
             center + z_axis * (z_min * z_unit),
             center + z_axis * (z_max * z_unit) + x_axis * (x_max * x_unit),
-            Float3::Z,
+            z_normal,
         ));
     }
-    Ok(mesh_from_parts(vec![], lins, vec![]))
+    let axis_mesh = mesh_from_parts(vec![], lins, vec![]);
+    let mut labels = Vec::new();
+    push_axis_tick_labels(
+        executor,
+        &mut labels,
+        &x_ticks,
+        center,
+        x_axis,
+        x_unit,
+        -y_axis,
+        x_axis,
+        xy_normal,
+        x_label_rate,
+        true,
+    )
+    .await?;
+    push_axis_tick_labels(
+        executor,
+        &mut labels,
+        &y_ticks,
+        center,
+        y_axis,
+        y_unit,
+        -x_axis,
+        x_axis,
+        xy_normal,
+        y_label_rate,
+        false,
+    )
+    .await?;
+    push_axis_tick_labels(
+        executor,
+        &mut labels,
+        &z_ticks,
+        center,
+        z_axis,
+        z_unit,
+        -x_axis,
+        x_axis,
+        z_normal,
+        z_label_rate,
+        false,
+    )
+    .await?;
+    push_axis_title(
+        executor,
+        &mut labels,
+        x_label,
+        center + x_axis * (x_max * x_unit),
+        x_axis,
+        x_axis,
+        xy_normal,
+    )
+    .await?;
+    push_axis_title(
+        executor,
+        &mut labels,
+        y_label,
+        center + y_axis * (y_max * y_unit),
+        y_axis,
+        x_axis,
+        xy_normal,
+    )
+    .await?;
+    push_axis_title(
+        executor,
+        &mut labels,
+        z_label,
+        center + z_axis * (z_max * z_unit),
+        z_axis,
+        x_axis,
+        z_normal,
+    )
+    .await?;
+    Ok(axis_result(axis_mesh, labels))
 }
 
 #[stdlib_func]

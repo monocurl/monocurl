@@ -27,6 +27,7 @@ const MAX_FRAME_TIME_MS: u32 = 10_000;
 const DEPTH_STEP: f32 = 1e-6;
 const DESIRED_MSAA_SAMPLE_COUNT: u32 = 8;
 const DEFAULT_LINE_MITER_SCALE: f32 = 4.0;
+const LINE_INDICES_PER_INSTANCE: u32 = 24;
 const LINE_VERTICES_PER_INSTANCE: u32 = 10;
 const REFERENCE_WIDTH: f32 = 1480.0;
 const WHITE_TEXTURE: [u8; 4] = [255, 255, 255, 255];
@@ -38,7 +39,6 @@ pub(crate) struct BladeRenderer {
     texture_sampler: gpu::Sampler,
     upload_belt: BufferBelt,
     white_texture: CachedTexture,
-    line_index_buffer: Option<IndexedBuffer>,
     dot_index_buffers: HashMap<u16, IndexedBuffer>,
     target: Option<OffscreenTarget>,
     mesh_cache: HashMap<usize, CachedMesh>,

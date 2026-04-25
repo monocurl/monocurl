@@ -332,11 +332,16 @@ impl DocumentView {
             &self.user_path
         );
 
-        self.window_state.upgrade().map(|state| {
+        let Some(state) = self.window_state.upgrade() else {
+            return;
+        };
+        let internal_path = self.internal_path.clone();
+
+        w.defer(cx, move |w, cx| {
             state.update(cx, |state, cx| {
-                state.close_tab(&self.internal_path, cx, w);
+                state.close_tab(&internal_path, cx, w);
                 cx.notify();
-            })
+            });
         });
     }
 }

@@ -197,12 +197,41 @@ fn fs_triangle(in: TriOut) -> @location(0) vec4<f32> {
     return vec4<f32>(lit_rgb * sampled.rgb, alpha);
 }
 
+fn line_vertex_index(local_index: u32) -> u32 {
+    switch local_index {
+        case 0u: { return 0u; }
+        case 1u: { return 2u; }
+        case 2u: { return 1u; }
+        case 3u: { return 1u; }
+        case 4u: { return 2u; }
+        case 5u: { return 4u; }
+        case 6u: { return 1u; }
+        case 7u: { return 4u; }
+        case 8u: { return 3u; }
+        case 9u: { return 3u; }
+        case 10u: { return 4u; }
+        case 11u: { return 5u; }
+        case 12u: { return 6u; }
+        case 13u: { return 7u; }
+        case 14u: { return 3u; }
+        case 15u: { return 3u; }
+        case 16u: { return 7u; }
+        case 17u: { return 8u; }
+        case 18u: { return 3u; }
+        case 19u: { return 8u; }
+        case 20u: { return 1u; }
+        case 21u: { return 1u; }
+        case 22u: { return 8u; }
+        default: { return 9u; }
+    }
+}
+
 @vertex
 fn vs_line(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32,
 ) -> ColorOut {
-    let vertex = line_vertices[instance_index * 10u + vertex_index];
+    let vertex = line_vertices[instance_index * 10u + line_vertex_index(vertex_index % 24u)];
     let model = world_to_camera(vertex.pos.xyz, line_camera);
 
     let viewport = max(line_params.viewport_and_line_width.xy, vec2<f32>(1.0));

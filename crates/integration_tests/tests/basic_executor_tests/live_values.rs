@@ -708,6 +708,25 @@ fn test_label_preserves_cross_axis_alignment() {
 }
 
 #[test]
+fn test_axis2d_uses_leading_optional_axis_labels() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis2d(\"x\", nil, x = [0, 0, 1, 1], y = [0, 0, 1, 1], tick_label_rates = [0, 0])
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+    assert!(
+        meshes.len() > 1,
+        "expected axis mesh plus at least one label mesh"
+    );
+}
+
+#[test]
 fn test_label_matches_latex_next_to_geometry() {
     let r = run_with_stdlib(
         "

@@ -159,10 +159,13 @@ impl PopoverElement {
         let above_y = target_position.y - popover_size.height;
 
         let margin = px(8.0);
-        let x = target_position.x.clamp(
-            container_bounds.left() + margin,
-            container_bounds.right() - popover_size.width - margin,
-        );
+        let min_x = container_bounds.left() + margin;
+        let max_x = container_bounds.right() - popover_size.width - margin;
+        let x = if max_x < min_x {
+            min_x
+        } else {
+            target_position.x.clamp(min_x, max_x)
+        };
 
         let space_below = container_bounds.bottom() - (target_position.y + line_height + margin);
         let space_above = target_position.y - container_bounds.top();
@@ -493,7 +496,6 @@ impl PopoverElement {
         let item_padding_x = px(12.0);
         let item_padding_y = px(6.0);
         let min_w = px(150.0);
-        let max_w = px(500.0);
 
         let state = parameter_hint_state.borrow();
         let hint = state.hint.as_ref().unwrap();
@@ -506,7 +508,6 @@ impl PopoverElement {
             .border_1()
             .border_color(styles.popover_border_color)
             .min_w(min_w)
-            .max_w(max_w)
             .shadow(vec![BoxShadow {
                 offset: Point {
                     x: px(0.),

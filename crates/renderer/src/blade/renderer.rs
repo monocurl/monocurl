@@ -10,11 +10,11 @@ use image::RgbaImage;
 use crate::{RenderSize, RenderView, SceneRenderData, mesh_fingerprint};
 
 use super::{
-    BladeRenderer, DEPTH_FORMAT, DEPTH_STEP, LINE_VERTICES_PER_INSTANCE, MAX_FRAME_TIME_MS,
-    MeshWorkItem, TARGET_FORMAT, TEXTURE_FORMAT, WHITE_TEXTURE,
+    BladeRenderer, DEPTH_FORMAT, DEPTH_STEP, LINE_INDICES_PER_INSTANCE, LINE_VERTICES_PER_INSTANCE,
+    MAX_FRAME_TIME_MS, MeshWorkItem, TARGET_FORMAT, TEXTURE_FORMAT, WHITE_TEXTURE,
     geometry::{
-        build_dot_indices, build_dot_instances, build_line_indices, build_line_vertices,
-        build_triangle_vertices, mesh_dot_radius_px, mesh_line_miter_scale, mesh_line_radius_px,
+        build_dot_indices, build_dot_instances, build_line_vertices, build_triangle_vertices,
+        mesh_dot_radius_px, mesh_line_miter_scale, mesh_line_radius_px,
     },
     pipelines::Pipelines,
     resources::{
@@ -66,7 +66,6 @@ impl BladeRenderer {
                 alignment: 64,
             }),
             white_texture,
-            line_index_buffer: None,
             dot_index_buffers: std::collections::HashMap::new(),
             target: None,
             mesh_cache: std::collections::HashMap::new(),
@@ -77,14 +76,6 @@ impl BladeRenderer {
             sample_count,
             frame_index: 0,
         };
-        renderer.line_index_buffer = renderer
-            .create_buffer_with_upload("renderer-line-indices", &build_line_indices())
-            .map(|buffer| IndexedBuffer {
-                buffer: buffer.buffer,
-                count: buffer.count,
-            })
-            .ok_or_else(|| anyhow!("failed to create line index buffer"))?
-            .into();
         renderer.initialize_white_texture()?;
         Ok(renderer)
     }
@@ -541,9 +532,6 @@ impl BladeRenderer {
             if let Some(lines) = buffers.lines.as_ref() {
                 let line_radius = mesh_line_radius_px(item.mesh.as_ref(), size, self.style);
                 if line_radius > f32::EPSILON {
-                    let Some(index_buffer) = self.line_index_buffer.as_ref() else {
-                        continue;
-                    };
                     let mut encoder = pass.with(&self.pipelines.lines);
                     encoder.bind(
                         0,
@@ -566,11 +554,9 @@ impl BladeRenderer {
                             line_vertices: lines.buffer.into(),
                         },
                     );
-                    encoder.draw_indexed(
-                        index_buffer.buffer.into(),
-                        gpu::IndexType::U16,
-                        index_buffer.count,
+                    encoder.draw(
                         0,
+                        LINE_INDICES_PER_INSTANCE,
                         0,
                         lines.count / LINE_VERTICES_PER_INSTANCE,
                     );
@@ -676,9 +662,6 @@ impl BladeRenderer {
         }
         if let Some(target) = self.target.take() {
             destroy_offscreen_target(&self.gpu, target);
-        }
-        if let Some(index_buffer) = self.line_index_buffer.take() {
-            self.gpu.destroy_buffer(index_buffer.buffer);
         }
         for (_, index_buffer) in self.dot_index_buffers.drain() {
             self.gpu.destroy_buffer(index_buffer.buffer);

@@ -213,6 +213,7 @@ pub(super) fn build_dot_indices(vertex_count: u16) -> Vec<u16> {
     indices
 }
 
+#[cfg(test)]
 pub(super) fn build_line_indices() -> [u16; 24] {
     [
         0, 2, 1, 1, 2, 4, 1, 4, 3, 3, 4, 5, 6, 7, 3, 3, 7, 8, 3, 8, 1, 1, 8, 9,
