@@ -467,7 +467,12 @@ fn dashed_lines(source_lines: &[Lin], dash_length: f32, gap_length: f32, offset:
 
 fn stroke_source_lines(mesh: &Mesh) -> Vec<Lin> {
     if !mesh.lins.is_empty() {
-        return mesh.lins.clone();
+        return mesh
+            .lins
+            .iter()
+            .copied()
+            .filter(|line| line.is_dom_sib)
+            .collect();
     }
     if mesh.tris.is_empty() {
         return Vec::new();
@@ -486,7 +491,8 @@ fn stroke_source_lines(mesh: &Mesh) -> Vec<Lin> {
 
 fn dashed_mesh(mesh: &Mesh, dash_length: f32, gap_length: f32, offset: f32) -> MeshTree {
     let dashed_lins = dashed_lines(&stroke_source_lines(mesh), dash_length, gap_length, offset);
-    let has_base_geometry = !mesh.dots.is_empty() || !mesh.tris.is_empty();
+    let has_base_geometry =
+        mesh.dots.iter().any(|dot| dot.col.w > f32::EPSILON) || !mesh.tris.is_empty();
 
     if !has_base_geometry {
         if dashed_lins.is_empty() {
@@ -500,6 +506,8 @@ fn dashed_mesh(mesh: &Mesh, dash_length: f32, gap_length: f32, offset: f32) -> M
             uniform: mesh.uniform.clone(),
             tag: mesh.tag.clone(),
         };
+        let mut dashed = dashed;
+        dashed.normalize_line_dot_topology();
         dashed.debug_assert_consistent_topology();
         return MeshTree::Mesh(Arc::new(dashed));
     }
@@ -517,13 +525,14 @@ fn dashed_mesh(mesh: &Mesh, dash_length: f32, gap_length: f32, offset: f32) -> M
     children.push(MeshTree::Mesh(Arc::new(base)));
 
     if !dashed_lins.is_empty() {
-        let dashed = Mesh {
+        let mut dashed = Mesh {
             dots: Vec::new(),
             lins: dashed_lins,
             tris: Vec::new(),
             uniform: mesh.uniform.clone(),
             tag: mesh.tag.clone(),
         };
+        dashed.normalize_line_dot_topology();
         dashed.debug_assert_consistent_topology();
         children.push(MeshTree::Mesh(Arc::new(dashed)));
     }
@@ -1343,6 +1352,7 @@ pub async fn op_downrank(
                 .collect();
             mesh.lins.clear();
         }
+        mesh.normalize_line_dot_topology();
         mesh.debug_assert_consistent_topology();
     })
     .await?;
@@ -1497,7 +1507,7 @@ pub async fn op_extrude(executor: &mut Executor, stack_idx: usize) -> Result<Val
             ));
             return;
         }
-        if mesh.lins.iter().any(|lin| lin.inv == -1) {
+        if mesh.lins.iter().any(|lin| lin.is_dom_sib && lin.inv >= 0) {
             extrude_error = Some(ExecutorError::invalid_operation(
                 "cannot extrude meshes that have standalone line loops; try upranking first",
             ));

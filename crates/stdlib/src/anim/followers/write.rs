@@ -384,6 +384,7 @@ fn write_mesh_window(
 ) -> Mesh {
     let mut out = mesh.clone();
     out.uniform.alpha = mesh.uniform.alpha;
+    let has_visible_dots = mesh.dots.iter().any(|dot| dot.col.w > f32::EPSILON);
 
     let subset_count = subset_count.max(1) as f32;
     let anim_length = 1.0 / (WRITE_LAG_RATIO * (subset_count - 1.0) + 1.0);
@@ -410,7 +411,7 @@ fn write_mesh_window(
         mesh,
         &mut out,
         WriteWindow {
-            start: if mesh.dots.is_empty() {
+            start: if !has_visible_dots {
                 base_start
             } else {
                 base_start + WRITE_BOUNDARY_HEADSTART * anim_length
@@ -425,6 +426,7 @@ fn write_mesh_window(
         u,
         v,
     );
+    sync_inverse_line_geometry(&mut out);
 
     write_tris(
         mesh,
@@ -446,7 +448,7 @@ fn write_mesh_window(
 }
 
 fn write_dots(mesh: &Mesh, out: &mut Mesh, window: WriteWindow, u: f32, v: f32) {
-    if mesh.dots.is_empty() {
+    if !mesh.dots.iter().any(|dot| dot.col.w > f32::EPSILON) {
         return;
     }
 
@@ -613,12 +615,31 @@ fn write_line_groups(mesh: &Mesh) -> Vec<WriteLineGroup> {
         .collect()
 }
 
+fn sync_inverse_line_geometry(mesh: &mut Mesh) {
+    for line_idx in 0..mesh.lins.len() {
+        let line = mesh.lins[line_idx];
+        if !line.is_dom_sib || line.inv < 0 {
+            continue;
+        }
+        let inv_idx = line.inv as usize;
+        if inv_idx >= mesh.lins.len() || mesh.lins[inv_idx].is_dom_sib {
+            continue;
+        }
+
+        let inverse = &mut mesh.lins[inv_idx];
+        inverse.a.pos = line.b.pos;
+        inverse.b.pos = line.a.pos;
+        inverse.a.col = line.b.col;
+        inverse.b.col = line.a.col;
+    }
+}
+
 fn ordered_line_components(mesh: &Mesh) -> Vec<Vec<usize>> {
     let mut visited = vec![false; mesh.lins.len()];
     let mut components = Vec::new();
 
     for line_idx in 0..mesh.lins.len() {
-        if visited[line_idx] {
+        if visited[line_idx] || !mesh.lins[line_idx].is_dom_sib {
             continue;
         }
 
@@ -630,7 +651,12 @@ fn ordered_line_components(mesh: &Mesh) -> Vec<Vec<usize>> {
                 break;
             }
             let prev = prev as usize;
-            if prev >= mesh.lins.len() || prev == start || prev == cursor || prev == line_idx {
+            if prev >= mesh.lins.len()
+                || !mesh.lins[prev].is_dom_sib
+                || prev == start
+                || prev == cursor
+                || prev == line_idx
+            {
                 break;
             }
             cursor = prev;
@@ -651,6 +677,9 @@ fn ordered_line_components(mesh: &Mesh) -> Vec<Vec<usize>> {
                 break;
             }
             let next = next as usize;
+            if next >= mesh.lins.len() || !mesh.lins[next].is_dom_sib {
+                break;
+            }
             if next == start {
                 break;
             }
@@ -692,7 +721,7 @@ mod tests {
             prev,
             next,
             inv: -1,
-            is_dom_sib: false,
+            is_dom_sib: true,
         }
     }
 

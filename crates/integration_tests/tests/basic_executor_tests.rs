@@ -340,11 +340,6 @@ fn run_section_with_stdlib(
         };
     }
 
-    println!(
-        "Bytecode Instructions {:?}",
-        result.bytecode.sections[1].instructions
-    );
-
     // -- execute --
     let mut executor = Executor::new(result.bytecode, registry().func_table());
 

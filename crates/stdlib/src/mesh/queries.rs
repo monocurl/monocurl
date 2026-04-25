@@ -13,11 +13,13 @@ fn decode_mesh_ref(value: i32) -> Option<usize> {
     (value < -1).then_some((-value - 2) as usize)
 }
 
-fn shift_dot_refs(dots: &mut [Dot], delta: usize) {
-    let delta = delta as i32;
+fn shift_dot_refs(dots: &mut [Dot], dot_delta: usize, line_delta: usize) {
+    let dot_delta = dot_delta as i32;
     for dot in dots {
         if dot.inv >= 0 {
-            dot.inv += delta;
+            dot.inv += dot_delta;
+        } else if let Some(line_idx) = decode_mesh_ref(dot.inv) {
+            dot.inv = mesh_ref(line_idx + line_delta);
         }
     }
 }
@@ -71,7 +73,7 @@ fn append_mesh_into(out: &mut Mesh, mesh: &Mesh) {
     let mut lins = mesh.lins.clone();
     let mut tris = mesh.tris.clone();
 
-    shift_dot_refs(&mut dots, dot_delta);
+    shift_dot_refs(&mut dots, dot_delta, line_delta);
     shift_line_refs(&mut lins, dot_delta, line_delta, tri_delta);
     shift_tri_refs(&mut tris, line_delta, tri_delta);
 
@@ -534,4 +536,71 @@ pub async fn mesh_contour_separate(
             Value::Mesh(Arc::new(mesh))
         },
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use geo::{
+        mesh::{Dot, Lin, LinVertex, Mesh, Uniforms},
+        simd::{Float3, Float4},
+    };
+
+    use super::{append_mesh_into, mesh_ref};
+
+    #[test]
+    fn append_mesh_remaps_negative_dot_inverse_refs() {
+        let mut out = Mesh {
+            dots: vec![],
+            lins: vec![Lin {
+                a: LinVertex {
+                    pos: Float3::new(-1.0, 0.0, 0.0),
+                    col: Float4::ONE,
+                },
+                b: LinVertex {
+                    pos: Float3::ZERO,
+                    col: Float4::ONE,
+                },
+                norm: Float3::Z,
+                prev: -1,
+                next: -1,
+                inv: -1,
+                is_dom_sib: true,
+            }],
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+        let mesh = Mesh {
+            dots: vec![Dot {
+                pos: Float3::ZERO,
+                norm: Float3::Z,
+                col: Float4::ONE,
+                inv: mesh_ref(0),
+                is_dom_sib: false,
+            }],
+            lins: vec![Lin {
+                a: LinVertex {
+                    pos: Float3::ZERO,
+                    col: Float4::ONE,
+                },
+                b: LinVertex {
+                    pos: Float3::X,
+                    col: Float4::ONE,
+                },
+                norm: Float3::Z,
+                prev: mesh_ref(0),
+                next: -1,
+                inv: -1,
+                is_dom_sib: true,
+            }],
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+
+        append_mesh_into(&mut out, &mesh);
+
+        assert_eq!(out.dots[0].inv, mesh_ref(1));
+        out.debug_assert_consistent_topology();
+    }
 }

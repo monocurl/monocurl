@@ -55,7 +55,7 @@ pub fn line(a: Float3, b: Float3, norm: Float3, color: Float4) -> Lin {
         prev: -1,
         next: -1,
         inv: -1,
-        is_dom_sib: false,
+        is_dom_sib: true,
     }
 }
 
@@ -117,54 +117,7 @@ pub fn build_indexed_surface(
     faces: &[[usize; 3]],
     boundary_edges: &HashMap<(usize, usize), BoundaryEdge>,
 ) -> (Vec<Lin>, Vec<Tri>) {
-    let mut tris: Vec<_> = faces
-        .iter()
-        .map(|face| Tri {
-            a: TriVertex {
-                pos: vertices[face[0]].pos,
-                col: vertices[face[0]].col,
-                uv: vertices[face[0]].uv,
-            },
-            b: TriVertex {
-                pos: vertices[face[1]].pos,
-                col: vertices[face[1]].col,
-                uv: vertices[face[1]].uv,
-            },
-            c: TriVertex {
-                pos: vertices[face[2]].pos,
-                col: vertices[face[2]].col,
-                uv: vertices[face[2]].uv,
-            },
-            ab: -1,
-            bc: -1,
-            ca: -1,
-            is_dom_sib: false,
-        })
-        .collect();
-
-    let mut edge_map = HashMap::<(usize, usize), Vec<(usize, usize)>>::new();
-    for (tri_idx, face) in faces.iter().enumerate() {
-        for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
-            .into_iter()
-            .enumerate()
-        {
-            if let Some(other_edges) = edge_map.get_mut(&(b, a)) {
-                if let Some((other_tri, other_edge)) = other_edges.pop() {
-                    if other_edges.is_empty() {
-                        edge_map.remove(&(b, a));
-                    }
-                    set_tri_edge(&mut tris[tri_idx], edge_idx, other_tri as i32);
-                    set_tri_edge(&mut tris[other_tri], other_edge, tri_idx as i32);
-                    continue;
-                }
-            }
-
-            edge_map
-                .entry((a, b))
-                .or_default()
-                .push((tri_idx, edge_idx));
-        }
-    }
+    let (mut tris, edge_map) = build_surface_tris(vertices, faces);
 
     let mut boundary_items = Vec::new();
     for ((a, b), edges) in edge_map {
@@ -220,6 +173,23 @@ pub fn build_indexed_surface(
     (lins, tris)
 }
 
+pub fn build_indexed_tris_with_open_boundaries(
+    vertices: &[Float3],
+    faces: &[[usize; 3]],
+    color: Float4,
+) -> Vec<Tri> {
+    let vertices: Vec<_> = vertices
+        .iter()
+        .copied()
+        .map(|pos| SurfaceVertex {
+            pos,
+            col: color,
+            uv: Float2::ZERO,
+        })
+        .collect();
+    build_surface_tris(&vertices, faces).0
+}
+
 pub fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]], color: Float4) -> Vec<Tri> {
     let vertices: Vec<_> = vertices
         .iter()
@@ -230,15 +200,68 @@ pub fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]], color: Floa
             uv: Float2::ZERO,
         })
         .collect();
-    let mut tris = build_indexed_surface(&vertices, faces, &HashMap::new()).1;
-    for tri in &mut tris {
-        for edge in [&mut tri.ab, &mut tri.bc, &mut tri.ca] {
-            if *edge < 0 {
-                *edge = -1;
+    let (lins, tris) = build_indexed_surface(&vertices, faces, &HashMap::new());
+    assert!(
+        lins.is_empty(),
+        "build_indexed_tris requires a closed surface; open triangle boundaries must remain explicit lines",
+    );
+    tris
+}
+
+fn build_surface_tris(
+    vertices: &[SurfaceVertex],
+    faces: &[[usize; 3]],
+) -> (Vec<Tri>, HashMap<(usize, usize), Vec<(usize, usize)>>) {
+    let mut tris: Vec<_> = faces
+        .iter()
+        .map(|face| Tri {
+            a: TriVertex {
+                pos: vertices[face[0]].pos,
+                col: vertices[face[0]].col,
+                uv: vertices[face[0]].uv,
+            },
+            b: TriVertex {
+                pos: vertices[face[1]].pos,
+                col: vertices[face[1]].col,
+                uv: vertices[face[1]].uv,
+            },
+            c: TriVertex {
+                pos: vertices[face[2]].pos,
+                col: vertices[face[2]].col,
+                uv: vertices[face[2]].uv,
+            },
+            ab: -1,
+            bc: -1,
+            ca: -1,
+            is_dom_sib: false,
+        })
+        .collect();
+
+    let mut edge_map = HashMap::<(usize, usize), Vec<(usize, usize)>>::new();
+    for (tri_idx, face) in faces.iter().enumerate() {
+        for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
+            .into_iter()
+            .enumerate()
+        {
+            if let Some(other_edges) = edge_map.get_mut(&(b, a)) {
+                if let Some((other_tri, other_edge)) = other_edges.pop() {
+                    if other_edges.is_empty() {
+                        edge_map.remove(&(b, a));
+                    }
+                    set_tri_edge(&mut tris[tri_idx], edge_idx, other_tri as i32);
+                    set_tri_edge(&mut tris[other_tri], other_edge, tri_idx as i32);
+                    continue;
+                }
             }
+
+            edge_map
+                .entry((a, b))
+                .or_default()
+                .push((tri_idx, edge_idx));
         }
     }
-    tris
+
+    (tris, edge_map)
 }
 
 fn set_tri_edge(tri: &mut Tri, edge_idx: usize, value: i32) {
@@ -259,7 +282,10 @@ mod tests {
         simd::{Float2, Float3, Float4},
     };
 
-    use super::{SurfaceVertex, build_indexed_surface, build_indexed_tris};
+    use super::{
+        SurfaceVertex, build_indexed_surface, build_indexed_tris,
+        build_indexed_tris_with_open_boundaries,
+    };
 
     #[test]
     fn build_indexed_surface_keeps_same_direction_duplicate_edges_on_boundary() {
@@ -318,8 +344,22 @@ mod tests {
     }
 
     #[test]
-    fn build_indexed_tris_clears_boundary_refs() {
-        let tris = build_indexed_tris(
+    #[should_panic(expected = "open triangle boundaries must remain explicit lines")]
+    fn build_indexed_tris_rejects_open_boundaries() {
+        let _ = build_indexed_tris(
+            &[
+                Float3::new(0.0, 0.0, 0.0),
+                Float3::new(1.0, 0.0, 0.0),
+                Float3::new(0.0, 1.0, 0.0),
+            ],
+            &[[0, 1, 2]],
+            Float4::ONE,
+        );
+    }
+
+    #[test]
+    fn build_indexed_tris_with_open_boundaries_leaves_edges_unset() {
+        let tris = build_indexed_tris_with_open_boundaries(
             &[
                 Float3::new(0.0, 0.0, 0.0),
                 Float3::new(1.0, 0.0, 0.0),

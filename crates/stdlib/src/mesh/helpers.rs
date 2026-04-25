@@ -578,7 +578,7 @@ pub(super) fn default_lin(a: Float3, b: Float3, norm: Float3) -> Lin {
         prev: -1,
         next: -1,
         inv: -1,
-        is_dom_sib: false,
+        is_dom_sib: true,
     }
 }
 
@@ -701,6 +701,14 @@ pub(crate) fn mesh_position_groups(mesh: &Mesh) -> Vec<usize> {
             let inv = dot.inv as usize;
             if inv < mesh.dots.len() {
                 dsu.union(dot_slot(idx), dot_slot(inv));
+            }
+        } else if let Some(line_idx) = decode_mesh_ref(dot.inv).filter(|&i| i < mesh.lins.len()) {
+            let line = mesh.lins[line_idx];
+            if line.a.pos == dot.pos {
+                dsu.union(dot_slot(idx), line_a_slot(mesh, line_idx));
+            }
+            if line.b.pos == dot.pos {
+                dsu.union(dot_slot(idx), line_b_slot(mesh, line_idx));
             }
         }
     }
@@ -927,10 +935,20 @@ pub(super) fn mesh_to_indexed_lines(mesh: &Mesh) -> IndexedLineMesh {
         }
     };
 
-    for (idx, dot) in mesh.dots.iter().enumerate() {
+    for (idx, dot) in mesh
+        .dots
+        .iter()
+        .enumerate()
+        .filter(|(_, dot)| dot.is_dom_sib && dot.col.w > f32::EPSILON)
+    {
         assign_vertex(groups[dot_slot(idx)], dot.pos, dot.col);
     }
-    for (idx, line) in mesh.lins.iter().enumerate() {
+    for (idx, line) in mesh
+        .lins
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.is_dom_sib)
+    {
         assign_vertex(groups[line_a_slot(mesh, idx)], line.a.pos, line.a.col);
         assign_vertex(groups[line_b_slot(mesh, idx)], line.b.pos, line.b.col);
     }
@@ -939,6 +957,7 @@ pub(super) fn mesh_to_indexed_lines(mesh: &Mesh) -> IndexedLineMesh {
         .lins
         .iter()
         .enumerate()
+        .filter(|(_, line)| line.is_dom_sib)
         .map(|(idx, _)| {
             [
                 groups[line_a_slot(mesh, idx)],
@@ -1002,7 +1021,11 @@ fn tessellate_planar_loops_with_options(
         ExecutorError::invalid_operation(format!("failed to tessellate polygon: {error}"))
     })?;
 
-    let mut tris = mesh_build::build_indexed_tris(&tess.vertices, &tess.triangles, default_ink());
+    let mut tris = mesh_build::build_indexed_tris_with_open_boundaries(
+        &tess.vertices,
+        &tess.triangles,
+        default_ink(),
+    );
     for (tri_idx, face) in tess.triangles.iter().enumerate() {
         for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
             .into_iter()
@@ -1040,13 +1063,23 @@ fn tessellate_planar_loops_with_options(
     Ok((lins, tris))
 }
 fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
-    if mesh.lins.is_empty() || mesh.lins.iter().any(|lin| lin.prev < 0 || lin.next < 0) {
+    let primary_lines: Vec<_> = mesh
+        .lins
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| line.is_dom_sib.then_some(idx))
+        .collect();
+    if primary_lines.is_empty()
+        || primary_lines
+            .iter()
+            .any(|&idx| mesh.lins[idx].prev < 0 || mesh.lins[idx].next < 0)
+    {
         return None;
     }
 
     let mut visited = vec![false; mesh.lins.len()];
     let mut contours = Vec::new();
-    for start in 0..mesh.lins.len() {
+    for start in primary_lines {
         if visited[start] {
             continue;
         }
@@ -1061,7 +1094,10 @@ fn closed_line_contours(mesh: &Mesh) -> Option<Vec<Vec<Float3>>> {
             contour.push(mesh.lins[cursor].a.pos);
 
             let next = mesh.lins[cursor].next as usize;
-            if next >= mesh.lins.len() || mesh.lins[next].prev != cursor as i32 {
+            if next >= mesh.lins.len()
+                || !mesh.lins[next].is_dom_sib
+                || mesh.lins[next].prev != cursor as i32
+            {
                 return None;
             }
             cursor = next;
@@ -1105,13 +1141,14 @@ pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
 }
 
 pub(super) fn mesh_from_parts(dots: Vec<Dot>, lins: Vec<Lin>, tris: Vec<Tri>) -> Value {
-    let mesh = Mesh {
+    let mut mesh = Mesh {
         dots,
         lins,
         tris,
         uniform: Uniforms::default(),
         tag: vec![],
     };
+    mesh.normalize_line_dot_topology();
     mesh.debug_assert_consistent_topology();
     Value::Mesh(Arc::new(mesh))
 }
@@ -1676,12 +1713,16 @@ pub(super) fn set_triangle_uv_rect(
 
 #[cfg(test)]
 mod tests {
+    use executor::value::Value;
     use geo::{
-        mesh::{Mesh, Uniforms},
-        simd::Float3,
+        mesh::{Dot, Lin, LinVertex, Mesh, Uniforms},
+        simd::{Float3, Float4},
     };
 
-    use super::{push_closed_polyline, uprank_mesh};
+    use super::{
+        mesh_from_parts, mesh_position_groups, mesh_ref, mesh_to_indexed_lines,
+        push_closed_polyline, uprank_mesh,
+    };
 
     fn mesh_from_contours(contours: &[Vec<Float3>]) -> Mesh {
         let mut lins = Vec::new();
@@ -1705,6 +1746,71 @@ mod tests {
             Float3::new(center_x + half_extent, center_y + half_extent, 0.0),
             Float3::new(center_x - half_extent, center_y + half_extent, 0.0),
         ]
+    }
+
+    #[test]
+    fn position_groups_follow_negative_dot_inverse_refs() {
+        let mesh = Mesh {
+            dots: vec![Dot {
+                pos: Float3::ZERO,
+                norm: Float3::Z,
+                col: Float4::ONE,
+                inv: mesh_ref(0),
+                is_dom_sib: false,
+            }],
+            lins: vec![Lin {
+                a: LinVertex {
+                    pos: Float3::ZERO,
+                    col: Float4::ONE,
+                },
+                b: LinVertex {
+                    pos: Float3::X,
+                    col: Float4::ONE,
+                },
+                norm: Float3::Z,
+                prev: -1,
+                next: -1,
+                inv: -1,
+                is_dom_sib: true,
+            }],
+            tris: Vec::new(),
+            uniform: Uniforms::default(),
+            tag: Vec::new(),
+        };
+
+        let groups = mesh_position_groups(&mesh);
+        assert_eq!(groups[0], groups[1]);
+    }
+
+    #[test]
+    fn mesh_from_parts_normalizes_open_line_topology() {
+        let Value::Mesh(mesh) = mesh_from_parts(
+            vec![],
+            vec![Lin {
+                a: LinVertex {
+                    pos: Float3::ZERO,
+                    col: Float4::ONE,
+                },
+                b: LinVertex {
+                    pos: Float3::X,
+                    col: Float4::ONE,
+                },
+                norm: Float3::Z,
+                prev: -1,
+                next: -1,
+                inv: -1,
+                is_dom_sib: true,
+            }],
+            vec![],
+        ) else {
+            panic!("expected mesh");
+        };
+
+        assert_eq!(mesh.lins.len(), 2);
+        assert_eq!(mesh.dots.len(), 4);
+        assert!(mesh.lins.iter().all(|line| line.inv != -1));
+        assert!(mesh.dots.iter().all(|dot| dot.inv != -1));
+        assert_eq!(mesh_to_indexed_lines(&mesh).segments.len(), 1);
     }
 
     #[test]

@@ -659,9 +659,11 @@ fn same_mesh_topology(start: &Mesh, end: &Mesh) -> bool {
         && start.lins.iter().zip(&end.lins).all(|(a, b)| {
             (a.prev, a.next, a.inv, a.is_dom_sib) == (b.prev, b.next, b.inv, b.is_dom_sib)
         })
-        && start.tris.iter().zip(&end.tris).all(|(a, b)| {
-            (a.ab, a.bc, a.ca, a.is_dom_sib) == (b.ab, b.bc, b.ca, b.is_dom_sib)
-        })
+        && start
+            .tris
+            .iter()
+            .zip(&end.tris)
+            .all(|(a, b)| (a.ab, a.bc, a.ca, a.is_dom_sib) == (b.ab, b.bc, b.ca, b.is_dom_sib))
 }
 
 fn prepare_planar_trans_mesh_pair(
@@ -949,12 +951,21 @@ fn signed_contour_area(points: &[Float3], normal: Float3) -> f32 {
 }
 
 fn mesh_vertex_samples(mesh: &Mesh) -> Vec<(Float3, Float4)> {
-    let mut samples =
-        Vec::with_capacity(mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3);
-    samples.extend(mesh.dots.iter().map(|dot| (dot.pos, dot.col)));
+    let mut samples = Vec::with_capacity(
+        mesh.dots.iter().filter(|dot| dot.is_dom_sib).count()
+            + mesh.lins.iter().filter(|line| line.is_dom_sib).count() * 2
+            + mesh.tris.len() * 3,
+    );
+    samples.extend(
+        mesh.dots
+            .iter()
+            .filter(|dot| dot.is_dom_sib && dot.col.w > f32::EPSILON)
+            .map(|dot| (dot.pos, dot.col)),
+    );
     samples.extend(
         mesh.lins
             .iter()
+            .filter(|line| line.is_dom_sib)
             .flat_map(|line| [(line.a.pos, line.a.col), (line.b.pos, line.b.col)]),
     );
     samples.extend(mesh.tris.iter().flat_map(|tri| {
@@ -1521,18 +1532,33 @@ fn ordered_path_from_mesh(mesh: &Mesh) -> Option<OrderedPath> {
         return None;
     }
 
+    let primary_lines: Vec<_> = mesh
+        .lins
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, line)| line.is_dom_sib.then_some(idx))
+        .collect();
+    if primary_lines.is_empty() {
+        return None;
+    }
+
     let closed = mesh
         .lins
         .iter()
-        .all(|line| line.prev >= 0 && line.next >= 0);
+        .enumerate()
+        .filter(|(_, line)| line.is_dom_sib)
+        .all(|(_, line)| line.prev >= 0 && line.next >= 0);
     let start = if closed {
-        0
+        primary_lines[0]
     } else {
-        mesh.lins.iter().position(|line| line.prev < 0)?
+        primary_lines
+            .into_iter()
+            .find(|&idx| mesh.lins[idx].prev < 0)?
     };
 
-    let mut points = Vec::with_capacity(mesh.lins.len() + (!closed as usize));
-    let mut colors = Vec::with_capacity(mesh.lins.len() + (!closed as usize));
+    let primary_count = mesh.lins.iter().filter(|line| line.is_dom_sib).count();
+    let mut points = Vec::with_capacity(primary_count + (!closed as usize));
+    let mut colors = Vec::with_capacity(primary_count + (!closed as usize));
     let mut seen = vec![false; mesh.lins.len()];
     let mut cursor = start;
     loop {
@@ -1557,6 +1583,9 @@ fn ordered_path_from_mesh(mesh: &Mesh) -> Option<OrderedPath> {
             break;
         }
         cursor = line.next as usize;
+        if cursor >= mesh.lins.len() || !mesh.lins[cursor].is_dom_sib {
+            return None;
+        }
         if closed && cursor == start {
             break;
         }
@@ -1565,7 +1594,12 @@ fn ordered_path_from_mesh(mesh: &Mesh) -> Option<OrderedPath> {
     if closed {
         points.pop();
         colors.pop();
-    } else if seen.iter().any(|visited| !visited) {
+    } else if mesh
+        .lins
+        .iter()
+        .enumerate()
+        .any(|(idx, line)| line.is_dom_sib && !seen[idx])
+    {
         return grouped_ordered_path_from_mesh(mesh);
     }
 
@@ -1591,7 +1625,12 @@ fn grouped_ordered_path_from_mesh(mesh: &Mesh) -> Option<OrderedPath> {
 
     let mut adjacency = vec![Vec::<usize>::new(); group_count];
     let mut endpoints = Vec::with_capacity(mesh.lins.len());
-    for (line_idx, line) in mesh.lins.iter().enumerate() {
+    for (line_idx, line) in mesh
+        .lins
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| line.is_dom_sib)
+    {
         let a_group = groups[mesh.dots.len() + line_idx * 2];
         let b_group = groups[mesh.dots.len() + line_idx * 2 + 1];
         adjacency[a_group].push(line_idx);
@@ -1653,7 +1692,13 @@ fn grouped_ordered_path_from_mesh(mesh: &Mesh) -> Option<OrderedPath> {
         }
     }
 
-    if visited.iter().any(|visited| !visited) || points.len() < 2 {
+    if mesh
+        .lins
+        .iter()
+        .enumerate()
+        .any(|(idx, line)| line.is_dom_sib && !visited[idx])
+        || points.len() < 2
+    {
         return None;
     }
     if closed {
@@ -1815,7 +1860,7 @@ fn mesh_from_ordered_path(path: &OrderedPath, uniform: &Uniforms, tag: &[isize])
                     idx as i32 + 1
                 },
                 inv: -1,
-                is_dom_sib: false,
+                is_dom_sib: true,
             };
             if idx > 0 {
                 line.prev = idx as i32 - 1;
@@ -1824,13 +1869,15 @@ fn mesh_from_ordered_path(path: &OrderedPath, uniform: &Uniforms, tag: &[isize])
         }
     }
 
-    Mesh {
+    let mut mesh = Mesh {
         dots: Vec::new(),
         lins,
         tris: Vec::new(),
         uniform: uniform.clone(),
         tag: tag.to_vec(),
-    }
+    };
+    mesh.normalize_line_dot_topology();
+    mesh
 }
 
 fn conform_path_to_template(
@@ -2205,9 +2252,11 @@ fn ensure_same_mesh_topology(
         || start.lins.iter().zip(&end.lins).any(|(a, b)| {
             (a.prev, a.next, a.inv, a.is_dom_sib) != (b.prev, b.next, b.inv, b.is_dom_sib)
         })
-        || start.tris.iter().zip(&end.tris).any(|(a, b)| {
-            (a.ab, a.bc, a.ca, a.is_dom_sib) != (b.ab, b.bc, b.ca, b.is_dom_sib)
-        })
+        || start
+            .tris
+            .iter()
+            .zip(&end.tris)
+            .any(|(a, b)| (a.ab, a.bc, a.ca, a.is_dom_sib) != (b.ab, b.bc, b.ca, b.is_dom_sib))
     {
         return Err(ExecutorError::invalid_interpolation(format!(
             "cannot {} meshes with different topology",
@@ -2299,7 +2348,7 @@ mod tests {
             prev,
             next,
             inv: -1,
-            is_dom_sib: false,
+            is_dom_sib: true,
         }
     }
 

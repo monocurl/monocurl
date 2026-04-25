@@ -188,7 +188,7 @@ fn fs_triangle(in: TriOut) -> @location(0) vec4<f32> {
     let normal = normalize(in.normal);
     let light_dir = normalize(in.model - LIGHT_SRC);
     let gloss = max(tri_params.values.z, 0.0);
-    let specular = gloss * pow(max(dot(light_dir, normal), 0.0), GAMMA);
+    let specular = gloss * pow(abs(dot(light_dir, normal)), GAMMA);
     let lit_rgb = in.color.rgb + (vec3<f32>(1.0) - in.color.rgb) * specular;
     let alpha = in.color.a * sampled.a * tri_params.values.x;
     if (alpha <= ALPHA_CUTOFF) {
@@ -202,7 +202,7 @@ fn vs_line(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32,
 ) -> ColorOut {
-    let vertex = line_vertices[instance_index * 6u + vertex_index];
+    let vertex = line_vertices[instance_index * 10u + vertex_index];
     let model = world_to_camera(vertex.pos.xyz, line_camera);
 
     let viewport = max(line_params.viewport_and_line_width.xy, vec2<f32>(1.0));

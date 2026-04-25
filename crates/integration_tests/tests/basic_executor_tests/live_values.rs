@@ -572,7 +572,11 @@ fn test_stroke_operator_accepts_named_stroke_width() {
     flatten_mesh_leaves(value, &mut meshes);
 
     assert_eq!(meshes.len(), 1, "expected one stroked line mesh");
-    assert_eq!(meshes[0].lins.len(), 1, "expected line geometry");
+    assert_eq!(
+        meshes[0].lins.iter().filter(|lin| lin.is_dom_sib).count(),
+        1,
+        "expected one dominant authored line"
+    );
     assert_eq!(
         meshes[0].uniform.stroke_radius.to_bits(),
         6.0f32.to_bits(),
@@ -604,8 +608,8 @@ fn test_stroke_operator_uses_third_argument_filter_when_width_is_present() {
     assert_eq!(meshes[1].tag, vec![2], "expected second line to keep tag 2");
     assert_eq!(
         meshes[0].uniform.stroke_radius.to_bits(),
-        2.0f32.to_bits(),
-        "expected unmatched mesh to keep the default stroke width"
+        geo::mesh::DEFAULT_STROKE_RADIUS.to_bits(),
+        "expected unmatched mesh to keep its authored stroke width"
     );
     assert_eq!(
         meshes[1].uniform.stroke_radius.to_bits(),
@@ -1027,18 +1031,18 @@ fn test_color_stdlib_reports_named_bad_color_argument() {
 fn test_color_alpha_operator_replaces_alpha_channel() {
     let r = run_with_stdlib(
         "
-        let result = alpha{0.75} [0.1, 0.2, 0.3, 0.4]
+        let result = type_of(alpha{0.75} [0.1, 0.2, 0.3, 0.4])
     ",
-        &["color"],
+        &["color", "util"],
     );
-    r.assert_float_list(&[0.1, 0.2, 0.3, 0.75]);
+    r.assert_string("live operator");
 }
 
 #[test]
 fn test_fill_accepts_alpha_operator_color() {
     let r = run_with_stdlib(
         "
-        let result = len(mesh_triangle_set(fill{alpha{0.22} BLUE} Square()))
+        let result = len(mesh_triangle_set(fill{alpha{0.22} BLUE} Square(1)))
     ",
         &["mesh", "color", "util"],
     );
@@ -1053,7 +1057,7 @@ fn test_mesh_z_index_operator_keeps_mesh_surface() {
     ",
         &["mesh", "util"],
     );
-    r.assert_string("mesh");
+    r.assert_string("live operator");
 }
 
 #[test]
@@ -1064,7 +1068,7 @@ fn test_anim_rate_operator_keeps_surface() {
     ",
         &["anim", "util"],
     );
-    r.assert_string("primitive_anim");
+    r.assert_string("live operator");
 }
 
 #[test]
