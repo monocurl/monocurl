@@ -19,9 +19,6 @@ fn shift_dot_refs(dots: &mut [Dot], delta: usize) {
         if dot.inv >= 0 {
             dot.inv += delta;
         }
-        if dot.anti >= 0 {
-            dot.anti += delta;
-        }
     }
 }
 
@@ -46,9 +43,6 @@ fn shift_line_refs(lines: &mut [Lin], dot_delta: usize, line_delta: usize, tri_d
         shift_line_point_ref(&mut line.prev, dot_delta, line_delta);
         shift_line_point_ref(&mut line.next, dot_delta, line_delta);
         shift_line_surface_ref(&mut line.inv, tri_delta, line_delta);
-        if line.anti >= 0 {
-            line.anti += line_delta as i32;
-        }
     }
 }
 
@@ -65,9 +59,6 @@ fn shift_tri_refs(tris: &mut [Tri], line_delta: usize, tri_delta: usize) {
         shift_tri_edge_ref(&mut tri.ab, line_delta, tri_delta);
         shift_tri_edge_ref(&mut tri.bc, line_delta, tri_delta);
         shift_tri_edge_ref(&mut tri.ca, line_delta, tri_delta);
-        if tri.anti >= 0 {
-            tri.anti += tri_delta as i32;
-        }
     }
 }
 

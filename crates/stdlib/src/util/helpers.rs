@@ -60,7 +60,8 @@ pub async fn expect_list(
         .stack(stack_idx)
         .read_at(-2)
         .clone()
-        .elide_lvalue();
+        .elide_wrappers(executor)
+        .await?;
     let expected_len = read_int(executor, stack_idx, -1, "expected_len")?;
 
     let Ok(expected_len) = usize::try_from(expected_len) else {

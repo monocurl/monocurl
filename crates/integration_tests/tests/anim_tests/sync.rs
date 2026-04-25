@@ -1534,7 +1534,7 @@ fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
 #[test]
 fn test_tag_trans_handles_everything_intro_badges() {
     let src = r#"
-        let soft = |c, a = 0.22| with_alpha(c, a)
+        let soft = |c, a = 0.22| alpha{a} c
         let badge = |shape, color, t = 0| tag{t} fill{soft(color)} stroke{color} shape
 
         mesh intro = [
@@ -1574,7 +1574,7 @@ fn test_tag_trans_handles_everything_intro_badges() {
 #[test]
 fn test_tag_trans_handles_everything_intro_after_operator_rewrite() {
     let src = r#"
-        let soft = |c, a = 0.22| with_alpha(c, a)
+        let soft = |c, a = 0.22| alpha{a} c
         let badge = |shape, color, t = 0| tag{t} fill{soft(color)} stroke{color} shape
 
         mesh intro = [
@@ -1622,8 +1622,8 @@ fn test_trans_handles_square_to_capsule_badge_pair() {
     let r = run_anim_impl(
         &[(
             "
-                mesh x = fill{with_alpha(BLUE, 0.22)} stroke{BLUE} Square(width: 1.2)
-                x = fill{with_alpha(BLUE, 0.22)} stroke{BLUE} Capsule([0.8, 1.8, 0], [3.2, 3.0, 0], [0.28, 0.54])
+                mesh x = fill{alpha{0.22} BLUE} stroke{BLUE} Square(width: 1.2)
+                x = fill{alpha{0.22} BLUE} stroke{BLUE} Capsule([0.8, 1.8, 0], [3.2, 3.0, 0], [0.28, 0.54])
                 play Trans()
             ",
             SectionType::Slide,
@@ -1640,8 +1640,8 @@ fn test_trans_handles_triangle_to_annulus_badge_pair() {
     let r = run_anim_impl(
         &[(
             "
-                mesh x = fill{with_alpha(GREEN, 0.22)} stroke{GREEN} Triangle([1.5, 1.8, 0], [2.5, 3.4, 0], [3.3, 1.7, 0])
-                x = shift{delta: [5.2, 2.6, 0]} fill{with_alpha(GREEN, 0.22)} stroke{GREEN} Annulus(inner: 0.34, outer: 0.82)
+                mesh x = fill{alpha{0.22} GREEN} stroke{GREEN} Triangle([1.5, 1.8, 0], [2.5, 3.4, 0], [3.3, 1.7, 0])
+                x = shift{delta: [5.2, 2.6, 0]} fill{alpha{0.22} GREEN} stroke{GREEN} Annulus(inner: 0.34, outer: 0.82)
                 play Trans()
             ",
             SectionType::Slide,

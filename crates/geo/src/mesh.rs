@@ -9,7 +9,6 @@ pub struct Dot {
     pub col: Float4,
 
     pub inv: i32,
-    pub anti: i32,
     pub is_dom_sib: bool,
 }
 
@@ -29,7 +28,6 @@ pub struct Lin {
     pub prev: i32,
     pub next: i32,
     pub inv: i32,
-    pub anti: i32,
     pub is_dom_sib: bool,
 }
 
@@ -50,7 +48,6 @@ pub struct Tri {
     pub bc: i32,
     pub ca: i32,
 
-    pub anti: i32,
     pub is_dom_sib: bool,
 }
 
@@ -68,7 +65,7 @@ pub struct Uniforms {
 }
 
 pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 4.0;
-pub const DEFAULT_STROKE_RADIUS: f32 = 2.0;
+pub const DEFAULT_STROKE_RADIUS: f32 = 20.0;
 pub const DEFAULT_DOT_RADIUS: f32 = 4.0;
 pub const DEFAULT_DOT_VERTEX_COUNT: u16 = 8;
 pub const DEFAULT_SMOOTH: bool = false;
@@ -190,46 +187,6 @@ impl Mesh {
                 }
             }
 
-            if let Some(mismatch) = dot_pair_mismatch(
-                self.dots.len(),
-                dot.anti,
-                &format!(
-                    "dot[{dot_idx}].anti = {} should reference a dot anti",
-                    dot.anti
-                ),
-            ) {
-                return Some(mismatch);
-            }
-            if dot.anti >= 0 {
-                let anti_idx = dot.anti as usize;
-                let anti = self.dots[anti_idx];
-                if anti.anti != dot_idx as i32 {
-                    return Some(format!(
-                        "dot[{dot_idx}].anti -> dot[{anti_idx}] does not point back: dot[{anti_idx}].anti = {}",
-                        anti.anti
-                    ));
-                }
-                if anti.is_dom_sib != dot.is_dom_sib {
-                    return Some(format!(
-                        "dot[{dot_idx}].anti -> dot[{anti_idx}] has mismatched is_dom_sib: {} vs {}",
-                        dot.is_dom_sib, anti.is_dom_sib,
-                    ));
-                }
-                if !same_point(dot.pos, anti.pos) {
-                    return Some(format!(
-                        "dot[{dot_idx}].anti -> dot[{anti_idx}] has mismatched position: {} vs {}",
-                        fmt_point(dot.pos),
-                        fmt_point(anti.pos),
-                    ));
-                }
-                if !opposite_vec(dot.norm, anti.norm) {
-                    return Some(format!(
-                        "dot[{dot_idx}].anti -> dot[{anti_idx}] normal is not opposite: {} vs {}",
-                        fmt_point(dot.norm),
-                        fmt_point(anti.norm),
-                    ));
-                }
-            }
         }
 
         for line_idx in 0..self.lins.len() {
@@ -255,86 +212,9 @@ impl Mesh {
             if let Some(mismatch) = line_triangle_boundary_mismatch(self, line_idx) {
                 return Some(mismatch);
             }
-
-            let line = self.lins[line_idx];
-            if let Some(mismatch) = dot_pair_mismatch(
-                self.lins.len(),
-                line.anti,
-                &format!(
-                    "line[{line_idx}].anti = {} should reference a line anti",
-                    line.anti
-                ),
-            ) {
-                return Some(mismatch);
-            }
-            if line.anti >= 0 {
-                let anti_idx = line.anti as usize;
-                let anti = self.lins[anti_idx];
-                if anti.anti != line_idx as i32 {
-                    return Some(format!(
-                        "line[{line_idx}].anti -> line[{anti_idx}] does not point back: line[{anti_idx}].anti = {}",
-                        anti.anti
-                    ));
-                }
-                if anti.is_dom_sib != line.is_dom_sib {
-                    return Some(format!(
-                        "line[{line_idx}].anti -> line[{anti_idx}] has mismatched is_dom_sib: {} vs {}",
-                        line.is_dom_sib, anti.is_dom_sib,
-                    ));
-                }
-                if !same_point(line.a.pos, anti.a.pos) || !same_point(line.b.pos, anti.b.pos) {
-                    return Some(format!(
-                        "line[{line_idx}].anti -> line[{anti_idx}] has mismatched endpoints: {} vs {}",
-                        fmt_line(&line),
-                        fmt_line(&anti),
-                    ));
-                }
-                if !opposite_vec(line.norm, anti.norm) {
-                    return Some(format!(
-                        "line[{line_idx}].anti -> line[{anti_idx}] normal is not opposite: {} vs {}",
-                        fmt_point(line.norm),
-                        fmt_point(anti.norm),
-                    ));
-                }
-            }
         }
 
         for tri_idx in 0..self.tris.len() {
-            let tri = self.tris[tri_idx];
-            if let Some(mismatch) = dot_pair_mismatch(
-                self.tris.len(),
-                tri.anti,
-                &format!(
-                    "tri[{tri_idx}].anti = {} should reference a triangle anti",
-                    tri.anti
-                ),
-            ) {
-                return Some(mismatch);
-            }
-            if tri.anti >= 0 {
-                let anti_idx = tri.anti as usize;
-                let anti = self.tris[anti_idx];
-                if anti.anti != tri_idx as i32 {
-                    return Some(format!(
-                        "tri[{tri_idx}].anti -> tri[{anti_idx}] does not point back: tri[{anti_idx}].anti = {}",
-                        anti.anti
-                    ));
-                }
-                if anti.is_dom_sib == tri.is_dom_sib {
-                    return Some(format!(
-                        "tri[{tri_idx}].anti -> tri[{anti_idx}] has matching is_dom_sib = {}, expected opposite",
-                        anti.is_dom_sib
-                    ));
-                }
-                if !same_triangle_positions(&tri, &anti) {
-                    return Some(format!(
-                        "tri[{tri_idx}].anti -> tri[{anti_idx}] has mismatched vertices: {} vs {}",
-                        fmt_tri(&tri),
-                        fmt_tri(&anti),
-                    ));
-                }
-            }
-
             if let Some(mismatch) = tri_edge_mismatch(self, tri_idx) {
                 return Some(mismatch);
             }
@@ -358,29 +238,12 @@ fn tri_edge_positions(tri: &Tri) -> [(Float3, Float3); 3] {
     ]
 }
 
-fn same_triangle_positions(a: &Tri, b: &Tri) -> bool {
-    let mut lhs = [point_key(a.a.pos), point_key(a.b.pos), point_key(a.c.pos)];
-    let mut rhs = [point_key(b.a.pos), point_key(b.b.pos), point_key(b.c.pos)];
-    lhs.sort_unstable();
-    rhs.sort_unstable();
-    lhs == rhs
-}
-
 fn fmt_point(point: Float3) -> String {
     format!("[{:.6}, {:.6}, {:.6}]", point.x, point.y, point.z)
 }
 
 fn fmt_line(line: &Lin) -> String {
     format!("{} -> {}", fmt_point(line.a.pos), fmt_point(line.b.pos))
-}
-
-fn fmt_tri(tri: &Tri) -> String {
-    format!(
-        "{} / {} / {}",
-        fmt_point(tri.a.pos),
-        fmt_point(tri.b.pos),
-        fmt_point(tri.c.pos),
-    )
 }
 
 fn dot_pair_mismatch(len: usize, value: i32, prefix: &str) -> Option<String> {
@@ -673,10 +536,6 @@ fn same_vec(a: Float3, b: Float3) -> bool {
     point_key(a) == point_key(b)
 }
 
-fn opposite_vec(a: Float3, b: Float3) -> bool {
-    point_key(a) == point_key(-b)
-}
-
 fn point_key(point: Float3) -> [u32; 3] {
     [
         canonical_bits(point.x),
@@ -714,7 +573,6 @@ mod tests {
             prev,
             next,
             inv,
-            anti: -1,
             is_dom_sib: false,
         }
     }
@@ -739,7 +597,6 @@ mod tests {
             ab,
             bc,
             ca,
-            anti: -1,
             is_dom_sib: false,
         }
     }

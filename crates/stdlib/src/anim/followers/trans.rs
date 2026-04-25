@@ -423,9 +423,6 @@ fn extract_component_mesh(
                 tri_indices.push(idx);
 
                 let tri = mesh.tris[idx];
-                if tri.anti >= 0 {
-                    stack.push(MeshNode::Tri(tri.anti as usize));
-                }
                 for edge in [tri.ab, tri.bc, tri.ca] {
                     if edge >= 0 {
                         stack.push(MeshNode::Tri(edge as usize));
@@ -444,9 +441,6 @@ fn extract_component_mesh(
                 line_indices.push(idx);
 
                 let line = mesh.lins[idx];
-                if line.anti >= 0 {
-                    stack.push(MeshNode::Lin(line.anti as usize));
-                }
                 if line.inv >= 0 {
                     stack.push(MeshNode::Lin(line.inv as usize));
                 } else if let Some(tri_idx) = decode_mesh_ref(line.inv) {
@@ -473,9 +467,6 @@ fn extract_component_mesh(
                 dot_indices.push(idx);
 
                 let dot = mesh.dots[idx];
-                if dot.anti >= 0 {
-                    stack.push(MeshNode::Dot(dot.anti as usize));
-                }
                 if dot.inv >= 0 {
                     stack.push(MeshNode::Dot(dot.inv as usize));
                 } else if let Some(line_idx) = decode_mesh_ref(dot.inv) {
@@ -497,21 +488,18 @@ fn extract_component_mesh(
 
     for dot in &mut dots {
         dot.inv = remap_dot_ref(dot.inv, &dot_map, &line_map);
-        dot.anti = remap_index_ref(dot.anti, &dot_map);
     }
 
     for line in &mut lins {
         line.prev = remap_mesh_ref(line.prev, &line_map, &dot_map);
         line.next = remap_mesh_ref(line.next, &line_map, &dot_map);
         line.inv = remap_mesh_ref(line.inv, &line_map, &tri_map);
-        line.anti = remap_index_ref(line.anti, &line_map);
     }
 
     for tri in &mut tris {
         tri.ab = remap_mesh_ref(tri.ab, &tri_map, &line_map);
         tri.bc = remap_mesh_ref(tri.bc, &tri_map, &line_map);
         tri.ca = remap_mesh_ref(tri.ca, &tri_map, &line_map);
-        tri.anti = remap_index_ref(tri.anti, &tri_map);
     }
 
     let component = Mesh {
@@ -667,13 +655,12 @@ fn same_mesh_topology(start: &Mesh, end: &Mesh) -> bool {
             .dots
             .iter()
             .zip(&end.dots)
-            .all(|(a, b)| (a.inv, a.anti, a.is_dom_sib) == (b.inv, b.anti, b.is_dom_sib))
+            .all(|(a, b)| (a.inv, a.is_dom_sib) == (b.inv, b.is_dom_sib))
         && start.lins.iter().zip(&end.lins).all(|(a, b)| {
-            (a.prev, a.next, a.inv, a.anti, a.is_dom_sib)
-                == (b.prev, b.next, b.inv, b.anti, b.is_dom_sib)
+            (a.prev, a.next, a.inv, a.is_dom_sib) == (b.prev, b.next, b.inv, b.is_dom_sib)
         })
         && start.tris.iter().zip(&end.tris).all(|(a, b)| {
-            (a.ab, a.bc, a.ca, a.anti, a.is_dom_sib) == (b.ab, b.bc, b.ca, b.anti, b.is_dom_sib)
+            (a.ab, a.bc, a.ca, a.is_dom_sib) == (b.ab, b.bc, b.ca, b.is_dom_sib)
         })
 }
 
@@ -1412,7 +1399,6 @@ fn choose_triangle_rotation(
                 ab: source.ab,
                 bc: source.bc,
                 ca: source.ca,
-                anti: source.anti,
                 is_dom_sib: source.is_dom_sib,
             };
 
@@ -1829,7 +1815,6 @@ fn mesh_from_ordered_path(path: &OrderedPath, uniform: &Uniforms, tag: &[isize])
                     idx as i32 + 1
                 },
                 inv: -1,
-                anti: -1,
                 is_dom_sib: false,
             };
             if idx > 0 {
@@ -2102,7 +2087,6 @@ fn mesh_patharc_lerp(
                 norm: vec3_norm_lerp(start.norm, t, end.norm),
                 col: start.col.lerp(end.col, t),
                 inv: end.inv,
-                anti: end.anti,
                 is_dom_sib: end.is_dom_sib,
             })
             .collect(),
@@ -2123,7 +2107,6 @@ fn mesh_patharc_lerp(
                 prev: end.prev,
                 next: end.next,
                 inv: end.inv,
-                anti: end.anti,
                 is_dom_sib: end.is_dom_sib,
             })
             .collect(),
@@ -2150,7 +2133,6 @@ fn mesh_patharc_lerp(
                 ab: end.ab,
                 bc: end.bc,
                 ca: end.ca,
-                anti: end.anti,
                 is_dom_sib: end.is_dom_sib,
             })
             .collect(),
@@ -2219,13 +2201,12 @@ fn ensure_same_mesh_topology(
             .dots
             .iter()
             .zip(&end.dots)
-            .any(|(a, b)| (a.inv, a.anti, a.is_dom_sib) != (b.inv, b.anti, b.is_dom_sib))
+            .any(|(a, b)| (a.inv, a.is_dom_sib) != (b.inv, b.is_dom_sib))
         || start.lins.iter().zip(&end.lins).any(|(a, b)| {
-            (a.prev, a.next, a.inv, a.anti, a.is_dom_sib)
-                != (b.prev, b.next, b.inv, b.anti, b.is_dom_sib)
+            (a.prev, a.next, a.inv, a.is_dom_sib) != (b.prev, b.next, b.inv, b.is_dom_sib)
         })
         || start.tris.iter().zip(&end.tris).any(|(a, b)| {
-            (a.ab, a.bc, a.ca, a.anti, a.is_dom_sib) != (b.ab, b.bc, b.ca, b.anti, b.is_dom_sib)
+            (a.ab, a.bc, a.ca, a.is_dom_sib) != (b.ab, b.bc, b.ca, b.is_dom_sib)
         })
     {
         return Err(ExecutorError::invalid_interpolation(format!(
@@ -2318,7 +2299,6 @@ mod tests {
             prev,
             next,
             inv: -1,
-            anti: -1,
             is_dom_sib: false,
         }
     }
@@ -2353,7 +2333,6 @@ mod tests {
             ab,
             bc,
             ca,
-            anti: -1,
             is_dom_sib: false,
         }
     }

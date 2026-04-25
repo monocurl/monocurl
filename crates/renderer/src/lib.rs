@@ -211,7 +211,6 @@ fn hash_dot(hasher: &mut impl Hasher, dot: &Dot) {
     hash_float3(hasher, dot.norm);
     hash_float4(hasher, float4_tuple(dot.col));
     dot.inv.hash(hasher);
-    dot.anti.hash(hasher);
     dot.is_dom_sib.hash(hasher);
 }
 
@@ -224,7 +223,6 @@ fn hash_line(hasher: &mut impl Hasher, line: &Lin) {
     line.prev.hash(hasher);
     line.next.hash(hasher);
     line.inv.hash(hasher);
-    line.anti.hash(hasher);
     line.is_dom_sib.hash(hasher);
 }
 
@@ -241,7 +239,6 @@ fn hash_tri(hasher: &mut impl Hasher, tri: &Tri) {
     tri.ab.hash(hasher);
     tri.bc.hash(hasher);
     tri.ca.hash(hasher);
-    tri.anti.hash(hasher);
     tri.is_dom_sib.hash(hasher);
 }
 
@@ -416,7 +413,8 @@ mod tests {
             return;
         };
         let mut triangle = flat_triangle_mesh(Float4::new(0.0, 1.0, 0.0, 1.0), 0);
-        std::mem::swap(&mut triangle.tris[0].b, &mut triangle.tris[0].c);
+        let tri = &mut triangle.tris[0];
+        std::mem::swap(&mut tri.b, &mut tri.c);
 
         let scene = SceneRenderData {
             background: BackgroundSnapshot::default(),
@@ -538,7 +536,6 @@ mod tests {
                 ab: -1,
                 bc: -1,
                 ca: -1,
-                anti: -1,
                 is_dom_sib: false,
             }],
             uniform: Uniforms {
@@ -598,7 +595,6 @@ mod tests {
                 prev: -1,
                 next: -1,
                 inv: -1,
-                anti: -1,
                 is_dom_sib: false,
             }],
             tris: Vec::new(),
@@ -625,7 +621,6 @@ mod tests {
                     prev: -1,
                     next: first_next,
                     inv: -1,
-                    anti: -1,
                     is_dom_sib: false,
                 },
                 Lin {
@@ -641,7 +636,6 @@ mod tests {
                     prev: second_prev,
                     next: -1,
                     inv: -1,
-                    anti: -1,
                     is_dom_sib: false,
                 },
             ],
@@ -668,7 +662,6 @@ mod tests {
                     prev: 2,
                     next: 1,
                     inv: -1,
-                    anti: -1,
                     is_dom_sib: false,
                 },
                 Lin {
@@ -684,7 +677,6 @@ mod tests {
                     prev: 0,
                     next: 2,
                     inv: -1,
-                    anti: -1,
                     is_dom_sib: false,
                 },
                 Lin {
@@ -700,7 +692,6 @@ mod tests {
                     prev: 1,
                     next: 0,
                     inv: -1,
-                    anti: -1,
                     is_dom_sib: false,
                 },
             ],
@@ -723,7 +714,6 @@ mod tests {
                 ab: -2,
                 bc: -3,
                 ca: -4,
-                anti: -1,
                 is_dom_sib: false,
             }],
             uniform: Uniforms::default(),

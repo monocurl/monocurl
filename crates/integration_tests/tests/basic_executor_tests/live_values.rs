@@ -558,6 +558,78 @@ fn test_gloss_operator_defaults_filter_to_nil() {
 }
 
 #[test]
+fn test_stroke_operator_accepts_named_stroke_width() {
+    let r = run_with_stdlib(
+        "
+        let result = stroke{RED, stroke_width: 6} Line([0, 0, 0], [1, 0, 0])
+    ",
+        &["mesh", "color"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+
+    assert_eq!(meshes.len(), 1, "expected one stroked line mesh");
+    assert_eq!(meshes[0].lins.len(), 1, "expected line geometry");
+    assert_eq!(
+        meshes[0].uniform.stroke_radius.to_bits(),
+        6.0f32.to_bits(),
+        "expected stroke_width to write the mesh stroke radius directly"
+    );
+}
+
+#[test]
+fn test_stroke_operator_uses_third_argument_filter_when_width_is_present() {
+    let r = run_with_stdlib(
+        "
+        let scene = [
+            tag{1} Line([0, 0, 0], [1, 0, 0]),
+            tag{2} shift{[0, 1, 0]} Line([0, 0, 0], [1, 0, 0])
+        ]
+        let result = stroke{RED, 5, 2} scene
+    ",
+        &["mesh", "color"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+    meshes.sort_by_key(|mesh| mesh.tag[0]);
+
+    assert_eq!(meshes.len(), 2, "expected two line meshes");
+    assert_eq!(meshes[0].tag, vec![1], "expected first line to keep tag 1");
+    assert_eq!(meshes[1].tag, vec![2], "expected second line to keep tag 2");
+    assert_eq!(
+        meshes[0].uniform.stroke_radius.to_bits(),
+        2.0f32.to_bits(),
+        "expected unmatched mesh to keep the default stroke width"
+    );
+    assert_eq!(
+        meshes[1].uniform.stroke_radius.to_bits(),
+        5.0f32.to_bits(),
+        "expected third-argument filter to scope stroke width updates"
+    );
+    assert_eq!(
+        meshes[0].lins[0].a.col.to_array(),
+        [0.0, 0.0, 0.0, 1.0],
+        "expected third-argument filter to leave unmatched strokes unchanged"
+    );
+    assert_eq!(
+        meshes[1].lins[0].a.col.to_array(),
+        meshes[1].lins[0].b.col.to_array(),
+        "expected matching stroke vertices to stay in sync"
+    );
+    assert_ne!(
+        meshes[1].lins[0].a.col.to_array(),
+        [0.0, 0.0, 0.0, 1.0],
+        "expected third-argument filter to still recolor the matching stroke"
+    );
+}
+
+#[test]
 fn test_tag_filter_operator_reads_filtered_side() {
     let r = run_with_stdlib(
         "
@@ -942,13 +1014,57 @@ fn test_mesh_stdlib_reports_named_bad_list_length() {
 fn test_color_stdlib_reports_named_bad_color_argument() {
     let r = run_with_stdlib(
         "
-        let result = with_alpha(7, 0.5)
+        let result = alpha{0.5} 7
     ",
         &["color"],
     );
     r.assert_error("invalid argument 'color'");
     r.assert_error("expected list of length 4");
     r.assert_error("got int");
+}
+
+#[test]
+fn test_color_alpha_operator_replaces_alpha_channel() {
+    let r = run_with_stdlib(
+        "
+        let result = alpha{0.75} [0.1, 0.2, 0.3, 0.4]
+    ",
+        &["color"],
+    );
+    r.assert_float_list(&[0.1, 0.2, 0.3, 0.75]);
+}
+
+#[test]
+fn test_fill_accepts_alpha_operator_color() {
+    let r = run_with_stdlib(
+        "
+        let result = len(mesh_triangle_set(fill{alpha{0.22} BLUE} Square()))
+    ",
+        &["mesh", "color", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_mesh_z_index_operator_keeps_mesh_surface() {
+    let r = run_with_stdlib(
+        "
+        let result = type_of(z_index{3} Dot())
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_string("mesh");
+}
+
+#[test]
+fn test_anim_rate_operator_keeps_surface() {
+    let r = run_with_stdlib(
+        "
+        let result = type_of(rate{smooth} Wait())
+    ",
+        &["anim", "util"],
+    );
+    r.assert_string("primitive_anim");
 }
 
 #[test]

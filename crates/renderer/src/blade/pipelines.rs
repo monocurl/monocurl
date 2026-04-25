@@ -75,7 +75,6 @@ impl Pipelines {
                 primitive: gpu::PrimitiveState {
                     topology: gpu::PrimitiveTopology::TriangleList,
                     front_face: gpu::FrontFace::Ccw,
-                    cull_mode: Some(gpu::Face::Back),
                     ..Default::default()
                 },
                 depth_stencil: Some(depth_stencil.clone()),

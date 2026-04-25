@@ -147,9 +147,16 @@ impl Render for Viewport {
         let controls = parameter_controls(self, params.as_ref(), services_weak, weak_vp.clone());
         let (slide_label, time_label) =
             match visual_slide_time(timestamp.slide, timestamp.time, &durations) {
-                None => (format!("Slide 0 / {}", slide_count.max(1)), "0.00s".to_string()),
+                None => (
+                    format!("Slide 0 / {}", slide_count.max(1)),
+                    "0.00s".to_string(),
+                ),
                 Some((slide, time)) => (
-                    format!("Slide {} / {}", (slide + 1).min(slide_count.max(1)), slide_count.max(1)),
+                    format!(
+                        "Slide {} / {}",
+                        (slide + 1).min(slide_count.max(1)),
+                        slide_count.max(1)
+                    ),
                     format!("{:.2}s", time),
                 ),
             };

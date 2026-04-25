@@ -34,14 +34,14 @@ let hsv  = |h, s, v, a = 1| __monocurl__native__ hsv(h, s, v, a)
 # grayscale shade at given luminance.
 let gray_shade = |v, a = 1| [v, v, v, a]
 
-# drop the alpha component of a color.
-let with_alpha = |color, a| {
+# replace the alpha component of a color.
+let alpha = operator |target, a| {
     var r = 0
     var g = 0
     var b = 0
     var old_alpha = 0
-    [r, g, b, old_alpha] = __monocurl__native__ expect_list("color", color, 4)
-    return [r, g, b, a]
+    [r, g, b, old_alpha] = __monocurl__native__ expect_list("color", target, 4)
+    return [target, [r, g, b, a]]
 }
 
 # linear blend between two colors in RGBA.

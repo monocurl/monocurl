@@ -3,6 +3,63 @@ use ui_cli_shared::doc_type::DocumentType;
 
 use super::*;
 
+const EPSILON_STEP: f64 = 1.0 / 30.0;
+
+fn cached_slide_duration(
+    slide: usize,
+    slide_durations: &[Option<f64>],
+    minimum_slide_durations: &[Option<f64>],
+) -> Option<f64> {
+    slide_durations
+        .get(slide)
+        .copied()
+        .flatten()
+        .or_else(|| minimum_slide_durations.get(slide).copied().flatten())
+}
+
+fn epsilon_forward_target(
+    timestamp: Timestamp,
+    slide_count: usize,
+    slide_durations: &[Option<f64>],
+) -> Timestamp {
+    if slide_count == 0 {
+        return Timestamp::default();
+    }
+
+    if slide_durations.get(timestamp.slide).copied().flatten() == Some(timestamp.time)
+        && timestamp.slide + 1 < slide_count
+    {
+        Timestamp::new(timestamp.slide + 1, EPSILON_STEP)
+    } else {
+        Timestamp::new(timestamp.slide, timestamp.time + EPSILON_STEP)
+    }
+}
+
+fn epsilon_backward_target(
+    timestamp: Timestamp,
+    slide_count: usize,
+    slide_durations: &[Option<f64>],
+    minimum_slide_durations: &[Option<f64>],
+) -> Timestamp {
+    if slide_count == 0 {
+        return Timestamp::default();
+    }
+
+    if timestamp.time > 0.0 {
+        return Timestamp::new(timestamp.slide, (timestamp.time - EPSILON_STEP).max(0.0));
+    }
+
+    if timestamp.slide == 0 {
+        return Timestamp::new(0, 0.0);
+    }
+
+    let prev_slide = timestamp.slide - 1;
+    let prev_duration =
+        cached_slide_duration(prev_slide, slide_durations, minimum_slide_durations).unwrap_or(0.0);
+
+    Timestamp::new(prev_slide, (prev_duration - EPSILON_STEP).max(0.0))
+}
+
 impl DocumentView {
     pub fn focus(&self, window: &mut Window) {
         window.focus(&self.focus_handle);
@@ -81,14 +138,6 @@ impl DocumentView {
             .update(cx, |services, _| services.toggle_play());
     }
 
-    fn timestamp_transform(&mut self, cx: &mut Context<Self>, f: impl Fn(Timestamp) -> Timestamp) {
-        self.services.update(cx, |services, cx| {
-            let timestamp = services.timestamp(cx);
-            let next = f(timestamp);
-            services.seek_to(next);
-        });
-    }
-
     pub(super) fn prev_slide(&mut self, _: &PrevSlide, _w: &mut Window, cx: &mut Context<Self>) {
         log::info!("Prev Slide");
         self.services.update(cx, |s, cx| s.prev_slide(cx));
@@ -115,9 +164,17 @@ impl DocumentView {
         _w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        println!("Epsilon Forward");
-        self.timestamp_transform(cx, |timestamp| {
-            Timestamp::new(timestamp.slide, timestamp.time + 1.0 / 30.0)
+        log::info!("Epsilon Forward");
+        self.services.update(cx, |services, cx| {
+            let next = {
+                let execution = services.execution_state().read(cx);
+                epsilon_forward_target(
+                    execution.current_timestamp,
+                    execution.slide_count,
+                    &execution.slide_durations,
+                )
+            };
+            services.seek_to(next);
         });
     }
 
@@ -127,9 +184,18 @@ impl DocumentView {
         _w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        println!("Epsilon Backward");
-        self.timestamp_transform(cx, |timestamp| {
-            Timestamp::new(timestamp.slide, (timestamp.time - 1.0 / 30.0).max(0.0))
+        log::info!("Epsilon Backward");
+        self.services.update(cx, |services, cx| {
+            let next = {
+                let execution = services.execution_state().read(cx);
+                epsilon_backward_target(
+                    execution.current_timestamp,
+                    execution.slide_count,
+                    &execution.slide_durations,
+                    &execution.minimum_slide_durations,
+                )
+            };
+            services.seek_to(next);
         });
     }
 
@@ -272,6 +338,47 @@ impl DocumentView {
                 cx.notify();
             })
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{EPSILON_STEP, epsilon_backward_target, epsilon_forward_target};
+    use executor::time::Timestamp;
+
+    #[test]
+    fn epsilon_backward_wraps_to_previous_slide_end() {
+        let target = epsilon_backward_target(
+            Timestamp::new(3, 0.0),
+            5,
+            &[Some(1.0), Some(2.0), Some(4.0), None, None],
+            &[None; 5],
+        );
+
+        assert_eq!(target.slide, 2);
+        assert!((target.time - (4.0 - EPSILON_STEP)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn epsilon_forward_wraps_to_next_slide_start() {
+        let target = epsilon_forward_target(
+            Timestamp::new(2, 4.0),
+            5,
+            &[Some(1.0), Some(2.0), Some(4.0), None, None],
+        );
+
+        assert_eq!(target, Timestamp::new(3, EPSILON_STEP));
+    }
+
+    #[test]
+    fn epsilon_forward_inside_slide_stays_in_slide() {
+        let target = epsilon_forward_target(
+            Timestamp::new(2, 1.25),
+            5,
+            &[Some(1.0), Some(2.0), Some(4.0), None, None],
+        );
+
+        assert_eq!(target, Timestamp::new(2, 1.25 + EPSILON_STEP));
     }
 }
 

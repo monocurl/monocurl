@@ -82,14 +82,14 @@ pub(super) fn render_toolbar(
             })
         });
 
-    let (slide_label, time_label) =
-        match visual_slide_time(current_slide, current_time, durations) {
-            None => (format!("Slide 0 / {}", slide_count), "0.00s".to_string()),
-            Some((slide, time)) => (
-                format!("Slide {} / {}", (slide + 1).min(slide_count), slide_count),
-                format!("{:.2}s", time),
-            ),
-        };
+    let (slide_label, time_label) = match visual_slide_time(current_slide, current_time, durations)
+    {
+        None => (format!("Slide 0 / {}", slide_count), "0.00s".to_string()),
+        Some((slide, time)) => (
+            format!("Slide {} / {}", (slide + 1).min(slide_count), slide_count),
+            format!("{:.2}s", time),
+        ),
+    };
 
     let center_group = div()
         .flex()

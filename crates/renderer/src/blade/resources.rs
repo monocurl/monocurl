@@ -135,12 +135,7 @@ pub(super) fn destroy_offscreen_target(gpu: &gpu::Context, target: OffscreenTarg
 }
 
 pub(super) fn choose_sample_count(gpu: &gpu::Context) -> u32 {
-    let supported = gpu.capabilities().sample_count_mask;
-    if supported & DESIRED_MSAA_SAMPLE_COUNT != 0 {
-        DESIRED_MSAA_SAMPLE_COUNT
-    } else {
-        1
-    }
+    choose_sample_count_from_mask(gpu.capabilities().sample_count_mask)
 }
 
 pub(super) fn extent(size: RenderSize) -> gpu::Extent {
@@ -148,5 +143,30 @@ pub(super) fn extent(size: RenderSize) -> gpu::Extent {
         width: size.width,
         height: size.height,
         depth: 1,
+    }
+}
+
+fn choose_sample_count_from_mask(supported: u32) -> u32 {
+    let mut sample_count = DESIRED_MSAA_SAMPLE_COUNT;
+    while sample_count > 1 {
+        if supported & sample_count != 0 {
+            return sample_count;
+        }
+        sample_count >>= 1;
+    }
+
+    1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::choose_sample_count_from_mask;
+
+    #[test]
+    fn chooses_highest_supported_count_not_exceeding_desired() {
+        assert_eq!(choose_sample_count_from_mask(1 | 2 | 4 | 8), 8);
+        assert_eq!(choose_sample_count_from_mask(1 | 2 | 4), 4);
+        assert_eq!(choose_sample_count_from_mask(1 | 2), 2);
+        assert_eq!(choose_sample_count_from_mask(1), 1);
     }
 }

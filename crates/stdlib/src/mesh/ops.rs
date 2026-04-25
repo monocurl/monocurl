@@ -683,13 +683,19 @@ pub async fn op_restroke(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
+    let color = read_float4(executor, stack_idx, -4, "color").await?;
+    let stroke_width = crate::read_float(executor, stack_idx, -3, "stroke_width")? as f32;
+    let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     let level = read_level(executor, stack_idx, -1, "level")?;
+    let stroke_radius = stroke_width.max(0.0);
+    tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
+        mesh.uniform.stroke_radius = stroke_radius;
+    })
+    .await?;
     if level <= 0.0 {
         return Ok(tree.into_value());
     }
-    let color = read_float4(executor, stack_idx, -3, "color")?;
-    let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         for lin in &mut mesh.lins {
             lin.a.col = lin.a.col.lerp(color, level);
@@ -707,7 +713,7 @@ pub async fn op_refill(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     if level <= 0.0 {
         return Ok(tree.into_value());
     }
-    let color = read_float4(executor, stack_idx, -3, "color")?;
+    let color = read_float4(executor, stack_idx, -3, "color").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         for tri in &mut mesh.tris {
@@ -727,7 +733,7 @@ pub async fn op_redot(executor: &mut Executor, stack_idx: usize) -> Result<Value
     if level <= 0.0 {
         return Ok(tree.into_value());
     }
-    let color = read_float4(executor, stack_idx, -3, "color")?;
+    let color = read_float4(executor, stack_idx, -3, "color").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         for dot in &mut mesh.dots {
@@ -745,7 +751,7 @@ pub async fn op_recolor(executor: &mut Executor, stack_idx: usize) -> Result<Val
     if level <= 0.0 {
         return Ok(tree.into_value());
     }
-    let color = read_float4(executor, stack_idx, -3, "color")?;
+    let color = read_float4(executor, stack_idx, -3, "color").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         recolor_mesh(mesh, color, level);
@@ -1436,11 +1442,6 @@ pub async fn op_subdivide(
                     } else {
                         lin.inv
                     };
-                    out.anti = if lin.anti >= 0 {
-                        (lin.anti as usize * factor + i) as i32
-                    } else {
-                        lin.anti
-                    };
                     out.is_dom_sib = lin.is_dom_sib;
                     lins.push(out);
                 }
@@ -1971,7 +1972,6 @@ mod tests {
                 norm: Float3::Z,
                 col: start,
                 inv: -1,
-                anti: -1,
                 is_dom_sib: false,
             }],
             lins: vec![Lin {
@@ -1987,7 +1987,6 @@ mod tests {
                 prev: -1,
                 next: -1,
                 inv: -1,
-                anti: -1,
                 is_dom_sib: false,
             }],
             tris: vec![Tri {
@@ -2009,7 +2008,6 @@ mod tests {
                 ab: -1,
                 bc: -1,
                 ca: -1,
-                anti: -1,
                 is_dom_sib: false,
             }],
             uniform: Uniforms::default(),

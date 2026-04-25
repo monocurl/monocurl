@@ -231,4 +231,4 @@ let delay = operator |target, time = 1| {
 }
 
 # override the rate function on a primitive animation.
-let with_rate = operator |target, rate| [target, __monocurl__native__ anim_with_rate(target, rate)]
+let rate = operator |target, rate| [target, __monocurl__native__ anim_with_rate(target, rate)]

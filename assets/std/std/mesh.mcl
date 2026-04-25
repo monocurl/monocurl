@@ -322,8 +322,8 @@ let fade = operator |target, opacity, filter = nil| {
     return [go(o: 1), go(o: opacity)]
 }
 
-let stroke = operator |target, color, filter = nil| {
-    let go = |c, level| __monocurl__native__ op_restroke(target, c, filter, level)
+let stroke = operator |target, color, stroke_width = 2.0, filter = nil| {
+    let go = |c, level| __monocurl__native__ op_restroke(target, c, stroke_width, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
@@ -350,7 +350,7 @@ let normal_hint = operator |target, normal, filter = nil| {
 let tag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_retagged(target, |old| tag, filter)]
 
 let textured = operator |target, image, filter = nil| [target, __monocurl__native__ op_retextured(target, image, filter)]
-let with_zindex = operator |target, z_index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, z_index, filter)]
+let z_index = operator |target, z_index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, z_index, filter)]
 let gloss = operator |target, amount = 0.5, filter = nil| [target, __monocurl__native__ op_gloss(target, amount, filter)]
 let point_map = operator |target, f, filter = nil| {
     let go = |level| __monocurl__native__ op_point_map(target, f, filter, level)

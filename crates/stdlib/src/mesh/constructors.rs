@@ -1784,8 +1784,8 @@ pub async fn mk_explicit_diff(
         "explicit diff triangles",
         samples.saturating_sub(1).saturating_mul(2),
     )?;
-    let fill0 = read_float4(executor, stack_idx, -4, "fill0")?;
-    let fill1 = read_float4(executor, stack_idx, -3, "fill1")?;
+    let fill0 = read_float4(executor, stack_idx, -4, "fill0").await?;
+    let fill1 = read_float4(executor, stack_idx, -3, "fill1").await?;
     let tag0 = read_tags(executor, stack_idx, -2, "tag0")?;
     let tag1 = read_tags(executor, stack_idx, -1, "tag1")?;
 

@@ -692,7 +692,6 @@ mod tests {
             prev,
             next,
             inv: -1,
-            anti: -1,
             is_dom_sib: false,
         }
     }
@@ -717,7 +716,6 @@ mod tests {
             ab,
             bc,
             ca,
-            anti: -1,
             is_dom_sib: false,
         }
     }
@@ -752,7 +750,6 @@ mod tests {
                 norm: Float3::Z,
                 col: Float4::ONE,
                 inv: -1,
-                anti: -1,
                 is_dom_sib: false,
             }],
             lins: vec![

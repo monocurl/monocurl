@@ -309,7 +309,6 @@ fn copy_dot_template(dot: &Dot, pos: Float3, col: Float4) -> Dot {
         norm: dot.norm,
         col,
         inv: dot.inv,
-        anti: dot.anti,
         is_dom_sib: dot.is_dom_sib,
     }
 }
@@ -322,7 +321,6 @@ fn copy_lin_template(lin: &Lin, a: Float3, b: Float3, col_a: Float4, col_b: Floa
         prev: lin.prev,
         next: lin.next,
         inv: lin.inv,
-        anti: lin.anti,
         is_dom_sib: lin.is_dom_sib,
     }
 }
@@ -355,7 +353,6 @@ fn copy_tri_template(
         ab: tri.ab,
         bc: tri.bc,
         ca: tri.ca,
-        anti: tri.anti,
         is_dom_sib: tri.is_dom_sib,
     }
 }
@@ -489,7 +486,6 @@ fn dots_exactly_equal(a: &Dot, b: &Dot) -> bool {
         && float3_exactly_equal(a.norm, b.norm)
         && float4_exactly_equal(a.col, b.col)
         && a.inv == b.inv
-        && a.anti == b.anti
         && a.is_dom_sib == b.is_dom_sib
 }
 
@@ -500,7 +496,6 @@ fn lines_exactly_equal(a: &Lin, b: &Lin) -> bool {
         && a.prev == b.prev
         && a.next == b.next
         && a.inv == b.inv
-        && a.anti == b.anti
         && a.is_dom_sib == b.is_dom_sib
 }
 
@@ -511,7 +506,6 @@ fn tris_exactly_equal(a: &Tri, b: &Tri) -> bool {
         && a.ab == b.ab
         && a.bc == b.bc
         && a.ca == b.ca
-        && a.anti == b.anti
         && a.is_dom_sib == b.is_dom_sib
 }
 

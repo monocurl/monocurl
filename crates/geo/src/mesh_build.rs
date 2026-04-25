@@ -39,12 +39,7 @@ pub fn mesh_ref(idx: usize) -> i32 {
 pub fn shift_line_refs(lines: &mut [Lin], delta: usize) {
     let delta = delta as i32;
     for line in lines {
-        for value in [
-            &mut line.prev,
-            &mut line.next,
-            &mut line.inv,
-            &mut line.anti,
-        ] {
+        for value in [&mut line.prev, &mut line.next, &mut line.inv] {
             if *value >= 0 {
                 *value += delta;
             }
@@ -60,7 +55,6 @@ pub fn line(a: Float3, b: Float3, norm: Float3, color: Float4) -> Lin {
         prev: -1,
         next: -1,
         inv: -1,
-        anti: -1,
         is_dom_sib: false,
     }
 }
@@ -144,7 +138,6 @@ pub fn build_indexed_surface(
             ab: -1,
             bc: -1,
             ca: -1,
-            anti: -1,
             is_dom_sib: false,
         })
         .collect();

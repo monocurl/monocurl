@@ -510,8 +510,8 @@ pub(super) fn read_float3_list(
         .collect()
 }
 
-pub(super) fn read_float4(
-    executor: &Executor,
+pub(super) async fn read_float4(
+    executor: &mut Executor,
     stack_idx: usize,
     index: i32,
     name: &'static str,
@@ -521,7 +521,8 @@ pub(super) fn read_float4(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue_leader_rec()
+        .elide_wrappers(executor)
+        .await?
     {
         Value::List(list) if list.elements().len() == 4 => {
             let mut components = [0.0; 4];
@@ -559,7 +560,6 @@ pub(super) fn default_dot(pos: Float3, norm: Float3) -> Dot {
         norm,
         col: default_ink(),
         inv: -1,
-        anti: -1,
         is_dom_sib: false,
     }
 }
@@ -578,7 +578,6 @@ pub(super) fn default_lin(a: Float3, b: Float3, norm: Float3) -> Lin {
         prev: -1,
         next: -1,
         inv: -1,
-        anti: -1,
         is_dom_sib: false,
     }
 }
@@ -606,7 +605,6 @@ pub(super) fn default_tri(a: Float3, b: Float3, c: Float3) -> Tri {
         ab: -1,
         bc: -1,
         ca: -1,
-        anti: -1,
         is_dom_sib: false,
     }
 }
@@ -705,12 +703,6 @@ pub(crate) fn mesh_position_groups(mesh: &Mesh) -> Vec<usize> {
                 dsu.union(dot_slot(idx), dot_slot(inv));
             }
         }
-        if dot.anti >= 0 {
-            let anti = dot.anti as usize;
-            if anti < mesh.dots.len() {
-                dsu.union(dot_slot(idx), dot_slot(anti));
-            }
-        }
     }
 
     for (idx, lin) in mesh.lins.iter().enumerate() {
@@ -739,26 +731,9 @@ pub(crate) fn mesh_position_groups(mesh: &Mesh) -> Vec<usize> {
                 dsu.union(line_b_slot(mesh, idx), line_a_slot(mesh, inv));
             }
         }
-
-        if lin.anti >= 0 {
-            let anti = lin.anti as usize;
-            if anti < mesh.lins.len() {
-                dsu.union(line_a_slot(mesh, idx), line_a_slot(mesh, anti));
-                dsu.union(line_b_slot(mesh, idx), line_b_slot(mesh, anti));
-            }
-        }
     }
 
     for (tri_idx, tri) in mesh.tris.iter().enumerate() {
-        if tri.anti >= 0 {
-            let anti = tri.anti as usize;
-            if anti < mesh.tris.len() {
-                dsu.union(tri_a_slot(mesh, tri_idx), tri_b_slot(mesh, anti));
-                dsu.union(tri_b_slot(mesh, tri_idx), tri_a_slot(mesh, anti));
-                dsu.union(tri_c_slot(mesh, tri_idx), tri_c_slot(mesh, anti));
-            }
-        }
-
         for (edge_idx, value) in [tri.ab, tri.bc, tri.ca].into_iter().enumerate() {
             let (lhs, rhs) = tri_edge_slots(mesh, tri_idx, edge_idx);
             if value >= 0 {

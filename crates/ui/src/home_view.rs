@@ -6,7 +6,9 @@ use structs::assets::Assets;
 use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{
-    components::buttons::link_button, navbar_view::Navbar, state::window_state::WindowState,
+    components::buttons::link_button,
+    navbar_view::Navbar,
+    state::window_state::WindowState,
     theme::{Theme, ThemeMode, ThemeSettings},
 };
 
@@ -127,7 +129,7 @@ impl HomeView {
         let theme = ThemeSettings::theme(cx);
         let missing = Self::missing_latex_tools(self.latex_backend_status);
         let message = format!(
-            "Missing on PATH: {missing}. Monocurl will use a limited MathJax fallback for Tex(...) and Text(...) still require the system LaTeX toolchain."
+            "Missing on PATH: {missing}. Monocurl will use a limited MathJax fallback for Tex(...); Text(...) and Latex(...) still require the system LaTeX toolchain."
         );
         let install_url = Self::latex_install_url();
         let (banner_bg, banner_border, accent) = Self::latex_warning_palette(theme);
@@ -588,7 +590,7 @@ impl Render for HomeView {
                     .flex_row()
                     .child(self.render_logo(cx))
                     .child(div().w(px(0.5)).h_full().bg(divider_color))
-                    .child(self.render_projects(cx))
+                    .child(self.render_projects(cx)),
             )
             .bg(theme.app_background)
             .text_color(theme.text_primary)

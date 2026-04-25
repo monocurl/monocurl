@@ -25,11 +25,8 @@ pub(super) fn build_triangle_vertices(mesh: &Mesh) -> Vec<TriVertexPod> {
                 && tri.c.col.w <= f32::EPSILON)
         })
         .count();
-    let needs_antinorm = mesh.tris.iter().all(|tri| tri.anti < 0);
-    let smooth_normals =
-        (mesh.uniform.smooth && needs_antinorm).then(|| averaged_triangle_normals(mesh));
-    let mut vertices =
-        Vec::with_capacity(visible_triangles * 3 * if needs_antinorm { 2 } else { 1 });
+    let smooth_normals = mesh.uniform.smooth.then(|| averaged_triangle_normals(mesh));
+    let mut vertices = Vec::with_capacity(visible_triangles * 3);
     for tri in &mesh.tris {
         if tri.a.col.w <= f32::EPSILON && tri.b.col.w <= f32::EPSILON && tri.c.col.w <= f32::EPSILON
         {
@@ -43,12 +40,6 @@ pub(super) fn build_triangle_vertices(mesh: &Mesh) -> Vec<TriVertexPod> {
         vertices.push(tri_vertex(tri.a, a_normal));
         vertices.push(tri_vertex(tri.b, b_normal));
         vertices.push(tri_vertex(tri.c, c_normal));
-
-        if needs_antinorm {
-            vertices.push(tri_vertex(tri.b, -b_normal));
-            vertices.push(tri_vertex(tri.a, -a_normal));
-            vertices.push(tri_vertex(tri.c, -c_normal));
-        }
     }
     vertices
 }
@@ -92,18 +83,10 @@ fn triangle_vertex_normal(
 
 pub(super) fn build_line_vertices(mesh: &Mesh) -> Vec<LineVertexPod> {
     let mut lines = Vec::with_capacity(mesh.lins.len() * LINE_VERTICES_PER_INSTANCE as usize);
-    for (line_idx, line) in mesh.lins.iter().enumerate() {
-        let (source_idx, source) = match line_inverse_index(mesh, line.inv) {
-            Some(inv_idx) if line_idx > inv_idx => continue,
-            Some(inv_idx) if !line_visible(line) && line_visible(&mesh.lins[inv_idx]) => {
-                (inv_idx, &mesh.lins[inv_idx])
-            }
-            _ => (line_idx, line),
-        };
-
-        if !line_visible(source) {
+    for line_idx in 0..mesh.lins.len() {
+        let Some((source_idx, source)) = rendered_line_source(mesh, line_idx) else {
             continue;
-        }
+        };
 
         let prev = resolved_line_neighbor(mesh, source_idx, source.prev, NeighborDirection::Prev)
             .unwrap_or(source);
@@ -123,6 +106,31 @@ pub(super) fn build_line_vertices(mesh: &Mesh) -> Vec<LineVertexPod> {
         ]);
     }
     lines
+}
+
+fn rendered_line_source(mesh: &Mesh, line_idx: usize) -> Option<(usize, &geo::mesh::Lin)> {
+    let line = &mesh.lins[line_idx];
+    let Some(inv_idx) = line_inverse_index(mesh, line.inv) else {
+        return line_visible(line).then_some((line_idx, line));
+    };
+
+    let inverse = &mesh.lins[inv_idx];
+
+    if line.is_dom_sib {
+        return line_visible(line).then_some((line_idx, line));
+    }
+    if inverse.is_dom_sib {
+        return None;
+    }
+
+    if line_idx > inv_idx {
+        return None;
+    }
+    if !line_visible(line) && line_visible(inverse) {
+        return Some((inv_idx, inverse));
+    }
+
+    line_visible(line).then_some((line_idx, line))
 }
 
 #[derive(Clone, Copy)]
@@ -304,7 +312,7 @@ mod tests {
     use super::{LINE_VERTICES_PER_INSTANCE, build_line_vertices};
 
     #[test]
-    fn line_vertices_render_inverse_pairs_once_even_without_dominant_sibling_flags() {
+    fn line_vertices_prefer_dominant_sibling_orientation() {
         let mesh = Mesh {
             dots: Vec::new(),
             tris: Vec::new(),
@@ -315,6 +323,7 @@ mod tests {
                     1,
                     -1,
                     -1,
+                    false,
                     1.0,
                 ),
                 test_line(
@@ -323,6 +332,42 @@ mod tests {
                     0,
                     -1,
                     -1,
+                    true,
+                    1.0,
+                ),
+            ],
+            uniform: Uniforms::default(),
+            tag: Vec::new(),
+        };
+
+        let vertices = build_line_vertices(&mesh);
+        assert_eq!(vertices.len(), LINE_VERTICES_PER_INSTANCE as usize);
+        assert_eq!(vertices[0].pos, [1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(vertices[5].pos, [0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn line_vertices_render_inverse_pairs_once_without_dominant_metadata() {
+        let mesh = Mesh {
+            dots: Vec::new(),
+            tris: Vec::new(),
+            lins: vec![
+                test_line(
+                    Float3::new(0.0, 0.0, 0.0),
+                    Float3::new(1.0, 0.0, 0.0),
+                    1,
+                    -1,
+                    -1,
+                    false,
+                    1.0,
+                ),
+                test_line(
+                    Float3::new(1.0, 0.0, 0.0),
+                    Float3::new(0.0, 0.0, 0.0),
+                    0,
+                    -1,
+                    -1,
+                    false,
                     1.0,
                 ),
             ],
@@ -346,6 +391,7 @@ mod tests {
                     1,
                     -1,
                     -1,
+                    false,
                     0.0,
                 ),
                 test_line(
@@ -354,6 +400,7 @@ mod tests {
                     0,
                     -1,
                     -1,
+                    false,
                     1.0,
                 ),
             ],
@@ -380,6 +427,7 @@ mod tests {
                     -1,
                     -1,
                     -1,
+                    false,
                     1.0,
                 ),
                 test_line(
@@ -388,6 +436,7 @@ mod tests {
                     -1,
                     -1,
                     -1,
+                    false,
                     1.0,
                 ),
             ],
@@ -401,7 +450,15 @@ mod tests {
         assert_eq!(vertices[6].prev_tangent, [0.0, 1.0, 0.0, 0.0]);
     }
 
-    fn test_line(a: Float3, b: Float3, inv: i32, prev: i32, next: i32, alpha: f32) -> Lin {
+    fn test_line(
+        a: Float3,
+        b: Float3,
+        inv: i32,
+        prev: i32,
+        next: i32,
+        is_dom_sib: bool,
+        alpha: f32,
+    ) -> Lin {
         Lin {
             a: LinVertex {
                 pos: a,
@@ -415,8 +472,7 @@ mod tests {
             prev,
             next,
             inv,
-            anti: -1,
-            is_dom_sib: false,
+            is_dom_sib,
         }
     }
 }
