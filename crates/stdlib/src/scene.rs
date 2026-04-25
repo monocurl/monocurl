@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use executor::{
     error::ExecutorError,
     executor::Executor,
@@ -23,9 +21,7 @@ fn read_value(executor: &Executor, stack_idx: usize, index: i32, _name: &'static
 }
 
 fn value_list(values: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(Rc::new(List::new_with(
-        values.into_iter().map(VRc::new).collect(),
-    )))
+    Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
 }
 
 fn tagged_map(
@@ -40,7 +36,7 @@ fn tagged_map(
     for (key, value) in fields {
         map.insert(HashableKey::String(key.to_string()), VRc::new(value));
     }
-    Value::Map(Rc::new(map))
+    Value::Map(map)
 }
 
 fn camera_value(

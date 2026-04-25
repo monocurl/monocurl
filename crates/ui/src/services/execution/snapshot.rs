@@ -28,19 +28,19 @@ impl ExecutionService {
     pub(super) fn runtime_value_from_parameter(value: &ParameterValue) -> Option<Value> {
         Some(match value {
             ParameterValue::Int(n) => Value::Integer(*n),
-            ParameterValue::VectorInt(values) => Value::List(std::rc::Rc::new(List::new_with(
+            ParameterValue::VectorInt(values) => Value::List(List::new_with(
                 values
                     .iter()
                     .map(|&value| VRc::new(Value::Integer(value)))
                     .collect(),
-            ))),
+            )),
             ParameterValue::Float(f) => Value::Float(*f),
-            ParameterValue::VectorFloat(values) => Value::List(std::rc::Rc::new(List::new_with(
+            ParameterValue::VectorFloat(values) => Value::List(List::new_with(
                 values
                     .iter()
                     .map(|&value| VRc::new(Value::Float(value)))
                     .collect(),
-            ))),
+            )),
             ParameterValue::Complex { re, im } => Value::Complex { re: *re, im: *im },
             ParameterValue::Camera(camera) => camera_value_from_snapshot(camera),
             ParameterValue::Other => return None,

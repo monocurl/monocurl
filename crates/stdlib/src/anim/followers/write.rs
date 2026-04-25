@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{mesh::Mesh, simd::Float3};
@@ -264,10 +264,8 @@ fn write_tree_value(
                 let state = executor::heap::with_heap(|h| h.get(state.key()).clone());
                 out.push(write_tree_value(&start, &end, &state, t)?);
             }
-            Ok(Value::List(Rc::new(
-                executor::value::container::List::new_with(
-                    out.into_iter().map(executor::heap::VRc::new).collect(),
-                ),
+            Ok(Value::List(executor::value::container::List::new_with(
+                out.into_iter().map(executor::heap::VRc::new).collect(),
             )))
         }
         other => Err(ExecutorError::type_error("mesh / list", other.type_name())),
@@ -345,10 +343,8 @@ fn flash_tree_value(
                 let state = executor::heap::with_heap(|h| h.get(state.key()).clone());
                 out.push(flash_tree_value(&start, &end, &state, u, v)?);
             }
-            Ok(Value::List(Rc::new(
-                executor::value::container::List::new_with(
-                    out.into_iter().map(executor::heap::VRc::new).collect(),
-                ),
+            Ok(Value::List(executor::value::container::List::new_with(
+                out.into_iter().map(executor::heap::VRc::new).collect(),
             )))
         }
         other => Err(ExecutorError::type_error("mesh / list", other.type_name())),

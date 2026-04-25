@@ -1,4 +1,8 @@
-use std::{path::PathBuf, time::Duration};
+use std::{
+    io,
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
 use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle, Window};
 use serde::{Deserialize, Serialize};
@@ -85,6 +89,59 @@ impl WindowState {
         path
     }
 
+    fn physical_file_newer_than_virtual(
+        virtual_path: &Path,
+        physical_path: &Path,
+    ) -> io::Result<bool> {
+        let physical_modified = std::fs::metadata(physical_path)?.modified()?;
+        let virtual_modified = match std::fs::metadata(virtual_path) {
+            Ok(metadata) => metadata.modified()?,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(true),
+            Err(err) => return Err(err),
+        };
+
+        Ok(physical_modified > virtual_modified)
+    }
+
+    fn copy_physical_to_virtual_if_newer(virtual_path: &Path, physical_path: Option<&Path>) {
+        let Some(physical_path) = physical_path else {
+            return;
+        };
+
+        match Self::physical_file_newer_than_virtual(virtual_path, physical_path) {
+            Ok(false) => {}
+            Ok(true) => {
+                if let Some(parent) = virtual_path.parent()
+                    && let Err(err) = std::fs::create_dir_all(parent)
+                {
+                    log::warn!(
+                        "Could not create internal storage directory {:?}: {}",
+                        parent,
+                        err
+                    );
+                    return;
+                }
+
+                let _ = std::fs::copy(physical_path, virtual_path).inspect_err(|err| {
+                    log::warn!(
+                        "Could not refresh internal file {:?} from user file {:?}: {}",
+                        virtual_path,
+                        physical_path,
+                        err
+                    );
+                });
+            }
+            Err(err) => {
+                log::warn!(
+                    "Could not compare user file {:?} with internal file {:?}: {}",
+                    physical_path,
+                    virtual_path,
+                    err
+                );
+            }
+        }
+    }
+
     fn load_saved_state(window: &mut Window, cx: &mut Context<Self>) -> Option<Self> {
         let path = Self::save_file();
         if path.exists() {
@@ -96,6 +153,11 @@ impl WindowState {
                 .open_documents
                 .into_iter()
                 .map(|serde| {
+                    Self::copy_physical_to_virtual_if_newer(
+                        &serde.internal_path,
+                        serde.user_path.as_deref(),
+                    );
+
                     let dirty = cx.new(|_cx| false);
                     OpenDocument {
                         internal_path: serde.internal_path.clone(),
@@ -454,6 +516,8 @@ impl WindowState {
             .iter()
             .any(|doc| doc.internal_path == internal_path)
         {
+            Self::copy_physical_to_virtual_if_newer(&internal_path, user_path.as_deref());
+
             self.open_documents.push({
                 let dirty = cx.new(|_cx| false);
                 OpenDocument {

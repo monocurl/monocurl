@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use bytecode::{CopyValueMode, Instruction};
 
 use crate::{
@@ -52,14 +50,12 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(Value::String(s));
             }
             Instruction::PushEmptyMap => {
-                self.state
-                    .stack_mut(stack_idx)
-                    .push(Value::Map(Rc::new(Map::new())));
+                self.state.stack_mut(stack_idx).push(Value::Map(Map::new()));
             }
             Instruction::PushEmptyVector => {
                 self.state
                     .stack_mut(stack_idx)
-                    .push(Value::List(Rc::new(List::new())));
+                    .push(Value::List(List::new()));
             }
 
             Instruction::SyncAllLeaders => {

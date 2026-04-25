@@ -9,9 +9,7 @@ use executor::{
 use stdlib_macros::stdlib_func;
 
 pub(super) fn list_from<I: IntoIterator<Item = Value>>(values: I) -> Value {
-    Value::List(Rc::new(List::new_with(
-        values.into_iter().map(VRc::new).collect(),
-    )))
+    Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
 }
 
 pub(super) async fn read_string(
@@ -93,7 +91,7 @@ pub(super) fn read_rc_list(
     stack_idx: usize,
     index: i32,
     name: &'static str,
-) -> Result<Rc<List>, ExecutorError> {
+) -> Result<List, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)

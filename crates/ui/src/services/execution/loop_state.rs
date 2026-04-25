@@ -60,6 +60,7 @@ impl RuntimeState {
                     let old_user_timestamp = self.executor.internal_to_user_timestamp(self.target);
                     self.executor.update_bytecode(bytecode);
                     self.target = self.executor.user_to_internal_timestamp(old_user_timestamp);
+                    self.executor.restore_live_state_to_cache_point(self.target);
                     self.has_compiler_error = false;
                 } else {
                     self.has_compiler_error = true;
@@ -159,7 +160,7 @@ impl RuntimeState {
         match self.executor.advance_playback(max_slide, target_dt).await {
             Ok(true) => {}
             Ok(false) => {
-                self.checked_advance_section().await;
+                self.checked_advance_section();
                 self.is_playing = false;
                 // on slide advances, allow "lag"
                 last_update = Instant::now();
@@ -204,7 +205,7 @@ impl RuntimeState {
         }
     }
 
-    async fn checked_advance_section(&mut self) {
+    fn checked_advance_section(&mut self) {
         if self.executor.state.has_errors() {
             self.cancel_runtime_work();
             return;
@@ -214,7 +215,7 @@ impl RuntimeState {
             return;
         }
 
-        self.executor.advance_section().await;
+        self.executor.advance_section();
         if self.executor.state.has_errors() {
             self.cancel_runtime_work();
         }

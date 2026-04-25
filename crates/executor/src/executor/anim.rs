@@ -21,7 +21,7 @@ impl Executor {
         duration.max(f64::MIN_POSITIVE)
     }
 
-    pub async fn advance_section(&mut self) {
+    pub fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
 
         // a fully played slide must be distinguishable from an unentered one, so
@@ -81,7 +81,7 @@ impl Executor {
                     if self.state.timestamp.slide < max_slide
                         && self.state.timestamp.slide + 1 < self.bytecode.sections.len()
                     {
-                        self.advance_section().await;
+                        self.advance_section();
                     } else {
                         // distinguish a played-zero-length terminal slide from
                         // the pre-entry state
@@ -192,7 +192,7 @@ impl Executor {
     }
 
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
-        self.rebase_at_cache_point(target).await;
+        self.rebase_at_cache_point(target);
 
         loop {
             match self.seek_primitive_anim_skip(target.slide).await {

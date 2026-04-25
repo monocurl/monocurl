@@ -379,9 +379,7 @@ fn test_scene_snapshot_camera_accepts_look_at_surface() {
     };
 
     let list_value = |values: Vec<Value>| {
-        Value::List(Rc::new(List::new_with(
-            values.into_iter().map(VRc::new).collect(),
-        )))
+        Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
     };
 
     let mut map = Map::new();
@@ -421,7 +419,7 @@ fn test_scene_snapshot_camera_accepts_look_at_surface() {
         HashableKey::String("far".to_string()),
         VRc::new(Value::Integer(50)),
     );
-    let camera_value = Value::Map(Rc::new(map));
+    let camera_value = Value::Map(map);
 
     smol::block_on(async {
         let camera = parse_camera_value(&mut executor, camera_value, "camera")

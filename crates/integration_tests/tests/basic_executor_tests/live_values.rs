@@ -59,6 +59,14 @@ fn float3_approx_eq(actual: geo::simd::Float3, expected: geo::simd::Float3, eps:
         && (actual.z - expected.z).abs() <= eps
 }
 
+fn max_mesh_line_len(meshes: &[std::sync::Arc<geo::mesh::Mesh>]) -> f32 {
+    meshes
+        .iter()
+        .flat_map(|mesh| mesh.lins.iter())
+        .map(|lin| (lin.b.pos - lin.a.pos).len())
+        .fold(0.0, f32::max)
+}
+
 // -- COW: list element independence after aliasing --
 
 #[test]
@@ -193,12 +201,11 @@ fn test_labeled_error_on_unknown_label() {
     r.assert_error("no labeled argument");
 }
 
-// -- COW on InvokedFunction: mutating one copy must not affect the other --
+// -- InvokedFunction mutation isolation: mutating one copy must not affect the other --
 
 #[test]
 fn test_cow_invoked_function_mutation_leaves_alias_intact() {
-    // alias and inv start sharing the same Rc<InvokedFunction>;
-    // mutating inv.lbl triggers Rc::make_mut (COW) so alias is unchanged
+    // alias captures its own live-call body, so mutating inv.lbl leaves it unchanged
     let r = run("
         let f = |x, y| x + y
         var inv = f(lbl: 10, 30)
@@ -711,7 +718,7 @@ fn test_label_preserves_cross_axis_alignment() {
 fn test_axis2d_uses_leading_optional_axis_labels() {
     let r = run_with_stdlib(
         "
-        let result = Axis2d(\"x\", nil, x = [0, 0, 1, 1], y = [0, 0, 1, 1], tick_label_rates = [0, 0])
+        let result = Axis2d(\"x\", nil, [0, 0, 1], [0, 0, 1], [1r, 1u], [0, 0], 0)
     ",
         &["mesh"],
     );
@@ -723,6 +730,67 @@ fn test_axis2d_uses_leading_optional_axis_labels() {
     assert!(
         meshes.len() > 1,
         "expected axis mesh plus at least one label mesh"
+    );
+}
+
+#[test]
+fn test_axis2d_infers_scale_from_basis_vectors() {
+    let r = run_with_stdlib(
+        "
+        let axis = Axis2d(nil, nil, [0, 1, 1], [0, 1, 1], [2r, 3u], [0, 0], 0)
+        let result = (mesh_right(axis)[0] > 2.05) + (mesh_up(axis)[1] > 3.05)
+    ",
+        &["mesh"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_axis_ranges_no_longer_accept_explicit_unit_scale() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis2d(nil, nil, [-1, 1, 1, 1], [-1, 1, 1], [1r, 1u], [0, 0], 0)
+    ",
+        &["mesh"],
+    );
+    r.assert_error("list of length 4");
+}
+
+#[test]
+fn test_axis_arrows_are_filled_meshes() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis1d(nil, 1r, 1f, [-1, 1, 1], 0)
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+    assert!(
+        meshes.iter().any(|mesh| !mesh.tris.is_empty()),
+        "expected axis arrows to include filled triangle geometry"
+    );
+}
+
+#[test]
+fn test_axis2d_grid_spans_plot_area() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis2d(nil, nil, [-1, 1, 1], [-1, 1, 1], [1r, 1u], [0, 0], 1)
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+    assert!(
+        max_mesh_line_len(&meshes) > 1.9,
+        "expected grid lines to span the plotted range"
     );
 }
 
@@ -1031,6 +1099,18 @@ fn test_mesh_stdlib_reports_named_bad_list_length() {
     r.assert_error("invalid argument 'size'");
     r.assert_error("expected list of length 2");
     r.assert_error("got list of length 3");
+}
+
+#[test]
+fn test_rect_size_order_is_width_then_height() {
+    let r = run_with_stdlib(
+        "
+        let rect = Rect([2, 3])
+        let result = [mesh_width(rect), mesh_height(rect)]
+    ",
+        &["mesh"],
+    );
+    r.assert_float_list(&[2.0, 3.0]);
 }
 
 #[test]

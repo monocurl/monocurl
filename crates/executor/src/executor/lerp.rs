@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, rc::Rc};
+use std::{future::Future, pin::Pin};
 
 use smallvec::SmallVec;
 
@@ -85,8 +85,8 @@ impl Executor {
         t: f64,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            let a_args: SmallVec<[Value; 8]> = a_inv.body.arguments.clone();
-            let b_args: SmallVec<[Value; 8]> = b_inv.body.arguments.clone();
+            let a_args = a_inv.body.arguments.clone();
+            let b_args = b_inv.body.arguments.clone();
             let lambda_val = a_inv.body.lambda.as_ref().clone();
             let labels = a_inv.body.labels.clone();
 
@@ -318,7 +318,7 @@ impl Executor {
                         })?;
                         elements.push(crate::heap::VRc::new(lerped));
                     }
-                    Ok(Some(Value::List(Rc::new(List { elements }))))
+                    Ok(Some(Value::List(List { elements })))
                 }
                 (Value::Map(a_map), Value::Map(b_map)) => {
                     let missing_from_b: Vec<&HashableKey> = a_map
@@ -355,7 +355,7 @@ impl Executor {
                         })?;
                         map.insert(key.clone(), crate::heap::VRc::new(lerped));
                     }
-                    Ok(Some(Value::Map(Rc::new(map))))
+                    Ok(Some(Value::Map(map)))
                 }
                 _ => Ok(None),
             }

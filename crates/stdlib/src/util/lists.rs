@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, rc::Rc};
+use std::cmp::Ordering;
 
 use executor::{
     error::ExecutorError,
@@ -84,8 +84,8 @@ pub async fn range(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
         }));
         x += step;
     }
-    Ok(Value::List(Rc::new(
-        executor::value::container::List::new_with(elements),
+    Ok(Value::List(executor::value::container::List::new_with(
+        elements,
     )))
 }
 
@@ -105,8 +105,8 @@ pub async fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value,
                 .cloned()
                 .collect::<SmallVec<[VRc; 4]>>();
             elements.reverse();
-            Ok(Value::List(Rc::new(
-                executor::value::container::List::new_with(elements),
+            Ok(Value::List(executor::value::container::List::new_with(
+                elements,
             )))
         }
         Value::String(s) => Ok(Value::String(s.chars().rev().collect())),
@@ -167,13 +167,13 @@ pub async fn zip(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         .iter()
         .zip(v.elements().iter())
         .map(|(a_key, b_key)| {
-            VRc::new(Value::List(Rc::new(
-                executor::value::container::List::new_with(smallvec![a_key.clone(), b_key.clone()]),
+            VRc::new(Value::List(executor::value::container::List::new_with(
+                smallvec![a_key.clone(), b_key.clone()],
             )))
         })
         .collect::<SmallVec<[VRc; 4]>>();
-    Ok(Value::List(Rc::new(
-        executor::value::container::List::new_with(elements),
+    Ok(Value::List(executor::value::container::List::new_with(
+        elements,
     )))
 }
 
@@ -185,16 +185,13 @@ pub async fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         .iter()
         .enumerate()
         .map(|(i, elem_key)| {
-            VRc::new(Value::List(Rc::new(
-                executor::value::container::List::new_with(smallvec![
-                    VRc::new(Value::Integer(i as i64)),
-                    elem_key.clone()
-                ]),
+            VRc::new(Value::List(executor::value::container::List::new_with(
+                smallvec![VRc::new(Value::Integer(i as i64)), elem_key.clone()],
             )))
         })
         .collect::<SmallVec<[VRc; 4]>>();
-    Ok(Value::List(Rc::new(
-        executor::value::container::List::new_with(elements),
+    Ok(Value::List(executor::value::container::List::new_with(
+        elements,
     )))
 }
 
@@ -202,14 +199,12 @@ pub async fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 pub async fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
-    Ok(Value::List(Rc::new(
-        executor::value::container::List::new_with(
-            list.elements()
-                .iter()
-                .take(n)
-                .cloned()
-                .collect::<SmallVec<[VRc; 4]>>(),
-        ),
+    Ok(Value::List(executor::value::container::List::new_with(
+        list.elements()
+            .iter()
+            .take(n)
+            .cloned()
+            .collect::<SmallVec<[VRc; 4]>>(),
     )))
 }
 
@@ -217,14 +212,12 @@ pub async fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 pub async fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
-    Ok(Value::List(Rc::new(
-        executor::value::container::List::new_with(
-            list.elements()
-                .iter()
-                .skip(n)
-                .cloned()
-                .collect::<SmallVec<[VRc; 4]>>(),
-        ),
+    Ok(Value::List(executor::value::container::List::new_with(
+        list.elements()
+            .iter()
+            .skip(n)
+            .cloned()
+            .collect::<SmallVec<[VRc; 4]>>(),
     )))
 }
 
@@ -267,8 +260,8 @@ pub async fn list_subset(
         elements.push(src.elements()[idx].clone());
     }
 
-    Ok(Value::List(Rc::new(
-        executor::value::container::List::new_with(elements),
+    Ok(Value::List(executor::value::container::List::new_with(
+        elements,
     )))
 }
 

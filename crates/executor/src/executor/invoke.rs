@@ -986,7 +986,7 @@ impl Executor {
                         let value = with_heap(|h| h.get(value_ref.key()).clone());
                         elements.push(VRc::new(self.materialize_cached_value(value).await?));
                     }
-                    Ok(Value::List(Rc::new(List::new_with(elements))))
+                    Ok(Value::List(List::new_with(elements)))
                 }
                 Value::Map(map) => {
                     let mut out = Map::new();
@@ -1000,7 +1000,7 @@ impl Executor {
                             VRc::new(self.materialize_cached_value(value).await?),
                         );
                     }
-                    Ok(Value::Map(Rc::new(out)))
+                    Ok(Value::Map(out))
                 }
                 other => Ok(other),
             }

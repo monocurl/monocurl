@@ -141,8 +141,12 @@ impl Executor {
     }
 
     // given a target, find the first cache point that we can base off of
-    pub(crate) async fn rebase_at_cache_point(&mut self, target: Timestamp) {
+    pub fn restore_live_state_to_cache_point(&mut self, target: Timestamp) {
         self.restore_latest_cache_before_or_reset(target);
+    }
+
+    pub(crate) fn rebase_at_cache_point(&mut self, target: Timestamp) {
+        self.restore_live_state_to_cache_point(target);
     }
 
     // called right before advance to next section
@@ -320,9 +324,9 @@ mod tests {
         executor
             .state
             .stack_mut(ExecutionState::ROOT_STACK_ID)
-            .push(Value::List(std::rc::Rc::new(List {
+            .push(Value::List(List {
                 elements: smallvec![VRc::new(Value::Integer(1)), VRc::new(Value::Integer(2))],
-            })));
+            }));
         executor.state.promote_to_var(ExecutionState::ROOT_STACK_ID);
         executor.save_cache();
 
@@ -334,15 +338,13 @@ mod tests {
             .unwrap();
         heap_replace(
             list_key,
-            Value::List(std::rc::Rc::new(List {
+            Value::List(List {
                 elements: smallvec![VRc::new(Value::Integer(99)), VRc::new(Value::Integer(2))],
-            })),
+            }),
         );
         executor.state.timestamp = Timestamp::new(1, 1.0);
 
-        smol::block_on(async {
-            executor.rebase_at_cache_point(Timestamp::new(1, 0.0)).await;
-        });
+        executor.rebase_at_cache_point(Timestamp::new(1, 0.0));
 
         let restored = with_heap(|h| h.get(list_key).clone());
         let Value::List(restored) = restored else {
@@ -401,9 +403,7 @@ mod tests {
         heap_replace(follower_key, Value::Integer(55));
         executor.state.timestamp = Timestamp::new(1, 1.0);
 
-        smol::block_on(async {
-            executor.rebase_at_cache_point(Timestamp::new(1, 0.0)).await;
-        });
+        executor.rebase_at_cache_point(Timestamp::new(1, 0.0));
 
         let restored = match with_heap(|h| h.get(cell_key).clone()) {
             Value::Leader(leader) => leader,
@@ -447,14 +447,14 @@ mod tests {
         executor
             .state
             .stack_mut(ExecutionState::ROOT_STACK_ID)
-            .push(Value::List(std::rc::Rc::new(List {
+            .push(Value::List(List {
                 elements: smallvec![
-                    VRc::new(Value::List(std::rc::Rc::new(List {
+                    VRc::new(Value::List(List {
                         elements: smallvec![VRc::new(Value::Integer(3))],
-                    }))),
+                    })),
                     VRc::new(Value::Integer(4)),
                 ],
-            })));
+            }));
         executor.state.promote_to_var(ExecutionState::ROOT_STACK_ID);
         executor.save_cache();
 
@@ -466,20 +466,18 @@ mod tests {
             .unwrap();
         heap_replace(
             live_key,
-            Value::List(std::rc::Rc::new(List {
+            Value::List(List {
                 elements: smallvec![
-                    VRc::new(Value::List(std::rc::Rc::new(List {
+                    VRc::new(Value::List(List {
                         elements: smallvec![VRc::new(Value::Integer(30))],
-                    }))),
+                    })),
                     VRc::new(Value::Integer(4)),
                 ],
-            })),
+            }),
         );
         executor.state.timestamp = Timestamp::new(1, 1.0);
 
-        smol::block_on(async {
-            executor.rebase_at_cache_point(Timestamp::new(1, 0.0)).await;
-        });
+        executor.rebase_at_cache_point(Timestamp::new(1, 0.0));
 
         let restored = with_heap(|h| h.get(live_key).clone());
         let Value::List(restored) = restored else {
@@ -598,11 +596,7 @@ mod tests {
             .push(Value::Integer(11));
         executor.state.timestamp = Timestamp::new(1, 0.5);
 
-        smol::block_on(async {
-            executor
-                .rebase_at_cache_point(Timestamp::new(1, 0.75))
-                .await;
-        });
+        executor.rebase_at_cache_point(Timestamp::new(1, 0.75));
 
         assert_eq!(executor.state.alive_stack_count, 1);
         assert_eq!(

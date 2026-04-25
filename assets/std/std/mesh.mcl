@@ -157,59 +157,14 @@ let Number = |value, precision = 2, scale = 1|
 
 # graphing
 
-let Axis1d = |label = nil, axis = 1r, normal = 1f, range = [-5, 5], unit = 1, tick_step = 1, tick_label_rate = 1| {
-    var min = 0
-    var max = 0
-    [min, max] = __monocurl__native__ expect_list("range", range, 2)
-    return __monocurl__native__ mk_axis1d(0l, axis, normal, min, max, unit, tick_step, label, tick_label_rate)
-}
+let Axis1d = |label = nil, axis = 1r, normal = 1f, range = [-5, 5, 0.25], tick_label_rate = 4|
+    __monocurl__native__ mk_axis1d(0l, axis, normal, range, label, tick_label_rate)
 
-let Axis2d = |x_label = nil, y_label = nil, x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], axes = [1r, 1u], tick_label_rates = [1, 1], grid = 0| {
-    var x_axis = 0
-    var y_axis = 0
-    var x_min = 0
-    var x_max = 0
-    var x_unit = 0
-    var x_tick_step = 0
-    var y_min = 0
-    var y_max = 0
-    var y_unit = 0
-    var y_tick_step = 0
-    var x_tick_label_rate = 0
-    var y_tick_label_rate = 0
-    [x_axis, y_axis] = __monocurl__native__ expect_list("axes", axes, 2)
-    [x_min, x_max, x_unit, x_tick_step] = __monocurl__native__ expect_list("x", x, 4)
-    [y_min, y_max, y_unit, y_tick_step] = __monocurl__native__ expect_list("y", y, 4)
-    [x_tick_label_rate, y_tick_label_rate] = __monocurl__native__ expect_list("tick_label_rates", tick_label_rates, 2)
-    return __monocurl__native__ mk_axis2d(0l, x_axis, y_axis, x_min, x_max, x_unit, x_tick_step, y_min, y_max, y_unit, y_tick_step, x_label, x_tick_label_rate, y_label, y_tick_label_rate, grid)
-}
+let Axis2d = |x_label = nil, y_label = nil, x = [-5, 5, 0.25], y = [-5, 5, 0.25], axes = [1r, 1u], tick_label_rates = [4, 4], grid = 0|
+    __monocurl__native__ mk_axis2d(0l, axes, x, y, x_label, y_label, tick_label_rates, grid)
 
-let Axis3d = |x_label = nil, y_label = nil, z_label = nil, x = [-5, 5, 1, 1], y = [-5, 5, 1, 1], z = [-5, 5, 1, 1], axes = [1r, 1u, 1f], tick_label_rates = [1, 1, 1], grid = 0| {
-    var x_axis = 0
-    var y_axis = 0
-    var z_axis = 0
-    var x_min = 0
-    var x_max = 0
-    var x_unit = 0
-    var x_tick_step = 0
-    var y_min = 0
-    var y_max = 0
-    var y_unit = 0
-    var y_tick_step = 0
-    var z_min = 0
-    var z_max = 0
-    var z_unit = 0
-    var z_tick_step = 0
-    var x_tick_label_rate = 0
-    var y_tick_label_rate = 0
-    var z_tick_label_rate = 0
-    [x_axis, y_axis, z_axis] = __monocurl__native__ expect_list("axes", axes, 3)
-    [x_min, x_max, x_unit, x_tick_step] = __monocurl__native__ expect_list("x", x, 4)
-    [y_min, y_max, y_unit, y_tick_step] = __monocurl__native__ expect_list("y", y, 4)
-    [z_min, z_max, z_unit, z_tick_step] = __monocurl__native__ expect_list("z", z, 4)
-    [x_tick_label_rate, y_tick_label_rate, z_tick_label_rate] = __monocurl__native__ expect_list("tick_label_rates", tick_label_rates, 3)
-    return __monocurl__native__ mk_axis3d(0l, x_axis, y_axis, z_axis, x_min, x_max, x_unit, x_tick_step, y_min, y_max, y_unit, y_tick_step, z_min, z_max, z_unit, z_tick_step, x_label, x_tick_label_rate, y_label, y_tick_label_rate, z_label, z_tick_label_rate, grid)
-}
+let Axis3d = |x_label = nil, y_label = nil, z_label = nil, x = [-5, 5, 0.25], y = [-5, 5, 0.25], z = [-5, 5, 0.25], axes = [1r, 1u, 1f], tick_label_rates = [4, 4, 4], grid = 0|
+    __monocurl__native__ mk_axis3d(0l, axes, x, y, z, x_label, y_label, z_label, tick_label_rates, grid)
 
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
     var theta_min = 0

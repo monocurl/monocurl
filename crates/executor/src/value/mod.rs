@@ -49,8 +49,8 @@ pub enum Value {
     Lambda(Rc<Lambda>),
     Operator(Operator),
     AnimBlock(Rc<AnimBlock>),
-    Map(Rc<Map>),
-    List(Rc<List>),
+    Map(Map),
+    List(List),
 
     Stateful(Stateful),
     Leader(Leader),

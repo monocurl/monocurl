@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use executor::{
     error::ExecutorError,
     executor::Executor,
@@ -22,7 +20,7 @@ fn key_to_value(k: &HashableKey) -> Value {
     }
 }
 
-fn map_from(executor: &Executor, stack_idx: usize, index: i32) -> Result<Rc<Map>, ExecutorError> {
+fn map_from(executor: &Executor, stack_idx: usize, index: i32) -> Result<Map, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)
@@ -62,8 +60,8 @@ pub async fn map_values(executor: &mut Executor, stack_idx: usize) -> Result<Val
         .iter()
         .map(|(_, v)| v.clone())
         .collect::<SmallVec<[VRc; 4]>>();
-    Ok(Value::List(Rc::new(
-        executor::value::container::List::new_with(elements),
+    Ok(Value::List(executor::value::container::List::new_with(
+        elements,
     )))
 }
 
@@ -73,15 +71,12 @@ pub async fn map_items(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let elements = m
         .iter()
         .map(|(k, v)| {
-            VRc::new(Value::List(Rc::new(
-                executor::value::container::List::new_with(smallvec![
-                    VRc::new(key_to_value(k)),
-                    v.clone()
-                ]),
+            VRc::new(Value::List(executor::value::container::List::new_with(
+                smallvec![VRc::new(key_to_value(k)), v.clone()],
             )))
         })
         .collect::<SmallVec<[VRc; 4]>>();
-    Ok(Value::List(Rc::new(
-        executor::value::container::List::new_with(elements),
+    Ok(Value::List(executor::value::container::List::new_with(
+        elements,
     )))
 }

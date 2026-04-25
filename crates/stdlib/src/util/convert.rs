@@ -40,7 +40,7 @@ async fn read_text_tag(executor: &mut Executor, value: Value) -> Result<Vec<isiz
 
 async fn read_text_tag_list(
     executor: &mut Executor,
-    list: std::rc::Rc<List>,
+    list: List,
 ) -> Result<Vec<isize>, ExecutorError> {
     let mut out = Vec::with_capacity(list.len());
     for key in list.elements() {

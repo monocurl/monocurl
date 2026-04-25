@@ -196,22 +196,30 @@ let Copy = |&from, &into| anim {
     play Set([&into])
 }
 
-let TransSubsetTo = |&from, target, &into, filter=nil, time=1, path_arc = 0, rate = smooth| anim {
+let TransSubsetTo = |&from, filter, target, &into, time=1, tagged=0, path_arc = 0, rate = smooth| anim {
     mesh aux = []
     play TransferSubset(&from, &aux, filter)
 
     aux = target
-    play Trans(time, &aux, path_arc, rate)
+    if (tagged) {
+        play TagTrans(time, &aux, path_arc, rate)
+    } else {
+        play Trans(time, &aux, path_arc, rate)
+    }
 
     play Transfer(&aux, &into)
 }
 
-let TransSubsetCopy = |&from, target, &into, filter=nil, time=1, path_arc = 0, rate = smooth| anim {
+let TransSubsetCopy = |&from, filter, target, &into, time=1, tagged=0, path_arc = 0, rate = smooth| anim {
     mesh aux = []
     play CopySubset(&from, &aux, filter)
 
     aux = target
-    play Trans(time, &aux, path_arc, rate)
+    if (tagged) {
+        play TagTrans(time, &aux, path_arc, rate)
+    } else {
+        play Trans(time, &aux, path_arc, rate)
+    }
 
     play Transfer(&aux, &into)
 }

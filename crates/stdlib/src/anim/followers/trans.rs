@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, rc::Rc, sync::Arc};
+use std::{collections::VecDeque, sync::Arc};
 
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
@@ -2077,8 +2077,8 @@ fn mesh_tree_trans_lerp(
                         .map(executor::heap::VRc::new)
                 })
                 .collect::<Result<_, _>>()?;
-            Ok(Value::List(Rc::new(
-                executor::value::container::List::new_with(elements),
+            Ok(Value::List(executor::value::container::List::new_with(
+                elements,
             )))
         }
         (start, end, state) => Err(ExecutorError::invalid_interpolation(format!(
@@ -2125,8 +2125,8 @@ pub(super) fn mesh_tree_patharc_lerp(
                     mesh_tree_patharc_lerp(&start, &end, t, path_arc).map(executor::heap::VRc::new)
                 })
                 .collect::<Result<_, _>>()?;
-            Ok(Value::List(Rc::new(
-                executor::value::container::List::new_with(elements),
+            Ok(Value::List(executor::value::container::List::new_with(
+                elements,
             )))
         }
         (start, end) => Err(ExecutorError::invalid_interpolation(format!(

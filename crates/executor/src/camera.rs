@@ -86,13 +86,13 @@ fn normalized_or(value: Float3, fallback: Float3) -> Float3 {
 }
 
 fn float3_value(value: Float3) -> Value {
-    Value::List(std::rc::Rc::new(crate::value::container::List::new_with(
+    Value::List(crate::value::container::List::new_with(
         value
             .to_array()
             .into_iter()
             .map(|component| crate::heap::VRc::new(Value::Float(component as f64)))
             .collect(),
-    )))
+    ))
 }
 
 pub fn camera_value_from_snapshot(snapshot: &CameraSnapshot) -> Value {
@@ -121,7 +121,7 @@ pub fn camera_value_from_snapshot(snapshot: &CameraSnapshot) -> Value {
         HashableKey::String("far".to_string()),
         crate::heap::VRc::new(Value::Float(snapshot.far as f64)),
     );
-    Value::Map(std::rc::Rc::new(map))
+    Value::Map(map)
 }
 
 fn map_field_value(map: &Map, name: &str) -> Option<Value> {

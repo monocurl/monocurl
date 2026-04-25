@@ -131,9 +131,7 @@ impl<'a> Iterator for MeshTreeIter<'a> {
 }
 
 pub(super) fn list_value(values: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(Rc::new(List::new_with(
-        values.into_iter().map(VRc::new).collect(),
-    )))
+    Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
 }
 
 pub(super) fn float_to_value(value: f64) -> Value {
@@ -1201,9 +1199,9 @@ pub(super) fn polygon_basis(normal: Float3) -> (Float3, Float3, Float3) {
     let seed = if normal.z.abs() < 0.9 {
         Float3::Z
     } else {
-        Float3::X
+        Float3::Y
     };
-    let x = normal.cross(seed).normalize();
+    let x = seed.cross(normal).normalize();
     let y = normal.cross(x).normalize();
     (x, y, normal)
 }
@@ -1728,7 +1726,7 @@ mod tests {
     };
 
     use super::{
-        mesh_from_parts, mesh_position_groups, mesh_ref, mesh_to_indexed_lines,
+        mesh_from_parts, mesh_position_groups, mesh_ref, mesh_to_indexed_lines, polygon_basis,
         push_closed_polyline, tessellate_planar_loops, uprank_mesh,
     };
 
@@ -1828,6 +1826,14 @@ mod tests {
         assert!(mesh.lins.iter().all(|line| line.inv != -1));
         assert!(mesh.dots.iter().all(|dot| dot.inv != -1));
         assert_eq!(mesh_to_indexed_lines(&mesh).segments.len(), 1);
+    }
+
+    #[test]
+    fn polygon_basis_uses_xy_axes_for_default_normal() {
+        let (x, y, normal) = polygon_basis(Float3::Z);
+        assert_eq!(x, Float3::X);
+        assert_eq!(y, Float3::Y);
+        assert_eq!(normal, Float3::Z);
     }
 
     #[test]

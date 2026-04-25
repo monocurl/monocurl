@@ -1,4 +1,4 @@
-use std::{cell::Cell, future::Future, pin::Pin, rc::Rc};
+use std::{cell::Cell, future::Future, pin::Pin};
 
 use smallvec::SmallVec;
 
@@ -15,7 +15,7 @@ pub struct InvokedOperatorBody {
     pub operator: Box<Value>,
     pub operand: Box<Value>,
     pub boxed_operand: bool,
-    pub arguments: SmallVec<[Value; 8]>,
+    pub arguments: Vec<Value>,
     pub boxed_arguments: SmallVec<[bool; 8]>,
     pub labels: SmallVec<[(usize, String); 4]>,
 }
@@ -57,14 +57,14 @@ pub fn make_invoked_operator(
     let mut boxed_arguments = SmallVec::with_capacity(arguments.len());
     boxed_arguments.resize(arguments.len(), false);
     RcCached {
-        body: Rc::new(InvokedOperatorBody {
+        body: InvokedOperatorBody {
             operator: Box::new(operator),
             operand: Box::new(operand),
             boxed_operand: false,
-            arguments,
+            arguments: arguments.into_vec(),
             boxed_arguments,
             labels,
-        }),
+        },
         cache: InvOpCache {
             unmodified: Cell::new(Some(Box::new(initial))),
             cached_result: Cell::new(Some(Box::new(modified))),

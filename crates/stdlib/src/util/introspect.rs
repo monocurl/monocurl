@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use executor::{
     error::ExecutorError,
     executor::Executor,
@@ -144,7 +142,7 @@ fn set_attr_on_stateful(
     match target {
         Target::Call(arg_idx) => {
             let key = {
-                let body = Rc::make_mut(&mut stateful.body);
+                let body = &mut stateful.body;
                 let StatefulNode::LabeledCall { args, .. } = &mut body.root else {
                     unreachable!();
                 };
@@ -154,7 +152,7 @@ fn set_attr_on_stateful(
         }
         Target::OperatorArg(arg_idx) => {
             let key = {
-                let body = Rc::make_mut(&mut stateful.body);
+                let body = &mut stateful.body;
                 let StatefulNode::LabeledOperatorCall { extra_args, .. } = &mut body.root else {
                     unreachable!();
                 };
@@ -164,7 +162,7 @@ fn set_attr_on_stateful(
         }
         Target::OperatorOperand => {
             let key = {
-                let body = Rc::make_mut(&mut stateful.body);
+                let body = &mut stateful.body;
                 let StatefulNode::LabeledOperatorCall { operand, .. } = &mut body.root else {
                     unreachable!();
                 };
@@ -199,7 +197,7 @@ fn set_attr_on_value(
             };
 
             let key = {
-                let body = Rc::make_mut(&mut inv.body);
+                let body = &mut inv.body;
                 let key = body.arguments[arg_idx].make_mut_lvalue();
                 body.boxed_arguments.resize(body.arguments.len(), false);
                 body.boxed_arguments[arg_idx] = true;
@@ -217,7 +215,7 @@ fn set_attr_on_value(
                 .find_map(|(arg_idx, label)| (label == attr_name).then_some(*arg_idx))
             {
                 let key = {
-                    let body = Rc::make_mut(&mut inv.body);
+                    let body = &mut inv.body;
                     let key = body.arguments[arg_idx].make_mut_lvalue();
                     body.boxed_arguments.resize(body.arguments.len(), false);
                     body.boxed_arguments[arg_idx] = true;
@@ -229,7 +227,7 @@ fn set_attr_on_value(
             }
 
             let key = {
-                let body = Rc::make_mut(&mut inv.body);
+                let body = &mut inv.body;
                 let key = body.operand.as_mut().make_mut_lvalue();
                 body.boxed_operand = true;
                 key

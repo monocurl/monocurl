@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     error::ExecutorError,
     heap::with_heap,
@@ -279,9 +277,9 @@ fn negate_list(list: &List) -> Result<Value, ExecutorError> {
         elements.push(crate::heap::VRc::new(negated));
     }
 
-    Ok(Value::List(Rc::new(List {
+    Ok(Value::List(List {
         elements: elements.into(),
-    })))
+    }))
 }
 
 fn combine_lists(lhs: &List, rhs: &List, op: BinOp) -> Result<Value, ExecutorError> {
@@ -308,9 +306,9 @@ fn combine_lists(lhs: &List, rhs: &List, op: BinOp) -> Result<Value, ExecutorErr
         elements.push(crate::heap::VRc::new(combined));
     }
 
-    Ok(Value::List(Rc::new(List {
+    Ok(Value::List(List {
         elements: elements.into(),
-    })))
+    }))
 }
 
 fn multiply_list(list: &List, scalar: &Value, scalar_on_lhs: bool) -> Result<Value, ExecutorError> {
@@ -334,9 +332,9 @@ fn multiply_list(list: &List, scalar: &Value, scalar_on_lhs: bool) -> Result<Val
         elements.push(crate::heap::VRc::new(product));
     }
 
-    Ok(Value::List(Rc::new(List {
+    Ok(Value::List(List {
         elements: elements.into(),
-    })))
+    }))
 }
 
 fn list_index_err(op: &'static str, idx: usize, err: ExecutorError) -> ExecutorError {

@@ -46,28 +46,26 @@ impl Value {
             (Value::PrimitiveAnim(a), Value::PrimitiveAnim(b)) => prim_anim_equal(a, b),
 
             (Value::List(a), Value::List(b)) => {
-                Rc::ptr_eq(a, b)
-                    || (a.len() == b.len()
-                        && a.elements.iter().zip(b.elements.iter()).all(|(ak, bk)| {
-                            ak == bk
-                                || Value::values_equal(
-                                    &with_heap(|h| h.get(ak.key()).clone()),
-                                    &with_heap(|h| h.get(bk.key()).clone()),
-                                )
-                        }))
+                a.len() == b.len()
+                    && a.elements.iter().zip(b.elements.iter()).all(|(ak, bk)| {
+                        ak == bk
+                            || Value::values_equal(
+                                &with_heap(|h| h.get(ak.key()).clone()),
+                                &with_heap(|h| h.get(bk.key()).clone()),
+                            )
+                    })
             }
             (Value::Map(a), Value::Map(b)) => {
-                Rc::ptr_eq(a, b)
-                    || (a.len() == b.len()
-                        && a.iter().all(|(k, av)| {
-                            b.get(k).is_some_and(|bv| {
-                                av == bv
-                                    || Value::values_equal(
-                                        &with_heap(|h| h.get(av.key()).clone()),
-                                        &with_heap(|h| h.get(bv.key()).clone()),
-                                    )
-                            })
-                        }))
+                a.len() == b.len()
+                    && a.iter().all(|(k, av)| {
+                        b.get(k).is_some_and(|bv| {
+                            av == bv
+                                || Value::values_equal(
+                                    &with_heap(|h| h.get(av.key()).clone()),
+                                    &with_heap(|h| h.get(bv.key()).clone()),
+                                )
+                        })
+                    })
             }
 
             (Value::Stateful(a), Value::Stateful(b)) => {
@@ -80,27 +78,25 @@ impl Value {
             ),
 
             (Value::InvokedFunction(a), Value::InvokedFunction(b)) => {
-                Rc::ptr_eq(&a.body, &b.body)
-                    || (Value::values_equal(&a.body.lambda, &b.body.lambda)
-                        && a.body.labels == b.body.labels
-                        && a.body.arguments.len() == b.body.arguments.len()
-                        && a.body
-                            .arguments
-                            .iter()
-                            .zip(b.body.arguments.iter())
-                            .all(|(ai, bi)| Value::values_equal(ai, bi)))
+                Value::values_equal(&a.body.lambda, &b.body.lambda)
+                    && a.body.labels == b.body.labels
+                    && a.body.arguments.len() == b.body.arguments.len()
+                    && a.body
+                        .arguments
+                        .iter()
+                        .zip(b.body.arguments.iter())
+                        .all(|(ai, bi)| Value::values_equal(ai, bi))
             }
             (Value::InvokedOperator(a), Value::InvokedOperator(b)) => {
-                Rc::ptr_eq(&a.body, &b.body)
-                    || (Value::values_equal(&a.body.operator, &b.body.operator)
-                        && Value::values_equal(&a.body.operand, &b.body.operand)
-                        && a.body.labels == b.body.labels
-                        && a.body.arguments.len() == b.body.arguments.len()
-                        && a.body
-                            .arguments
-                            .iter()
-                            .zip(b.body.arguments.iter())
-                            .all(|(ai, bi)| Value::values_equal(ai, bi)))
+                Value::values_equal(&a.body.operator, &b.body.operator)
+                    && Value::values_equal(&a.body.operand, &b.body.operand)
+                    && a.body.labels == b.body.labels
+                    && a.body.arguments.len() == b.body.arguments.len()
+                    && a.body
+                        .arguments
+                        .iter()
+                        .zip(b.body.arguments.iter())
+                        .all(|(ai, bi)| Value::values_equal(ai, bi))
             }
 
             _ => false,

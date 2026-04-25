@@ -1,4 +1,4 @@
-use std::{cell::Cell, future::Future, pin::Pin, rc::Rc};
+use std::{cell::Cell, future::Future, pin::Pin};
 
 use smallvec::SmallVec;
 
@@ -13,7 +13,7 @@ use super::rc_cached::RcCached;
 #[derive(Clone)]
 pub struct InvokedFunctionBody {
     pub lambda: Box<Value>,
-    pub arguments: SmallVec<[Value; 8]>,
+    pub arguments: Vec<Value>,
     pub boxed_arguments: SmallVec<[bool; 8]>,
     pub labels: SmallVec<[(usize, String); 4]>,
 }
@@ -40,12 +40,12 @@ pub fn make_invoked_function(
     let mut boxed_arguments = SmallVec::with_capacity(arguments.len());
     boxed_arguments.resize(arguments.len(), false);
     RcCached {
-        body: Rc::new(InvokedFunctionBody {
+        body: InvokedFunctionBody {
             lambda: Box::new(lambda),
-            arguments,
+            arguments: arguments.into_vec(),
             boxed_arguments,
             labels,
-        }),
+        },
         cache: InvFuncCache(Cell::new(cached_result.map(Box::new))),
     }
 }

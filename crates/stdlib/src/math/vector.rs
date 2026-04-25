@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use executor::{
     error::ExecutorError,
     executor::Executor,
@@ -42,9 +40,9 @@ pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
         u[2] * v[0] - u[0] * v[2],
         u[0] * v[1] - u[1] * v[0],
     ];
-    Ok(Value::List(Rc::new(List::new_with(smallvec![
+    Ok(Value::List(List::new_with(smallvec![
         VRc::new(Value::Float(out[0])),
         VRc::new(Value::Float(out[1])),
         VRc::new(Value::Float(out[2])),
-    ]))))
+    ])))
 }

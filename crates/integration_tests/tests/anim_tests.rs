@@ -5,7 +5,6 @@ use std::{
     cell::Cell,
     f64, fs,
     path::{Path, PathBuf},
-    rc::Rc,
     sync::Arc,
 };
 

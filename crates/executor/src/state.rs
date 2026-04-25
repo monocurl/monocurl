@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, rc::Rc};
+use std::collections::BTreeSet;
 
 use smallvec::SmallVec;
 use structs::text::Span8;
@@ -406,7 +406,7 @@ impl ExecutionState {
 
         let leader_key = heap_alloc(init_val.clone());
         let follower_init = match kind {
-            LeaderKind::Mesh => Value::List(Rc::new(List::new())),
+            LeaderKind::Mesh => Value::List(List::new()),
             LeaderKind::Param => init_val,
         };
         let follower_key = heap_alloc(follower_init);

@@ -1,4 +1,4 @@
-use std::{rc::Rc, sync::Arc};
+use std::sync::Arc;
 
 use crate::read_float;
 use executor::{
@@ -59,9 +59,7 @@ pub(super) fn read_float4_value(value: Value, name: &'static str) -> Result<Floa
 }
 
 pub(super) fn list_value(values: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(Rc::new(List::new_with(
-        values.into_iter().map(VRc::new).collect(),
-    )))
+    Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
 }
 
 pub(super) fn scale_primitive_time(anim: Value, factor: f64) -> Result<Value, ExecutorError> {

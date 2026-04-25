@@ -724,8 +724,8 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
         equation = tag_filter{|t| len(t) == 0} theorem
 
         let w = Write(1, [&equation])
-        let tl = TransSubsetTo(&left, tag_filter{|t| 1 in t} theorem, &c_transfer, |tag| C2_TAG in tag)
-        let ta = TransSubsetTo(&right, tag_filter{|t| 2 in t} theorem, &ab_transfer, |tag| A2_TAG in tag or B2_TAG in tag)
+        let tl = TransSubsetTo(&left, |tag| C2_TAG in tag, tag_filter{|t| 1 in t} theorem, &c_transfer)
+        let ta = TransSubsetTo(&right, |tag| A2_TAG in tag or B2_TAG in tag, tag_filter{|t| 2 in t} theorem, &ab_transfer)
 
         play [
             Write(1, [&equation]),
@@ -1096,25 +1096,35 @@ fn test_scale_scales_text_about_global_tree_center() {
         Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
     };
 
-    let (plain_value, scaled_value) = smol::block_on(async {
-        let plain_ts = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
-        match executor.seek_to(plain_ts).await {
-            SeekToResult::SeekedTo(_) => {}
-            SeekToResult::Error(e) => panic!("seek failed at plain text state: {e}"),
-        }
-        let plain = current_mesh_leader_value(&mut executor).await;
+    let (plain_center, plain_leaf_centers, scaled_center, scaled_leaf_centers) =
+        smol::block_on(async {
+            let plain_ts = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+            match executor.seek_to(plain_ts).await {
+                SeekToResult::SeekedTo(_) => {}
+                SeekToResult::Error(e) => panic!("seek failed at plain text state: {e}"),
+            }
+            let plain = current_mesh_leader_value(&mut executor).await;
+            let plain_center = value_tree_box_center(&plain);
+            let plain_leaf_centers = value_leaf_box_centers(&plain);
+            drop(plain);
 
-        let scaled_ts = executor.user_to_internal_timestamp(Timestamp::new(1, f64::INFINITY));
-        match executor.seek_to(scaled_ts).await {
-            SeekToResult::SeekedTo(_) => {}
-            SeekToResult::Error(e) => panic!("seek failed at scaled text state: {e}"),
-        }
-        let scaled = current_mesh_leader_value(&mut executor).await;
-        (plain, scaled)
-    });
+            let scaled_ts = executor.user_to_internal_timestamp(Timestamp::new(1, f64::INFINITY));
+            match executor.seek_to(scaled_ts).await {
+                SeekToResult::SeekedTo(_) => {}
+                SeekToResult::Error(e) => panic!("seek failed at scaled text state: {e}"),
+            }
+            let scaled = current_mesh_leader_value(&mut executor).await;
+            let scaled_center = value_tree_box_center(&scaled);
+            let scaled_leaf_centers = value_leaf_box_centers(&scaled);
 
-    let plain_center = value_tree_box_center(&plain_value);
-    let scaled_center = value_tree_box_center(&scaled_value);
+            (
+                plain_center,
+                plain_leaf_centers,
+                scaled_center,
+                scaled_leaf_centers,
+            )
+        });
+
     assert!(
         (plain_center - scaled_center).len() < 1e-3,
         "expected global tree center to stay fixed, got plain {:?} scaled {:?}",
@@ -1122,8 +1132,6 @@ fn test_scale_scales_text_about_global_tree_center() {
         scaled_center.to_array()
     );
 
-    let plain_leaf_centers = value_leaf_box_centers(&plain_value);
-    let scaled_leaf_centers = value_leaf_box_centers(&scaled_value);
     assert_eq!(plain_leaf_centers.len(), scaled_leaf_centers.len());
 
     let mut saw_offset_leaf = false;

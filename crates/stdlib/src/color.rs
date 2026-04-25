@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use executor::{
     error::ExecutorError,
     executor::Executor,
@@ -32,10 +30,10 @@ pub async fn hsv(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         _ => (c, 0.0, x),
     };
 
-    Ok(Value::List(Rc::new(List::new_with(smallvec![
+    Ok(Value::List(List::new_with(smallvec![
         VRc::new(Value::Float(r + m)),
         VRc::new(Value::Float(g + m)),
         VRc::new(Value::Float(b + m)),
         VRc::new(Value::Float(a)),
-    ]))))
+    ])))
 }

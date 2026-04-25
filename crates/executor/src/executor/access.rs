@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     error::ExecutorError,
     heap::{HeapKey, VRc, VWeak, heap_replace, with_heap, with_heap_mut},
@@ -59,7 +57,7 @@ impl Executor {
 
         match target {
             Value::Leader(leader) => {
-                let rhs = rhs.elide_lvalue().elide_leader();
+                let rhs = rhs.elide_lvalue_leader_rec();
                 if matches!(rhs, Value::Stateful(_)) && leader.kind != LeaderKind::Mesh {
                     return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
@@ -105,7 +103,7 @@ impl Executor {
 
         match lhs {
             Value::List(mut list) => {
-                Rc::make_mut(&mut list).elements.push(VRc::new(rhs));
+                list.elements.push(VRc::new(rhs));
                 self.state.stack_mut(stack_idx).push(Value::List(list));
                 ExecSingle::Continue
             }
@@ -132,7 +130,7 @@ impl Executor {
         let (key, base_val) = follow_heap_lvalues(key);
         match base_val {
             Value::List(mut list) => {
-                Rc::make_mut(&mut list).elements.push(VRc::new(rhs));
+                list.elements.push(VRc::new(rhs.elide_lvalue_leader_rec()));
                 heap_replace(key, Value::List(list));
             }
             _ => {
@@ -187,7 +185,7 @@ impl Executor {
                         });
                     }
 
-                    let key = Rc::make_mut(&mut list).elements[idx].make_mut();
+                    let key = list.elements[idx].make_mut();
                     heap_replace(base_key, Value::List(list));
 
                     self.state
@@ -201,7 +199,6 @@ impl Executor {
                     };
 
                     let key = {
-                        let map = Rc::make_mut(&mut map);
                         match map.get_mut(&key_hash) {
                             Some(value_ref) => value_ref.make_mut(),
                             None => {
@@ -333,7 +330,7 @@ impl Executor {
                     let label_idx = inv.body.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
                         let key = {
-                            let body = Rc::make_mut(&mut inv.body);
+                            let body = &mut inv.body;
                             let key = body.arguments[arg_idx].make_mut_lvalue();
                             body.boxed_arguments.resize(body.arguments.len(), false);
                             body.boxed_arguments[arg_idx] = true;
@@ -354,7 +351,7 @@ impl Executor {
                     let label_idx = inv.body.labels.iter().find(|(_, name)| name == &attr_name);
                     if let Some(&(arg_idx, _)) = label_idx {
                         let key = {
-                            let body = Rc::make_mut(&mut inv.body);
+                            let body = &mut inv.body;
                             let key = body.arguments[arg_idx].make_mut_lvalue();
                             body.boxed_arguments.resize(body.arguments.len(), false);
                             body.boxed_arguments[arg_idx] = true;
@@ -368,7 +365,7 @@ impl Executor {
                             .push(Value::WeakLvalue(VWeak::from(key)));
                     } else {
                         let key = {
-                            let body = Rc::make_mut(&mut inv.body);
+                            let body = &mut inv.body;
                             let key = body.operand.as_mut().make_mut_lvalue();
                             body.boxed_operand = true;
                             key
@@ -389,7 +386,7 @@ impl Executor {
                         let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                         if let Some(&(arg_idx, _)) = label_idx {
                             let key = {
-                                let body = Rc::make_mut(&mut stateful.body);
+                                let body = &mut stateful.body;
                                 let StatefulNode::LabeledCall { args, .. } = &mut body.root else {
                                     unreachable!();
                                 };
@@ -415,7 +412,7 @@ impl Executor {
                         let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
                         if let Some(&(arg_idx, _)) = label_idx {
                             let key = {
-                                let body = Rc::make_mut(&mut stateful.body);
+                                let body = &mut stateful.body;
                                 let StatefulNode::LabeledOperatorCall { extra_args, .. } =
                                     &mut body.root
                                 else {
@@ -430,7 +427,7 @@ impl Executor {
                                 .push(Value::WeakLvalue(VWeak::from(key)));
                         } else {
                             let key = {
-                                let body = Rc::make_mut(&mut stateful.body);
+                                let body = &mut stateful.body;
                                 let StatefulNode::LabeledOperatorCall { operand, .. } =
                                     &mut body.root
                                 else {

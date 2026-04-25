@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use smallvec::SmallVec;
 
@@ -70,10 +70,10 @@ pub fn make_stateful(
         }
     }
     RcCached {
-        body: Rc::new(StatefulBody {
+        body: StatefulBody {
             roots: deduped,
             root,
-        }),
+        },
         cache: StatefulCache {
             read_kind,
             cached: RefCell::new(None),
@@ -86,7 +86,7 @@ pub fn to_follower_stateful(s: &Stateful) -> Stateful {
         return s.clone();
     }
     RcCached {
-        body: Rc::clone(&s.body),
+        body: s.body.clone(),
         cache: StatefulCache {
             read_kind: StatefulReadKind::Follower,
             cached: RefCell::new(None),

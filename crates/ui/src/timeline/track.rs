@@ -3,9 +3,9 @@ use gpui::*;
 use crate::theme::{FontSet, Theme};
 
 use super::metrics::{
-    compute_gap_ws, compute_painted_gap_ws, compute_playhead_x, compute_slide_xs,
-    compute_track_width, effective_durations, CONTENT_H, DUR_FONT_SIZE, LABEL_FONT_SIZE, LABEL_GAP,
-    LABEL_LINE_H, LABEL_MAX_LINES, LABEL_TEXT_H, PADDING_V, PX_PER_SEC, SLIDE_H, SLIDE_W,
+    CONTENT_H, DUR_FONT_SIZE, LABEL_FONT_SIZE, LABEL_GAP, LABEL_LINE_H, LABEL_MAX_LINES,
+    LABEL_TEXT_H, PADDING_V, PX_PER_SEC, SLIDE_H, SLIDE_W, compute_gap_ws, compute_painted_gap_ws,
+    compute_playhead_x, compute_slide_xs, compute_track_width, effective_durations,
 };
 
 struct TrackPrepaint {
