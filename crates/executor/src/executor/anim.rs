@@ -86,8 +86,11 @@ impl Executor {
                     {
                         self.advance_section();
                     } else {
+                        // (edge case with zero length slides)
+                        let old = self.state.timestamp;
                         self.mark_section_as_started_playing();
                         self.save_cache();
+                        self.state.timestamp = old;
                         return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
                     }
                 }
