@@ -76,7 +76,11 @@ impl Executor {
         }
     }
 
-    async fn seek_primitive_anim_skip(&mut self, max_slide: usize, stop_before_section: bool) -> SeekPrimitiveAnimSkipResult {
+    async fn seek_primitive_anim_skip(
+        &mut self,
+        max_slide: usize,
+        stop_before_section: bool,
+    ) -> SeekPrimitiveAnimSkipResult {
         loop {
             self.tick_yielder().await;
 
@@ -201,13 +205,42 @@ impl Executor {
 
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
         self.rebase_at_cache_point(target);
+        self.advance_to_target(target).await
+    }
+
+    /// advance the executor's live state forward to `target` without any rebase.
+    /// caller must guarantee `self.state.timestamp <= target` and that the
+    /// current state is a valid live execution point.
+    pub async fn advance_to_target(&mut self, target: Timestamp) -> SeekToResult {
+        debug_assert!(
+            !self.state.timestamp.time.is_nan() && !target.time.is_nan(),
+            "advance_to_target requires comparable timestamps: current={:?}, target={:?}",
+            self.state.timestamp,
+            target
+        );
+        debug_assert!(
+            self.state.timestamp <= target,
+            "advance_to_target cannot move backward: current={:?}, target={:?}",
+            self.state.timestamp,
+            target
+        );
+        debug_assert!(
+            !self.state.has_errors(),
+            "advance_to_target requires a non-error executor state"
+        );
+        debug_assert_eq!(
+            self.state.pending_playback_time, 0.0,
+            "advance_to_target requires no pending playback time"
+        );
 
         let stop_before_section = target.time < 0.0;
         loop {
-            match self.seek_primitive_anim_skip(target.slide, stop_before_section).await {
+            match self
+                .seek_primitive_anim_skip(target.slide, stop_before_section)
+                .await
+            {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
-                    // would the target have allowed us to have played anything at all
                     if self.state.timestamp.slide == target.slide && target.time >= 0.0 {
                         self.mark_section_as_started_playing();
                     }

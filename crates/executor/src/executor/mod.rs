@@ -118,8 +118,7 @@ impl Executor {
 
     pub fn internal_to_signed_user_timestamp(&self, internal_ts: Timestamp) -> SignedTimestamp {
         SignedTimestamp {
-            slide: internal_ts.slide
-            as isize - self.bytecode.non_slide_sections() as isize,
+            slide: internal_ts.slide as isize - self.bytecode.non_slide_sections() as isize,
             time: internal_ts.time,
         }
     }
