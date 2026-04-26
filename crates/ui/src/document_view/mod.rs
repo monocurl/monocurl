@@ -11,9 +11,9 @@ use structs::rope::{Attribute, Rope, TextAggregate};
 use crate::{
     actions::{
         CloseActiveDocument, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide,
-        PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart,
-        SyncViewportCamera, ToggleParamsPanel, TogglePlaying, TogglePresentationMode, Undo,
-        UnfocusEditor, ZoomIn, ZoomOut,
+        PlayOrShowPauseHint, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath,
+        SceneEnd, SceneStart, SyncViewportCamera, ToggleParamsPanel, TogglePlaying,
+        TogglePresentationMode, Undo, UnfocusEditor, ZoomIn, ZoomOut,
     },
     components::split_pane::Split,
     editor::editor_view::Editor,
@@ -47,7 +47,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("escape", UnfocusEditor, Some("!presenter")),
         KeyBinding::new("left", PrevSlide, None),
         KeyBinding::new("right", NextSlide, None),
-        KeyBinding::new("space", TogglePlaying, Some("!editor")),
+        KeyBinding::new("space", PlayOrShowPauseHint, Some("!editor")),
         KeyBinding::new("shift-space", TogglePlaying, Some("!editor")),
         KeyBinding::new("secondary-shift-space,", TogglePlaying, None),
         KeyBinding::new(",", PrevSlide, Some("!editor")),

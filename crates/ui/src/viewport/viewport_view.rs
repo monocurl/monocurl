@@ -3,7 +3,7 @@ mod params;
 mod render;
 mod style;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use gpui::*;
 use renderer::Renderer;
@@ -19,6 +19,8 @@ use self::{
     style::{OVERDRAG_TICK, RingStyle, TRANSPARENT},
 };
 
+const PAUSE_HINT_DURATION: Duration = Duration::from_millis(500);
+
 pub struct Viewport {
     services: Entity<ServiceManager>,
     execution_state: Entity<ExecutionState>,
@@ -29,6 +31,8 @@ pub struct Viewport {
     preview_camera: Option<PreviewCameraState>,
     copied_preview_camera: Option<String>,
     presentation_camera: Option<PresentationCameraState>,
+    show_pause_hint: bool,
+    pause_hint_nonce: u64,
     scene_camera_version: u64,
     scroll_handle: ScrollHandle,
     slider_bounds: HashMap<String, [f64; 4]>,
@@ -64,6 +68,8 @@ impl Viewport {
             preview_camera: None,
             copied_preview_camera: None,
             presentation_camera: None,
+            show_pause_hint: false,
+            pause_hint_nonce: 0,
             scene_camera_version,
             scroll_handle: ScrollHandle::new(),
             slider_bounds: HashMap::new(),
@@ -101,6 +107,8 @@ impl Viewport {
         self.preview_camera = None;
         self.copied_preview_camera = None;
         self.presentation_camera = None;
+        self.show_pause_hint = false;
+        self.pause_hint_nonce = self.pause_hint_nonce.wrapping_add(1);
         if presenting {
             let hidden_ring = RingStyle {
                 color: TRANSPARENT,
@@ -114,6 +122,38 @@ impl Viewport {
             self.drag_state = None;
             self.slider_bounds.clear();
         }
+        cx.notify();
+    }
+
+    pub fn show_pause_hint(&mut self, cx: &mut Context<Self>) {
+        if !self.is_presenting {
+            return;
+        }
+
+        self.show_pause_hint = true;
+        self.pause_hint_nonce = self.pause_hint_nonce.wrapping_add(1);
+        let nonce = self.pause_hint_nonce;
+        cx.notify();
+
+        cx.spawn(async move |weak, cx| {
+            cx.background_executor().timer(PAUSE_HINT_DURATION).await;
+            let _ = weak.update(cx, |viewport, cx| {
+                if viewport.pause_hint_nonce == nonce {
+                    viewport.show_pause_hint = false;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    pub fn clear_pause_hint(&mut self, cx: &mut Context<Self>) {
+        if !self.show_pause_hint {
+            return;
+        }
+
+        self.show_pause_hint = false;
+        self.pause_hint_nonce = self.pause_hint_nonce.wrapping_add(1);
         cx.notify();
     }
 

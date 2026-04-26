@@ -1,7 +1,11 @@
 use gpui::*;
 use renderer::SceneRenderData;
 
-use crate::{services::ServiceManager, theme::ThemeSettings, timeline::visual_slide_time};
+use crate::{
+    services::ServiceManager,
+    theme::ThemeSettings,
+    timeline::{slide_label, slide_title_label, visual_slide_time},
+};
 
 use super::{
     Viewport,
@@ -17,6 +21,7 @@ const VIEWPORT_FRAME_ASPECT: f32 = 16.0 / 9.0;
 const VIEWPORT_FRAME_PADDING: f32 = 35.0;
 const VIEWPORT_PREVIEW_CHROME_INSET_X: f32 = 8.0;
 const VIEWPORT_PREVIEW_CHROME_INSET_Y: f32 = 6.0;
+const PAUSE_HINT_TEXT: &str = "press shift + space to pause";
 const VIEWPORT_OVERSCAN_SCRIM: Rgba = Rgba {
     r: 0.5,
     g: 0.5,
@@ -41,13 +46,24 @@ struct SceneStageLayout {
 impl Render for Viewport {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
-        let (status, params, timestamp, slide_count, durations, background, scene_camera, meshes) = {
+        let (
+            status,
+            params,
+            timestamp,
+            slide_count,
+            slide_names,
+            durations,
+            background,
+            scene_camera,
+            meshes,
+        ) = {
             let execution = self.execution_state.read(cx);
             (
                 execution.status,
                 execution.parameters.clone(),
                 execution.current_timestamp,
                 execution.slide_count,
+                execution.slide_names.clone(),
                 execution.slide_durations.clone(),
                 execution.background,
                 execution.camera.clone(),
@@ -145,19 +161,17 @@ impl Render for Viewport {
 
         let services_weak: WeakEntity<ServiceManager> = self.services.downgrade();
         let controls = parameter_controls(self, params.as_ref(), services_weak, weak_vp.clone());
-        let (slide_label, time_label) =
+        let (slide_label, time_label, title_label) =
             match visual_slide_time(timestamp.slide, timestamp.time, &durations) {
                 None => (
                     format!("Slide 0 / {}", slide_count.max(1)),
                     "0.00s".to_string(),
+                    None,
                 ),
                 Some((slide, time)) => (
-                    format!(
-                        "Slide {} / {}",
-                        (slide + 1).min(slide_count.max(1)),
-                        slide_count.max(1)
-                    ),
+                    slide_label(slide, slide_count.max(1)),
                     format!("{:.2}s", time),
+                    slide_title_label(slide, &slide_names),
                 ),
             };
         let params_button = render_toolbar_button(
@@ -198,7 +212,15 @@ impl Render for Viewport {
                         .text_color(PRES_MUTED)
                         .text_size(px(11.0))
                         .child(time_label),
-                );
+                )
+                .children(title_label.clone().map(|title| {
+                    div()
+                        .text_color(PRES_MUTED)
+                        .text_size(px(11.0))
+                        .child(title)
+                }))
+                .children(self.show_pause_hint.then(|| div().flex_1()))
+                .children(self.show_pause_hint.then(render_pause_hint));
 
             let params_body = if controls.is_empty() {
                 div()
@@ -279,7 +301,15 @@ impl Render for Viewport {
                     .text_color(PRES_MUTED)
                     .text_size(px(11.0))
                     .child(time_label),
-            );
+            )
+            .children(title_label.map(|title| {
+                div()
+                    .text_color(PRES_MUTED)
+                    .text_size(px(11.0))
+                    .child(title)
+            }))
+            .children(self.show_pause_hint.then(|| div().flex_1()))
+            .children(self.show_pause_hint.then(render_pause_hint));
 
         div()
             .flex()
@@ -543,6 +573,13 @@ fn paint_preview_frame_border(
     for edge in [top, bottom, left, right] {
         window.paint_quad(fill(edge, ring_style.color));
     }
+}
+
+fn render_pause_hint() -> impl IntoElement {
+    div()
+        .text_color(PRES_MUTED)
+        .text_size(px(11.0))
+        .child(PAUSE_HINT_TEXT)
 }
 
 fn render_toolbar_button(

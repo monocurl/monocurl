@@ -99,6 +99,31 @@ impl DocumentView {
         cx.notify();
     }
 
+    pub(super) fn play_or_show_pause_hint(
+        &mut self,
+        _: &PlayOrShowPauseHint,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let is_playing = self
+            .services
+            .read(cx)
+            .execution_state()
+            .read(cx)
+            .is_playing();
+        if self.is_presenting && is_playing {
+            self.viewport
+                .update(cx, |viewport, cx| viewport.show_pause_hint(cx));
+            return;
+        }
+
+        self.viewport
+            .update(cx, |viewport, cx| viewport.clear_pause_hint(cx));
+        log::info!("Toggled playing");
+        self.services
+            .update(cx, |services, _| services.toggle_play());
+    }
+
     pub(super) fn toggle_params_panel(
         &mut self,
         _: &ToggleParamsPanel,
@@ -133,6 +158,8 @@ impl DocumentView {
         _w: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.viewport
+            .update(cx, |viewport, cx| viewport.clear_pause_hint(cx));
         log::info!("Toggled playing");
         self.services
             .update(cx, |services, _| services.toggle_play());

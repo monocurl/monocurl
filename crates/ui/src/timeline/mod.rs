@@ -4,4 +4,4 @@ pub mod timeline_view;
 mod toolbar;
 mod track;
 
-pub(crate) use metrics::visual_slide_time;
+pub(crate) use metrics::{slide_label, slide_title_label, visual_slide_time};

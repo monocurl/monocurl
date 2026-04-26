@@ -51,6 +51,7 @@ actions!(
         TogglePresentationMode,
         ToggleParamsPanel,
         SyncViewportCamera,
+        PlayOrShowPauseHint,
         TogglePlaying,
         SceneStart,
         SceneEnd,

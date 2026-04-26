@@ -334,12 +334,12 @@ fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
             rotate{radians: $spin, axis: 1f}
             Circle(radius: $radius)
 
-        play Set([reactive])
+        play Set([&reactive])
 
         radius = 1.75
         spread = 5.0
         spin = 1.8
-        play Lerp(1.3, [reactive])
+        play Lerp(1.3, [&reactive])
     ";
 
     let (mut executor, _user_slide_count) = match build_anim_executor(
@@ -443,11 +443,11 @@ fn test_fade_accepts_stateful_live_mesh_targets() {
         mesh reactive = shift{delta: mul($spread)}
             Circle(radius: $radius)
 
-        play Set([reactive])
+        play Set([&reactive])
 
         radius = 1.75
         spread = 5.0
-        play Fade(1.0, [reactive], [-1, 0, 0], smooth)
+        play Fade(1.0, [&reactive], [-1, 0, 0], smooth)
     ";
 
     let (mut executor, _user_slide_count) = match build_anim_executor(
@@ -477,11 +477,11 @@ fn test_custom_lerp_accepts_stateful_live_mesh_targets() {
         mesh reactive = shift{delta: mul($spread)}
             Circle(radius: $radius)
 
-        play Set([reactive])
+        play Set([&reactive])
 
         radius = 1.75
         spread = 5.0
-        play PrimitiveAnim(1.0, [reactive], nil, |a, b, state, t| b, smooth)
+        play PrimitiveAnim(1.0, [&reactive], nil, |a, b, state, t| b, smooth)
     ";
 
     let (mut executor, _user_slide_count) = match build_anim_executor(
@@ -831,10 +831,10 @@ fn test_grow_animates_insertions_and_deletions_symmetrically() {
         let line = |y| Polyline([[0, y, 0], [2, y, 0]])
 
         mesh x = [line(0), line(1)]
-        play Set([x])
+        play Set([&x])
 
         x = [line(0), line(2)]
-        play Grow(1, [x], linear)
+        play Grow(1, [&x], linear)
     "#;
 
     let r = run_anim_impl(
@@ -885,10 +885,10 @@ fn test_fade_animates_insertions_and_deletions_symmetrically() {
         let line = |y| Polyline([[0, y, 0], [2, y, 0]])
 
         mesh x = [line(0), line(1)]
-        play Set([x])
+        play Set([&x])
 
         x = [line(0), line(2)]
-        play Fade(1, [x], [0, 0, 0], linear)
+        play Fade(1, [&x], [0, 0, 0], linear)
     "#;
 
     let r = run_anim_impl(
@@ -939,10 +939,10 @@ fn test_write_animates_insertions_and_deletions_symmetrically() {
         let line = |y| Polyline([[0, y, 0], [2, y, 0]])
 
         mesh x = [line(0), line(1)]
-        play Set([x])
+        play Set([&x])
 
         x = [line(0), line(2)]
-        play Write(1, [x], linear)
+        play Write(1, [&x], linear)
     "#;
 
     let r = run_anim_impl(

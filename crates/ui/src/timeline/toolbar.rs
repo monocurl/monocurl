@@ -7,7 +7,7 @@ use crate::{
 
 use super::{
     icons::{TRANSPORT_BTN_H, TRANSPORT_BTN_W, TransportIcon, transport_icon},
-    metrics::{TOOLBAR_H, ZOOM_LEVELS, visual_slide_time},
+    metrics::{TOOLBAR_H, ZOOM_LEVELS, slide_label, slide_title_label, visual_slide_time},
     timeline_view::Timeline,
 };
 
@@ -16,6 +16,7 @@ pub(super) fn render_toolbar(
     is_playing: bool,
     current_slide: usize,
     slide_count: usize,
+    slide_names: Vec<Option<String>>,
     current_time: f64,
     durations: &[Option<f64>],
     cx: &mut Context<Timeline>,
@@ -82,14 +83,19 @@ pub(super) fn render_toolbar(
             })
         });
 
-    let (slide_label, time_label) = match visual_slide_time(current_slide, current_time, durations)
-    {
-        None => (format!("Slide 0 / {}", slide_count), "0.00s".to_string()),
-        Some((slide, time)) => (
-            format!("Slide {} / {}", (slide + 1).min(slide_count), slide_count),
-            format!("{:.2}s", time),
-        ),
-    };
+    let (slide_label, time_label, title_label) =
+        match visual_slide_time(current_slide, current_time, durations) {
+            None => (
+                format!("Slide 0 / {}", slide_count),
+                "0.00s".to_string(),
+                None,
+            ),
+            Some((slide, time)) => (
+                slide_label(slide, slide_count),
+                format!("{:.2}s", time),
+                slide_title_label(slide, &slide_names),
+            ),
+        };
 
     let center_group = div()
         .flex()
@@ -108,7 +114,13 @@ pub(super) fn render_toolbar(
                 .text_color(theme.timeline_text)
                 .text_size(px(11.0))
                 .child(time_label),
-        );
+        )
+        .children(title_label.map(|title| {
+            div()
+                .text_color(theme.timeline_text)
+                .text_size(px(11.0))
+                .child(title)
+        }));
 
     let zoom_group = div()
         .flex()

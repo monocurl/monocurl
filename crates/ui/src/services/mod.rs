@@ -267,7 +267,7 @@ impl ServiceManager {
 
     pub fn prev_slide(&mut self, cx: &App) {
         let ts = self.timestamp(cx);
-        let next = if ts.time > 1e-3 {
+        let next = if ts.time >= 0.0 {
             Timestamp::right_before_slide(ts.slide)
         } else {
             Timestamp::right_before_slide(ts.slide.saturating_sub(1))

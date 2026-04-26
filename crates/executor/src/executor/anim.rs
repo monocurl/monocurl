@@ -12,6 +12,10 @@ use crate::{
 use super::{ExecSingle, Executor, SeekPrimitiveResult, prepare_eager_call_args};
 
 impl Executor {
+    fn mark_section_as_started_playing(&mut self) {
+        self.state.timestamp.time = self.state.timestamp.time.max(0.0);
+    }
+
     fn primitive_anim_duration(prim: &PrimitiveAnim) -> f64 {
         match prim {
             PrimitiveAnim::Lerp { time, .. } => *time,
@@ -149,20 +153,23 @@ impl Executor {
     ) -> Result<bool, ExecutorError> {
         debug_assert!(dt >= 0.0);
         self.state.pending_playback_time += dt;
-        self.state.timestamp.time = self.state.timestamp.time.max(0.0);
 
         while self.state.pending_playback_time > 0.0 {
             match self.seek_primitive_anim_skip(max_slide).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
+                    self.mark_section_as_started_playing();
                     self.state.pending_playback_time = 0.0;
                     return Ok(false);
                 }
                 SeekPrimitiveAnimSkipResult::Error(e) => {
+                    self.mark_section_as_started_playing();
                     self.state.pending_playback_time = 0.0;
                     return Err(e);
                 }
             }
+
+            self.mark_section_as_started_playing();
 
             let next_end = self
                 .state
@@ -189,9 +196,9 @@ impl Executor {
             match self.seek_primitive_anim_skip(target.slide).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
-                    // would the target allowed us to have played anything at all
+                    // would the target have allowed us to have played anything at all
                     if self.state.timestamp.slide == target.slide && target.time >= 0.0 {
-                        self.state.timestamp.time = self.state.timestamp.time.max(0.0);
+                        self.mark_section_as_started_playing();
                     }
                     return SeekToResult::SeekedTo(self.state.timestamp);
                 }
@@ -203,7 +210,13 @@ impl Executor {
             {
                 return SeekToResult::SeekedTo(self.state.timestamp);
             }
-            self.state.timestamp.time = self.state.timestamp.time.max(0.0);
+            self.mark_section_as_started_playing();
+            // dumb but works
+            if self.state.timestamp.slide == target.slide
+                && self.state.timestamp.time >= target.time
+            {
+                return SeekToResult::SeekedTo(self.state.timestamp);
+            }
 
             let next_end = self
                 .state

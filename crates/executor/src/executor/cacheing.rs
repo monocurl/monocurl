@@ -137,7 +137,6 @@ impl Executor {
             .minimum_durations
             .iter_mut()
             .for_each(|e| *e = None);
-        self.state = ExecutionState::new();
     }
 
     // given a target, find the first cache point that we can base off of

@@ -108,6 +108,19 @@ pub(crate) fn visual_slide_time(
     }
 }
 
+pub(crate) fn slide_label(slide: usize, slide_count: usize) -> String {
+    let slide_number = (slide + 1).min(slide_count);
+    format!("Slide {} / {}", slide_number, slide_count)
+}
+
+pub(crate) fn slide_title_label(slide: usize, slide_names: &[Option<String>]) -> Option<String> {
+    slide_names
+        .get(slide)
+        .and_then(|name| name.as_deref())
+        .filter(|name| !name.trim().is_empty())
+        .map(|name| format!("({name})"))
+}
+
 pub(super) fn compute_playhead_x(
     current_slide: usize,
     current_time: f64,
@@ -116,8 +129,7 @@ pub(super) fn compute_playhead_x(
     durations: &[Option<f64>],
     zoom: f32,
 ) -> f32 {
-    match visual_slide_time(current_slide, current_time,
-       durations) {
+    match visual_slide_time(current_slide, current_time, durations) {
         None => PADDING_H,
         Some((slide, time)) => {
             let x = slide_xs.get(slide).copied().unwrap_or(PADDING_H);
