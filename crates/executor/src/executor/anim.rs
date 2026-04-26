@@ -76,9 +76,13 @@ impl Executor {
         }
     }
 
-    async fn seek_primitive_anim_skip(&mut self, max_slide: usize) -> SeekPrimitiveAnimSkipResult {
+    async fn seek_primitive_anim_skip(&mut self, max_slide: usize, stop_before_section: bool) -> SeekPrimitiveAnimSkipResult {
         loop {
             self.tick_yielder().await;
+
+            if stop_before_section && self.state.timestamp.slide >= max_slide {
+                return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
+            }
 
             match self.seek_primitive_anim().await {
                 SeekPrimitiveResult::EndOfSection => {
@@ -161,7 +165,7 @@ impl Executor {
         self.state.pending_playback_time += dt;
 
         while self.state.pending_playback_time > 0.0 {
-            match self.seek_primitive_anim_skip(max_slide).await {
+            match self.seek_primitive_anim_skip(max_slide, false).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
                     self.mark_section_as_started_playing();
@@ -198,8 +202,9 @@ impl Executor {
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
         self.rebase_at_cache_point(target);
 
+        let stop_before_section = target.time < 0.0;
         loop {
-            match self.seek_primitive_anim_skip(target.slide).await {
+            match self.seek_primitive_anim_skip(target.slide, stop_before_section).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
                     // would the target have allowed us to have played anything at all

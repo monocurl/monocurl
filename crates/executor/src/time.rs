@@ -1,3 +1,9 @@
+#[derive(Copy, Clone, Debug, Default, PartialEq)]
+pub struct SignedTimestamp {
+    pub slide: isize,
+    pub time: f64,
+}
+
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Timestamp {
     pub slide: usize,

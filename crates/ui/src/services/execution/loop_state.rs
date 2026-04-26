@@ -57,9 +57,9 @@ impl RuntimeState {
                 self.is_playing = false;
                 self.root_text_rope = root_text_rope;
                 if let Some(bytecode) = bytecode {
-                    let old_user_timestamp = self.executor.internal_to_user_timestamp(self.target);
+                    let old_user_timestamp = self.executor.internal_to_signed_user_timestamp(self.target);
                     self.executor.update_bytecode(bytecode);
-                    self.target = self.executor.user_to_internal_timestamp(old_user_timestamp);
+                    self.target = self.executor.signed_user_to_internal_timestamp(old_user_timestamp);
                     self.executor.restore_live_state_to_cache_point(self.target);
                     self.has_compiler_error = false;
                 } else {
@@ -189,10 +189,16 @@ impl RuntimeState {
     }
 
     fn clamp_target_to_valid_timestamp(&mut self) {
-        if self.target.slide >= self.executor.total_sections() {
+        let min = self.executor.user_to_internal_timestamp(Timestamp::right_before_slide(0));
+        if self.target <= min {
+            self.target = min;
+        }
+
+        if self.target.slide >= self.executor.total_sections() && self.target.time >= 0.0 {
             self.target.slide = self.executor.total_sections() - 1;
             self.target.time = f64::INFINITY;
         }
+
     }
 
     fn cancel_runtime_work(&mut self) {
