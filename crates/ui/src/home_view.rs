@@ -13,6 +13,54 @@ use crate::{
 };
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
+const HOME_PROJECTS_TARGET_MIN_WIDTH: f32 = 420.0;
+const HOME_LOGO_WIDE_FRACTION: f32 = 0.58;
+const HOME_LOGO_MIN_EXPANDED_WIDTH: f32 = 520.0;
+const HOME_LOGO_MAX_WIDTH: f32 = 960.0;
+const HOME_LOGO_CARD_MAX_WIDTH: f32 = 430.0;
+
+#[derive(Clone, Copy)]
+struct LogoMetrics {
+    sidebar_width: f32,
+    divider_width: f32,
+    card_width: f32,
+    card_padding: f32,
+    logo_size: f32,
+    logo_padding: f32,
+    title_size: f32,
+    links_height: f32,
+    links_opacity: f32,
+}
+
+impl LogoMetrics {
+    fn for_window_width(window_width: Pixels) -> Self {
+        let window_width = f32::from(window_width);
+        let expanded_width = (window_width * HOME_LOGO_WIDE_FRACTION)
+            .clamp(HOME_LOGO_MIN_EXPANDED_WIDTH, HOME_LOGO_MAX_WIDTH);
+        let available_width = (window_width - HOME_PROJECTS_TARGET_MIN_WIDTH).max(0.0);
+        let sidebar_width = expanded_width.min(available_width);
+        let expanded_progress = (sidebar_width / HOME_LOGO_MIN_EXPANDED_WIDTH).clamp(0.0, 1.0);
+        let card_width = (sidebar_width - 90.0).clamp(0.0, HOME_LOGO_CARD_MAX_WIDTH);
+        let logo_size = (card_width - 92.0).clamp(0.0, 320.0);
+        let logo_padding = (logo_size * 0.125).clamp(0.0, 40.0);
+        let card_padding = (card_width * 0.074).clamp(0.0, 32.0);
+        let title_size = 12.0 + 12.0 * expanded_progress;
+        let links_progress = ((card_width - 300.0) / 130.0).clamp(0.0, 1.0);
+        let divider_width = 0.5 * (sidebar_width / 80.0).clamp(0.0, 1.0);
+
+        Self {
+            sidebar_width,
+            divider_width,
+            card_width,
+            card_padding,
+            logo_size,
+            logo_padding,
+            title_size,
+            links_height: 16.0 * links_progress,
+            links_opacity: links_progress,
+        }
+    }
+}
 
 fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
     let home_dir = dirs::home_dir()?;
@@ -262,31 +310,42 @@ impl HomeView {
         });
     }
 
-    fn render_logo(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_logo(&self, metrics: LogoMetrics, cx: &mut Context<Self>) -> AnyElement {
         let theme = ThemeSettings::theme(cx);
 
         div()
             .flex()
+            .flex_none()
             .flex_col()
             .justify_center()
             .items_center()
+            .overflow_hidden()
             .child(
                 div().child(
                     div()
                         .flex()
                         .flex_col()
                         .items_center()
+                        .overflow_hidden()
                         .child(
                             img(Assets::image("monocurl-1024.png"))
-                                .w(px(300.))
-                                .h(px(300.))
-                                .p_10(),
+                                .w(px(metrics.logo_size))
+                                .h(px(metrics.logo_size))
+                                .p(px(metrics.logo_padding)),
                         )
-                        .child(div().child("Monocurl").text_2xl().text_color(gpui::white()))
+                        .child(
+                            div()
+                                .child("Monocurl")
+                                .text_size(px(metrics.title_size))
+                                .text_color(gpui::white()),
+                        )
                         .child(
                             div()
                                 .flex()
                                 .flex_row()
+                                .h(px(metrics.links_height))
+                                .opacity(metrics.links_opacity)
+                                .overflow_hidden()
                                 .child(link_button(
                                     "Website",
                                     theme.link_text,
@@ -295,7 +354,7 @@ impl HomeView {
                                     }),
                                 ))
                                 .child(link_button(
-                                    "Source Code",
+                                    "GitHub",
                                     theme.link_text,
                                     cx.listener(|_, _, _, _| {
                                         let _ = open::that("https://github.com/monocurl/monocurl");
@@ -312,14 +371,17 @@ impl HomeView {
                         )
                         .rounded(px(6.))
                         .bg(gpui::black())
-                        .p_8()
-                        .w(px(400.)),
+                        .p(px(metrics.card_padding))
+                        .w(px(metrics.card_width))
+                        .max_w(px(metrics.card_width))
+                        .overflow_hidden(),
                 ),
             )
             .bg(theme.home_sidebar_background)
-            .min_w(px(600.))
-            .w(relative(0.5))
-            .max_w(px(800.))
+            .min_w(px(0.0))
+            .w(px(metrics.sidebar_width))
+            .max_w(px(metrics.sidebar_width))
+            .into_any_element()
     }
 
     fn single_project(
@@ -561,24 +623,31 @@ impl HomeView {
 }
 
 impl Render for HomeView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
         let divider_color = theme.accent;
+        let logo_metrics = LogoMetrics::for_window_width(window.bounds().size.width);
+
+        let body = div()
+            .flex_1()
+            .flex()
+            .flex_row()
+            .overflow_hidden()
+            .child(self.render_logo(logo_metrics, cx))
+            .child(
+                div()
+                    .w(px(logo_metrics.divider_width))
+                    .h_full()
+                    .bg(divider_color),
+            )
+            .child(div().flex_1().min_w_0().child(self.render_projects(cx)));
 
         div()
             .flex()
             .flex_col()
             .children(self.render_latex_warning(cx))
             .child(self.navbar.clone())
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .flex_row()
-                    .child(self.render_logo(cx))
-                    .child(div().w(px(0.5)).h_full().bg(divider_color))
-                    .child(self.render_projects(cx)),
-            )
+            .child(body)
             .bg(theme.app_background)
             .text_color(theme.text_primary)
             .size_full()
