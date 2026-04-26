@@ -113,6 +113,34 @@ fn read_text_scale(
     Ok(scale)
 }
 
+fn read_optional_decimal_places(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<Option<usize>, ExecutorError> {
+    match executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_lvalue()
+    {
+        Value::Nil => Ok(None),
+        Value::Integer(value) if value >= 0 => Ok(Some(value as usize)),
+        Value::Float(value) if value.fract() == 0.0 && value >= 0.0 => Ok(Some(value as usize)),
+        Value::Integer(_) | Value::Float(_) => Err(ExecutorError::InvalidArgument {
+            arg: name,
+            message: "must be nil or a non-negative integer",
+        }),
+        other => Err(ExecutorError::type_error_for(
+            "nil / non-negative int",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
 fn read_nonnegative_float(
     executor: &Executor,
     stack_idx: usize,
@@ -1158,8 +1186,22 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn mk_number(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("number rendered with fixed precision, usable for counters")
+pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let value = crate::read_float(executor, stack_idx, -4, "value")?;
+    let decimal_places = read_optional_decimal_places(executor, stack_idx, -3, "decimal_places")?;
+    let scale = read_text_scale(executor, stack_idx, -2, "scale")?;
+    let include_sign = read_flag(executor, stack_idx, -1, "include_sign")?;
+    let meshes = latex::render_number_with_quality(
+        value,
+        decimal_places,
+        include_sign,
+        scale,
+        text_render_quality(executor),
+    )
+    .map_err(|error| {
+        ExecutorError::invalid_invocation(format!("number render failed: {error:#}"))
+    })?;
+    Ok(latex_meshes_to_value(meshes))
 }
 
 #[stdlib_func]

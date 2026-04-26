@@ -435,6 +435,8 @@ mod arithmetic;
 mod collections;
 #[path = "basic_executor_tests/control_flow.rs"]
 mod control_flow;
+#[path = "basic_executor_tests/heap.rs"]
+mod heap;
 #[path = "basic_executor_tests/lambdas.rs"]
 mod lambdas;
 #[path = "basic_executor_tests/live_values.rs"]

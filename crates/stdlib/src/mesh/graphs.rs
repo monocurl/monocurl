@@ -471,6 +471,26 @@ fn render_axis_tex_tree(
     }
 }
 
+fn render_axis_number_tree(
+    executor: &Executor,
+    text: &str,
+    scale: f32,
+    name: &'static str,
+) -> Result<Option<MeshTree>, ExecutorError> {
+    let meshes =
+        latex::render_number_string_with_quality(text, scale, text_render_quality(executor))
+            .map_err(|error| {
+                ExecutorError::invalid_invocation(format!("{name} render failed: {error:#}"))
+            })?;
+    if meshes.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(MeshTree::List(
+            meshes.into_iter().map(MeshTree::Mesh).collect(),
+        )))
+    }
+}
+
 fn styled_line_mesh(lins: Vec<geo::mesh::Lin>, stroke_radius: f32, alpha: f32) -> Option<Value> {
     if lins.is_empty() {
         return None;
@@ -668,7 +688,7 @@ fn push_axis_tick_labels(
         }
         let text = format_axis_number(value);
         let Some(mut tree) =
-            render_axis_tex_tree(executor, &text, AXIS_TICK_LABEL_SCALE, "axis tick label")?
+            render_axis_number_tree(executor, &text, AXIS_TICK_LABEL_SCALE, "axis tick label")?
         else {
             continue;
         };

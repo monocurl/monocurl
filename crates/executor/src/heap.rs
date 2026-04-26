@@ -69,6 +69,17 @@ impl VirtualHeap {
         self.slots.len()
     }
 
+    pub fn live_slot_count(&self) -> usize {
+        self.slots
+            .iter()
+            .filter(|slot| slot.borrow().is_some())
+            .count()
+    }
+
+    pub fn free_slot_count(&self) -> usize {
+        self.slot_count() - self.live_slot_count()
+    }
+
     pub fn get(&self, key: HeapKey) -> Ref<'_, Value> {
         Ref::map(self.slots[key as usize].borrow(), |opt| {
             opt.as_ref().expect("HeapKey points to free slot")
@@ -280,4 +291,69 @@ pub fn with_inhibit<R>(f: impl FnOnce() -> R) -> R {
         let _ = HEAP_INHIBIT_REFCOUNT.try_with(|f| f.set(prev));
     }
     r
+}
+
+#[cfg(test)]
+mod tests {
+    use smallvec::smallvec;
+
+    use super::{VRc, heap_ref_count, snapshot_heap, with_heap};
+    use crate::value::{Value, container::List};
+
+    #[test]
+    fn dropping_vrc_releases_nested_heap_slots() {
+        let baseline = with_heap(|heap| heap.live_slot_count());
+
+        {
+            let _value = VRc::new(Value::List(List::new_with(smallvec![
+                VRc::new(Value::Integer(1)),
+                VRc::new(Value::List(List::new_with(smallvec![
+                    VRc::new(Value::Integer(2)),
+                    VRc::new(Value::Integer(3)),
+                ]))),
+            ])));
+
+            assert_eq!(with_heap(|heap| heap.live_slot_count()), baseline + 5);
+        }
+
+        assert_eq!(with_heap(|heap| heap.live_slot_count()), baseline);
+    }
+
+    #[test]
+    fn freed_heap_slots_are_reused() {
+        let baseline_live = with_heap(|heap| heap.live_slot_count());
+
+        {
+            let _values = (0..32)
+                .map(|value| VRc::new(Value::Integer(value)))
+                .collect::<Vec<_>>();
+            assert_eq!(with_heap(|heap| heap.live_slot_count()), baseline_live + 32);
+        }
+
+        assert_eq!(with_heap(|heap| heap.live_slot_count()), baseline_live);
+        let high_water_mark = with_heap(|heap| heap.slot_count());
+
+        {
+            let _values = (0..32)
+                .map(|value| VRc::new(Value::Integer(value)))
+                .collect::<Vec<_>>();
+        }
+
+        assert_eq!(with_heap(|heap| heap.live_slot_count()), baseline_live);
+        assert_eq!(with_heap(|heap| heap.slot_count()), high_water_mark);
+    }
+
+    #[test]
+    fn dropping_raw_heap_snapshot_does_not_release_live_slots() {
+        let baseline = with_heap(|heap| heap.live_slot_count());
+        let value = VRc::new(Value::Integer(1));
+        let key = value.key();
+
+        let snapshot = snapshot_heap();
+        drop(snapshot);
+
+        assert_eq!(heap_ref_count(key), 1);
+        drop(value);
+        assert_eq!(with_heap(|heap| heap.live_slot_count()), baseline);
+    }
 }
