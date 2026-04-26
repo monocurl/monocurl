@@ -178,7 +178,7 @@ impl Render for Timeline {
                                 let gw = gap_ws[i];
                                 if local_x >= bx && local_x < bx + SLIDE_W {
                                     services
-                                        .update(cx, |s, _| s.seek_to(Timestamp::new(i, 0.0)))
+                                        .update(cx, |s, _| s.seek_to(Timestamp::right_before_slide(i)))
                                         .ok();
                                     return;
                                 }

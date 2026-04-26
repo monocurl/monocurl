@@ -32,7 +32,7 @@ impl Default for ExecutionState {
             camera_version: 0,
             meshes: Vec::new(),
             parameter_state: HashMap::new(),
-            current_timestamp: Timestamp::new(0, -f64::MIN_POSITIVE),
+            current_timestamp: Timestamp::right_before_slide(0),
             status: ExecutionStatus::Paused,
             slide_names: Vec::new(),
             slide_durations: Vec::new(),

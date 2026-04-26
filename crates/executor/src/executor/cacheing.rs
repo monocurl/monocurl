@@ -16,7 +16,7 @@ struct CacheEntry {
 
 impl CacheEntry {
     pub fn slide_duration(&self) -> f64 {
-        self.state_after.as_ref().timestamp.time
+        self.state_after.as_ref().timestamp.time.max(0.0)
     }
 }
 
@@ -41,7 +41,7 @@ impl ExecutionCache {
 
     fn note_timestamp(&mut self, timestamp: Timestamp) {
         if let Some(minimum) = self.minimum_durations.get_mut(timestamp.slide) {
-            *minimum = Some(minimum.unwrap_or(0.0).max(timestamp.time));
+            *minimum = Some(minimum.unwrap_or(0.0).max(timestamp.time).max(0.0));
         }
     }
 }

@@ -35,8 +35,6 @@ impl Executor {
         self.state.timestamp.slide += 1;
         // "unplayed" state
         self.state.timestamp.time = -f64::MIN_POSITIVE;
-
-        println!("Timestamp now {:?}", self.state.timestamp);
     }
 
     async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
@@ -151,6 +149,7 @@ impl Executor {
     ) -> Result<bool, ExecutorError> {
         debug_assert!(dt >= 0.0);
         self.state.pending_playback_time += dt;
+        self.state.timestamp.time = self.state.timestamp.time.max(0.0);
 
         while self.state.pending_playback_time > 0.0 {
             match self.seek_primitive_anim_skip(max_slide).await {
@@ -190,6 +189,10 @@ impl Executor {
             match self.seek_primitive_anim_skip(target.slide).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
+                    // would the target allowed us to have played anything at all
+                    if self.state.timestamp.slide == target.slide && target.time >= 0.0 {
+                        self.state.timestamp.time = self.state.timestamp.time.max(0.0);
+                    }
                     return SeekToResult::SeekedTo(self.state.timestamp);
                 }
                 SeekPrimitiveAnimSkipResult::Error(e) => return SeekToResult::Error(e),
@@ -200,6 +203,7 @@ impl Executor {
             {
                 return SeekToResult::SeekedTo(self.state.timestamp);
             }
+            self.state.timestamp.time = self.state.timestamp.time.max(0.0);
 
             let next_end = self
                 .state

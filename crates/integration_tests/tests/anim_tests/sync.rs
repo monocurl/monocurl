@@ -51,7 +51,7 @@ fn test_set_slide_can_seek_back_to_zero_after_finishing() {
     };
 
     smol::block_on(async {
-        let end = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        let end = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
         match executor.seek_to(end).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -113,7 +113,7 @@ fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
     };
 
     smol::block_on(async {
-        let end = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        let end = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
         match executor.seek_to(end).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -550,7 +550,7 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
 
     smol::block_on(async {
         for slide in 0..user_slide_count {
-            let target = executor.user_to_internal_timestamp(Timestamp::new(slide, f64::INFINITY));
+            let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(slide));
             match executor.seek_to(target).await {
                 SeekToResult::SeekedTo(_) => {}
                 SeekToResult::Error(e) => {
@@ -747,7 +747,7 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
         .unwrap_or_else(|result| panic!("executor should build, got errors: {:?}", result.errors));
 
     smol::block_on(async {
-        let prefinal = executor.user_to_internal_timestamp(Timestamp::new(4, f64::INFINITY));
+        let prefinal = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(4));
         match executor.seek_to(prefinal).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("seek failed at prefinal slide end: {e}"),
@@ -1098,7 +1098,7 @@ fn test_scale_scales_text_about_global_tree_center() {
 
     let (plain_center, plain_leaf_centers, scaled_center, scaled_leaf_centers) =
         smol::block_on(async {
-            let plain_ts = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+            let plain_ts = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
             match executor.seek_to(plain_ts).await {
                 SeekToResult::SeekedTo(_) => {}
                 SeekToResult::Error(e) => panic!("seek failed at plain text state: {e}"),
@@ -1108,7 +1108,7 @@ fn test_scale_scales_text_about_global_tree_center() {
             let plain_leaf_centers = value_leaf_box_centers(&plain);
             drop(plain);
 
-            let scaled_ts = executor.user_to_internal_timestamp(Timestamp::new(1, f64::INFINITY));
+            let scaled_ts = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(1));
             match executor.seek_to(scaled_ts).await {
                 SeekToResult::SeekedTo(_) => {}
                 SeekToResult::Error(e) => panic!("seek failed at scaled text state: {e}"),

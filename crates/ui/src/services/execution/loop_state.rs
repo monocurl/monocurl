@@ -37,7 +37,7 @@ impl RuntimeState {
             version: 0,
             has_compiler_error: true,
             executor: Executor::new(default_bytecode(), registry().func_table()),
-            target: Timestamp::default(),
+            target: Timestamp::right_before_slide(0),
             is_playing: false,
             has_seeked_for_play: false,
             playback_mode: PlaybackMode::Preview,

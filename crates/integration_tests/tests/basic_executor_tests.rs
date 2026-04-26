@@ -346,7 +346,7 @@ fn run_section_with_stdlib(
     let mut runtime_errors: Vec<String> = Vec::new();
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::new(0, f64::INFINITY));
+        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => {
