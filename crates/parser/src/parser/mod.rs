@@ -18,7 +18,7 @@ use crate::{
         Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral,
         Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaArg, LambdaBody,
         LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition,
-        OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType,
+        OperatorInvocation, Play, Print, Property, Return, Section, SectionBundle, SectionType,
         SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While,
     },
     flatten_rope,

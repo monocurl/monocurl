@@ -563,12 +563,12 @@ fn prepare_trans_mesh_pair(
 ) -> Result<(Mesh, Mesh, Value), ExecutorError> {
     match (source, target) {
         (Some(source), Some(target)) if mesh_has_content(source) && mesh_has_content(target) => {
-            if same_mesh_topology(source, target) {
-                return Ok((source.clone(), target.clone(), Value::Nil));
-            }
-
             if let Some((start, end, state)) = prepare_planar_trans_mesh_pair(source, target)? {
                 return Ok((start, end, state));
+            }
+
+            if same_mesh_topology(source, target) {
+                return Ok((source.clone(), target.clone(), Value::Nil));
             }
 
             let prepared = match (mesh_rank(source), mesh_rank(target)) {

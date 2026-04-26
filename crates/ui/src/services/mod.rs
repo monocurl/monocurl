@@ -15,11 +15,12 @@ use crate::{
         },
     },
 };
-use executor::time::Timestamp;
+use executor::{time::Timestamp, transcript::SectionTranscript};
 use futures::channel::mpsc::unbounded;
 use futures::{SinkExt, StreamExt, channel::mpsc::UnboundedSender};
 use gpui::{App, AppContext, Context, Entity};
 use lexer::token::Token;
+use std::sync::Arc;
 use structs::rope::{Attribute, Rope, TextAggregate};
 
 mod compilation;
@@ -69,6 +70,10 @@ pub enum ServiceManagerMessage {
     },
     ExecutionStateUpdated {
         snapshot: ExecutionSnapshot,
+    },
+    UpdateTranscript {
+        transcript: Vec<Arc<SectionTranscript>>,
+        version: usize,
     },
 }
 
@@ -233,6 +238,16 @@ impl ServiceManager {
                     cx.notify();
                 });
             }
+            ServiceManagerMessage::UpdateTranscript {
+                transcript,
+                version,
+            } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_transcript(transcript, version) {
+                        cx.notify();
+                    }
+                });
+            }
         }
     }
 
@@ -318,5 +333,9 @@ impl ServiceManager {
 
     pub fn execution_state(&self) -> &Entity<ExecutionState> {
         &self.execution_state
+    }
+
+    pub fn textual_state(&self) -> &Entity<TextualState> {
+        &self.textual_state
     }
 }

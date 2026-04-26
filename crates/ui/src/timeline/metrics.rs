@@ -114,9 +114,7 @@ pub(crate) fn slide_label(slide: usize, slide_count: usize) -> String {
 }
 
 pub(crate) fn slide_title_label(slide: usize, slide_names: &[Option<String>]) -> Option<String> {
-    slide_names
-        .get(slide)
-        .and_then(|name| name.clone())
+    slide_names.get(slide).and_then(|name| name.clone())
 }
 
 pub(super) fn compute_playhead_x(

@@ -96,45 +96,46 @@ impl TextElement {
 
         let visible_selection =
             visible_lines.start.max(start_loc.row)..visible_lines.end.min(end_loc.row + 1);
-        let mut y = editor.line_map.y_range(0..visible_selection.start).end;
+        let mut selection_bounds = Vec::new();
 
-        editor
+        for multi_line in editor
             .line_map
             .unwrapped_lines_iter(visible_selection.start)
             .take(visible_selection.len())
-            .flat_map(|multi_line| {
-                let line_num = multi_line.unwrapped_line_no;
-                let line_start = if line_num == start_loc.row {
-                    start_loc.col
-                } else {
-                    0
+        {
+            let line_num = multi_line.unwrapped_line_no;
+            let line_start = if line_num == start_loc.row {
+                start_loc.col
+            } else {
+                0
+            };
+            let line_end = if line_num == end_loc.row {
+                end_loc.col
+            } else {
+                editor.line_map.line_len(line_num)
+            };
+            let line_y = editor.line_map.y_range(line_num..line_num + 1).start;
+
+            for (wrapped_ix, single_line) in multi_line.line.iter().enumerate() {
+                let Some(mut x_pixels) = single_line.x_range(line_start..line_end) else {
+                    continue;
                 };
-                let line_end = if line_num == end_loc.row {
-                    end_loc.col
-                } else {
-                    editor.line_map.line_len(line_num)
-                };
-                multi_line
-                    .line
-                    .iter()
-                    .map(move |single_line| (line_start..line_end, single_line))
-            })
-            .filter_map(|(local_range, single_line)| {
-                y += editor.line_height;
-                let mut x_pixels = single_line.x_range(local_range)?;
                 x_pixels.end = x_pixels.end.max(x_pixels.start + px(5.0));
-                Some(Bounds::from_corners(
+                let y = line_y + editor.line_height * wrapped_ix as f32;
+                selection_bounds.push(Bounds::from_corners(
                     point(
                         bounds.left() + editor.gutter_width + x_pixels.start,
-                        bounds.top() + y - editor.line_height,
+                        bounds.top() + y,
                     ),
                     point(
                         bounds.left() + editor.gutter_width + x_pixels.end,
-                        bounds.top() + y,
+                        bounds.top() + y + editor.line_height,
                     ),
-                ))
-            })
-            .collect()
+                ));
+            }
+        }
+
+        selection_bounds
     }
 
     fn compute_scroll_bar_state(
@@ -252,7 +253,7 @@ impl TextElement {
         y: Pixels,
         bounds: Bounds<Pixels>,
         window: &mut Window,
-        cx: &App,
+        cx: &mut App,
     ) {
         let line_origin = point(bounds.left() + gutter_width, bounds.top() + y);
         shaped.paint(line_origin, line_height, window, cx).ok();

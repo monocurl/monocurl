@@ -7,7 +7,7 @@ mod test {
     use lexer::token::Token;
     use parser::ast::{
         BinaryOperator, BinaryOperatorType, Declaration, Expression, IdentifierDeclaration,
-        IdentifierReference, LambdaArg, LambdaBody, LambdaDefinition, Literal, Section,
+        IdentifierReference, LambdaArg, LambdaBody, LambdaDefinition, Literal, Print, Section,
         SectionBundle, SectionType, Statement, VariableType,
     };
     use stdlib::registry::registry;
@@ -751,6 +751,15 @@ mod test {
         );
     }
 
+    #[test]
+    fn test_no_warning_for_print_statement() {
+        let result = compile_src("print 1 + 2");
+        assert!(
+            !has_warning(&result, "expression statement has no effect"),
+            "did not expect useless-expression warning"
+        );
+    }
+
     // -- bytecode sequence tests --
 
     // `let x = 42` — PushInt evaluates the value, PushVar creates the variable slot.
@@ -837,6 +846,24 @@ mod test {
             ],
         );
         assert_eq!(sec.int_pool, vec![0i64, 1i64]);
+    }
+
+    #[test]
+    fn test_bytecode_print_observes_and_pops_value() {
+        let result = compile_stmts(vec![s(Statement::Print(Print {
+            value: s(Expression::Literal(Literal::Int(42))),
+        }))]);
+        no_errors(&result);
+        let sec = &result.bytecode.sections[1];
+        assert_eq!(
+            sec.instructions,
+            vec![
+                Instruction::PushInt { index: 0 },
+                Instruction::Observe,
+                Instruction::EndOfExecutionHead,
+            ],
+        );
+        assert_eq!(sec.int_pool, vec![42i64]);
     }
 
     // `let f = |a| a` — verifies lambda body is Jump-over + body + MakeLambda

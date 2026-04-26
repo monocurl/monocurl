@@ -21,9 +21,9 @@ use parser::ast::{
     Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression,
     For, IdentifierDeclaration, IdentifierReference, If, InvocationArguments, LambdaArg,
     LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition,
-    OperatorInvocation, Play, Property, Return, Section, SectionBundle, SectionType, SpanTagged,
-    Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType as AstVariableType,
-    While,
+    OperatorInvocation, Play, Print, Property, Return, Section, SectionBundle, SectionType,
+    SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator,
+    VariableType as AstVariableType, While,
 };
 use stateful::is_stateful;
 use stdlib::registry::registry;

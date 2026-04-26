@@ -519,6 +519,13 @@ impl TerminalProgress {
         if matches!(kind, CommandKind::Video) {
             eprintln!("Frames written: {}", outcome.frames_written);
         }
+        if !outcome.transcript.is_empty() {
+            eprintln!();
+            eprintln!("Print output:");
+            for entry in &outcome.transcript {
+                eprintln!("  {}", entry.text());
+            }
+        }
         Ok(())
     }
 

@@ -307,6 +307,27 @@ impl Executor {
             Instruction::Play => {
                 return self.exec_play(stack_idx).await;
             }
+            Instruction::Observe => {
+                let val = self.state.stack_mut(stack_idx).pop();
+                let resolved = match val.elide_wrappers_rec(self).await {
+                    Ok(v) => v,
+                    Err(e) => return ExecSingle::Error(e),
+                };
+                let section = &self.bytecode.sections[section_idx];
+                let is_root = section.flags.is_root_module;
+                let annotation_idx = self.state.stack(stack_idx).ip.1.saturating_sub(1) as usize;
+                let span = section.annotations[annotation_idx].source_loc.clone();
+                let text = crate::transcript::stringify_for_transcript(&resolved);
+                self.state.transcript.append(
+                    section_idx,
+                    crate::transcript::TranscriptEntry {
+                        span,
+                        section: section_idx as u16,
+                        is_root,
+                        kind: crate::transcript::TranscriptEntryKind::String(text),
+                    },
+                );
+            }
 
             Instruction::Negate => {
                 let val = self.state.stack_mut(stack_idx).pop();

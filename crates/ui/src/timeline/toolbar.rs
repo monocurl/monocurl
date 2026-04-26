@@ -8,7 +8,7 @@ use crate::{
 use super::{
     icons::{TRANSPORT_BTN_H, TRANSPORT_BTN_W, TransportIcon, transport_icon},
     metrics::{TOOLBAR_H, ZOOM_LEVELS, slide_label, slide_title_label, visual_slide_time},
-    timeline_view::Timeline,
+    timeline_view::{BottomPanelMode, Timeline},
 };
 
 pub(super) fn render_toolbar(
@@ -176,6 +176,30 @@ pub(super) fn render_toolbar(
                 }),
         );
 
+    let panel_mode = timeline.panel_mode;
+    let panel_toggle = {
+        let this = cx.weak_entity();
+        let label = match panel_mode {
+            BottomPanelMode::Timeline => "Console",
+            BottomPanelMode::Console => "Timeline",
+        };
+        div()
+            .id("tl-panel-toggle")
+            .px(px(8.0))
+            .h(px(20.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .text_color(theme.timeline_text)
+            .text_size(px(11.0))
+            .cursor_pointer()
+            .hover(|s| s.opacity(0.6))
+            .child(label)
+            .on_click(move |_, _, cx| {
+                this.update(cx, |tl, cx| tl.toggle_panel_mode(cx)).ok();
+            })
+    };
+
     div()
         .flex()
         .flex_row()
@@ -189,5 +213,6 @@ pub(super) fn render_toolbar(
         .pl(px(24.0))
         .child(center_group)
         .child(div().flex_1())
+        .child(panel_toggle)
         .child(zoom_group)
 }

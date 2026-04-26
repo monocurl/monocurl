@@ -50,6 +50,7 @@ actions!(
         UnfocusEditor,
         TogglePresentationMode,
         ToggleParamsPanel,
+        ToggleTimelineConsole,
         SyncViewportCamera,
         PlayOrShowPauseHint,
         TogglePlaying,

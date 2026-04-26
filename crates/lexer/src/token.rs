@@ -58,6 +58,7 @@ pub enum Token {
     Param,
     Anim,
     Play,
+    Print,
     Slide,
     Nil,
     Native,
@@ -85,8 +86,8 @@ impl Token {
             LParen | RParen | LBracket | RBracket | LFlower | RFlower => {
                 TokenCategory::Punctutation
             }
-            Block | Operator | Anim | Play | Break | Continue | Return | If | Else | For
-            | While => TokenCategory::ControlFlow,
+            Block | Operator | Anim | Play | Print | Break | Continue | Return | If | Else
+            | For | While => TokenCategory::ControlFlow,
             Import | Let | Var | Mesh | Param | Slide | Nil | Native => {
                 TokenCategory::NonControlFlowKeyword
             }
@@ -152,6 +153,7 @@ impl Token {
             Token::Param => "'param'",
             Token::Anim => "'anim'",
             Token::Play => "'play'",
+            Token::Print => "'print'",
             Token::Slide => "'slide'",
             Token::Nil => "'nil'",
             Token::Native => "'__monocurl__native__'",
@@ -217,6 +219,7 @@ impl Token {
             Token::Param => Some("param"),
             Token::Anim => Some("anim"),
             Token::Play => Some("play"),
+            Token::Print => Some("print"),
             Token::Slide => Some("slide"),
             Token::Nil => Some("nil"),
             Token::Native => None,

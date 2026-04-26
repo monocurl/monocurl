@@ -21,7 +21,8 @@ impl Executor {
             PrimitiveAnim::Lerp { time, .. } => *time,
             PrimitiveAnim::Set { .. } => 0.0,
             PrimitiveAnim::Wait { time } => *time,
-        }.max(f64::MIN_POSITIVE)
+        }
+        .max(f64::MIN_POSITIVE)
     }
 
     pub fn advance_section(&mut self) {

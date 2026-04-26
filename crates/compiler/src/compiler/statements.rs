@@ -43,6 +43,10 @@ impl Compiler {
                 self.infer_possible_cursor_identifiers(span.clone());
                 self.compile_play(p, span)
             }
+            Statement::Print(p) => {
+                self.infer_possible_cursor_identifiers(span.clone());
+                self.compile_print(p, span)
+            }
         }
     }
 
@@ -488,6 +492,12 @@ impl Compiler {
                 .continue_patches
                 .push(patch_idx);
         }
+    }
+
+    pub(super) fn compile_print(&mut self, p: &Print, span: &Span8) {
+        self.compile_val(&p.value.1, &p.value.0);
+        self.emit(Instruction::Observe, span.clone());
+        self.dec_stack(1);
     }
 
     pub(super) fn compile_play(&mut self, p: &Play, span: &Span8) {

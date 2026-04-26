@@ -100,6 +100,10 @@ impl SectionParser {
                 let (span, statement) = self.parse_play();
                 (span, Statement::Play(statement))
             },
+            ExactPred(Token::Print) => {
+                let (span, statement) = self.parse_print();
+                (span, Statement::Print(statement))
+            },
             if RootTopLevelPredicate, ExactPred(Token::Slide) => {
                 // for autocomplete only
                 unreachable!("root files are split on 'slide' before section parsing")
@@ -234,6 +238,13 @@ impl SectionParser {
         let base_span = self.advance_token();
         let animations = self.parse_expr_best_effort();
         (base_span.start..animations.0.end, Play { animations })
+    }
+
+    pub(super) fn parse_print(&mut self) -> SpanTagged<Print> {
+        self.debug_assert_token_eq(Token::Print);
+        let base_span = self.advance_token();
+        let value = self.parse_expr_best_effort();
+        (base_span.start..value.0.end, Print { value })
     }
 
     pub(super) fn parse_declaration(&mut self, var_type: VariableType) -> SpanTagged<Declaration> {

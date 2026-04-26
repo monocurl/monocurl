@@ -1,5 +1,6 @@
-use std::{cell::RefCell, isize, ops::Range, rc::Rc};
+use std::{cell::RefCell, isize, ops::Range, rc::Rc, sync::Arc};
 
+use executor::transcript::SectionTranscript;
 use gpui::{App, Context, Entity, ScrollHandle, Window};
 use lexer::token::Token;
 use smallvec::SmallVec;
@@ -320,6 +321,28 @@ impl ParameterPositionState {
     }
 }
 
+/// per-line index of root-originating transcript entries used for inline
+/// rendering in the editor. non-root entries (library prints) are kept in the
+/// console-side transcript only.
+#[derive(Clone, Debug)]
+pub struct InlineTranscriptEntry {
+    pub span: Span8,
+    pub text: String,
+}
+
+#[derive(Default)]
+pub struct TranscriptIndex {
+    sections: Vec<Arc<SectionTranscript>>,
+    /// row -> entries that originated on that row (root sections only)
+    by_line: std::collections::BTreeMap<usize, SmallVec<[InlineTranscriptEntry; 4]>>,
+}
+
+impl TranscriptIndex {
+    pub fn entries_for_line(&self, row: usize) -> &[InlineTranscriptEntry] {
+        self.by_line.get(&row).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+}
+
 #[derive(Default, Clone, Copy, Debug, PartialEq)]
 pub struct Cursor {
     pub anchor: Location8,
@@ -379,6 +402,8 @@ pub struct TextualState {
     diagnostics: DiagnosticContainer,
     dirty_diagnostic_lines: Rope<RLEAggregate<bool>>,
 
+    transcript: TranscriptIndex,
+
     version: usize,
 
     nested_transaction_count: usize,
@@ -422,6 +447,7 @@ impl TextualState {
         _cx: &mut App,
     ) -> (Range<usize>, Range<usize>) {
         debug_assert!(self.nested_transaction_count > 0);
+        let transcript_dirty_rows = self.transcript.by_line.keys().copied().collect();
         let del_range = {
             let start_loc = self.offset8_to_loc8(span.start);
             let end_loc = self.offset8_to_loc8(span.end);
@@ -449,6 +475,7 @@ impl TextualState {
                 attribute: false,
             }),
         );
+        self.apply_transcript_replacement(span.clone(), new_text.len(), transcript_dirty_rows);
 
         // update lex_rope and static analysis rope with best effort of extending the previous runs
         // background threads will do the proper update asynchronously
@@ -685,7 +712,7 @@ impl TextualState {
         true
     }
 
-    pub fn mark_line_as_up_to_date_attributes(&mut self, start: usize, end: usize) {
+    pub fn mark_line_as_up_to_date_attributes(&mut self, line_no: usize, start: usize, end: usize) {
         let lex_content =
             self.lex_rope
                 .iterator_range(start..end)
@@ -708,6 +735,14 @@ impl TextualState {
         self.rendered_static_analysis_rope = self
             .rendered_static_analysis_rope
             .replace_range(start..end, sa_content);
+
+        self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
+            line_no..line_no + 1,
+            std::iter::once(RLEData {
+                codeunits: 1,
+                attribute: false,
+            }),
+        );
     }
 
     pub fn line_has_new_attributes(&self, line_no: usize) -> bool {
@@ -765,6 +800,90 @@ impl TextualState {
 }
 
 impl TextualState {
+    fn rows_for_span(&self, span: &Span8) -> Range<usize> {
+        let len = self.len();
+        let start = span.start.min(len);
+        let end = span.end.min(len).max(start);
+        let start_row = self.offset8_to_loc8(start).row;
+        let end_row = if end == start {
+            start_row
+        } else {
+            self.offset8_to_loc8(end.saturating_sub(1)).row
+        };
+        start_row..end_row + 1
+    }
+
+    fn mark_transcript_rows_dirty(&mut self, rows: impl IntoIterator<Item = usize>) {
+        let line_count = self.text_rope.utf8_prefix_summary(self.len()).newlines + 1;
+        if line_count == 0 {
+            return;
+        }
+
+        for row in rows {
+            let row = row.min(line_count - 1);
+            self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
+                row..row + 1,
+                std::iter::once(RLEData {
+                    codeunits: 1,
+                    attribute: true,
+                }),
+            );
+        }
+    }
+
+    fn apply_transcript_replacement(
+        &mut self,
+        old: Span8,
+        new: Count8,
+        mut changed_rows: std::collections::BTreeSet<usize>,
+    ) {
+        if self.transcript.sections.is_empty() {
+            return;
+        }
+
+        let modify_pos = |pos: &mut Count8| {
+            if *pos >= old.end {
+                *pos = (*pos - old.len()) + new;
+            } else if *pos > old.start {
+                *pos = old.start;
+            }
+        };
+
+        let sections = self
+            .transcript
+            .sections
+            .iter()
+            .map(|section| {
+                let mut section = (**section).clone();
+                for entry in &mut section.entries {
+                    modify_pos(&mut entry.span.start);
+                    modify_pos(&mut entry.span.end);
+                }
+                Arc::new(section)
+            })
+            .collect::<Vec<_>>();
+
+        let mut by_line: std::collections::BTreeMap<usize, SmallVec<[InlineTranscriptEntry; 4]>> =
+            std::collections::BTreeMap::new();
+        for section in &sections {
+            for entry in &section.entries {
+                if !entry.is_root {
+                    continue;
+                }
+                for row in self.rows_for_span(&entry.span) {
+                    changed_rows.insert(row);
+                    by_line.entry(row).or_default().push(InlineTranscriptEntry {
+                        span: entry.span.clone(),
+                        text: entry.text().to_string(),
+                    });
+                }
+            }
+        }
+
+        self.transcript = TranscriptIndex { sections, by_line };
+        self.mark_transcript_rows_dirty(changed_rows);
+    }
+
     fn set_dirty_flags_on_diagnostics_change(
         &mut self,
         new_diags: &Vec<Diagnostic>,
@@ -826,6 +945,90 @@ impl TextualState {
 
     pub fn diagnostics(&self) -> &DiagnosticContainer {
         &self.diagnostics
+    }
+
+    pub fn transcript(&self) -> &TranscriptIndex {
+        &self.transcript
+    }
+
+    pub fn set_transcript(
+        &mut self,
+        new_sections: Vec<Arc<SectionTranscript>>,
+        for_version: usize,
+    ) -> bool {
+        if for_version != self.version {
+            return false;
+        }
+
+        // collect rows that change so we can dirty them
+        let mut changed_rows: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+
+        let old = &self.transcript.sections;
+        let n_old = old.len();
+        let n_new = new_sections.len();
+        let max = n_old.max(n_new);
+        let mut differs = false;
+        for i in 0..max {
+            let old_section = old.get(i);
+            let new_section = new_sections.get(i);
+            match (old_section, new_section) {
+                (Some(a), Some(b)) if Arc::ptr_eq(a, b) => continue,
+                _ => {
+                    differs = true;
+                }
+            }
+            for entry in old_section.iter().flat_map(|s| s.entries.iter()) {
+                if !entry.is_root {
+                    continue;
+                }
+                changed_rows.extend(self.rows_for_span(&entry.span));
+            }
+            for entry in new_section.iter().flat_map(|s| s.entries.iter()) {
+                if !entry.is_root {
+                    continue;
+                }
+                changed_rows.extend(self.rows_for_span(&entry.span));
+            }
+        }
+
+        if !differs {
+            return false;
+        }
+
+        // rebuild by_line index
+        let mut by_line: std::collections::BTreeMap<usize, SmallVec<[InlineTranscriptEntry; 4]>> =
+            std::collections::BTreeMap::new();
+        for section in &new_sections {
+            for entry in &section.entries {
+                if !entry.is_root {
+                    continue;
+                }
+                for row in self.rows_for_span(&entry.span) {
+                    by_line.entry(row).or_default().push(InlineTranscriptEntry {
+                        span: entry.span.clone(),
+                        text: entry.text().to_string(),
+                    });
+                }
+            }
+        }
+
+        self.transcript = TranscriptIndex {
+            sections: new_sections,
+            by_line,
+        };
+
+        // dirty all changed rows so reshape picks them up
+        for row in &changed_rows {
+            self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
+                *row..*row + 1,
+                std::iter::once(RLEData {
+                    codeunits: 1,
+                    attribute: true,
+                }),
+            );
+        }
+
+        true
     }
 
     pub fn prepare_diagnostics_iterator(&mut self) {

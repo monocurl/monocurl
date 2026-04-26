@@ -167,6 +167,14 @@ parallel animations may cause contention,
 in general we ask that the two animations be fully independent and ultimately commute.
 If parallel animations cannot mutably write to the same variable, there is no conflict whatsoever guaranteed. We can just lerp all the variables that this animation "owns". If two parallel animations write to the same variable, it will be marked as an error. If two animations need to animate different parts of the same variable, we can simply contour separate / whatever and transfer to temporary meshes, and transfer back once done
 
+## Print / Transcript
+```monocurl
+let x = 42
+print x + 1
+```
+
+`print <expr>` is a statement. It evaluates the expression and appends the value's string form to the execution transcript. The editor can render transcript entries inline below the source line, and the bottom panel can show the same output as a console.
+
 ## Slides
 All this means is a pause / cache point. Stuff before the first slide is special and no play statements are allowed
 ```monocurl

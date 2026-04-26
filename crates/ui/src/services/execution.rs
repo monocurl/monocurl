@@ -11,6 +11,7 @@ use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
     scene_snapshot::{BackgroundSnapshot, CameraSnapshot},
     time::Timestamp,
+    transcript::SectionTranscript,
 };
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use geo::mesh::Mesh;
@@ -48,6 +49,7 @@ pub struct ExecutionSnapshot {
     pub slide_durations: Vec<Option<f64>>,
     pub minimum_slide_durations: Vec<Option<f64>>,
     pub parameters: Option<ParameterSnapshot>,
+    pub transcript: Option<Vec<Arc<SectionTranscript>>>,
 }
 
 #[derive(Clone, Copy, PartialEq)]

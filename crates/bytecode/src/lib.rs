@@ -140,6 +140,9 @@ pub enum Instruction {
     },
 
     Play,
+    /// pop tos, append it as a transcript entry (string-formatted) on the
+    /// current section transcript using the instruction's annotation span
+    Observe,
 
     /* unary */
     Negate,

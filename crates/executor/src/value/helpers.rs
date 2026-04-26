@@ -33,11 +33,7 @@ impl Value {
 
     #[inline(always)]
     fn may_need_lvalue_leader_elision(&self) -> bool {
-        self.is_lvalue()
-            || matches!(
-                self,
-                Value::List(_) | Value::Leader(_)
-            )
+        self.is_lvalue() || matches!(self, Value::List(_) | Value::Leader(_))
     }
 
     /// creates owned copy of self which elides lvalues and leaders recursively

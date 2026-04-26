@@ -167,6 +167,7 @@ where
             "param" => Token::Param,
             "anim" => Token::Anim,
             "play" => Token::Play,
+            "print" => Token::Print,
             "slide" => Token::Slide,
             "nil" => Token::Nil,
             "__monocurl__native__" => Token::Native,

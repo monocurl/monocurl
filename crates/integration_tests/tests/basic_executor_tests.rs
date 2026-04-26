@@ -24,6 +24,7 @@ use structs::{
 struct ExecResult {
     /// the value captured from the root execution head's TOS, if any
     value: Option<Value>,
+    transcript: Vec<String>,
     /// compile-time or runtime error messages
     errors: Vec<String>,
     _error_spans: Vec<Span8>,
@@ -294,6 +295,7 @@ fn run_section_with_stdlib(
     if !parse_errors.is_empty() {
         return ExecResult {
             value: None,
+            transcript: Vec::new(),
             errors: parse_errors,
             _error_spans: vec![],
         };
@@ -326,6 +328,7 @@ fn run_section_with_stdlib(
     if !compile_errors.is_empty() {
         return ExecResult {
             value: None,
+            transcript: Vec::new(),
             errors: compile_errors,
             _error_spans: vec![],
         };
@@ -335,6 +338,7 @@ fn run_section_with_stdlib(
     if result.bytecode.sections.len() < 2 {
         return ExecResult {
             value: None,
+            transcript: Vec::new(),
             errors: vec!["no user section was compiled".into()],
             _error_spans: vec![],
         };
@@ -368,6 +372,12 @@ fn run_section_with_stdlib(
         .iter()
         .map(|err| err.span.clone())
         .collect();
+    let transcript = executor
+        .state
+        .transcript
+        .iter_entries()
+        .map(|entry| entry.text().to_string())
+        .collect();
 
     let value = executor
         .state
@@ -381,6 +391,7 @@ fn run_section_with_stdlib(
 
     ExecResult {
         value,
+        transcript,
         errors: runtime_errors,
         _error_spans: error_spans,
     }
@@ -432,5 +443,7 @@ mod live_values;
 mod operators;
 #[path = "basic_executor_tests/references.rs"]
 mod references;
+#[path = "basic_executor_tests/transcript.rs"]
+mod transcript;
 #[path = "basic_executor_tests/validation.rs"]
 mod validation;

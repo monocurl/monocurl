@@ -136,6 +136,11 @@ impl ExecutionService {
             None => (None, None, None, None),
         };
 
+        let transcript = match status {
+            ExecutionStatus::Seeking | ExecutionStatus::CompileError => None,
+            _ => Some(executor.state.transcript.sections.clone()),
+        };
+
         let snapshot = ExecutionSnapshot {
             background,
             camera,
@@ -148,11 +153,21 @@ impl ExecutionService {
             slide_durations: executor.real_slide_durations(),
             minimum_slide_durations: executor.real_minimum_slide_durations(),
             parameters: (playback_mode == PlaybackMode::Presentation).then_some(parameters),
+            transcript: transcript.clone(),
         };
 
         sm_tx
             .unbounded_send(ServiceManagerMessage::ExecutionStateUpdated { snapshot })
             .ok();
+
+        if let Some(transcript) = transcript {
+            sm_tx
+                .unbounded_send(ServiceManagerMessage::UpdateTranscript {
+                    transcript,
+                    version,
+                })
+                .ok();
+        }
 
         let diagnostics = executor
             .state

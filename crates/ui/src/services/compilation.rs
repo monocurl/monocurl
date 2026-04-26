@@ -97,6 +97,7 @@ fn token_autocomplete_category(token: &Token) -> AutoCompleteCategory {
         | Token::Param
         | Token::Anim
         | Token::Play
+        | Token::Print
         | Token::Slide
         | Token::Nil
         | Token::Native

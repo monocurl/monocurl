@@ -949,7 +949,7 @@ mod test {
 
     #[test]
     fn test_for_loop() {
-        let result = parse_stmt_test("for (i in [1, 2, 3]) { print(i) }").unwrap();
+        let result = parse_stmt_test("for (i in [1, 2, 3]) { print i }").unwrap();
         let expected = Statement::For(For {
             var_name: (5..6, IdentifierDeclaration("i".to_string())),
             container: (
@@ -961,30 +961,39 @@ mod test {
                 ])),
             ),
             body: (
-                21..33,
+                21..32,
                 vec![(
-                    23..31,
-                    Statement::Expression(Expression::LambdaInvocation(LambdaInvocation {
-                        lambda: (
-                            23..28,
-                            Box::new(Expression::IdentifierReference(IdentifierReference::Value(
-                                "print".to_string(),
-                            ))),
+                    23..30,
+                    Statement::Print(Print {
+                        value: (
+                            29..30,
+                            Expression::IdentifierReference(IdentifierReference::Value(
+                                "i".to_string(),
+                            )),
                         ),
-                        arguments: (
-                            28..31,
-                            vec![(
-                                None,
-                                (
-                                    29..30,
-                                    Expression::IdentifierReference(IdentifierReference::Value(
-                                        "i".to_string(),
-                                    )),
-                                ),
-                            )],
-                        ),
-                    })),
+                    }),
                 )],
+            ),
+        });
+        assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_print_statement() {
+        let result = parse_stmt_test("print x + 1").unwrap();
+        let expected = Statement::Print(Print {
+            value: (
+                6..11,
+                Expression::BinaryOperator(BinaryOperator {
+                    lhs: (
+                        6..7,
+                        Box::new(Expression::IdentifierReference(IdentifierReference::Value(
+                            "x".to_string(),
+                        ))),
+                    ),
+                    op_type: BinaryOperatorType::Add,
+                    rhs: (10..11, Box::new(Expression::Literal(Literal::Int(1)))),
+                }),
             ),
         });
         assert_eq!(result.1, expected);

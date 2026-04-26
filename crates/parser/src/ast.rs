@@ -56,6 +56,7 @@ pub enum Statement {
     Declaration(Declaration),
     Expression(Expression),
     Play(Play),
+    Print(Print),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -323,4 +324,9 @@ pub struct If {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Play {
     pub animations: SpanTagged<Expression>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Print {
+    pub value: SpanTagged<Expression>,
 }

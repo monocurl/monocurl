@@ -7,6 +7,7 @@ use crate::{
     error::RuntimeError,
     heap::{HeapKey, VRc, heap_alloc, heap_replace, with_heap},
     time::Timestamp,
+    transcript::Transcript,
     value::{
         InstructionPointer, Value, container::List, leader::Leader, primitive_anim::PrimitiveAnim,
     },
@@ -211,6 +212,8 @@ pub struct ExecutionState {
 
     pub errors: Vec<RuntimeError>,
 
+    pub transcript: Transcript,
+
     #[cfg(feature = "capture_tos")]
     pub captured_output: Vec<Value>,
 
@@ -238,6 +241,7 @@ impl ExecutionState {
             active_params: Vec::new(),
             ephemeral_pool: Vec::new(),
             errors: Vec::new(),
+            transcript: Transcript::default(),
             #[cfg(feature = "capture_tos")]
             captured_output: Vec::new(),
             call_depth: 0,

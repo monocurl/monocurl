@@ -62,6 +62,7 @@ impl FreeVarCollector {
                 }
             }
             Statement::Play(p) => self.visit_expr(&p.animations.1),
+            Statement::Print(p) => self.visit_expr(&p.value.1),
             Statement::Break | Statement::Continue => {}
         }
     }
@@ -224,6 +225,7 @@ impl LvalueRefCollector {
                 }
             }
             Statement::Play(p) => self.visit_expr(&p.animations.1),
+            Statement::Print(p) => self.visit_expr(&p.value.1),
             Statement::Break | Statement::Continue => {}
         }
     }

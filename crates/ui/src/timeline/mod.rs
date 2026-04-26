@@ -1,3 +1,4 @@
+mod console;
 mod icons;
 mod metrics;
 pub mod timeline_view;

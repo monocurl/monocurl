@@ -30,6 +30,7 @@ fn statement_has_effect(stmt: &Statement) -> bool {
         Statement::Declaration(decl) => expression_has_effect(&decl.value.1),
         Statement::Expression(expr) => expression_has_effect(expr),
         Statement::Play(_) => true,
+        Statement::Print(_) => true,
     }
 }
 

@@ -891,7 +891,7 @@ impl TextEditor {
     ) -> WrappedLine {
         self.state.update(cx, |state, _| {
             let (start, end, mut line_text) = self.line_range_and_text(state, line_no);
-            state.mark_line_as_up_to_date_attributes(start, end);
+            state.mark_line_as_up_to_date_attributes(line_no, start, end);
 
             if line_text.ends_with('\n') {
                 line_text.pop();
@@ -907,11 +907,46 @@ impl TextEditor {
             )
             .collect();
 
-            WrappedLine::new(
+            let line_span = start..end;
+            let transcript_entries = state.transcript().entries_for_line(line_no);
+            let transcript_run = TextRun {
+                len: 0,
+                font: self.text_styles.text_font.clone().italic(),
+                color: self.text_styles.comment_color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            const MAX_INLINE_ENTRIES: usize = 3;
+            let mut transcript_rows: SmallVec<[(String, TextRun); 4]> = SmallVec::new();
+            let transcript_entries: SmallVec<[_; 4]> = transcript_entries
+                .iter()
+                .filter(|entry| {
+                    entry.span.start < line_span.end && line_span.start < entry.span.end
+                })
+                .collect();
+            let total = transcript_entries.len();
+            for entry in transcript_entries.iter().take(MAX_INLINE_ENTRIES) {
+                transcript_rows.push((entry.text.clone(), transcript_run.clone()));
+            }
+            if total > MAX_INLINE_ENTRIES {
+                let hidden = total - MAX_INLINE_ENTRIES;
+                transcript_rows.push((
+                    format!(
+                        "<{} more {}>",
+                        hidden,
+                        if hidden == 1 { "instance" } else { "instances" }
+                    ),
+                    transcript_run.clone(),
+                ));
+            }
+
+            WrappedLine::new_with_transcript(
                 &line_text,
                 self.text_styles.text_size,
                 &runs,
                 wrap_width,
+                &transcript_rows,
                 window,
             )
         })

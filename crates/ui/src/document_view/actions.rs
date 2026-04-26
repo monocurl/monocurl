@@ -133,6 +133,16 @@ impl DocumentView {
         self.viewport.update(cx, |vp, cx| vp.toggle_params(cx));
     }
 
+    pub(super) fn toggle_timeline_console(
+        &mut self,
+        _: &ToggleTimelineConsole,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.timeline
+            .update(cx, |timeline, cx| timeline.toggle_panel_mode(cx));
+    }
+
     pub(super) fn sync_viewport_camera(
         &mut self,
         _: &SyncViewportCamera,

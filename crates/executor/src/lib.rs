@@ -5,4 +5,5 @@ pub mod heap;
 pub mod scene_snapshot;
 pub mod state;
 pub mod time;
+pub mod transcript;
 pub mod value;

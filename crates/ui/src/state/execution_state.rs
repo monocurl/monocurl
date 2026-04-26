@@ -3,6 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use crate::services::{ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue};
 use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot};
 use executor::time::Timestamp;
+use executor::transcript::SectionTranscript;
 use geo::mesh::Mesh;
 
 // Any state that's necessary for actual execution
@@ -22,6 +23,7 @@ pub struct ExecutionState {
     pub minimum_slide_durations: Vec<Option<f64>>,
     pub parameters: Option<ParameterSnapshot>,
     pub slide_count: usize,
+    pub transcript: Vec<Arc<SectionTranscript>>,
 }
 
 impl Default for ExecutionState {
@@ -39,6 +41,7 @@ impl Default for ExecutionState {
             minimum_slide_durations: Vec::new(),
             parameters: None,
             slide_count: 0,
+            transcript: Vec::new(),
         }
     }
 }
@@ -76,5 +79,8 @@ impl ExecutionState {
             self.parameter_state = params.parameters.clone();
         }
         self.parameters = snapshot.parameters;
+        if let Some(transcript) = snapshot.transcript {
+            self.transcript = transcript;
+        }
     }
 }

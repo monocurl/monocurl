@@ -8,6 +8,7 @@ use crate::{
 };
 
 use super::{
+    console::render_console,
     metrics::{
         DEFAULT_ZOOM_IDX, MIN_GAP, PX_PER_SEC, SLIDE_W, ZOOM_LEVELS, compute_gap_ws,
         compute_playhead_x, compute_slide_xs, effective_durations,
@@ -16,10 +17,18 @@ use super::{
     track::render_track,
 };
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BottomPanelMode {
+    Timeline,
+    Console,
+}
+
 pub struct Timeline {
     pub(super) services: Entity<ServiceManager>,
     pub(super) scroll: ScrollHandle,
+    pub(super) console_scroll: ScrollHandle,
     pub(super) zoom_idx: usize,
+    pub(super) panel_mode: BottomPanelMode,
 }
 
 impl Timeline {
@@ -27,6 +36,11 @@ impl Timeline {
         let execution_state = services.read(cx).execution_state().clone();
         cx.observe(&execution_state, |this, _, cx| {
             this.recenter_playhead_if_needed(cx);
+            cx.notify();
+        })
+        .detach();
+        let textual_state = services.read(cx).textual_state().clone();
+        cx.observe(&textual_state, |_this, _, cx| {
             cx.notify();
         })
         .detach();
@@ -38,8 +52,18 @@ impl Timeline {
         Self {
             services,
             scroll: ScrollHandle::new(),
+            console_scroll: ScrollHandle::new(),
             zoom_idx: DEFAULT_ZOOM_IDX,
+            panel_mode: BottomPanelMode::Timeline,
         }
+    }
+
+    pub fn toggle_panel_mode(&mut self, cx: &mut Context<Self>) {
+        self.panel_mode = match self.panel_mode {
+            BottomPanelMode::Timeline => BottomPanelMode::Console,
+            BottomPanelMode::Console => BottomPanelMode::Timeline,
+        };
+        cx.notify();
     }
 
     pub(super) fn zoom_factor(&self) -> f32 {
@@ -127,6 +151,30 @@ impl Render for Timeline {
         let slide_xs = compute_slide_xs(slide_count, &effective_for_seek, zoom);
         let gap_ws = compute_gap_ws(slide_count, &effective_for_seek, zoom);
 
+        let (console_entries, runtime_errors): (Vec<_>, Vec<_>) =
+            if self.panel_mode == BottomPanelMode::Console {
+                let services = self.services.read(cx);
+                let console_entries = services
+                    .execution_state()
+                    .read(cx)
+                    .transcript
+                    .iter()
+                    .flat_map(|s| s.entries.iter().cloned())
+                    .collect();
+                let runtime_errors = services
+                    .textual_state()
+                    .read(cx)
+                    .diagnostics()
+                    .diagnostics_list()
+                    .iter()
+                    .filter(|diagnostic| diagnostic.is_runtime())
+                    .map(|diagnostic| diagnostic.message.clone())
+                    .collect();
+                (console_entries, runtime_errors)
+            } else {
+                (Vec::new(), Vec::new())
+            };
+
         let toolbar = render_toolbar(
             self,
             is_playing,
@@ -137,24 +185,19 @@ impl Render for Timeline {
             &effective_for_seek,
             cx,
         );
-        let track = render_track(
-            current_slide,
-            current_time,
-            slide_count,
-            slide_names,
-            durations,
-            minimum_durations,
-            zoom,
-            theme,
-        );
 
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .bg(theme.timeline_background)
-            .child(toolbar)
-            .child(
+        let body: AnyElement = match self.panel_mode {
+            BottomPanelMode::Timeline => {
+                let track = render_track(
+                    current_slide,
+                    current_time,
+                    slide_count,
+                    slide_names,
+                    durations,
+                    minimum_durations,
+                    zoom,
+                    theme,
+                );
                 div()
                     .id("tl-scroll")
                     .flex()
@@ -201,7 +244,21 @@ impl Render for Timeline {
                             }
                         }
                     })
-                    .child(track),
-            )
+                    .child(track)
+                    .into_any_element()
+            }
+            BottomPanelMode::Console => {
+                render_console(console_entries, runtime_errors, &self.console_scroll, theme)
+                    .into_any_element()
+            }
+        };
+
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .bg(theme.timeline_background)
+            .child(toolbar)
+            .child(body)
     }
 }

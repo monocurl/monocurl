@@ -351,6 +351,7 @@ impl DocumentView {
             .key_context("document")
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::toggle_presentation))
+            .on_action(cx.listener(Self::toggle_timeline_console))
             .on_action(cx.listener(Self::play_or_show_pause_hint))
             .on_action(cx.listener(Self::toggle_playing))
             .on_action(cx.listener(Self::sync_viewport_camera))

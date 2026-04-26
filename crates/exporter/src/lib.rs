@@ -105,6 +105,7 @@ impl ExportProgress {
 pub struct ExportOutcome {
     pub output_path: PathBuf,
     pub frames_written: usize,
+    pub transcript: Vec<executor::transcript::TranscriptEntry>,
 }
 
 struct PreparedScene {
@@ -358,10 +359,16 @@ async fn export_image(
 
     emit_progress_checked(cancel_flag, on_progress, "Finished image export", 4, 4)?;
 
+    let transcript = collect_transcript(&prepared.executor);
     Ok(ExportOutcome {
         output_path,
         frames_written: 1,
+        transcript,
     })
+}
+
+fn collect_transcript(executor: &Executor) -> Vec<executor::transcript::TranscriptEntry> {
+    executor.state.transcript.iter_entries().cloned().collect()
 }
 
 async fn resolve_scene_end_timestamp(
@@ -394,6 +401,7 @@ async fn export_video(
     let video_size = settings.render_size;
     let slide_durations =
         precompute_slide_durations(&mut prepared.executor, &prepared.root_text_rope).await?;
+    let transcript = collect_transcript(&prepared.executor);
     check_cancelled(cancel_flag)?;
     let frame_targets = build_frame_targets(&slide_durations, settings.fps);
     ensure!(!frame_targets.is_empty(), "scene has no slides to export");
@@ -524,6 +532,7 @@ async fn export_video(
     Ok(ExportOutcome {
         output_path,
         frames_written: frame_targets.len(),
+        transcript,
     })
 }
 

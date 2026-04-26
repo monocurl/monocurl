@@ -7,6 +7,8 @@ use gpui::{
 use smallvec::SmallVec;
 use structs::text::{Count8, Span8};
 
+const TRANSCRIPT_INDENT: f32 = 25.0;
+
 // adapted from gpui's wrapped line
 #[derive(Clone, Debug)]
 pub struct WrappedLine {
@@ -14,6 +16,9 @@ pub struct WrappedLine {
     wrap_boundaries: SmallVec<[(WrapBoundary, Pixels); 1]>,
     decoration_runs: SmallVec<[DecorationRun; 32]>,
     default_color: Hsla,
+    first_line_indent: Pixels,
+    /// extra rows rendered after the source line, such as print output
+    transcript_rows: SmallVec<[Box<WrappedLine>; 0]>,
 }
 
 impl Default for WrappedLine {
@@ -28,6 +33,8 @@ impl Default for WrappedLine {
                 l: 0.0,
                 a: 0.0,
             },
+            first_line_indent: px(0.0),
+            transcript_rows: SmallVec::new(),
         }
     }
 }
@@ -37,6 +44,7 @@ impl WrappedLine {
         text: &str,
         unwrapped_layout: &LineLayout,
         wrap_width: Pixels,
+        first_line_indent: Pixels,
     ) -> SmallVec<[(WrapBoundary, Pixels); 1]> {
         debug_assert!(!text.contains('\n'));
 
@@ -91,7 +99,12 @@ impl WrappedLine {
 
             let next_x = glyphs.peek().map_or(unwrapped_layout.width, |x| x.2);
 
-            if next_x + current_x_offset > wrap_width {
+            let current_line_indent = if wrap_boundaries.is_empty() {
+                first_line_indent
+            } else {
+                px(0.0)
+            };
+            if current_line_indent + next_x + current_x_offset > wrap_width {
                 let indent = hanging_indentation.get_or_insert(px(0.0));
 
                 // first try to wrap at big word boundary
@@ -127,11 +140,43 @@ impl WrappedLine {
         wrap_boundaries
     }
 
-    pub fn new(
+    pub fn new_with_transcript(
         text: &str,
         size: Pixels,
         runs: &[TextRun],
         wrap_width: Pixels,
+        transcript_rows: &[(String, TextRun)],
+        window: &mut Window,
+    ) -> Self {
+        let mut wrapped = Self::new_source_only(text, size, runs, wrap_width, px(0.0), window);
+
+        wrapped.transcript_rows = transcript_rows
+            .iter()
+            .map(|(text, run)| {
+                let run = TextRun {
+                    len: text.len(),
+                    ..run.clone()
+                };
+                Box::new(Self::new_source_only(
+                    text,
+                    size,
+                    &[run],
+                    wrap_width,
+                    px(TRANSCRIPT_INDENT),
+                    window,
+                ))
+            })
+            .collect();
+
+        wrapped
+    }
+
+    fn new_source_only(
+        text: &str,
+        size: Pixels,
+        runs: &[TextRun],
+        wrap_width: Pixels,
+        first_line_indent: Pixels,
         window: &mut Window,
     ) -> Self {
         let unwrapped_layout = window.text_system().layout_line(text, size, runs, None);
@@ -147,7 +192,8 @@ impl WrappedLine {
             })
             .collect();
 
-        let wrap_boundaries = Self::build_wrap_boundaries(text, &unwrapped_layout, wrap_width);
+        let wrap_boundaries =
+            Self::build_wrap_boundaries(text, &unwrapped_layout, wrap_width, first_line_indent);
         let default_color = runs.first().map(|run| run.color).unwrap_or(Hsla {
             h: 0.0,
             s: 0.0,
@@ -160,6 +206,8 @@ impl WrappedLine {
             wrap_boundaries,
             decoration_runs,
             default_color,
+            first_line_indent,
+            transcript_rows: SmallVec::new(),
         }
     }
 
@@ -254,11 +302,20 @@ impl WrappedLine {
     }
 
     pub fn line_count(&self) -> usize {
+        self.primary_line_count()
+            + self
+                .transcript_rows
+                .iter()
+                .map(|row| row.line_count())
+                .sum::<usize>()
+    }
+
+    pub fn primary_line_count(&self) -> usize {
         self.wrap_boundaries.len() + 1
     }
 
     pub fn iter(&self) -> impl Iterator<Item = SingleWrappedLine<'_>> {
-        (0..self.line_count()).map(move |line_ix| {
+        (0..self.primary_line_count()).map(move |line_ix| {
             let prev_boundary = if line_ix > 0 {
                 Some(&self.wrap_boundaries[line_ix - 1])
             } else {
@@ -283,7 +340,7 @@ impl WrappedLine {
         origin: Point<Pixels>,
         line_height: Pixels,
         window: &mut Window,
-        cx: &App,
+        cx: &mut App,
     ) -> Result<(), anyhow::Error> {
         let layout = &self.unwrapped_layout;
         let wrap_boundaries = &self.wrap_boundaries;
@@ -293,7 +350,7 @@ impl WrappedLine {
         let line_bounds = Bounds::new(
             origin,
             gpui::size(
-                layout.width,
+                layout.width + self.first_line_indent,
                 line_height * (wrap_boundaries.len() as f32 + 1.),
             ),
         );
@@ -307,10 +364,10 @@ impl WrappedLine {
             let mut current_underline: Option<(Point<Pixels>, UnderlineStyle)> = None;
             let mut current_strikethrough: Option<(Point<Pixels>, StrikethroughStyle)> = None;
             let text_system = cx.text_system().clone();
-            let mut glyph_origin = origin;
+            let mut glyph_origin = point(origin.x + self.first_line_indent, origin.y);
             let mut prev_glyph_position = Point::default();
             let mut max_glyph_size = size(px(0.), px(0.));
-            let mut first_glyph_x = origin.x;
+            let mut first_glyph_x = glyph_origin.x;
             for (run_ix, run) in layout.runs.iter().enumerate() {
                 max_glyph_size = text_system.bounding_box(run.font_id, layout.font_size).size;
 
@@ -506,8 +563,16 @@ impl WrappedLine {
                 );
             }
 
-            Ok(())
-        })
+            Ok::<(), anyhow::Error>(())
+        })?;
+
+        let mut row_y = line_height * self.primary_line_count() as f32;
+        for row in &self.transcript_rows {
+            row.paint(point(origin.x, origin.y + row_y), line_height, window, cx)?;
+            row_y += line_height * row.line_count() as f32;
+        }
+
+        Ok(())
     }
 
     #[allow(unused)]
