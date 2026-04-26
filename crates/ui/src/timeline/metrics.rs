@@ -90,18 +90,12 @@ pub(super) fn compute_track_width(slide_count: usize, durations: &[Option<f64>],
     slide_xs[last] + SLIDE_W + gap_w(durations.get(last).and_then(|d| *d), zoom) + END_PADDING
 }
 
-/// remaps a raw `(slide, time)` timestamp to the "one slide earlier at the
-/// previous slide's end" representation used by the timeline; returns
-/// `None` when we're before slide 0 (pre-start of the scene).
-///
-/// `time == 0.0` is treated specially — `f64::MIN_POSITIVE` counts as
-/// already-started and falls through to `Some((slide, time))`.
 pub(crate) fn visual_slide_time(
     current_slide: usize,
     current_time: f64,
     durations: &[Option<f64>],
 ) -> Option<(usize, f64)> {
-    if current_time == 0.0 {
+    if current_time < 0.0 {
         if current_slide == 0 {
             None
         } else {
@@ -122,7 +116,8 @@ pub(super) fn compute_playhead_x(
     durations: &[Option<f64>],
     zoom: f32,
 ) -> f32 {
-    match visual_slide_time(current_slide, current_time, durations) {
+    match visual_slide_time(current_slide, current_time,
+       durations) {
         None => PADDING_H,
         Some((slide, time)) => {
             let x = slide_xs.get(slide).copied().unwrap_or(PADDING_H);

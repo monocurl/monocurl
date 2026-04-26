@@ -268,27 +268,27 @@ impl ServiceManager {
     pub fn prev_slide(&mut self, cx: &App) {
         let ts = self.timestamp(cx);
         let next = if ts.time > 1e-3 {
-            Timestamp::new(ts.slide, 0.0)
+            Timestamp::new(ts.slide, -f64::MIN_POSITIVE)
         } else if ts.slide == 0 {
-            Timestamp::new(0, 0.0)
+            Timestamp::new(0, -f64::MIN_POSITIVE)
         } else {
-            Timestamp::new(ts.slide - 1, 0.0)
+            Timestamp::new(ts.slide - 1, -f64::MIN_POSITIVE)
         };
         self.seek_to(next);
     }
 
     pub fn next_slide(&mut self, cx: &App) {
         let ts = self.timestamp(cx);
-        self.seek_to(Timestamp::new(ts.slide + 1, 0.0));
+        self.seek_to(Timestamp::new(ts.slide + 1, -f64::MIN_POSITIVE));
     }
 
     pub fn scene_start(&mut self) {
-        self.seek_to(Timestamp::new(0, 0.0));
+        self.seek_to(Timestamp::new(0, -f64::MIN_POSITIVE));
     }
 
     pub fn scene_end(&mut self, cx: &App) {
         let slide_count = self.execution_state.read(cx).slide_count;
-        self.seek_to(Timestamp::new(slide_count, 0.0));
+        self.seek_to(Timestamp::new(slide_count, -f64::MIN_POSITIVE));
     }
 
     pub fn toggle_play(&mut self) {

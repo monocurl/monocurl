@@ -53,66 +53,66 @@ let Set = |vars = []| __monocurl__native__ set(vars)
 # general primitive animation constructor.
 # optional `embed` maps `(start, dst) -> [a, b, state]`.
 # optional `lerp` overrides interpolation with `|a, b, state, t| ...`.
-let PrimitiveAnim = |time = 1, vars = [], embed = nil, lerp = nil, rate = smooth| __monocurl__native__ lerp_anim(vars, time, rate, embed, lerp)
+let PrimitiveAnim = |time = 1, &vars = [], embed = nil, lerp = nil, rate = smooth| __monocurl__native__ lerp_anim(&vars, time, rate, embed, lerp)
 
 # standard value lerp with only the rate function exposed.
-let Lerp = |time = 1, vars = [], rate = smooth| PrimitiveAnim(time, vars, nil, nil, rate)
+let Lerp = |time = 1, &vars = [], rate = smooth| PrimitiveAnim(time, &vars, nil, nil, rate)
 
 # follower animations
 # these each have a specific transform they apply to the follower start state
 # before letting a standard interpolation finish the job.
 
 # points start co-located at the mesh centroid and grow outward.
-let Grow = |time = 1, meshes = [], rate = smooth| {
+let Grow = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ grow_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ mesh_lerp_value(a, b, t)
-    return PrimitiveAnim(time, meshes, embed, lerp, rate)
+    return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
 
 # interpolate opacity from 0 (or along `delta`) to full.
-let Fade = |time = 1, meshes = [], delta = [0, 0, 0], rate = smooth| {
+let Fade = |time = 1, &meshes = [], delta = [0, 0, 0], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ fade_embed(start, dst, delta)
     let lerp = |a, b, state, t| __monocurl__native__ mesh_lerp_value(a, b, t)
-    return PrimitiveAnim(time, meshes, embed, lerp, rate)
+    return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
 
 # tracing animation for line / polyline content.
-let Write = |time = 1, meshes = [], rate = smooth| {
+let Write = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ write_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ write_lerp_value(a, b, state, t)
-    return PrimitiveAnim(time, meshes, embed, lerp, rate)
+    return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
 
 # interpolate by matching points between start and end meshes.
-let Trans = |time = 1, meshes = [], path_arc = 0, rate = smooth| {
+let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth| {
     let embed = |start, dst| __monocurl__native__ trans_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
-    return PrimitiveAnim(time, meshes, embed, lerp, rate)
+    return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
 
 # like Trans, but pairs sub-meshes by their `tag` rather than by order.
-let TagTrans = |time = 1, meshes = [], path_arc = 0, rate = smooth| {
+let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth| {
     let embed = |start, dst| __monocurl__native__ tag_trans_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
-    return PrimitiveAnim(time, meshes, embed, lerp, rate)
+    return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
 
 # line-based geometric interpolation that accumulates edge rotations.
-let Bend = |time = 1, meshes = [], rate = smooth| {
+let Bend = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ bend_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ bend_lerp_value(a, b, t)
-    return PrimitiveAnim(time, meshes, embed, lerp, rate)
+    return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
 
 # like Bend, but pairs sub-meshes by tag first.
-let TagBend = |time = 1, meshes = [], rate = smooth| {
+let TagBend = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ tag_bend_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ bend_lerp_value(a, b, t)
-    return PrimitiveAnim(time, meshes, embed, lerp, rate)
+    return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
 
 # camera-aware lerp over the camera leader.
-let CameraLerp = |&camera, time = 1, rate = smooth| Lerp(time, [&camera], rate)
+let CameraLerp = |&camera, time = 1, rate = smooth| Lerp(time, &camera, rate)
 
 # indication animations
 
@@ -126,10 +126,10 @@ let Highlight = |&value, color, time = 1, rate = smooth| anim {
     play Set(&value)
 
     value = highlighted
-    play Trans(time / 2, [&value], 0, rate)
+    play Trans(time / 2, &value, 0, rate)
 
     value = original
-    play Trans(time / 2, [&value], 0, rate)
+    play Trans(time / 2, &value, 0, rate)
 }
 
 # brief moving write-window over stroke of a mesh.
@@ -162,7 +162,7 @@ let Flash = |&value, time = 1, lead = nil, trail = nil| {
         play Set(&value)
 
         value = flash_value(original, phase: 1)
-        play Lerp(time, [&value], linear)
+        play Lerp(time, &value, linear)
 
         value = original
         play Set(&value)

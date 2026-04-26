@@ -127,6 +127,8 @@ impl RuntimeState {
 
         match self.executor.seek_to(self.target).await {
             SeekToResult::SeekedTo(reached) => {
+                println!("seeked to {:?}, wanted {:?}", self.executor.internal_to_user_timestamp(reached),
+                self.executor.internal_to_user_timestamp(self.target));
                 if self.executor.state.has_errors() {
                     self.cancel_runtime_work();
                 } else {
@@ -338,7 +340,7 @@ mod tests {
         let child = runtime
             .executor
             .state
-            .alloc_stack((0, 0), Some(ExecutionState::ROOT_STACK_ID), None)
+            .alloc_stack((0, 0), Some(ExecutionState::ROOT_STACK_IDX), None)
             .expect("child stack");
         runtime
             .executor
@@ -362,13 +364,13 @@ mod tests {
                 .iter()
                 .copied()
                 .collect::<Vec<_>>(),
-            vec![ExecutionState::ROOT_STACK_ID]
+            vec![ExecutionState::ROOT_STACK_IDX]
         );
         assert_eq!(
             runtime
                 .executor
                 .state
-                .stack(ExecutionState::ROOT_STACK_ID)
+                .stack(ExecutionState::ROOT_STACK_IDX)
                 .stack_len(),
             0
         );

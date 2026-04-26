@@ -517,7 +517,7 @@ impl Executor {
         Box::pin(async move {
             if self.state.call_depth >= MAX_CALL_DEPTH {
                 self.state.last_stack_idx =
-                    trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                    trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
                 return Err(ExecutorError::StackOverflow);
             }
             self.state.call_depth += 1;
@@ -527,7 +527,7 @@ impl Executor {
                 .alloc_stack(lambda.ip, None, trace_parent_idx)
                 .map_err(|_| {
                     self.state.last_stack_idx =
-                        trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                        trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
                     ExecutorError::TooManyActiveAnimations
                 })?;
             let stack = self.state.stack_mut(temp_idx);
@@ -550,8 +550,8 @@ impl Executor {
                             Value::Nil
                         };
                         self.state.free_stack(temp_idx);
-                        self.state.last_stack_idx =
-                            trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                        self.state.last_stack_idx = trace_parent_idx
+                            .unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
                         self.state.call_depth -= 1;
                         return Ok(result);
                     }
@@ -588,7 +588,7 @@ impl Executor {
             }
             if self.state.call_depth >= MAX_CALL_DEPTH {
                 self.state.last_stack_idx =
-                    trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                    trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
                 return Err(ExecutorError::StackOverflow);
             }
             self.state.call_depth += 1;
@@ -598,7 +598,7 @@ impl Executor {
                 .alloc_stack(lambda.ip, None, trace_parent_idx)
                 .map_err(|_| {
                     self.state.last_stack_idx =
-                        trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                        trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
                     ExecutorError::TooManyActiveAnimations
                 })?;
             let full_arg_len = lambda.required_args as usize + lambda.defaults.len();
@@ -661,7 +661,7 @@ impl Executor {
 
             self.state.free_stack(temp_idx);
             self.state.last_stack_idx =
-                trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_ID);
+                trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
             self.state.call_depth -= 1;
             Ok(results)
         })

@@ -68,6 +68,11 @@ let z = [4->5] # map
 There are specialized literals for directions, degrees, etc (see parser for more details).
 ```
 1l == [-1, 0, 0]
+1r == [1, 0, 0]
+1u == [0, 1, 0]
+1d == [0, -1, 0]
+1f == [0, 0, -1]
+1b == [0, 0, 1]
 ```
 
 Function Invocation. You can invoke functions as normal, but you can also do a labeled invocation. In a labeled invocation, you label some of the arguments. This allows you to refer to the arguments later as attributes. This allows you to change the argument to the function, and the entire result is recomputed.

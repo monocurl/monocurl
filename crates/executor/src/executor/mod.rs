@@ -208,10 +208,10 @@ mod tests {
         let mut executor = empty_executor();
         executor
             .state
-            .stack_mut(crate::state::ExecutionState::ROOT_STACK_ID)
+            .stack_mut(crate::state::ExecutionState::ROOT_STACK_IDX)
             .push(Value::Integer(5));
         executor.state.promote_to_leader(
-            crate::state::ExecutionState::ROOT_STACK_ID,
+            crate::state::ExecutionState::ROOT_STACK_IDX,
             LeaderKind::Param,
             "speed".into(),
         );
@@ -245,10 +245,10 @@ mod tests {
         let mut executor = empty_executor();
         executor
             .state
-            .stack_mut(crate::state::ExecutionState::ROOT_STACK_ID)
+            .stack_mut(crate::state::ExecutionState::ROOT_STACK_IDX)
             .push(Value::Integer(5));
         executor.state.promote_to_leader(
-            crate::state::ExecutionState::ROOT_STACK_ID,
+            crate::state::ExecutionState::ROOT_STACK_IDX,
             LeaderKind::Param,
             "speed".into(),
         );

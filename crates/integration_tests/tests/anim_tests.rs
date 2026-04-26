@@ -326,7 +326,7 @@ async fn current_mesh_leader_value(executor: &mut Executor) -> Value {
     };
 
     with_heap(|h| h.get(leader.follower_rc.key()).clone())
-        .elide_wrappers(executor)
+        .elide_wrappers_rec(executor)
         .await
         .expect("mesh leader wrapper elision should succeed")
 }

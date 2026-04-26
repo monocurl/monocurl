@@ -13,35 +13,35 @@ use super::{ExecSingle, Executor, SeekPrimitiveResult, prepare_eager_call_args};
 
 impl Executor {
     fn primitive_anim_duration(prim: &PrimitiveAnim) -> f64 {
-        let duration = match prim {
+        match prim {
             PrimitiveAnim::Lerp { time, .. } => *time,
             PrimitiveAnim::Set { .. } => 0.0,
             PrimitiveAnim::Wait { time } => *time,
-        };
-        duration.max(f64::MIN_POSITIVE)
+        }
     }
 
     pub fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
 
-        // a fully played slide must be distinguishable from an unentered one, so
-        // snap its cached end-time to at least `MIN_POSITIVE` even when nothing
-        // in the slide actually advanced time
-        self.state.timestamp.time = self.state.timestamp.time.max(f64::MIN_POSITIVE);
         self.save_cache();
 
         let mut heads = BTreeSet::new();
-        heads.insert(ExecutionState::ROOT_STACK_ID);
+        heads.insert(ExecutionState::ROOT_STACK_IDX);
 
         self.state.execution_heads = heads;
 
         let ip = ((self.state.timestamp.slide + 1) as u16, 0);
-        self.state.stack_mut(ExecutionState::ROOT_STACK_ID).ip = ip;
+        self.state.stack_mut(ExecutionState::ROOT_STACK_IDX).ip = ip;
         self.state.timestamp.slide += 1;
-        self.state.timestamp.time = 0.0;
+        // "unplayed" state
+        self.state.timestamp.time = -f64::MIN_POSITIVE;
+
+        println!("Timestamp now {:?}", self.state.timestamp);
     }
 
     async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
+        // mark no longer unplayed
+
         while let Some(&stack_idx) = self.state.execution_heads.first() {
             let result = loop {
                 self.tick_yielder().await;
@@ -83,10 +83,6 @@ impl Executor {
                     {
                         self.advance_section();
                     } else {
-                        // distinguish a played-zero-length terminal slide from
-                        // the pre-entry state
-                        self.state.timestamp.time =
-                            self.state.timestamp.time.max(f64::MIN_POSITIVE);
                         self.save_cache();
                         return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
                     }
@@ -182,10 +178,6 @@ impl Executor {
 
             self.step_primitive_anims(step_dt).await?;
             self.state.pending_playback_time -= step_dt;
-
-            if self.state.pending_playback_time <= f64::EPSILON {
-                self.state.pending_playback_time = 0.0;
-            }
         }
 
         Ok(true)
@@ -393,7 +385,7 @@ impl Executor {
 
         self.state.execution_heads.remove(&stack_idx);
 
-        if stack_idx != ExecutionState::ROOT_STACK_ID {
+        if stack_idx != ExecutionState::ROOT_STACK_IDX {
             self.state.free_stack(stack_idx);
         }
 
@@ -408,7 +400,7 @@ impl Executor {
 
     pub(super) async fn exec_play(&mut self, stack_idx: usize) -> ExecSingle {
         let val = self.state.stack_mut(stack_idx).pop();
-        let val = match val.elide_wrappers(self).await {
+        let val = match val.elide_wrappers_rec(self).await {
             Ok(val) => val,
             Err(e) => return ExecSingle::Error(e),
         };
@@ -434,7 +426,7 @@ impl Executor {
                 let mut values = Vec::with_capacity(list.elements.len());
                 for key in list.elements.iter() {
                     let elem = with_heap(|h| h.get(key.key()).clone());
-                    let elem = match elem.elide_wrappers(self).await {
+                    let elem = match elem.elide_wrappers_rec(self).await {
                         Ok(elem) => elem,
                         Err(e) => return ExecSingle::Error(e),
                     };
@@ -539,7 +531,6 @@ impl Executor {
         let duration = Self::primitive_anim_duration(&prim);
 
         let start = self.state.timestamp.time;
-        let stack_id = self.state.stack_id(parent_stack_idx);
         let targets = self.resolve_primitive_anim_targets(parent_stack_idx, &prim, reserved)?;
         let embed = match &prim {
             PrimitiveAnim::Lerp { embed, .. } => embed.as_deref().cloned(),
@@ -584,7 +575,6 @@ impl Executor {
             embedded_ends,
             embedded_states,
             parent_stack_idx,
-            stack_id,
             span: self.current_instruction_span(parent_stack_idx),
         })
     }
@@ -623,9 +613,9 @@ impl Executor {
                         };
                         if leader
                             .last_modified_stack
-                            .is_some_and(|last_modified_stack_id| {
-                                self.state.is_stack_id_ancestor_of_stack(
-                                    last_modified_stack_id,
+                            .is_some_and(|last_modified_stack_idx| {
+                                self.state.is_stack_ancestor_of_stack(
+                                    last_modified_stack_idx,
                                     spawning_stack_idx,
                                 )
                             })

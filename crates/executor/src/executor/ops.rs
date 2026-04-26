@@ -60,11 +60,11 @@ impl Executor {
             };
         }
 
-        let lhs = match lhs.elide_wrappers(self).await {
+        let lhs = match lhs.elide_wrappers_rec(self).await {
             Ok(val) => val,
             Err(e) => return ExecSingle::Error(e),
         };
-        let rhs = match rhs.elide_wrappers(self).await {
+        let rhs = match rhs.elide_wrappers_rec(self).await {
             Ok(val) => val,
             Err(e) => return ExecSingle::Error(e),
         };
@@ -83,7 +83,7 @@ impl Executor {
             return Err(ExecutorError::stateful_unary_op());
         }
 
-        let val = val.elide_wrappers(self).await?;
+        let val = val.elide_wrappers_rec(self).await?;
 
         match &val {
             Value::Integer(n) => Ok(Value::Integer(-n)),
@@ -99,7 +99,7 @@ impl Executor {
             return Err(ExecutorError::stateful_operator());
         }
 
-        let val = val.elide_wrappers(self).await?;
+        let val = val.elide_wrappers_rec(self).await?;
         val.check_truthy()
             .map(|truthy| Value::Integer(!truthy as i64))
     }

@@ -31,8 +31,8 @@ const AXIS_TITLE_BUFFER: f32 = 0.18;
 const AXIS_TICK_LABEL_BUFFER: f32 = 0.08;
 const AXIS_ZERO_TICK_LABEL_OFFSET: f32 = 0.15;
 const LARGE_TICK_EXTEND: f32 = 0.075;
-const LARGE_TICK_WIDTH: f32 = 0.8;
-const LARGE_TICK_GRID_WIDTH: f32 = 0.8;
+const LARGE_TICK_WIDTH: f32 = 1.0;
+const LARGE_TICK_GRID_WIDTH: f32 = 1.0;
 const LARGE_TICK_OPACITY: f32 = 0.7;
 const LARGE_TICK_GRID_OPACITY: f32 = 0.6;
 const SMALL_TICK_EXTEND: f32 = 0.05;
@@ -391,7 +391,7 @@ async fn read_optional_string(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_wrappers(executor)
+        .elide_wrappers_rec(executor)
         .await?;
     if matches!(value, Value::Nil) {
         return Ok(None);

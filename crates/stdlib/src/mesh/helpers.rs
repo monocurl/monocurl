@@ -521,7 +521,7 @@ pub(super) async fn read_float4(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_wrappers(executor)
+        .elide_wrappers_rec(executor)
         .await?
     {
         Value::List(list) if list.elements().len() == 4 => {
@@ -1224,7 +1224,7 @@ pub(super) fn read_mesh_tree<'a>(
     name: &'static str,
 ) -> Pin<Box<dyn Future<Output = Result<MeshTree, ExecutorError>> + 'a>> {
     Box::pin(async move {
-        let value = value.elide_wrappers(executor).await?;
+        let value = value.elide_wrappers_rec(executor).await?;
         match value {
             Value::Mesh(arc) => Ok(MeshTree::Mesh(arc)),
             Value::List(list) => {
@@ -1265,7 +1265,7 @@ pub(super) async fn read_mesh_tree_list_arg(
     name: &'static str,
 ) -> Result<Vec<MeshTree>, ExecutorError> {
     let value = executor.state.stack(stack_idx).read_at(index).clone();
-    let value = value.elide_wrappers(executor).await?;
+    let value = value.elide_wrappers_rec(executor).await?;
     let Value::List(list) = value else {
         return Err(ExecutorError::type_error_for(
             "list",
@@ -1485,7 +1485,7 @@ pub(super) async fn mesh_matches_tag_filter(
                     .map(|tag| Value::Integer(tag as i64)),
             );
             let value = executor.invoke_lambda(lambda, vec![tags]).await?;
-            let value = value.elide_wrappers(executor).await?;
+            let value = value.elide_wrappers_rec(executor).await?;
             value.check_truthy()
         }
     }
@@ -1508,7 +1508,7 @@ pub(super) async fn invoke_callable(
             ));
         }
     };
-    raw.elide_wrappers(executor).await
+    raw.elide_wrappers_rec(executor).await
 }
 
 pub(super) async fn invoke_callable_many<A>(

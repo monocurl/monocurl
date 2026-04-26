@@ -314,7 +314,7 @@ pub async fn set_attr(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let target = executor.state.stack(stack_idx).read_at(-3).clone();
     let attr_name = read_string(executor, stack_idx, -2, "name").await?;
     let rhs = executor.state.stack(stack_idx).read_at(-1).clone();
-    let stack_id = executor.state.stack(stack_idx).stack_id;
+    let stack_id = stack_idx;
 
     if let Some(key) = target.as_lvalue_key() {
         set_attr_in_heap(key, &attr_name, &rhs, stack_id)?;

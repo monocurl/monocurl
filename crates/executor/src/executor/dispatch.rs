@@ -106,7 +106,7 @@ impl Executor {
             } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let copied = match copy_mode {
-                    CopyValueMode::Read => val.elide_lvalue().elide_leader(),
+                    CopyValueMode::Read => val.elide_lvalue_leader_rec(),
                     CopyValueMode::Reference => val.force_elide_lvalue(),
                     CopyValueMode::Raw => val,
                 };
@@ -258,7 +258,7 @@ impl Executor {
             }
             Instruction::ConditionalJump { section, to } => {
                 let val = self.state.stack_mut(stack_idx).pop();
-                let val = match val.elide_wrappers(self).await {
+                let val = match val.elide_wrappers_rec(self).await {
                     Ok(v) => v,
                     Err(e) => return ExecSingle::Error(e),
                 };

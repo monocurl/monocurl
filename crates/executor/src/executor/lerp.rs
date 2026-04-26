@@ -67,8 +67,8 @@ impl Executor {
                 }
             }
 
-            let a = a.elide_wrappers(self).await?;
-            let b = b.elide_wrappers(self).await?;
+            let a = a.elide_wrappers_rec(self).await?;
+            let b = b.elide_wrappers_rec(self).await?;
 
             if let Some(lerped) = self.lerp_containers(&a, &b, t).await? {
                 return Ok(lerped);

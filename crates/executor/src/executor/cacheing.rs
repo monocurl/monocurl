@@ -323,16 +323,18 @@ mod tests {
         executor.state.timestamp = Timestamp::new(1, 0.0);
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::List(List {
                 elements: smallvec![VRc::new(Value::Integer(1)), VRc::new(Value::Integer(2))],
             }));
-        executor.state.promote_to_var(ExecutionState::ROOT_STACK_ID);
+        executor
+            .state
+            .promote_to_var(ExecutionState::ROOT_STACK_IDX);
         executor.save_cache();
 
         let list_key = executor
             .state
-            .stack(ExecutionState::ROOT_STACK_ID)
+            .stack(ExecutionState::ROOT_STACK_IDX)
             .peek()
             .as_lvalue_key()
             .unwrap();
@@ -380,10 +382,10 @@ mod tests {
         executor.state.timestamp = Timestamp::new(1, 0.0);
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::Integer(10));
         executor.state.promote_to_leader(
-            ExecutionState::ROOT_STACK_ID,
+            ExecutionState::ROOT_STACK_IDX,
             LeaderKind::Param,
             "speed".into(),
         );
@@ -391,7 +393,7 @@ mod tests {
 
         let cell_key = executor
             .state
-            .stack(ExecutionState::ROOT_STACK_ID)
+            .stack(ExecutionState::ROOT_STACK_IDX)
             .peek()
             .as_lvalue_key()
             .unwrap();
@@ -446,7 +448,7 @@ mod tests {
         executor.state.timestamp = Timestamp::new(1, 0.0);
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::List(List {
                 elements: smallvec![
                     VRc::new(Value::List(List {
@@ -455,12 +457,14 @@ mod tests {
                     VRc::new(Value::Integer(4)),
                 ],
             }));
-        executor.state.promote_to_var(ExecutionState::ROOT_STACK_ID);
+        executor
+            .state
+            .promote_to_var(ExecutionState::ROOT_STACK_IDX);
         executor.save_cache();
 
         let live_key = executor
             .state
-            .stack(ExecutionState::ROOT_STACK_ID)
+            .stack(ExecutionState::ROOT_STACK_IDX)
             .peek()
             .as_lvalue_key()
             .unwrap();
@@ -517,23 +521,23 @@ mod tests {
         executor.state.timestamp = Timestamp::new(1, 0.0);
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::Integer(5));
         executor.save_cache();
 
         let child = executor
             .state
-            .alloc_stack((0, 0), Some(ExecutionState::ROOT_STACK_ID), None)
+            .alloc_stack((0, 0), Some(ExecutionState::ROOT_STACK_IDX), None)
             .expect("child stack");
         executor.state.execution_heads.insert(child);
         executor.state.stack_mut(child).push(Value::Integer(9));
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .pop();
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::Integer(11));
 
         executor.restore_live_state_to_cache_point(Timestamp::new(1, 0.5));
@@ -547,10 +551,10 @@ mod tests {
                 .iter()
                 .copied()
                 .collect::<Vec<_>>(),
-            vec![ExecutionState::ROOT_STACK_ID]
+            vec![ExecutionState::ROOT_STACK_IDX]
         );
         assert!(matches!(
-            executor.state.stack(ExecutionState::ROOT_STACK_ID).peek(),
+            executor.state.stack(ExecutionState::ROOT_STACK_IDX).peek(),
             Value::Integer(5)
         ));
     }
@@ -576,23 +580,23 @@ mod tests {
         executor.state.timestamp = Timestamp::new(1, 0.0);
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::Integer(5));
         executor.save_cache();
 
         let child = executor
             .state
-            .alloc_stack((0, 0), Some(ExecutionState::ROOT_STACK_ID), None)
+            .alloc_stack((0, 0), Some(ExecutionState::ROOT_STACK_IDX), None)
             .expect("child stack");
         executor.state.execution_heads.insert(child);
         executor.state.stack_mut(child).push(Value::Integer(9));
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .pop();
         executor
             .state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::Integer(11));
         executor.state.timestamp = Timestamp::new(1, 0.5);
 
@@ -606,10 +610,10 @@ mod tests {
                 .iter()
                 .copied()
                 .collect::<Vec<_>>(),
-            vec![ExecutionState::ROOT_STACK_ID]
+            vec![ExecutionState::ROOT_STACK_IDX]
         );
         assert!(matches!(
-            executor.state.stack(ExecutionState::ROOT_STACK_ID).peek(),
+            executor.state.stack(ExecutionState::ROOT_STACK_IDX).peek(),
             Value::Integer(5)
         ));
     }

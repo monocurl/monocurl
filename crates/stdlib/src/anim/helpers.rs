@@ -151,7 +151,7 @@ pub(super) async fn eval_unit_map(
             ));
         }
     }
-    .elide_wrappers(executor)
+    .elide_wrappers_rec(executor)
     .await?;
 
     match raw {
@@ -424,7 +424,7 @@ pub(super) fn materialize_live_value<'a>(
     value: &'a Value,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>> {
     Box::pin(async move {
-        let resolved = value.clone().elide_wrappers(executor).await?;
+        let resolved = value.clone().elide_wrappers_rec(executor).await?;
         match resolved {
             Value::List(list) => {
                 let mut out = Vec::with_capacity(list.len());

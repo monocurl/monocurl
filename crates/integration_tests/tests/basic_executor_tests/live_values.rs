@@ -67,6 +67,36 @@ fn max_mesh_line_len(meshes: &[std::sync::Arc<geo::mesh::Mesh>]) -> f32 {
         .fold(0.0, f32::max)
 }
 
+#[test]
+fn test_direction_literals_use_right_handed_forward() {
+    let r = run_with_stdlib(
+        "
+        let result =
+            (1f[2] == -1) +
+            (1b[2] == 1) +
+            (FORWARD[2] == -1) +
+            (BACKWARD[2] == 1) +
+            (Z_HAT[2] == 1)
+    ",
+        &["math"],
+    );
+    r.assert_int(5);
+}
+
+#[test]
+fn test_mesh_forward_backward_use_right_handed_depth() {
+    let r = run_with_stdlib(
+        "
+        let target = [Dot(1f), Dot(1b)]
+        let front = mesh_forward(target)
+        let back = mesh_backward(target)
+        let result = (front[2] == -1) + (back[2] == 1)
+    ",
+        &["mesh"],
+    );
+    r.assert_int(2);
+}
+
 // -- COW: list element independence after aliasing --
 
 #[test]
@@ -115,6 +145,36 @@ fn test_cow_list_nested_alias_chain() {
         let result = a[1]
     ");
     r.assert_int(6);
+}
+
+#[test]
+fn test_mesh_leader_append_assign_appends_to_wrapped_list() {
+    let r = run_section(
+        "
+        mesh base = []
+        base .= 42
+        let result = base[0]
+    ",
+        SectionType::Slide,
+    );
+    r.assert_int(42);
+}
+
+#[test]
+fn test_mesh_leader_append_assign_accepts_mesh_value() {
+    let r = run_with_stdlib(
+        "
+        mesh base = []
+        base .= Dot()
+        let result = base[0]
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let mut leaves = Vec::new();
+    flatten_mesh_leaves(r.value.as_ref().expect("expected result"), &mut leaves);
+    assert_eq!(leaves.len(), 1);
 }
 
 // -- labeled function invocations --
@@ -663,7 +723,7 @@ fn test_tag_filter_operator_reads_filtered_side() {
 fn test_to_side_and_to_corner_smoke() {
     let r = run_with_stdlib(
         "
-        let cam = Camera([0, 0, -10], [0, 0, 0], 1u)
+        let cam = Camera(10b, [0, 0, 0], 1u)
         let side = mesh_center(to_side{cam, 1r} Circle(1))
         let corner = mesh_center(to_corner{cam, [1, 1, 0], 0.1} Circle(1))
         let result = (side[0] > 0) + (corner[0] > 0) + (corner[1] > 0)
@@ -760,7 +820,7 @@ fn test_axis_ranges_no_longer_accept_explicit_unit_scale() {
 fn test_axis_arrows_are_filled_meshes() {
     let r = run_with_stdlib(
         "
-        let result = Axis1d(nil, 1r, 1f, [-1, 1, 1], 0)
+        let result = Axis1d(nil, 1r, 1b, [-1, 1, 1], 0)
     ",
         &["mesh"],
     );
@@ -772,6 +832,39 @@ fn test_axis_arrows_are_filled_meshes() {
     assert!(
         meshes.iter().any(|mesh| !mesh.tris.is_empty()),
         "expected axis arrows to include filled triangle geometry"
+    );
+}
+
+#[test]
+fn test_axis_large_ticks_have_larger_stroke_radius() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis1d(nil, 1r, 1b, [-1, 1, 0.25], 0)
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+    let radii = meshes
+        .iter()
+        .filter(|mesh| !mesh.lins.is_empty() && mesh.tris.is_empty())
+        .map(|mesh| mesh.uniform.stroke_radius)
+        .collect::<Vec<_>>();
+
+    assert!(
+        radii
+            .iter()
+            .any(|radius| radius.to_bits() == 0.5f32.to_bits()),
+        "expected small tick stroke radius, got {radii:?}"
+    );
+    assert!(
+        radii
+            .iter()
+            .any(|radius| radius.to_bits() == 1.0f32.to_bits()),
+        "expected larger tick stroke radius, got {radii:?}"
     );
 }
 
@@ -951,8 +1044,8 @@ fn test_text_tag_operator_tags_text_backends() {
 fn test_fixed_in_frame_preserves_camera_space_under_translation() {
     let r = run_with_stdlib(
         "
-        let original = Camera([0, 0, -10], [0, 0, 0], 1u)
-        let live = Camera([2, 3, -10], [2, 3, 0], 1u)
+        let original = Camera(10b, [0, 0, 0], 1u)
+        let live = Camera([2, 3, 10], [2, 3, 0], 1u)
         let result = mesh_center(fixed_in_frame{original, live} Dot([1, 0, 0]))
     ",
         &["mesh", "scene"],
@@ -964,13 +1057,13 @@ fn test_fixed_in_frame_preserves_camera_space_under_translation() {
 fn test_fixed_in_frame_preserves_camera_space_under_orbit() {
     let r = run_with_stdlib(
         "
-        let original = Camera([0, 0, -10], [0, 0, 0], 1u)
+        let original = Camera(10b, [0, 0, 0], 1u)
         let live = Camera([10, 0, 0], [0, 0, 0], 1u)
         let result = mesh_center(fixed_in_frame{original, live} Dot([1, 0, 0]))
     ",
         &["mesh", "scene"],
     );
-    r.assert_float_list_approx(&[0.0, 0.0, 1.0], 1e-5);
+    r.assert_float_list_approx(&[0.0, 0.0, -1.0], 1e-5);
 }
 
 #[test]
@@ -1245,7 +1338,7 @@ fn test_rotate_operator_uses_angle_axis_and_optional_pivot() {
     ",
         &["mesh"],
     );
-    r.assert_float_list_approx(&[0.0, 1.0, 0.0], 1e-5);
+    r.assert_float_list_approx(&[0.0, -1.0, 0.0], 1e-5);
 }
 
 #[test]

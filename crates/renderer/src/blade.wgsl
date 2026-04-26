@@ -100,7 +100,7 @@ fn world_to_camera(world: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     return vec3<f32>(
         dot(relative, camera.right.xyz),
         dot(relative, camera.up.xyz),
-        dot(relative, camera.forward.xyz),
+        -dot(relative, camera.forward.xyz),
     );
 }
 
@@ -108,7 +108,7 @@ fn normal_to_camera(normal: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     return vec3<f32>(
         dot(normal, camera.right.xyz),
         dot(normal, camera.up.xyz),
-        dot(normal, camera.forward.xyz),
+        -dot(normal, camera.forward.xyz),
     );
 }
 
@@ -116,7 +116,7 @@ fn vector_to_camera(vector: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     return vec3<f32>(
         dot(vector, camera.right.xyz),
         dot(vector, camera.up.xyz),
-        dot(vector, camera.forward.xyz),
+        -dot(vector, camera.forward.xyz),
     );
 }
 
@@ -131,10 +131,10 @@ fn project_camera(model: vec3<f32>, camera: CameraParams, depth_bias: f32) -> Pr
     let near = camera.clip.x;
     let far = max(camera.clip.y, near + 0.0001);
 
-    let clip_w = camera_z;
+    let clip_w = -camera_z;
     let clip_x = camera_x / (tan_half_fov * aspect) * viewport_scale.x;
     let clip_y = camera_y / tan_half_fov * viewport_scale.y;
-    let clip_z = far * camera_z / (far - near) - (far * near) / (far - near);
+    let clip_z = -far * camera_z / (far - near) - (far * near) / (far - near);
 
     var clip = vec4<f32>(clip_x, clip_y, clip_z, clip_w);
     clip.z -= depth_bias * clip.w;
@@ -250,7 +250,8 @@ fn vs_line(
     }
     let tan_half_fov = max(line_camera.clip.z, 0.05);
     let aspect = max(line_camera.clip.w, 0.1);
-    let scale = 2.0 * radius_px * model.z * tan_half_fov * aspect / viewport.x * extrude;
+    let eye_depth = max(-model.z, line_camera.clip.x);
+    let scale = 2.0 * radius_px * eye_depth * tan_half_fov * aspect / viewport.x * extrude;
     let max_miter_scale = max(line_params.depth_bias.y, 0.0);
     let unclipped_length_sq = dot(unclipped, unclipped);
     var full_normal = unclipped * scale;

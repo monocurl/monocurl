@@ -36,11 +36,7 @@ impl Value {
         self.is_lvalue()
             || matches!(
                 self,
-                Value::List(_)
-                    | Value::Map(_)
-                    | Value::Leader(_)
-                    | Value::InvokedFunction(_)
-                    | Value::InvokedOperator(_)
+                Value::List(_) | Value::Leader(_)
             )
     }
 
@@ -58,46 +54,11 @@ impl Value {
                 list.elements = list.elements.iter().map(elided_heap_ref_value).collect();
                 Value::List(list)
             }
-            Value::Map(mut map) => {
-                let mut entries = std::collections::HashMap::with_capacity(map.entries.len());
-                for key in &map.insertion_order {
-                    if let Some(value_ref) = map.entries.get(key) {
-                        entries.insert(key.clone(), elided_heap_ref_value(value_ref));
-                    }
-                }
-                map.entries = entries;
-                Value::Map(map)
-            }
-            Value::InvokedFunction(mut inv) => {
-                inv.body.lambda =
-                    Box::new(inv.body.lambda.as_ref().clone().elide_lvalue_leader_rec());
-                for argument in &mut inv.body.arguments {
-                    if argument.may_need_lvalue_leader_elision() {
-                        *argument =
-                            std::mem::replace(argument, Value::Nil).elide_lvalue_leader_rec();
-                    }
-                }
-                Value::InvokedFunction(inv)
-            }
-            Value::InvokedOperator(mut inv) => {
-                inv.body.operator =
-                    Box::new(inv.body.operator.as_ref().clone().elide_lvalue_leader_rec());
-                inv.body.operand =
-                    Box::new(inv.body.operand.as_ref().clone().elide_lvalue_leader_rec());
-                for argument in &mut inv.body.arguments {
-                    if argument.may_need_lvalue_leader_elision() {
-                        *argument =
-                            std::mem::replace(argument, Value::Nil).elide_lvalue_leader_rec();
-                    }
-                }
-                Value::InvokedOperator(inv)
-            }
             other => other,
         }
     }
 
     /// read through an lvalue or weak lvalue
-    #[inline(always)]
     pub fn elide_lvalue(self) -> Value {
         match self {
             Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()),
@@ -106,7 +67,7 @@ impl Value {
         }
     }
 
-    pub async fn elide_wrappers(self, executor: &mut Executor) -> Result<Value, ExecutorError> {
+    pub async fn elide_wrappers_rec(self, executor: &mut Executor) -> Result<Value, ExecutorError> {
         let mut base = self.elide_lvalue();
         loop {
             base = match base {

@@ -82,7 +82,7 @@ pub async fn initial_camera(
         [
             (
                 "position",
-                value_list([Value::Integer(0), Value::Integer(0), Value::Integer(-4)]),
+                value_list([Value::Integer(0), Value::Integer(0), Value::Integer(4)]),
             ),
             (
                 "look_at",

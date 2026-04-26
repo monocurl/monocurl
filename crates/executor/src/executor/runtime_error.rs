@@ -18,7 +18,8 @@ impl Executor {
     }
 
     pub fn record_runtime_error_at_root(&mut self, error: ExecutorError) -> RuntimeError {
-        let runtime_error = self.build_runtime_error_at_stack(error, ExecutionState::ROOT_STACK_ID);
+        let runtime_error =
+            self.build_runtime_error_at_stack(error, ExecutionState::ROOT_STACK_IDX);
         self.state.error(runtime_error.clone());
         runtime_error
     }
@@ -28,7 +29,7 @@ impl Executor {
         error: ExecutorError,
     ) -> RuntimeError {
         let mut runtime_error =
-            self.build_runtime_error_at_stack(error, ExecutionState::ROOT_STACK_ID);
+            self.build_runtime_error_at_stack(error, ExecutionState::ROOT_STACK_IDX);
         if let Some(span) = self.latest_root_init_section_span() {
             runtime_error.span = span;
         }
@@ -270,7 +271,7 @@ mod tests {
         let mut executor =
             executor_with_root_annotations(&[(10, 14), (20, 24), (30, 34), (40, 44)]);
 
-        let root_idx = crate::state::ExecutionState::ROOT_STACK_ID;
+        let root_idx = crate::state::ExecutionState::ROOT_STACK_IDX;
         executor.state.stack_mut(root_idx).ip = (0, 1);
         executor.state.stack_mut(root_idx).call_stack.push((0, 3));
 

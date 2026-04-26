@@ -58,7 +58,7 @@ pub async fn expect_list(
         .stack(stack_idx)
         .read_at(-2)
         .clone()
-        .elide_wrappers(executor)
+        .elide_wrappers_rec(executor)
         .await?;
     let expected_len = read_int(executor, stack_idx, -1, "expected_len")?;
 
@@ -130,7 +130,7 @@ pub(super) async fn invoke_key_lambda(
     executor
         .invoke_lambda(lambda, vec![value])
         .await?
-        .elide_wrappers(executor)
+        .elide_wrappers_rec(executor)
         .await
 }
 

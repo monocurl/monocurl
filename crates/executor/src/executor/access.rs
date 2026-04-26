@@ -61,11 +61,10 @@ impl Executor {
                 if matches!(rhs, Value::Stateful(_)) && leader.kind != LeaderKind::Mesh {
                     return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
-                let stack_id = self.state.stack(stack_idx).stack_id;
                 heap_replace(leader.leader_rc.key(), rhs);
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(key) {
-                        l.last_modified_stack = Some(stack_id);
+                        l.last_modified_stack = Some(stack_idx);
                         l.leader_version += 1;
                     }
                 });
@@ -128,18 +127,49 @@ impl Executor {
         }
 
         let (key, base_val) = follow_heap_lvalues(key);
-        match base_val {
+        let appended_key = match base_val {
             Value::List(mut list) => {
                 list.elements.push(VRc::new(rhs.elide_lvalue_leader_rec()));
                 heap_replace(key, Value::List(list));
+                key
+            }
+            Value::Leader(leader) => {
+                let (inner_key, inner_val) = follow_heap_lvalues(leader.leader_rc.key());
+                let Value::List(mut list) = inner_val else {
+                    return ExecSingle::Error(ExecutorError::type_error(
+                        "list",
+                        inner_val.type_name(),
+                    ));
+                };
+
+                list.elements.push(VRc::new(rhs.elide_lvalue_leader_rec()));
+
+                if leader.cloned {
+                    // elide leader
+                    heap_replace(key, Value::List(list));
+
+                    key
+                } else {
+                    // modify in place
+                    heap_replace(inner_key, Value::List(list));
+
+                    with_heap_mut(|h| {
+                        if let Value::Leader(l) = &mut *h.get_mut(key) {
+                            l.last_modified_stack = Some(stack_idx);
+                            l.leader_version += 1;
+                        }
+                    });
+
+                    inner_key
+                }
             }
             _ => {
                 return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name()));
             }
-        }
+        };
         self.state
             .stack_mut(stack_idx)
-            .push(Value::WeakLvalue(VWeak::from(key)));
+            .push(Value::WeakLvalue(VWeak::from(appended_key)));
         ExecSingle::Continue
     }
 
@@ -160,10 +190,9 @@ impl Executor {
 
             let (base_key, base_val) = follow_heap_lvalues(base_key);
             if let Value::Leader(_) = &base_val {
-                let stack_id = self.state.stack(stack_idx).stack_id;
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(base_key) {
-                        l.last_modified_stack = Some(stack_id);
+                        l.last_modified_stack = Some(stack_idx);
                         l.leader_version += 1;
                     }
                 });
@@ -310,10 +339,9 @@ impl Executor {
 
             let (base_key, base_val) = follow_heap_lvalues(base_key);
             if let Value::Leader(_) = &base_val {
-                let stack_id = self.state.stack(stack_idx).stack_id;
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(base_key) {
-                        l.last_modified_stack = Some(stack_id);
+                        l.last_modified_stack = Some(stack_idx);
                         l.leader_version += 1;
                     }
                 });

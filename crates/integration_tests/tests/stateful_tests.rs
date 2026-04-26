@@ -282,7 +282,7 @@ fn test_stateful_dereference_after_set_animation() {
         param x = 5
         mesh m = $x
         x = 20
-        play Set([&x])
+        play Set([x])
     ",
     );
     r.assert_ok();
@@ -346,7 +346,7 @@ fn test_stateful_add_after_set_animation() {
         param x = 5
         mesh m = $x + 10
         x = 20
-        play Set([&x])
+        play Set([x])
     ",
     );
     r.assert_error("operators cannot be applied to stateful values");

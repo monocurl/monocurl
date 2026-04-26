@@ -95,7 +95,7 @@ fn collect_scene_meshes<'a>(
 ) -> std::pin::Pin<Box<dyn Future<Output = Result<(), SceneSnapshotBuildError>> + 'a>> {
     Box::pin(async move {
         let value = value
-            .elide_wrappers(executor)
+            .elide_wrappers_rec(executor)
             .await
             .map_err(|error| scene_snapshot_error(error, false))?;
         match value {
@@ -186,7 +186,7 @@ async fn scene_field_value(
     match follower {
         Some((value, prefer_root_init_span)) => Ok(Some(SceneFieldValue {
             value: value
-                .elide_wrappers(executor)
+                .elide_wrappers_rec(executor)
                 .await
                 .map_err(|error| scene_snapshot_error(error, prefer_root_init_span))?,
             prefer_root_init_span,
@@ -224,7 +224,7 @@ async fn scene_field_value_with_version(
     match follower {
         Some((value, version, prefer_root_init_span)) => Ok(Some(SceneFieldValueWithVersion {
             value: value
-                .elide_wrappers(executor)
+                .elide_wrappers_rec(executor)
                 .await
                 .map_err(|error| scene_snapshot_error(error, prefer_root_init_span))?,
             version,
@@ -239,7 +239,7 @@ async fn read_f32(
     value: Value,
     target: &'static str,
 ) -> Result<f32, ExecutorError> {
-    match value.elide_wrappers(executor).await? {
+    match value.elide_wrappers_rec(executor).await? {
         Value::Integer(n) => Ok(n as f32),
         Value::Float(f) => Ok(f as f32),
         other => Err(ExecutorError::type_error_for(
@@ -255,7 +255,7 @@ async fn read_float4(
     value: Value,
     target: &'static str,
 ) -> Result<(f32, f32, f32, f32), ExecutorError> {
-    let value = value.elide_wrappers(executor).await?;
+    let value = value.elide_wrappers_rec(executor).await?;
     let Value::List(list) = value else {
         return Err(ExecutorError::type_error_for(
             "list of length 4",
@@ -294,7 +294,7 @@ async fn background_snapshot_from_value(
     executor: &mut Executor,
     value: Value,
 ) -> Result<BackgroundSnapshot, ExecutorError> {
-    let value = value.elide_wrappers(executor).await?;
+    let value = value.elide_wrappers_rec(executor).await?;
     if matches!(value, Value::List(_)) {
         return Ok(BackgroundSnapshot {
             color: read_float4(executor, value, "background").await?,
@@ -312,7 +312,7 @@ async fn background_snapshot_from_value(
     let Some(kind) = map_field_value(&map, "kind") else {
         return Err(ExecutorError::missing_field("background", "kind"));
     };
-    let kind = kind.elide_wrappers(executor).await?;
+    let kind = kind.elide_wrappers_rec(executor).await?;
     if !matches!(kind, Value::String(ref kind) if kind == "solid_background") {
         return Err(ExecutorError::invalid_scene(format!(
             "background must resolve to a solid background, got kind {}",

@@ -26,7 +26,7 @@ pub struct CameraSnapshot {
 impl Default for CameraSnapshot {
     fn default() -> Self {
         Self {
-            position: Float3::new(0.0, 0.0, -10.0),
+            position: Float3::new(0.0, 0.0, 10.0),
             look_at: Float3::ZERO,
             up: Float3::Y,
             near: 0.1,
@@ -48,21 +48,21 @@ pub struct CameraBasis {
 
 impl CameraSnapshot {
     pub fn basis(&self) -> CameraBasis {
-        let forward = normalized_or(self.look_at - self.position, Float3::Z);
+        let forward = normalized_or(self.look_at - self.position, -Float3::Z);
         let up_hint = normalized_or(self.up, Float3::Y);
 
-        let mut right = up_hint.cross(forward);
+        let mut right = forward.cross(up_hint);
         if right.len_sq() <= 1e-6 {
-            let fallback_up = if Float3::Y.cross(forward).len_sq() > 1e-6 {
+            let fallback_up = if forward.cross(Float3::Y).len_sq() > 1e-6 {
                 Float3::Y
             } else {
                 Float3::Z
             };
-            right = fallback_up.cross(forward);
+            right = forward.cross(fallback_up);
         }
 
         let right = right.normalize();
-        let up = forward.cross(right).normalize();
+        let up = right.cross(forward).normalize();
         let near = self.near.max(MIN_CAMERA_NEAR);
 
         CameraBasis {
@@ -134,7 +134,7 @@ async fn read_f32(
     value: Value,
     target: &'static str,
 ) -> Result<f32, ExecutorError> {
-    match value.elide_wrappers(executor).await? {
+    match value.elide_wrappers_rec(executor).await? {
         Value::Integer(n) => Ok(n as f32),
         Value::Float(f) => Ok(f as f32),
         other => Err(ExecutorError::type_error_for(
@@ -150,7 +150,7 @@ async fn read_float3(
     value: Value,
     target: &'static str,
 ) -> Result<Float3, ExecutorError> {
-    let value = value.elide_wrappers(executor).await?;
+    let value = value.elide_wrappers_rec(executor).await?;
     let Value::List(list) = value else {
         return Err(ExecutorError::type_error_for(
             "list of length 3",
@@ -183,7 +183,7 @@ pub async fn parse_camera_value(
     value: Value,
     target: &'static str,
 ) -> Result<CameraSnapshot, ExecutorError> {
-    let value = value.elide_wrappers(executor).await?;
+    let value = value.elide_wrappers_rec(executor).await?;
     let Value::Map(map) = value else {
         return Err(ExecutorError::type_error_for(
             "camera",
@@ -195,7 +195,7 @@ pub async fn parse_camera_value(
     let Some(kind) = map_field_value(&map, "kind") else {
         return Err(ExecutorError::missing_field("camera", "kind"));
     };
-    let kind = kind.elide_wrappers(executor).await?;
+    let kind = kind.elide_wrappers_rec(executor).await?;
     if !matches!(kind, Value::String(ref kind) if kind == "camera") {
         return Err(ExecutorError::invalid_scene(format!(
             "camera must resolve to a camera object, got kind {}",
@@ -240,4 +240,46 @@ pub async fn parse_camera_arg(
 ) -> Result<CameraSnapshot, ExecutorError> {
     let value = executor.state.stack(stack_idx).read_at(index).clone();
     parse_camera_value(executor, value, target).await
+}
+
+#[cfg(test)]
+mod tests {
+    use geo::simd::Float3;
+
+    use super::CameraSnapshot;
+
+    fn assert_float3_close(actual: Float3, expected: Float3) {
+        let delta = actual - expected;
+        assert!(
+            delta.len_sq() <= 1e-10,
+            "expected {actual:?} to be close to {expected:?}"
+        );
+    }
+
+    #[test]
+    fn default_camera_basis_is_right_handed() {
+        let basis = CameraSnapshot::default().basis();
+
+        assert_float3_close(basis.position, Float3::new(0.0, 0.0, 10.0));
+        assert_float3_close(basis.right, Float3::X);
+        assert_float3_close(basis.up, Float3::Y);
+        assert_float3_close(basis.forward, -Float3::Z);
+        assert_float3_close(basis.right.cross(basis.up), -basis.forward);
+    }
+
+    #[test]
+    fn camera_basis_keeps_screen_axes_unflipped() {
+        let basis = CameraSnapshot {
+            position: Float3::new(0.0, 0.0, 4.0),
+            look_at: Float3::ZERO,
+            up: Float3::Y,
+            near: 0.1,
+            far: 100.0,
+        }
+        .basis();
+
+        assert!(Float3::X.dot(basis.right) > 0.999);
+        assert!(Float3::Y.dot(basis.up) > 0.999);
+        assert!(Float3::Z.dot(-basis.forward) > 0.999);
+    }
 }

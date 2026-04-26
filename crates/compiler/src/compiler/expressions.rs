@@ -164,8 +164,8 @@ impl Compiler {
             DirectionalLiteral::Right(m) => (*m, 0.0, 0.0),
             DirectionalLiteral::Up(m) => (0.0, *m, 0.0),
             DirectionalLiteral::Down(m) => (0.0, -m, 0.0),
-            DirectionalLiteral::Forward(m) => (0.0, 0.0, *m),
-            DirectionalLiteral::Backward(m) => (0.0, 0.0, -m),
+            DirectionalLiteral::Forward(m) => (0.0, 0.0, -m),
+            DirectionalLiteral::Backward(m) => (0.0, 0.0, *m),
         };
         self.emit_push(Instruction::PushEmptyVector, span.clone());
         for component in [x, y, z] {

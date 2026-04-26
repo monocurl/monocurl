@@ -28,16 +28,16 @@ let Rect = |size| {
 let RegularPolygon = |n, circumradius|
     __monocurl__native__ mk_regular_polygon([0, 0, 0], n, circumradius)
 
-let Polygon = |vertices, normal_hint = 1f|
+let Polygon = |vertices, normal_hint = 1b|
     __monocurl__native__ mk_polygon(vertices, normal_hint)
 
-let Polyline = |vertices, normal_hint = 1f|
+let Polyline = |vertices, normal_hint = 1b|
     __monocurl__native__ mk_polyline(vertices, normal_hint)
 
-let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1f|
+let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
     __monocurl__native__ mk_line(start, end, normal)
 
-let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1f, path_arc = 0|
+let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0|
     __monocurl__native__ mk_arrow(start, end, normal, path_arc)
 
 let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
@@ -47,7 +47,7 @@ let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
     return __monocurl__native__ mk_arc([0, 0, 0], radius, theta_start, theta_end)
 }
 
-let Capsule = |start_center, end_center, radii = 0.4, normal = 1f| {
+let Capsule = |start_center, end_center, radii = 0.4, normal = 1b| {
     var start_radius = 0
     var end_radius = 0
     if (__monocurl__native__ is_list(radii)) {
@@ -59,7 +59,7 @@ let Capsule = |start_center, end_center, radii = 0.4, normal = 1f| {
     return __monocurl__native__ mk_capsule(start_center, end_center, start_radius, end_radius, normal)
 }
 
-let Triangle = |p, q, r, normal_hint = 1f|
+let Triangle = |p, q, r, normal_hint = 1b|
     __monocurl__native__ mk_triangle(p, q, r, normal_hint)
 
 # 3-d primitives
@@ -98,10 +98,10 @@ let Plane = |dist = 0, size = [4, 4]| {
 let Bezier = |control_points|
     __monocurl__native__ mk_bezier(control_points)
 
-let Vector = |delta = 1r, tail = [0, 0, 0], normal = 1f|
+let Vector = |delta = 1r, tail = [0, 0, 0], normal = 1b|
     __monocurl__native__ mk_vector(tail, delta, normal)
 
-let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1f|
+let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1b|
     __monocurl__native__ mk_half_vector(tail, delta, normal)
 
 let Image = |name, center = [0, 0, 0], size = [1, 1]| {
@@ -157,13 +157,13 @@ let Number = |value, precision = 2, scale = 1|
 
 # graphing
 
-let Axis1d = |label = nil, axis = 1r, normal = 1f, range = [-5, 5, 0.25], tick_label_rate = 4|
+let Axis1d = |label = nil, axis = 1r, normal = 1b, range = [-5, 5, 0.25], tick_label_rate = 4|
     __monocurl__native__ mk_axis1d(0l, axis, normal, range, label, tick_label_rate)
 
 let Axis2d = |x_label = nil, y_label = nil, x = [-5, 5, 0.25], y = [-5, 5, 0.25], axes = [1r, 1u], tick_label_rates = [4, 4], grid = 0|
     __monocurl__native__ mk_axis2d(0l, axes, x, y, x_label, y_label, tick_label_rates, grid)
 
-let Axis3d = |x_label = nil, y_label = nil, z_label = nil, x = [-5, 5, 0.25], y = [-5, 5, 0.25], z = [-5, 5, 0.25], axes = [1r, 1u, 1f], tick_label_rates = [4, 4, 4], grid = 0|
+let Axis3d = |x_label = nil, y_label = nil, z_label = nil, x = [-5, 5, 0.25], y = [-5, 5, 0.25], z = [-5, 5, 0.25], axes = [1r, 1u, 1b], tick_label_rates = [4, 4, 4], grid = 0|
     __monocurl__native__ mk_axis3d(0l, axes, x, y, z, x_label, y_label, z_label, tick_label_rates, grid)
 
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
@@ -240,7 +240,7 @@ let Stack = |meshes, dir, align_dir = [0, 0, 0]| __monocurl__native__ mk_stack(m
 
 let XStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1r, align_dir)
 let YStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1u, align_dir)
-let ZStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1f, align_dir)
+let ZStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1b, align_dir)
 
 let Grid = |mesh_array| __monocurl__native__ mk_grid(mesh_array)
 
@@ -264,7 +264,7 @@ let scale = operator |target, factor = 1, filter = nil| {
     return [go(s: 1), go(s: factor)]
 }
 
-let rotate = operator |target, radians, axis = 1f, pivot = nil, filter = nil| {
+let rotate = operator |target, radians, axis = 1b, pivot = nil, filter = nil| {
     let go = |angle| __monocurl__native__ op_rotate(target, angle, axis, pivot, filter)
     return [go(angle: 0), go(angle: radians)]
 }
@@ -388,7 +388,7 @@ let projected = operator |target, screen, ray = 1b, filter = nil| {
     let go = |level| __monocurl__native__ op_projected(target, screen, ray, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1f, filter = nil| {
+let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1b, filter = nil| {
     let go = |level| __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit, filter, level)
     return [go(level: 0), go(level: 1)]
 }

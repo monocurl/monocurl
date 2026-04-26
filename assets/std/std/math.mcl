@@ -10,7 +10,7 @@ let PI  = 3.1415926535897932
 let TAU = 6.2831853071795864
 
 # canonical lists of length 3. Direction-suffix literals (1l, 1r, 1u, 1d, 1f, 1b)
-# produce the same values; these names read more naturally in expressions.
+# produce the same values; in the right-handed viewport, forward is negative z.
 let ORIGIN   = [0, 0, 0]
 let ZERO_V   = [0, 0, 0]
 let ONE_V    = [1, 1, 1]
@@ -24,7 +24,7 @@ let BACKWARD = 1b
 # basis vectors
 let X_HAT = RIGHT
 let Y_HAT = UP
-let Z_HAT = FORWARD
+let Z_HAT = BACKWARD
 
 # scalar functions
 let sqrt  = |x| __monocurl__native__ sqrt(x)

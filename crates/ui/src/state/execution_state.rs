@@ -32,7 +32,7 @@ impl Default for ExecutionState {
             camera_version: 0,
             meshes: Vec::new(),
             parameter_state: HashMap::new(),
-            current_timestamp: Timestamp::default(),
+            current_timestamp: Timestamp::new(0, -f64::MIN_POSITIVE),
             status: ExecutionStatus::Paused,
             slide_names: Vec::new(),
             slide_durations: Vec::new(),
@@ -61,7 +61,7 @@ impl ExecutionState {
         if let Some(meshes) = snapshot.meshes {
             self.meshes = meshes;
         }
-        if !matches!(snapshot.status, ExecutionStatus::Seeking) {
+        if snapshot.status != ExecutionStatus::Seeking {
             self.current_timestamp = snapshot.current_timestamp;
         }
         self.status = snapshot.status;

@@ -11,7 +11,7 @@ fn test_set_syncs_only_explicit_candidates() {
         param b = 2
         a = 10
         b = 20
-        play Set([&a])
+        play Set([a])
     ",
     );
     r.assert_ok();
@@ -26,7 +26,7 @@ fn test_set_has_minimum_positive_duration() {
         "
         param x = 0
         x = 10
-        play Set([&x])
+        play Set([x])
     ",
     );
     r.assert_ok()
@@ -40,7 +40,7 @@ fn test_set_slide_can_seek_back_to_zero_after_finishing() {
             "
             param x = 0
             x = 10
-            play Set([&x])
+            play Set([x])
         ",
             SectionType::Slide,
         )],
@@ -131,11 +131,11 @@ fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
         };
 
         let _ = with_heap(|h| h.get(leader.leader_rc.key()).clone())
-            .elide_wrappers(&mut executor)
+            .elide_wrappers_rec(&mut executor)
             .await
             .expect("leader wrapper elision should succeed");
         let _ = with_heap(|h| h.get(leader.follower_rc.key()).clone())
-            .elide_wrappers(&mut executor)
+            .elide_wrappers_rec(&mut executor)
             .await
             .expect("follower wrapper elision should succeed");
     });
@@ -723,12 +723,12 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
     let slide5 = r#"
         equation = tag_filter{|t| len(t) == 0} theorem
 
-        let w = Write(1, [&equation])
+        let w = Write(1, [equation])
         let tl = TransSubsetTo(&left, |tag| C2_TAG in tag, tag_filter{|t| 1 in t} theorem, &c_transfer)
         let ta = TransSubsetTo(&right, |tag| A2_TAG in tag or B2_TAG in tag, tag_filter{|t| 2 in t} theorem, &ab_transfer)
 
         play [
-            Write(1, [&equation]),
+            Write(1, [equation]),
             tl, ta
         ]
     "#;
@@ -793,7 +793,7 @@ fn test_lerp_flattens_nested_candidate_tree() {
         param b = 2
         a = 10
         b = 20
-        play Lerp(2, [[&a], []])
+        play Lerp(2, [[a], []])
     ",
         1.0,
     );
@@ -811,7 +811,7 @@ fn test_lerp_rate_lambda_shapes_progression() {
         "
         param x = 0
         x = 10
-        play Lerp(2, [&x], |t| t * t)
+        play Lerp(2, [x], |t| t * t)
     ",
         1.0,
     );
@@ -828,7 +828,7 @@ fn test_lerp_custom_lerp_lambda_shapes_value_interpolation() {
         "
         param x = 0
         x = 10
-        play PrimitiveAnim(2, [&x], nil, |a, b, state, t| a + (b - a) * t * t, linear)
+        play PrimitiveAnim(2, [x], nil, |a, b, state, t| a + (b - a) * t * t, linear)
     ",
         1.0,
     );
@@ -1555,7 +1555,7 @@ fn test_tag_trans_handles_everything_intro_badges() {
             tag{7} stroke{MAGENTA} Capsule([3.6, -3.0, 0], [6.2, -2.2, 0], [0.22, 0.22])
         ]
 
-        play Set([&intro])
+        play Set([intro])
 
         intro = [
             badge(shift{delta: [-5.5, 2.6, 0]} Circle(radius: 0.78), PURPLE, 4),
@@ -1567,7 +1567,7 @@ fn test_tag_trans_handles_everything_intro_badges() {
             tag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
         ]
 
-        play TagTrans(1.2, [&intro], 0.6 * 1u, smoother)
+        play TagTrans(1.2, [intro], 0.6 * 1u, smoother)
     "#;
 
     let r = run_anim_impl(
@@ -1601,7 +1601,7 @@ fn test_tag_trans_handles_everything_intro_after_operator_rewrite() {
             scale{[1.05, 0.9, 1]}
             intro
 
-        play Set([&intro])
+        play Set([intro])
 
         intro = [
             badge(shift{[-5.5, 2.6, 0]} Circle(0.78), PURPLE, 4),
@@ -1613,7 +1613,7 @@ fn test_tag_trans_handles_everything_intro_after_operator_rewrite() {
             tag{7} stroke{MAGENTA} Capsule([3.6, -3.1, 0], [6.1, -2.1, 0], [0.18, 0.55])
         ]
 
-        play TagTrans(1.2, [&intro], 0.6 * 1u, smoother)
+        play TagTrans(1.2, [intro], 0.6 * 1u, smoother)
     "#;
 
     let r = run_anim_impl(
@@ -1871,7 +1871,7 @@ fn test_concurrent_primitive_animation_lock_error() {
         "
         param x = 0
         x = 10
-        play [Lerp(1, [&x]), Set([&x])]
+        play [Lerp(1, [x]), Set([x])]
     ",
     );
     r.assert_error("concurrent animation");

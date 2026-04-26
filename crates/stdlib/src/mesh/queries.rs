@@ -164,7 +164,7 @@ pub async fn mesh_forward(
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
-    require_point(extremal_point(&tree, Float3::new(0.0, 0.0, 1.0)), "mesh")
+    require_point(extremal_point(&tree, Float3::new(0.0, 0.0, -1.0)), "mesh")
 }
 
 #[stdlib_func]
@@ -173,7 +173,7 @@ pub async fn mesh_backward(
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
     let tree = read_mesh_tree_arg(executor, stack_idx, -1, "mesh").await?;
-    require_point(extremal_point(&tree, Float3::new(0.0, 0.0, -1.0)), "mesh")
+    require_point(extremal_point(&tree, Float3::new(0.0, 0.0, 1.0)), "mesh")
 }
 
 #[stdlib_func]

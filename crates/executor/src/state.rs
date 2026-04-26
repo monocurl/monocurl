@@ -15,7 +15,6 @@ use crate::{
 /// a single execution context (analogous to a thread / coroutine).
 #[derive(Clone)]
 pub struct ExecutionStack {
-    pub stack_id: usize,
     pub var_stack: Vec<Value>,
     pub retained_prefix_len: usize,
     pub ip: InstructionPointer,
@@ -29,7 +28,6 @@ pub struct ExecutionStack {
 
 #[derive(Clone)]
 pub struct ExecutionStackGhost {
-    pub stack_id: usize,
     pub ip: InstructionPointer,
     pub call_stack: Vec<InstructionPointer>,
     pub parent_idx: Option<usize>,
@@ -44,13 +42,11 @@ pub enum ExecutionStackSlot {
 
 impl ExecutionStack {
     pub fn new(
-        stack_id: usize,
         ip: InstructionPointer,
         parent_idx: Option<usize>,
         trace_parent_idx: Option<usize>,
     ) -> Self {
         Self {
-            stack_id,
             var_stack: Vec::new(),
             retained_prefix_len: 0,
             ip,
@@ -120,13 +116,6 @@ impl ExecutionStackSlot {
         }
     }
 
-    fn stack_id(&self) -> usize {
-        match self {
-            Self::Alive(stack) => stack.stack_id,
-            Self::Ghost(stack) => stack.stack_id,
-        }
-    }
-
     fn ip(&self) -> InstructionPointer {
         match self {
             Self::Alive(stack) => stack.ip,
@@ -169,7 +158,6 @@ pub struct BakedPrimitiveAnim {
     pub embedded_ends: Vec<Value>,
     pub embedded_states: Vec<Value>,
     pub parent_stack_idx: usize,
-    pub stack_id: usize,
     pub span: Span8,
 }
 
@@ -209,7 +197,6 @@ pub struct ExecutionState {
     pub last_stack_idx: usize,
     rng_state: u64,
 
-    global_stack_counter: usize,
     global_primitive_anim_counter: usize,
     pub alive_stack_count: usize,
     pub execution_stacks: Vec<ExecutionStackSlot>,
@@ -231,18 +218,17 @@ pub struct ExecutionState {
 }
 
 impl ExecutionState {
-    pub const ROOT_STACK_ID: usize = 0;
+    pub const ROOT_STACK_IDX: usize = 0;
     const RNG_GAMMA: u64 = 0x9E37_79B9_7F4A_7C15;
     const RNG_TIMESTAMP_BASIS: u64 = 0xA076_1D64_78BD_642F;
 
     pub fn new() -> Self {
-        let timestamp = Timestamp::default();
+        let timestamp = Timestamp::new(0, -f64::MIN_POSITIVE);
         let mut ret = Self {
             timestamp,
             pending_playback_time: 0.0,
-            last_stack_idx: Self::ROOT_STACK_ID,
+            last_stack_idx: Self::ROOT_STACK_IDX,
             rng_state: Self::seed_random_state(timestamp),
-            global_stack_counter: 0,
             global_primitive_anim_counter: 0,
             alive_stack_count: 0,
             execution_stacks: Vec::new(),
@@ -259,7 +245,7 @@ impl ExecutionState {
 
         let ip: InstructionPointer = (0, 0);
         let stack_idx = ret.alloc_stack(ip, None, None).unwrap();
-        debug_assert_eq!(stack_idx, ExecutionState::ROOT_STACK_ID);
+        debug_assert_eq!(stack_idx, ExecutionState::ROOT_STACK_IDX);
 
         let mut heads = BTreeSet::new();
         heads.insert(stack_idx);
@@ -268,7 +254,6 @@ impl ExecutionState {
         ret
     }
 
-    #[inline]
     fn mix_random_bits(mut x: u64) -> u64 {
         x ^= x >> 30;
         x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
@@ -277,7 +262,6 @@ impl ExecutionState {
         x ^ (x >> 31)
     }
 
-    #[inline]
     fn seed_random_state(timestamp: Timestamp) -> u64 {
         let slide = timestamp.slide as u64;
         let time_bits = timestamp.time.to_bits();
@@ -312,9 +296,7 @@ impl ExecutionState {
         }
 
         self.alive_stack_count += 1;
-        let id = self.global_stack_counter;
-        self.global_stack_counter += 1;
-        let stack = ExecutionStack::new(id, ip, parent_idx, trace_parent_idx);
+        let stack = ExecutionStack::new(ip, parent_idx, trace_parent_idx);
         let idx = self.execution_stacks.len();
         self.execution_stacks.push(ExecutionStackSlot::Alive(stack));
 
@@ -330,7 +312,6 @@ impl ExecutionState {
     pub fn free_stack(&mut self, idx: usize) {
         let ghost = match &mut self.execution_stacks[idx] {
             ExecutionStackSlot::Alive(stack) => ExecutionStackGhost {
-                stack_id: stack.stack_id,
                 ip: stack.ip,
                 call_stack: std::mem::take(&mut stack.call_stack),
                 parent_idx: stack.parent_idx,
@@ -354,10 +335,6 @@ impl ExecutionState {
             .expect("ghost stack has no live frame")
     }
 
-    pub fn stack_id(&self, idx: usize) -> usize {
-        self.execution_stacks[idx].stack_id()
-    }
-
     pub fn stack_ip(&self, idx: usize) -> InstructionPointer {
         self.execution_stacks[idx].ip()
     }
@@ -374,15 +351,15 @@ impl ExecutionState {
         self.execution_stacks[idx].parent_idx()
     }
 
-    pub fn is_stack_id_ancestor_of_stack(
+    pub fn is_stack_ancestor_of_stack(
         &self,
-        ancestor_stack_id: usize,
+        ancestor_stack_idx: usize,
         descendant_stack_idx: usize,
     ) -> bool {
         let mut cursor = Some(descendant_stack_idx);
         while let Some(idx) = cursor {
             let slot = &self.execution_stacks[idx];
-            if slot.stack_id() == ancestor_stack_id {
+            if idx == ancestor_stack_idx {
                 return true;
             }
             cursor = slot.parent_idx().or(slot.trace_parent_idx());
@@ -414,7 +391,7 @@ impl ExecutionState {
         let leader_val = Value::Leader(Leader {
             kind,
             last_modified_stack: if kind == LeaderKind::Mesh {
-                Some(self.stack_id(stack_idx))
+                Some(stack_idx)
             } else {
                 None
             },
@@ -423,6 +400,7 @@ impl ExecutionState {
             leader_version: 0,
             follower_rc: VRc::from_retained(follower_key),
             follower_version: 0,
+            cloned: false,
         });
         let cell_vrc = VRc::new(leader_val);
 
@@ -489,11 +467,11 @@ mod tests {
     fn promote_to_param_tracks_leader_metadata_and_active_params() {
         let mut state = ExecutionState::new();
         state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::Integer(7));
 
         state.promote_to_leader(
-            ExecutionState::ROOT_STACK_ID,
+            ExecutionState::ROOT_STACK_IDX,
             LeaderKind::Param,
             "speed".into(),
         );
@@ -520,11 +498,11 @@ mod tests {
     fn promote_to_leader_elides_top_level_lvalue_init() {
         let mut state = ExecutionState::new();
         state
-            .stack_mut(ExecutionState::ROOT_STACK_ID)
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
             .push(Value::Lvalue(crate::heap::VRc::new(Value::Integer(7))));
 
         state.promote_to_leader(
-            ExecutionState::ROOT_STACK_ID,
+            ExecutionState::ROOT_STACK_IDX,
             LeaderKind::Param,
             "speed".into(),
         );
@@ -544,21 +522,21 @@ mod tests {
         let mut state = ExecutionState::new();
         let child_idx = state.alloc_stack(
             (0, 1),
-            Some(ExecutionState::ROOT_STACK_ID),
-            Some(ExecutionState::ROOT_STACK_ID),
+            Some(ExecutionState::ROOT_STACK_IDX),
+            Some(ExecutionState::ROOT_STACK_IDX),
         );
         let child_idx = child_idx.expect("child alloc should succeed");
-        let child_stack_id = state.stack_id(child_idx);
+        let child_stack_idx = child_idx;
 
         let trace_idx = state.alloc_stack((0, 2), None, Some(child_idx));
         let trace_idx = trace_idx.expect("trace alloc should succeed");
-        let trace_stack_id = state.stack_id(trace_idx);
+        let trace_stack_idx = trace_idx;
 
         state.free_stack(trace_idx);
 
-        assert!(state.is_stack_id_ancestor_of_stack(trace_stack_id, trace_idx));
-        assert!(state.is_stack_id_ancestor_of_stack(child_stack_id, trace_idx));
-        assert!(state.is_stack_id_ancestor_of_stack(ExecutionState::ROOT_STACK_ID, trace_idx));
+        assert!(state.is_stack_ancestor_of_stack(trace_stack_idx, trace_idx));
+        assert!(state.is_stack_ancestor_of_stack(child_stack_idx, trace_idx));
+        assert!(state.is_stack_ancestor_of_stack(ExecutionState::ROOT_STACK_IDX, trace_idx));
     }
 
     #[test]

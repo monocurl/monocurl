@@ -19,7 +19,7 @@ async fn read_text_tag_component(
     executor: &mut Executor,
     value: Value,
 ) -> Result<isize, ExecutorError> {
-    match value.elide_wrappers(executor).await? {
+    match value.elide_wrappers_rec(executor).await? {
         Value::Integer(value) => isize::try_from(value).map_err(|_| {
             ExecutorError::invalid_invocation("text tag component is out of range for isize")
         }),
@@ -28,7 +28,7 @@ async fn read_text_tag_component(
 }
 
 async fn read_text_tag(executor: &mut Executor, value: Value) -> Result<Vec<isize>, ExecutorError> {
-    let resolved = value.elide_wrappers(executor).await?;
+    let resolved = value.elide_wrappers_rec(executor).await?;
     Ok(match resolved {
         Value::Integer(value) => vec![isize::try_from(value).map_err(|_| {
             ExecutorError::invalid_invocation("text tag component is out of range for isize")
