@@ -1187,15 +1187,14 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let value = crate::read_float(executor, stack_idx, -4, "value")?;
-    let decimal_places = read_optional_decimal_places(executor, stack_idx, -3, "decimal_places")?;
-    let scale = read_text_scale(executor, stack_idx, -2, "scale")?;
+    let value = crate::read_float(executor, stack_idx, -3, "value")?;
+    let decimal_places = read_optional_decimal_places(executor, stack_idx, -2, "decimal_places")?;
     let include_sign = read_flag(executor, stack_idx, -1, "include_sign")?;
     let meshes = latex::render_number_with_quality(
         value,
         decimal_places,
         include_sign,
-        scale,
+        1.0,
         text_render_quality(executor),
     )
     .map_err(|error| {

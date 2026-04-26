@@ -69,6 +69,7 @@ impl VirtualHeap {
         self.slots.len()
     }
 
+    #[cfg(any(test, feature = "test_heap_tracking"))]
     pub fn live_slot_count(&self) -> usize {
         self.slots
             .iter()
@@ -76,6 +77,7 @@ impl VirtualHeap {
             .count()
     }
 
+    #[cfg(any(test, feature = "test_heap_tracking"))]
     pub fn free_slot_count(&self) -> usize {
         self.slot_count() - self.live_slot_count()
     }

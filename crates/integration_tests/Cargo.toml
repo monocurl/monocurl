@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 compiler.workspace = true
-executor = { path = "../executor", features = ["capture_tos"] }
+executor = { path = "../executor", features = ["capture_tos", "test_heap_tracking"] }
 geo.workspace = true
 lexer.workspace = true
 parser.workspace = true

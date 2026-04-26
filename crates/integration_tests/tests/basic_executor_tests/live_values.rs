@@ -1044,10 +1044,10 @@ fn test_text_tag_operator_tags_text_backends() {
 fn test_number_constructor_accepts_decimal_and_sign_options() {
     let r = run_with_stdlib(
         "
-        let general = Number(12345.678, nil, 1, 0)
-        let fixed = Number(-1.234, 2, 1, 0)
-        let unsigned = Number(1.5, 1, 1, 0)
-        let signed = Number(1.5, 1, 1, 1)
+        let general = Number(12345.678, nil, 0)
+        let fixed = Number(-1.234, 2, 0)
+        let unsigned = Number(1.5, 1, 0)
+        let signed = Number(1.5, 1, 1)
         let result =
             (len(mesh_triangle_set(general)) > 0) +
             (len(mesh_triangle_set(fixed)) > 0) +

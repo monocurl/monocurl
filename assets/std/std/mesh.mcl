@@ -152,8 +152,8 @@ let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(
 let Label = |target, str, scale = 1, dir = 1u, buffer = 0.1|
     __monocurl__native__ mk_label(target, str, scale, dir, buffer)
 
-let Number = |value, decimal_places = nil, scale = 1, include_sign = 0|
-    __monocurl__native__ mk_number(value, decimal_places, scale, include_sign)
+let Number = |value, decimal_places = nil, include_sign = 0|
+    __monocurl__native__ mk_number(value, decimal_places, include_sign)
 
 # graphing
 
