@@ -143,25 +143,16 @@ impl Executor {
                 };
 
                 list.elements.push(VRc::new(rhs.elide_lvalue_leader_rec()));
+                heap_replace(inner_key, Value::List(list));
 
-                if leader.cloned {
-                    // elide leader
-                    heap_replace(key, Value::List(list));
+                with_heap_mut(|h| {
+                    if let Value::Leader(l) = &mut *h.get_mut(key) {
+                        l.last_modified_stack = Some(stack_idx);
+                        l.leader_version += 1;
+                    }
+                });
 
-                    key
-                } else {
-                    // modify in place
-                    heap_replace(inner_key, Value::List(list));
-
-                    with_heap_mut(|h| {
-                        if let Value::Leader(l) = &mut *h.get_mut(key) {
-                            l.last_modified_stack = Some(stack_idx);
-                            l.leader_version += 1;
-                        }
-                    });
-
-                    inner_key
-                }
+                inner_key
             }
             _ => {
                 return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name()));

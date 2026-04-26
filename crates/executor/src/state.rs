@@ -400,7 +400,6 @@ impl ExecutionState {
             leader_version: 0,
             follower_rc: VRc::from_retained(follower_key),
             follower_version: 0,
-            cloned: false,
         });
         let cell_vrc = VRc::new(leader_val);
 

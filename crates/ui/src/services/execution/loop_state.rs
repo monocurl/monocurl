@@ -127,6 +127,10 @@ impl RuntimeState {
 
         match self.executor.seek_to(self.target).await {
             SeekToResult::SeekedTo(reached) => {
+                println!(
+                    "seeked to {:?}",
+                    self.executor.internal_to_user_timestamp(reached)
+                );
                 if self.executor.state.has_errors() {
                     self.cancel_runtime_work();
                 } else {

@@ -42,3 +42,32 @@ fn test_wait_duration_cross_section_lambda_with_while_loop() {
     );
     r.assert_ok().assert_slide_time_approx(4.0, 1e-9);
 }
+
+#[test]
+fn test_mesh_append_assign_preserves_snapshot_follower_slot() {
+    let (mut executor, _) = build_anim_executor(
+        &[(
+            "
+            mesh lins = []
+            play Set()
+            lins .= Line()
+            ",
+            SectionType::Slide,
+        )],
+        &stdlib_bundles(["mesh", "anim"]),
+    )
+    .unwrap_or_else(|result| panic!("executor should build, got errors: {:?}", result.errors));
+
+    smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("seek failed: {e}"),
+        }
+
+        executor
+            .capture_stable_scene_snapshot()
+            .await
+            .unwrap_or_else(|e| panic!("snapshot failed: {e}"));
+    });
+}
