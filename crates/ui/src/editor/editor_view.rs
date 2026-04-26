@@ -56,7 +56,7 @@ impl Editor {
         }));
 
         subscriptions.push(cx.on_release(|editor, cx| {
-            editor.save_if_dirty(cx);
+            editor.save(cx);
         }));
 
         cx.spawn(async move |editor: WeakEntity<Editor>, cx: &mut AsyncApp| {
