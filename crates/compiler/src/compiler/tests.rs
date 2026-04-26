@@ -35,7 +35,7 @@ mod test {
         section_type: SectionType,
     ) -> Arc<SectionBundle> {
         Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -86,7 +86,7 @@ mod test {
 
     fn compile_with_random_stdlib(src: &str) -> CompileResult {
         let stdlib_bundle = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::from("std.math.mcl")),
+            file_path: PathBuf::from("std.math.mcl"),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -104,7 +104,7 @@ mod test {
             was_cached: false,
         });
         let root_bundle = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::from("scene.mcl")),
+            file_path: PathBuf::from("scene.mcl"),
             file_index: 1,
             imported_files: vec![0],
             sections: vec![Section {
@@ -137,7 +137,7 @@ mod test {
     #[test]
     fn test_section_name_is_written_to_bytecode() {
         let bundle = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -415,7 +415,7 @@ mod test {
     fn test_cross_bundle_symbol_visible() {
         // bundle 0 defines `x`; bundle 1 imports it and reads it — no error
         let bundle0 = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -431,7 +431,7 @@ mod test {
             was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 1,
             imported_files: vec![0],
             sections: vec![Section {
@@ -451,7 +451,7 @@ mod test {
     fn test_cross_bundle_symbol_is_let() {
         // bundle 0 defines `var x`; bundle 1 imports it and tries to assign — error
         let bundle0 = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -467,7 +467,7 @@ mod test {
             was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 1,
             imported_files: vec![0],
             sections: vec![Section {
@@ -496,7 +496,7 @@ mod test {
     #[test]
     fn test_for_stdlib_range_uses_counted_loop_lowering() {
         let bundle0 = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -511,7 +511,7 @@ mod test {
             was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 1,
             imported_files: vec![0],
             sections: vec![Section {
@@ -568,7 +568,7 @@ mod test {
     #[test]
     fn test_for_shadowed_range_keeps_generic_lowering() {
         let bundle0 = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 0,
             imported_files: vec![],
             sections: vec![Section {
@@ -583,7 +583,7 @@ mod test {
             was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
-            file_path: Some(PathBuf::new()),
+            file_path: PathBuf::new(),
             file_index: 1,
             imported_files: vec![0],
             sections: vec![Section {

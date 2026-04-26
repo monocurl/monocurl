@@ -2,8 +2,7 @@ use super::*;
 
 impl DocumentView {
     pub fn new(
-        internal_path: PathBuf,
-        user_path: Option<PathBuf>,
+        path: PathBuf,
         window_state: WeakEntity<WindowState>,
         dirty: Entity<bool>,
         window: &mut Window,
@@ -14,6 +13,7 @@ impl DocumentView {
             ServiceManager::new(
                 state.textual_state.clone(),
                 state.execution_state.clone(),
+                path.clone(),
                 cx,
             )
         });
@@ -21,7 +21,7 @@ impl DocumentView {
         let editor = cx.new(|cx| {
             Editor::new(
                 state.textual_state.clone(),
-                internal_path.clone(),
+                path.clone(),
                 dirty.clone(),
                 window,
                 cx,
@@ -30,12 +30,12 @@ impl DocumentView {
         let viewport = cx.new(|cx| Viewport::new(services.clone(), cx));
         let timeline = cx.new(|cx| Timeline::new(services.clone(), cx));
 
-        let virtual_path = internal_path.clone();
+        let document_path = path.clone();
         let window_state_up = window_state.upgrade().unwrap();
         cx.observe(&window_state_up, move |dv, ws, cx| {
             ws.update(cx, |window_state, cx| {
                 if let ActiveScreen::Document(doc) = &window_state.screen
-                    && doc.internal_path == virtual_path
+                    && doc.path == document_path
                 {
                     dv.on_imports_may_have_changed(window_state, cx);
                 }
@@ -51,16 +51,13 @@ impl DocumentView {
         })
         .detach();
 
-        dirty.update(cx, |dirty, _| {
-            *dirty = dirty_file(&internal_path, &user_path);
-        });
+        dirty.update(cx, |dirty, _| *dirty = false);
 
         Self {
-            internal_path,
-            user_path,
+            path,
             was_fullscreen_before_presenting: false,
             is_presenting: false,
-            dirty,
+            is_headless: false,
             window_state: window_state.clone(),
             state,
             services,
@@ -327,24 +324,31 @@ impl DocumentView {
         .divider_color(divider_color)
     }
 
-    fn render_editing(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_editing(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
+        let should_hide_editor =
+            self.is_headless || window.bounds().size.width < px(AUTO_HEADLESS_WINDOW_WIDTH);
+        let workspace = if should_hide_editor {
+            self.viewport_timeline(theme.split_divider)
+                .into_any_element()
+        } else {
+            Split::new(
+                Axis::Horizontal,
+                self.editor.clone().into_any_element(),
+                self.viewport_timeline(theme.split_divider)
+                    .into_any_element(),
+            )
+            .default_flex(0.5)
+            .divider_color(theme.split_divider)
+            .into_any_element()
+        };
 
         div()
             .relative()
             .flex()
             .flex_col()
             .child(self.navbar.clone())
-            .child(
-                Split::new(
-                    Axis::Horizontal,
-                    self.editor.clone().into_any_element(),
-                    self.viewport_timeline(theme.split_divider)
-                        .into_any_element(),
-                )
-                .default_flex(0.5)
-                .divider_color(theme.split_divider),
-            )
+            .child(workspace)
             .text_color(theme.text_primary)
             .bg(theme.document_background)
             .size_full()
@@ -355,6 +359,7 @@ impl DocumentView {
             .on_action(cx.listener(Self::play_or_show_pause_hint))
             .on_action(cx.listener(Self::toggle_playing))
             .on_action(cx.listener(Self::sync_viewport_camera))
+            .on_action(cx.listener(Self::toggle_headless))
             .on_action(cx.listener(Self::unfocus_editor))
             .on_action(cx.listener(Self::prev_slide))
             .on_action(cx.listener(Self::next_slide))
@@ -388,7 +393,7 @@ impl Render for DocumentView {
         if self.is_presenting {
             self.render_presentation(cx).into_any_element()
         } else {
-            self.render_editing(cx).into_any_element()
+            self.render_editing(window, cx).into_any_element()
         }
     }
 }

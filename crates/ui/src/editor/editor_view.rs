@@ -6,37 +6,65 @@ use gpui::{
 
 use crate::{editor::text_editor::TextEditor, state::textual_state::TextualState};
 
-const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub struct Editor {
-    internal_path: PathBuf,
+    path: PathBuf,
     editor: Entity<TextEditor>,
     state: Entity<TextualState>,
-    internal_dirty: Entity<bool>,
+    dirty: Entity<bool>,
+    save_dirty: Entity<bool>,
+    last_disk_text: String,
 
-    _drop_handle: Subscription,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl Editor {
     pub fn new(
         state: Entity<TextualState>,
-        internal_path: PathBuf,
+        path: PathBuf,
         dirty: Entity<bool>,
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) -> Self {
-        let content = std::fs::read_to_string(internal_path.clone()).unwrap_or_default();
-        let internal_dirty = cx.new(|_| false);
+        let content = std::fs::read_to_string(path.clone()).unwrap_or_default();
+        let save_dirty = cx.new(|_| false);
 
-        // schedule a save every interval if internal is dirty
+        let editor = cx.new(|cx| {
+            TextEditor::new(
+                state.clone(),
+                window,
+                cx,
+                content.clone(),
+                dirty.clone(),
+                save_dirty.clone(),
+            )
+        });
+
+        let mut subscriptions = Vec::new();
+
+        subscriptions.push(cx.observe_window_activation(window, |editor, window, cx| {
+            if !window.is_window_active() {
+                editor.save_if_dirty(cx);
+            }
+        }));
+
+        let focus_handle = editor.read(cx).editor_focus_handle();
+        subscriptions.push(cx.on_focus_out(&focus_handle, window, |editor, _, _, cx| {
+            editor.save_if_dirty(cx);
+        }));
+
+        subscriptions.push(cx.on_release(|editor, cx| {
+            editor.save_if_dirty(cx);
+        }));
+
         cx.spawn(async move |editor: WeakEntity<Editor>, cx: &mut AsyncApp| {
             loop {
                 cx.background_executor().timer(SAVE_INTERVAL).await;
                 let finished = editor
                     .update(cx, |editor, cx| {
-                        if *editor.internal_dirty.read(cx) {
-                            editor.write_to_internal_path(cx);
-                        }
+                        editor.save_if_dirty(cx);
                     })
                     .is_err();
 
@@ -47,27 +75,37 @@ impl Editor {
         })
         .detach();
 
-        let drop_handle = cx.on_release(|editor, cx| {
-            if *editor.internal_dirty.read(cx) {
-                editor.write_to_internal_path(cx);
-            }
-        });
+        cx.spawn_in(
+            window,
+            async move |editor: WeakEntity<Editor>, window_cx| {
+                loop {
+                    smol::Timer::after(WATCH_INTERVAL).await;
+                    let finished = window_cx
+                        .update(|window, cx| {
+                            editor
+                                .update(cx, |editor, cx| {
+                                    editor.reload_from_disk_if_changed(window, cx);
+                                })
+                                .is_err()
+                        })
+                        .unwrap_or(true);
+
+                    if finished {
+                        break;
+                    }
+                }
+            },
+        )
+        .detach();
 
         Self {
-            internal_path,
-            editor: cx.new(|cx| {
-                TextEditor::new(
-                    state.clone(),
-                    window,
-                    cx,
-                    content,
-                    dirty,
-                    internal_dirty.clone(),
-                )
-            }),
+            path,
+            editor,
             state,
-            internal_dirty,
-            _drop_handle: drop_handle,
+            dirty,
+            save_dirty,
+            last_disk_text: content,
+            _subscriptions: subscriptions,
         }
     }
 
@@ -83,39 +121,74 @@ impl Editor {
         });
     }
 
-    fn write_to_path(&self, path: &std::path::Path, cx: &App) {
+    pub fn next_undo_requires_reload_confirmation(&self, cx: &App) -> bool {
+        self.editor
+            .read(cx)
+            .next_undo_requires_reload_confirmation()
+    }
+
+    fn current_text(&self, cx: &App) -> String {
         let state = self.state.read(cx);
-        let content = state.read(0..state.len());
-        let _ = std::fs::write(path, content).inspect_err(|e| {
-            log::error!("Failed to save file to {}: {}", path.display(), e);
+        state.read(0..state.len())
+    }
+
+    pub fn save_if_dirty(&mut self, cx: &mut App) {
+        if *self.save_dirty.read(cx) {
+            self.write_to_disk(cx);
+        }
+    }
+
+    pub fn save(&mut self, cx: &mut App) {
+        self.write_to_disk(cx);
+    }
+
+    fn write_to_disk(&mut self, cx: &mut App) {
+        let content = self.current_text(cx);
+        if let Some(parent) = self.path.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            log::error!("Failed to create {}: {}", parent.display(), err);
+            return;
+        }
+        match std::fs::write(&self.path, &content) {
+            Ok(()) => {
+                self.last_disk_text = content;
+                self.save_dirty.update(cx, |dirty, _| *dirty = false);
+                self.dirty.update(cx, |dirty, _| *dirty = false);
+            }
+            Err(err) => {
+                log::error!("Failed to save file to {}: {}", self.path.display(), err);
+            }
+        }
+    }
+
+    pub fn save_to_path(&mut self, path: PathBuf, cx: &mut App) {
+        self.path = path;
+        self.write_to_disk(cx);
+    }
+
+    fn reload_from_disk_if_changed(&mut self, window: &mut Window, cx: &mut App) {
+        let Ok(content) = std::fs::read_to_string(&self.path) else {
+            return;
+        };
+
+        if content == self.last_disk_text {
+            return;
+        }
+
+        if content == self.current_text(cx) {
+            self.last_disk_text = content;
+            self.save_dirty.update(cx, |dirty, _| *dirty = false);
+            self.dirty.update(cx, |dirty, _| *dirty = false);
+            return;
+        }
+
+        self.editor.update(cx, |editor, cx| {
+            editor.replace_entire_text_from_external_reload(content.clone(), window, cx);
         });
-    }
-
-    pub fn write_to_internal_path(&self, cx: &mut App) {
-        self.write_to_path(&self.internal_path, cx);
-        self.internal_dirty.update(cx, |id, _| *id = false);
-    }
-
-    pub fn write_to_user_path(&self, path: &std::path::Path, cx: &mut App) {
-        self.write_to_internal_path(cx);
-        self.write_to_path(path, cx);
-    }
-
-    pub fn abandon_unsaved_changes(&self, cx: &mut App) {
-        self.internal_dirty.update(cx, |dirty, _| *dirty = false);
-    }
-
-    pub fn discard_unsaved_changes(&self, source: &std::path::Path, cx: &mut App) {
-        self.abandon_unsaved_changes(cx);
-
-        let _ = std::fs::copy(source, &self.internal_path).inspect_err(|err| {
-            log::warn!(
-                "Could not copy user file {:?} to internal path {:?}: {}",
-                source,
-                self.internal_path,
-                err
-            );
-        });
+        self.last_disk_text = content;
+        self.save_dirty.update(cx, |dirty, _| *dirty = false);
+        self.dirty.update(cx, |dirty, _| *dirty = false);
     }
 }
 

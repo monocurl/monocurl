@@ -4,7 +4,7 @@ use crate::{
     actions::{
         Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide, Paste,
         PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd,
-        SceneStart, TogglePlaying, TogglePresentationMode, Undo,
+        SceneStart, ToggleHeadlessMode, TogglePlaying, TogglePresentationMode, Undo,
     },
     editor::text_editor,
     theme::ThemeSettings,
@@ -70,6 +70,7 @@ impl MonocurlLauncher {
                     MenuItem::action("Export as Video", ExportVideo),
                     MenuItem::separator(),
                     MenuItem::action("Present", TogglePresentationMode),
+                    MenuItem::action("Toggle Headless Mode", ToggleHeadlessMode),
                 ],
             },
             Menu {
@@ -113,7 +114,7 @@ impl MonocurlLauncher {
                 title: Some("Monocurl".into()),
                 ..Default::default()
             }),
-            window_min_size: Some(size(px(900.), px(600.))),
+            window_min_size: Some(size(px(520.), px(420.))),
             focus: true,
             ..Default::default()
         };

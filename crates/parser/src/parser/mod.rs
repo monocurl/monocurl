@@ -535,12 +535,12 @@ impl SectionParser {
 pub struct Parser {
     errors: Vec<Diagnostic>,
     preparsed_files: Vec<PreparsedFile>,
-    import_stack: Vec<Option<PathBuf>>,
+    import_stack: Vec<PathBuf>,
 }
 
 struct PreparsedFile {
     imports: Vec<PathBuf>,
-    path: Option<PathBuf>,
+    path: PathBuf,
     text_rope: Rope<TextAggregate>,
     root_import_span: Option<Span8>,
     tokens: Vec<(Token, Span8)>,

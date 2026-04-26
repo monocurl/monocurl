@@ -157,9 +157,25 @@ impl DocumentView {
         &mut self,
         _: &UnfocusEditor,
         w: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
+        self.editor.update(cx, |editor, cx| {
+            editor.save_if_dirty(cx);
+        });
         self.focus(w);
+    }
+
+    pub(super) fn toggle_headless(
+        &mut self,
+        _: &ToggleHeadlessMode,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.is_headless = !self.is_headless;
+        if self.is_headless {
+            self.focus(w);
+        }
+        cx.notify();
     }
 
     pub(super) fn toggle_playing(
@@ -246,6 +262,38 @@ impl DocumentView {
     }
 
     pub(super) fn undo(&mut self, _: &Undo, w: &mut Window, cx: &mut Context<Self>) {
+        if self
+            .editor
+            .read(cx)
+            .next_undo_requires_reload_confirmation(cx)
+        {
+            let confirm = w.prompt(
+                PromptLevel::Warning,
+                "Undo Reload From Disk?",
+                Some("This will restore the editor buffer that existed before the external file change."),
+                &[
+                    PromptButton::Cancel("Cancel".into()),
+                    PromptButton::Ok("Undo Reload".into()),
+                ],
+                cx,
+            );
+            let this = cx.weak_entity();
+            w.spawn(cx, async move |window_cx| {
+                if confirm.await != Ok(1) {
+                    return;
+                }
+                let _ = window_cx.update(move |window, cx| {
+                    let _ = this.update(cx, |this, cx| {
+                        this.editor.update(cx, |editor, cx| {
+                            editor.undo(window, cx);
+                        });
+                    });
+                });
+            })
+            .detach();
+            return;
+        }
+
         self.editor.update(cx, |editor, cx| {
             editor.undo(w, cx);
         });
@@ -258,24 +306,19 @@ impl DocumentView {
     }
 
     fn really_save(&mut self, path: PathBuf, cx: &mut Context<Self>) {
-        if Some(path.clone()) != self.user_path {
-            self.user_path = Some(path.clone());
-        }
+        let old_path = self.path.clone();
+        self.path = path.clone();
 
         self.editor.update(cx, |editor, cx| {
-            editor.write_to_user_path(&path, cx);
+            editor.save_to_path(path.clone(), cx);
         });
 
         self.window_state.upgrade().inspect(|ws| {
             ws.update(cx, |state, cx| {
-                state.set_user_path(&self.internal_path, path.clone());
+                state.set_document_path(&old_path, path.clone());
                 self.on_imports_may_have_changed(state, cx);
             })
         });
-
-        self.dirty.update(cx, |dirty, _| {
-            *dirty = dirty_file(&self.internal_path, &self.user_path);
-        })
     }
 
     pub(super) fn save_document_custom_path(
@@ -285,18 +328,18 @@ impl DocumentView {
         cx: &mut Context<Self>,
     ) {
         let directory = self
-            .user_path
-            .as_ref()
-            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .path
+            .parent()
+            .map(|p| p.to_path_buf())
             .unwrap_or(dirs::home_dir().unwrap());
         let name = self
-            .user_path
-            .as_ref()
-            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
             .unwrap_or(
                 "Untitled.".to_string()
                     + self
-                        .internal_path
+                        .path
                         .extension()
                         .and_then(|e| e.to_str())
                         .unwrap_or(DocumentType::Scene.extension()),
@@ -324,19 +367,11 @@ impl DocumentView {
     pub(super) fn save_document(
         &mut self,
         _: &SaveActiveDocument,
-        w: &mut Window,
+        _w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        log::info!(
-            "Saving document {:?} {:?}",
-            &self.internal_path,
-            &self.user_path
-        );
-        if let Some(user_path) = &self.user_path {
-            self.really_save(user_path.clone(), cx);
-        } else {
-            self.save_document_custom_path(&SaveActiveDocumentCustomPath, w, cx);
-        }
+        log::info!("Saving document {:?}", &self.path);
+        self.really_save(self.path.clone(), cx);
     }
 
     pub(super) fn export_image(
@@ -363,20 +398,16 @@ impl DocumentView {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        log::info!(
-            "Closing document {:?} {:?}",
-            &self.internal_path,
-            &self.user_path
-        );
+        log::info!("Closing document {:?}", &self.path);
 
         let Some(state) = self.window_state.upgrade() else {
             return;
         };
-        let internal_path = self.internal_path.clone();
+        let path = self.path.clone();
 
         w.defer(cx, move |w, cx| {
             state.update(cx, |state, cx| {
-                state.close_tab(&internal_path, cx, w);
+                state.close_tab(&path, cx, w);
                 cx.notify();
             });
         });
@@ -425,18 +456,10 @@ mod tests {
 }
 
 impl DocumentView {
-    pub fn discard_unsaved_changes(&mut self, cx: &mut App) {
-        let user_path = self.user_path.clone();
-
+    pub fn save_before_close(&mut self, cx: &mut App) {
         self.editor.update(cx, |editor, cx| {
-            if let Some(user_path) = &user_path {
-                editor.discard_unsaved_changes(user_path, cx);
-            } else {
-                editor.abandon_unsaved_changes(cx);
-            }
+            editor.save(cx);
         });
-
-        self.dirty.update(cx, |dirty, _| *dirty = false);
     }
 
     fn get_live_ropes(
@@ -446,13 +469,11 @@ impl DocumentView {
     ) -> HashMap<PathBuf, (Rope<Attribute<LexData>>, Rope<TextAggregate>)> {
         let mut ret = HashMap::new();
         for doc in window_state.open_documents() {
-            if &doc.internal_path != &self.internal_path
-                && let Some(ref physical) = doc.user_path
-            {
+            if doc.path != self.path {
                 let state = doc.view.read(cx).state.textual_state.read(cx);
                 let text_rope = state.text_rope().clone();
                 let lex_rope = state.lex_rope().clone();
-                ret.insert(physical.clone(), (lex_rope, text_rope));
+                ret.insert(doc.path.clone(), (lex_rope, text_rope));
             }
         }
         ret
@@ -464,7 +485,7 @@ impl DocumentView {
         let live_ropes = self.get_live_ropes(window_state, cx);
 
         self.services.update(cx, |services, _| {
-            services.invalidate_dependencies(self.user_path.clone(), live_ropes);
+            services.invalidate_dependencies(self.path.clone(), live_ropes);
         });
     }
 }

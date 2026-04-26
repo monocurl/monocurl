@@ -213,49 +213,52 @@ impl HomeView {
         )
     }
 
-    fn open(
-        &mut self,
-        internal_path: std::path::PathBuf,
-        user_path: Option<std::path::PathBuf>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        log::info!("Opening project {:?}", user_path);
+    fn open(&mut self, path: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        log::info!("Opening project {:?}", path);
 
         self.state.update(cx, move |state, cx| {
-            state.navigate_to(
-                user_path.clone(),
-                internal_path.clone(),
-                cx.entity(),
-                window,
-                cx,
-            );
+            state.navigate_to(path.clone(), cx.entity(), window, cx);
         });
     }
 
-    fn import(&mut self, path: std::path::PathBuf, cx: &mut App) -> Result<(), String> {
+    fn import(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
         log::info!("Adding project {:?}", path);
 
         self.state.update(cx, move |state, _cx| state.import(path))
     }
 
-    fn create_default(&mut self, dtype: DocumentType, window: &mut Window, cx: &mut App) {
+    fn create_default(&mut self, dtype: DocumentType, window: &mut Window, cx: &mut Context<Self>) {
         log::info!("Creating default {:?}", dtype);
 
-        let path = self
-            .state
-            .update(cx, move |state, _cx| state.create_new_document(dtype));
+        let directory = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let name = format!("Untitled.{}", dtype.extension());
+        let path = cx.prompt_for_new_path(&directory, Some(&name));
+        let state = self.state.clone();
 
-        self.state.update(cx, move |state, cx| {
-            state.navigate_to(None, path, cx.entity(), window, cx);
-        });
+        window
+            .spawn(cx, async move |window_cx| {
+                let Some(path) = path.await.ok().map(|s| s.ok()).flatten().flatten() else {
+                    return;
+                };
+
+                let _ = window_cx.update(move |window, cx| {
+                    let _ = state.update(cx, |state, cx| {
+                        if let Err(err) = state.create_new_document(dtype, path.clone()) {
+                            log::error!("{err}");
+                            return;
+                        }
+                        state.navigate_to(path, cx.entity(), window, cx);
+                    });
+                });
+            })
+            .detach();
     }
 
-    fn forget(&mut self, internal_path: std::path::PathBuf, cx: &mut App) {
-        log::info!("Forgetting project {:?}", internal_path);
+    fn forget(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        log::info!("Forgetting project {:?}", path);
 
         self.state.update(cx, move |state, _cx| {
-            state.forget_project(&internal_path);
+            state.forget_project(&path);
         });
     }
 
@@ -321,29 +324,20 @@ impl HomeView {
 
     fn single_project(
         &self,
-        internal_path: std::path::PathBuf,
-        user_path: Option<std::path::PathBuf>,
+        project_path: std::path::PathBuf,
         cx: &Context<HomeView>,
     ) -> impl IntoElement + use<> {
         let theme = ThemeSettings::theme(cx);
-        let path = if let Some(ref path) = user_path {
-            sub_home_dir(&path)
-                .unwrap_or(path.to_path_buf())
-                .to_string_lossy()
-                .to_string()
-        } else {
-            "Untitled".to_string()
-        };
+        let path = sub_home_dir(&project_path)
+            .unwrap_or(project_path.to_path_buf())
+            .to_string_lossy()
+            .to_string();
 
-        let path_for_open = user_path.clone();
-        let path_for_remove = user_path.clone();
+        let path_for_open = project_path.clone();
+        let path_for_remove = project_path.clone();
 
-        let internal_path = internal_path;
-        let internal_path_for_remove = internal_path.clone();
-
-        let name = user_path
-            .as_ref()
-            .and_then(|f| f.file_name())
+        let name = project_path
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or("Untitled".to_string());
 
@@ -380,7 +374,7 @@ impl HomeView {
                     .w_full()
                     .p_2()
                     .on_click(cx.listener(move |this, _event, window, cx| {
-                        this.open(internal_path.clone(), path_for_open.clone(), window, cx);
+                        this.open(path_for_open.clone(), window, cx);
                     }))
                     .child(
                         div()
@@ -425,8 +419,7 @@ impl HomeView {
 
                                 if SHOULD_PROMPT_ON_DELETE {
                                     let name = path_for_remove
-                                        .as_ref()
-                                        .and_then(|f| f.file_name())
+                                        .file_name()
                                         .map(|f| f.to_string_lossy().to_string())
                                         .unwrap_or("Untitled".into());
                                     let confirm = window.prompt(
@@ -440,7 +433,7 @@ impl HomeView {
                                         cx,
                                     );
 
-                                    let path_copy = internal_path_for_remove.clone();
+                                    let path_copy = path_for_remove.clone();
                                     cx.spawn(async move |this, app| {
                                         let Some(this) = this.upgrade() else {
                                             return;
@@ -456,7 +449,7 @@ impl HomeView {
                                     })
                                     .detach();
                                 } else {
-                                    this.forget(internal_path_for_remove.clone(), cx);
+                                    this.forget(path_for_remove.clone(), cx);
                                 }
                             })),
                     ),
@@ -482,13 +475,7 @@ impl HomeView {
                     cx.processor(move |this, range: Range<usize>, _, cx| {
                         this.state.read(cx).recently_opened[range]
                             .iter()
-                            .map(|p| {
-                                this.single_project(
-                                    p.internal_path.clone(),
-                                    p.user_path.clone(),
-                                    cx,
-                                )
-                            })
+                            .map(|p| this.single_project(p.path.clone(), cx))
                             .collect()
                     }),
                 )

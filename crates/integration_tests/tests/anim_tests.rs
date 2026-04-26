@@ -335,11 +335,11 @@ fn load_stdlib_bundle_with_import_span(
     path: impl AsRef<Path>,
     import_span: Span8,
 ) -> Arc<SectionBundle> {
-    let src = fs::read_to_string(path).expect("failed to read stdlib file");
+    let src = fs::read_to_string(path.as_ref()).expect("failed to read stdlib file");
     let (section, errors) = parse_section(&src, SectionType::StandardLibrary);
     assert!(errors.is_empty(), "stdlib parse errors: {:?}", errors);
     Arc::new(SectionBundle {
-        file_path: None,
+        file_path: path.as_ref().to_path_buf(),
         file_index: 0,
         imported_files: vec![],
         sections: vec![section],
@@ -360,7 +360,7 @@ fn make_imported_bundle(
         errors
     );
     Arc::new(SectionBundle {
-        file_path: None,
+        file_path: PathBuf::from("imported.mcl"),
         file_index: 0,
         imported_files: vec![],
         sections: vec![section],
@@ -373,13 +373,13 @@ fn build_anim_executor(
     slides: &[(&str, SectionType)],
     stdlib_bundles: &[Arc<SectionBundle>],
 ) -> Result<(Executor, usize), AnimResult> {
-    build_anim_executor_with_file_path(slides, stdlib_bundles, None)
+    build_anim_executor_with_file_path(slides, stdlib_bundles, PathBuf::from("scene.mcs"))
 }
 
 fn build_anim_executor_with_file_path(
     slides: &[(&str, SectionType)],
     stdlib_bundles: &[Arc<SectionBundle>],
-    file_path: Option<PathBuf>,
+    file_path: PathBuf,
 ) -> Result<(Executor, usize), AnimResult> {
     let mut all_errors: Vec<String> = Vec::new();
     let mut sections: Vec<Section> = Vec::new();

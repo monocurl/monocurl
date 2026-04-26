@@ -87,17 +87,16 @@ impl Parser {
             }
 
             let full_span = import_span.start..end;
-            let Some(imported_file) = external_context.file_content(
-                file.path.as_ref().and_then(|f| f.parent()),
-                &import_rel_path,
-            ) else {
+            let Some(imported_file) =
+                external_context.file_content(file.path.parent(), &import_rel_path)
+            else {
                 self.errors.push(Self::import_err(
                     full_span.clone(),
                     &format!("Cannot find module \"{}\"", import_rel_path.display()),
                 ));
                 return Err(());
             };
-            imports.push(imported_file.path.clone().unwrap());
+            imports.push(imported_file.path.clone());
             self.dfs(
                 root_span.clone().or(Some(full_span.clone())),
                 external_context,
@@ -277,7 +276,7 @@ impl Parser {
             None,
             external_context,
             FileResult {
-                path: external_context.root_file_user_path.clone(),
+                path: external_context.root_file_path.clone(),
                 tokens: flatten_rope(&lex_rope),
                 text_rope: Rope::from(text_rope),
                 is_stdlib: false,
@@ -301,22 +300,20 @@ impl Parser {
             {
                 artifacts.extend(result.1);
                 sorted_bundles.push(result.0.clone());
-                bundles.insert(file.path.unwrap(), result.0);
+                bundles.insert(file.path, result.0);
                 continue;
             }
 
             let key = file.path.clone();
             let is_root = file.root_import_span.is_none();
             let (bundle, sub_artifacts) = Self::parse_file(&bundles, file, cursor.clone());
-            if !is_root && let Some(key) = key.clone() {
-                external_context.set_cache(key, &bundle, sub_artifacts.clone());
+            if !is_root {
+                external_context.set_cache(key.clone(), &bundle, sub_artifacts.clone());
             }
 
             artifacts.extend(sub_artifacts);
             sorted_bundles.push(bundle.clone());
-            if let Some(key) = key {
-                bundles.insert(key, bundle);
-            }
+            bundles.insert(key, bundle);
         }
 
         (sorted_bundles, artifacts)

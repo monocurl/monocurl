@@ -306,7 +306,7 @@ fn run_section_with_stdlib(
     let imported_files: Vec<usize> = (0..stdlib_bundles.len()).collect();
 
     let user_bundle = Arc::new(SectionBundle {
-        file_path: None,
+        file_path: Path::new("scene.mcs").to_path_buf(),
         file_index: 0,
         imported_files,
         sections: vec![Section {
@@ -416,7 +416,7 @@ fn stdlib_bundle(name: &str) -> Arc<SectionBundle> {
     assert!(errors.is_empty(), "stdlib parse errors: {:?}", errors);
 
     Arc::new(SectionBundle {
-        file_path: Some(Path::new(&format!("std/{name}.mcl")).to_path_buf()),
+        file_path: Path::new(&format!("std/{name}.mcl")).to_path_buf(),
         file_index: 0,
         imported_files: vec![],
         sections: vec![Section {

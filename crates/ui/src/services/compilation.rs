@@ -32,7 +32,7 @@ pub enum CompilationMessage {
         _version: usize,
     },
     RecheckDependencies {
-        physical_path: Option<PathBuf>,
+        physical_path: PathBuf,
         open_documents: HashMap<PathBuf, (Rope<Attribute<LexData>>, Rope<TextAggregate>)>,
     },
 }
@@ -41,6 +41,7 @@ pub struct CompilationService {
     rx: UnboundedReceiver<CompilationMessage>,
     execution_tx: UnboundedSender<ExecutionMessage>,
     sm_tx: UnboundedSender<ServiceManagerMessage>,
+    root_path: PathBuf,
 }
 
 fn token_autocomplete_category(token: &Token) -> AutoCompleteCategory {
@@ -133,11 +134,13 @@ impl CompilationService {
         rx: UnboundedReceiver<CompilationMessage>,
         execution_tx: UnboundedSender<ExecutionMessage>,
         sm_tx: UnboundedSender<ServiceManagerMessage>,
+        root_path: PathBuf,
     ) -> Self {
         Self {
             rx,
             execution_tx,
             sm_tx,
+            root_path,
         }
     }
 
@@ -494,7 +497,11 @@ impl CompilationService {
         let mut latest_lex_rope = Rope::default();
         let mut latest_version = 0;
 
-        let mut parse_state = ParseImportContext::default();
+        let mut parse_state = ParseImportContext {
+            root_file_path: self.root_path.clone(),
+            open_tab_ropes: Default::default(),
+            cached_parses: Default::default(),
+        };
         let mut compiler_state = CompilerCache::default();
 
         let mut last_compile_result = CompileResult::default();
@@ -529,7 +536,7 @@ impl CompilationService {
                         open_documents,
                     } => {
                         parse_state = ParseImportContext {
-                            root_file_user_path: physical_path,
+                            root_file_path: physical_path,
                             open_tab_ropes: open_documents,
                             cached_parses: Default::default(),
                         };

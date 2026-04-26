@@ -78,7 +78,7 @@ fn test_image_relative_path_resolves_against_scene_file() {
     let (mut executor, _) = match build_anim_executor_with_file_path(
         &[(src, SectionType::Slide)],
         &stdlib_bundles(["anim", "mesh"]),
-        Some(scene_path.clone()),
+        scene_path.clone(),
     ) {
         Ok(data) => data,
         Err(result) => panic!("failed to build executor: {:?}", result.errors),
@@ -134,7 +134,7 @@ fn test_textured_relative_path_resolves_against_scene_file() {
     let (mut executor, _) = match build_anim_executor_with_file_path(
         &[(src, SectionType::Slide)],
         &stdlib_bundles(["anim", "mesh"]),
-        Some(scene_path.clone()),
+        scene_path.clone(),
     ) {
         Ok(data) => data,
         Err(result) => panic!("failed to build executor: {:?}", result.errors),
@@ -154,20 +154,6 @@ fn test_textured_relative_path_resolves_against_scene_file() {
     };
     let expected = scene_path.parent().unwrap().join("textures/foo.png");
     assert_eq!(mesh.uniform.img.as_ref(), Some(&expected));
-}
-
-#[test]
-fn test_relative_image_path_without_scene_file_errors() {
-    let r = run_anim_impl(
-        &[(
-            r#"mesh x = Image("textures/foo.png", [0, 0, 0], [1, 1])"#,
-            SectionType::Slide,
-        )],
-        0,
-        f64::INFINITY,
-        &stdlib_bundles(["anim", "mesh"]),
-    );
-    r.assert_error("relative image path 'textures/foo.png' requires a scene file path");
 }
 
 #[test]

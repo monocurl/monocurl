@@ -1,12 +1,7 @@
-use std::{
-    io,
-    path::{Path, PathBuf},
-    time::Duration,
-};
+use std::path::PathBuf;
 
-use gpui::{App, AppContext, Context, Entity, PromptButton, PromptLevel, ScrollHandle, Window};
+use gpui::{App, AppContext, Context, Entity, ScrollHandle, Window};
 use serde::{Deserialize, Serialize};
-use smol::Timer;
 use ui_cli_shared::doc_type::DocumentType;
 
 use crate::document_view::{DocumentView, OpenDocument};
@@ -16,7 +11,6 @@ pub const CHECK_FOR_WRONGLY_IMPORTED_EXTENSION: bool = false;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum ActiveScreenSerde {
     Home,
-    // virtual path buf
     Document(PathBuf),
 }
 
@@ -28,14 +22,12 @@ pub enum ActiveScreen {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenDocumentSerde {
-    pub internal_path: PathBuf,
-    pub user_path: Option<PathBuf>,
+    pub path: PathBuf,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RecentlyOpened {
-    pub internal_path: PathBuf,
-    pub user_path: Option<PathBuf>,
+    pub path: PathBuf,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,187 +69,62 @@ impl WindowState {
         path
     }
 
-    fn allocate_internal_file(extension: &str) -> PathBuf {
-        let mut path = dirs::data_local_dir().expect("Could not find local data directory");
-        path.push("Monocurl");
-        path.push("save_files");
-        if !path.exists() {
-            std::fs::create_dir_all(&path).expect("Could not create internal storage directory");
-        }
-        let random_id = uuid::Uuid::new_v4();
-        path.push(random_id.to_string() + "." + extension);
-        path
-    }
-
-    fn physical_file_newer_than_virtual(
-        virtual_path: &Path,
-        physical_path: &Path,
-    ) -> io::Result<bool> {
-        let physical_modified = std::fs::metadata(physical_path)?.modified()?;
-        let virtual_modified = match std::fs::metadata(virtual_path) {
-            Ok(metadata) => metadata.modified()?,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(true),
-            Err(err) => return Err(err),
-        };
-
-        Ok(physical_modified > virtual_modified)
-    }
-
-    fn copy_physical_to_virtual_if_newer(virtual_path: &Path, physical_path: Option<&Path>) {
-        let Some(physical_path) = physical_path else {
-            return;
-        };
-
-        match Self::physical_file_newer_than_virtual(virtual_path, physical_path) {
-            Ok(false) => {}
-            Ok(true) => {
-                if let Some(parent) = virtual_path.parent()
-                    && let Err(err) = std::fs::create_dir_all(parent)
-                {
-                    log::warn!(
-                        "Could not create internal storage directory {:?}: {}",
-                        parent,
-                        err
-                    );
-                    return;
-                }
-
-                let _ = std::fs::copy(physical_path, virtual_path).inspect_err(|err| {
-                    log::warn!(
-                        "Could not refresh internal file {:?} from user file {:?}: {}",
-                        virtual_path,
-                        physical_path,
-                        err
-                    );
-                });
-            }
-            Err(err) => {
-                log::warn!(
-                    "Could not compare user file {:?} with internal file {:?}: {}",
-                    physical_path,
-                    virtual_path,
-                    err
-                );
-            }
-        }
-    }
-
     fn load_saved_state(window: &mut Window, cx: &mut Context<Self>) -> Option<Self> {
         let path = Self::save_file();
-        if path.exists() {
-            let data = std::fs::read_to_string(&path).ok()?;
-            let state: WindowStateSerde = serde_json::from_str(&data).ok()?;
-
-            let weak_state = cx.weak_entity();
-            let open_documents: Vec<_> = state
-                .open_documents
-                .into_iter()
-                .map(|serde| {
-                    Self::copy_physical_to_virtual_if_newer(
-                        &serde.internal_path,
-                        serde.user_path.as_deref(),
-                    );
-
-                    let dirty = cx.new(|_cx| false);
-                    OpenDocument {
-                        internal_path: serde.internal_path.clone(),
-                        user_path: serde.user_path.clone(),
-                        view: cx.new(|cx| {
-                            DocumentView::new(
-                                serde.internal_path,
-                                serde.user_path,
-                                weak_state.clone(),
-                                dirty.clone(),
-                                window,
-                                cx,
-                            )
-                        }),
-                        dirty,
-                    }
-                })
-                .collect();
-
-            let screen = match state.screen {
-                ActiveScreenSerde::Home => ActiveScreen::Home,
-                ActiveScreenSerde::Document(path) => {
-                    if let Some(doc) = open_documents.iter().find(|doc| doc.internal_path == path) {
-                        ActiveScreen::Document(doc.clone())
-                    } else {
-                        ActiveScreen::Home
-                    }
-                }
-            };
-
-            let recently_opened = state.recently_opened;
-            let ret = WindowState {
-                screen,
-                recently_opened,
-                open_documents,
-                navbar_scroll: ScrollHandle::new(),
-            };
-
-            // mark initial open document if applicable
-            // this is hacky, but basically wait a second or so
-            // to let the lexer of the others catch up
-            // TODO: might just be better to relex each time a tab is changed?
-            cx.spawn(async move |weak, cx| {
-                Timer::after(Duration::from_millis(100)).await;
-                let Some(strong) = weak.upgrade() else {
-                    return;
-                };
-                cx.update_entity(&strong, |state, cx| {
-                    if let ActiveScreen::Document(doc) = &state.screen {
-                        for open in &state.open_documents {
-                            if open.internal_path == doc.internal_path {
-                                open.view.update(cx, |view, cx| {
-                                    view.on_imports_may_have_changed(&state, cx);
-                                });
-                                break;
-                            }
-                        }
-                    }
-                })
-                .ok();
-            })
-            .detach();
-
-            Some(ret)
-        } else {
-            None
+        if !path.exists() {
+            return None;
         }
+
+        let data = std::fs::read_to_string(&path).ok()?;
+        let state: WindowStateSerde = serde_json::from_str(&data).ok()?;
+
+        let weak_state = cx.weak_entity();
+        let open_documents: Vec<_> = state
+            .open_documents
+            .into_iter()
+            .filter(|serde| serde.path.exists())
+            .map(|serde| {
+                let dirty = cx.new(|_cx| false);
+                OpenDocument {
+                    path: serde.path.clone(),
+                    view: cx.new(|cx| {
+                        DocumentView::new(serde.path, weak_state.clone(), dirty.clone(), window, cx)
+                    }),
+                }
+            })
+            .collect();
+
+        let screen = match state.screen {
+            ActiveScreenSerde::Home => ActiveScreen::Home,
+            ActiveScreenSerde::Document(path) => open_documents
+                .iter()
+                .find(|doc| doc.path == path)
+                .map(|doc| ActiveScreen::Document(doc.clone()))
+                .unwrap_or(ActiveScreen::Home),
+        };
+
+        Some(WindowState {
+            screen,
+            recently_opened: state
+                .recently_opened
+                .into_iter()
+                .filter(|recent| recent.path.exists())
+                .collect(),
+            open_documents,
+            navbar_scroll: ScrollHandle::new(),
+        })
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         if let Some(saved) = Self::load_saved_state(window, cx) {
             log::info!("Successfuly loaded window state from previous run");
-            return saved;
+            saved
         } else {
             log::info!("Creating new window state");
-
-            // default files
-            let mut recent = vec![];
-            for i in 0..30 {
-                let internal = Self::allocate_internal_file(DocumentType::Scene.extension());
-                let user = PathBuf::from(format!("/Users/manubhat/Recent Document {i}.txt"));
-
-                // try copying to internal file
-                if !internal.exists() {
-                    let Ok(_) = std::fs::copy(&user, &internal) else {
-                        log::warn!("Could not copy {user:?} to internal storage at {internal:?}");
-                        continue;
-                    };
-                }
-
-                recent.push(RecentlyOpened {
-                    internal_path: internal,
-                    user_path: Some(user),
-                });
-            }
-
             let ret = Self {
                 screen: ActiveScreen::Home,
-                recently_opened: recent,
-                open_documents: vec![],
+                recently_opened: Vec::new(),
+                open_documents: Vec::new(),
                 navbar_scroll: ScrollHandle::new(),
             };
             ret.save();
@@ -277,17 +144,14 @@ impl WindowState {
         let serde = WindowStateSerde {
             screen: match &self.screen {
                 ActiveScreen::Home => ActiveScreenSerde::Home,
-                ActiveScreen::Document(doc) => {
-                    ActiveScreenSerde::Document(doc.internal_path.clone())
-                }
+                ActiveScreen::Document(doc) => ActiveScreenSerde::Document(doc.path.clone()),
             },
             recently_opened: self.recently_opened.clone(),
             open_documents: self
                 .open_documents
                 .iter()
                 .map(|doc| OpenDocumentSerde {
-                    internal_path: doc.internal_path.clone(),
-                    user_path: doc.user_path.clone(),
+                    path: doc.path.clone(),
                 })
                 .collect(),
         };
@@ -299,249 +163,150 @@ impl WindowState {
             .unwrap_or_else(|| log::warn!("Unable to save window state"));
     }
 
-    pub fn create_new_document(&mut self, dtype: DocumentType) -> PathBuf {
-        let internal = Self::allocate_internal_file(dtype.extension());
+    pub fn create_new_document(
+        &mut self,
+        dtype: DocumentType,
+        path: PathBuf,
+    ) -> Result<(), String> {
+        if let Some(parent) = path.parent()
+            && let Err(err) = std::fs::create_dir_all(parent)
+        {
+            return Err(format!(
+                "Could not create directory {}: {}",
+                parent.display(),
+                err
+            ));
+        }
 
-        self.recently_opened.insert(
-            0,
-            RecentlyOpened {
-                internal_path: internal.clone(),
-                user_path: None,
-            },
-        );
-        let content = dtype.default_file();
-        let _ = std::fs::write(&internal, content);
-
-        self.save();
-
-        internal
+        std::fs::write(&path, dtype.default_file())
+            .map_err(|err| format!("Could not create {}: {}", path.display(), err))?;
+        self.import(path)
     }
 
-    pub fn import(&mut self, user_path: PathBuf) -> Result<(), String> {
+    pub fn import(&mut self, path: PathBuf) -> Result<(), String> {
         if CHECK_FOR_WRONGLY_IMPORTED_EXTENSION {
-            match user_path
+            match path
                 .extension()
                 .map(|ext| ext.to_string_lossy().to_lowercase())
             {
                 Some(ext) if ext == DocumentType::Library.extension() => Ok(()),
                 Some(ext) if ext == DocumentType::Scene.extension() => Ok(()),
                 _ => {
-                    log::error!("Unsupported file type: {:?}", user_path.extension());
-                    Err(format!(
-                        "Unsupported file type: {:?}",
-                        user_path.extension()
-                    ))
+                    log::error!("Unsupported file type: {:?}", path.extension());
+                    Err(format!("Unsupported file type: {:?}", path.extension()))
                 }
             }?;
         }
 
-        // simply reorder if already exists
-        if let Some(index) = self
-            .recently_opened
-            .iter()
-            .position(|o| o.user_path.as_ref() == Some(&user_path))
-        {
-            let old = self.recently_opened.remove(index);
-            self.recently_opened.insert(0, old);
-        } else {
-            let internal = Self::allocate_internal_file(
-                user_path
-                    .extension()
-                    .map(|ext| ext.to_string_lossy())
-                    .unwrap_or_default()
-                    .as_ref(),
-            );
-            // copy to internal
-            let _ = std::fs::copy(&user_path, &internal)
-                .inspect_err(|e| log::error!("Failed to copy file: {e}"));
-
-            self.recently_opened.insert(
-                0,
-                RecentlyOpened {
-                    internal_path: internal,
-                    user_path: Some(user_path.clone()),
-                },
-            );
+        if !path.exists() {
+            return Err(format!("File does not exist: {}", path.display()));
         }
-        self.save();
 
+        self.recently_opened.retain(|recent| recent.path != path);
+        self.recently_opened.insert(0, RecentlyOpened { path });
+        self.save();
         Ok(())
     }
 
-    fn close_project(&mut self, internal_path: &PathBuf) {
-        self.open_documents
-            .retain(|p| &p.internal_path != internal_path);
-        if let ActiveScreen::Document(current_doc) = &self.screen {
-            if &current_doc.internal_path == internal_path {
-                self.screen = self
-                    .open_documents
-                    .first()
-                    .map(|doc| ActiveScreen::Document(doc.clone()))
-                    .unwrap_or(ActiveScreen::Home);
-            }
+    fn close_project(&mut self, path: &PathBuf) {
+        self.open_documents.retain(|doc| &doc.path != path);
+        if let ActiveScreen::Document(current_doc) = &self.screen
+            && &current_doc.path == path
+        {
+            self.screen = self
+                .open_documents
+                .first()
+                .map(|doc| ActiveScreen::Document(doc.clone()))
+                .unwrap_or(ActiveScreen::Home);
         }
 
         self.save();
     }
 
-    pub fn close_tab(
-        &mut self,
-        internal_path: &PathBuf,
-        cx: &mut Context<Self>,
-        window: &mut gpui::Window,
-    ) {
-        let Some(document) = self
-            .open_documents
-            .iter()
-            .find(|p| &p.internal_path == internal_path)
-        else {
-            log::warn!(
-                "Tried to close tab for non-open document: {:?}",
-                internal_path
-            );
+    pub fn close_tab(&mut self, path: &PathBuf, cx: &mut Context<Self>, window: &mut gpui::Window) {
+        let Some(document) = self.open_documents.iter().find(|doc| &doc.path == path) else {
+            log::warn!("Tried to close tab for non-open document: {:?}", path);
             return;
         };
 
-        // warn if not the same
-        let diff = *document.dirty.read(cx);
-
-        fn actually_close(
-            this: &mut WindowState,
-            document_view: &Entity<DocumentView>,
-            user_path: &Option<PathBuf>,
-            internal_path: &PathBuf,
-            cx: &mut App,
-        ) {
-            let _ = document_view.update(cx, |view, cx| {
-                view.discard_unsaved_changes(cx);
-            });
-
-            if user_path.is_some() {
-                this.close_project(internal_path);
-            } else {
-                // otherwise, completely forget project (nothing to save)
-                this.forget_project(internal_path);
-            }
-        }
-
-        let user_path = document.user_path.clone();
-        let internal_path = internal_path.clone();
+        let path = path.clone();
         let document_view = document.view.clone();
-
-        if diff {
-            let confirm = window.prompt(
-                PromptLevel::Warning,
-                "Close Tab?",
-                Some("You have unsaved changes!"),
-                &[
-                    PromptButton::Cancel("Cancel".into()),
-                    PromptButton::Ok("Close Anyways".into()),
-                ],
-                cx,
-            );
-
-            cx.spawn(async move |this, app| {
-                let Some(this) = this.upgrade() else {
-                    return;
-                };
-
-                if confirm.await == Ok(1) {
-                    let _ = app.update(move |cx| {
-                        let _ = this.update(cx, move |this, cx| {
-                            actually_close(this, &document_view, &user_path, &internal_path, cx);
-                        });
-                    });
-                }
-            })
-            .detach();
-        } else {
-            actually_close(self, &document_view, &user_path, &internal_path, cx);
-        }
+        let _ = document_view.update(cx, |view, cx| {
+            view.save_before_close(cx);
+        });
+        self.close_project(&path);
+        cx.notify();
+        window.refresh();
     }
 
-    pub fn set_user_path(&mut self, internal_path: &PathBuf, user_path: PathBuf) {
+    pub fn set_document_path(&mut self, old_path: &PathBuf, new_path: PathBuf) {
         for doc in self.open_documents.iter_mut() {
-            if &doc.internal_path == internal_path {
-                doc.user_path = Some(user_path.clone());
+            if &doc.path == old_path {
+                doc.path = new_path.clone();
             }
         }
 
-        for recent in self.recently_opened.iter_mut() {
-            if &recent.internal_path == internal_path {
-                recent.user_path = Some(user_path.clone());
-            }
+        self.recently_opened
+            .retain(|recent| recent.path != *old_path && recent.path != new_path);
+        self.recently_opened.insert(
+            0,
+            RecentlyOpened {
+                path: new_path.clone(),
+            },
+        );
+
+        if let ActiveScreen::Document(current) = &self.screen
+            && &current.path == old_path
+            && let Some(doc) = self.open_documents.iter().find(|doc| doc.path == new_path)
+        {
+            self.screen = ActiveScreen::Document(doc.clone());
         }
 
         self.save();
     }
 
-    pub fn forget_project(&mut self, internal_path: &PathBuf) {
-        self.recently_opened
-            .retain(|doc| &doc.internal_path != internal_path);
-        self.close_project(internal_path);
-
-        // we can safely delete the internal file
-        if internal_path.exists() {
-            std::fs::remove_file(internal_path).expect("Internal file should exist")
-        }
-
+    pub fn forget_project(&mut self, path: &PathBuf) {
+        self.recently_opened.retain(|doc| &doc.path != path);
+        self.close_project(path);
         self.save();
     }
 
     pub fn navigate_to_home(&mut self) {
         self.screen = ActiveScreen::Home;
-
         self.save();
     }
 
     pub fn navigate_to(
         &mut self,
-        user_path: Option<PathBuf>,
-        internal_path: PathBuf,
+        path: PathBuf,
         window_state: Entity<WindowState>,
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.recently_opened.retain(|p| p.user_path != user_path);
-        self.recently_opened.insert(
-            0,
-            RecentlyOpened {
-                internal_path: internal_path.clone(),
-                user_path: user_path.clone(),
-            },
-        );
+        self.recently_opened.retain(|recent| recent.path != path);
+        self.recently_opened
+            .insert(0, RecentlyOpened { path: path.clone() });
 
-        if !self
-            .open_documents
-            .iter()
-            .any(|doc| doc.internal_path == internal_path)
-        {
-            Self::copy_physical_to_virtual_if_newer(&internal_path, user_path.as_deref());
-
-            self.open_documents.push({
-                let dirty = cx.new(|_cx| false);
-                OpenDocument {
-                    internal_path: internal_path.clone(),
-                    user_path: user_path.clone(),
-                    view: cx.new(|cx| {
-                        DocumentView::new(
-                            internal_path.clone(),
-                            user_path.clone(),
-                            window_state.downgrade(),
-                            dirty.clone(),
-                            window,
-                            cx,
-                        )
-                    }),
-                    dirty: dirty,
-                }
+        if !self.open_documents.iter().any(|doc| doc.path == path) {
+            let dirty = cx.new(|_cx| false);
+            self.open_documents.push(OpenDocument {
+                path: path.clone(),
+                view: cx.new(|cx| {
+                    DocumentView::new(
+                        path.clone(),
+                        window_state.downgrade(),
+                        dirty.clone(),
+                        window,
+                        cx,
+                    )
+                }),
             });
         }
 
         self.screen = ActiveScreen::Document(
             self.open_documents
                 .iter()
-                .find(|doc| doc.internal_path == internal_path)
+                .find(|doc| doc.path == path)
                 .unwrap()
                 .clone(),
         );

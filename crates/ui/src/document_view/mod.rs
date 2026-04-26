@@ -12,8 +12,9 @@ use crate::{
     actions::{
         CloseActiveDocument, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide,
         PlayOrShowPauseHint, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath,
-        SceneEnd, SceneStart, SyncViewportCamera, ToggleParamsPanel, TogglePlaying,
-        TogglePresentationMode, ToggleTimelineConsole, Undo, UnfocusEditor, ZoomIn, ZoomOut,
+        SceneEnd, SceneStart, SyncViewportCamera, ToggleHeadlessMode, ToggleParamsPanel,
+        TogglePlaying, TogglePresentationMode, ToggleTimelineConsole, Undo, UnfocusEditor, ZoomIn,
+        ZoomOut,
     },
     components::split_pane::Split,
     editor::editor_view::Editor,
@@ -33,10 +34,13 @@ mod actions;
 mod export;
 mod render;
 
+const AUTO_HEADLESS_WINDOW_WIDTH: f32 = 720.0;
+
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("secondary-s", SaveActiveDocument, None),
         KeyBinding::new("secondary-shift-s", SaveActiveDocumentCustomPath, None),
+        KeyBinding::new("secondary-shift-h", ToggleHeadlessMode, None),
         KeyBinding::new("secondary-w", CloseActiveDocument, None),
         KeyBinding::new("secondary-z", Undo, None),
         KeyBinding::new("secondary-shift-z", Redo, None),
@@ -70,10 +74,8 @@ pub fn init(cx: &mut App) {
 
 #[derive(Clone, Debug)]
 pub struct OpenDocument {
-    pub internal_path: PathBuf,
-    pub user_path: Option<PathBuf>,
+    pub path: PathBuf,
     pub view: Entity<DocumentView>,
-    pub dirty: Entity<bool>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,13 +183,12 @@ impl ExportOverlayState {
 }
 
 pub struct DocumentView {
-    internal_path: PathBuf,
-    user_path: Option<PathBuf>,
+    path: PathBuf,
 
     was_fullscreen_before_presenting: bool,
     is_presenting: bool,
+    is_headless: bool,
 
-    dirty: Entity<bool>,
     state: DocumentState,
     services: Entity<ServiceManager>,
     window_state: WeakEntity<WindowState>,
@@ -202,18 +203,4 @@ pub struct DocumentView {
     export_poll_task: Option<Task<()>>,
 
     focus_handle: FocusHandle,
-}
-
-fn dirty_file(internal: &PathBuf, user: &Option<PathBuf>) -> bool {
-    let Some(user) = user else {
-        return true;
-    };
-
-    let content_ip = std::fs::read_to_string(internal);
-    let content_up = std::fs::read_to_string(user);
-
-    match (content_ip, content_up) {
-        (Ok(ci), Ok(cu)) => ci != cu,
-        _ => true,
-    }
 }

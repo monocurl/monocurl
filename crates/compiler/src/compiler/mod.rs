@@ -288,11 +288,11 @@ pub fn compile(
 
     let mut allowing_caches = true;
     for (ind, bundle) in bundles.iter().enumerate() {
-        let can_use_cache = allowing_caches &&
-            bundle.was_cached &&
+        let can_use_cache = allowing_caches
+            && bundle.was_cached
             // skip prelude
-            ind + 1 < compiler_cache.last_bundles.len() &&
-            compiler_cache.last_bundles[ind + 1].path == bundle.file_path;
+            && ind + 1 < compiler_cache.last_bundles.len()
+            && compiler_cache.last_bundles[ind + 1].path.as_ref() == Some(&bundle.file_path);
 
         if can_use_cache {
             c.emit_cached_bundle(
@@ -441,7 +441,7 @@ impl Compiler {
         }];
 
         self.current_bundle = Some(CompileBundle {
-            path: bundle.file_path.clone(),
+            path: Some(bundle.file_path.clone()),
             is_root_bundle: bundle.root_import_span.is_none(),
             import_display_index: bundle.root_import_span.as_ref().map(|_| {
                 self.compile_bundles

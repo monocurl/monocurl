@@ -81,6 +81,7 @@ impl ServiceManager {
     pub fn new(
         textual_state: Entity<TextualState>,
         execution_state: Entity<ExecutionState>,
+        root_path: PathBuf,
         cx: &mut Context<Self>,
     ) -> Self {
         let (sm_tx, mut sm_rx) = unbounded();
@@ -89,8 +90,12 @@ impl ServiceManager {
         let (execution_tx, execution_rx) = unbounded();
 
         let lexing = LexingService::new(lexing_rx, compilation_tx.clone(), sm_tx.clone());
-        let compilation =
-            CompilationService::new(compilation_rx, execution_tx.clone(), sm_tx.clone());
+        let compilation = CompilationService::new(
+            compilation_rx,
+            execution_tx.clone(),
+            sm_tx.clone(),
+            root_path,
+        );
         let execution = ExecutionService::new(execution_rx, sm_tx.clone());
 
         let weak_service_manager = cx.weak_entity();
@@ -253,7 +258,7 @@ impl ServiceManager {
 
     pub fn invalidate_dependencies(
         &mut self,
-        physical_path: Option<PathBuf>,
+        physical_path: PathBuf,
         live_ropes: HashMap<PathBuf, (Rope<Attribute<Token>>, Rope<TextAggregate>)>,
     ) {
         smol::block_on(async {

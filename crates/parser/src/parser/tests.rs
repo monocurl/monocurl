@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, path::PathBuf};
 
     use lexer::{lexer::Lexer, token::Token};
     use structs::{rope::Rope, text::Span8};
@@ -53,7 +53,7 @@ mod test {
             &HashMap::new(),
             PreparsedFile {
                 imports: vec![],
-                path: None,
+                path: PathBuf::from("scene.mcs"),
                 text_rope: Rope::from_str(content),
                 root_import_span: None,
                 tokens: lex(content),

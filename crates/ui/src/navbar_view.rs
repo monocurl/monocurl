@@ -24,23 +24,20 @@ impl DocumentList {
         cx: &Context<Self>,
     ) -> impl IntoElement {
         let filename = doc
-            .user_path
-            .as_ref()
-            .and_then(|f| f.file_name())
+            .path
+            .file_name()
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or(
                 "Untitled".to_string()
                     + &doc
-                        .internal_path
+                        .path
                         .extension()
                         .map(|e| ".".to_string() + &e.to_string_lossy().to_string())
                         .unwrap_or_default(),
             );
 
-        let dirty = *doc.dirty.read(cx);
-        let up = doc.user_path.clone();
-        let ip0 = doc.internal_path.clone();
-        let ip = doc.internal_path.clone();
+        let path_for_close = doc.path.clone();
+        let path_for_open = doc.path.clone();
         let theme = ThemeSettings::theme(cx);
 
         let bg = if is_active {
@@ -62,16 +59,8 @@ impl DocumentList {
             .h(px(30.0))
             .bg(bg)
             .text_color(theme.text_primary)
-            .child(
-                div()
-                    .size_1()
-                    .rounded_full()
-                    .bg(if dirty { theme.accent } else { bg }),
-            )
             .child(filename)
-            .id(SharedString::new(
-                doc.internal_path.to_string_lossy().to_string(),
-            ))
+            .id(SharedString::new(doc.path.to_string_lossy().to_string()))
             .child(
                 div()
                     .size_3()
@@ -87,11 +76,11 @@ impl DocumentList {
                     .id("close-button")
                     .on_click(cx.listener(move |this, _, window, cx| {
                         let state = this.window_state.upgrade().unwrap();
-                        let ip = ip0.clone();
+                        let path = path_for_close.clone();
                         state.update(cx, move |wstate, cx| {
                             cx.stop_propagation();
                             window.prevent_default();
-                            wstate.close_tab(&ip, cx, window);
+                            wstate.close_tab(&path, cx, window);
                             cx.notify();
                         })
                     })),
@@ -99,10 +88,9 @@ impl DocumentList {
             .on_click(cx.listener(move |this, _, window, cx| {
                 let state = this.window_state.upgrade().unwrap();
                 let statec = state.clone();
-                let up = up.clone();
-                let ip = ip.clone();
+                let path = path_for_open.clone();
                 state.update(cx, move |wstate, cx| {
-                    wstate.navigate_to(up.clone(), ip.clone(), statec, window, cx);
+                    wstate.navigate_to(path.clone(), statec, window, cx);
                     cx.notify();
                 })
             }))
@@ -117,8 +105,12 @@ impl Render for DocumentList {
         let theme = ThemeSettings::theme(cx);
         let active = match state.screen {
             ActiveScreen::Home => None,
-            ActiveScreen::Document(ref open_document) => Some(open_document.internal_path.clone()),
+            ActiveScreen::Document(ref open_document) => Some(open_document.path.clone()),
         };
+
+        if state.open_documents().next().is_none() {
+            return div().id("document-list").h_full().into_any_element();
+        }
 
         div()
             .flex()
@@ -126,16 +118,19 @@ impl Render for DocumentList {
             .flex_shrink()
             .h_full()
             .id("document-list")
-            .border(px(0.5))
+            .border_l(px(0.5))
+            .border_t(px(0.5))
+            .border_b(px(0.5))
             .border_color(theme.navbar_border)
             .children(
-                state.open_documents().map(|doc| {
-                    self.render_tab(doc, Some(&doc.internal_path) == active.as_ref(), cx)
-                }),
+                state
+                    .open_documents()
+                    .map(|doc| self.render_tab(doc, Some(&doc.path) == active.as_ref(), cx)),
             )
             .text_size(px(12.0))
             .overflow_x_scroll()
             .track_scroll(state.navbar_scroll())
+            .into_any_element()
     }
 }
 

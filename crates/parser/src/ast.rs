@@ -21,7 +21,7 @@ impl SectionType {
 
 #[derive(Clone)]
 pub struct SectionBundle {
-    pub file_path: Option<PathBuf>,
+    pub file_path: PathBuf,
     // same as previous parsing for the file path
     // must never be true for the root module
     pub was_cached: bool,

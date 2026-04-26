@@ -443,7 +443,7 @@ fn run_command(command: CliCommand) -> Result<()> {
         .with_context(|| format!("failed to read scene {}", scene_path.display()))?;
     let request = ExportRequest {
         root_text,
-        root_user_path: Some(scene_path),
+        root_path: scene_path,
         open_documents: HashMap::new(),
         output_path: command.output_path().to_path_buf(),
         kind: command.export_kind(),

@@ -48,6 +48,7 @@ actions!(
         Undo,
         Redo,
         UnfocusEditor,
+        ToggleHeadlessMode,
         TogglePresentationMode,
         ToggleParamsPanel,
         ToggleTimelineConsole,

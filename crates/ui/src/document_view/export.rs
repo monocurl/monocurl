@@ -35,35 +35,31 @@ impl DocumentView {
         let mut documents = HashMap::new();
 
         for doc in window_state.open_documents() {
-            if doc.internal_path == self.internal_path {
+            if doc.path == self.path {
                 continue;
             }
-            let Some(user_path) = &doc.user_path else {
-                continue;
-            };
             let text = {
                 let doc_view = doc.view.read(cx);
                 let state = doc_view.state.textual_state.read(cx);
                 state.read(0..state.len())
             };
-            documents.insert(user_path.clone(), text);
+            documents.insert(doc.path.clone(), text);
         }
 
         documents
     }
 
     fn export_directory(&self) -> PathBuf {
-        self.user_path
-            .as_ref()
-            .and_then(|path| path.parent().map(|path| path.to_path_buf()))
+        self.path
+            .parent()
+            .map(|path| path.to_path_buf())
             .unwrap_or(dirs::home_dir().unwrap())
     }
 
     fn export_filename(&self, kind: RequestedExport) -> String {
         let stem = self
-            .user_path
-            .as_ref()
-            .and_then(|path| path.file_stem())
+            .path
+            .file_stem()
             .map(|stem| stem.to_string_lossy().to_string())
             .unwrap_or_else(|| "Untitled".to_string());
         format!("{stem}.{}", kind.extension())
@@ -115,7 +111,7 @@ impl DocumentView {
         let current_timestamp = self.state.execution_state.read(cx).current_timestamp;
         let request = ExportRequest {
             root_text: self.current_document_text(cx),
-            root_user_path: self.user_path.clone(),
+            root_path: self.path.clone(),
             open_documents: self.live_open_document_texts(cx),
             output_path,
             kind: match kind {

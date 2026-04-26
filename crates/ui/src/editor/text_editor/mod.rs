@@ -90,10 +90,17 @@ struct HistoryItem {
     replacement: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HistoryGroupKind {
+    User,
+    ExternalReload,
+}
+
 struct HistoryGroup {
     items: SmallVec<[HistoryItem; 8]>,
     // before the group was applied, where was the cursor?
     cursor: Cursor,
+    kind: HistoryGroupKind,
 }
 
 pub struct TextEditor {
@@ -110,7 +117,7 @@ pub struct TextEditor {
 
     state: Entity<TextualState>,
     dirty: Entity<bool>,
-    internal_dirty: Entity<bool>,
+    save_dirty: Entity<bool>,
 
     last_op_matched_character: Option<Count8>,
 
@@ -152,7 +159,7 @@ impl TextEditor {
         cx: &mut Context<Self>,
         content: String,
         dirty: Entity<bool>,
-        internal_dirty: Entity<bool>,
+        save_dirty: Entity<bool>,
     ) -> Self {
         let text_styles = ThemeSettings::theme(cx).text_editor_styles();
         let line_height = text_styles.line_height;
@@ -202,7 +209,7 @@ impl TextEditor {
             state,
 
             dirty,
-            internal_dirty,
+            save_dirty,
             last_op_matched_character: None,
 
             marked_range: None,
@@ -239,8 +246,14 @@ impl TextEditor {
             ret.replace(0..0, &content, window, cx);
             ret.state.update(cx, |state, cx| state.end_transaction(cx));
             ret.history_disabled = false;
+            ret.dirty.update(cx, |dirty, _| *dirty = false);
+            ret.save_dirty.update(cx, |dirty, _| *dirty = false);
         }
         ret
+    }
+
+    pub fn editor_focus_handle(&self) -> FocusHandle {
+        self.focus_handle.clone()
     }
 
     fn apply_theme(&mut self, styles: TextEditorStyles, cx: &mut Context<Self>) {
@@ -268,6 +281,7 @@ impl TextEditor {
         let mut inverse = HistoryGroup {
             items: SmallVec::new(),
             cursor: self.cursor(cx),
+            kind: group.kind,
         };
 
         for item in group.items.iter().rev() {
@@ -302,6 +316,7 @@ impl TextEditor {
             self.undo_stack.push_back(HistoryGroup {
                 items: SmallVec::new(),
                 cursor: self.cursor(cx),
+                kind: HistoryGroupKind::User,
             });
 
             while self.undo_stack.len() > MAX_UNDO_GROUPS {
@@ -361,11 +376,66 @@ impl TextEditor {
         self.undo_stack.push_back(undo);
     }
 
+    pub fn next_undo_requires_reload_confirmation(&self) -> bool {
+        self.undo_stack
+            .iter()
+            .rev()
+            .find(|group| !group.items.is_empty())
+            .is_some_and(|group| group.kind == HistoryGroupKind::ExternalReload)
+    }
+
+    pub fn replace_entire_text_from_external_reload(
+        &mut self,
+        new_text: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let old_len = self.state.read(cx).len();
+        let old_text = self.state.read(cx).read(0..old_len);
+        if old_text == new_text {
+            self.dirty.update(cx, |dirty, _| *dirty = false);
+            self.save_dirty.update(cx, |dirty, _| *dirty = false);
+            return;
+        }
+
+        while self
+            .undo_stack
+            .back()
+            .is_some_and(|group| group.items.is_empty())
+        {
+            self.undo_stack.pop_back();
+        }
+        let mut items = SmallVec::new();
+        items.push(HistoryItem {
+            old: 0..new_text.len(),
+            replacement: old_text,
+        });
+        self.undo_stack.push_back(HistoryGroup {
+            items,
+            cursor: self.cursor(cx),
+            kind: HistoryGroupKind::ExternalReload,
+        });
+        while self.undo_stack.len() > MAX_UNDO_GROUPS {
+            self.undo_stack.pop_front();
+        }
+        self.redo_stack.clear();
+
+        self.history_disabled = true;
+        self.state.update(cx, |state, _| state.start_transaction());
+        self.replace(0..old_len, &new_text, window, cx);
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
+        self.history_disabled = false;
+
+        self.dirty.update(cx, |dirty, _| *dirty = false);
+        self.save_dirty.update(cx, |dirty, _| *dirty = false);
+    }
+
     fn undo_group_boundary(&mut self, cx: &App) {
         if self.undo_stack.back().is_none_or(|g| !g.items.is_empty()) {
             self.undo_stack.push_back(HistoryGroup {
                 items: SmallVec::new(),
                 cursor: self.cursor(cx),
+                kind: HistoryGroupKind::User,
             });
         }
 
@@ -390,7 +460,7 @@ impl TextEditor {
         });
         self.reshape_lines(del_range, ins_range, window, cx);
         self.dirty.update(cx, |dirty, _| *dirty = true);
-        self.internal_dirty.update(cx, |dirty, _| *dirty = true);
+        self.save_dirty.update(cx, |dirty, _| *dirty = true);
     }
 
     // 0. if not inserting a single parenthesis, do normal

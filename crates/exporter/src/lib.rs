@@ -77,7 +77,7 @@ pub enum ExportKind {
 #[derive(Clone, Debug)]
 pub struct ExportRequest {
     pub root_text: String,
-    pub root_user_path: Option<PathBuf>,
+    pub root_path: PathBuf,
     pub open_documents: HashMap<PathBuf, String>,
     pub output_path: PathBuf,
     pub kind: ExportKind,
@@ -213,7 +213,7 @@ async fn export_scene_async(
         ExportKind::Image { timestamp } => {
             let prepared = prepare_scene(
                 &request.root_text,
-                request.root_user_path.as_ref(),
+                &request.root_path,
                 &request.open_documents,
                 cancel_flag,
                 on_progress,
@@ -233,7 +233,7 @@ async fn export_scene_async(
         ExportKind::Video => {
             let prepared = prepare_scene(
                 &request.root_text,
-                request.root_user_path.as_ref(),
+                &request.root_path,
                 &request.open_documents,
                 cancel_flag,
                 on_progress,
@@ -254,7 +254,7 @@ async fn export_scene_async(
 
 fn prepare_scene(
     root_text: &str,
-    root_user_path: Option<&PathBuf>,
+    root_path: &PathBuf,
     open_documents: &HashMap<PathBuf, String>,
     cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
@@ -267,7 +267,7 @@ fn prepare_scene(
     let root_lex_rope = lex_rope_from_str(root_text);
 
     let mut import_context = ParseImportContext {
-        root_file_user_path: root_user_path.cloned(),
+        root_file_path: root_path.clone(),
         open_tab_ropes: open_documents
             .iter()
             .map(|(path, text)| {

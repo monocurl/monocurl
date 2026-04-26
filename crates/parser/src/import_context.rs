@@ -21,13 +21,13 @@ pub enum Error {
 // context mainly related about finding additional imports
 #[derive(Default)]
 pub struct ParseImportContext {
-    pub root_file_user_path: Option<PathBuf>,
+    pub root_file_path: PathBuf,
     pub open_tab_ropes: HashMap<PathBuf, (Rope<Attribute<Token>>, Rope<TextAggregate>)>,
     pub cached_parses: HashMap<PathBuf, (Arc<SectionBundle>, ParseArtifacts)>,
 }
 
 pub(crate) struct FileResult {
-    pub path: Option<PathBuf>,
+    pub path: PathBuf,
     pub tokens: Vec<(Token, Range<usize>)>,
     pub text_rope: Rope<TextAggregate>,
     pub is_stdlib: bool,
@@ -35,20 +35,13 @@ pub(crate) struct FileResult {
 
 impl ParseImportContext {
     pub fn reset(&mut self) {
-        self.root_file_user_path = None;
+        self.root_file_path = PathBuf::new();
         self.open_tab_ropes.clear();
         self.cached_parses.clear();
     }
 
-    pub fn cache_get(
-        &self,
-        path: &Option<PathBuf>,
-    ) -> Option<(Arc<SectionBundle>, ParseArtifacts)> {
-        if let Some(path) = path {
-            self.cached_parses.get(path).cloned()
-        } else {
-            None
-        }
+    pub fn cache_get(&self, path: &PathBuf) -> Option<(Arc<SectionBundle>, ParseArtifacts)> {
+        self.cached_parses.get(path).cloned()
     }
 
     pub fn set_cache(&mut self, path: PathBuf, bundle: &SectionBundle, artifacts: ParseArtifacts) {
@@ -75,7 +68,7 @@ impl ParseImportContext {
 
             if let Some((lex_rope, text_rope)) = self.open_tab_ropes.get(&p) {
                 return Some(FileResult {
-                    path: Some(p.clone()),
+                    path: p.clone(),
                     tokens: flatten_rope(lex_rope),
                     text_rope: text_rope.clone(),
                     is_stdlib,
@@ -87,7 +80,7 @@ impl ParseImportContext {
                 let text_rope = Rope::from_str(&content);
                 let filtered = Lexer::new(content.chars());
                 return Some(FileResult {
-                    path: Some(p.clone()),
+                    path: p.clone(),
                     tokens: flatten_lex_stream(filtered).collect(),
                     text_rope: text_rope,
                     is_stdlib,

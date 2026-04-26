@@ -5907,7 +5907,6 @@ dependencies = [
  "structs",
  "ui_cli_shared",
  "unicode-segmentation",
- "uuid",
 ]
 
 [[package]]
