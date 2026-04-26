@@ -50,7 +50,7 @@ image = "0.25.5"
 mp4 = "0.14.0"
 openh264 = "0.9.3"
 
-gpui = { path = "../../../../gpui/crates/gpui" }
+gpui = { path = "../gpui/crates/gpui" }
 
 autocomplete = { path = "crates/autocomplete" }
 bytecode = { path = "crates/bytecode" }
