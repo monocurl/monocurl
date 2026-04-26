@@ -191,7 +191,7 @@ impl Viewport {
             return;
         };
 
-        let dx = f32::from(position.x - drag.start_mouse.x);
+        let dx = f32::from(drag.start_mouse.x - position.x);
         let dy = f32::from(position.y - drag.start_mouse.y);
         let scene_camera = self.execution_state.read(cx).camera.clone();
         let next_camera = match drag.mode {

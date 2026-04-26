@@ -21,12 +21,13 @@ impl Executor {
             PrimitiveAnim::Lerp { time, .. } => *time,
             PrimitiveAnim::Set { .. } => 0.0,
             PrimitiveAnim::Wait { time } => *time,
-        }
+        }.max(f64::MIN_POSITIVE)
     }
 
     pub fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
 
+        self.mark_section_as_started_playing();
         self.save_cache();
 
         let mut heads = BTreeSet::new();
@@ -85,6 +86,7 @@ impl Executor {
                     {
                         self.advance_section();
                     } else {
+                        self.mark_section_as_started_playing();
                         self.save_cache();
                         return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
                     }
@@ -211,7 +213,7 @@ impl Executor {
                 return SeekToResult::SeekedTo(self.state.timestamp);
             }
             self.mark_section_as_started_playing();
-            // dumb but works
+            // dumb but works (relevant when seeking to exactly 0)
             if self.state.timestamp.slide == target.slide
                 && self.state.timestamp.time >= target.time
             {
@@ -547,7 +549,7 @@ impl Executor {
     ) -> Result<BakedPrimitiveAnim, ExecutorError> {
         let duration = Self::primitive_anim_duration(&prim);
 
-        let start = self.state.timestamp.time;
+        let start = self.state.timestamp.time.max(0.0);
         let targets = self.resolve_primitive_anim_targets(parent_stack_idx, &prim, reserved)?;
         let embed = match &prim {
             PrimitiveAnim::Lerp { embed, .. } => embed.as_deref().cloned(),
