@@ -3,7 +3,7 @@ use gpui::*;
 
 use crate::{
     actions::{ZoomIn, ZoomOut},
-    services::ServiceManager,
+    services::{ExecutionStatus, ServiceManager},
     theme::ThemeSettings,
 };
 
@@ -34,9 +34,12 @@ pub struct Timeline {
 impl Timeline {
     pub fn new(services: Entity<ServiceManager>, cx: &mut Context<Self>) -> Self {
         let execution_state = services.read(cx).execution_state().clone();
-        cx.observe(&execution_state, |this, _, cx| {
-            this.recenter_playhead_if_needed(cx);
-            cx.notify();
+        cx.observe(&execution_state, |this, es, cx| {
+            let exec = es.read(cx);
+            if exec.status != ExecutionStatus::Seeking {
+                this.recenter_playhead_if_needed(cx);
+                cx.notify();
+            }
         })
         .detach();
         let textual_state = services.read(cx).textual_state().clone();
