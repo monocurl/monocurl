@@ -2,7 +2,22 @@ use super::*;
 
 impl SectionParser {
     pub(super) fn parse_expr_priority(&mut self, priority: usize) -> SpanTagged<Expression> {
-        let mut expr = Some(self.parse_unary());
+        self.parse_expr_priority_with_leading_newlines(priority, true)
+    }
+
+    pub(super) fn parse_expr_priority_without_leading_newlines(
+        &mut self,
+        priority: usize,
+    ) -> SpanTagged<Expression> {
+        self.parse_expr_priority_with_leading_newlines(priority, false)
+    }
+
+    fn parse_expr_priority_with_leading_newlines(
+        &mut self,
+        priority: usize,
+        allow_leading_newlines: bool,
+    ) -> SpanTagged<Expression> {
+        let mut expr = Some(self.parse_unary_with_leading_newlines(allow_leading_newlines));
         loop {
             let mut finished = false;
             try_all!(self, {
@@ -43,7 +58,16 @@ impl SectionParser {
     }
 
     pub(super) fn parse_unary(&mut self) -> SpanTagged<Expression> {
-        self.advance_newlines();
+        self.parse_unary_with_leading_newlines(true)
+    }
+
+    fn parse_unary_with_leading_newlines(
+        &mut self,
+        allow_leading_newlines: bool,
+    ) -> SpanTagged<Expression> {
+        if allow_leading_newlines {
+            self.advance_newlines();
+        }
 
         // parse base expression
         let expr = try_all!(self, expected = Some("<unary expression>"), {

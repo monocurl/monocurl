@@ -1000,6 +1000,30 @@ mod test {
     }
 
     #[test]
+    fn test_print_statement_does_not_consume_newline_before_expression() {
+        let content = "print\nx";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
+        let result = parser.parse_statement_list();
+
+        assert!(!parser.artifacts.error_diagnostics.is_empty());
+        assert_eq!(result.len(), 2);
+        assert!(matches!(
+            result[0].1,
+            Statement::Print(Print {
+                value: (_, Expression::Literal(Literal::Int(0)))
+            })
+        ));
+        assert!(matches!(
+            result[1].1,
+            Statement::Expression(Expression::IdentifierReference(IdentifierReference::Value(
+                ref name
+            ))) if name == "x"
+        ));
+    }
+
+    #[test]
     fn test_if_statement() {
         let result = parse_stmt_test("if (x > 0) { y = 1 }").unwrap();
         let expected = Statement::If(If {
@@ -1372,6 +1396,33 @@ mod test {
             )],
         });
         assert_eq!(result.1, expected);
+    }
+
+    #[test]
+    fn test_play_statement_does_not_consume_newline_before_expression() {
+        let content = "anim { play\ncircle }";
+        let lexed = lex(content);
+        let text_rope = Rope::from_str(content);
+        let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
+        let result = parser.parse_expr_best_effort();
+
+        assert!(!parser.artifacts.error_diagnostics.is_empty());
+        let Expression::Anim(Anim { body }) = result.1 else {
+            panic!("expected anim expression");
+        };
+        assert_eq!(body.len(), 2);
+        assert!(matches!(
+            body[0].1,
+            Statement::Play(Play {
+                animations: (_, Expression::Literal(Literal::Int(0)))
+            })
+        ));
+        assert!(matches!(
+            body[1].1,
+            Statement::Expression(Expression::IdentifierReference(IdentifierReference::Value(
+                ref name
+            ))) if name == "circle"
+        ));
     }
 
     // Multiline tests

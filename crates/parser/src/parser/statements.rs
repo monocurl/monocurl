@@ -236,14 +236,14 @@ impl SectionParser {
     pub(super) fn parse_play(&mut self) -> SpanTagged<Play> {
         self.debug_assert_token_eq(Token::Play);
         let base_span = self.advance_token();
-        let animations = self.parse_expr_best_effort();
+        let animations = self.parse_expr_without_leading_newlines_best_effort();
         (base_span.start..animations.0.end, Play { animations })
     }
 
     pub(super) fn parse_print(&mut self) -> SpanTagged<Print> {
         self.debug_assert_token_eq(Token::Print);
         let base_span = self.advance_token();
-        let value = self.parse_expr_best_effort();
+        let value = self.parse_expr_without_leading_newlines_best_effort();
         (base_span.start..value.0.end, Print { value })
     }
 
@@ -313,6 +313,12 @@ impl SectionParser {
 
     pub(super) fn parse_expr_best_effort(&mut self) -> SpanTagged<Expression> {
         self.parse_expr_priority(0)
+    }
+
+    pub(super) fn parse_expr_without_leading_newlines_best_effort(
+        &mut self,
+    ) -> SpanTagged<Expression> {
+        self.parse_expr_priority_without_leading_newlines(0)
     }
 }
 
