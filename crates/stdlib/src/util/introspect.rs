@@ -473,13 +473,13 @@ pub async fn set_default(
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
     let target = executor.state.stack(stack_idx).read_at(-4).clone();
-    let default_name = read_string(executor, stack_idx, -3, "name").await?;
-    let rhs = executor.state.stack(stack_idx).read_at(-2).clone();
     let level = crate::read_float(executor, stack_idx, -1, "level")?;
-
     if level == 0.0 {
         return Ok(target);
     }
+
+    let default_name = read_string(executor, stack_idx, -3, "name").await?;
+    let rhs = executor.state.stack(stack_idx).read_at(-2).clone();
 
     let rhs = if level == 1.0 {
         rhs

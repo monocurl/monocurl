@@ -585,6 +585,9 @@ fn dashed_tree<'a>(
 pub async fn op_shift(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let delta = read_float3(executor, stack_idx, -2, "delta")?;
+    if delta.len_sq() <= 1e-12 {
+        return Ok(tree.into_value());
+    }
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         transform_mesh_positions(mesh, |p| p + delta)
@@ -597,6 +600,9 @@ pub async fn op_shift(executor: &mut Executor, stack_idx: usize) -> Result<Value
 pub async fn op_scale(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let factor = read_scale_factor(executor, stack_idx, -2, "factor")?;
+    if (factor - Float3::splat(1.0)).len_sq() <= 1e-12 {
+        return Ok(tree.into_value());
+    }
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
         return Ok(tree.into_value());
@@ -613,6 +619,9 @@ pub async fn op_scale(executor: &mut Executor, stack_idx: usize) -> Result<Value
 pub async fn op_rotate(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
     let angle = crate::read_float(executor, stack_idx, -4, "radians")? as f32;
+    if angle.abs() <= 1e-12 {
+        return Ok(tree.into_value());
+    }
     let axis = read_float3(executor, stack_idx, -3, "axis")?;
     let axis = if axis.len_sq() <= 1e-12 {
         Float3::Z
@@ -685,6 +694,9 @@ pub async fn op_camera_transfer(
 pub async fn op_fade(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let alpha = crate::read_float(executor, stack_idx, -2, "opacity")?;
+    if (alpha - 1.0).abs() <= 1e-12 {
+        return Ok(tree.into_value());
+    }
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         mesh.uniform.alpha *= alpha;
