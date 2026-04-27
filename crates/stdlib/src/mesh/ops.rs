@@ -76,6 +76,10 @@ fn transform_hint_normal(normal: Float3, x_unit: Float3, y_unit: Float3, z_unit:
     }
 }
 
+fn decode_mesh_ref(value: i32) -> Option<usize> {
+    (value < -1).then_some((-value - 2) as usize)
+}
+
 fn viewport_half_extents(depth: f32) -> (f32, f32) {
     let depth = depth.max(executor::camera::MIN_CAMERA_NEAR);
     let tan_half_fov = (DEFAULT_CAMERA_FOV * 0.5).tan().max(0.05);
@@ -1400,6 +1404,93 @@ pub async fn op_dashed(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     .map(MeshTree::into_value)
 }
 
+fn subdivide_line_mesh(mesh: &mut Mesh, factor: usize) {
+    let original_lins = mesh.lins.clone();
+    let mut lins = Vec::with_capacity(original_lins.len() * factor);
+
+    for (lin_idx, lin) in original_lins.iter().enumerate() {
+        let base = lin_idx * factor;
+        for i in 0..factor {
+            let u = i as f32 / factor as f32;
+            let v = (i + 1) as f32 / factor as f32;
+            let a = if i == 0 {
+                lin.a.pos
+            } else {
+                lin.a.pos.lerp(lin.b.pos, u)
+            };
+            let b = if i + 1 == factor {
+                lin.b.pos
+            } else {
+                lin.a.pos.lerp(lin.b.pos, v)
+            };
+            let mut out = default_lin(a, b, lin.norm);
+            out.a.col = lin.a.col.lerp(lin.b.col, u);
+            out.b.col = lin.a.col.lerp(lin.b.col, v);
+            out.prev = if i == 0 {
+                if lin.prev >= 0 {
+                    (lin.prev as usize * factor + (factor - 1)) as i32
+                } else {
+                    lin.prev
+                }
+            } else {
+                (base + i - 1) as i32
+            };
+            out.next = if i + 1 == factor {
+                if lin.next >= 0 {
+                    (lin.next as usize * factor) as i32
+                } else {
+                    lin.next
+                }
+            } else {
+                (base + i + 1) as i32
+            };
+            out.inv = if lin.inv >= 0 {
+                (lin.inv as usize * factor + (factor - 1 - i)) as i32
+            } else {
+                lin.inv
+            };
+            out.is_dom_sib = lin.is_dom_sib;
+            lins.push(out);
+        }
+    }
+
+    for line_idx in 0..original_lins.len() {
+        let inv_idx = original_lins[line_idx].inv;
+        if inv_idx < 0 {
+            continue;
+        }
+        let inv_idx = inv_idx as usize;
+        if inv_idx >= original_lins.len() || line_idx >= inv_idx {
+            continue;
+        }
+
+        for i in 0..factor {
+            let line_piece_idx = line_idx * factor + i;
+            let inv_piece_idx = inv_idx * factor + (factor - 1 - i);
+            let line_piece = lins[line_piece_idx];
+            lins[inv_piece_idx].a.pos = line_piece.b.pos;
+            lins[inv_piece_idx].b.pos = line_piece.a.pos;
+        }
+    }
+
+    for (dot_idx, dot) in mesh.dots.iter_mut().enumerate() {
+        let Some(line_idx) = decode_mesh_ref(dot.inv) else {
+            continue;
+        };
+        let Some(line) = original_lins.get(line_idx) else {
+            continue;
+        };
+        let dot_ref = mesh_ref(dot_idx);
+        if line.prev == dot_ref {
+            dot.inv = mesh_ref(line_idx * factor);
+        } else if line.next == dot_ref {
+            dot.inv = mesh_ref(line_idx * factor + factor - 1);
+        }
+    }
+
+    mesh.lins = lins;
+}
+
 #[stdlib_func]
 pub async fn op_subdivide(
     executor: &mut Executor,
@@ -1420,43 +1511,7 @@ pub async fn op_subdivide(
             mesh.lins = lins;
             mesh.tris = tris;
         } else if !mesh.lins.is_empty() && factor > 1 {
-            let mut lins = Vec::with_capacity(mesh.lins.len() * factor);
-            for (lin_idx, lin) in mesh.lins.iter().enumerate() {
-                let base = lin_idx * factor;
-                for i in 0..factor {
-                    let u = i as f32 / factor as f32;
-                    let v = (i + 1) as f32 / factor as f32;
-                    let a = lin.a.pos.lerp(lin.b.pos, u);
-                    let b = lin.a.pos.lerp(lin.b.pos, v);
-                    let mut out = default_lin(a, b, lin.norm);
-                    out.prev = if i == 0 {
-                        if lin.prev >= 0 {
-                            (lin.prev as usize * factor + (factor - 1)) as i32
-                        } else {
-                            lin.prev
-                        }
-                    } else {
-                        (base + i - 1) as i32
-                    };
-                    out.next = if i + 1 == factor {
-                        if lin.next >= 0 {
-                            (lin.next as usize * factor) as i32
-                        } else {
-                            lin.next
-                        }
-                    } else {
-                        (base + i + 1) as i32
-                    };
-                    out.inv = if lin.inv >= 0 {
-                        (lin.inv as usize * factor + (factor - 1 - i)) as i32
-                    } else {
-                        lin.inv
-                    };
-                    out.is_dom_sib = lin.is_dom_sib;
-                    lins.push(out);
-                }
-            }
-            mesh.lins = lins;
+            subdivide_line_mesh(mesh, factor);
         }
         mesh.debug_assert_consistent_topology();
     })
@@ -1842,12 +1897,14 @@ mod tests {
 
     use geo::{
         mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
+        mesh_build::mesh_ref,
         simd::{Float2, Float3, Float4},
     };
 
     use super::{
         BoundaryEdge, IndexedSurface, MeshTree, SurfaceVertex, build_indexed_surface, dashed_lines,
         dashed_mesh, default_lin, push_dashed_segment, recolor_mesh, subdivide_indexed_surface,
+        subdivide_line_mesh,
     };
 
     fn square_surface() -> IndexedSurface {
@@ -1931,6 +1988,32 @@ mod tests {
 
         assert_eq!(mesh.tris.len(), 8);
         assert_eq!(mesh.lins.len(), 8);
+        assert!(mesh.has_consistent_topology());
+    }
+
+    #[test]
+    fn subdivide_lines_remaps_endpoint_dot_backrefs() {
+        let mut mesh = Mesh {
+            dots: vec![],
+            lins: vec![default_lin(
+                Float3::new(-2.0, -2.0, 0.0),
+                Float3::new(-1.0, -2.0, 0.0),
+                Float3::Z,
+            )],
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+        };
+        mesh.normalize_line_dot_topology();
+
+        subdivide_line_mesh(&mut mesh, 3);
+
+        assert_eq!(mesh.lins.len(), 6);
+        assert_eq!(mesh.dots.len(), 4);
+        assert_eq!(mesh.dots[0].inv, mesh_ref(0));
+        assert_eq!(mesh.dots[1].inv, mesh_ref(2));
+        assert_eq!(mesh.dots[2].inv, mesh_ref(3));
+        assert_eq!(mesh.dots[3].inv, mesh_ref(5));
         assert!(mesh.has_consistent_topology());
     }
 

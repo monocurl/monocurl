@@ -950,7 +950,7 @@ pub async fn mk_color_grid(
         color_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
     }
     let colors = invoke_callable_many(executor, &color_at, &color_args, "color_at").await?;
-    let mut colors = colors
+    let colors = colors
         .into_iter()
         .map(|color| float4_from_value(color, "color_at"))
         .collect::<Result<Vec<_>, _>>()?
@@ -966,10 +966,7 @@ pub async fn mk_color_grid(
     }
 
     let (mut lins, mut tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
-    for tri_pair in tris.chunks_mut(2) {
-        let Some(color) = colors.next() else {
-            break;
-        };
+    for (tri_pair, color) in tris.chunks_mut(2).zip(colors) {
         for tri in tri_pair {
             tri.a.col = color;
             tri.b.col = color;
