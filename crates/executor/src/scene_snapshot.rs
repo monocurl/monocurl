@@ -88,12 +88,6 @@ fn collect_scene_meshes<'a>(
             .map_err(scene_snapshot_error)?;
         match value {
             Value::Mesh(mesh) => {
-                if let Some(report) = mesh.topology_mismatch_report() {
-                    return Err(scene_snapshot_error(ExecutorError::invalid_scene(format!(
-                        "on-screen mesh '{}' has invalid topology\n{}",
-                        target_name, report
-                    ))));
-                }
                 out.push(mesh);
                 Ok(())
             }

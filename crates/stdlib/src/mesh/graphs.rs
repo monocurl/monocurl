@@ -22,6 +22,7 @@ use super::{
 const MAX_CURVE_SAMPLES: usize = 1 << 14;
 const MAX_AXIS_TICKS: usize = 1 << 12;
 const MAX_GRID_CELLS: usize = 1 << 16;
+const MAX_LINE_GRID_POINTS: usize = 1 << 16;
 const MAX_FIELD_SAMPLES: usize = 1 << 16;
 const MAX_SURFACE_TRIANGLES: usize = 1 << 17;
 const DEFAULT_AXIS_TICK_STEP: f32 = 0.25;
@@ -69,6 +70,14 @@ fn checked_product(kind: &str, a: usize, b: usize, limit: usize) -> Result<usize
     Ok(total)
 }
 
+fn checked_sum(kind: &str, a: usize, b: usize, limit: usize) -> Result<usize, ExecutorError> {
+    let total = a
+        .checked_add(b)
+        .ok_or_else(|| mesh_limit_error(kind, usize::MAX, limit))?;
+    ensure_limit(kind, total, limit)?;
+    Ok(total)
+}
+
 fn ensure_grid_cells(kind: &str, nx: usize, ny: usize) -> Result<usize, ExecutorError> {
     checked_product(kind, nx, ny, MAX_GRID_CELLS)
 }
@@ -96,6 +105,22 @@ fn open_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
     let mut out = Vec::with_capacity(points.len().saturating_sub(1));
     push_open_polyline(&mut out, points, normal);
     out
+}
+
+fn push_subdivided_line(out: &mut Vec<geo::mesh::Lin>, a: Float3, b: Float3, subdivision: usize) {
+    let base = out.len();
+    for i in 0..subdivision {
+        let u = i as f32 / subdivision as f32;
+        let v = (i + 1) as f32 / subdivision as f32;
+        let mut line = default_lin(a.lerp(b, u), a.lerp(b, v), Float3::Z);
+        line.prev = if i == 0 { -1 } else { (base + i - 1) as i32 };
+        line.next = if i + 1 == subdivision {
+            -1
+        } else {
+            (base + i + 1) as i32
+        };
+        out.push(line);
+    }
 }
 
 fn tick_count(min: f32, max: f32, step: f32) -> usize {
@@ -986,6 +1011,60 @@ pub async fn mk_color_grid(
     }
 
     Ok(mesh_from_parts(vec![], lins, tris))
+}
+
+#[stdlib_func]
+pub async fn mk_line_grid(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let x0 = crate::read_float(executor, stack_idx, -7, "x0")? as f32;
+    let x1 = crate::read_float(executor, stack_idx, -6, "x1")? as f32;
+    let y0 = crate::read_float(executor, stack_idx, -5, "y0")? as f32;
+    let y1 = crate::read_float(executor, stack_idx, -4, "y1")? as f32;
+    let x_samples = point_samples(read_int(executor, stack_idx, -3, "x_samples")?);
+    let y_samples = point_samples(read_int(executor, stack_idx, -2, "y_samples")?);
+    let subdivision = read_int(executor, stack_idx, -1, "subdivision")?.max(1) as usize;
+
+    let line_count = checked_sum(
+        "line grid points",
+        x_samples,
+        y_samples,
+        MAX_LINE_GRID_POINTS,
+    )?;
+    let points_per_line = subdivision
+        .checked_add(1)
+        .ok_or_else(|| mesh_limit_error("line grid points", usize::MAX, MAX_LINE_GRID_POINTS))?;
+    let point_count = checked_product(
+        "line grid points",
+        line_count,
+        points_per_line,
+        MAX_LINE_GRID_POINTS,
+    )?;
+
+    let x_den = x_samples.saturating_sub(1).max(1);
+    let y_den = y_samples.saturating_sub(1).max(1);
+    let mut lins = Vec::with_capacity(point_count - line_count);
+    for ix in 0..x_samples {
+        let x = x0 + (x1 - x0) * ix as f32 / x_den as f32;
+        push_subdivided_line(
+            &mut lins,
+            Float3::new(x, y0, 0.0),
+            Float3::new(x, y1, 0.0),
+            subdivision,
+        );
+    }
+    for iy in 0..y_samples {
+        let y = y0 + (y1 - y0) * iy as f32 / y_den as f32;
+        push_subdivided_line(
+            &mut lins,
+            Float3::new(x0, y, 0.0),
+            Float3::new(x1, y, 0.0),
+            subdivision,
+        );
+    }
+
+    Ok(mesh_from_parts(vec![], lins, vec![]))
 }
 
 #[stdlib_func]

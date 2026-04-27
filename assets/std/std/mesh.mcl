@@ -129,6 +129,18 @@ let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = 
     return __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, actual_smooth, actual_mask, color_at)
 }
 
+let LineGrid = |x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], subdivision = 16| {
+    var x_min = 0
+    var x_max = 0
+    var x_samples = 0
+    var y_min = 0
+    var y_max = 0
+    var y_samples = 0
+    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    return __monocurl__native__ mk_line_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, subdivision)
+}
+
 let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], mask = |pos| 1| {
     var x_min = 0
     var x_max = 0

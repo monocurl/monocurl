@@ -664,6 +664,19 @@ mod tests {
     }
 
     #[test]
+    fn text_monocurl_has_consistent_topology() {
+        let meshes = render_text("Monocurl", 1.5).unwrap();
+        for mesh in meshes {
+            assert!(
+                mesh.has_consistent_topology(),
+                "{}",
+                mesh.topology_mismatch_report()
+                    .unwrap_or_else(|| "no mismatch report".into())
+            );
+        }
+    }
+
+    #[test]
     fn empty_inputs_render_to_no_meshes() {
         assert!(render_text("", 1.0).unwrap().is_empty());
         assert!(render_text("   ", 1.0).unwrap().is_empty());

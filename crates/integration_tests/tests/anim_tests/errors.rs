@@ -364,6 +364,35 @@ fn test_scene_snapshot_mesh_error_names_mesh_and_uses_hint() {
 }
 
 #[test]
+fn test_scene_snapshot_accepts_mid_write_text_mesh() {
+    let src = r#"
+        mesh tex = Text("Monocurl", 1.5)
+        play Write(1, [&tex])
+    "#;
+
+    let (mut executor, _user_slide_count) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("failed to build executor: {:?}", result.errors),
+    };
+
+    smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(user_timestamp(0, 0.5));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+
+        executor
+            .capture_stable_scene_snapshot()
+            .await
+            .expect("mid-write text snapshot should succeed");
+    });
+}
+
+#[test]
 fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
     let src = "
         camera = Camera(16b, [0, 0, 0], 1u)

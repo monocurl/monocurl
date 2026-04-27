@@ -1825,6 +1825,60 @@ fn test_color_grid_triangle_limit_is_reported() {
 }
 
 #[test]
+fn test_line_grid_authors_single_subdivided_mesh() {
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = LineGrid([-1, 1, 3], [-2, 2, 2], 4)
+                play Set()
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        f64::INFINITY,
+        &stdlib_bundles(["anim", "mesh"]),
+    );
+    r.assert_ok();
+
+    let leader = r
+        .mesh_leaders()
+        .into_iter()
+        .next()
+        .expect("expected mesh leader");
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&leader.current, &mut leaves);
+    assert_eq!(leaves.len(), 1, "expected line grid to be one mesh");
+
+    let Value::Mesh(mesh) = &leaves[0] else {
+        panic!("expected mesh leaf");
+    };
+    assert!(mesh.tris.is_empty(), "line grid should not author surfaces");
+    assert_eq!(mesh.lins.len(), 40, "unexpected subdivided line count");
+    assert!(
+        mesh.lins
+            .iter()
+            .all(|lin| (lin.b.pos - lin.a.pos).len() <= 1.0 + 1e-5),
+        "expected each segment to respect the subdivision"
+    );
+}
+
+#[test]
+fn test_line_grid_point_limit_is_reported() {
+    let r = run_anim_impl(
+        &[(
+            "
+                mesh x = LineGrid([-1, 1, 512], [-1, 1, 512], 128)
+            ",
+            SectionType::Slide,
+        )],
+        0,
+        0.0,
+        &stdlib_bundles(["mesh"]),
+    );
+    r.assert_error("line grid points is too large");
+}
+
+#[test]
 fn test_regular_polygon_limit_is_reported() {
     let r = run_anim_impl(
         &[(
