@@ -8,6 +8,7 @@ use geo::mesh::Mesh;
 
 // Any state that's necessary for actual execution
 pub struct ExecutionState {
+    pub scene_version: u64,
     pub background: BackgroundSnapshot,
     pub camera: CameraSnapshot,
     pub camera_version: u64,
@@ -29,6 +30,7 @@ pub struct ExecutionState {
 impl Default for ExecutionState {
     fn default() -> Self {
         Self {
+            scene_version: 0,
             background: BackgroundSnapshot::default(),
             camera: CameraSnapshot::default(),
             camera_version: 0,
@@ -52,6 +54,8 @@ impl ExecutionState {
     }
 
     pub fn apply_snapshot(&mut self, snapshot: ExecutionSnapshot) {
+        let scene_updated =
+            snapshot.background.is_some() || snapshot.camera.is_some() || snapshot.meshes.is_some();
         if let Some(background) = snapshot.background {
             self.background = background;
         }
@@ -63,6 +67,9 @@ impl ExecutionState {
         }
         if let Some(meshes) = snapshot.meshes {
             self.meshes = meshes;
+        }
+        if scene_updated {
+            self.scene_version = self.scene_version.wrapping_add(1);
         }
         if snapshot.status != ExecutionStatus::Seeking {
             self.current_timestamp = snapshot.current_timestamp;

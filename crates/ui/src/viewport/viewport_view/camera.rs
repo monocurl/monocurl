@@ -160,6 +160,7 @@ impl Viewport {
             return;
         }
 
+        self.bump_viewport_camera_version();
         self.presentation_camera = Some(PresentationCameraState {
             current: state.reset_camera.clone(),
             reset_camera: state.reset_camera.clone(),
@@ -194,6 +195,7 @@ impl Viewport {
         let dx = f32::from(drag.start_mouse.x - position.x);
         let dy = f32::from(position.y - drag.start_mouse.y);
         let scene_camera = self.execution_state.read(cx).camera.clone();
+        let previous_display_camera = self.display_camera(&scene_camera);
         let next_camera = match drag.mode {
             CameraDragMode::Orbit => orbit_camera(&drag.start_camera, dx, dy, drag.scene_size),
             CameraDragMode::Pan => pan_camera(&drag.start_camera, dx, dy, drag.scene_size),
@@ -205,7 +207,7 @@ impl Viewport {
                     .clone()
                     .unwrap_or_else(|| PresentationCameraState {
                         current: scene_camera.clone(),
-                        reset_camera: scene_camera,
+                        reset_camera: scene_camera.clone(),
                         pending_updates: VecDeque::new(),
                     });
             state.current = next_camera.clone();
@@ -226,7 +228,7 @@ impl Viewport {
                 .preview_camera
                 .as_ref()
                 .map(|state| state.reset_camera.clone())
-                .unwrap_or(scene_camera);
+                .unwrap_or_else(|| scene_camera.clone());
             if cameras_close(&next_camera, &reset_camera) {
                 self.preview_camera = None;
                 self.copied_preview_camera = None;
@@ -236,6 +238,10 @@ impl Viewport {
                     reset_camera,
                 });
             }
+        }
+        let next_display_camera = self.display_camera(&scene_camera);
+        if !cameras_close(&previous_display_camera, &next_display_camera) {
+            self.bump_viewport_camera_version();
         }
         cx.notify();
     }

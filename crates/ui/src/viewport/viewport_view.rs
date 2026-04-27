@@ -34,6 +34,7 @@ pub struct Viewport {
     show_pause_hint: bool,
     pause_hint_nonce: u64,
     scene_camera_version: u64,
+    viewport_camera_version: u64,
     scroll_handle: ScrollHandle,
     slider_bounds: HashMap<String, [f64; 4]>,
     ring_style: Option<RingStyle>,
@@ -71,6 +72,7 @@ impl Viewport {
             show_pause_hint: false,
             pause_hint_nonce: 0,
             scene_camera_version,
+            viewport_camera_version: 0,
             scroll_handle: ScrollHandle::new(),
             slider_bounds: HashMap::new(),
             ring_style: None,
@@ -103,6 +105,7 @@ impl Viewport {
 
     pub fn set_presenting(&mut self, presenting: bool, cx: &mut Context<Self>) {
         self.is_presenting = presenting;
+        self.bump_viewport_camera_version();
         self.camera_drag = None;
         self.preview_camera = None;
         self.copied_preview_camera = None;
@@ -164,6 +167,7 @@ impl Viewport {
 
     pub fn sync_viewport_camera(&mut self, cx: &mut Context<Self>) {
         self.camera_drag = None;
+        self.bump_viewport_camera_version();
         if self.is_presenting {
             self.reset_presentation_camera(cx);
         } else {
@@ -171,5 +175,9 @@ impl Viewport {
             self.copied_preview_camera = None;
             cx.notify();
         }
+    }
+
+    pub(super) fn bump_viewport_camera_version(&mut self) {
+        self.viewport_camera_version = self.viewport_camera_version.wrapping_add(1);
     }
 }

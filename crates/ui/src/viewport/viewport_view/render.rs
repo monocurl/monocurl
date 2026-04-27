@@ -5,6 +5,7 @@ use crate::{
     services::ServiceManager,
     theme::ThemeSettings,
     timeline::{slide_label, slide_title_label, visual_slide_time},
+    viewport::scene_renderer::SceneImageRevision,
 };
 
 use super::{
@@ -56,6 +57,7 @@ impl Render for Viewport {
             background,
             scene_camera,
             meshes,
+            scene_version,
         ) = {
             let execution = self.execution_state.read(cx);
             (
@@ -68,10 +70,12 @@ impl Render for Viewport {
                 execution.background,
                 execution.camera.clone(),
                 execution.meshes.clone(),
+                execution.scene_version,
             )
         };
 
         let display_camera = self.display_camera(&scene_camera);
+        let scene_revision = SceneImageRevision::new(scene_version, self.viewport_camera_version);
         let show_preview_reset = self.should_show_preview_reset();
         let preview_camera_summary = self.preview_camera_summary();
         let preview_camera_copied = preview_camera_summary
@@ -120,6 +124,7 @@ impl Render for Viewport {
                 .bg(theme.viewport_background)
                 .child(render_scene_stage(
                     scene,
+                    scene_revision,
                     theme.viewport_stage_background,
                     SceneStageMode::Preview { ring_style },
                     weak_vp.clone(),
@@ -145,6 +150,7 @@ impl Render for Viewport {
             .p(px(ring_style.width))
             .child(render_scene_stage(
                 scene,
+                scene_revision,
                 presentation_stage_background,
                 SceneStageMode::Presentation,
                 weak_vp.clone(),
@@ -333,6 +339,7 @@ impl Render for Viewport {
 
 fn render_scene_stage(
     scene: SceneRenderData,
+    scene_revision: SceneImageRevision,
     stage_background: Rgba,
     mode: SceneStageMode,
     weak_vp: WeakEntity<Viewport>,
@@ -345,6 +352,7 @@ fn render_scene_stage(
         .child(
             canvas(move |bounds, _, _| bounds, {
                 let scene = scene.clone();
+                let scene_revision = scene_revision;
                 let weak_vp = weak_vp.clone();
                 move |_, bounds: Bounds<Pixels>, window, _cx| {
                     let layout = scene_stage_layout(bounds, mode);
@@ -353,6 +361,7 @@ fn render_scene_stage(
                             viewport.scene_image_cache.image_for(
                                 &mut viewport.renderer,
                                 &scene,
+                                scene_revision,
                                 layout.image_bounds,
                                 layout.projection_bounds,
                                 window.scale_factor(),
