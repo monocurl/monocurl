@@ -278,7 +278,6 @@ pub enum IdentifierReference {
     Value(String),
     Reference(String),
     StatefulReference(String),
-    StatefulDereference(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

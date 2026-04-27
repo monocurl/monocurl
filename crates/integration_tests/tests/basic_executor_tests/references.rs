@@ -12,7 +12,7 @@ fn test_ref_basic_mutation() {
             return []
         }
         mutate(&x)
-        let result = *x
+        let result = x
     ");
     r.assert_int(1);
 }
@@ -27,7 +27,7 @@ fn test_ref_mutation_does_not_affect_unrelated_var() {
             return []
         }
         inc(&x)
-        let result = *z
+        let result = z
     ");
     r.assert_int(99);
 }
@@ -43,7 +43,7 @@ fn test_ref_called_multiple_times() {
         inc(&x)
         inc(&x)
         inc(&x)
-        let result = *x
+        let result = x
     ");
     r.assert_int(3);
 }
@@ -63,7 +63,7 @@ fn test_ref_chain_of_lambdas() {
             return []
         }
         double_add(&x)
-        let result = *x
+        let result = x
     ");
     r.assert_int(4);
 }
@@ -79,7 +79,7 @@ fn test_ref_two_distinct_references() {
             return []
         }
         modify_both(&a, &b)
-        let result = *a + *b
+        let result = a + b
     ");
     // a=2, b=11, result=13
     r.assert_int(13);
@@ -95,7 +95,7 @@ fn test_ref_reference_to_list_via_ref() {
             return []
         }
         set_first(&arr)
-        let result = (*arr)[0]
+        let result = (arr)[0]
     ");
     r.assert_int(42);
 }
@@ -112,7 +112,7 @@ fn test_ref_destructure_list_references() {
             return []
         }
         set_both(&a, &b)
-        let result = *a + *b
+        let result = a + b
     ");
     r.assert_int(20);
 }
@@ -128,7 +128,7 @@ fn test_ref_reference_in_closure_capture() {
             return []
         }
         f(&target)
-        let result = *target
+        let result = target
     ");
     r.assert_int(6);
 }
@@ -157,7 +157,7 @@ fn test_ref_lambda_returning_anim_can_be_played_multiple_times() {
         play View(&cam, 4)
         play View(&cam, 5)
 
-        let result = *cam
+        let result = cam
     ");
     r.assert_int(5);
 }
@@ -179,7 +179,7 @@ fn test_nested_ref_anim_invocation_can_be_played_multiple_times() {
         play View(&cam, 4)
         play View(&cam, 5)
 
-        let result = *cam
+        let result = cam
     ");
     r.assert_int(3);
 }

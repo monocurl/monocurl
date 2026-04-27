@@ -186,7 +186,6 @@ fn ident_ref_name(ir: &IdentifierReference) -> &str {
     match ir {
         IdentifierReference::Value(n)
         | IdentifierReference::StatefulReference(n)
-        | IdentifierReference::StatefulDereference(n)
         | IdentifierReference::Reference(n) => n,
     }
 }

@@ -722,12 +722,9 @@ mod test {
     }
 
     #[test]
-    fn test_integration_param_requires_explicit_read() {
+    fn test_integration_param_allows_plain_read() {
         let result = compile_src("param x = 1\nlet y = x");
-        assert!(
-            has_error(&result, "cannot read param 'x' directly"),
-            "expected compile error for naked param read"
-        );
+        no_errors(&result);
     }
 
     #[test]

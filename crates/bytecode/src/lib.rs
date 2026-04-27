@@ -76,9 +76,6 @@ pub enum Instruction {
         stack_delta: i32,
     },
 
-    PushDereference {
-        stack_delta: i32,
-    },
     PushStateful {
         stack_delta: i32,
     },

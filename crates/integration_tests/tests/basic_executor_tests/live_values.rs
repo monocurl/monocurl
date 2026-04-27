@@ -1059,12 +1059,12 @@ fn test_number_constructor_accepts_decimal_and_sign_options() {
 }
 
 #[test]
-fn test_fixed_in_frame_preserves_camera_space_under_translation() {
+fn test_camera_transfer_preserves_camera_space_under_translation() {
     let r = run_with_stdlib(
         "
         let original = Camera(10b, [0, 0, 0], 1u)
         let live = Camera([2, 3, 10], [2, 3, 0], 1u)
-        let result = mesh_center(fixed_in_frame{original, live} Dot([1, 0, 0]))
+        let result = mesh_center(camera_transfer{original, live} Dot([1, 0, 0]))
     ",
         &["mesh", "scene"],
     );
@@ -1072,12 +1072,12 @@ fn test_fixed_in_frame_preserves_camera_space_under_translation() {
 }
 
 #[test]
-fn test_fixed_in_frame_preserves_camera_space_under_orbit() {
+fn test_camera_transfer_preserves_camera_space_under_orbit() {
     let r = run_with_stdlib(
         "
         let original = Camera(10b, [0, 0, 0], 1u)
         let live = Camera([10, 0, 0], [0, 0, 0], 1u)
-        let result = mesh_center(fixed_in_frame{original, live} Dot([1, 0, 0]))
+        let result = mesh_center(camera_transfer{original, live} Dot([1, 0, 0]))
     ",
         &["mesh", "scene"],
     );

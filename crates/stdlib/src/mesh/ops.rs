@@ -641,7 +641,7 @@ pub async fn op_rotate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn op_fixed_in_frame(
+pub async fn op_camera_transfer(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

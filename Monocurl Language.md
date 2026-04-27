@@ -163,7 +163,7 @@ play lerp(3)
 
 The `$` sigil (e.g. `$x`) creates a **stateful reference** to the live follower value of a param variable. A stateful reference can only appear as an argument to a labeled function or operator call; the resulting value is called a **stateful value**. A stateful value continuously re-evaluates its expression using the current follower values of all params it depends on.
 
-Stateful values may only be stored in `mesh` leaders — assigning one to a `let`, `var`, or `param` variable is a runtime error. You can use the dereference operator `*` on a mesh variable whose leader is a stateful expression to evaluate it immediately and obtain a concrete value. Attribute access on a stateful value works the same way as on a live operator (destructures the labeled call node).
+Stateful values may only be stored in `mesh` leaders — assigning one to a `let`, `var`, or `param` variable is a runtime error. A plain read of a `mesh` or `param` variable evaluates to its current concrete leader value; use `$` only when constructing a reactive expression.
 
 Arithmetic on `$` references is valid as a sub-expression inside a labeled call (e.g. `Circle(r: $radius * 2)`), but the outermost expression must always be a labeled call.
 
@@ -173,7 +173,7 @@ param radius = 0
 mesh target = Circle(center: 0l, radius: $radius)
 play Set()
 # get the current concrete value of target's leader expression
-let current = *target
+let current = target
 radius = 5
 play Lerp(3)
 # as the follower of radius increases, the follower of target reacts live
@@ -181,15 +181,14 @@ play Lerp(3)
 # live operator example
 param delta = 0l
 mesh target2 = shift{delta: $delta} Circle(center: 0l)
-# can still access labeled arguments on stateful operators
-let c = target2.center   # returns the center arg of the Circle
+# mutable attribute access can still edit labeled arguments on stateful operators
 target2.center = 1l      # mutates the center arg in place
 delta = 3l
 play Lerp(1)
 # target2 is now updated to respect the new value of delta
 
-# *target gives the evaluated leader value (concrete); plain mesh_center(target) errors
-let current2 = *target2
+# plain reads evaluate the leader value concretely
+let current2 = target2
 ```
 
 When followers are synced to leaders (via Set or at the end of a Lerp), stateful leader expressions propagate to the follower, keeping it reactive.

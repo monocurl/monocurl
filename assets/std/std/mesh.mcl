@@ -340,8 +340,8 @@ let centered_at = operator |target, at, filter = nil| {
     let go = |level| __monocurl__native__ op_centered(target, at, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let fixed_in_frame = operator |target, original_camera, live_camera, filter = nil| {
-    let go = |level| __monocurl__native__ op_fixed_in_frame(target, original_camera, live_camera, filter, level)
+let camera_transfer = operator |target, original_camera, live_camera, filter = nil| {
+    let go = |level| __monocurl__native__ op_camera_transfer(target, original_camera, live_camera, filter, level)
     return [go(level: 0), go(level: 1)]
 }
 let to_side = operator |target, camera = nil, dir = [0, 0, 0], buffer = 0, filter = nil| {

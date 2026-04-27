@@ -73,9 +73,10 @@ impl SceneImageKey {
             .max(0.0) as u32;
         Self {
             scene: scene_fingerprint(scene),
-            view: RenderView::new(
+            view: RenderView::with_raster_scale(
                 RenderSize::new(output_width, output_height),
                 RenderSize::new(projection_width, projection_height),
+                scale_factor,
             ),
         }
     }

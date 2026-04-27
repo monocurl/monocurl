@@ -95,11 +95,6 @@ impl SectionParser {
                 let (full_span, str) = self.read_pure_identifier();
                 (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::StatefulReference(str)))
             },
-            ExactPred(Token::Multiply) => {
-                let base_span = self.advance_token();
-                let (full_span, str) = self.read_pure_identifier();
-                (base_span.start..full_span.end, Expression::IdentifierReference(IdentifierReference::StatefulDereference(str)))
-            },
             /* operator definition */
             ExactPred(Token::Operator) => {
                 let base_span = self.advance_token();

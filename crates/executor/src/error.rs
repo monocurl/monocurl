@@ -175,7 +175,7 @@ impl ExecutorError {
 
     pub fn direct_stateful_copy() -> Self {
         Self::stateful_value(
-            "attempt to copy a stateful value directly. Use $<ident> to use the live value, and *ident to read the current value",
+            "attempt to copy a stateful value directly. Use $<ident> only where a reactive expression is intended",
         )
     }
 

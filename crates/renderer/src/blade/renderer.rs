@@ -443,7 +443,7 @@ impl BladeRenderer {
         }
 
         for item in items {
-            let dot_radius = mesh_dot_radius_px(item.mesh.as_ref(), self.style);
+            let dot_radius = mesh_dot_radius_px(item.mesh.as_ref(), self.style, view.raster_scale);
             let dot_vertex_count = item.mesh.uniform.dot_vertex_count.max(3);
             if dot_radius > f32::EPSILON {
                 let _ = self.ensure_dot_index_buffer(dot_vertex_count);
@@ -565,7 +565,8 @@ impl BladeRenderer {
             }
 
             if let Some(dots) = buffers.dots.as_ref() {
-                let dot_radius = mesh_dot_radius_px(item.mesh.as_ref(), self.style);
+                let dot_radius =
+                    mesh_dot_radius_px(item.mesh.as_ref(), self.style, view.raster_scale);
                 let dot_vertex_count = item.mesh.uniform.dot_vertex_count.max(3);
                 if dot_radius > f32::EPSILON {
                     if let Some(index_buffer) = self.dot_index_buffers.get(&dot_vertex_count) {

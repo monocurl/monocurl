@@ -237,12 +237,8 @@ mod test {
     }
 
     #[test]
-    fn test_dereference() {
-        let result = parse_expr_test("*ptr");
-        let expected = Expression::IdentifierReference(IdentifierReference::StatefulDereference(
-            "ptr".to_string(),
-        ));
-        assert_eq!(result.1, expected);
+    fn test_star_identifier_syntax_is_removed() {
+        error_expr_test("*ptr");
     }
 
     // Binary operator tests

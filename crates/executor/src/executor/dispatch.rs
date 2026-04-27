@@ -91,11 +91,10 @@ impl Executor {
 
             Instruction::PushDeepCopy { stack_delta } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let lvalue_resolved = val.elide_lvalue_leader_rec();
-
-                if let Value::Stateful(_) = lvalue_resolved {
-                    return ExecSingle::Error(ExecutorError::direct_stateful_copy());
-                }
+                let lvalue_resolved = match self.read_current_value(val).await {
+                    Ok(value) => value,
+                    Err(error) => return ExecSingle::Error(error),
+                };
 
                 self.state.stack_mut(stack_idx).push(lvalue_resolved);
             }
@@ -106,7 +105,10 @@ impl Executor {
             } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let copied = match copy_mode {
-                    CopyValueMode::Read => val.elide_lvalue_leader_rec(),
+                    CopyValueMode::Read => match self.read_current_value(val).await {
+                        Ok(value) => value,
+                        Err(error) => return ExecSingle::Error(error),
+                    },
                     CopyValueMode::Reference => val.force_elide_lvalue(),
                     CopyValueMode::Raw => val,
                 };
@@ -136,18 +138,6 @@ impl Executor {
                 self.state
                     .stack_mut(stack_idx)
                     .push(Value::WeakLvalue(vrc.downgrade()));
-            }
-            Instruction::PushDereference { stack_delta } => {
-                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let inner = resolve_leader_value(&val);
-                let resolved = match inner {
-                    Value::Stateful(ref s) => match self.eval_stateful(s).await {
-                        Ok(v) => v,
-                        Err(e) => return ExecSingle::Error(e),
-                    },
-                    other => other,
-                };
-                self.state.stack_mut(stack_idx).push(resolved);
             }
             Instruction::PushStateful { stack_delta } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
@@ -379,17 +369,11 @@ impl Executor {
 
         ExecSingle::Continue
     }
-}
 
-fn resolve_leader_value(val: &Value) -> Value {
-    let key = match val {
-        Value::Lvalue(vrc) => vrc.key(),
-        Value::WeakLvalue(vweak) => vweak.key(),
-        other => return other.clone(),
-    };
-    let inner = with_heap(|h| h.get(key).clone());
-    match inner {
-        Value::Leader(leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
-        other => other,
+    async fn read_current_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
+        match val.elide_lvalue_leader_rec() {
+            Value::Stateful(stateful) => self.eval_stateful(&stateful).await,
+            other => Ok(other),
+        }
     }
 }

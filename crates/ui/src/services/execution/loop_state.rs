@@ -294,7 +294,7 @@ async fn run_play_session_iteration(
 
     if executor.state.has_errors() {
         shared.cancel_runtime_work();
-        if shared.snapshot_requested.get()  {
+        if shared.snapshot_requested.get() {
             emit_runtime_snapshot(
                 executor,
                 shared,
@@ -612,8 +612,7 @@ impl ExecutionService {
 mod tests {
     use std::collections::HashMap;
 
-    use executor::time::Timestamp;
-    use executor::{state::ExecutionState, value::Value};
+    use executor::{state::ExecutionState, time::Timestamp, value::Value};
     use structs::rope::{Rope, TextAggregate};
 
     use super::{RuntimeState, default_bytecode};

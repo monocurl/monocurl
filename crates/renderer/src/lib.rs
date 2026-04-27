@@ -65,10 +65,11 @@ impl RenderSize {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderView {
     pub output_size: RenderSize,
     pub projection_size: RenderSize,
+    pub raster_scale: f32,
 }
 
 impl RenderView {
@@ -76,11 +77,28 @@ impl RenderView {
         Self {
             output_size,
             projection_size,
+            raster_scale: 1.0,
         }
     }
 
     pub const fn full(size: RenderSize) -> Self {
         Self::new(size, size)
+    }
+
+    pub fn with_raster_scale(
+        output_size: RenderSize,
+        projection_size: RenderSize,
+        raster_scale: f32,
+    ) -> Self {
+        Self {
+            output_size,
+            projection_size,
+            raster_scale: if raster_scale.is_finite() {
+                raster_scale.max(1.0)
+            } else {
+                1.0
+            },
+        }
     }
 
     pub const fn is_empty(self) -> bool {

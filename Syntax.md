@@ -108,8 +108,8 @@ g.point = Circle(0, [])
 ## Params and Stateful Values
 params are the only leader kind that can be referenced via `$`. a stateful value continuously re-evaluates using the current follower values of all depended params.
 
-`$x` — stateful reference to param `x`'s follower; only valid as an argument to a labeled call  
-`*x` — evaluate a mesh variable's leader expression to a concrete value  
+`$x` - stateful reference to param `x`'s follower; only valid where a reactive expression is intended
+plain `x` - read the current concrete leader value of a param or mesh variable
 
 stateful values can only be stored in `mesh` leaders. assigning to `let`/`var`/`param` is a runtime error.
 
@@ -125,8 +125,8 @@ play Wait(5)
 mesh h = Circle(center: 0l, radius: $x * 2)
 play Set()
 
-# dereference to get current concrete value
-let current = *g
+# plain read to get current concrete value
+let current = g
 
 # change x in code
 x = 5
@@ -136,7 +136,7 @@ play Lerp(1)
 param delta = 0l
 mesh shifted = shift{delta: $delta} Circle(center: 0l)
 shifted.center = 1l   # mutate the center arg directly
-let snap = *shifted   # evaluate leader to concrete
+let snap = shifted    # evaluate leader to concrete
 ```
 
 ## Mesh

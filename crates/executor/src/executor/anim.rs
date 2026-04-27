@@ -227,12 +227,8 @@ impl Executor {
             self.state.timestamp,
             target
         );
-        debug_assert!(
-            !self.state.has_errors()
-        );
-        debug_assert_eq!(
-            self.state.pending_playback_time, 0.0
-        );
+        debug_assert!(!self.state.has_errors());
+        debug_assert_eq!(self.state.pending_playback_time, 0.0);
 
         loop {
             match self.seek_primitive_anim_skip(target.slide).await {

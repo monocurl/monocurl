@@ -168,7 +168,7 @@ fn test_default_references_var_is_error() {
 fn test_default_references_param_is_ok() {
     let r = run("
         param scale = 3
-        let f = |x = *scale| x * 2
+        let f = |x = scale| x * 2
         let result = f()
     ");
     r.assert_int(6);
@@ -179,7 +179,7 @@ fn test_default_references_mesh_is_ok() {
     let r = run("
         let make = |v| v
         mesh m = make(v: 7)
-        let f = |x = m.v| x + 1
+        let f = |x = m| x + 1
         let result = f()
     ");
     r.assert_int(8);
@@ -237,7 +237,7 @@ fn test_exec_lambda_by_value_preserves_passed_reference() {
             return []
         }
         set(passthrough(&x))
-        let result = *x
+        let result = x
     ");
     r.assert_int(7);
 }
@@ -255,7 +255,7 @@ fn test_exec_lambda_capture_preserves_passed_reference() {
             return []
         }
         set(passthrough(&x))
-        let result = *x
+        let result = x
     ");
     r.assert_int(7);
 }

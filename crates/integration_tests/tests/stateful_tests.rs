@@ -1,5 +1,5 @@
 // stateful value tests
-// covers: $param creation, *mesh dereference, runtime validation for invalid
+// covers: $param creation, plain reads of stateful meshes, runtime validation for invalid
 // stateful operators/subscripts, caching, error cases, and interaction with animations.
 
 use anim_tests::{LeaderInfo, run_anim, run_anim_with_stdlib, run_anim_with_stdlib_at};
@@ -43,22 +43,22 @@ fn test_stateful_stored_in_mesh() {
 }
 
 #[test]
-fn test_stateful_dereference_equals_follower() {
-    // *m dereferences the stateful expression — with no animations the
+fn test_stateful_plain_read_equals_follower() {
+    // m reads the current value of the stateful expression; with no animations the
     // follower equals the leader value (param initial = 7)
     let r = run_anim(
         "
         param x = 7
         mesh m = $x
-        let result = *m
+        let result = m
     ",
     );
     r.assert_ok();
 }
 
 #[test]
-fn test_stateful_dereference_reflects_param_leader_value() {
-    // after changing x, *m should evaluate to the new follower.
+fn test_stateful_plain_read_reflects_param_leader_value() {
+    // after changing x, m should evaluate to the new follower.
     // with no animation the follower == leader immediately.
     let r = run_anim(
         "
@@ -86,12 +86,12 @@ fn test_stateful_add_constant_stored_in_mesh() {
 }
 
 #[test]
-fn test_stateful_dereference_add_evaluates_correctly() {
+fn test_stateful_plain_read_add_evaluates_correctly() {
     let r = run_anim(
         "
         param x = 5
         mesh m = $x + 2
-        let result = *m
+        let result = m
         let check = result == 7
     ",
     );
@@ -104,7 +104,7 @@ fn test_stateful_sub() {
         "
         param x = 10
         mesh m = $x - 3
-        let result = *m
+        let result = m
         let check = result == 7
     ",
     );
@@ -117,7 +117,7 @@ fn test_stateful_mul() {
         "
         param x = 6
         mesh m = $x * 4
-        let result = *m
+        let result = m
         let check = result == 24
     ",
     );
@@ -131,7 +131,7 @@ fn test_stateful_two_param_add() {
         param x = 3
         param y = 4
         mesh m = $x + $y
-        let result = *m
+        let result = m
         let check = result == 7
     ",
     );
@@ -144,7 +144,7 @@ fn test_stateful_comparison_lt() {
         "
         param x = 3
         mesh m = $x < 10
-        let result = *m
+        let result = m
         let check = result == 1
     ",
     );
@@ -159,7 +159,7 @@ fn test_stateful_negate() {
         "
         param x = 5
         mesh m = -$x
-        let result = *m
+        let result = m
         let check = result == -5
     ",
     );
@@ -172,7 +172,7 @@ fn test_stateful_double_negate() {
         "
         param x = 8
         mesh m = -(-$x)
-        let result = *m
+        let result = m
         let check = result == 8
     ",
     );
@@ -187,7 +187,7 @@ fn test_stateful_subscript_list_param() {
         "
         param xs = [10, 20, 30]
         mesh m = $xs[1]
-        let result = *m
+        let result = m
         let check = result == 20
     ",
     );
@@ -202,7 +202,7 @@ fn test_stateful_not_false() {
         "
         param x = 0
         mesh m =  not $x
-        let result = *m
+        let result = m
         let check = result == 1
     ",
     );
@@ -215,7 +215,7 @@ fn test_stateful_not_truthy() {
         "
         param x = 5
         mesh m = not $x
-        let result = *m
+        let result = m
         let check = result == 0
     ",
     );
@@ -274,9 +274,9 @@ fn test_dollar_on_mesh_is_error() {
 // ── stateful + animation interaction ─────────────────────────────────────────
 
 #[test]
-fn test_stateful_dereference_after_set_animation() {
+fn test_stateful_plain_read_after_set_animation() {
     // after a Set animation x follower == x leader == 20;
-    // *m should evaluate $x and return 20
+    // m should evaluate $x and return 20
     let r = run_anim_with_stdlib(
         "
         param x = 5
@@ -292,8 +292,8 @@ fn test_stateful_dereference_after_set_animation() {
 }
 
 #[test]
-fn test_stateful_dereference_after_lerp_uses_param_leader() {
-    // code-side dereference should read param leaders, even while the follower is mid-lerp
+fn test_stateful_plain_read_after_lerp_uses_param_leader() {
+    // code-side plain reads should read param leaders, even while the follower is mid-lerp
     let r = run_anim_with_stdlib_at(
         "
         param x = 0
@@ -303,7 +303,7 @@ fn test_stateful_dereference_after_lerp_uses_param_leader() {
         m = $x
         play Set()
         x = 5
-        leader_value = *m
+        leader_value = m
         play Lerp(2)
     ",
         1.0,
@@ -318,7 +318,7 @@ fn test_stateful_dereference_after_lerp_uses_param_leader() {
 
 #[test]
 fn test_stateful_function() {
-    // code-side dereference should read param leaders, even while the follower is mid-lerp
+    // code-side plain reads should read param leaders, even while the follower is mid-lerp
     let r = run_anim_with_stdlib_at(
         "
         param x = 0
@@ -326,7 +326,7 @@ fn test_stateful_function() {
         mesh leader_value = 0
         play Set()
         x = 5
-        leader_value = *m
+        leader_value = m
         play Lerp(2)
     ",
         1.0,
@@ -411,13 +411,13 @@ fn test_mesh_var_alias_mutation_then_read_mesh_unchanged() {
 }
 
 #[test]
-fn test_param_deref_copy_to_var_no_alias() {
+fn test_param_plain_read_copy_to_var_no_alias() {
     let r = run_anim(
         "
         param x = 10
-        var y = *x
+        var y = x
         y = 20
-        print *x
+        print x
     ",
     );
     r.assert_transcript(&["10"]);
@@ -490,11 +490,11 @@ fn test_lambda_implicit_return_stateful_is_compile_error() {
     r.assert_error("stateful");
 }
 
-// ── lambda arguments must not contain stateful (rule 1) ───────────────────────
+// ── stateful lambda arguments ─────────────────────────────────────────────────
 
 #[test]
 fn test_lambda_arg_is_stateful() {
-    // rule 1: a plain (non-labeled) lambda call must not receive a stateful arg
+    // a lambda call marked stateful by the compiler may be stored in a mesh
     let r = run_anim(
         "
         param p = 1
@@ -506,8 +506,8 @@ fn test_lambda_arg_is_stateful() {
 }
 
 #[test]
-fn test_higher_order_stateful_arg_is_error() {
-    // stateful passed as argument to a higher-order lambda must also be rejected
+fn test_higher_order_stateful_arg_stored_in_mesh() {
+    // stateful passed as argument to a higher-order lambda is captured in the mesh recipe
     let r = run_anim(
         "
         param p = 2
@@ -546,7 +546,7 @@ fn test_list_append_stateful_is_error() {
 
 #[test]
 fn test_list_of_stateful_assigned_to_mesh_is_error() {
-    // even if the target is a mesh, a *list* containing stateful is still illegal (rule 4)
+    // even if the target is a mesh, a list containing stateful is still illegal (rule 4)
     let r = run_anim(
         "
         param p = 3
@@ -575,7 +575,7 @@ fn test_operator_extra_arg_stateful_stored_in_mesh() {
 
 #[test]
 fn test_operator_stateful_operand_stored_in_mesh() {
-    // stateful as the *operand* to an operator; result stored in mesh
+    // stateful as the operand to an operator; result stored in mesh
     let r = run_anim(
         "
         param base = 5
@@ -637,21 +637,21 @@ fn test_labeled_lambda_stateful_arg_attribute_readable() {
         param offset = 7
         let f = |x, y| x + y
         mesh m = f(x: $offset, y: 5)
-        let result = (*m)
+        let result = (m)
     ",
     );
     r.assert_ok();
 }
 
 #[test]
-fn test_labeled_lambda_stateful_arg_dereference_reflects_param() {
-    // *m evaluated with param = 7 → leader value should be 7 + 5 = 12
+fn test_labeled_lambda_stateful_arg_plain_read_reflects_param() {
+    // m evaluated with param = 7 -> leader value should be 7 + 5 = 12
     let r = run_anim(
         "
         param offset = 7
         let f = |x, y| x + y
         mesh m = f(x: $offset, y: 5)
-        mesh leader_val = *m
+        mesh leader_val = m
     ",
     );
     r.assert_ok();
@@ -659,15 +659,15 @@ fn test_labeled_lambda_stateful_arg_dereference_reflects_param() {
 }
 
 #[test]
-fn test_stateful_labeled_lambda_param_change_updates_deref() {
-    // change param then re-dereference; leader_val must reflect new param
+fn test_stateful_labeled_lambda_param_change_updates_plain_read() {
+    // change param then read again; leader_val must reflect new param
     let r = run_anim(
         "
         param offset = 7
         let f = |x, y| x + y
         mesh m = f(x: $offset, y: 5)
         offset = 10
-        mesh leader_val = *m
+        mesh leader_val = m
     ",
     );
     r.assert_ok();
@@ -683,7 +683,7 @@ fn test_nested_labeled_stateful_calls_in_mesh() {
         param b = 3
         let add = |x, y| x + y
         mesh m = add(x: $a, y: $b)
-        mesh result = *m
+        mesh result = m
     ",
     );
     r.assert_ok();
@@ -704,32 +704,43 @@ fn test_ref_to_param_and_independent_stateful() {
             return []
         }
         inc(&p)
-        mesh updated = *m
+        mesh updated = m
     ",
     );
     r.assert_ok();
-    // after inc, param p leader = 2; *m should see 2
+    // after inc, param p leader = 2; m should see 2
     assert_mesh_target_int(&r.leaders, 1, 2);
 }
 
 #[test]
-fn test_stateful_mesh_attribute_then_naked_var_copy() {
-    // copy a mesh attribute into a var; that copy must be independent of the mesh
+fn test_stateful_mesh_plain_read_then_var_copy() {
+    // copy a stateful mesh into a var; that copy must be independent of later param changes
     let r = run_anim(
         "
         param offset = 3
         let f = |x, y| x + y
         mesh m = f(x: $offset, y: 10)
-        var snap = *m
+        var snap = m
         offset = 99
         let result = snap
+        print result
     ",
     );
-    r.assert_ok();
-    // snap captured *m when offset=3, so result should be 13
-    match &r.leaders.iter().last() {
-        _ => {} // just checking no error; captured_output check done via assert_ok
-    }
+    r.assert_transcript(&["13"]);
+}
+
+#[test]
+fn test_stateful_mesh_plain_read_passed_to_non_stateful_lambda() {
+    let r = run_anim(
+        "
+        param value = 4
+        let id = |x| x
+        mesh m = id(v: $value)
+        let result = id(m)
+        print result
+    ",
+    );
+    r.assert_transcript(&["4"]);
 }
 
 #[test]
@@ -742,13 +753,13 @@ fn test_two_params_two_meshes_independent_stateful() {
         mesh ma = $a
         mesh mb = $b
         a = 99
-        mesh ra = *ma
-        mesh rb = *mb
+        mesh ra = ma
+        mesh rb = mb
     ",
     );
     r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 2, 99); // ra = *ma = a = 99
-    assert_mesh_target_int(&r.leaders, 3, 20); // rb = *mb = b = 20
+    assert_mesh_target_int(&r.leaders, 2, 99); // ra = ma = a = 99
+    assert_mesh_target_int(&r.leaders, 3, 20); // rb = mb = b = 20
 }
 
 // ── stateful map: maps cannot store stateful values ───────────────────────────
@@ -772,7 +783,7 @@ fn test_stateful_arithmetic_chain() {
         "
         param x = 3
         mesh m = ($x + 1) * 2
-        let result = *m
+        let result = m
         let check = result == 8
     ",
     );
@@ -786,7 +797,7 @@ fn test_stateful_logical_and() {
         param x = 1
         param y = 0
         mesh m = $x and $y
-        mesh result = *m
+        mesh result = m
     ",
     );
     r.assert_ok();
@@ -800,7 +811,7 @@ fn test_stateful_logical_or() {
         param x = 0
         param y = 4
         mesh m = $x or $y
-        mesh result = *m
+        mesh result = m
     ",
     );
     r.assert_ok();
@@ -808,14 +819,15 @@ fn test_stateful_logical_or() {
 }
 
 #[test]
-fn test_naked_param_read_is_compile_error() {
+fn test_naked_param_read_uses_current_value() {
     let r = run_anim(
         "
         param x = 1
         let y = x
+        print y
     ",
     );
-    r.assert_error("cannot read param 'x' directly");
+    r.assert_transcript(&["1"]);
 }
 
 #[test]
@@ -824,7 +836,7 @@ fn test_stateful_mixed_constant_and_param() {
         "
         param x = 30
         mesh m = 100 - $x
-        let result = *m
+        let result = m
         let check = result == 70
     ",
     );
@@ -839,7 +851,7 @@ fn test_stateful_two_params_arithmetic() {
         param b = 4
         param c = 5
         mesh m = ($a * $b) + $c
-        let result = *m
+        let result = m
         let check = result == 17
     ",
     );

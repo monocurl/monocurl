@@ -93,19 +93,7 @@ impl Compiler {
                 }
             }
             IdentifierReference::Value(_) => {
-                if sym.var_type == VariableType::Param {
-                    self.error(
-                        span.clone(),
-                        format!(
-                            "cannot read param '{}' directly; use '${}' for a stateful reference or '*{}' for the current leader value",
-                            name, name, name
-                        ),
-                    );
-                    self.emit_push(
-                        Instruction::PushDereference { stack_delta: delta },
-                        span.clone(),
-                    );
-                } else if sym.var_type == VariableType::Reference {
+                if sym.var_type == VariableType::Reference {
                     self.emit_push(
                         Instruction::PushDeepCopy { stack_delta: delta },
                         span.clone(),
@@ -117,12 +105,6 @@ impl Compiler {
             IdentifierReference::StatefulReference(_) => {
                 self.emit_push(
                     Instruction::PushStateful { stack_delta: delta },
-                    span.clone(),
-                );
-            }
-            IdentifierReference::StatefulDereference(_) => {
-                self.emit_push(
-                    Instruction::PushDereference { stack_delta: delta },
                     span.clone(),
                 );
             }

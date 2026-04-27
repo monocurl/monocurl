@@ -237,11 +237,16 @@ pub(super) fn mesh_line_miter_scale(mesh: &Mesh) -> f32 {
     }
 }
 
-pub(super) fn mesh_dot_radius_px(mesh: &Mesh, style: RenderStyle) -> f32 {
-    if mesh.uniform.dot_radius.is_finite() {
-        mesh.uniform.dot_radius.max(0.0)
+pub(super) fn mesh_dot_radius_px(mesh: &Mesh, style: RenderStyle, raster_scale: f32) -> f32 {
+    let raster_scale = if raster_scale.is_finite() {
+        raster_scale.max(1.0)
     } else {
-        style.dot_radius_px.max(0.0)
+        1.0
+    };
+    if mesh.uniform.dot_radius.is_finite() {
+        mesh.uniform.dot_radius.max(0.0) * raster_scale
+    } else {
+        style.dot_radius_px.max(0.0) * raster_scale
     }
 }
 
@@ -252,7 +257,11 @@ mod tests {
         simd::{Float3, Float4},
     };
 
-    use super::{LINE_VERTICES_PER_INSTANCE, build_line_indices, build_line_vertices};
+    use crate::RenderStyle;
+
+    use super::{
+        LINE_VERTICES_PER_INSTANCE, build_line_indices, build_line_vertices, mesh_dot_radius_px,
+    };
 
     #[test]
     fn line_vertices_prefer_dominant_sibling_orientation() {
@@ -439,6 +448,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dot_radius_scales_by_raster_scale() {
+        let mesh = test_mesh_with_uniform(Uniforms {
+            dot_radius: 4.0,
+            ..Uniforms::default()
+        });
+
+        assert_eq!(mesh_dot_radius_px(&mesh, RenderStyle::default(), 2.0), 8.0);
+    }
+
+    #[test]
+    fn dot_radius_falls_back_to_style_and_sanitizes_scale() {
+        let mesh = test_mesh_with_uniform(Uniforms {
+            dot_radius: f32::NAN,
+            ..Uniforms::default()
+        });
+        let style = RenderStyle {
+            line_width_px: 1.0,
+            dot_radius_px: 5.0,
+        };
+
+        assert_eq!(mesh_dot_radius_px(&mesh, style, 2.0), 10.0);
+        assert_eq!(mesh_dot_radius_px(&mesh, style, f32::NAN), 5.0);
+    }
+
     fn test_line(
         a: Float3,
         b: Float3,
@@ -462,6 +496,16 @@ mod tests {
             next,
             inv,
             is_dom_sib,
+        }
+    }
+
+    fn test_mesh_with_uniform(uniform: Uniforms) -> Mesh {
+        Mesh {
+            dots: Vec::new(),
+            tris: Vec::new(),
+            lins: Vec::new(),
+            uniform,
+            tag: Vec::new(),
         }
     }
 }
