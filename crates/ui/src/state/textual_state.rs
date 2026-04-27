@@ -800,17 +800,17 @@ impl TextualState {
 }
 
 impl TextualState {
-    fn rows_for_span(&self, span: &Span8) -> Range<usize> {
+    fn transcript_row_for_span(&self, span: &Span8) -> usize {
         let len = self.len();
         let start = span.start.min(len);
         let end = span.end.min(len).max(start);
-        let start_row = self.offset8_to_loc8(start).row;
-        let end_row = if end == start {
-            start_row
+        let offset = if end == start {
+            start
         } else {
-            self.offset8_to_loc8(end.saturating_sub(1)).row
+            end.saturating_sub(1)
         };
-        start_row..end_row + 1
+
+        self.offset8_to_loc8(offset).row
     }
 
     fn mark_transcript_rows_dirty(&mut self, rows: impl IntoIterator<Item = usize>) {
@@ -870,13 +870,12 @@ impl TextualState {
                 if !entry.is_root {
                     continue;
                 }
-                for row in self.rows_for_span(&entry.span) {
-                    changed_rows.insert(row);
-                    by_line.entry(row).or_default().push(InlineTranscriptEntry {
-                        span: entry.span.clone(),
-                        text: entry.text().to_string(),
-                    });
-                }
+                let row = self.transcript_row_for_span(&entry.span);
+                changed_rows.insert(row);
+                by_line.entry(row).or_default().push(InlineTranscriptEntry {
+                    span: entry.span.clone(),
+                    text: entry.text().to_string(),
+                });
             }
         }
 
@@ -981,13 +980,13 @@ impl TextualState {
                 if !entry.is_root {
                     continue;
                 }
-                changed_rows.extend(self.rows_for_span(&entry.span));
+                changed_rows.insert(self.transcript_row_for_span(&entry.span));
             }
             for entry in new_section.iter().flat_map(|s| s.entries.iter()) {
                 if !entry.is_root {
                     continue;
                 }
-                changed_rows.extend(self.rows_for_span(&entry.span));
+                changed_rows.insert(self.transcript_row_for_span(&entry.span));
             }
         }
 
@@ -1003,12 +1002,11 @@ impl TextualState {
                 if !entry.is_root {
                     continue;
                 }
-                for row in self.rows_for_span(&entry.span) {
-                    by_line.entry(row).or_default().push(InlineTranscriptEntry {
-                        span: entry.span.clone(),
-                        text: entry.text().to_string(),
-                    });
-                }
+                let row = self.transcript_row_for_span(&entry.span);
+                by_line.entry(row).or_default().push(InlineTranscriptEntry {
+                    span: entry.span.clone(),
+                    text: entry.text().to_string(),
+                });
             }
         }
 
@@ -1196,6 +1194,7 @@ fn grapheme_boundary<const N: usize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use executor::transcript::{TranscriptEntry, TranscriptEntryKind};
     use unicode_segmentation::UnicodeSegmentation;
 
     #[derive(Default, Clone, Debug)]
@@ -1346,5 +1345,28 @@ mod tests {
 
         assert_eq!(state.filtered_items.len(), 1);
         assert!(state.recheck_should_display(Cursor::collapsed(state.cursor_at)));
+    }
+
+    #[test]
+    fn transcript_entry_for_multiline_span_indexes_tail_row_only() {
+        let src = "print [\n    1\n]\n";
+        let mut state = TextualState {
+            text_rope: Rope::from_str(src),
+            ..Default::default()
+        };
+        let section = SectionTranscript {
+            entries: vec![TranscriptEntry {
+                span: 0..src.find(']').unwrap() + 1,
+                section: 0,
+                is_root: true,
+                kind: TranscriptEntryKind::String("[1]".to_string()),
+            }],
+        };
+
+        assert!(state.set_transcript(vec![Arc::new(section)], 0));
+
+        assert!(state.transcript().entries_for_line(0).is_empty());
+        assert!(state.transcript().entries_for_line(1).is_empty());
+        assert_eq!(state.transcript().entries_for_line(2).len(), 1);
     }
 }
