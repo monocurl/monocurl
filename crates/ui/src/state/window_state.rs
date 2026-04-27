@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
-use gpui::{App, AppContext, Context, Entity, ScrollHandle, Window};
+use gpui::{App, AppContext, Context, Entity, ScrollHandle, WeakEntity, Window};
 use serde::{Deserialize, Serialize};
+use structs::assets::Assets;
 use ui_cli_shared::doc_type::DocumentType;
 
 use crate::document_view::{DocumentView, OpenDocument};
 
 pub const CHECK_FOR_WRONGLY_IMPORTED_EXTENSION: bool = false;
+const DEFAULT_SCENE_FILES: &[&str] = &["shapes.mcs", "graph.mcs", "parameters.mcs"];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum ActiveScreenSerde {
@@ -69,6 +71,61 @@ impl WindowState {
         path
     }
 
+    fn make_open_document(
+        path: PathBuf,
+        weak_state: WeakEntity<Self>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> OpenDocument {
+        let view_path = path.clone();
+        let dirty = cx.new(|_cx| false);
+        OpenDocument {
+            path,
+            view: cx.new(|cx| DocumentView::new(view_path, weak_state, dirty.clone(), window, cx)),
+        }
+    }
+
+    fn default_scene_paths() -> Vec<PathBuf> {
+        DEFAULT_SCENE_FILES
+            .iter()
+            .filter_map(|file| {
+                let path = Assets::default_scene(file);
+                if path.exists() {
+                    Some(path)
+                } else {
+                    log::warn!("Default scene does not exist: {}", path.display());
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn default_state(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let weak_state = cx.weak_entity();
+        let open_documents: Vec<_> = Self::default_scene_paths()
+            .into_iter()
+            .map(|path| Self::make_open_document(path, weak_state.clone(), window, cx))
+            .collect();
+
+        let screen = open_documents
+            .first()
+            .map(|doc| ActiveScreen::Document(doc.clone()))
+            .unwrap_or(ActiveScreen::Home);
+        let recently_opened = open_documents
+            .iter()
+            .map(|doc| RecentlyOpened {
+                path: doc.path.clone(),
+            })
+            .collect();
+
+        Self {
+            screen,
+            recently_opened,
+            open_documents,
+            navbar_scroll: ScrollHandle::new(),
+        }
+    }
+
     fn load_saved_state(window: &mut Window, cx: &mut Context<Self>) -> Option<Self> {
         let path = Self::save_file();
         if !path.exists() {
@@ -77,22 +134,33 @@ impl WindowState {
 
         let data = std::fs::read_to_string(&path).ok()?;
         let state: WindowStateSerde = serde_json::from_str(&data).ok()?;
+        let saved_open_document_count = state.open_documents.len();
 
         let weak_state = cx.weak_entity();
         let open_documents: Vec<_> = state
             .open_documents
             .into_iter()
-            .filter(|serde| serde.path.exists())
-            .map(|serde| {
-                let dirty = cx.new(|_cx| false);
-                OpenDocument {
-                    path: serde.path.clone(),
-                    view: cx.new(|cx| {
-                        DocumentView::new(serde.path, weak_state.clone(), dirty.clone(), window, cx)
-                    }),
+            .filter_map(|serde| {
+                if serde.path.exists() {
+                    Some(Self::make_open_document(
+                        serde.path,
+                        weak_state.clone(),
+                        window,
+                        cx,
+                    ))
+                } else {
+                    log::warn!(
+                        "Saved open document does not exist: {}",
+                        serde.path.display()
+                    );
+                    None
                 }
             })
             .collect();
+
+        if saved_open_document_count > 0 && open_documents.is_empty() {
+            return None;
+        }
 
         let screen = match state.screen {
             ActiveScreenSerde::Home => ActiveScreen::Home,
@@ -121,12 +189,7 @@ impl WindowState {
             saved
         } else {
             log::info!("Creating new window state");
-            let ret = Self {
-                screen: ActiveScreen::Home,
-                recently_opened: Vec::new(),
-                open_documents: Vec::new(),
-                navbar_scroll: ScrollHandle::new(),
-            };
+            let ret = Self::default_state(window, cx);
             ret.save();
             ret
         }

@@ -45,20 +45,11 @@ impl Executor {
         error: crate::error::ExecutorError,
         stack_idx: usize,
     ) -> RuntimeError {
-        let mut fallback_span = self.current_instruction_span(stack_idx);
-        let mut root_span = None;
+        let fallback_span = self.current_instruction_span(stack_idx);
         let mut recovered_callstack = Vec::new();
 
         for frame in self.recover_call_stack(stack_idx) {
             let span = self.best_effort_span(frame.stack_idx, frame.next_ip);
-            fallback_span = span.clone();
-            if root_span.is_none()
-                && self.bytecode.sections[frame.next_ip.0 as usize]
-                    .flags
-                    .is_root_module
-            {
-                root_span = Some(span.clone());
-            }
             recovered_callstack.push(RuntimeCallFrame {
                 section: frame.next_ip.0,
                 span: span.clone(),
@@ -66,14 +57,28 @@ impl Executor {
         }
 
         recovered_callstack.reverse();
+        let primary_span = recovered_callstack
+            .iter()
+            .rev()
+            .find(|frame| self.is_user_code_section(frame.section as usize))
+            .map(|frame| frame.span.clone())
+            .or_else(|| recovered_callstack.last().map(|frame| frame.span.clone()))
+            .unwrap_or(fallback_span);
         recovered_callstack.truncate(RUNTIME_ERROR_CALLSTACK_LIMIT);
 
         RuntimeError {
             error,
-            span: root_span.unwrap_or(fallback_span),
+            span: primary_span,
             callstack: recovered_callstack,
             hint: None,
         }
+    }
+
+    fn is_user_code_section(&self, section_idx: usize) -> bool {
+        self.bytecode
+            .sections
+            .get(section_idx)
+            .is_some_and(|section| !section.flags.is_stdlib)
     }
 
     pub(super) fn current_instruction_span(&self, stack_idx: usize) -> Span8 {
@@ -161,12 +166,11 @@ impl Executor {
         let mut skip_current_ip = false;
 
         while let Some(idx) = cursor {
-            let parent_idx = self
-                .state
-                .stack_trace_parent_idx(idx)
-                .or_else(|| self.state.stack_parent_idx(idx));
+            let direct_parent_idx = self.state.stack_parent_idx(idx);
+            let trace_parent_idx = self.state.stack_trace_parent_idx(idx);
+            let parent_idx = trace_parent_idx.or(direct_parent_idx);
 
-            if let Some(parent_idx) = parent_idx {
+            if let Some(parent_idx) = direct_parent_idx {
                 frames.push(RecoveredFrame {
                     stack_idx: parent_idx,
                     next_ip: self.state.stack_ip(parent_idx),
@@ -191,7 +195,7 @@ impl Executor {
                     }),
             );
             cursor = parent_idx;
-            skip_current_ip = true;
+            skip_current_ip = direct_parent_idx.is_some() && direct_parent_idx == parent_idx;
         }
 
         frames.into_iter()
@@ -257,6 +261,21 @@ mod tests {
         Executor::new(Bytecode::new(vec![Arc::new(section)]), Vec::new())
     }
 
+    fn section_with_annotations(
+        flags: SectionFlags,
+        spans: &[(usize, usize)],
+    ) -> Arc<SectionBytecode> {
+        let mut section = SectionBytecode::new(flags);
+        section.annotations = spans
+            .iter()
+            .map(|(start, end)| InstructionAnnotation {
+                source_loc: *start..*end,
+            })
+            .collect();
+        section.instructions = vec![bytecode::Instruction::PushNil; spans.len()];
+        Arc::new(section)
+    }
+
     #[test]
     fn recover_call_stack_prioritizes_spawning_play_frame() {
         let mut executor =
@@ -278,6 +297,74 @@ mod tests {
             .collect();
 
         assert_eq!(spans, vec![10..14, 20..24, 40..44, 30..34]);
+    }
+
+    #[test]
+    fn trace_only_eager_frames_keep_callee_before_trace_parent() {
+        let mut executor =
+            executor_with_root_annotations(&[(10, 14), (20, 24), (30, 34), (40, 44)]);
+
+        let root_idx = crate::state::ExecutionState::ROOT_STACK_IDX;
+        executor.state.stack_mut(root_idx).ip = (0, 1);
+        executor.state.stack_mut(root_idx).call_stack.push((0, 3));
+
+        let trace_idx = executor
+            .state
+            .alloc_stack((0, 2), None, Some(root_idx))
+            .expect("failed to allocate trace stack");
+        executor.state.stack_mut(trace_idx).call_stack.push((0, 4));
+
+        let spans: Vec<_> = executor
+            .recover_call_stack(trace_idx)
+            .map(|frame| executor.best_effort_span(frame.stack_idx, frame.next_ip))
+            .collect();
+
+        assert_eq!(spans, vec![20..24, 40..44, 10..14, 30..34]);
+    }
+
+    #[test]
+    fn runtime_error_span_uses_deepest_non_stdlib_frame() {
+        let root = section_with_annotations(
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: true,
+                is_root_module: true,
+            },
+            &[(10, 14), (20, 24)],
+        );
+        let stdlib = section_with_annotations(
+            SectionFlags {
+                is_stdlib: true,
+                is_library: true,
+                is_init: false,
+                is_root_module: false,
+            },
+            &[(100, 104)],
+        );
+        let mut executor = Executor::new(Bytecode::new(vec![root, stdlib]), Vec::new());
+
+        let root_idx = crate::state::ExecutionState::ROOT_STACK_IDX;
+        executor.state.stack_mut(root_idx).ip = (0, 1);
+        let trace_idx = executor
+            .state
+            .alloc_stack((1, 1), None, Some(root_idx))
+            .expect("failed to allocate trace stack");
+        executor.state.stack_mut(trace_idx).call_stack.push((0, 2));
+        executor.state.last_stack_idx = trace_idx;
+
+        let runtime_error =
+            executor.build_runtime_error(crate::error::ExecutorError::invalid_operation("test"));
+
+        assert_eq!(runtime_error.span, 20..24);
+        assert_eq!(
+            runtime_error
+                .callstack
+                .iter()
+                .map(|frame| frame.span.clone())
+                .collect::<Vec<_>>(),
+            vec![10..14, 20..24, 100..104]
+        );
     }
 
     #[test]

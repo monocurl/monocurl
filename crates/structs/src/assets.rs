@@ -31,6 +31,13 @@ impl Assets {
         path.to_string_lossy().into_owned()
     }
 
+    pub fn default_scene(name: impl AsRef<Path>) -> PathBuf {
+        let mut base = Self::base_path();
+        base.push("default_scenes");
+        base.push(name.as_ref());
+        base
+    }
+
     pub fn font(name: impl AsRef<Path>) -> PathBuf {
         let mut base = Self::base_path();
         base.push("font");

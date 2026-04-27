@@ -1,0 +1,24 @@
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+param radius = 0.75
+param offset = -1.5
+
+let horizontal = |x| x * 1r
+
+mesh track = stroke{LIGHT_GRAY, 1.5} Line([-3.0, -1.2, 0], [3.0, -1.2, 0])
+mesh moving = shift{delta: horizontal($offset)}
+    fill{alpha{0.22} CYAN}
+    stroke{BLUE}
+    Circle(radius: $radius)
+
+slide "Live Parameters"
+play Set([&track, &moving])
+
+radius = 1.2
+offset = 1.5
+play Lerp(1.2, [&moving])

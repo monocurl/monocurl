@@ -45,6 +45,31 @@ fn test_runtime_error_prefers_innermost_root_callsite_span() {
 }
 
 #[test]
+fn test_eager_lambda_runtime_error_highlights_innermost_user_frame() {
+    let src = "
+        let Bad = |center = 0| {
+            return centered_at{center} Circle(1)
+        }
+
+        let q = Bad()
+    ";
+    let r = run_anim_impl(
+        &[(src, SectionType::Init), ("", SectionType::Slide)],
+        0,
+        0.0,
+        &stdlib_bundles(["mesh"]),
+    );
+    r.assert_error("expected list of length 3");
+
+    let expected_start = src
+        .find("centered_at{center}")
+        .expect("missing centered_at call");
+    let expected = expected_start..expected_start + "centered_at{center}".len();
+    assert!(!r.error_spans.is_empty(), "expected runtime error span");
+    assert_eq!(r.error_spans[0], expected);
+}
+
+#[test]
 fn test_imported_init_runtime_error_uses_import_span_when_no_root_frame_exists() {
     let import_span = 2000..2006;
     let imported = make_imported_bundle("let x = 1 / 0", SectionType::Init, import_span.clone());
