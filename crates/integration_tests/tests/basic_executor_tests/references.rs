@@ -194,6 +194,7 @@ fn test_camera_lerp_view_lambda_can_be_played_multiple_times() {
             play CameraLerp(&camera_ref, 3)
         }
 
+        play Set()
         play View(&cam, 4)
         play View(&cam, 5)
 

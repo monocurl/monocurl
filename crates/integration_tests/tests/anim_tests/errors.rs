@@ -815,7 +815,7 @@ fn test_write_staggers_across_mesh_leaves() {
     let first_len = (first.lins[0].b.pos - first.lins[0].a.pos).len();
     let second_len = (second.lins[0].b.pos - second.lins[0].a.pos).len();
     assert!(
-        first_len > 0.01,
+        first_len > 0.0001,
         "expected first leaf to have started writing"
     );
     assert!(

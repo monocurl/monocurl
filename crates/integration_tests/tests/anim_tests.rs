@@ -1,14 +1,8 @@
 // animation test framework and tests
 // covers: slide durations, leader values, multi-slide scenes, stdlib usage
 
-use std::{
-    cell::Cell,
-    f64, fs,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{cell::Cell, f64, path::PathBuf, sync::Arc};
 
-use compiler::cache::CompilerCache;
 use executor::{
     camera::parse_camera_value,
     error::ExecutorError,
@@ -22,17 +16,13 @@ use executor::{
         stateful::stateful_cache_valid,
     },
 };
-use lexer::{lexer::Lexer, token::Token};
-use parser::{
-    ast::{Section, SectionBundle, SectionType},
-    parser::SectionParser,
+use integration_tests::{
+    compile_bundles, inspect_block, make_imported_bundle, make_section_bundle, parse_section,
+    print_inspection, stdlib_bundle_with_import_span, stdlib_bundles, value_summary,
 };
+use parser::ast::{Section, SectionBundle, SectionType};
 use stdlib::registry::registry;
-use structs::{
-    assets::Assets,
-    rope::{Rope, TextAggregate},
-    text::Span8,
-};
+use structs::text::Span8;
 
 // ── snapshot types ────────────────────────────────────────────────────────────
 
@@ -45,18 +35,54 @@ pub struct LeaderInfo {
 }
 
 impl LeaderInfo {
+    fn inspection_lines(&self) -> Vec<String> {
+        vec![
+            format!("kind: {}", leader_kind_name(self.kind)),
+            format!("target: {}", value_summary(&self.target)),
+            format!("current: {}", value_summary(&self.current)),
+        ]
+    }
+
+    fn inspection(&self) -> String {
+        inspect_block("leader", self.inspection_lines())
+    }
+
+    #[allow(dead_code)]
+    pub fn inspect(&self, label: &str) -> &Self {
+        print_inspection(label, self.inspection_lines());
+        self
+    }
+
     pub fn assert_target_int(&self, expected: i64) -> &Self {
         match &self.target {
-            Value::Integer(n) => assert_eq!(*n, expected, "leader target int mismatch"),
-            other => panic!("expected Integer({}), got {}", expected, other.type_name()),
+            Value::Integer(n) => assert_eq!(
+                *n,
+                expected,
+                "leader target int mismatch\n{}",
+                self.inspection()
+            ),
+            other => panic!(
+                "expected Integer({expected}), got {}\n{}",
+                other.type_name(),
+                self.inspection()
+            ),
         }
         self
     }
 
     pub fn assert_current_int(&self, expected: i64) -> &Self {
         match &self.current {
-            Value::Integer(n) => assert_eq!(*n, expected, "leader current int mismatch"),
-            other => panic!("expected Integer({}), got {}", expected, other.type_name()),
+            Value::Integer(n) => assert_eq!(
+                *n,
+                expected,
+                "leader current int mismatch\n{}",
+                self.inspection()
+            ),
+            other => panic!(
+                "expected Integer({expected}), got {}\n{}",
+                other.type_name(),
+                self.inspection()
+            ),
         }
         self
     }
@@ -65,11 +91,14 @@ impl LeaderInfo {
         match &self.current {
             Value::Float(f) => assert!(
                 (f - expected).abs() < eps,
-                "leader current float mismatch: expected {}, got {}",
-                expected,
-                f
+                "leader current float mismatch: expected {expected}, got {f}\n{}",
+                self.inspection()
             ),
-            other => panic!("expected Float({}), got {}", expected, other.type_name()),
+            other => panic!(
+                "expected Float({expected}), got {}\n{}",
+                other.type_name(),
+                self.inspection()
+            ),
         }
         self
     }
@@ -89,11 +118,44 @@ pub struct AnimResult {
 }
 
 impl AnimResult {
+    fn inspection_lines(&self) -> Vec<String> {
+        let mut lines = vec![
+            format!(
+                "timestamp: slide={}, time={}",
+                self.timestamp.slide, self.timestamp.time
+            ),
+            format!("user slide count: {}", self.user_slide_count),
+            format!("transcript: {:?}", self.transcript),
+            format!("errors: {:?}", self.errors),
+            format!("error spans: {:?}", self.error_spans),
+        ];
+        lines.extend(self.leaders.iter().enumerate().map(|(idx, leader)| {
+            format!(
+                "leader[{idx}] {} target={} current={}",
+                leader_kind_name(leader.kind),
+                value_summary(&leader.target),
+                value_summary(&leader.current)
+            )
+        }));
+        lines
+    }
+
+    fn inspection(&self) -> String {
+        inspect_block("anim result", self.inspection_lines())
+    }
+
+    #[allow(dead_code)]
+    pub fn inspect(&self, label: &str) -> &Self {
+        print_inspection(label, self.inspection_lines());
+        self
+    }
+
     pub fn assert_ok(&self) -> &Self {
         assert!(
             self.errors.is_empty(),
-            "expected no errors, got: {:?}",
-            self.errors
+            "expected no errors, got: {:?}\n{}",
+            self.errors,
+            self.inspection()
         );
         self
     }
@@ -101,9 +163,10 @@ impl AnimResult {
     pub fn assert_error(&self, fragment: &str) -> &Self {
         assert!(
             self.errors.iter().any(|e| e.contains(fragment)),
-            "expected error containing {:?}, got: {:?}",
+            "expected error containing {:?}, got: {:?}\n{}",
             fragment,
-            self.errors
+            self.errors,
+            self.inspection()
         );
         self
     }
@@ -115,13 +178,20 @@ impl AnimResult {
             expected
                 .iter()
                 .map(|entry| entry.to_string())
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
+            "transcript mismatch\n{}",
+            self.inspection()
         );
         self
     }
 
     pub fn assert_user_slide_count(&self, n: usize) -> &Self {
-        assert_eq!(self.user_slide_count, n, "user slide count mismatch");
+        assert_eq!(
+            self.user_slide_count,
+            n,
+            "user slide count mismatch\n{}",
+            self.inspection()
+        );
         self
     }
 
@@ -136,9 +206,8 @@ impl AnimResult {
         let actual = self.slide_time();
         assert!(
             (actual - expected).abs() <= eps,
-            "slide time mismatch: expected ~{}, got {}",
-            expected,
-            actual
+            "slide time mismatch: expected ~{expected}, got {actual}\n{}",
+            self.inspection()
         );
         self
     }
@@ -156,52 +225,49 @@ impl AnimResult {
             .filter(|l| l.kind == LeaderKind::Param)
             .collect()
     }
+
+    pub fn mesh_leader(&self, index: usize) -> &LeaderInfo {
+        self.nth_leader(LeaderKind::Mesh, index)
+    }
+
+    #[allow(dead_code)]
+    pub fn param_leader(&self, index: usize) -> &LeaderInfo {
+        self.nth_leader(LeaderKind::Param, index)
+    }
+
+    pub fn assert_mesh_target_int(&self, index: usize, expected: i64) -> &Self {
+        self.mesh_leader(index).assert_target_int(expected);
+        self
+    }
+
+    fn nth_leader(&self, kind: LeaderKind, index: usize) -> &LeaderInfo {
+        let mut seen = 0;
+        for leader in &self.leaders {
+            if leader.kind == kind {
+                if seen == index {
+                    return leader;
+                }
+                seen += 1;
+            }
+        }
+
+        panic!(
+            "expected {} leader at index {}, found {}\n{}",
+            leader_kind_name(kind),
+            index,
+            seen,
+            self.inspection()
+        )
+    }
 }
 
 // ── internal helpers ──────────────────────────────────────────────────────────
 
-fn lex(src: &str) -> Vec<(Token, Span8)> {
-    Lexer::token_stream(src.chars())
-        .into_iter()
-        .filter(|(t, _)| t != &Token::Whitespace && t != &Token::Comment)
-        .collect()
-}
-
-fn parse_section(src: &str, section_type: SectionType) -> (Section, Vec<String>) {
-    let tokens = lex(src);
-    let rope: Rope<TextAggregate> = Rope::from_str(src);
-    let mut parser = SectionParser::new(tokens, rope, section_type.clone(), None, None);
-    let stmts = parser.parse_statement_list();
-    let errors = parser
-        .artifacts()
-        .error_diagnostics
-        .iter()
-        .map(|e| e.message.clone())
-        .collect();
-    (
-        Section {
-            body: stmts,
-            section_type,
-            name: None,
-        },
-        errors,
-    )
-}
-
-fn stdlib_path(name: &str) -> std::path::PathBuf {
-    Assets::std_lib().join(format!("std/{name}.mcl"))
-}
-
-fn stdlib_bundle(name: &str) -> Arc<SectionBundle> {
-    load_stdlib_bundle_with_import_span(stdlib_path(name), 0..0)
-}
-
-fn stdlib_bundle_with_import_span(name: &str, import_span: Span8) -> Arc<SectionBundle> {
-    load_stdlib_bundle_with_import_span(stdlib_path(name), import_span)
-}
-
-fn stdlib_bundles<const N: usize>(names: [&str; N]) -> [Arc<SectionBundle>; N] {
-    names.map(stdlib_bundle)
+fn leader_kind_name(kind: LeaderKind) -> &'static str {
+    match kind {
+        LeaderKind::Mesh => "mesh",
+        LeaderKind::Param => "param",
+    }
 }
 
 fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
@@ -344,44 +410,6 @@ async fn current_mesh_leader_value(executor: &mut Executor) -> Value {
         .expect("mesh leader wrapper elision should succeed")
 }
 
-fn load_stdlib_bundle_with_import_span(
-    path: impl AsRef<Path>,
-    import_span: Span8,
-) -> Arc<SectionBundle> {
-    let src = fs::read_to_string(path.as_ref()).expect("failed to read stdlib file");
-    let (section, errors) = parse_section(&src, SectionType::StandardLibrary);
-    assert!(errors.is_empty(), "stdlib parse errors: {:?}", errors);
-    Arc::new(SectionBundle {
-        file_path: path.as_ref().to_path_buf(),
-        file_index: 0,
-        imported_files: vec![],
-        sections: vec![section],
-        root_import_span: Some(import_span),
-        was_cached: false,
-    })
-}
-
-fn make_imported_bundle(
-    src: &str,
-    section_type: SectionType,
-    import_span: Span8,
-) -> Arc<SectionBundle> {
-    let (section, errors) = parse_section(src, section_type);
-    assert!(
-        errors.is_empty(),
-        "imported bundle parse errors: {:?}",
-        errors
-    );
-    Arc::new(SectionBundle {
-        file_path: PathBuf::from("imported.mcl"),
-        file_index: 0,
-        imported_files: vec![],
-        sections: vec![section],
-        root_import_span: Some(import_span),
-        was_cached: false,
-    })
-}
-
 fn build_anim_executor(
     slides: &[(&str, SectionType)],
     stdlib_bundles: &[Arc<SectionBundle>],
@@ -415,20 +443,12 @@ fn build_anim_executor_with_file_path(
 
     let imported_files: Vec<usize> = (0..stdlib_bundles.len()).collect();
 
-    let user_bundle = Arc::new(SectionBundle {
-        file_path,
-        file_index: 0,
-        imported_files,
-        sections,
-        root_import_span: None,
-        was_cached: false,
-    });
+    let user_bundle = make_section_bundle(file_path, 0, imported_files, sections, None);
 
     let mut bundles: Vec<Arc<SectionBundle>> = stdlib_bundles.to_vec();
     bundles.push(user_bundle);
 
-    let mut cache = CompilerCache::default();
-    let result = compiler::compiler::compile(&mut cache, None, &bundles);
+    let result = compile_bundles(&bundles);
 
     let compile_errors: Vec<String> = result.errors.iter().map(|e| e.message.clone()).collect();
     if !compile_errors.is_empty() {

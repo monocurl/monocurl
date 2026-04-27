@@ -2,31 +2,11 @@
 // covers: $param creation, plain reads of stateful meshes, runtime validation for invalid
 // stateful operators/subscripts, caching, error cases, and interaction with animations.
 
-use anim_tests::{LeaderInfo, run_anim, run_anim_with_stdlib, run_anim_with_stdlib_at};
-use executor::value::Value;
+use anim_tests::{run_anim, run_anim_with_stdlib, run_anim_with_stdlib_at};
 
 // anim_tests helpers are in a sibling test file; re-export by including it
 #[path = "anim_tests.rs"]
 mod anim_tests;
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
-fn assert_mesh_target_int(leaders: &[LeaderInfo], mesh_idx: usize, expected: i64) {
-    use executor::state::LeaderKind;
-    let meshes: Vec<&LeaderInfo> = leaders
-        .iter()
-        .filter(|l| l.kind == LeaderKind::Mesh)
-        .collect();
-    match &meshes[mesh_idx].target {
-        Value::Integer(n) => assert_eq!(*n, expected, "mesh[{}] target int mismatch", mesh_idx),
-        other => panic!(
-            "mesh[{}]: expected Integer({}), got {}",
-            mesh_idx,
-            expected,
-            other.type_name()
-        ),
-    }
-}
 
 // ── basic stateful creation ───────────────────────────────────────────────────
 
@@ -313,7 +293,7 @@ fn test_stateful_plain_read_after_lerp_uses_param_leader() {
     params[2]
         .assert_target_int(5)
         .assert_current_float(2.5, 1e-9);
-    assert_mesh_target_int(&r.leaders, 1, 5);
+    r.assert_mesh_target_int(1, 5);
 }
 
 #[test]
@@ -336,7 +316,7 @@ fn test_stateful_function() {
     params[2]
         .assert_target_int(5)
         .assert_current_float(2.5, 1e-9);
-    assert_mesh_target_int(&r.leaders, 1, 5);
+    r.assert_mesh_target_int(1, 5);
 }
 
 #[test]
@@ -655,7 +635,7 @@ fn test_labeled_lambda_stateful_arg_plain_read_reflects_param() {
     ",
     );
     r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 1, 12);
+    r.assert_mesh_target_int(1, 12);
 }
 
 #[test]
@@ -671,7 +651,7 @@ fn test_stateful_labeled_lambda_param_change_updates_plain_read() {
     ",
     );
     r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 1, 15);
+    r.assert_mesh_target_int(1, 15);
 }
 
 #[test]
@@ -687,7 +667,7 @@ fn test_nested_labeled_stateful_calls_in_mesh() {
     ",
     );
     r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 1, 5);
+    r.assert_mesh_target_int(1, 5);
 }
 
 // ── stateful + references ─────────────────────────────────────────────────────
@@ -709,7 +689,7 @@ fn test_ref_to_param_and_independent_stateful() {
     );
     r.assert_ok();
     // after inc, param p leader = 2; m should see 2
-    assert_mesh_target_int(&r.leaders, 1, 2);
+    r.assert_mesh_target_int(1, 2);
 }
 
 #[test]
@@ -758,8 +738,8 @@ fn test_two_params_two_meshes_independent_stateful() {
     ",
     );
     r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 2, 99); // ra = ma = a = 99
-    assert_mesh_target_int(&r.leaders, 3, 20); // rb = mb = b = 20
+    r.assert_mesh_target_int(2, 99); // ra = ma = a = 99
+    r.assert_mesh_target_int(3, 20); // rb = mb = b = 20
 }
 
 // ── stateful map: maps cannot store stateful values ───────────────────────────
@@ -801,7 +781,7 @@ fn test_stateful_logical_and() {
     ",
     );
     r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 1, 0);
+    r.assert_mesh_target_int(1, 0);
 }
 
 #[test]
@@ -815,7 +795,7 @@ fn test_stateful_logical_or() {
     ",
     );
     r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 1, 4);
+    r.assert_mesh_target_int(1, 4);
 }
 
 #[test]

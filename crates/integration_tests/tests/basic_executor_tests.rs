@@ -1,25 +1,20 @@
 // lex → parse → compile → execute
 
-use std::{f64, fs, path::Path, sync::Arc};
+use std::f64;
 
-use compiler::cache::CompilerCache;
 use executor::{
     executor::{Executor, SeekToResult},
     heap::with_heap,
     time::Timestamp,
     value::Value,
 };
-use lexer::{lexer::Lexer, token::Token};
-use parser::{
-    ast::{Section, SectionBundle, SectionType},
-    parser::SectionParser,
+use integration_tests::{
+    compile_bundles, inspect_block, make_section_bundle, parse_section, print_inspection,
+    stdlib_bundle, value_summary,
 };
+use parser::ast::SectionType;
 use stdlib::registry::registry;
-use structs::{
-    assets::Assets,
-    rope::{Rope, TextAggregate},
-    text::Span8,
-};
+use structs::text::Span8;
 
 struct ExecResult {
     /// the value captured from the root execution head's TOS, if any
@@ -35,233 +30,250 @@ fn elide_value_for_assert(value: &Value) -> Value {
 }
 
 impl ExecResult {
-    fn assert_ok(&self) {
-        assert!(
-            self.errors.is_empty(),
-            "expected no errors, got: {:?}",
-            self.errors
-        );
+    fn inspection_lines(&self) -> Vec<String> {
+        vec![
+            format!("value: {}", self.value_summary()),
+            format!("transcript: {:?}", self.transcript),
+            format!("errors: {:?}", self.errors),
+            format!("error spans: {:?}", self._error_spans),
+        ]
     }
 
-    fn assert_int(&self, expected: i64) {
-        self.assert_ok();
-        let value = self.value.as_ref().map(elide_value_for_assert);
-        match &value {
-            Some(Value::Integer(n)) => assert_eq!(*n, expected, "integer mismatch"),
-            other => panic!(
-                "expected Integer({}), got {}",
-                expected,
-                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
-            ),
-        }
-    }
-
-    fn assert_nil(&self) {
-        self.assert_ok();
-        let value = self.value.as_ref().map(elide_value_for_assert);
-        match &value {
-            Some(Value::Nil) => {}
-            other => panic!(
-                "expected Nil, got {}",
-                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
-            ),
-        }
+    fn inspection(&self) -> String {
+        inspect_block("exec result", self.inspection_lines())
     }
 
     #[allow(dead_code)]
-    fn assert_float(&self, expected: f64) {
+    fn inspect(&self, label: &str) -> &Self {
+        print_inspection(label, self.inspection_lines());
+        self
+    }
+
+    fn value_summary(&self) -> String {
+        self.value
+            .as_ref()
+            .map(|value| value_summary(&elide_value_for_assert(value)))
+            .unwrap_or_else(|| "(empty)".to_string())
+    }
+
+    fn elided_value(&self) -> Option<Value> {
+        self.value.as_ref().map(elide_value_for_assert)
+    }
+
+    fn unexpected_value(&self, expected: &str, actual: Option<&Value>) -> ! {
+        panic!(
+            "expected {expected}, got {}\n{}",
+            actual.map(Value::type_name).unwrap_or("(empty)"),
+            self.inspection()
+        )
+    }
+
+    fn assert_list_elements<T>(
+        &self,
+        expected: &[T],
+        mut assert_element: impl FnMut(usize, Value, &T),
+    ) -> &Self {
         self.assert_ok();
-        let value = self.value.as_ref().map(elide_value_for_assert);
+        let value = self.elided_value();
+        let Some(Value::List(list)) = &value else {
+            self.unexpected_value("List", value.as_ref());
+        };
+
+        assert_eq!(
+            list.elements().len(),
+            expected.len(),
+            "list length mismatch\n{}",
+            self.inspection()
+        );
+
+        for (idx, (actual, expected)) in list.elements().iter().zip(expected.iter()).enumerate() {
+            assert_element(
+                idx,
+                with_heap(|heap| heap.get(actual.key()).clone()),
+                expected,
+            );
+        }
+
+        self
+    }
+
+    fn assert_ok(&self) -> &Self {
+        assert!(
+            self.errors.is_empty(),
+            "expected no errors, got: {:?}\n{}",
+            self.errors,
+            self.inspection()
+        );
+        self
+    }
+
+    fn assert_int(&self, expected: i64) -> &Self {
+        self.assert_ok();
+        let value = self.elided_value();
+        match &value {
+            Some(Value::Integer(n)) => {
+                assert_eq!(*n, expected, "integer mismatch\n{}", self.inspection())
+            }
+            other => self.unexpected_value(&format!("Integer({expected})"), other.as_ref()),
+        }
+        self
+    }
+
+    fn assert_nil(&self) -> &Self {
+        self.assert_ok();
+        let value = self.elided_value();
+        match &value {
+            Some(Value::Nil) => {}
+            other => self.unexpected_value("Nil", other.as_ref()),
+        }
+        self
+    }
+
+    #[allow(dead_code)]
+    fn assert_float(&self, expected: f64) -> &Self {
+        self.assert_ok();
+        let value = self.elided_value();
         match &value {
             Some(Value::Float(f)) => assert!(
                 (f - expected).abs() < 1e-9,
-                "float mismatch: expected {}, got {}",
-                expected,
-                f
+                "float mismatch: expected {expected}, got {f}\n{}",
+                self.inspection()
             ),
-            other => panic!(
-                "expected Float({}), got {}",
-                expected,
-                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
-            ),
+            other => self.unexpected_value(&format!("Float({expected})"), other.as_ref()),
         }
+        self
     }
 
-    fn assert_float_list(&self, expected: &[f64]) {
-        self.assert_ok();
-        let value = self.value.as_ref().map(elide_value_for_assert);
-        match &value {
-            Some(Value::List(list)) => {
-                assert_eq!(
-                    list.elements().len(),
-                    expected.len(),
-                    "list length mismatch"
-                );
+    fn assert_float_list(&self, expected: &[f64]) -> &Self {
+        self.assert_list_elements(expected, |idx, actual, expected| match actual {
+            Value::Float(f) => assert!(
+                (f - *expected).abs() < 1e-9,
+                "float mismatch at index {idx}: expected {expected}, got {f}\n{}",
+                self.inspection()
+            ),
+            other => panic!(
+                "expected float list element at index {idx}, got {}\n{}",
+                other.type_name(),
+                self.inspection()
+            ),
+        })
+    }
 
-                for (actual, expected) in list.elements().iter().zip(expected.iter()) {
-                    match with_heap(|h| h.get(actual.key()).clone()) {
-                        Value::Float(f) => assert!(
-                            (f - *expected).abs() < 1e-9,
-                            "float mismatch: expected {}, got {}",
-                            expected,
-                            f
-                        ),
-                        other => panic!("expected float list element, got {}", other.type_name()),
-                    }
-                }
+    fn assert_float_list_approx(&self, expected: &[f64], eps: f64) -> &Self {
+        self.assert_list_elements(expected, |idx, actual, expected| match actual {
+            Value::Float(f) => assert!(
+                (f - *expected).abs() < eps,
+                "float mismatch at index {idx}: expected {expected}, got {f}\n{}",
+                self.inspection()
+            ),
+            Value::Integer(n) => assert!(
+                (n as f64 - *expected).abs() < eps,
+                "float mismatch at index {idx}: expected {expected}, got {n}\n{}",
+                self.inspection()
+            ),
+            other => panic!(
+                "expected numeric list element at index {idx}, got {}\n{}",
+                other.type_name(),
+                self.inspection()
+            ),
+        })
+    }
+
+    fn assert_int_list(&self, expected: &[i64]) -> &Self {
+        self.assert_list_elements(expected, |idx, actual, expected| match actual {
+            Value::Integer(n) => assert_eq!(
+                n,
+                *expected,
+                "integer mismatch at index {idx}\n{}",
+                self.inspection()
+            ),
+            other => panic!(
+                "expected int list element at index {idx}, got {}\n{}",
+                other.type_name(),
+                self.inspection()
+            ),
+        })
+    }
+
+    fn assert_string(&self, expected: &str) -> &Self {
+        self.assert_ok();
+        let value = self.elided_value();
+        match &value {
+            Some(Value::String(s)) => {
+                assert_eq!(s, expected, "string mismatch\n{}", self.inspection())
             }
-            other => panic!(
-                "expected List, got {}",
-                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
-            ),
+            other => self.unexpected_value(&format!("String({expected:?})"), other.as_ref()),
         }
+        self
     }
 
-    fn assert_float_list_approx(&self, expected: &[f64], eps: f64) {
-        self.assert_ok();
-        let value = self.value.as_ref().map(elide_value_for_assert);
-        match &value {
-            Some(Value::List(list)) => {
-                assert_eq!(
-                    list.elements().len(),
-                    expected.len(),
-                    "list length mismatch"
-                );
-
-                for (actual, expected) in list.elements().iter().zip(expected.iter()) {
-                    match with_heap(|h| h.get(actual.key()).clone()) {
-                        Value::Float(f) => assert!(
-                            (f - *expected).abs() < eps,
-                            "float mismatch: expected {}, got {}",
-                            expected,
-                            f
-                        ),
-                        Value::Integer(n) => assert!(
-                            (n as f64 - *expected).abs() < eps,
-                            "float mismatch: expected {}, got {}",
-                            expected,
-                            n
-                        ),
-                        other => panic!("expected numeric list element, got {}", other.type_name()),
-                    }
-                }
-            }
-            other => panic!(
-                "expected List, got {}",
-                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+    fn assert_string_list(&self, expected: &[&str]) -> &Self {
+        self.assert_list_elements(expected, |idx, actual, expected| match actual {
+            Value::String(s) => assert_eq!(
+                s,
+                *expected,
+                "string mismatch at index {idx}\n{}",
+                self.inspection()
             ),
-        }
+            other => panic!(
+                "expected string list element at index {idx}, got {}\n{}",
+                other.type_name(),
+                self.inspection()
+            ),
+        })
     }
 
-    fn assert_int_list(&self, expected: &[i64]) {
-        self.assert_ok();
-        let value = self.value.as_ref().map(elide_value_for_assert);
-        match &value {
-            Some(Value::List(list)) => {
-                assert_eq!(
-                    list.elements().len(),
-                    expected.len(),
-                    "list length mismatch"
-                );
-
-                for (actual, expected) in list.elements().iter().zip(expected.iter()) {
-                    match with_heap(|h| h.get(actual.key()).clone()) {
-                        Value::Integer(n) => {
-                            assert_eq!(n, *expected, "integer mismatch");
-                        }
-                        other => panic!("expected int list element, got {}", other.type_name()),
-                    }
-                }
-            }
-            other => panic!(
-                "expected List, got {}",
-                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
-            ),
-        }
-    }
-
-    fn assert_string(&self, expected: &str) {
-        self.assert_ok();
-        let value = self.value.as_ref().map(elide_value_for_assert);
-        match &value {
-            Some(Value::String(s)) => assert_eq!(s, expected, "string mismatch"),
-            other => panic!(
-                "expected String({:?}), got {}",
-                expected,
-                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
-            ),
-        }
-    }
-
-    fn assert_string_list(&self, expected: &[&str]) {
-        self.assert_ok();
-        let value = self.value.as_ref().map(elide_value_for_assert);
-        match &value {
-            Some(Value::List(list)) => {
-                assert_eq!(
-                    list.elements().len(),
-                    expected.len(),
-                    "list length mismatch"
-                );
-
-                for (actual, expected) in list.elements().iter().zip(expected.iter()) {
-                    match with_heap(|h| h.get(actual.key()).clone()) {
-                        Value::String(s) => assert_eq!(s, *expected, "string mismatch"),
-                        other => panic!("expected string list element, got {}", other.type_name()),
-                    }
-                }
-            }
-            other => panic!(
-                "expected List, got {}",
-                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
-            ),
-        }
-    }
-
-    fn assert_error(&self, fragment: &str) {
+    fn assert_error(&self, fragment: &str) -> &Self {
         assert!(
             self.errors.iter().any(|e| e.contains(fragment)),
-            "expected error containing {:?}, got: {:?}",
+            "expected error containing {:?}, got: {:?}\n{}",
             fragment,
-            self.errors
+            self.errors,
+            self.inspection()
         );
+        self
     }
 
-    fn assert_transcript(&self, expected: &[&str]) {
+    fn assert_transcript(&self, expected: &[&str]) -> &Self {
         self.assert_ok();
         assert_eq!(
             self.transcript,
             expected
                 .iter()
                 .map(|entry| entry.to_string())
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>(),
+            "transcript mismatch\n{}",
+            self.inspection()
         );
+        self
     }
 
-    fn assert_first_error_span(&self, expected: Span8) {
+    fn assert_first_error_span(&self, expected: Span8) -> &Self {
         assert!(
             !self._error_spans.is_empty(),
-            "expected at least one runtime error span"
+            "expected at least one runtime error span\n{}",
+            self.inspection()
         );
-        assert_eq!(self._error_spans[0], expected);
+        assert_eq!(
+            self._error_spans[0],
+            expected,
+            "runtime error span mismatch\n{}",
+            self.inspection()
+        );
+        self
     }
 
     #[allow(dead_code)]
-    fn assert_no_value(&self) {
+    fn assert_no_value(&self) -> &Self {
         self.assert_ok();
         assert!(
             self.value.is_none(),
-            "expected no value, got {}",
-            self.value.as_ref().map(Value::type_name).unwrap_or("")
+            "expected no value, got {}\n{}",
+            self.value_summary(),
+            self.inspection()
         );
+        self
     }
-}
-
-fn lex(src: &str) -> Vec<(Token, Span8)> {
-    Lexer::token_stream(src.chars())
-        .into_iter()
-        .filter(|(t, _)| t != &Token::Whitespace && t != &Token::Comment)
-        .collect()
 }
 
 /// compile and execute a snippet of Monocurl slide code.
@@ -283,18 +295,7 @@ fn run_section_with_stdlib(
     section_type: SectionType,
     stdlib_names: &[&str],
 ) -> ExecResult {
-    // -- parse --
-    let tokens = lex(src);
-    let rope: Rope<TextAggregate> = Rope::from_str(src);
-    let mut parser = SectionParser::new(tokens, rope, section_type.clone(), None, None);
-    let stmts = parser.parse_statement_list();
-
-    let parse_errors: Vec<String> = parser
-        .artifacts()
-        .error_diagnostics
-        .iter()
-        .map(|e| e.message.clone())
-        .collect();
+    let (section, parse_errors) = parse_section(src, section_type);
     if !parse_errors.is_empty() {
         return ExecResult {
             value: None,
@@ -304,28 +305,15 @@ fn run_section_with_stdlib(
         };
     }
 
-    let stdlib_bundles: Vec<Arc<SectionBundle>> =
-        stdlib_names.iter().copied().map(stdlib_bundle).collect();
+    let stdlib_bundles: Vec<_> = stdlib_names.iter().copied().map(stdlib_bundle).collect();
     let imported_files: Vec<usize> = (0..stdlib_bundles.len()).collect();
 
-    let user_bundle = Arc::new(SectionBundle {
-        file_path: Path::new("scene.mcs").to_path_buf(),
-        file_index: 0,
-        imported_files,
-        sections: vec![Section {
-            body: stmts,
-            section_type,
-            name: None,
-        }],
-        root_import_span: None,
-        was_cached: false,
-    });
+    let user_bundle = make_section_bundle("scene.mcs", 0, imported_files, vec![section], None);
 
     let mut bundles = stdlib_bundles;
     bundles.push(user_bundle);
 
-    let mut cache = CompilerCache::default();
-    let result = compiler::compiler::compile(&mut cache, None, &bundles);
+    let result = compile_bundles(&bundles);
 
     let compile_errors: Vec<String> = result.errors.iter().map(|e| e.message.clone()).collect();
     if !compile_errors.is_empty() {
@@ -398,38 +386,6 @@ fn run_section_with_stdlib(
         errors: runtime_errors,
         _error_spans: error_spans,
     }
-}
-
-fn stdlib_path(name: &str) -> std::path::PathBuf {
-    Assets::std_lib().join(format!("std/{name}.mcl"))
-}
-
-fn stdlib_bundle(name: &str) -> Arc<SectionBundle> {
-    let src = fs::read_to_string(stdlib_path(name)).expect("failed to read stdlib file");
-    let tokens = lex(&src);
-    let rope: Rope<TextAggregate> = Rope::from_str(&src);
-    let mut parser = SectionParser::new(tokens, rope, SectionType::StandardLibrary, None, None);
-    let stmts = parser.parse_statement_list();
-    let errors: Vec<String> = parser
-        .artifacts()
-        .error_diagnostics
-        .iter()
-        .map(|e| e.message.clone())
-        .collect();
-    assert!(errors.is_empty(), "stdlib parse errors: {:?}", errors);
-
-    Arc::new(SectionBundle {
-        file_path: Path::new(&format!("std/{name}.mcl")).to_path_buf(),
-        file_index: 0,
-        imported_files: vec![],
-        sections: vec![Section {
-            body: stmts,
-            section_type: SectionType::StandardLibrary,
-            name: None,
-        }],
-        root_import_span: Some(0..0),
-        was_cached: false,
-    })
 }
 
 #[path = "basic_executor_tests/arithmetic.rs"]
