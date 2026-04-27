@@ -55,6 +55,7 @@ impl Executor {
             required_args: proto.required_args as u16,
             defaults,
             reference_args: proto.reference_args,
+            arg_names: proto.arg_names,
         });
         self.state.stack_mut(stack_idx).push(Value::Lambda(lambda));
     }
@@ -178,8 +179,12 @@ impl Executor {
                 .stack_mut(stack_idx)
                 .push(Value::Stateful(stateful));
             return ExecSingle::Continue;
-        } else if labeled {
-            let labels = self.drain_labels(stack_idx, section_idx);
+        } else if labeled || !lambda.defaults.is_empty() {
+            let labels = if labeled {
+                self.drain_labels(stack_idx, section_idx)
+            } else {
+                SmallVec::new()
+            };
 
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);

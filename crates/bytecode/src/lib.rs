@@ -9,6 +9,7 @@ pub struct LambdaPrototype {
     pub required_args: u32,
     pub default_arg_count: u32,
     pub reference_args: Vec<bool>,
+    pub arg_names: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

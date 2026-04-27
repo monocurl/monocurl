@@ -127,6 +127,15 @@ let type_of          = |x| __monocurl__native__ type_of(x)
 let has_attr         = |x, name| __monocurl__native__ has_attr(x, name)
 let get_attr         = |x, name| __monocurl__native__ get_attr(x, name)
 let set_attr         = |x, name, value| __monocurl__native__ set_attr(x, name, value)
+let get_defaults     = |x| __monocurl__native__ get_defaults(x)
+let set_default      = operator |target, name, value| {
+    let go = |level| __monocurl__native__ set_default(target, name, value, level)
+    return [go(level: 0), go(level: 1)]
+}
+let set_defaults     = operator |target, defaults| {
+    let go = |level| __monocurl__native__ set_defaults(target, defaults, level)
+    return [go(level: 0), go(level: 1)]
+}
 let runtime_error    = |message| __monocurl__native__ runtime_error(message)
 
 # type predicates after lvalue / leader elision

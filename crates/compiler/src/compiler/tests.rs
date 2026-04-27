@@ -946,6 +946,7 @@ mod test {
         assert_eq!(sec.lambda_prototypes[0].required_args, 1);
         assert_eq!(sec.lambda_prototypes[0].default_arg_count, 0);
         assert_eq!(sec.lambda_prototypes[0].reference_args, vec![false]);
+        assert_eq!(sec.lambda_prototypes[0].arg_names, vec!["a"]);
         assert_eq!(sec.lambda_prototypes[0].ip, 1);
     }
 
@@ -960,6 +961,7 @@ mod test {
             sec.lambda_prototypes[0].reference_args,
             vec![true, false, true]
         );
+        assert_eq!(sec.lambda_prototypes[0].arg_names, vec!["x", "y", "z"]);
     }
 
     #[test]

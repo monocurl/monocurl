@@ -35,11 +35,14 @@ pub(super) fn read_int(
 ) -> Result<i64, ExecutorError> {
     match executor.state.stack(stack).read_at(index) {
         Value::Integer(n) => Ok(*n),
-        other => Err(ExecutorError::type_error_for(
-            "int",
-            other.type_name(),
-            name,
-        )),
+        other => match other.clone().elide_cached_wrappers_rec() {
+            Value::Integer(n) => Ok(n),
+            other => Err(ExecutorError::type_error_for(
+                "int",
+                other.type_name(),
+                name,
+            )),
+        },
     }
 }
 
@@ -54,7 +57,7 @@ pub(super) fn read_list(
         .stack(stack)
         .read_at(index)
         .clone()
-        .elide_lvalue_leader_rec()
+        .elide_cached_wrappers_rec()
     {
         Value::List(list) => list
             .elements()
@@ -88,13 +91,13 @@ pub(super) fn read_number_pair(
         .stack(stack)
         .read_at(-2)
         .clone()
-        .elide_lvalue();
+        .elide_cached_wrappers_rec();
     let rhs_value = executor
         .state
         .stack(stack)
         .read_at(-1)
         .clone()
-        .elide_lvalue();
+        .elide_cached_wrappers_rec();
 
     match (lhs_value, rhs_value) {
         (Value::Integer(a), Value::Integer(b)) => Ok(NumberPair::Int(a, b)),

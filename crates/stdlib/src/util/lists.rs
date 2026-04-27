@@ -20,7 +20,7 @@ pub async fn vector_len(executor: &mut Executor, stack_idx: usize) -> Result<Val
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::List(list) => Ok(Value::Integer(list.len() as i64)),
         other => Err(ExecutorError::type_error("list", other.type_name())),
@@ -34,7 +34,7 @@ pub async fn len(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::List(list) => list.len(),
         Value::Map(map) => map.len(),
@@ -56,7 +56,7 @@ pub async fn depth(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_lvalue();
+        .elide_cached_wrappers_rec();
     Ok(Value::Integer(list_depth(&value) as i64))
 }
 
@@ -96,7 +96,7 @@ pub async fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::List(list) => {
             let mut elements = list

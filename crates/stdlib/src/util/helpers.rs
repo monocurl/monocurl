@@ -39,11 +39,14 @@ pub(super) fn read_int(
 ) -> Result<i64, ExecutorError> {
     match executor.state.stack(stack_idx).read_at(index) {
         Value::Integer(n) => Ok(*n),
-        other => Err(ExecutorError::type_error_for(
-            "int",
-            other.type_name(),
-            name,
-        )),
+        other => match other.clone().elide_cached_wrappers_rec() {
+            Value::Integer(n) => Ok(n),
+            other => Err(ExecutorError::type_error_for(
+                "int",
+                other.type_name(),
+                name,
+            )),
+        },
     }
 }
 
@@ -97,7 +100,7 @@ pub(super) fn read_rc_list(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::List(list) => Ok(list),
         other => Err(ExecutorError::type_error_for(
@@ -109,7 +112,7 @@ pub(super) fn read_rc_list(
 }
 
 pub(super) fn list_depth(value: &Value) -> usize {
-    match value {
+    match value.clone().elide_cached_wrappers_rec() {
         Value::List(list) => {
             1 + list
                 .elements()

@@ -13,6 +13,7 @@ pub struct Lambda {
     /// default values for trailing optional parameters
     pub defaults: SmallVec<[Value; 1]>,
     pub reference_args: Vec<bool>,
+    pub arg_names: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -27,5 +28,25 @@ impl Lambda {
     #[inline(always)]
     pub fn total_args(&self) -> usize {
         self.required_args as usize + self.defaults.len()
+    }
+
+    #[inline(always)]
+    pub fn default_arg_start(&self) -> usize {
+        self.required_args as usize
+    }
+
+    pub fn default_arg_index(&self, name: &str) -> Option<usize> {
+        self.arg_names
+            .iter()
+            .enumerate()
+            .skip(self.default_arg_start())
+            .find_map(|(idx, arg_name)| (arg_name == name).then_some(idx))
+    }
+
+    pub fn default_arg_names(&self) -> impl Iterator<Item = &str> {
+        self.arg_names
+            .iter()
+            .skip(self.default_arg_start())
+            .map(String::as_str)
     }
 }

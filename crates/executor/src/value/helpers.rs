@@ -1,3 +1,5 @@
+use std::cell::Cell;
+
 use crate::{
     error::ExecutorError,
     executor::Executor,
@@ -5,7 +7,7 @@ use crate::{
 };
 
 use super::{
-    Value, invoked_function::InvokedFunction, invoked_operator::InvokedOperator,
+    Value, container::Map, invoked_function::InvokedFunction, invoked_operator::InvokedOperator,
     stateful::to_follower_stateful,
 };
 
@@ -17,6 +19,19 @@ fn elided_heap_ref_value(value_ref: &VRc) -> VRc {
     } else {
         val
     };
+    VRc::new(value)
+}
+
+fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
+    let cached = cell.take();
+    let cloned = cached.as_ref().map(|value| (**value).clone());
+    cell.set(cached);
+    cloned
+}
+
+fn cached_elided_heap_ref_value(value_ref: &VRc) -> VRc {
+    let key = value_ref.key();
+    let value = with_heap(|h| h.get(key).clone()).elide_cached_wrappers_rec();
     VRc::new(value)
 }
 
@@ -59,6 +74,40 @@ impl Value {
         match self {
             Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()),
             Value::WeakLvalue(vweak) => with_heap(|h| h.get(vweak.key()).clone()),
+            other => other,
+        }
+    }
+
+    /// synchronously read through wrappers that already have a cached concrete value.
+    pub fn elide_cached_wrappers_rec(self) -> Value {
+        match self.elide_lvalue() {
+            Value::Leader(leader) => {
+                with_heap(|h| h.get(leader.leader_rc.key()).clone()).elide_cached_wrappers_rec()
+            }
+            Value::InvokedFunction(inv) => clone_cached_value(&inv.cache.0)
+                .map(Value::elide_cached_wrappers_rec)
+                .unwrap_or(Value::InvokedFunction(inv)),
+            Value::InvokedOperator(inv) => clone_cached_value(&inv.cache.cached_result)
+                .map(Value::elide_cached_wrappers_rec)
+                .unwrap_or(Value::InvokedOperator(inv)),
+            Value::List(mut list) => {
+                list.elements = list
+                    .elements
+                    .iter()
+                    .map(cached_elided_heap_ref_value)
+                    .collect();
+                Value::List(list)
+            }
+            Value::Map(map) => {
+                let mut out = Map::new();
+                for key in &map.insertion_order {
+                    let value_ref = map
+                        .get(key)
+                        .expect("map insertion order points to missing entry");
+                    out.insert(key.clone(), cached_elided_heap_ref_value(value_ref));
+                }
+                Value::Map(out)
+            }
             other => other,
         }
     }

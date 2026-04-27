@@ -28,6 +28,7 @@ impl Compiler {
         let mut required_args: u32 = 0;
         let mut default_count: u32 = 0;
         let mut reference_args = Vec::with_capacity(l.args.len());
+        let mut arg_names = Vec::with_capacity(l.args.len());
         for (i, arg) in l.args.iter().enumerate() {
             let vt = if arg.must_be_reference {
                 VariableType::Reference
@@ -35,6 +36,7 @@ impl Compiler {
                 VariableType::Let
             };
             reference_args.push(arg.must_be_reference);
+            arg_names.push(arg.identifier.1.0.clone());
             self.register_symbol(
                 &arg.identifier.1.0,
                 vt,
@@ -115,6 +117,7 @@ impl Compiler {
                 required_args,
                 default_arg_count: default_count,
                 reference_args,
+                arg_names,
             });
 
         let cap16 = captures.len() as u16;
@@ -154,6 +157,7 @@ impl Compiler {
                 required_args: 0,
                 default_arg_count: 0,
                 reference_args: Vec::new(),
+                arg_names: Vec::new(),
             });
 
         let cap16 = captures.len() as u16;

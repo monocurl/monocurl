@@ -106,7 +106,7 @@ impl Executor {
                 self.state.stack_mut(stack_idx).push(Value::List(list));
                 ExecSingle::Continue
             }
-            _ => ExecSingle::Error(ExecutorError::CannotSubscript(lhs.type_name())),
+            other => ExecSingle::Error(ExecutorError::CannotSubscript(other.type_name())),
         }
     }
 
@@ -169,7 +169,7 @@ impl Executor {
         let index = stack.pop();
         let base = stack.pop();
 
-        let index = index.elide_lvalue();
+        let index = index.elide_cached_wrappers_rec();
 
         if mutable {
             let base_key = match base.as_lvalue_key() {
@@ -250,7 +250,7 @@ impl Executor {
                 return ExecSingle::Error(ExecutorError::stateful_subscript());
             }
 
-            let base = base.elide_lvalue();
+            let base = base.elide_cached_wrappers_rec();
             match &base {
                 Value::List(list) => {
                     let Value::Integer(idx) = index else {

@@ -26,7 +26,7 @@ fn map_from(executor: &Executor, stack_idx: usize, index: i32) -> Result<Map, Ex
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::Map(m) => Ok(m),
         other => Err(ExecutorError::type_error("map", other.type_name())),
@@ -40,7 +40,7 @@ pub async fn map_len(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::Map(map) => Ok(Value::Integer(map.len() as i64)),
         other => Err(ExecutorError::type_error("map", other.type_name())),

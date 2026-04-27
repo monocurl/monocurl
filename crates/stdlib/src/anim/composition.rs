@@ -17,7 +17,7 @@ pub async fn lagged_map(executor: &mut Executor, stack_idx: usize) -> Result<Val
         .stack(stack_idx)
         .read_at(-3)
         .clone()
-        .elide_lvalue_leader_rec();
+        .elide_cached_wrappers_rec();
     let average_offset = read_time(executor, stack_idx, -2)?;
     let unit_map = executor
         .state
@@ -70,7 +70,7 @@ pub async fn anim_time_scale(
         .stack(stack_idx)
         .read_at(-2)
         .clone()
-        .elide_lvalue();
+        .elide_cached_wrappers_rec();
     let factor = read_time(executor, stack_idx, -1)?;
     scale_primitive_time(anim, factor)
 }
@@ -85,7 +85,7 @@ pub async fn anim_delayed(
         .stack(stack_idx)
         .read_at(-2)
         .clone()
-        .elide_lvalue();
+        .elide_cached_wrappers_rec();
     let delay = read_time(executor, stack_idx, -1)?;
     delay_primitive(anim, delay)
 }
@@ -100,7 +100,7 @@ pub async fn anim_with_rate(
         .stack(stack_idx)
         .read_at(-2)
         .clone()
-        .elide_lvalue();
+        .elide_cached_wrappers_rec();
     let rate = executor
         .state
         .stack(stack_idx)

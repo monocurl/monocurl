@@ -32,7 +32,7 @@ pub(super) fn progression_from(value: Value) -> Option<Box<Value>> {
 }
 
 pub(super) fn read_float4_value(value: Value, name: &'static str) -> Result<Float4, ExecutorError> {
-    match value.elide_lvalue_leader_rec() {
+    match value.elide_cached_wrappers_rec() {
         Value::List(list) if list.elements().len() == 4 => {
             let mut out = [0.0; 4];
             for (slot, key) in out.iter_mut().zip(list.elements().iter()) {
@@ -63,7 +63,7 @@ pub(super) fn list_value(values: impl IntoIterator<Item = Value>) -> Value {
 }
 
 pub(super) fn scale_primitive_time(anim: Value, factor: f64) -> Result<Value, ExecutorError> {
-    match anim {
+    match anim.elide_cached_wrappers_rec() {
         Value::PrimitiveAnim(PrimitiveAnim::Lerp {
             candidates,
             time,
@@ -82,7 +82,9 @@ pub(super) fn scale_primitive_time(anim: Value, factor: f64) -> Result<Value, Ex
                 time: time * factor,
             }))
         }
-        Value::PrimitiveAnim(PrimitiveAnim::Set { .. }) => Ok(anim),
+        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => {
+            Ok(Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }))
+        }
         other => Err(ExecutorError::type_error_for(
             "primitive_anim",
             other.type_name(),
@@ -92,7 +94,7 @@ pub(super) fn scale_primitive_time(anim: Value, factor: f64) -> Result<Value, Ex
 }
 
 pub(super) fn delay_primitive(anim: Value, delay: f64) -> Result<Value, ExecutorError> {
-    match anim {
+    match anim.elide_cached_wrappers_rec() {
         Value::PrimitiveAnim(PrimitiveAnim::Lerp {
             candidates,
             time,

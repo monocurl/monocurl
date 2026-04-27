@@ -94,7 +94,7 @@ pub async fn to_int(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::Integer(n) => Ok(Value::Integer(n)),
         Value::Float(f) => Ok(Value::Integer(f as i64)),
@@ -118,7 +118,7 @@ pub async fn to_float(executor: &mut Executor, stack_idx: usize) -> Result<Value
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::Integer(n) => Ok(Value::Float(n as f64)),
         Value::Float(f) => Ok(Value::Float(f)),

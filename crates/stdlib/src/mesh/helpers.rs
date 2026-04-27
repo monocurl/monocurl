@@ -248,7 +248,7 @@ pub(super) fn read_int(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::Integer(value) => Ok(value),
         Value::Float(value) if value.fract() == 0.0 => Ok(value as i64),
@@ -271,7 +271,7 @@ pub(super) fn read_flag(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue()
+        .elide_cached_wrappers_rec()
     {
         Value::Integer(value) => Ok(value != 0),
         Value::Float(value) => Ok(value != 0.0),
@@ -294,7 +294,7 @@ pub(super) fn read_float3(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue_leader_rec()
+        .elide_cached_wrappers_rec()
     {
         Value::List(list) if list.elements().len() == 3 => {
             let mut components = [0.0; 3];
@@ -327,7 +327,7 @@ pub(super) fn read_float3(
 }
 
 pub(super) fn float2_from_value(value: Value, name: &'static str) -> Result<Float2, ExecutorError> {
-    match value.elide_lvalue_leader_rec() {
+    match value.elide_cached_wrappers_rec() {
         Value::List(list) if list.elements().len() == 2 => {
             let mut components = [0.0; 2];
             for (slot, key) in components.iter_mut().zip(list.elements().iter()) {
@@ -354,7 +354,7 @@ pub(super) fn float2_from_value(value: Value, name: &'static str) -> Result<Floa
 }
 
 pub(super) fn float3_from_value(value: Value, name: &'static str) -> Result<Float3, ExecutorError> {
-    match value.elide_lvalue_leader_rec() {
+    match value.elide_cached_wrappers_rec() {
         Value::List(list) if list.elements().len() == 3 => {
             let mut components = [0.0; 3];
             for (slot, key) in components.iter_mut().zip(list.elements().iter()) {
@@ -381,7 +381,7 @@ pub(super) fn float3_from_value(value: Value, name: &'static str) -> Result<Floa
 }
 
 pub(super) fn float4_from_value(value: Value, name: &'static str) -> Result<Float4, ExecutorError> {
-    match value.elide_lvalue_leader_rec() {
+    match value.elide_cached_wrappers_rec() {
         Value::List(list) if list.elements().len() == 4 => {
             let mut components = [0.0; 4];
             for (slot, key) in components.iter_mut().zip(list.elements().iter()) {
@@ -408,7 +408,7 @@ pub(super) fn float4_from_value(value: Value, name: &'static str) -> Result<Floa
 }
 
 pub(super) fn int_from_value(value: Value, name: &'static str) -> Result<i64, ExecutorError> {
-    match value.elide_lvalue_leader_rec() {
+    match value.elide_cached_wrappers_rec() {
         Value::Integer(n) => Ok(n),
         Value::Float(f) if f.fract() == 0.0 => Ok(f as i64),
         other => Err(ExecutorError::type_error_for(
@@ -430,7 +430,7 @@ pub(super) fn read_tags(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue_leader_rec()
+        .elide_cached_wrappers_rec()
     {
         Value::Integer(tag) => Ok(vec![tag as isize]),
         Value::Float(tag) if tag.fract() == 0.0 => Ok(vec![tag as isize]),
@@ -461,14 +461,14 @@ pub(super) fn read_float3_list(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue_leader_rec()
+        .elide_cached_wrappers_rec()
     else {
         let value = executor
             .state
             .stack(stack_idx)
             .read_at(index)
             .clone()
-            .elide_lvalue_leader_rec();
+            .elide_cached_wrappers_rec();
         return Err(ExecutorError::type_error_for(
             "list",
             value.type_name(),
@@ -481,7 +481,7 @@ pub(super) fn read_float3_list(
         .enumerate()
         .map(|(i, key)| {
             let value = with_heap(|h| h.get(key.key()).clone());
-            match value.elide_lvalue_leader_rec() {
+            match value.elide_cached_wrappers_rec() {
                 Value::List(inner) if inner.elements().len() == 3 => {
                     let mut components = [0.0; 3];
                     for (slot, key) in components.iter_mut().zip(inner.elements().iter()) {
@@ -1296,7 +1296,7 @@ pub(super) fn read_tag_filter(
 
     match value {
         Value::Lambda(lambda) => Ok(TagFilter::Predicate(lambda)),
-        value => Ok(TagFilter::Exact(match value.elide_lvalue_leader_rec() {
+        value => Ok(TagFilter::Exact(match value.elide_cached_wrappers_rec() {
             Value::List(list) => list
                 .elements()
                 .iter()
@@ -1335,7 +1335,7 @@ pub(super) fn read_optional_tag_filter(
         .stack(stack_idx)
         .read_at(index)
         .clone()
-        .elide_lvalue();
+        .elide_cached_wrappers_rec();
     if matches!(value, Value::Nil) {
         return Ok(None);
     }

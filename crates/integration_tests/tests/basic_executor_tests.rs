@@ -30,35 +30,8 @@ struct ExecResult {
     _error_spans: Vec<Span8>,
 }
 
-fn cached_value_for_assert(cell: &std::cell::Cell<Option<Box<Value>>>) -> Option<Value> {
-    let cached = cell.take();
-    let cloned = cached.as_ref().map(|value| (**value).clone());
-    cell.set(cached);
-    cloned
-}
-
 fn elide_value_for_assert(value: &Value) -> Value {
-    match value {
-        Value::Lvalue(vrc) => {
-            let resolved = with_heap(|h| h.get(vrc.key()).clone());
-            elide_value_for_assert(&resolved)
-        }
-        Value::WeakLvalue(vweak) => {
-            let resolved = with_heap(|h| h.get(vweak.key()).clone());
-            elide_value_for_assert(&resolved)
-        }
-        Value::Leader(leader) => {
-            let resolved = with_heap(|h| h.get(leader.leader_rc.key()).clone());
-            elide_value_for_assert(&resolved)
-        }
-        Value::InvokedFunction(inv) => cached_value_for_assert(&inv.cache.0)
-            .map(|resolved| elide_value_for_assert(&resolved))
-            .unwrap_or_else(|| value.clone()),
-        Value::InvokedOperator(inv) => cached_value_for_assert(&inv.cache.cached_result)
-            .map(|resolved| elide_value_for_assert(&resolved))
-            .unwrap_or_else(|| value.clone()),
-        other => other.clone(),
-    }
+    value.clone().elide_cached_wrappers_rec()
 }
 
 impl ExecResult {
@@ -72,7 +45,8 @@ impl ExecResult {
 
     fn assert_int(&self, expected: i64) {
         self.assert_ok();
-        match &self.value {
+        let value = self.value.as_ref().map(elide_value_for_assert);
+        match &value {
             Some(Value::Integer(n)) => assert_eq!(*n, expected, "integer mismatch"),
             other => panic!(
                 "expected Integer({}), got {}",
@@ -84,7 +58,8 @@ impl ExecResult {
 
     fn assert_nil(&self) {
         self.assert_ok();
-        match &self.value {
+        let value = self.value.as_ref().map(elide_value_for_assert);
+        match &value {
             Some(Value::Nil) => {}
             other => panic!(
                 "expected Nil, got {}",
@@ -96,7 +71,8 @@ impl ExecResult {
     #[allow(dead_code)]
     fn assert_float(&self, expected: f64) {
         self.assert_ok();
-        match &self.value {
+        let value = self.value.as_ref().map(elide_value_for_assert);
+        match &value {
             Some(Value::Float(f)) => assert!(
                 (f - expected).abs() < 1e-9,
                 "float mismatch: expected {}, got {}",
@@ -113,7 +89,8 @@ impl ExecResult {
 
     fn assert_float_list(&self, expected: &[f64]) {
         self.assert_ok();
-        match &self.value {
+        let value = self.value.as_ref().map(elide_value_for_assert);
+        match &value {
             Some(Value::List(list)) => {
                 assert_eq!(
                     list.elements().len(),
@@ -142,7 +119,8 @@ impl ExecResult {
 
     fn assert_float_list_approx(&self, expected: &[f64], eps: f64) {
         self.assert_ok();
-        match &self.value {
+        let value = self.value.as_ref().map(elide_value_for_assert);
+        match &value {
             Some(Value::List(list)) => {
                 assert_eq!(
                     list.elements().len(),
@@ -177,7 +155,8 @@ impl ExecResult {
 
     fn assert_int_list(&self, expected: &[i64]) {
         self.assert_ok();
-        match &self.value {
+        let value = self.value.as_ref().map(elide_value_for_assert);
+        match &value {
             Some(Value::List(list)) => {
                 assert_eq!(
                     list.elements().len(),
@@ -203,11 +182,37 @@ impl ExecResult {
 
     fn assert_string(&self, expected: &str) {
         self.assert_ok();
-        match &self.value {
+        let value = self.value.as_ref().map(elide_value_for_assert);
+        match &value {
             Some(Value::String(s)) => assert_eq!(s, expected, "string mismatch"),
             other => panic!(
                 "expected String({:?}), got {}",
                 expected,
+                other.as_ref().map(Value::type_name).unwrap_or("(empty)")
+            ),
+        }
+    }
+
+    fn assert_string_list(&self, expected: &[&str]) {
+        self.assert_ok();
+        let value = self.value.as_ref().map(elide_value_for_assert);
+        match &value {
+            Some(Value::List(list)) => {
+                assert_eq!(
+                    list.elements().len(),
+                    expected.len(),
+                    "list length mismatch"
+                );
+
+                for (actual, expected) in list.elements().iter().zip(expected.iter()) {
+                    match with_heap(|h| h.get(actual.key()).clone()) {
+                        Value::String(s) => assert_eq!(s, *expected, "string mismatch"),
+                        other => panic!("expected string list element, got {}", other.type_name()),
+                    }
+                }
+            }
+            other => panic!(
+                "expected List, got {}",
                 other.as_ref().map(Value::type_name).unwrap_or("(empty)")
             ),
         }

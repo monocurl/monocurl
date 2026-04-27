@@ -54,6 +54,129 @@ fn test_exec_lambda_default_arg_overridden() {
 }
 
 #[test]
+fn test_exec_default_arg_call_is_live_function() {
+    let r = run_with_stdlib(
+        "
+        let func = |x = 1| x
+        let result = is_live_function(func())
+    ",
+        &["util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_exec_set_default_updates_unlabeled_default() {
+    let r = run_with_stdlib(
+        "
+        let func = |x = 1| x
+        let result = set_default{\"x\", 4} func()
+    ",
+        &["util"],
+    );
+    r.assert_int(4);
+}
+
+#[test]
+fn test_exec_set_defaults_updates_map_values() {
+    let r = run_with_stdlib(
+        "
+        let func = |x = 1, y = 2| x * 10 + y
+        let result = set_defaults{[\"x\" -> 4, \"y\" -> 5]} func()
+    ",
+        &["util"],
+    );
+    r.assert_int(45);
+}
+
+#[test]
+fn test_exec_set_default_interpolates_default_value() {
+    let r = run_with_stdlib(
+        "
+        let func = |x = 1| x
+        let result = lerp(func(), set_default{\"x\", 5} func(), 0.25) + 0
+    ",
+        &["util", "math"],
+    );
+    r.assert_float(2.0);
+}
+
+#[test]
+fn test_exec_set_defaults_interpolates_map_values() {
+    let r = run_with_stdlib(
+        "
+        let func = |x = 1, y = 10| x * 100 + y
+        let result = lerp(func(), set_defaults{[\"x\" -> 5, \"y\" -> 20]} func(), 0.5) + 0
+    ",
+        &["util", "math"],
+    );
+    r.assert_float(315.0);
+}
+
+#[test]
+fn test_exec_set_default_interpolates_through_live_operator_chain() {
+    let r = run_with_stdlib(
+        "
+        let add = operator |target, delta| [target, target + delta]
+        let func = |x = 1| x
+        let before = add{3} func()
+        let after = set_default{\"x\", 5} add{3} func()
+        let result = lerp(before, after, 0.5) + 0
+    ",
+        &["util", "math"],
+    );
+    r.assert_float(6.0);
+}
+
+#[test]
+fn test_exec_set_default_traverses_live_operator_chain() {
+    let r = run_with_stdlib(
+        "
+        let add = operator |target, delta| [target, target + delta]
+        let func = |x = 1| x
+        let result = set_default{\"x\", 4} add{3} func()
+    ",
+        &["util"],
+    );
+    r.assert_int(7);
+}
+
+#[test]
+fn test_exec_get_defaults_lists_default_arg_names() {
+    let r = run_with_stdlib(
+        "
+        let func = |required, x = 1, y = 2| required + x + y
+        let result = get_defaults(func(0))
+    ",
+        &["util"],
+    );
+    r.assert_string_list(&["x", "y"]);
+}
+
+#[test]
+fn test_exec_set_default_errors_without_live_function() {
+    let r = run_with_stdlib(
+        "
+        let result = set_default{\"x\", 4} 1
+    ",
+        &["util"],
+    );
+    r.assert_error("live function");
+}
+
+#[test]
+fn test_exec_set_default_errors_for_unknown_default() {
+    let r = run_with_stdlib(
+        "
+        let func = |x = 1| x
+        let result = set_default{\"missing\", 4} func()
+    ",
+        &["util"],
+    );
+    r.assert_error("no default argument");
+}
+
+#[test]
 fn test_exec_reference_default_arg_omitted() {
     let r = run("
         let base = 7
