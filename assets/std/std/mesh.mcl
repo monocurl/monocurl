@@ -10,23 +10,23 @@
 let Dot = |point=[0,0,0]| __monocurl__native__ mk_dot(point)
 
 let Circle = |radius, samples = 64|
-    __monocurl__native__ mk_circle([0, 0, 0], radius, samples)
+    __monocurl__native__ mk_circle(radius, samples)
 
 let Annulus = |inner, outer|
-    __monocurl__native__ mk_annulus([0, 0, 0], inner, outer)
+    __monocurl__native__ mk_annulus(inner, outer)
 
 let Square = |width|
-    __monocurl__native__ mk_square([0, 0, 0], width)
+    __monocurl__native__ mk_square(width)
 
 let Rect = |size| {
     var width = 0
     var height = 0
     [width, height] = __monocurl__native__ expect_list("size", size, 2)
-    return __monocurl__native__ mk_rect([0, 0, 0], width, height)
+    return __monocurl__native__ mk_rect(width, height)
 }
 
 let RegularPolygon = |n, circumradius|
-    __monocurl__native__ mk_regular_polygon([0, 0, 0], n, circumradius)
+    __monocurl__native__ mk_regular_polygon(n, circumradius)
 
 let Polygon = |vertices, normal_hint = 1b|
     __monocurl__native__ mk_polygon(vertices, normal_hint)
@@ -44,7 +44,7 @@ let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
     var theta_start = 0
     var theta_end = 0
     [theta_start, theta_end] = __monocurl__native__ expect_list("theta", theta, 2)
-    return __monocurl__native__ mk_arc([0, 0, 0], radius, theta_start, theta_end)
+    return __monocurl__native__ mk_arc(radius, theta_start, theta_end)
 }
 
 let Capsule = |start_center, end_center, radii = 0.4, normal = 1b| {
@@ -65,13 +65,13 @@ let Triangle = |p, q, r, normal_hint = 1b|
 # 3-d primitives
 
 let Sphere = |radius, sample_depth = 2|
-    __monocurl__native__ mk_sphere([0, 0, 0], radius, sample_depth)
+    __monocurl__native__ mk_sphere(radius, sample_depth)
 
 let RectangularPrism = |dimensions|
-    __monocurl__native__ mk_rect_prism([0, 0, 0], dimensions)
+    __monocurl__native__ mk_rect_prism(dimensions)
 
 let Cylinder = |radius, height, direction = 1u, sample_count = 32|
-    __monocurl__native__ mk_cylinder([0, 0, 0], radius, height, direction, sample_count)
+    __monocurl__native__ mk_cylinder(radius, height, direction, sample_count)
 
 let Cone = |apex = [0, 1, 0], base = [0, 0, 0], radius = 1, sample_count = 32|
     __monocurl__native__ mk_cone(apex, base, radius, sample_count)
@@ -186,13 +186,13 @@ let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacin
 }
 
 let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
-    __monocurl__native__ mk_axis1d(0l, basis, normal, color, x_axis)
+    __monocurl__native__ mk_axis1d(basis, normal, color, x_axis)
 
 let Axis2d = |basis = [1r, 1u], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
-    __monocurl__native__ mk_axis2d(0l, basis, color, x_axis, y_axis, grid_color)
+    __monocurl__native__ mk_axis2d(basis, color, x_axis, y_axis, grid_color)
 
 let Axis3d = |basis = [1r, 1u, 1b], color = [0, 0, 0, 1], grid_color = nil, label_up = [1u, 1u, 1b], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], z_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
-    __monocurl__native__ mk_axis3d(0l, basis, color, label_up, x_axis, y_axis, z_axis, grid_color)
+    __monocurl__native__ mk_axis3d(basis, color, label_up, x_axis, y_axis, z_axis, grid_color)
 
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
     var theta_min = 0

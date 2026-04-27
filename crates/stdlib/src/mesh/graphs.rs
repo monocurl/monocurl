@@ -1147,7 +1147,7 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -5, "center")?;
+    let center = Float3::ZERO;
     let axis = read_axis_basis(executor, stack_idx, -4, "basis")?;
     let axis_dir = axis.normalize();
     let normal = read_float3(executor, stack_idx, -3, "normal")?;
@@ -1217,7 +1217,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -6, "center")?;
+    let center = Float3::ZERO;
     let axes = read_axis_basis_list(executor, stack_idx, -5, "basis", &["x_basis", "y_basis"])?;
     let [x_axis, y_axis]: [Float3; 2] = axes.try_into().expect("length checked");
     let color = read_float4(executor, stack_idx, -4, "color").await?;
@@ -1376,7 +1376,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -8, "center")?;
+    let center = Float3::ZERO;
     let axes = read_axis_basis_list(
         executor,
         stack_idx,

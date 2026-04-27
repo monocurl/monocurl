@@ -455,7 +455,7 @@ pub async fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 
 #[stdlib_func]
 pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(3) as usize;
     ensure_limit("circle samples", samples, MAX_POLYGON_POINTS)?;
@@ -472,7 +472,7 @@ pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let center = Float3::ZERO;
     let inner = crate::read_float(executor, stack_idx, -2, "inner")? as f32;
     let outer = crate::read_float(executor, stack_idx, -1, "outer")? as f32;
     let samples = 64usize;
@@ -497,7 +497,7 @@ pub async fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Val
 
 #[stdlib_func]
 pub async fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -2, "center")?;
+    let center = Float3::ZERO;
     let width = crate::read_float(executor, stack_idx, -1, "width")? as f32;
     let normal = Float3::Z;
     let half = width / 2.0;
@@ -514,7 +514,7 @@ pub async fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let center = Float3::ZERO;
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
     let normal = Float3::Z;
@@ -534,7 +534,7 @@ pub async fn mk_regular_polygon(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let center = Float3::ZERO;
     let n = read_int(executor, stack_idx, -2, "n")?.max(3) as usize;
     ensure_limit("regular polygon sides", n, MAX_POLYGON_POINTS)?;
     let radius = crate::read_float(executor, stack_idx, -1, "circumradius")? as f32;
@@ -596,7 +596,7 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_arc(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -4, "center")?;
+    let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -3, "radius")? as f32;
     let theta0 = crate::read_float(executor, stack_idx, -2, "theta0")? as f32;
     let theta1 = crate::read_float(executor, stack_idx, -1, "theta1")? as f32;
@@ -684,7 +684,7 @@ pub async fn mk_triangle(
 
 #[stdlib_func]
 pub async fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -3, "center")?;
+    let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
     let depth = read_int(executor, stack_idx, -1, "sample_depth")?.max(0) as usize;
     let lat_steps = (8usize << depth).max(8);
@@ -753,7 +753,7 @@ pub async fn mk_rect_prism(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -2, "center")?;
+    let center = Float3::ZERO;
     let dims = read_float3(executor, stack_idx, -1, "dimensions")?;
     let hx = dims.x / 2.0;
     let hy = dims.y / 2.0;
@@ -791,7 +791,7 @@ pub async fn mk_cylinder(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -5, "center")?;
+    let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -4, "radius")? as f32;
     let height = crate::read_float(executor, stack_idx, -3, "height")? as f32;
     let direction = read_float3(executor, stack_idx, -2, "direction")?;
