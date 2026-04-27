@@ -953,7 +953,7 @@ fn test_axis2d_separates_axis_and_grid_color() {
 fn test_axis3d_draws_axis_arrows_after_grid() {
     let r = run_with_stdlib(
         "
-        let result = Axis3d([1r, 1u, 1b], [1, 0, 0, 1], [0, 0, 1, 1], [-1, 1, 1], [-1, 1, 1], [-1, 1, 1])
+        let result = Axis3d([1r, 1u, 1b], [1, 0, 0, 1], [0, 0, 1, 1], [1u, 1u, 1b], [-1, 1, 1], [-1, 1, 1], [-1, 1, 1])
     ",
         &["mesh"],
     );
@@ -976,6 +976,19 @@ fn test_axis3d_draws_axis_arrows_after_grid() {
         grid_index < axis_arrow_index,
         "expected grid lines to be emitted before axis arrows"
     );
+}
+
+#[test]
+fn test_axis3d_label_up_controls_title_orientation() {
+    let r = run_with_stdlib(
+        "
+        let axis = Axis3d([1r, 1u, 1b], [0, 0, 0, 1], nil, [1b, 1u, 1b], [-1, 1, \"x\", 1, 0, nil, 0], [-1, 1, nil, 1, 0, nil, 0], [-1, 1, nil, 1, 0, nil, 0])
+        let x_title = axis[9]
+        let result = (mesh_height(x_title) < 0.001) + (mesh_backward(x_title)[2] - mesh_forward(x_title)[2] > 0.05)
+    ",
+        &["mesh"],
+    );
+    r.assert_int(2);
 }
 
 #[test]

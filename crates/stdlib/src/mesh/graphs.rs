@@ -564,8 +564,39 @@ fn axis_text_basis(right: Float3, normal: Float3) -> (Float3, Float3, Float3) {
     (right, up, normal)
 }
 
-fn orient_text_tree(tree: &mut MeshTree, right: Float3, normal: Float3) {
-    let (right, up, normal) = axis_text_basis(right, normal);
+#[derive(Clone, Copy)]
+struct AxisTextFrame {
+    right: Float3,
+    up: Float3,
+    normal: Float3,
+}
+
+impl AxisTextFrame {
+    fn from_right_normal(right: Float3, normal: Float3) -> Self {
+        let (right, up, normal) = axis_text_basis(right, normal);
+        Self { right, up, normal }
+    }
+
+    fn from_right_up(right: Float3, up: Float3, normal_hint: Float3) -> Self {
+        let up = up.normalize();
+        let projected_right = right - up * right.dot(up);
+        let right = if projected_right.len_sq() > 1e-8 {
+            projected_right.normalize()
+        } else {
+            let projected_normal_right = up.cross(normal_hint);
+            if projected_normal_right.len_sq() > 1e-8 {
+                projected_normal_right.normalize()
+            } else {
+                polygon_basis(up).0
+            }
+        };
+        let normal = right.cross(up).normalize();
+        Self { right, up, normal }
+    }
+}
+
+fn orient_text_tree(tree: &mut MeshTree, frame: AxisTextFrame) {
+    let AxisTextFrame { right, up, normal } = frame;
     tree.for_each_mut(&mut |mesh| {
         transform_mesh_positions(mesh, |p| right * p.x + up * p.y + normal * p.z)
     });
@@ -792,8 +823,7 @@ fn push_axis_title(
     label: Option<String>,
     anchor: Float3,
     dir: Float3,
-    text_right: Float3,
-    normal: Float3,
+    text_frame: AxisTextFrame,
     color: Float4,
 ) -> Result<(), ExecutorError> {
     let Some(label) = label else {
@@ -804,7 +834,7 @@ fn push_axis_title(
         return Ok(());
     };
     recolor_tree(&mut tree, color);
-    orient_text_tree(&mut tree, text_right, normal);
+    orient_text_tree(&mut tree, text_frame);
     place_tree_next_to_point(&mut tree, anchor, dir, AXIS_TITLE_BUFFER);
     out.push(tree.into_value());
     Ok(())
@@ -842,8 +872,7 @@ async fn push_axis_tick_labels(
     center: Float3,
     basis: Float3,
     side: Float3,
-    text_right: Float3,
-    normal: Float3,
+    text_frame: AxisTextFrame,
     style: &AxisStyle,
     label_zero: bool,
     zero_offset: f32,
@@ -871,7 +900,7 @@ async fn push_axis_tick_labels(
             continue;
         };
         recolor_tree(&mut tree, color);
-        orient_text_tree(&mut tree, text_right, normal);
+        orient_text_tree(&mut tree, text_frame);
         place_tree_next_to_point(&mut tree, anchor, side, AXIS_TICK_LABEL_BUFFER);
         out.push(tree.into_value());
     }
@@ -1159,6 +1188,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     )?;
 
     let mut labels = Vec::new();
+    let text_frame = AxisTextFrame::from_right_normal(axis_dir, normal);
     push_axis_tick_labels(
         executor,
         &mut labels,
@@ -1166,8 +1196,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         center,
         axis,
         -tick_dir,
-        axis_dir,
-        normal,
+        text_frame,
         &style,
         true,
         AXIS_ZERO_TICK_LABEL_OFFSET,
@@ -1180,8 +1209,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         style.title,
         axis_title_anchor(center, axis, style.range.max, style.arrow_extrusion),
         axis_dir,
-        axis_dir,
-        normal,
+        text_frame,
         color,
     )?;
     Ok(axis_result(axis_meshes, labels))
@@ -1296,6 +1324,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     )?;
 
     let mut labels = Vec::new();
+    let text_frame = AxisTextFrame::from_right_normal(x_dir, normal);
     push_axis_tick_labels(
         executor,
         &mut labels,
@@ -1303,8 +1332,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         center,
         x_axis,
         -y_dir,
-        x_dir,
-        normal,
+        text_frame,
         &x_style,
         true,
         AXIS_ZERO_TICK_LABEL_OFFSET,
@@ -1318,8 +1346,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         center,
         y_axis,
         -x_dir,
-        x_dir,
-        normal,
+        text_frame,
         &y_style,
         false,
         0.0,
@@ -1332,8 +1359,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         x_style.title,
         axis_title_anchor(center, x_axis, x_style.range.max, x_style.arrow_extrusion),
         x_dir,
-        x_dir,
-        normal,
+        text_frame,
         color,
     )?;
     push_axis_title(
@@ -1342,8 +1368,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         y_style.title,
         axis_title_anchor(center, y_axis, y_style.range.max, y_style.arrow_extrusion),
         y_dir,
-        x_dir,
-        normal,
+        text_frame,
         color,
     )?;
     Ok(axis_result(axis_meshes, labels))
@@ -1351,16 +1376,25 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -7, "center")?;
+    let center = read_float3(executor, stack_idx, -8, "center")?;
     let axes = read_axis_basis_list(
         executor,
         stack_idx,
-        -6,
+        -7,
         "basis",
         &["x_basis", "y_basis", "z_basis"],
     )?;
     let [x_axis, y_axis, z_axis]: [Float3; 3] = axes.try_into().expect("length checked");
-    let color = read_float4(executor, stack_idx, -5, "color").await?;
+    let color = read_float4(executor, stack_idx, -6, "color").await?;
+    let label_ups = read_axis_basis_list(
+        executor,
+        stack_idx,
+        -5,
+        "label_up",
+        &["x_label_up", "y_label_up", "z_label_up"],
+    )?;
+    let [x_label_up, y_label_up, z_label_up]: [Float3; 3] =
+        label_ups.try_into().expect("length checked");
     let x_style = read_axis_style(executor, stack_idx, -4, "x_axis")?;
     let y_style = read_axis_style(executor, stack_idx, -3, "y_axis")?;
     let z_style = read_axis_style(executor, stack_idx, -2, "z_axis")?;
@@ -1543,6 +1577,9 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     )?;
 
     let mut labels = Vec::new();
+    let x_text_frame = AxisTextFrame::from_right_up(x_dir, x_label_up, xy_normal);
+    let y_text_frame = AxisTextFrame::from_right_up(x_dir, y_label_up, xy_normal);
+    let z_text_frame = AxisTextFrame::from_right_up(x_dir, z_label_up, z_normal);
     push_axis_tick_labels(
         executor,
         &mut labels,
@@ -1550,8 +1587,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         center,
         x_axis,
         -y_dir,
-        x_dir,
-        xy_normal,
+        x_text_frame,
         &x_style,
         true,
         AXIS_ZERO_TICK_LABEL_OFFSET,
@@ -1565,8 +1601,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         center,
         y_axis,
         -x_dir,
-        x_dir,
-        xy_normal,
+        y_text_frame,
         &y_style,
         false,
         0.0,
@@ -1580,8 +1615,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         center,
         z_axis,
         -x_dir,
-        x_dir,
-        z_normal,
+        z_text_frame,
         &z_style,
         false,
         0.0,
@@ -1594,8 +1628,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         x_style.title,
         axis_title_anchor(center, x_axis, x_style.range.max, x_style.arrow_extrusion),
         x_dir,
-        x_dir,
-        xy_normal,
+        x_text_frame,
         color,
     )?;
     push_axis_title(
@@ -1604,8 +1637,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         y_style.title,
         axis_title_anchor(center, y_axis, y_style.range.max, y_style.arrow_extrusion),
         y_dir,
-        x_dir,
-        xy_normal,
+        y_text_frame,
         color,
     )?;
     push_axis_title(
@@ -1614,8 +1646,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         z_style.title,
         axis_title_anchor(center, z_axis, z_style.range.max, z_style.arrow_extrusion),
         z_dir,
-        x_dir,
-        z_normal,
+        z_text_frame,
         color,
     )?;
     Ok(axis_result(axis_meshes, labels))

@@ -191,8 +191,8 @@ let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, ni
 let Axis2d = |basis = [1r, 1u], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis2d(0l, basis, color, x_axis, y_axis, grid_color)
 
-let Axis3d = |basis = [1r, 1u, 1b], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], z_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
-    __monocurl__native__ mk_axis3d(0l, basis, color, x_axis, y_axis, z_axis, grid_color)
+let Axis3d = |basis = [1r, 1u, 1b], color = [0, 0, 0, 1], grid_color = nil, label_up = [1u, 1u, 1b], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], z_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
+    __monocurl__native__ mk_axis3d(0l, basis, color, label_up, x_axis, y_axis, z_axis, grid_color)
 
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
     var theta_min = 0
