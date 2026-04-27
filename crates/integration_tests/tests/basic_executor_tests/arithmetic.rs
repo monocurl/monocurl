@@ -71,6 +71,18 @@ fn test_exec_literal_float() {
 }
 
 #[test]
+fn test_complex_real_and_imag_accessors() {
+    let r = run_with_stdlib(
+        "
+        let z = 3 + 4i
+        let result = [real(z), imag(z), real(5), imag(5)]
+    ",
+        &["util"],
+    );
+    r.assert_float_list_approx(&[3.0, 4.0, 5.0, 0.0], 1e-9);
+}
+
+#[test]
 fn test_exec_literal_negative() {
     let r = run("let x = ---7");
     r.assert_int(-7);

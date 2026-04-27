@@ -77,6 +77,8 @@ pub async fn range(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
     let mut elements = smallvec![];
     let mut x = start;
     while (step > 0.0 && x < stop) || (step < 0.0 && x > stop) {
+        executor.tick_yielder().await;
+
         elements.push(VRc::new(if all_ints {
             Value::Integer(x as i64)
         } else {

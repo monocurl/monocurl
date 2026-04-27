@@ -300,9 +300,13 @@ fn set_default_on_value(
             }
 
             let body = &mut inv.body;
-            body.arguments[arg_idx] = rhs.clone();
             body.boxed_arguments.resize(body.arguments.len(), false);
-            body.boxed_arguments[arg_idx] = false;
+            if body.boxed_arguments[arg_idx] {
+                let key = body.arguments[arg_idx].make_mut_lvalue();
+                heap_replace(key, rhs.clone());
+            } else {
+                body.arguments[arg_idx] = rhs.clone();
+            }
             inv.cache.0.take();
             Ok(())
         }

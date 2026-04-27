@@ -121,6 +121,10 @@ let to_string = |x| __monocurl__native__ to_string(x)
 let to_int    = |x| __monocurl__native__ to_int(x)
 let to_float  = |x| __monocurl__native__ to_float(x)
 
+# real / imaginary parts; non-complex numbers have zero imaginary part.
+let real = |x| __monocurl__native__ real(x)
+let imag = |x| __monocurl__native__ imag(x)
+
 # runtime reflection and dynamic live-attribute access.
 # `set_attr` returns the updated value so callers can write `x = set_attr(x, "label", v)`.
 let type_of          = |x| __monocurl__native__ type_of(x)

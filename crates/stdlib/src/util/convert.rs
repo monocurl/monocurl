@@ -137,3 +137,44 @@ pub async fn to_float(executor: &mut Executor, stack_idx: usize) -> Result<Value
         )),
     }
 }
+
+#[stdlib_func]
+pub async fn real(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    match executor
+        .state
+        .stack(stack_idx)
+        .peek()
+        .clone()
+        .elide_wrappers_rec(executor)
+        .await?
+    {
+        Value::Integer(n) => Ok(Value::Integer(n)),
+        Value::Float(f) => Ok(Value::Float(f)),
+        Value::Complex { re, .. } => Ok(Value::Float(re)),
+        other => Err(ExecutorError::type_error_for(
+            "number",
+            other.type_name(),
+            "x",
+        )),
+    }
+}
+
+#[stdlib_func]
+pub async fn imag(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    match executor
+        .state
+        .stack(stack_idx)
+        .peek()
+        .clone()
+        .elide_wrappers_rec(executor)
+        .await?
+    {
+        Value::Integer(_) | Value::Float(_) => Ok(Value::Integer(0)),
+        Value::Complex { im, .. } => Ok(Value::Float(im)),
+        other => Err(ExecutorError::type_error_for(
+            "number",
+            other.type_name(),
+            "x",
+        )),
+    }
+}

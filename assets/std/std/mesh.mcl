@@ -157,14 +157,24 @@ let Number = |value, decimal_places = nil, include_sign = 0|
 
 # graphing
 
-let Axis1d = |label = nil, axis = 1r, normal = 1b, range = [-5, 5, 0.25], tick_label_rate = 4|
-    __monocurl__native__ mk_axis1d(0l, axis, normal, range, label, tick_label_rate)
+let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacing = 0.25, major_tick_rate = 4, label_map = |x| x| {
+    if (axis != "x" and axis != "y" and axis != "z") {
+        return __monocurl__native__ runtime_error("axis_style axis must be x, y, or z")
+    }
+    let style = [min, max, axis_title, tick_spacing, major_tick_rate, label_map]
+    let name = axis + "_axis"
+    let go = |level| __monocurl__native__ set_default(target, name, style, level)
+    return [go(level: 0), go(level: 1)]
+}
 
-let Axis2d = |x_label = nil, y_label = nil, x = [-5, 5, 0.25], y = [-5, 5, 0.25], axes = [1r, 1u], tick_label_rates = [4, 4], grid = 0|
-    __monocurl__native__ mk_axis2d(0l, axes, x, y, x_label, y_label, tick_label_rates, grid)
+let Axis1d = |basis = 1r, normal = 1b, x_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+    __monocurl__native__ mk_axis1d(0l, basis, normal, x_axis)
 
-let Axis3d = |x_label = nil, y_label = nil, z_label = nil, x = [-5, 5, 0.25], y = [-5, 5, 0.25], z = [-5, 5, 0.25], axes = [1r, 1u, 1b], tick_label_rates = [4, 4, 4], grid = 0|
-    __monocurl__native__ mk_axis3d(0l, axes, x, y, z, x_label, y_label, z_label, tick_label_rates, grid)
+let Axis2d = |basis = [1r, 1u], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x], y_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+    __monocurl__native__ mk_axis2d(0l, basis, x_axis, y_axis, grid_color)
+
+let Axis3d = |basis = [1r, 1u, 1b], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x], y_axis = [-5, 5, nil, 0.25, 4, |x| x], z_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+    __monocurl__native__ mk_axis3d(0l, basis, x_axis, y_axis, z_axis, grid_color)
 
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
     var theta_min = 0

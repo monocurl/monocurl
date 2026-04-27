@@ -124,6 +124,32 @@ struct AxisRange {
     tick_step: f32,
 }
 
+#[derive(Clone)]
+enum AxisLabelMap {
+    DefaultFormat,
+    None,
+    Callable(Value),
+}
+
+#[derive(Clone)]
+struct AxisStyle {
+    range: AxisRange,
+    title: Option<String>,
+    major_tick_rate: usize,
+    label_map: AxisLabelMap,
+}
+
+impl AxisStyle {
+    fn from_range(range: AxisRange) -> Self {
+        Self {
+            range,
+            title: None,
+            major_tick_rate: 4,
+            label_map: AxisLabelMap::DefaultFormat,
+        }
+    }
+}
+
 fn axis_number_from_value(value: Value, name: &'static str) -> Result<f32, ExecutorError> {
     match value.elide_lvalue_leader_rec() {
         Value::Integer(value) => Ok(value as f32),
@@ -175,12 +201,43 @@ fn axis_radius_range(radius: f32, name: &'static str) -> Result<AxisRange, Execu
     checked_axis_range(-radius, radius, DEFAULT_AXIS_TICK_STEP, name)
 }
 
-fn read_axis_range(
+fn label_map_from_value(value: Value) -> AxisLabelMap {
+    match value.elide_cached_wrappers_rec() {
+        Value::Nil => AxisLabelMap::None,
+        other => AxisLabelMap::Callable(other),
+    }
+}
+
+fn axis_title_from_value(
+    value: Value,
+    name: &'static str,
+) -> Result<Option<String>, ExecutorError> {
+    match value.elide_cached_wrappers_rec() {
+        Value::Nil => Ok(None),
+        Value::String(value) => Ok(Some(value)),
+        Value::Integer(value) => Ok(Some(value.to_string())),
+        Value::Float(value) => Ok(Some(value.to_string())),
+        other => Err(ExecutorError::type_error_for(
+            crate::STRING_COMPATIBLE_DESC,
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
+fn axis_style_third_arg_is_title(value: Value) -> bool {
+    !matches!(
+        value.elide_cached_wrappers_rec(),
+        Value::Integer(_) | Value::Float(_)
+    )
+}
+
+fn read_axis_style(
     executor: &Executor,
     stack_idx: usize,
     index: i32,
     name: &'static str,
-) -> Result<AxisRange, ExecutorError> {
+) -> Result<AxisStyle, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)
@@ -188,41 +245,91 @@ fn read_axis_range(
         .clone()
         .elide_lvalue_leader_rec()
     {
-        Value::Integer(radius) => axis_radius_range(radius as f32, name),
-        Value::Float(radius) => axis_radius_range(radius as f32, name),
-        Value::List(list) => match list.elements().len() {
-            1 => {
-                let radius = axis_number_from_value(
-                    with_heap(|h| h.get(list.elements()[0].key()).clone()),
-                    name,
-                )?;
-                axis_radius_range(radius, name)
-            }
-            2 | 3 => {
-                let min = axis_number_from_value(
-                    with_heap(|h| h.get(list.elements()[0].key()).clone()),
-                    name,
-                )?;
-                let max = axis_number_from_value(
-                    with_heap(|h| h.get(list.elements()[1].key()).clone()),
-                    name,
-                )?;
-                let tick_step = if list.elements().len() == 3 {
-                    axis_number_from_value(
-                        with_heap(|h| h.get(list.elements()[2].key()).clone()),
+        Value::Integer(radius) => Ok(AxisStyle::from_range(axis_radius_range(
+            radius as f32,
+            name,
+        )?)),
+        Value::Float(radius) => Ok(AxisStyle::from_range(axis_radius_range(
+            radius as f32,
+            name,
+        )?)),
+        Value::List(list) => {
+            let elements = list.elements();
+            let mut title = None;
+            let mut major_tick_rate = 4;
+            let mut label_map = AxisLabelMap::DefaultFormat;
+            let range = match elements.len() {
+                1 => {
+                    let radius = axis_number_from_value(
+                        with_heap(|h| h.get(elements[0].key()).clone()),
                         name,
-                    )?
-                } else {
-                    DEFAULT_AXIS_TICK_STEP
-                };
-                checked_axis_range(min, max, tick_step, name)
-            }
-            len => Err(ExecutorError::invalid_operation(format!(
-                "{name}: expected a number or a list [min, max, tick_step], got list of length {len}"
-            ))),
-        },
+                    )?;
+                    axis_radius_range(radius, name)?
+                }
+                2..=6 => {
+                    let min = axis_number_from_value(
+                        with_heap(|h| h.get(elements[0].key()).clone()),
+                        name,
+                    )?;
+                    let max = axis_number_from_value(
+                        with_heap(|h| h.get(elements[1].key()).clone()),
+                        name,
+                    )?;
+                    let has_title = elements.len() >= 3
+                        && axis_style_third_arg_is_title(with_heap(|h| {
+                            h.get(elements[2].key()).clone()
+                        }));
+                    if !has_title && elements.len() > 5 {
+                        return Err(ExecutorError::invalid_operation(format!(
+                            "{name}: expected [min, max, tick_spacing, major_tick_rate, label_map] or [min, max, axis_title, tick_spacing, major_tick_rate, label_map]"
+                        )));
+                    }
+                    let tick_step_index = if has_title {
+                        title = axis_title_from_value(
+                            with_heap(|h| h.get(elements[2].key()).clone()),
+                            "axis_title",
+                        )?;
+                        3
+                    } else {
+                        2
+                    };
+                    let tick_step = if elements.len() > tick_step_index {
+                        axis_number_from_value(
+                            with_heap(|h| h.get(elements[tick_step_index].key()).clone()),
+                            "tick_spacing",
+                        )?
+                    } else {
+                        DEFAULT_AXIS_TICK_STEP
+                    };
+                    if elements.len() > tick_step_index + 1 {
+                        major_tick_rate = label_rate_from_value(
+                            with_heap(|h| h.get(elements[tick_step_index + 1].key()).clone()),
+                            "major_tick_rate",
+                        )?;
+                    }
+                    if elements.len() > tick_step_index + 2 {
+                        label_map = label_map_from_value(with_heap(|h| {
+                            h.get(elements[tick_step_index + 2].key()).clone()
+                        }));
+                    }
+                    checked_axis_range(min, max, tick_step, name)?
+                }
+                len => {
+                    return Err(ExecutorError::invalid_operation(format!(
+                        "{name}: expected a number or [min, max, axis_title, tick_spacing, major_tick_rate, label_map], got list of length {len}"
+                    )));
+                }
+            };
+
+            Ok(AxisStyle {
+                range,
+                title,
+                major_tick_rate,
+                label_map,
+            })
+        }
         other => Err(ExecutorError::type_error_for(
-            "number or list",
+            "number or axis style list",
             other.type_name(),
             name,
         )),
@@ -312,41 +419,6 @@ fn label_rate_from_value(value: Value, name: &'static str) -> Result<usize, Exec
     Ok(rate as usize)
 }
 
-fn read_label_rate_list(
-    executor: &Executor,
-    stack_idx: usize,
-    index: i32,
-    name: &'static str,
-    rate_names: &[&'static str],
-) -> Result<Vec<usize>, ExecutorError> {
-    match executor
-        .state
-        .stack(stack_idx)
-        .read_at(index)
-        .clone()
-        .elide_lvalue_leader_rec()
-    {
-        Value::List(list) if list.elements().len() == rate_names.len() => list
-            .elements()
-            .iter()
-            .zip(rate_names.iter().copied())
-            .map(|(key, rate_name)| {
-                label_rate_from_value(with_heap(|h| h.get(key.key()).clone()), rate_name)
-            })
-            .collect(),
-        Value::List(list) => Err(ExecutorError::invalid_operation(format!(
-            "{name}: expected list of length {}, got list of length {}",
-            rate_names.len(),
-            list.elements().len()
-        ))),
-        other => Err(ExecutorError::type_error_for(
-            "label rate list",
-            other.type_name(),
-            name,
-        )),
-    }
-}
-
 fn format_axis_number(value: f32) -> String {
     let value = if value.abs() < 1e-6 { 0.0 } else { value };
     let abs = value.abs();
@@ -380,12 +452,12 @@ fn sample_index_value(ix: usize, iy: usize) -> Value {
     list_value([Value::Integer(ix as i64), Value::Integer(iy as i64)])
 }
 
-async fn read_optional_string(
+async fn read_optional_color(
     executor: &mut Executor,
     stack_idx: usize,
     index: i32,
     name: &'static str,
-) -> Result<Option<String>, ExecutorError> {
+) -> Result<Option<Float4>, ExecutorError> {
     let value = executor
         .state
         .stack(stack_idx)
@@ -394,34 +466,14 @@ async fn read_optional_string(
         .elide_wrappers_rec(executor)
         .await?;
     if matches!(value, Value::Nil) {
-        return Ok(None);
+        Ok(None)
+    } else {
+        float4_from_value(value, name).map(Some)
     }
-
-    crate::stringify_value(executor, value)
-        .await
-        .map(Some)
-        .map_err(|error| match error {
-            ExecutorError::TypeError { got, .. } => {
-                ExecutorError::type_error_for(crate::STRING_COMPATIBLE_DESC, got, name)
-            }
-            other => other,
-        })
 }
 
-fn read_label_rate(
-    executor: &Executor,
-    stack_idx: usize,
-    index: i32,
-    name: &'static str,
-) -> Result<usize, ExecutorError> {
-    let value = read_int(executor, stack_idx, index, name)?;
-    if value < 0 {
-        return Err(ExecutorError::InvalidArgument {
-            arg: name,
-            message: "must be non-negative",
-        });
-    }
-    Ok(value as usize)
+fn is_major_tick(tick: i64, major_tick_rate: usize) -> bool {
+    major_tick_rate != 0 && tick % major_tick_rate as i64 == 0
 }
 
 fn axis_text_basis(right: Float3, normal: Float3) -> (Float3, Float3, Float3) {
@@ -471,29 +523,21 @@ fn render_axis_tex_tree(
     }
 }
 
-fn render_axis_number_tree(
-    executor: &Executor,
-    text: &str,
-    scale: f32,
-    name: &'static str,
-) -> Result<Option<MeshTree>, ExecutorError> {
-    let meshes =
-        latex::render_number_string_with_quality(text, scale, text_render_quality(executor))
-            .map_err(|error| {
-                ExecutorError::invalid_invocation(format!("{name} render failed: {error:#}"))
-            })?;
-    if meshes.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(MeshTree::List(
-            meshes.into_iter().map(MeshTree::Mesh).collect(),
-        )))
-    }
-}
-
-fn styled_line_mesh(lins: Vec<geo::mesh::Lin>, stroke_radius: f32, alpha: f32) -> Option<Value> {
+fn styled_line_mesh(
+    mut lins: Vec<geo::mesh::Lin>,
+    stroke_radius: f32,
+    alpha: f32,
+    color: Option<Float4>,
+) -> Option<Value> {
     if lins.is_empty() {
         return None;
+    }
+
+    if let Some(color) = color {
+        for lin in &mut lins {
+            lin.a.col = color;
+            lin.b.col = color;
+        }
     }
 
     let Value::Mesh(mesh) = mesh_from_parts(vec![], lins, vec![]) else {
@@ -512,9 +556,9 @@ fn push_styled_line_meshes(
     out: &mut Vec<Value>,
     small_lins: Vec<geo::mesh::Lin>,
     large_lins: Vec<geo::mesh::Lin>,
-    grid: bool,
+    grid_color: Option<Float4>,
 ) {
-    let (small_width, small_alpha, large_width, large_alpha) = if grid {
+    let (small_width, small_alpha, large_width, large_alpha) = if grid_color.is_some() {
         (
             SMALL_TICK_WIDTH,
             SMALL_TICK_GRID_OPACITY,
@@ -530,10 +574,10 @@ fn push_styled_line_meshes(
         )
     };
 
-    if let Some(mesh) = styled_line_mesh(small_lins, small_width, small_alpha) {
+    if let Some(mesh) = styled_line_mesh(small_lins, small_width, small_alpha, grid_color) {
         out.push(mesh);
     }
-    if let Some(mesh) = styled_line_mesh(large_lins, large_width, large_alpha) {
+    if let Some(mesh) = styled_line_mesh(large_lins, large_width, large_alpha, grid_color) {
         out.push(mesh);
     }
 }
@@ -590,18 +634,16 @@ fn axis_tick_lins(
     basis: Float3,
     side: Float3,
     normal: Float3,
+    major_tick_rate: usize,
 ) -> (Vec<geo::mesh::Lin>, Vec<geo::mesh::Lin>) {
     let side = normalize_or(side, polygon_basis(basis.normalize()).1);
     let mut small = Vec::new();
     let mut large = Vec::new();
     for &(tick, value) in ticks {
         let p = center + basis * value;
-        let target = if tick % 4 == 0 {
-            &mut large
-        } else {
-            &mut small
-        };
-        let extend = if tick % 4 == 0 {
+        let major = is_major_tick(tick, major_tick_rate);
+        let target = if major { &mut large } else { &mut small };
+        let extend = if major {
             LARGE_TICK_EXTEND
         } else {
             SMALL_TICK_EXTEND
@@ -618,12 +660,13 @@ fn axis_grid_lins(
     cross_basis: Float3,
     cross_range: AxisRange,
     normal: Float3,
+    major_tick_rate: usize,
 ) -> (Vec<geo::mesh::Lin>, Vec<geo::mesh::Lin>) {
     let mut small = Vec::new();
     let mut large = Vec::new();
     for &(tick, value) in ticks {
         let p = center + basis * value;
-        let target = if tick % 4 == 0 {
+        let target = if is_major_tick(tick, major_tick_rate) {
             &mut large
         } else {
             &mut small
@@ -659,8 +702,33 @@ fn push_axis_title(
     Ok(())
 }
 
-fn push_axis_tick_labels(
-    executor: &Executor,
+async fn axis_tick_label_text(
+    executor: &mut Executor,
+    label_map: &AxisLabelMap,
+    value: f32,
+) -> Result<Option<String>, ExecutorError> {
+    match label_map {
+        AxisLabelMap::DefaultFormat => Ok(Some(format_axis_number(value))),
+        AxisLabelMap::None => Ok(None),
+        AxisLabelMap::Callable(callable) => {
+            let label = invoke_callable(
+                executor,
+                callable,
+                vec![Value::Float(value as f64)],
+                "label_map",
+            )
+            .await?;
+            if matches!(label, Value::Nil) {
+                Ok(None)
+            } else {
+                crate::stringify_value(executor, label).await.map(Some)
+            }
+        }
+    }
+}
+
+async fn push_axis_tick_labels(
+    executor: &mut Executor,
     out: &mut Vec<Value>,
     ticks: &[(i64, f32)],
     center: Float3,
@@ -668,27 +736,28 @@ fn push_axis_tick_labels(
     side: Float3,
     text_right: Float3,
     normal: Float3,
-    label_rate: usize,
+    style: &AxisStyle,
     label_zero: bool,
     zero_offset: f32,
 ) -> Result<(), ExecutorError> {
-    if label_rate == 0 {
+    if matches!(style.label_map, AxisLabelMap::None) || style.major_tick_rate == 0 {
         return Ok(());
     }
 
-    let label_rate = label_rate as i64;
     let dir = basis.normalize();
     for &(tick, value) in ticks {
-        if tick % label_rate != 0 || (!label_zero && value.abs() <= 1e-4) {
+        if !is_major_tick(tick, style.major_tick_rate) || (!label_zero && value.abs() <= 1e-4) {
             continue;
         }
         let mut anchor = center + basis * value;
         if value.abs() <= 1e-4 {
             anchor = anchor - dir * zero_offset;
         }
-        let text = format_axis_number(value);
+        let Some(text) = axis_tick_label_text(executor, &style.label_map, value).await? else {
+            continue;
+        };
         let Some(mut tree) =
-            render_axis_number_tree(executor, &text, AXIS_TICK_LABEL_SCALE, "axis tick label")?
+            render_axis_tex_tree(executor, &text, AXIS_TICK_LABEL_SCALE, "axis tick label")?
         else {
             continue;
         };
@@ -832,16 +901,14 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -6, "center")?;
-    let axis = read_axis_basis(executor, stack_idx, -5, "axis")?;
+    let center = read_float3(executor, stack_idx, -4, "center")?;
+    let axis = read_axis_basis(executor, stack_idx, -3, "basis")?;
     let axis_dir = axis.normalize();
-    let normal = read_float3(executor, stack_idx, -4, "normal")?;
-    let range = read_axis_range(executor, stack_idx, -3, "range")?;
-    let label = read_optional_string(executor, stack_idx, -2, "label").await?;
-    let label_rate = read_label_rate(executor, stack_idx, -1, "label_rate")?;
+    let normal = read_float3(executor, stack_idx, -2, "normal")?;
+    let style = read_axis_style(executor, stack_idx, -1, "x_axis")?;
     ensure_limit(
         "axis ticks",
-        tick_count(range.min, range.max, range.tick_step),
+        tick_count(style.range.min, style.range.max, style.range.tick_step),
         MAX_AXIS_TICKS,
     )?;
     let tick_dir = {
@@ -852,11 +919,18 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             polygon_basis(axis_dir).1
         }
     };
-    let ticks = axis_tick_values(range.min, range.max, range.tick_step);
+    let ticks = axis_tick_values(style.range.min, style.range.max, style.range.tick_step);
     let mut axis_meshes = Vec::new();
-    push_axis_arrows(&mut axis_meshes, center, axis, range, normal)?;
-    let (small_ticks, large_ticks) = axis_tick_lins(&ticks, center, axis, tick_dir, normal);
-    push_styled_line_meshes(&mut axis_meshes, small_ticks, large_ticks, false);
+    push_axis_arrows(&mut axis_meshes, center, axis, style.range, normal)?;
+    let (small_ticks, large_ticks) = axis_tick_lins(
+        &ticks,
+        center,
+        axis,
+        tick_dir,
+        normal,
+        style.major_tick_rate,
+    );
+    push_styled_line_meshes(&mut axis_meshes, small_ticks, large_ticks, None);
 
     let mut labels = Vec::new();
     push_axis_tick_labels(
@@ -868,15 +942,16 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         -tick_dir,
         axis_dir,
         normal,
-        label_rate,
+        &style,
         true,
         AXIS_ZERO_TICK_LABEL_OFFSET,
-    )?;
+    )
+    .await?;
     push_axis_title(
         executor,
         &mut labels,
-        label,
-        axis_title_anchor(center, axis, range.max),
+        style.title,
+        axis_title_anchor(center, axis, style.range.max),
         axis_dir,
         axis_dir,
         normal,
@@ -886,30 +961,28 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -8, "center")?;
-    let axes = read_axis_basis_list(executor, stack_idx, -7, "axes", &["x_axis", "y_axis"])?;
+    let center = read_float3(executor, stack_idx, -5, "center")?;
+    let axes = read_axis_basis_list(executor, stack_idx, -4, "basis", &["x_basis", "y_basis"])?;
     let [x_axis, y_axis]: [Float3; 2] = axes.try_into().expect("length checked");
-    let x_range = read_axis_range(executor, stack_idx, -6, "x")?;
-    let y_range = read_axis_range(executor, stack_idx, -5, "y")?;
-    let x_label = read_optional_string(executor, stack_idx, -4, "x_label").await?;
-    let y_label = read_optional_string(executor, stack_idx, -3, "y_label").await?;
-    let label_rates = read_label_rate_list(
-        executor,
-        stack_idx,
-        -2,
-        "tick_label_rates",
-        &["x_label_rate", "y_label_rate"],
-    )?;
-    let [x_label_rate, y_label_rate]: [usize; 2] = label_rates.try_into().expect("length checked");
-    let grid = read_flag(executor, stack_idx, -1, "grid")?;
+    let x_style = read_axis_style(executor, stack_idx, -3, "x_axis")?;
+    let y_style = read_axis_style(executor, stack_idx, -2, "y_axis")?;
+    let grid_color = read_optional_color(executor, stack_idx, -1, "grid_color").await?;
     ensure_limit(
         "axis x ticks",
-        tick_count(x_range.min, x_range.max, x_range.tick_step),
+        tick_count(
+            x_style.range.min,
+            x_style.range.max,
+            x_style.range.tick_step,
+        ),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis y ticks",
-        tick_count(y_range.min, y_range.max, y_range.tick_step),
+        tick_count(
+            y_style.range.min,
+            y_style.range.max,
+            y_style.range.tick_step,
+        ),
         MAX_AXIS_TICKS,
     )?;
     let x_dir = x_axis.normalize();
@@ -922,21 +995,59 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         });
     }
     let normal = normal.normalize();
-    let x_ticks = axis_tick_values(x_range.min, x_range.max, x_range.tick_step);
-    let y_ticks = axis_tick_values(y_range.min, y_range.max, y_range.tick_step);
+    let x_ticks = axis_tick_values(
+        x_style.range.min,
+        x_style.range.max,
+        x_style.range.tick_step,
+    );
+    let y_ticks = axis_tick_values(
+        y_style.range.min,
+        y_style.range.max,
+        y_style.range.tick_step,
+    );
     let mut axis_meshes = Vec::new();
-    push_axis_arrows(&mut axis_meshes, center, x_axis, x_range, normal)?;
-    push_axis_arrows(&mut axis_meshes, center, y_axis, y_range, normal)?;
-    if grid {
-        let (small_x, large_x) = axis_grid_lins(&x_ticks, center, x_axis, y_axis, y_range, normal);
-        let (small_y, large_y) = axis_grid_lins(&y_ticks, center, y_axis, x_axis, x_range, normal);
-        push_styled_line_meshes(&mut axis_meshes, small_x, large_x, true);
-        push_styled_line_meshes(&mut axis_meshes, small_y, large_y, true);
+    push_axis_arrows(&mut axis_meshes, center, x_axis, x_style.range, normal)?;
+    push_axis_arrows(&mut axis_meshes, center, y_axis, y_style.range, normal)?;
+    if let Some(color) = grid_color {
+        let (small_x, large_x) = axis_grid_lins(
+            &x_ticks,
+            center,
+            x_axis,
+            y_axis,
+            y_style.range,
+            normal,
+            x_style.major_tick_rate,
+        );
+        let (small_y, large_y) = axis_grid_lins(
+            &y_ticks,
+            center,
+            y_axis,
+            x_axis,
+            x_style.range,
+            normal,
+            y_style.major_tick_rate,
+        );
+        push_styled_line_meshes(&mut axis_meshes, small_x, large_x, Some(color));
+        push_styled_line_meshes(&mut axis_meshes, small_y, large_y, Some(color));
     } else {
-        let (small_x, large_x) = axis_tick_lins(&x_ticks, center, x_axis, y_dir, normal);
-        let (small_y, large_y) = axis_tick_lins(&y_ticks, center, y_axis, x_dir, normal);
-        push_styled_line_meshes(&mut axis_meshes, small_x, large_x, false);
-        push_styled_line_meshes(&mut axis_meshes, small_y, large_y, false);
+        let (small_x, large_x) = axis_tick_lins(
+            &x_ticks,
+            center,
+            x_axis,
+            y_dir,
+            normal,
+            x_style.major_tick_rate,
+        );
+        let (small_y, large_y) = axis_tick_lins(
+            &y_ticks,
+            center,
+            y_axis,
+            x_dir,
+            normal,
+            y_style.major_tick_rate,
+        );
+        push_styled_line_meshes(&mut axis_meshes, small_x, large_x, None);
+        push_styled_line_meshes(&mut axis_meshes, small_y, large_y, None);
     }
 
     let mut labels = Vec::new();
@@ -949,10 +1060,11 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         -y_dir,
         x_dir,
         normal,
-        x_label_rate,
+        &x_style,
         true,
         AXIS_ZERO_TICK_LABEL_OFFSET,
-    )?;
+    )
+    .await?;
     push_axis_tick_labels(
         executor,
         &mut labels,
@@ -962,15 +1074,16 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         -x_dir,
         x_dir,
         normal,
-        y_label_rate,
+        &y_style,
         false,
         0.0,
-    )?;
+    )
+    .await?;
     push_axis_title(
         executor,
         &mut labels,
-        x_label,
-        axis_title_anchor(center, x_axis, x_range.max),
+        x_style.title,
+        axis_title_anchor(center, x_axis, x_style.range.max),
         x_dir,
         x_dir,
         normal,
@@ -978,8 +1091,8 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     push_axis_title(
         executor,
         &mut labels,
-        y_label,
-        axis_title_anchor(center, y_axis, y_range.max),
+        y_style.title,
+        axis_title_anchor(center, y_axis, y_style.range.max),
         y_dir,
         x_dir,
         normal,
@@ -989,44 +1102,44 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = read_float3(executor, stack_idx, -10, "center")?;
+    let center = read_float3(executor, stack_idx, -6, "center")?;
     let axes = read_axis_basis_list(
         executor,
         stack_idx,
-        -9,
-        "axes",
-        &["x_axis", "y_axis", "z_axis"],
+        -5,
+        "basis",
+        &["x_basis", "y_basis", "z_basis"],
     )?;
     let [x_axis, y_axis, z_axis]: [Float3; 3] = axes.try_into().expect("length checked");
-    let x_range = read_axis_range(executor, stack_idx, -8, "x")?;
-    let y_range = read_axis_range(executor, stack_idx, -7, "y")?;
-    let z_range = read_axis_range(executor, stack_idx, -6, "z")?;
-    let x_label = read_optional_string(executor, stack_idx, -5, "x_label").await?;
-    let y_label = read_optional_string(executor, stack_idx, -4, "y_label").await?;
-    let z_label = read_optional_string(executor, stack_idx, -3, "z_label").await?;
-    let label_rates = read_label_rate_list(
-        executor,
-        stack_idx,
-        -2,
-        "tick_label_rates",
-        &["x_label_rate", "y_label_rate", "z_label_rate"],
-    )?;
-    let [x_label_rate, y_label_rate, z_label_rate]: [usize; 3] =
-        label_rates.try_into().expect("length checked");
-    let grid = read_flag(executor, stack_idx, -1, "grid")?;
+    let x_style = read_axis_style(executor, stack_idx, -4, "x_axis")?;
+    let y_style = read_axis_style(executor, stack_idx, -3, "y_axis")?;
+    let z_style = read_axis_style(executor, stack_idx, -2, "z_axis")?;
+    let grid_color = read_optional_color(executor, stack_idx, -1, "grid_color").await?;
     ensure_limit(
         "axis x ticks",
-        tick_count(x_range.min, x_range.max, x_range.tick_step),
+        tick_count(
+            x_style.range.min,
+            x_style.range.max,
+            x_style.range.tick_step,
+        ),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis y ticks",
-        tick_count(y_range.min, y_range.max, y_range.tick_step),
+        tick_count(
+            y_style.range.min,
+            y_style.range.max,
+            y_style.range.tick_step,
+        ),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis z ticks",
-        tick_count(z_range.min, z_range.max, z_range.tick_step),
+        tick_count(
+            z_style.range.min,
+            z_style.range.max,
+            z_style.range.tick_step,
+        ),
         MAX_AXIS_TICKS,
     )?;
     let x_dir = x_axis.normalize();
@@ -1045,39 +1158,114 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let xz_normal = y_dir;
     let yz_normal = normalize_or(y_dir.cross(z_dir), x_dir);
     let z_normal = normalize_or(x_dir.cross(z_dir), xy_normal);
-    let x_ticks = axis_tick_values(x_range.min, x_range.max, x_range.tick_step);
-    let y_ticks = axis_tick_values(y_range.min, y_range.max, y_range.tick_step);
-    let z_ticks = axis_tick_values(z_range.min, z_range.max, z_range.tick_step);
+    let x_ticks = axis_tick_values(
+        x_style.range.min,
+        x_style.range.max,
+        x_style.range.tick_step,
+    );
+    let y_ticks = axis_tick_values(
+        y_style.range.min,
+        y_style.range.max,
+        y_style.range.tick_step,
+    );
+    let z_ticks = axis_tick_values(
+        z_style.range.min,
+        z_style.range.max,
+        z_style.range.tick_step,
+    );
     let mut axis_meshes = Vec::new();
-    push_axis_arrows(&mut axis_meshes, center, x_axis, x_range, xy_normal)?;
-    push_axis_arrows(&mut axis_meshes, center, y_axis, y_range, xy_normal)?;
-    push_axis_arrows(&mut axis_meshes, center, z_axis, z_range, z_normal)?;
-    if grid {
-        let (small_x_xy, large_x_xy) =
-            axis_grid_lins(&x_ticks, center, x_axis, y_axis, y_range, xy_normal);
-        let (small_y_xy, large_y_xy) =
-            axis_grid_lins(&y_ticks, center, y_axis, x_axis, x_range, xy_normal);
-        let (small_x_xz, large_x_xz) =
-            axis_grid_lins(&x_ticks, center, x_axis, z_axis, z_range, xz_normal);
-        let (small_z_xz, large_z_xz) =
-            axis_grid_lins(&z_ticks, center, z_axis, x_axis, x_range, xz_normal);
-        let (small_y_yz, large_y_yz) =
-            axis_grid_lins(&y_ticks, center, y_axis, z_axis, z_range, yz_normal);
-        let (small_z_yz, large_z_yz) =
-            axis_grid_lins(&z_ticks, center, z_axis, y_axis, y_range, yz_normal);
-        push_styled_line_meshes(&mut axis_meshes, small_x_xy, large_x_xy, true);
-        push_styled_line_meshes(&mut axis_meshes, small_y_xy, large_y_xy, true);
-        push_styled_line_meshes(&mut axis_meshes, small_x_xz, large_x_xz, true);
-        push_styled_line_meshes(&mut axis_meshes, small_z_xz, large_z_xz, true);
-        push_styled_line_meshes(&mut axis_meshes, small_y_yz, large_y_yz, true);
-        push_styled_line_meshes(&mut axis_meshes, small_z_yz, large_z_yz, true);
+    push_axis_arrows(&mut axis_meshes, center, x_axis, x_style.range, xy_normal)?;
+    push_axis_arrows(&mut axis_meshes, center, y_axis, y_style.range, xy_normal)?;
+    push_axis_arrows(&mut axis_meshes, center, z_axis, z_style.range, z_normal)?;
+    if let Some(color) = grid_color {
+        let (small_x_xy, large_x_xy) = axis_grid_lins(
+            &x_ticks,
+            center,
+            x_axis,
+            y_axis,
+            y_style.range,
+            xy_normal,
+            x_style.major_tick_rate,
+        );
+        let (small_y_xy, large_y_xy) = axis_grid_lins(
+            &y_ticks,
+            center,
+            y_axis,
+            x_axis,
+            x_style.range,
+            xy_normal,
+            y_style.major_tick_rate,
+        );
+        let (small_x_xz, large_x_xz) = axis_grid_lins(
+            &x_ticks,
+            center,
+            x_axis,
+            z_axis,
+            z_style.range,
+            xz_normal,
+            x_style.major_tick_rate,
+        );
+        let (small_z_xz, large_z_xz) = axis_grid_lins(
+            &z_ticks,
+            center,
+            z_axis,
+            x_axis,
+            x_style.range,
+            xz_normal,
+            z_style.major_tick_rate,
+        );
+        let (small_y_yz, large_y_yz) = axis_grid_lins(
+            &y_ticks,
+            center,
+            y_axis,
+            z_axis,
+            z_style.range,
+            yz_normal,
+            y_style.major_tick_rate,
+        );
+        let (small_z_yz, large_z_yz) = axis_grid_lins(
+            &z_ticks,
+            center,
+            z_axis,
+            y_axis,
+            y_style.range,
+            yz_normal,
+            z_style.major_tick_rate,
+        );
+        push_styled_line_meshes(&mut axis_meshes, small_x_xy, large_x_xy, Some(color));
+        push_styled_line_meshes(&mut axis_meshes, small_y_xy, large_y_xy, Some(color));
+        push_styled_line_meshes(&mut axis_meshes, small_x_xz, large_x_xz, Some(color));
+        push_styled_line_meshes(&mut axis_meshes, small_z_xz, large_z_xz, Some(color));
+        push_styled_line_meshes(&mut axis_meshes, small_y_yz, large_y_yz, Some(color));
+        push_styled_line_meshes(&mut axis_meshes, small_z_yz, large_z_yz, Some(color));
     } else {
-        let (small_x, large_x) = axis_tick_lins(&x_ticks, center, x_axis, y_dir, xy_normal);
-        let (small_y, large_y) = axis_tick_lins(&y_ticks, center, y_axis, x_dir, xy_normal);
-        let (small_z, large_z) = axis_tick_lins(&z_ticks, center, z_axis, x_dir, z_normal);
-        push_styled_line_meshes(&mut axis_meshes, small_x, large_x, false);
-        push_styled_line_meshes(&mut axis_meshes, small_y, large_y, false);
-        push_styled_line_meshes(&mut axis_meshes, small_z, large_z, false);
+        let (small_x, large_x) = axis_tick_lins(
+            &x_ticks,
+            center,
+            x_axis,
+            y_dir,
+            xy_normal,
+            x_style.major_tick_rate,
+        );
+        let (small_y, large_y) = axis_tick_lins(
+            &y_ticks,
+            center,
+            y_axis,
+            x_dir,
+            xy_normal,
+            y_style.major_tick_rate,
+        );
+        let (small_z, large_z) = axis_tick_lins(
+            &z_ticks,
+            center,
+            z_axis,
+            x_dir,
+            z_normal,
+            z_style.major_tick_rate,
+        );
+        push_styled_line_meshes(&mut axis_meshes, small_x, large_x, None);
+        push_styled_line_meshes(&mut axis_meshes, small_y, large_y, None);
+        push_styled_line_meshes(&mut axis_meshes, small_z, large_z, None);
     }
 
     let mut labels = Vec::new();
@@ -1090,10 +1278,11 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         -y_dir,
         x_dir,
         xy_normal,
-        x_label_rate,
+        &x_style,
         true,
         AXIS_ZERO_TICK_LABEL_OFFSET,
-    )?;
+    )
+    .await?;
     push_axis_tick_labels(
         executor,
         &mut labels,
@@ -1103,10 +1292,11 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         -x_dir,
         x_dir,
         xy_normal,
-        y_label_rate,
+        &y_style,
         false,
         0.0,
-    )?;
+    )
+    .await?;
     push_axis_tick_labels(
         executor,
         &mut labels,
@@ -1116,15 +1306,16 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         -x_dir,
         x_dir,
         z_normal,
-        z_label_rate,
+        &z_style,
         false,
         0.0,
-    )?;
+    )
+    .await?;
     push_axis_title(
         executor,
         &mut labels,
-        x_label,
-        axis_title_anchor(center, x_axis, x_range.max),
+        x_style.title,
+        axis_title_anchor(center, x_axis, x_style.range.max),
         x_dir,
         x_dir,
         xy_normal,
@@ -1132,8 +1323,8 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     push_axis_title(
         executor,
         &mut labels,
-        y_label,
-        axis_title_anchor(center, y_axis, y_range.max),
+        y_style.title,
+        axis_title_anchor(center, y_axis, y_style.range.max),
         y_dir,
         x_dir,
         xy_normal,
@@ -1141,8 +1332,8 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     push_axis_title(
         executor,
         &mut labels,
-        z_label,
-        axis_title_anchor(center, z_axis, z_range.max),
+        z_style.title,
+        axis_title_anchor(center, z_axis, z_style.range.max),
         z_dir,
         x_dir,
         z_normal,

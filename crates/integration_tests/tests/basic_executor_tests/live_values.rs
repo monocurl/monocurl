@@ -778,7 +778,7 @@ fn test_label_preserves_cross_axis_alignment() {
 fn test_axis2d_uses_leading_optional_axis_labels() {
     let r = run_with_stdlib(
         "
-        let result = Axis2d(\"x\", nil, [0, 0, 1], [0, 0, 1], [1r, 1u], [0, 0], 0)
+        let result = Axis2d([1r, 1u], nil, [0, 0, \"x\", 1, 0], [0, 0, nil, 1, 0])
     ",
         &["mesh"],
     );
@@ -797,7 +797,7 @@ fn test_axis2d_uses_leading_optional_axis_labels() {
 fn test_axis2d_infers_scale_from_basis_vectors() {
     let r = run_with_stdlib(
         "
-        let axis = Axis2d(nil, nil, [0, 1, 1], [0, 1, 1], [2r, 3u], [0, 0], 0)
+        let axis = Axis2d([2r, 3u], nil, [0, 1, 1], [0, 1, 1])
         let result = (mesh_right(axis)[0] > 2.05) + (mesh_up(axis)[1] > 3.05)
     ",
         &["mesh"],
@@ -806,21 +806,21 @@ fn test_axis2d_infers_scale_from_basis_vectors() {
 }
 
 #[test]
-fn test_axis_ranges_no_longer_accept_explicit_unit_scale() {
+fn test_axis_style_rejects_overlong_legacy_numeric_style() {
     let r = run_with_stdlib(
         "
-        let result = Axis2d(nil, nil, [-1, 1, 1, 1], [-1, 1, 1], [1r, 1u], [0, 0], 0)
+        let result = Axis2d([1r, 1u], nil, [-1, 1, 1, 1, |x| x, 0])
     ",
         &["mesh"],
     );
-    r.assert_error("list of length 4");
+    r.assert_error("expected");
 }
 
 #[test]
 fn test_axis_arrows_are_filled_meshes() {
     let r = run_with_stdlib(
         "
-        let result = Axis1d(nil, 1r, 1b, [-1, 1, 1], 0)
+        let result = Axis1d(1r, 1b, [-1, 1, nil, 1, 0])
     ",
         &["mesh"],
     );
@@ -839,7 +839,7 @@ fn test_axis_arrows_are_filled_meshes() {
 fn test_axis_large_ticks_have_larger_stroke_radius() {
     let r = run_with_stdlib(
         "
-        let result = Axis1d(nil, 1r, 1b, [-1, 1, 0.25], 0)
+        let result = Axis1d(1r, 1b, [-1, 1, 0.25])
     ",
         &["mesh"],
     );
@@ -872,7 +872,7 @@ fn test_axis_large_ticks_have_larger_stroke_radius() {
 fn test_axis2d_grid_spans_plot_area() {
     let r = run_with_stdlib(
         "
-        let result = Axis2d(nil, nil, [-1, 1, 1], [-1, 1, 1], [1r, 1u], [0, 0], 1)
+        let result = Axis2d([1r, 1u], [0.5, 0.5, 0.5, 1], [-1, 1, 1], [-1, 1, 1])
     ",
         &["mesh"],
     );
@@ -884,6 +884,38 @@ fn test_axis2d_grid_spans_plot_area() {
     assert!(
         max_mesh_line_len(&meshes) > 1.9,
         "expected grid lines to span the plotted range"
+    );
+}
+
+#[test]
+fn test_axis_style_updates_axis_defaults() {
+    let r = run_with_stdlib(
+        "
+        let axis = axis_style{\"x\", -2, 2, \"t\", 1, 2} Axis2d()
+        let result = mesh_right(axis)[0] > 2.05
+    ",
+        &["mesh"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_axis_style_nil_label_map_suppresses_tick_labels() {
+    let r = run_with_stdlib(
+        "
+        let result = axis_style{\"x\", -1, 1, nil, 1, 1, nil} Axis1d()
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+    assert_eq!(
+        meshes.len(),
+        3,
+        "expected only two axis arrows and one tick mesh when labels are disabled"
     );
 }
 

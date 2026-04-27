@@ -177,6 +177,21 @@ fn test_exec_set_default_errors_for_unknown_default() {
 }
 
 #[test]
+fn test_exec_set_default_preserves_labeled_default_alias() {
+    let r = run_section(
+        "
+        let func = |x = 1| x
+        var live = func(x: 1)
+        live.x = 2
+        live = __monocurl__native__ set_default(live, \"x\", 5, 1)
+        let result = live.x * 10 + live
+    ",
+        SectionType::StandardLibrary,
+    );
+    r.assert_int(55);
+}
+
+#[test]
 fn test_exec_reference_default_arg_omitted() {
     let r = run("
         let base = 7

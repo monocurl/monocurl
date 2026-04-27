@@ -87,7 +87,7 @@ impl Executor {
         }
     }
 
-    pub(crate) async fn tick_yielder(&mut self) {
+    pub async fn tick_yielder(&mut self) {
         self.yielder.tick().await;
     }
 
