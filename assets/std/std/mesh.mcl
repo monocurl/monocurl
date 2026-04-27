@@ -167,14 +167,14 @@ let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacin
     return [go(level: 0), go(level: 1)]
 }
 
-let Axis1d = |basis = 1r, normal = 1b, x_axis = [-5, 5, nil, 0.25, 4, |x| x]|
-    __monocurl__native__ mk_axis1d(0l, basis, normal, x_axis)
+let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+    __monocurl__native__ mk_axis1d(0l, basis, normal, color, x_axis)
 
-let Axis2d = |basis = [1r, 1u], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x], y_axis = [-5, 5, nil, 0.25, 4, |x| x]|
-    __monocurl__native__ mk_axis2d(0l, basis, x_axis, y_axis, grid_color)
+let Axis2d = |basis = [1r, 1u], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x], y_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+    __monocurl__native__ mk_axis2d(0l, basis, color, x_axis, y_axis, grid_color)
 
-let Axis3d = |basis = [1r, 1u, 1b], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x], y_axis = [-5, 5, nil, 0.25, 4, |x| x], z_axis = [-5, 5, nil, 0.25, 4, |x| x]|
-    __monocurl__native__ mk_axis3d(0l, basis, x_axis, y_axis, z_axis, grid_color)
+let Axis3d = |basis = [1r, 1u, 1b], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x], y_axis = [-5, 5, nil, 0.25, 4, |x| x], z_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+    __monocurl__native__ mk_axis3d(0l, basis, color, x_axis, y_axis, z_axis, grid_color)
 
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
     var theta_min = 0

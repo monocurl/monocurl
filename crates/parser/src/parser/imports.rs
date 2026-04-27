@@ -193,13 +193,7 @@ impl Parser {
         cursor: Option<Count8>,
     ) -> (Arc<SectionBundle>, ParseArtifacts) {
         let file_index = currently_parsed.len();
-        let imported_files = f
-            .imports
-            .iter()
-            .map(|path|
-            // can be null in the case that the library failed to parse so it wasn't inserted properly
-            currently_parsed.get(path).map(|x| x.file_index).unwrap_or_default())
-            .collect();
+        let imported_files = Self::imported_file_indices(currently_parsed, &f.imports);
 
         if f.root_import_span.is_none() {
             let (sections, split_artifacts) = Self::split_root_sections(f.tokens, &f.text_rope);
@@ -260,6 +254,35 @@ impl Parser {
         }
     }
 
+    fn imported_file_indices(
+        currently_parsed: &HashMap<PathBuf, Arc<SectionBundle>>,
+        imports: &[PathBuf],
+    ) -> Vec<usize> {
+        imports
+            .iter()
+            .map(|path| {
+                // can be null in the case that the library failed to parse so it wasn't inserted properly
+                currently_parsed
+                    .get(path)
+                    .map(|x| x.file_index)
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    fn remap_cached_bundle(
+        currently_parsed: &HashMap<PathBuf, Arc<SectionBundle>>,
+        f: &PreparsedFile,
+        cached_bundle: &SectionBundle,
+    ) -> Arc<SectionBundle> {
+        let mut bundle = cached_bundle.clone();
+        bundle.file_index = currently_parsed.len();
+        bundle.imported_files = Self::imported_file_indices(currently_parsed, &f.imports);
+        bundle.root_import_span = f.root_import_span.clone();
+        bundle.was_cached = true;
+        Arc::new(bundle)
+    }
+
     pub fn parse(
         external_context: &mut ParseImportContext,
         lex_rope: Rope<Attribute<Token>>,
@@ -299,8 +322,9 @@ impl Parser {
                 && let Some(result) = external_context.cache_get(&file.path)
             {
                 artifacts.extend(result.1);
-                sorted_bundles.push(result.0.clone());
-                bundles.insert(file.path, result.0);
+                let bundle = Self::remap_cached_bundle(&bundles, &file, result.0.as_ref());
+                sorted_bundles.push(bundle.clone());
+                bundles.insert(file.path, bundle);
                 continue;
             }
 

@@ -6,6 +6,7 @@ use executor::{
     value::Value,
 };
 use geo::{
+    mesh::DEFAULT_DOT_RADIUS,
     mesh_build::SurfaceVertex,
     simd::{Float2, Float3, Float4},
 };
@@ -444,10 +445,11 @@ mod tests {
 #[stdlib_func]
 pub async fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let point = read_float3(executor, stack_idx, -1, "point")?;
-    Ok(mesh_from_parts(
+    Ok(mesh_from_parts_with_dot_radius(
         vec![default_dot(point, Float3::Z)],
         vec![],
         vec![],
+        DEFAULT_DOT_RADIUS,
     ))
 }
 

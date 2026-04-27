@@ -328,7 +328,7 @@ fn pan_camera(
     let tan_half_fov = (DEFAULT_CAMERA_FOV * 0.5).tan().max(0.05);
     let half_height = depth * tan_half_fov;
     let half_width = half_height * aspect;
-    let translation = basis.right * (-2.0 * half_width * dx / width)
+    let translation = basis.right * (2.0 * half_width * dx / width)
         + basis.up * (2.0 * half_height * dy / height);
 
     CameraSnapshot {

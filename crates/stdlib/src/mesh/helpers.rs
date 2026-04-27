@@ -1178,11 +1178,22 @@ pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
 }
 
 pub(super) fn mesh_from_parts(dots: Vec<Dot>, lins: Vec<Lin>, tris: Vec<Tri>) -> Value {
+    mesh_from_parts_with_dot_radius(dots, lins, tris, 0.0)
+}
+
+pub(super) fn mesh_from_parts_with_dot_radius(
+    dots: Vec<Dot>,
+    lins: Vec<Lin>,
+    tris: Vec<Tri>,
+    dot_radius: f32,
+) -> Value {
+    let mut uniform = Uniforms::default();
+    uniform.dot_radius = dot_radius;
     let mut mesh = Mesh {
         dots,
         lins,
         tris,
-        uniform: Uniforms::default(),
+        uniform,
         tag: vec![],
     };
     mesh.normalize_line_dot_topology();

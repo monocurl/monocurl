@@ -480,6 +480,26 @@ fn test_mesh_stdlib_reports_named_bad_list_argument() {
 }
 
 #[test]
+fn test_only_dot_meshes_use_visible_dot_radius() {
+    let r = run_with_stdlib(
+        "
+        let result = [Dot(), Line([0, 0, 0], [1, 0, 0]), Circle(1)]
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+    let value = r.value.as_ref().expect("expected mesh list");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+
+    assert_eq!(meshes.len(), 3);
+    assert_eq!(meshes[0].uniform.dot_radius, geo::mesh::DEFAULT_DOT_RADIUS);
+    assert!(!meshes[1].dots.is_empty());
+    assert_eq!(meshes[1].uniform.dot_radius, 0.0);
+    assert_eq!(meshes[2].uniform.dot_radius, 0.0);
+}
+
+#[test]
 fn test_mesh_operator_filter_applies_predicate_to_subset() {
     let r = run_with_stdlib(
         "
@@ -778,7 +798,7 @@ fn test_label_preserves_cross_axis_alignment() {
 fn test_axis2d_uses_leading_optional_axis_labels() {
     let r = run_with_stdlib(
         "
-        let result = Axis2d([1r, 1u], nil, [0, 0, \"x\", 1, 0], [0, 0, nil, 1, 0])
+        let result = Axis2d([1r, 1u], [0, 0, 0, 1], nil, [0, 0, \"x\", 1, 0], [0, 0, nil, 1, 0])
     ",
         &["mesh"],
     );
@@ -797,7 +817,7 @@ fn test_axis2d_uses_leading_optional_axis_labels() {
 fn test_axis2d_infers_scale_from_basis_vectors() {
     let r = run_with_stdlib(
         "
-        let axis = Axis2d([2r, 3u], nil, [0, 1, 1], [0, 1, 1])
+        let axis = Axis2d([2r, 3u], [0, 0, 0, 1], nil, [0, 1, 1], [0, 1, 1])
         let result = (mesh_right(axis)[0] > 2.05) + (mesh_up(axis)[1] > 3.05)
     ",
         &["mesh"],
@@ -809,7 +829,7 @@ fn test_axis2d_infers_scale_from_basis_vectors() {
 fn test_axis_style_rejects_overlong_legacy_numeric_style() {
     let r = run_with_stdlib(
         "
-        let result = Axis2d([1r, 1u], nil, [-1, 1, 1, 1, |x| x, 0])
+        let result = Axis2d([1r, 1u], [0, 0, 0, 1], nil, [-1, 1, 1, 1, |x| x, 0])
     ",
         &["mesh"],
     );
@@ -820,7 +840,7 @@ fn test_axis_style_rejects_overlong_legacy_numeric_style() {
 fn test_axis_arrows_are_filled_meshes() {
     let r = run_with_stdlib(
         "
-        let result = Axis1d(1r, 1b, [-1, 1, nil, 1, 0])
+        let result = Axis1d(1r, 1b, [0, 0, 0, 1], [-1, 1, nil, 1, 0])
     ",
         &["mesh"],
     );
@@ -839,7 +859,7 @@ fn test_axis_arrows_are_filled_meshes() {
 fn test_axis_large_ticks_have_larger_stroke_radius() {
     let r = run_with_stdlib(
         "
-        let result = Axis1d(1r, 1b, [-1, 1, 0.25])
+        let result = Axis1d(1r, 1b, [0, 0, 0, 1], [-1, 1, 0.25])
     ",
         &["mesh"],
     );
@@ -872,7 +892,7 @@ fn test_axis_large_ticks_have_larger_stroke_radius() {
 fn test_axis2d_grid_spans_plot_area() {
     let r = run_with_stdlib(
         "
-        let result = Axis2d([1r, 1u], [0.5, 0.5, 0.5, 1], [-1, 1, 1], [-1, 1, 1])
+        let result = Axis2d([1r, 1u], [0, 0, 0, 1], [0.5, 0.5, 0.5, 1], [-1, 1, 1], [-1, 1, 1])
     ",
         &["mesh"],
     );
@@ -884,6 +904,77 @@ fn test_axis2d_grid_spans_plot_area() {
     assert!(
         max_mesh_line_len(&meshes) > 1.9,
         "expected grid lines to span the plotted range"
+    );
+}
+
+#[test]
+fn test_axis2d_separates_axis_and_grid_color() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis2d([1r, 1u], [1, 0, 0, 1], [0, 0, 1, 1], [-1, 1, 1], [-1, 1, 1])
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+
+    let axis_arrow_index = meshes
+        .iter()
+        .position(|mesh| !mesh.tris.is_empty())
+        .expect("expected axis arrow mesh");
+    let axis_arrow = &meshes[axis_arrow_index];
+    assert_eq!(axis_arrow.tris[0].a.col.to_array(), [1.0, 0.0, 0.0, 1.0]);
+
+    let grid_index = meshes
+        .iter()
+        .position(|mesh| {
+            !mesh.lins.is_empty()
+                && mesh.tris.is_empty()
+                && mesh
+                    .lins
+                    .iter()
+                    .any(|lin| (lin.b.pos - lin.a.pos).len() > 1.9)
+        })
+        .expect("expected grid line mesh");
+    assert!(
+        grid_index < axis_arrow_index,
+        "expected grid lines to be emitted before axis arrows"
+    );
+    let grid = &meshes[grid_index];
+    let grid_col = grid.lins[0].a.col.to_array();
+    assert_eq!([grid_col[0], grid_col[1], grid_col[2]], [0.0, 0.0, 1.0]);
+    assert!(grid_col[3] < 1.0, "expected grid opacity, got {grid_col:?}");
+}
+
+#[test]
+fn test_axis3d_draws_axis_arrows_after_grid() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis3d([1r, 1u, 1b], [1, 0, 0, 1], [0, 0, 1, 1], [-1, 1, 1], [-1, 1, 1], [-1, 1, 1])
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+
+    let grid_index = meshes
+        .iter()
+        .position(|mesh| !mesh.lins.is_empty() && mesh.tris.is_empty())
+        .expect("expected grid line mesh");
+    let axis_arrow_index = meshes
+        .iter()
+        .position(|mesh| !mesh.tris.is_empty())
+        .expect("expected axis arrow mesh");
+
+    assert!(
+        grid_index < axis_arrow_index,
+        "expected grid lines to be emitted before axis arrows"
     );
 }
 

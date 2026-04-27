@@ -1,12 +1,16 @@
 #[cfg(test)]
 mod test {
-    use std::{collections::HashMap, path::PathBuf};
+    use std::{collections::HashMap, fs, path::PathBuf, process};
 
     use lexer::{lexer::Lexer, token::Token};
-    use structs::{rope::Rope, text::Span8};
+    use structs::{
+        rope::{Attribute, RLEData, Rope},
+        text::Span8,
+    };
 
     use crate::{
         ast::*,
+        import_context::ParseImportContext,
         parser::{Diagnostic, Parser, PreparsedFile, SectionParser},
     };
 
@@ -16,6 +20,25 @@ mod test {
             .filter(|(tok, _)| tok != &Token::Whitespace && tok != &Token::Comment)
             .cloned()
             .collect()
+    }
+
+    fn lex_rope(content: &str) -> Rope<Attribute<Token>> {
+        Rope::default().replace_range(
+            0..0,
+            Lexer::new(content.chars()).map(|(attribute, codeunits)| RLEData {
+                codeunits,
+                attribute,
+            }),
+        )
+    }
+
+    fn parse_with_context(
+        context: &mut ParseImportContext,
+        content: &str,
+    ) -> (Vec<std::sync::Arc<SectionBundle>>, Vec<Diagnostic>) {
+        let (bundles, artifacts) =
+            Parser::parse(context, lex_rope(content), Rope::from_str(content), None);
+        (bundles, artifacts.error_diagnostics)
     }
 
     fn parse_expr_test(content: &str) -> SpanTagged<Expression> {
@@ -62,6 +85,47 @@ mod test {
             None,
         );
         (bundle.sections.clone(), artifacts.error_diagnostics)
+    }
+
+    #[test]
+    fn test_cached_imported_bundle_remaps_nested_import_indices() {
+        let dir =
+            std::env::temp_dir().join(format!("monocurl_parser_import_cache_{}", process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("dep1.mcl"), "let dep1 = 1\n").unwrap();
+        fs::write(dir.join("dep2.mcl"), "let dep2 = 2\n").unwrap();
+        fs::write(dir.join("lib.mcl"), "import dep1\nlet lib = dep1\n").unwrap();
+
+        let mut context = ParseImportContext {
+            root_file_path: dir.join("scene.mcs"),
+            open_tab_ropes: HashMap::new(),
+            cached_parses: HashMap::new(),
+        };
+
+        let (first, errors) = parse_with_context(
+            &mut context,
+            "import dep2\nimport lib\nlet x = lib + dep2\n",
+        );
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        let first_lib = first
+            .iter()
+            .find(|bundle| bundle.file_path.file_name().unwrap() == "lib.mcl")
+            .unwrap();
+        assert_eq!(first_lib.file_index, 2);
+        assert_eq!(first_lib.imported_files, vec![1]);
+
+        let (second, errors) = parse_with_context(&mut context, "import lib\nlet x = lib\n");
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        let second_lib = second
+            .iter()
+            .find(|bundle| bundle.file_path.file_name().unwrap() == "lib.mcl")
+            .unwrap();
+        assert!(second_lib.was_cached);
+        assert_eq!(second_lib.file_index, 1);
+        assert_eq!(second_lib.imported_files, vec![0]);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     // Literal tests
