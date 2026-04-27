@@ -137,6 +137,7 @@ struct AxisStyle {
     title: Option<String>,
     major_tick_rate: usize,
     label_map: AxisLabelMap,
+    arrow_extrusion: f32,
 }
 
 impl AxisStyle {
@@ -146,6 +147,7 @@ impl AxisStyle {
             title: None,
             major_tick_rate: 4,
             label_map: AxisLabelMap::DefaultFormat,
+            arrow_extrusion: AXIS_BUFFER,
         }
     }
 }
@@ -170,6 +172,16 @@ fn checked_axis_tick_step(value: f32, name: &'static str) -> Result<f32, Executo
         });
     }
     Ok(value.abs().max(1e-3))
+}
+
+fn checked_axis_arrow_extrusion(value: f32) -> Result<f32, ExecutorError> {
+    if !value.is_finite() || value < 0.0 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "arrow_extrusion",
+            message: "must be a non-negative finite number",
+        });
+    }
+    Ok(value)
 }
 
 fn checked_axis_range(
@@ -258,6 +270,7 @@ fn read_axis_style(
             let mut title = None;
             let mut major_tick_rate = 4;
             let mut label_map = AxisLabelMap::DefaultFormat;
+            let mut arrow_extrusion = AXIS_BUFFER;
             let range = match elements.len() {
                 1 => {
                     let radius = axis_number_from_value(
@@ -266,7 +279,7 @@ fn read_axis_style(
                     )?;
                     axis_radius_range(radius, name)?
                 }
-                2..=6 => {
+                2..=7 => {
                     let min = axis_number_from_value(
                         with_heap(|h| h.get(elements[0].key()).clone()),
                         name,
@@ -279,9 +292,9 @@ fn read_axis_style(
                         && axis_style_third_arg_is_title(with_heap(|h| {
                             h.get(elements[2].key()).clone()
                         }));
-                    if !has_title && elements.len() > 5 {
+                    if !has_title && elements.len() > 6 {
                         return Err(ExecutorError::invalid_operation(format!(
-                            "{name}: expected [min, max, tick_spacing, major_tick_rate, label_map] or [min, max, axis_title, tick_spacing, major_tick_rate, label_map]"
+                            "{name}: expected [min, max, tick_spacing, major_tick_rate, label_map, arrow_extrusion] or [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion]"
                         )));
                     }
                     let tick_step_index = if has_title {
@@ -312,11 +325,17 @@ fn read_axis_style(
                             h.get(elements[tick_step_index + 2].key()).clone()
                         }));
                     }
+                    if elements.len() > tick_step_index + 3 {
+                        arrow_extrusion = checked_axis_arrow_extrusion(axis_number_from_value(
+                            with_heap(|h| h.get(elements[tick_step_index + 3].key()).clone()),
+                            "arrow_extrusion",
+                        )?)?;
+                    }
                     checked_axis_range(min, max, tick_step, name)?
                 }
                 len => {
                     return Err(ExecutorError::invalid_operation(format!(
-                        "{name}: expected a number or [min, max, axis_title, tick_spacing, major_tick_rate, label_map], got list of length {len}"
+                        "{name}: expected a number or [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion], got list of length {len}"
                     )));
                 }
             };
@@ -326,6 +345,7 @@ fn read_axis_style(
                 title,
                 major_tick_rate,
                 label_map,
+                arrow_extrusion,
             })
         }
         other => Err(ExecutorError::type_error_for(
@@ -446,6 +466,36 @@ fn point_samples(samples: i64) -> usize {
 
 fn grid_axis_samples(samples: i64) -> usize {
     samples.max(2) as usize
+}
+
+fn grid_point(
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    y1: f32,
+    nx: usize,
+    ny: usize,
+    ix: usize,
+    iy: usize,
+) -> Float3 {
+    let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
+    let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
+    Float3::new(x, y, 0.0)
+}
+
+fn grid_cell_center(
+    x0: f32,
+    x1: f32,
+    y0: f32,
+    y1: f32,
+    nx: usize,
+    ny: usize,
+    ix: usize,
+    iy: usize,
+) -> Float3 {
+    (grid_point(x0, x1, y0, y1, nx, ny, ix, iy)
+        + grid_point(x0, x1, y0, y1, nx, ny, ix + 1, iy + 1))
+        / 2.0
 }
 
 fn sample_index_value(ix: usize, iy: usize) -> Value {
@@ -636,25 +686,26 @@ fn push_axis_arrows(
     range: AxisRange,
     normal: Float3,
     color: Float4,
+    arrow_extrusion: f32,
 ) -> Result<(), ExecutorError> {
     let dir = basis.normalize();
     out.push(axis_arrow_mesh(
         center,
-        basis * range.max + dir * AXIS_BUFFER,
+        basis * range.max + dir * arrow_extrusion,
         normal,
         color,
     )?);
     out.push(axis_arrow_mesh(
         center,
-        basis * range.min - dir * AXIS_BUFFER,
+        basis * range.min - dir * arrow_extrusion,
         normal,
         color,
     )?);
     Ok(())
 }
 
-fn axis_title_anchor(center: Float3, basis: Float3, max: f32) -> Float3 {
-    center + basis * max + basis.normalize() * AXIS_BUFFER
+fn axis_title_anchor(center: Float3, basis: Float3, max: f32, arrow_extrusion: f32) -> Float3 {
+    center + basis * max + basis.normalize() * arrow_extrusion
 }
 
 fn axis_tick_lins(
@@ -806,12 +857,13 @@ pub async fn mk_color_grid(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let x0 = crate::read_float(executor, stack_idx, -8, "x0")? as f32;
-    let x1 = crate::read_float(executor, stack_idx, -7, "x1")? as f32;
-    let y0 = crate::read_float(executor, stack_idx, -6, "y0")? as f32;
-    let y1 = crate::read_float(executor, stack_idx, -5, "y1")? as f32;
-    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -4, "x_samples")?);
-    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -3, "y_samples")?);
+    let x0 = crate::read_float(executor, stack_idx, -9, "x0")? as f32;
+    let x1 = crate::read_float(executor, stack_idx, -8, "x1")? as f32;
+    let y0 = crate::read_float(executor, stack_idx, -7, "y0")? as f32;
+    let y1 = crate::read_float(executor, stack_idx, -6, "y1")? as f32;
+    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -5, "x_samples")?);
+    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -4, "y_samples")?);
+    let smooth = read_flag(executor, stack_idx, -3, "smooth")?;
     let mask = executor
         .state
         .stack(stack_idx)
@@ -829,48 +881,82 @@ pub async fn mk_color_grid(
     let ny = y_samples - 1;
     let cell_count = ensure_grid_cells("color grid cells", nx, ny)?;
     ensure_surface_triangles("color grid triangles", cell_count.saturating_mul(2))?;
-    let mut vertices = Vec::<SurfaceVertex>::new();
-    let mut faces = Vec::<[usize; 3]>::new();
-    let mut positions = Vec::with_capacity(x_samples * y_samples);
-    let mut color_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
-    for ix in 0..x_samples {
-        for iy in 0..y_samples {
-            let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
-            let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
-            let pos = Float3::new(x, y, 0.0);
-            positions.push(pos);
-            color_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
-        }
-    }
-    let colors = invoke_callable_many(executor, &color_at, &color_args, "color_at").await?;
-    for (pos, color) in positions.into_iter().zip(colors) {
-        vertices.push(SurfaceVertex {
-            pos,
-            col: float4_from_value(color, "color_at")?,
-            uv: Float2::ZERO,
-        });
-    }
-    let grid_vertex = |ix: usize, iy: usize| ix * y_samples + iy;
 
-    let mut centers = Vec::with_capacity(nx * ny);
-    let mut mask_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(nx * ny);
+    let grid_vertex = |ix: usize, iy: usize| ix * y_samples + iy;
+    let mut cells = Vec::with_capacity(cell_count);
+    let mut mask_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(cell_count);
     for ix in 0..nx {
         for iy in 0..ny {
-            let xa = x0 + (x1 - x0) * ix as f32 / nx as f32;
-            let xb = x0 + (x1 - x0) * (ix + 1) as f32 / nx as f32;
-            let ya = y0 + (y1 - y0) * iy as f32 / ny as f32;
-            let yb = y0 + (y1 - y0) * (iy + 1) as f32 / ny as f32;
-            let center = Float3::new((xa + xb) / 2.0, (ya + yb) / 2.0, 0.0);
-            centers.push((ix, iy));
+            let center = grid_cell_center(x0, x1, y0, y1, nx, ny, ix, iy);
+            cells.push((ix, iy));
             mask_args.push(smallvec![point_value(center)]);
         }
     }
     let mask_values = invoke_callable_many(executor, &mask, &mask_args, "mask").await?;
-    for ((ix, iy), mask_value) in centers.into_iter().zip(mask_values) {
-        if !mask_value.check_truthy()? {
-            continue;
+    let mut enabled_cells = Vec::new();
+    for (cell, mask_value) in cells.into_iter().zip(mask_values) {
+        if mask_value.check_truthy()? {
+            enabled_cells.push(cell);
+        }
+    }
+
+    let mut vertices = Vec::<SurfaceVertex>::with_capacity(x_samples * y_samples);
+    let mut faces = Vec::<[usize; 3]>::with_capacity(enabled_cells.len() * 2);
+    if smooth {
+        let mut positions = Vec::with_capacity(x_samples * y_samples);
+        let mut color_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
+        for ix in 0..x_samples {
+            for iy in 0..y_samples {
+                let pos = grid_point(x0, x1, y0, y1, nx, ny, ix, iy);
+                positions.push(pos);
+                color_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
+            }
+        }
+        let colors = invoke_callable_many(executor, &color_at, &color_args, "color_at").await?;
+        for (pos, color) in positions.into_iter().zip(colors) {
+            vertices.push(SurfaceVertex {
+                pos,
+                col: float4_from_value(color, "color_at")?,
+                uv: Float2::ZERO,
+            });
         }
 
+        for (ix, iy) in enabled_cells {
+            let a = grid_vertex(ix, iy);
+            let b = grid_vertex(ix + 1, iy);
+            let c = grid_vertex(ix + 1, iy + 1);
+            let d = grid_vertex(ix, iy + 1);
+            faces.push([a, b, c]);
+            faces.push([a, c, d]);
+        }
+
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        return Ok(mesh_from_parts(vec![], lins, tris));
+    }
+
+    for ix in 0..x_samples {
+        for iy in 0..y_samples {
+            vertices.push(SurfaceVertex {
+                pos: grid_point(x0, x1, y0, y1, nx, ny, ix, iy),
+                col: Float4::ONE,
+                uv: Float2::ZERO,
+            });
+        }
+    }
+
+    let mut color_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(enabled_cells.len());
+    for &(ix, iy) in &enabled_cells {
+        let pos = grid_point(x0, x1, y0, y1, nx, ny, ix, iy);
+        color_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
+    }
+    let colors = invoke_callable_many(executor, &color_at, &color_args, "color_at").await?;
+    let mut colors = colors
+        .into_iter()
+        .map(|color| float4_from_value(color, "color_at"))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter();
+
+    for (ix, iy) in enabled_cells {
         let a = grid_vertex(ix, iy);
         let b = grid_vertex(ix + 1, iy);
         let c = grid_vertex(ix + 1, iy + 1);
@@ -879,7 +965,28 @@ pub async fn mk_color_grid(
         faces.push([a, c, d]);
     }
 
-    let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+    let (mut lins, mut tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+    for tri_pair in tris.chunks_mut(2) {
+        let Some(color) = colors.next() else {
+            break;
+        };
+        for tri in tri_pair {
+            tri.a.col = color;
+            tri.b.col = color;
+            tri.c.col = color;
+        }
+    }
+
+    for lin in &mut lins {
+        if lin.inv <= -2 {
+            let tri_idx = (-lin.inv - 2) as usize;
+            if let Some(tri) = tris.get(tri_idx) {
+                lin.a.col = tri.a.col;
+                lin.b.col = tri.a.col;
+            }
+        }
+    }
+
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -964,7 +1071,15 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         style.major_tick_rate,
     );
     push_styled_line_meshes(&mut axis_meshes, small_ticks, large_ticks, color, false);
-    push_axis_arrows(&mut axis_meshes, center, axis, style.range, normal, color)?;
+    push_axis_arrows(
+        &mut axis_meshes,
+        center,
+        axis,
+        style.range,
+        normal,
+        color,
+        style.arrow_extrusion,
+    )?;
 
     let mut labels = Vec::new();
     push_axis_tick_labels(
@@ -986,7 +1101,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         executor,
         &mut labels,
         style.title,
-        axis_title_anchor(center, axis, style.range.max),
+        axis_title_anchor(center, axis, style.range.max, style.arrow_extrusion),
         axis_dir,
         axis_dir,
         normal,
@@ -1091,6 +1206,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         x_style.range,
         normal,
         color,
+        x_style.arrow_extrusion,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1099,6 +1215,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         y_style.range,
         normal,
         color,
+        y_style.arrow_extrusion,
     )?;
 
     let mut labels = Vec::new();
@@ -1136,7 +1253,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         executor,
         &mut labels,
         x_style.title,
-        axis_title_anchor(center, x_axis, x_style.range.max),
+        axis_title_anchor(center, x_axis, x_style.range.max, x_style.arrow_extrusion),
         x_dir,
         x_dir,
         normal,
@@ -1146,7 +1263,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         executor,
         &mut labels,
         y_style.title,
-        axis_title_anchor(center, y_axis, y_style.range.max),
+        axis_title_anchor(center, y_axis, y_style.range.max, y_style.arrow_extrusion),
         y_dir,
         x_dir,
         normal,
@@ -1327,6 +1444,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         x_style.range,
         xy_normal,
         color,
+        x_style.arrow_extrusion,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1335,6 +1453,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         y_style.range,
         xy_normal,
         color,
+        y_style.arrow_extrusion,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1343,6 +1462,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         z_style.range,
         z_normal,
         color,
+        z_style.arrow_extrusion,
     )?;
 
     let mut labels = Vec::new();
@@ -1395,7 +1515,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         executor,
         &mut labels,
         x_style.title,
-        axis_title_anchor(center, x_axis, x_style.range.max),
+        axis_title_anchor(center, x_axis, x_style.range.max, x_style.arrow_extrusion),
         x_dir,
         x_dir,
         xy_normal,
@@ -1405,7 +1525,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         executor,
         &mut labels,
         y_style.title,
-        axis_title_anchor(center, y_axis, y_style.range.max),
+        axis_title_anchor(center, y_axis, y_style.range.max, y_style.arrow_extrusion),
         y_dir,
         x_dir,
         xy_normal,
@@ -1415,7 +1535,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         executor,
         &mut labels,
         z_style.title,
-        axis_title_anchor(center, z_axis, z_style.range.max),
+        axis_title_anchor(center, z_axis, z_style.range.max, z_style.arrow_extrusion),
         z_dir,
         x_dir,
         z_normal,

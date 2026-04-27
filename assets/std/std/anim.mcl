@@ -8,16 +8,19 @@
 # the pure identity; equivalent to "no easing."
 let linear = |t| t
 
-# smooth-step, monotone, symmetric around t=0.5.
-let smooth = |t| t * t * (3 - 2 * t)
+# smoother-step, monotone, symmetric around t=0.5. this matches old libmc.
+let smooth = |t| {
+    let s = 1 - t
+    return t * t * t * (10 * s * s + 5 * s * t + t * t)
+}
 
-# quadratic ease-in.
-let smooth_in  = |t| t * t
+# old libmc smooth ease-in.
+let smooth_in = |t| 2 * smooth(0.5 * t)
 
-# quadratic ease-out.
-let smooth_out = |t| 1 - (1 - t) * (1 - t)
+# old libmc smooth ease-out.
+let smooth_out = |t| 2 * smooth(0.5 * (t + 1)) - 1
 
-# slower ease-in-out (5th-order smoothstep).
+# explicit alias for callers that want the named 5th-order smoothstep.
 let smoother = |t| t * t * t * (t * (t * 6 - 15) + 10)
 
 # gentle cosine-based ease.
@@ -112,7 +115,11 @@ let TagBend = |time = 1, &meshes = [], rate = smooth| {
 }
 
 # camera-aware lerp over the camera leader.
-let CameraLerp = |&camera, time = 1, rate = smooth| Lerp(time, &camera, rate)
+let CameraLerp = |&camera, time = 1, rate = smooth| {
+    let embed = |start, dst| __monocurl__native__ camera_lerp_embed(start, dst)
+    let value_lerp = |start, end, state, t| __monocurl__native__ camera_lerp_value(start, end, t)
+    return PrimitiveAnim(time, &camera, embed, value_lerp, rate)
+}
 
 # indication animations
 

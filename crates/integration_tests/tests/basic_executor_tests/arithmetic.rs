@@ -83,6 +83,12 @@ fn test_complex_real_and_imag_accessors() {
 }
 
 #[test]
+fn test_abs_accepts_complex_values() {
+    let r = run_with_stdlib("let result = abs(3 + 4i)", &["math"]);
+    r.assert_float(5.0);
+}
+
+#[test]
 fn test_exec_literal_negative() {
     let r = run("let x = ---7");
     r.assert_int(-7);

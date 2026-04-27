@@ -829,7 +829,7 @@ fn test_axis2d_infers_scale_from_basis_vectors() {
 fn test_axis_style_rejects_overlong_legacy_numeric_style() {
     let r = run_with_stdlib(
         "
-        let result = Axis2d([1r, 1u], [0, 0, 0, 1], nil, [-1, 1, 1, 1, |x| x, 0])
+        let result = Axis2d([1r, 1u], [0, 0, 0, 1], nil, [-1, 1, 1, 1, |x| x, 0, 0])
     ",
         &["mesh"],
     );
@@ -976,6 +976,30 @@ fn test_axis3d_draws_axis_arrows_after_grid() {
         grid_index < axis_arrow_index,
         "expected grid lines to be emitted before axis arrows"
     );
+}
+
+#[test]
+fn test_axis_style_arrow_extrusion_controls_bounds() {
+    let r = run_with_stdlib(
+        "
+        let default_axis = Axis1d(1r, 1b, [0, 0, 0, 1], [-1, 1, nil, 1, 0, nil, 0.2])
+        let no_extrusion = axis_style{\"x\", -1, 1, nil, 1, 0, nil, 0} Axis1d()
+        let result = (mesh_right(default_axis)[0] > 1.05) + (mesh_right(no_extrusion)[0] < 1.05)
+    ",
+        &["mesh"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_axis_style_rejects_negative_arrow_extrusion() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis1d(1r, 1b, [0, 0, 0, 1], [-1, 1, nil, 1, 0, nil, -0.1])
+    ",
+        &["mesh"],
+    );
+    r.assert_error("arrow_extrusion");
 }
 
 #[test]
@@ -1424,6 +1448,74 @@ fn test_color_grid_uses_sample_counts() {
         &["mesh", "util"],
     );
     r.assert_int(12);
+}
+
+#[test]
+fn test_color_grid_defaults_to_solid_cell_colors() {
+    let r = run_with_stdlib(
+        "
+        let result = ColorGrid(|pos, idx| [idx[0], idx[1], 0, 1], [0, 1, 3], [0, 1, 3])
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(r.value.as_ref().expect("expected mesh"), &mut meshes);
+    assert_eq!(meshes.len(), 1);
+
+    let mesh = &meshes[0];
+    assert_eq!(mesh.tris.len(), 8);
+    for tri in &mesh.tris {
+        assert_eq!(tri.a.col.to_array(), tri.b.col.to_array());
+        assert_eq!(tri.a.col.to_array(), tri.c.col.to_array());
+    }
+
+    let colors = mesh
+        .tris
+        .chunks(2)
+        .map(|tris| tris[0].a.col.to_array())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        colors,
+        vec![
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0, 1.0],
+        ]
+    );
+}
+
+#[test]
+fn test_color_grid_smooth_samples_vertex_colors() {
+    let r = run_with_stdlib(
+        "
+        let result = ColorGrid(|pos, idx| [idx[0], idx[1], 0, 1], [0, 1, 2], [0, 1, 2], 1)
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(r.value.as_ref().expect("expected mesh"), &mut meshes);
+    assert_eq!(meshes.len(), 1);
+
+    let tri = meshes[0].tris[0];
+    assert_eq!(tri.a.col.to_array(), [0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(tri.b.col.to_array(), [1.0, 0.0, 0.0, 1.0]);
+    assert_eq!(tri.c.col.to_array(), [1.0, 1.0, 0.0, 1.0]);
+}
+
+#[test]
+fn test_color_grid_keeps_legacy_positional_mask_argument() {
+    let r = run_with_stdlib(
+        "
+        let result = len(mesh_triangle_set(ColorGrid(|pos, idx| [1, 0, 0, 1], [0, 1, 3], [0, 1, 3], |pos| pos[0] < 0.5)))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(4);
 }
 
 #[test]

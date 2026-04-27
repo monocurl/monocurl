@@ -1,4 +1,5 @@
 mod bend;
+mod camera;
 mod trans;
 mod write;
 

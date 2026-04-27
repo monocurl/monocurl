@@ -83,6 +83,7 @@ pub async fn abs(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
     match executor.state.stack(stack_idx).read_at(-1) {
         Value::Integer(n) => Ok(Value::Integer(n.abs())),
         Value::Float(f) => Ok(Value::Float(f.abs())),
+        Value::Complex { re, im } => Ok(Value::Float(re.hypot(*im))),
         other => Err(ExecutorError::type_error_for(
             "number",
             other.type_name(),

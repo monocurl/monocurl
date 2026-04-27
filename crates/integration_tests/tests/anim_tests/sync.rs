@@ -140,6 +140,47 @@ fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
 }
 
 #[test]
+fn test_camera_lerp_uses_native_spherical_up_interpolation() {
+    let r = run_anim_impl(
+        &[(
+            "
+            camera = Camera([0, 0, 0], [0, 0, 1], [0, 1, 0], 0.1, 10)
+            play Set(&camera)
+
+            camera = Camera([2, 0, 0], [2, 1, 0], [0, 0, 1], 0.5, 20)
+            play CameraLerp(&camera, 1, linear)
+        ",
+            SectionType::Slide,
+        )],
+        0,
+        0.5,
+        &stdlib_bundles(["anim", "scene"]),
+    );
+    r.assert_ok();
+
+    let camera = r
+        .param_leaders()
+        .into_iter()
+        .find(|leader| camera_kind(&leader.current).as_deref() == Some("camera"))
+        .expect("expected camera leader");
+
+    assert_vec3_close(
+        camera_vec3_field(&camera.current, "position"),
+        [1.0, 0.0, 0.0],
+    );
+    assert_vec3_close(
+        camera_vec3_field(&camera.current, "look_at"),
+        [1.0, 0.5, 0.5],
+    );
+    assert_vec3_close(
+        camera_vec3_field(&camera.current, "up"),
+        [0.0, 0.5_f64.sqrt(), 0.5_f64.sqrt()],
+    );
+    assert_close(camera_number_field(&camera.current, "near"), 0.3);
+    assert_close(camera_number_field(&camera.current, "far"), 15.0);
+}
+
+#[test]
 fn test_ref_mutation_of_live_function_argument_does_not_panic() {
     let r = run_anim_impl(
         &[(
@@ -163,6 +204,69 @@ fn test_ref_mutation_of_live_function_argument_does_not_panic() {
             .all(|error| !error.contains("Expected Lvalue")),
         "executor should not panic with force_elide_lvalue: {:?}",
         r.errors
+    );
+}
+
+fn camera_kind(value: &Value) -> Option<String> {
+    match camera_field(value, "kind") {
+        Value::String(kind) => Some(kind),
+        _ => None,
+    }
+}
+
+fn camera_vec3_field(value: &Value, field: &'static str) -> [f64; 3] {
+    let field_value = camera_field(value, field);
+    let Value::List(list) = field_value else {
+        panic!("expected camera.{field} to be a list");
+    };
+    assert_eq!(list.len(), 3, "expected camera.{field} to have length 3");
+
+    let mut out = [0.0; 3];
+    for (slot, elem) in out.iter_mut().zip(list.elements()) {
+        *slot = match with_heap(|h| h.get(elem.key()).clone()).elide_lvalue_leader_rec() {
+            Value::Integer(n) => n as f64,
+            Value::Float(f) => f,
+            other => panic!(
+                "expected camera.{field} component to be numeric, got {}",
+                other.type_name()
+            ),
+        };
+    }
+    out
+}
+
+fn camera_number_field(value: &Value, field: &'static str) -> f64 {
+    match camera_field(value, field).elide_lvalue_leader_rec() {
+        Value::Integer(n) => n as f64,
+        Value::Float(f) => f,
+        other => panic!(
+            "expected camera.{field} to be numeric, got {}",
+            other.type_name()
+        ),
+    }
+}
+
+fn camera_field(value: &Value, field: &'static str) -> Value {
+    let Value::Map(map) = value.clone().elide_lvalue_leader_rec() else {
+        panic!("expected camera map");
+    };
+    let key = HashableKey::String(field.to_string());
+    let Some(value) = map.get(&key) else {
+        panic!("missing camera.{field}");
+    };
+    with_heap(|h| h.get(value.key()).clone())
+}
+
+fn assert_vec3_close(actual: [f64; 3], expected: [f64; 3]) {
+    for (actual, expected) in actual.into_iter().zip(expected) {
+        assert_close(actual, expected);
+    }
+}
+
+fn assert_close(actual: f64, expected: f64) {
+    assert!(
+        (actual - expected).abs() <= 1e-6,
+        "expected {actual} to be close to {expected}",
     );
 }
 

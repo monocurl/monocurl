@@ -352,19 +352,22 @@ fn format_camera_surface(camera: &CameraSnapshot) -> String {
 fn format_axis_vector(vector: Float3) -> String {
     let mut result = String::new();
 
-    for (axis, value) in [("r", vector.x), ("u", vector.y), ("f", vector.z)] {
+    for (positive_axis, negative_axis, value) in [
+        ("r", "l", vector.x),
+        ("u", "d", vector.y),
+        ("b", "f", vector.z),
+    ] {
         if value.abs() <= 1e-4 {
             continue;
         }
 
-        let magnitude = format_axis_scalar(value.abs());
-        if result.is_empty() {
-            if value < 0.0 {
-                result.push('-');
-            }
-        } else if value < 0.0 {
-            result.push_str(" - ");
+        let axis = if value < 0.0 {
+            negative_axis
         } else {
+            positive_axis
+        };
+        let magnitude = format_axis_scalar(value.abs());
+        if !result.is_empty() {
             result.push_str(" + ");
         }
         result.push_str(&magnitude);
@@ -381,4 +384,25 @@ fn format_axis_vector(vector: Float3) -> String {
 fn format_axis_scalar(value: f32) -> String {
     let rounded = (value * 100.0).round() / 100.0;
     format!("{rounded:.2}")
+}
+
+#[cfg(test)]
+mod tests {
+    use geo::simd::Float3;
+
+    use super::format_axis_vector;
+
+    #[test]
+    fn format_axis_vector_uses_right_handed_depth_literals() {
+        assert_eq!(format_axis_vector(Float3::new(0.0, 0.0, 4.0)), "4.00b");
+        assert_eq!(format_axis_vector(Float3::new(0.0, 0.0, -4.0)), "4.00f");
+    }
+
+    #[test]
+    fn format_axis_vector_uses_directional_suffixes_for_negative_axes() {
+        assert_eq!(
+            format_axis_vector(Float3::new(-1.0, -2.0, 3.0)),
+            "1.00l + 2.00d + 3.00b"
+        );
+    }
 }

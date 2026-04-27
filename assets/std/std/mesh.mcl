@@ -111,7 +111,13 @@ let Image = |name, center = [0, 0, 0], size = [1, 1]| {
     return __monocurl__native__ mk_image(name, center, width, height)
 }
 
-let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], mask = |pos| 1| {
+let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], smooth = 0, mask = |pos| 1| {
+    var actual_smooth = smooth
+    var actual_mask = mask
+    if (__monocurl__native__ is_callable(smooth)) {
+        actual_mask = smooth
+        actual_smooth = 0
+    }
     var x_min = 0
     var x_max = 0
     var x_samples = 0
@@ -120,7 +126,7 @@ let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = 
     var y_samples = 0
     [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
     [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
-    return __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, mask, color_at)
+    return __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, actual_smooth, actual_mask, color_at)
 }
 
 let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], mask = |pos| 1| {
@@ -157,23 +163,23 @@ let Number = |value, decimal_places = nil, include_sign = 0|
 
 # graphing
 
-let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacing = 0.25, major_tick_rate = 4, label_map = |x| x| {
+let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacing = 0.25, major_tick_rate = 4, label_map = (|x| x), arrow_extrusion = 0.2| {
     if (axis != "x" and axis != "y" and axis != "z") {
         return __monocurl__native__ runtime_error("axis_style axis must be x, y, or z")
     }
-    let style = [min, max, axis_title, tick_spacing, major_tick_rate, label_map]
+    let style = [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion]
     let name = axis + "_axis"
     let go = |level| __monocurl__native__ set_default(target, name, style, level)
     return [go(level: 0), go(level: 1)]
 }
 
-let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis1d(0l, basis, normal, color, x_axis)
 
-let Axis2d = |basis = [1r, 1u], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x], y_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+let Axis2d = |basis = [1r, 1u], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis2d(0l, basis, color, x_axis, y_axis, grid_color)
 
-let Axis3d = |basis = [1r, 1u, 1b], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x], y_axis = [-5, 5, nil, 0.25, 4, |x| x], z_axis = [-5, 5, nil, 0.25, 4, |x| x]|
+let Axis3d = |basis = [1r, 1u, 1b], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], z_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis3d(0l, basis, color, x_axis, y_axis, z_axis, grid_color)
 
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
