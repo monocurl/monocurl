@@ -335,9 +335,10 @@ fn parse_image_command(args: &[OsString]) -> Result<CliAction> {
     );
     let timestamp = match (slide, time) {
         (None, None) => ImageTimestampSelection::SceneEnd,
-        (slide, time) => {
-            ImageTimestampSelection::Exact(Timestamp::new(slide.unwrap_or(0), time.unwrap_or(0.0)))
-        }
+        (slide, time) => ImageTimestampSelection::Exact(Timestamp::new(
+            slide.unwrap_or(0) + 1,
+            time.unwrap_or(0.0),
+        )),
     };
 
     Ok(CliAction::Run(CliCommand::Image(ImageCommand {
@@ -673,7 +674,7 @@ mod tests {
 
         assert_eq!(
             command.timestamp,
-            ImageTimestampSelection::Exact(Timestamp::new(2, 1.25))
+            ImageTimestampSelection::Exact(Timestamp::new(3, 1.25))
         );
     }
 

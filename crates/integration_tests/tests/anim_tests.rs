@@ -83,6 +83,7 @@ pub struct AnimResult {
     pub leaders: Vec<LeaderInfo>,
     /// number of user-visible slides in the compiled scene
     pub user_slide_count: usize,
+    pub transcript: Vec<String>,
     pub errors: Vec<String>,
     pub error_spans: Vec<Span8>,
 }
@@ -107,6 +108,18 @@ impl AnimResult {
         self
     }
 
+    pub fn assert_transcript(&self, expected: &[&str]) -> &Self {
+        self.assert_ok();
+        assert_eq!(
+            self.transcript,
+            expected
+                .iter()
+                .map(|entry| entry.to_string())
+                .collect::<Vec<_>>()
+        );
+        self
+    }
+
     pub fn assert_user_slide_count(&self, n: usize) -> &Self {
         assert_eq!(self.user_slide_count, n, "user slide count mismatch");
         self
@@ -122,7 +135,7 @@ impl AnimResult {
     pub fn assert_slide_time_approx(&self, expected: f64, eps: f64) -> &Self {
         let actual = self.slide_time();
         assert!(
-            (actual - expected).abs() < eps,
+            (actual - expected).abs() <= eps,
             "slide time mismatch: expected ~{}, got {}",
             expected,
             actual
@@ -394,6 +407,7 @@ fn build_anim_executor_with_file_path(
             timestamp: Timestamp::default(),
             leaders: vec![],
             user_slide_count: 0,
+            transcript: vec![],
             errors: all_errors,
             error_spans: vec![],
         });
@@ -422,16 +436,14 @@ fn build_anim_executor_with_file_path(
             timestamp: Timestamp::default(),
             leaders: vec![],
             user_slide_count: 0,
+            transcript: vec![],
             errors: compile_errors,
             error_spans: vec![],
         });
     }
 
     let executor = Executor::new(result.bytecode, registry().func_table());
-    let non_slide = executor
-        .user_to_internal_timestamp(Timestamp::new(0, 0.0))
-        .slide;
-    let user_slide_count = executor.total_sections() - non_slide;
+    let user_slide_count = executor.real_slide_count();
 
     Ok((executor, user_slide_count))
 }
@@ -472,12 +484,40 @@ fn collect_anim_result(
         })
         .collect();
 
-    let timestamp = executor.internal_to_user_timestamp(executor.state.timestamp);
+    let transcript = executor
+        .state
+        .transcript
+        .iter_entries()
+        .map(|entry| entry.text().to_string())
+        .collect();
+
+    let mut timestamp = executor.internal_to_user_timestamp(executor.state.timestamp);
+    let visible_timestamp_slide = timestamp.slide.checked_sub(1);
+    if timestamp.time.is_infinite() {
+        timestamp.time = visible_timestamp_slide
+            .and_then(|visible_slide| {
+                executor
+                    .real_slide_durations()
+                    .get(visible_slide)
+                    .copied()
+                    .flatten()
+                    .or_else(|| {
+                        executor
+                            .real_minimum_slide_durations()
+                            .get(visible_slide)
+                            .copied()
+                            .flatten()
+                    })
+            })
+            .unwrap_or_default();
+    }
+    timestamp.slide = visible_timestamp_slide.unwrap_or_default();
 
     AnimResult {
         timestamp,
         leaders,
         user_slide_count,
+        transcript,
         errors: runtime_errors,
         error_spans,
     }
@@ -488,6 +528,18 @@ fn collect_anim_result(
 ///
 /// `stdlib_bundles` are prepended before the user bundle; the user bundle
 /// automatically imports all of them by index.
+fn user_timestamp(slide: usize, time: f64) -> Timestamp {
+    Timestamp::new(slide + 1, time)
+}
+
+fn user_slide_end(slide: usize) -> Timestamp {
+    Timestamp::at_end_of_slide(slide + 1)
+}
+
+fn visible_slide(timestamp: Timestamp) -> Option<usize> {
+    timestamp.slide.checked_sub(1)
+}
+
 fn run_anim_impl(
     slides: &[(&str, SectionType)],
     target_slide: usize,
@@ -500,7 +552,7 @@ fn run_anim_impl(
     };
 
     let internal_target =
-        executor.user_to_internal_timestamp(Timestamp::new(target_slide, target_time));
+        executor.user_to_internal_timestamp(user_timestamp(target_slide, target_time));
 
     let mut runtime_errors: Vec<String> = Vec::new();
     smol::block_on(async {
@@ -526,7 +578,7 @@ fn run_anim_playback_impl(
     };
 
     let internal_start =
-        executor.user_to_internal_timestamp(Timestamp::new(start_slide, start_time));
+        executor.user_to_internal_timestamp(user_timestamp(start_slide, start_time));
 
     let mut runtime_errors = Vec::new();
     smol::block_on(async {

@@ -558,8 +558,7 @@ async fn precompute_slide_durations(
             .copied()
             .flatten()
             .or_else(|| minimum_durations.get(slide).copied().flatten())
-            .unwrap_or_default()
-            .max(0.0);
+            .unwrap_or_default();
         resolved.push(duration);
     }
 
@@ -573,7 +572,7 @@ fn build_frame_targets(slide_durations: &[f64], fps: u32) -> Vec<Timestamp> {
     for (slide, duration) in slide_durations.iter().copied().enumerate() {
         let frame_count = ((duration * fps).ceil() as usize).max(1);
         for frame in 0..frame_count {
-            frames.push(Timestamp::new(slide, frame as f64 / fps));
+            frames.push(Timestamp::new(slide + 1, frame as f64 / fps));
         }
     }
 

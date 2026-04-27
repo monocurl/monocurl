@@ -458,6 +458,18 @@ impl Compiler {
             final_stack_depth: 0,
         });
 
+        if bundle
+            .sections
+            .first()
+            .is_some_and(|section| bundle.is_root() && section.section_type == SectionType::Slide)
+        {
+            self.compile_section(&Section {
+                body: Vec::new(),
+                section_type: SectionType::Init,
+                name: None,
+            });
+        }
+
         for section in &bundle.sections {
             self.compile_section(section);
         }

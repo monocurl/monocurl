@@ -134,6 +134,17 @@ mod test {
         }
     }
 
+    fn root_slide_section(result: &CompileResult) -> &bytecode::SectionBytecode {
+        result
+            .bytecode
+            .sections
+            .iter()
+            .find(|section| {
+                section.flags.is_root_module && !section.flags.is_library && !section.flags.is_init
+            })
+            .expect("expected a root slide section")
+    }
+
     #[test]
     fn test_section_name_is_written_to_bytecode() {
         let bundle = Arc::new(SectionBundle {
@@ -151,7 +162,27 @@ mod test {
 
         let result = test_compile(&[bundle]);
         no_errors(&result);
-        assert_eq!(result.bytecode.sections[1].name.as_deref(), Some("Intro"));
+        assert_eq!(root_slide_section(&result).name.as_deref(), Some("Intro"));
+    }
+
+    #[test]
+    fn test_root_slide_bundle_gets_implicit_init_boundary() {
+        let result = compile_src("let x = 1");
+        no_errors(&result);
+
+        let init = result
+            .bytecode
+            .sections
+            .iter()
+            .find(|section| {
+                section.flags.is_root_module && !section.flags.is_library && section.flags.is_init
+            })
+            .expect("expected implicit root init section");
+
+        assert_eq!(
+            init.instructions,
+            vec![Instruction::SyncAllLeaders, Instruction::EndOfExecutionHead]
+        );
     }
 
     #[test]
@@ -211,8 +242,7 @@ mod test {
         }))];
         let result = compile_stmts(stmts);
         no_errors(&result);
-        // sections[0] is the prelude; user code is in sections[1]
-        let section = &result.bytecode.sections[1];
+        let section = root_slide_section(&result);
         assert!(
             section
                 .instructions
@@ -230,7 +260,7 @@ mod test {
         }))];
         let result = compile_stmts(stmts);
         no_errors(&result);
-        let section = &result.bytecode.sections[1];
+        let section = root_slide_section(&result);
         assert!(
             section
                 .instructions
@@ -534,7 +564,7 @@ mod test {
         no_errors(&result);
 
         let vector_len_idx = registry().index_of("vector_len") as u16;
-        let section = &result.bytecode.sections[2];
+        let section = root_slide_section(&result);
         assert!(
             !section
                 .instructions
@@ -605,7 +635,7 @@ mod test {
         no_errors(&result);
 
         let vector_len_idx = registry().index_of("vector_len") as u16;
-        let section = &result.bytecode.sections[2];
+        let section = root_slide_section(&result);
         assert!(
             section
                 .instructions
@@ -771,7 +801,7 @@ mod test {
             value: s(Expression::Literal(Literal::Int(42))),
         }))]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[1];
+        let sec = root_slide_section(&result);
         assert_eq!(
             sec.instructions,
             vec![
@@ -794,7 +824,7 @@ mod test {
             value: s(Expression::Literal(Literal::Nil)),
         }))]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[1];
+        let sec = root_slide_section(&result);
         assert_eq!(
             sec.instructions,
             vec![
@@ -827,7 +857,7 @@ mod test {
             ))),
         ]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[1];
+        let sec = root_slide_section(&result);
         assert_eq!(
             sec.instructions,
             vec![
@@ -854,7 +884,7 @@ mod test {
             value: s(Expression::Literal(Literal::Int(42))),
         }))]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[1];
+        let sec = root_slide_section(&result);
         assert_eq!(
             sec.instructions,
             vec![
@@ -885,7 +915,7 @@ mod test {
             })),
         }))]);
         no_errors(&result);
-        let sec = &result.bytecode.sections[1];
+        let sec = root_slide_section(&result);
         // [0] Jump{to:3}  [1] PushCopy{-1}  [2] Return{-1}  [3] MakeLambda{proto:0,cap:0}
         // [4] PushVar  [5] EndOfExecutionHead
         assert!(matches!(
@@ -927,7 +957,7 @@ mod test {
         let result = compile_src("let f = |&x, y = 1, &z = 2| x");
         no_errors(&result);
 
-        let sec = &result.bytecode.sections[1];
+        let sec = root_slide_section(&result);
         assert_eq!(sec.lambda_prototypes.len(), 1);
         assert_eq!(
             sec.lambda_prototypes[0].reference_args,
@@ -945,7 +975,7 @@ mod test {
         );
         no_errors(&result);
 
-        let sec = &result.bytecode.sections[1];
+        let sec = root_slide_section(&result);
         let convert_vars = sec
             .instructions
             .iter()

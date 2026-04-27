@@ -12,24 +12,32 @@ use crate::{
 use super::{ExecSingle, Executor, SeekPrimitiveResult, prepare_eager_call_args};
 
 impl Executor {
-    fn mark_section_as_started_playing(&mut self) {
-        self.state.timestamp.time = self.state.timestamp.time.max(0.0);
-    }
-
     fn primitive_anim_duration(prim: &PrimitiveAnim) -> f64 {
         match prim {
             PrimitiveAnim::Lerp { time, .. } => *time,
             PrimitiveAnim::Set { .. } => 0.0,
             PrimitiveAnim::Wait { time } => *time,
         }
-        .max(f64::MIN_POSITIVE)
+    }
+
+    fn finish_current_section(&mut self) {
+        debug_assert!(self.state.execution_heads.is_empty());
+        debug_assert!(self.state.primitive_anims.is_empty());
+        debug_assert!(
+            self.state.timestamp.time >= 0.0,
+            "section completion requires a non-negative timestamp"
+        );
+
+        self.note_current_timestamp_in_cache();
+        self.state.timestamp.time = f64::INFINITY;
+        self.save_cache();
     }
 
     pub fn advance_section(&mut self) {
         debug_assert!(self.state.execution_heads.is_empty());
-
-        self.mark_section_as_started_playing();
-        self.save_cache();
+        debug_assert!(self.state.primitive_anims.is_empty());
+        debug_assert!(self.state.timestamp.time.is_infinite());
+        debug_assert!(self.state.timestamp.slide + 1 < self.bytecode.sections.len());
 
         let mut heads = BTreeSet::new();
         heads.insert(ExecutionState::ROOT_STACK_IDX);
@@ -39,8 +47,7 @@ impl Executor {
         let ip = ((self.state.timestamp.slide + 1) as u16, 0);
         self.state.stack_mut(ExecutionState::ROOT_STACK_IDX).ip = ip;
         self.state.timestamp.slide += 1;
-        // "unplayed" state
-        self.state.timestamp.time = -f64::MIN_POSITIVE;
+        self.state.timestamp.time = 0.0;
     }
 
     async fn seek_primitive_anim(&mut self) -> SeekPrimitiveResult {
@@ -76,30 +83,26 @@ impl Executor {
         }
     }
 
-    async fn seek_primitive_anim_skip(
-        &mut self,
-        max_slide: usize,
-        stop_before_section: bool,
-    ) -> SeekPrimitiveAnimSkipResult {
+    async fn seek_primitive_anim_skip(&mut self, max_slide: usize) -> SeekPrimitiveAnimSkipResult {
         loop {
             self.tick_yielder().await;
 
-            if stop_before_section && self.state.timestamp.slide >= max_slide {
-                return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
+            if self.state.timestamp.time.is_infinite() {
+                if self.state.timestamp.slide < max_slide
+                    && self.state.timestamp.slide + 1 < self.bytecode.sections.len()
+                {
+                    self.advance_section();
+                } else {
+                    return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
+                }
             }
 
             match self.seek_primitive_anim().await {
                 SeekPrimitiveResult::EndOfSection => {
-                    if self.state.timestamp.slide < max_slide
-                        && self.state.timestamp.slide + 1 < self.bytecode.sections.len()
+                    self.finish_current_section();
+                    if self.state.timestamp.slide >= max_slide
+                        || self.state.timestamp.slide + 1 >= self.bytecode.sections.len()
                     {
-                        self.advance_section();
-                    } else {
-                        // (edge case with zero length slides)
-                        let old = self.state.timestamp;
-                        self.mark_section_as_started_playing();
-                        self.save_cache();
-                        self.state.timestamp = old;
                         return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
                     }
                 }
@@ -169,21 +172,17 @@ impl Executor {
         self.state.pending_playback_time += dt;
 
         while self.state.pending_playback_time > 0.0 {
-            match self.seek_primitive_anim_skip(max_slide, false).await {
+            match self.seek_primitive_anim_skip(max_slide).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
-                    self.mark_section_as_started_playing();
                     self.state.pending_playback_time = 0.0;
                     return Ok(false);
                 }
                 SeekPrimitiveAnimSkipResult::Error(e) => {
-                    self.mark_section_as_started_playing();
                     self.state.pending_playback_time = 0.0;
                     return Err(e);
                 }
             }
-
-            self.mark_section_as_started_playing();
 
             let next_end = self
                 .state
@@ -192,9 +191,13 @@ impl Executor {
                 .map(|b| b.end_time)
                 .fold(f64::INFINITY, f64::min);
 
-            let step_dt = (next_end - self.state.timestamp.time)
-                .min(self.state.pending_playback_time)
-                .max(0.0);
+            let step_dt =
+                (next_end - self.state.timestamp.time).min(self.state.pending_playback_time);
+            debug_assert!(
+                step_dt >= 0.0,
+                "playback step must be non-negative: current={:?}, next_end={next_end}",
+                self.state.timestamp
+            );
 
             self.step_primitive_anims(step_dt).await?;
             self.state.pending_playback_time -= step_dt;
@@ -225,25 +228,16 @@ impl Executor {
             target
         );
         debug_assert!(
-            !self.state.has_errors(),
-            "advance_to_target requires a non-error executor state"
+            !self.state.has_errors()
         );
         debug_assert_eq!(
-            self.state.pending_playback_time, 0.0,
-            "advance_to_target requires no pending playback time"
+            self.state.pending_playback_time, 0.0
         );
 
-        let stop_before_section = target.time < 0.0;
         loop {
-            match self
-                .seek_primitive_anim_skip(target.slide, stop_before_section)
-                .await
-            {
+            match self.seek_primitive_anim_skip(target.slide).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
-                    if self.state.timestamp.slide == target.slide && target.time >= 0.0 {
-                        self.mark_section_as_started_playing();
-                    }
                     return SeekToResult::SeekedTo(self.state.timestamp);
                 }
                 SeekPrimitiveAnimSkipResult::Error(e) => return SeekToResult::Error(e),
@@ -254,14 +248,6 @@ impl Executor {
             {
                 return SeekToResult::SeekedTo(self.state.timestamp);
             }
-            self.mark_section_as_started_playing();
-            // dumb but works (relevant when seeking to exactly 0)
-            if self.state.timestamp.slide == target.slide
-                && self.state.timestamp.time >= target.time
-            {
-                return SeekToResult::SeekedTo(self.state.timestamp);
-            }
-
             let next_end = self
                 .state
                 .primitive_anims
@@ -591,7 +577,11 @@ impl Executor {
     ) -> Result<BakedPrimitiveAnim, ExecutorError> {
         let duration = Self::primitive_anim_duration(&prim);
 
-        let start = self.state.timestamp.time.max(0.0);
+        debug_assert!(
+            self.state.timestamp.time.is_finite() && self.state.timestamp.time >= 0.0,
+            "primitive animations can only be planned at finite timestamps"
+        );
+        let start = self.state.timestamp.time;
         let targets = self.resolve_primitive_anim_targets(parent_stack_idx, &prim, reserved)?;
         let embed = match &prim {
             PrimitiveAnim::Lerp { embed, .. } => embed.as_deref().cloned(),

@@ -8,8 +8,9 @@ fn test_exec_operator_creation_and_invocation() {
         }
         let x = 40
         let result = add{2} x
+        print result
     ");
-    r.assert_elided_int(42);
+    r.assert_transcript(&["42"]);
 }
 
 #[test]
@@ -40,8 +41,9 @@ fn test_exec_operator_chain_invocation() {
         }
         let x = 10
         let result = add{2} mul{3} x
+        print result
     ");
-    r.assert_elided_int(32);
+    r.assert_transcript(&["32"]);
 }
 
 #[test]
@@ -57,8 +59,9 @@ fn test_exec_operator_chain_with_aliases() {
         let inner = mul
         let x = 10
         let result = outer{2} inner{3} x
+        print result
     ");
-    r.assert_elided_int(32);
+    r.assert_transcript(&["32"]);
 }
 
 #[test]
@@ -69,8 +72,9 @@ fn test_exec_operator_chain_same_operator_multiple_times() {
         }
         let x = 10
         let result = add{2} add{3} add{4} x
+        print result
     ");
-    r.assert_elided_int(19);
+    r.assert_transcript(&["19"]);
 }
 
 #[test]
@@ -84,8 +88,9 @@ fn test_exec_operator_may_return_live_operator() {
         }
         let x = 40
         let result = wrap{2} x
+        print result
     ");
-    r.assert_elided_int(42);
+    r.assert_transcript(&["42"]);
 }
 
 #[test]
@@ -165,8 +170,9 @@ fn test_exec_labeled_operator_mutation_updates_downstream_value() {
         var inv = add{amount: 2} 40
         inv.amount = 5
         let result = mul{2} inv
+        print result
     ");
-    r.assert_elided_int(90);
+    r.assert_transcript(&["90"]);
 }
 
 #[test]

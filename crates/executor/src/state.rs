@@ -226,7 +226,7 @@ impl ExecutionState {
     const RNG_TIMESTAMP_BASIS: u64 = 0xA076_1D64_78BD_642F;
 
     pub fn new() -> Self {
-        let timestamp = Timestamp::right_before_slide(0);
+        let timestamp = Timestamp::new(0, 0.0);
         let mut ret = Self {
             timestamp,
             pending_playback_time: 0.0,

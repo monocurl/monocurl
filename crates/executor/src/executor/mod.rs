@@ -17,7 +17,7 @@ use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
 use crate::heap::{heap_replace, with_heap_mut};
-use crate::time::{SignedTimestamp, Timestamp};
+use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
 pub(crate) use self::invoke::{fill_defaults, prepare_eager_call_args};
@@ -39,6 +39,7 @@ enum SeekPrimitiveAnimSkipResult {
     NoAnimsLeft,
 }
 
+#[derive(Debug)]
 pub enum SeekToResult {
     Error(ExecutorError),
     SeekedTo(Timestamp),
@@ -104,22 +105,8 @@ impl Executor {
 
     pub fn user_to_internal_timestamp(&self, user_ts: Timestamp) -> Timestamp {
         Timestamp {
-            slide: user_ts.slide + self.bytecode.non_slide_sections(),
+            slide: user_ts.slide + self.bytecode.library_sections(),
             time: user_ts.time,
-        }
-    }
-
-    pub fn signed_user_to_internal_timestamp(&self, user_ts: SignedTimestamp) -> Timestamp {
-        Timestamp {
-            slide: (user_ts.slide + self.bytecode.non_slide_sections() as isize) as usize,
-            time: user_ts.time,
-        }
-    }
-
-    pub fn internal_to_signed_user_timestamp(&self, internal_ts: Timestamp) -> SignedTimestamp {
-        SignedTimestamp {
-            slide: internal_ts.slide as isize - self.bytecode.non_slide_sections() as isize,
-            time: internal_ts.time,
         }
     }
 
@@ -127,7 +114,7 @@ impl Executor {
         Timestamp {
             slide: internal_ts
                 .slide
-                .saturating_sub(self.bytecode.non_slide_sections()),
+                .saturating_sub(self.bytecode.library_sections()),
             time: internal_ts.time,
         }
     }

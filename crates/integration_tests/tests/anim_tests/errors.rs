@@ -85,7 +85,7 @@ fn test_image_relative_path_resolves_against_scene_file() {
     };
 
     let current = smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -141,7 +141,7 @@ fn test_textured_relative_path_resolves_against_scene_file() {
     };
 
     let current = smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -169,7 +169,7 @@ fn test_root_recorded_error_uses_latest_root_statement_span() {
         };
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -204,7 +204,7 @@ fn test_root_recorded_error_uses_latest_prior_root_section_span() {
     };
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -240,7 +240,7 @@ fn test_scene_snapshot_error_after_play_uses_play_span() {
         };
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -279,7 +279,7 @@ fn test_init_scene_snapshot_type_error_uses_entire_init_section_span() {
     };
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -337,7 +337,7 @@ fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
     };
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -445,7 +445,7 @@ fn test_fade_accepts_stateful_live_mesh_targets() {
     };
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -479,7 +479,7 @@ fn test_custom_lerp_accepts_stateful_live_mesh_targets() {
     };
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -575,7 +575,7 @@ fn test_lerp_live_mesh_lambda_error_callstack_starts_at_play_site() {
         Err(result) => panic!("failed to build executor: {:?}", result.errors),
     };
 
-    let internal_target = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0));
+    let internal_target = executor.user_to_internal_timestamp(user_timestamp(0, 0.0));
     smol::block_on(async {
         let _ = executor.seek_to(internal_target).await;
         let _ = executor

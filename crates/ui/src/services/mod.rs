@@ -31,6 +31,40 @@ pub(crate) use execution::{
     ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue, PlaybackMode,
 };
 
+fn scene_boundary_slide(timestamp: Timestamp, slide_count: usize) -> usize {
+    timestamp.slide.min(slide_count)
+}
+
+fn previous_slide_target(timestamp: Timestamp, slide_count: usize) -> Timestamp {
+    if slide_count == 0 {
+        return Timestamp::default();
+    }
+
+    Timestamp::at_end_of_slide(scene_boundary_slide(timestamp, slide_count).saturating_sub(1))
+}
+
+fn next_slide_target(timestamp: Timestamp, slide_count: usize) -> Timestamp {
+    if slide_count == 0 {
+        return Timestamp::default();
+    }
+
+    let slide = scene_boundary_slide(timestamp, slide_count);
+    let target_slide = if timestamp.time.is_infinite() {
+        (slide + 1).min(slide_count)
+    } else {
+        slide
+    };
+    Timestamp::at_end_of_slide(target_slide)
+}
+
+fn scene_end_target(slide_count: usize) -> Timestamp {
+    if slide_count == 0 {
+        Timestamp::default()
+    } else {
+        Timestamp::at_end_of_slide(slide_count)
+    }
+}
+
 pub struct ServiceManager {
     textual_state: Entity<TextualState>,
     execution_state: Entity<ExecutionState>,
@@ -272,10 +306,6 @@ impl ServiceManager {
         })
     }
 
-    pub fn timestamp(&self, cx: &App) -> Timestamp {
-        self.execution_state.read(cx).current_timestamp
-    }
-
     pub fn seek_to(&mut self, target: Timestamp) {
         smol::block_on(async {
             self.execution_tx
@@ -286,27 +316,28 @@ impl ServiceManager {
     }
 
     pub fn prev_slide(&mut self, cx: &App) {
-        let ts = self.timestamp(cx);
-        let next = if ts.time >= 0.0 {
-            Timestamp::right_before_slide(ts.slide)
-        } else {
-            Timestamp::right_before_slide(ts.slide.saturating_sub(1))
+        let target = {
+            let execution = self.execution_state.read(cx);
+            previous_slide_target(execution.current_timestamp, execution.slide_count)
         };
-        self.seek_to(next);
+        self.seek_to(target);
     }
 
     pub fn next_slide(&mut self, cx: &App) {
-        let ts = self.timestamp(cx);
-        self.seek_to(Timestamp::right_before_slide(ts.slide + 1));
+        let target = {
+            let execution = self.execution_state.read(cx);
+            next_slide_target(execution.current_timestamp, execution.slide_count)
+        };
+        self.seek_to(target);
     }
 
     pub fn scene_start(&mut self) {
-        self.seek_to(Timestamp::right_before_slide(0));
+        self.seek_to(Timestamp::default());
     }
 
     pub fn scene_end(&mut self, cx: &App) {
         let slide_count = self.execution_state.read(cx).slide_count;
-        self.seek_to(Timestamp::right_before_slide(slide_count));
+        self.seek_to(scene_end_target(slide_count));
     }
 
     pub fn toggle_play(&mut self) {
@@ -342,5 +373,35 @@ impl ServiceManager {
 
     pub fn textual_state(&self) -> &Entity<TextualState> {
         &self.textual_state
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{next_slide_target, previous_slide_target, scene_end_target};
+    use executor::time::Timestamp;
+
+    #[test]
+    fn previous_slide_from_scene_end_goes_to_previous_boundary() {
+        assert_eq!(
+            previous_slide_target(Timestamp::at_end_of_slide(6), 6),
+            Timestamp::at_end_of_slide(5)
+        );
+    }
+
+    #[test]
+    fn previous_slide_clamps_overshot_scene_end() {
+        assert_eq!(
+            previous_slide_target(Timestamp::at_end_of_slide(7), 6),
+            Timestamp::at_end_of_slide(5)
+        );
+    }
+
+    #[test]
+    fn next_slide_from_end_stays_at_scene_end() {
+        assert_eq!(
+            next_slide_target(Timestamp::at_end_of_slide(6), 6),
+            scene_end_target(6)
+        );
     }
 }

@@ -33,7 +33,7 @@ struct SharedRuntimeState {
     has_compiler_error: Cell<bool>,
     has_runtime_error: Cell<bool>,
     playback_mode: Cell<PlaybackMode>,
-    non_slide_sections: Cell<usize>,
+    library_sections: Cell<usize>,
     pending_param_updates: RefCell<Vec<(String, ParameterValue)>>,
     last_update_at: Cell<Instant>,
     snapshot_requested: Cell<bool>,
@@ -42,15 +42,15 @@ struct SharedRuntimeState {
 impl SharedRuntimeState {
     fn new(executor: &Executor) -> Self {
         Self {
-            target: Cell::new(Timestamp::right_before_slide(0)),
+            target: Cell::new(executor.user_to_internal_timestamp(Timestamp::default())),
             current_timestamp: Cell::new(executor.state.timestamp),
             is_playing: Cell::new(false),
             has_compiler_error: Cell::new(true),
             has_runtime_error: Cell::new(false),
             playback_mode: Cell::new(PlaybackMode::Preview),
-            non_slide_sections: Cell::new(
+            library_sections: Cell::new(
                 executor
-                    .user_to_internal_timestamp(Timestamp::right_before_slide(0))
+                    .user_to_internal_timestamp(Timestamp::default())
                     .slide,
             ),
             pending_param_updates: RefCell::new(Vec::new()),
@@ -61,7 +61,7 @@ impl SharedRuntimeState {
 
     fn user_to_internal_timestamp(&self, user_ts: Timestamp) -> Timestamp {
         Timestamp {
-            slide: user_ts.slide + self.non_slide_sections.get(),
+            slide: user_ts.slide + self.library_sections.get(),
             time: user_ts.time,
         }
     }
@@ -140,14 +140,14 @@ impl RuntimeState {
                 if let Some(bytecode) = bytecode {
                     let mut executor = self.executor.borrow_mut();
                     let old_user_timestamp =
-                        executor.internal_to_signed_user_timestamp(self.shared.target.get());
+                        executor.internal_to_user_timestamp(self.shared.target.get());
                     executor.update_bytecode(bytecode);
-                    self.shared.non_slide_sections.set(
+                    self.shared.library_sections.set(
                         executor
-                            .user_to_internal_timestamp(Timestamp::right_before_slide(0))
+                            .user_to_internal_timestamp(Timestamp::default())
                             .slide,
                     );
-                    let target = executor.signed_user_to_internal_timestamp(old_user_timestamp);
+                    let target = executor.user_to_internal_timestamp(old_user_timestamp);
                     self.shared.target.set(target);
                     executor.restore_live_state_to_cache_point(target);
                     self.shared.current_timestamp.set(executor.state.timestamp);
@@ -181,9 +181,9 @@ impl RuntimeState {
                 self.shared.target.set(target);
                 executor.restore_live_state_to_cache_point(target);
                 self.shared.current_timestamp.set(executor.state.timestamp);
-                self.shared.non_slide_sections.set(
+                self.shared.library_sections.set(
                     executor
-                        .user_to_internal_timestamp(Timestamp::right_before_slide(0))
+                        .user_to_internal_timestamp(Timestamp::default())
                         .slide,
                 );
                 self.shared.snapshot_requested.set(true);
@@ -267,10 +267,12 @@ async fn run_play_session_iteration(
     root_text_rope: &Rope<TextAggregate>,
     version: usize,
 ) {
-    let applied_parameters = apply_pending_parameter_updates(executor, shared);
+    if apply_pending_parameter_updates(executor, shared) {
+        shared.snapshot_requested.set(true);
+    }
 
     if shared.has_compiler_error.get() {
-        if shared.snapshot_requested.replace(false) || applied_parameters {
+        if shared.snapshot_requested.get() {
             shared.current_timestamp.set(shared.target.get());
             emit_runtime_snapshot(
                 executor,
@@ -282,6 +284,7 @@ async fn run_play_session_iteration(
                 None,
             )
             .await;
+            shared.snapshot_requested.set(false);
         }
         return;
     }
@@ -291,7 +294,7 @@ async fn run_play_session_iteration(
 
     if executor.state.has_errors() {
         shared.cancel_runtime_work();
-        if shared.snapshot_requested.replace(false) || applied_parameters {
+        if shared.snapshot_requested.get()  {
             emit_runtime_snapshot(
                 executor,
                 shared,
@@ -302,6 +305,7 @@ async fn run_play_session_iteration(
                 None,
             )
             .await;
+            shared.snapshot_requested.set(false);
         }
         return;
     }
@@ -324,7 +328,7 @@ async fn run_play_session_iteration(
         return;
     }
 
-    if shared.snapshot_requested.replace(false) || applied_parameters {
+    if shared.snapshot_requested.get() {
         let scene_snapshot = capture_scene_snapshot(executor, shared)
             .await
             .ok()
@@ -339,6 +343,7 @@ async fn run_play_session_iteration(
             scene_snapshot,
         )
         .await;
+        shared.snapshot_requested.set(false);
         return;
     }
 
@@ -435,7 +440,6 @@ async fn playback_iteration(
     match executor.advance_playback(max_slide, target_dt).await {
         Ok(true) => {}
         Ok(false) => {
-            checked_advance_section(executor, shared);
             shared.is_playing.set(false);
             last_update = Instant::now();
         }
@@ -461,6 +465,7 @@ async fn playback_iteration(
         scene_snapshot,
     )
     .await;
+    shared.snapshot_requested.set(false);
 
     let full_elapsed = Instant::now().duration_since(last_update).as_secs_f64();
     if shared.is_playing.get() && target_dt > full_elapsed {
@@ -470,35 +475,22 @@ async fn playback_iteration(
 
 fn max_slide(executor: &Executor, playback_mode: PlaybackMode) -> usize {
     match playback_mode {
+        PlaybackMode::Presentation if executor.state.timestamp.time.is_infinite() => {
+            (executor.state.timestamp.slide + 1).min(executor.total_sections())
+        }
         PlaybackMode::Presentation => executor.state.timestamp.slide,
         PlaybackMode::Preview => executor.total_sections(),
     }
 }
 
-fn checked_advance_section(executor: &mut Executor, shared: &SharedRuntimeState) {
-    if executor.state.has_errors() {
-        shared.cancel_runtime_work();
-        return;
-    }
-
-    if executor.state.timestamp.slide + 1 >= executor.total_sections() {
-        return;
-    }
-
-    executor.advance_section();
-    if executor.state.has_errors() {
-        shared.cancel_runtime_work();
-    }
-}
-
 fn clamp_target_to_valid_timestamp(executor: &Executor, shared: &SharedRuntimeState) {
-    let min = executor.user_to_internal_timestamp(Timestamp::right_before_slide(0));
+    let min = executor.user_to_internal_timestamp(Timestamp::default());
     let mut target = shared.target.get();
     if target <= min {
         target = min;
     }
 
-    if target.slide >= executor.total_sections() && target.time >= 0.0 {
+    if target.slide >= executor.total_sections() {
         target.slide = executor.total_sections() - 1;
         target.time = f64::INFINITY;
     }
@@ -550,22 +542,7 @@ async fn emit_runtime_snapshot(
 }
 
 fn display_timestamp_for_target(executor: &Executor, target: Timestamp) -> Timestamp {
-    let mut current_timestamp = executor.internal_to_user_timestamp(target);
-    if current_timestamp.time.is_infinite() {
-        debug_assert_eq!(target.slide, executor.total_sections() - 1);
-        current_timestamp.time = executor
-            .real_slide_durations()
-            .last()
-            .copied()
-            .flatten()
-            .or(executor
-                .real_minimum_slide_durations()
-                .last()
-                .copied()
-                .flatten())
-            .unwrap_or_default();
-    }
-    current_timestamp
+    executor.internal_to_user_timestamp(target)
 }
 
 impl ExecutionService {
@@ -696,12 +673,12 @@ mod tests {
         let runtime = RuntimeState::new();
         let current = runtime
             .shared
-            .user_to_internal_timestamp(Timestamp::new(0, 1.0));
+            .user_to_internal_timestamp(Timestamp::new(1, 1.0));
         runtime.shared.current_timestamp.set(current);
         runtime.shared.target.set(current);
 
         assert!(!runtime.requires_future_reset(&ExecutionMessage::SeekTo {
-            target: Timestamp::new(0, 2.0),
+            target: Timestamp::new(1, 2.0),
         }));
     }
 
@@ -710,12 +687,12 @@ mod tests {
         let runtime = RuntimeState::new();
         let current = runtime
             .shared
-            .user_to_internal_timestamp(Timestamp::new(0, 1.0));
+            .user_to_internal_timestamp(Timestamp::new(1, 1.0));
         runtime.shared.current_timestamp.set(current);
         runtime.shared.target.set(current);
 
         assert!(runtime.requires_future_reset(&ExecutionMessage::SeekTo {
-            target: Timestamp::new(0, 0.5),
+            target: Timestamp::new(1, 0.5),
         }));
     }
 
@@ -735,7 +712,7 @@ mod tests {
         runtime.shared.has_runtime_error.set(true);
 
         assert!(runtime.requires_future_reset(&ExecutionMessage::SeekTo {
-            target: Timestamp::new(0, 2.0),
+            target: Timestamp::new(1, 2.0),
         }));
     }
 }

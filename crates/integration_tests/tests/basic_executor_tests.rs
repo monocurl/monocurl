@@ -82,19 +82,6 @@ impl ExecResult {
         }
     }
 
-    fn assert_elided_int(&self, expected: i64) {
-        self.assert_ok();
-        let value = self
-            .value
-            .as_ref()
-            .map(elide_value_for_assert)
-            .unwrap_or(Value::Nil);
-        match value {
-            Value::Integer(n) => assert_eq!(n, expected, "integer mismatch"),
-            other => panic!("expected Integer({}), got {}", expected, other.type_name()),
-        }
-    }
-
     fn assert_nil(&self) {
         self.assert_ok();
         match &self.value {
@@ -235,6 +222,17 @@ impl ExecResult {
         );
     }
 
+    fn assert_transcript(&self, expected: &[&str]) {
+        self.assert_ok();
+        assert_eq!(
+            self.transcript,
+            expected
+                .iter()
+                .map(|entry| entry.to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
     fn assert_first_error_span(&self, expected: Span8) {
         assert!(
             !self._error_spans.is_empty(),
@@ -350,7 +348,7 @@ fn run_section_with_stdlib(
     let mut runtime_errors: Vec<String> = Vec::new();
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(1));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => {

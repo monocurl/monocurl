@@ -5,33 +5,61 @@ use super::*;
 
 const EPSILON_STEP: f64 = 1.0 / 30.0;
 
-fn cached_slide_duration(
-    slide: usize,
+fn visible_slide_for_global(slide: usize) -> Option<usize> {
+    slide.checked_sub(1)
+}
+
+fn scene_boundary_slide(timestamp: Timestamp, slide_count: usize) -> Option<usize> {
+    (slide_count > 0).then_some(timestamp.slide.min(slide_count))
+}
+
+fn cached_visible_slide_duration(
+    visible_slide: usize,
     slide_durations: &[Option<f64>],
     minimum_slide_durations: &[Option<f64>],
 ) -> Option<f64> {
     slide_durations
-        .get(slide)
+        .get(visible_slide)
         .copied()
         .flatten()
-        .or_else(|| minimum_slide_durations.get(slide).copied().flatten())
+        .or_else(|| {
+            minimum_slide_durations
+                .get(visible_slide)
+                .copied()
+                .flatten()
+        })
 }
 
-fn epsilon_forward_target(
-    timestamp: Timestamp,
-    slide_count: usize,
+fn resolved_global_slide_duration(
+    slide: usize,
     slide_durations: &[Option<f64>],
-) -> Timestamp {
-    if slide_count == 0 {
-        return Timestamp::default();
-    }
+    minimum_slide_durations: &[Option<f64>],
+) -> f64 {
+    visible_slide_for_global(slide)
+        .and_then(|visible_slide| {
+            cached_visible_slide_duration(visible_slide, slide_durations, minimum_slide_durations)
+        })
+        .unwrap_or_default()
+}
 
-    if slide_durations.get(timestamp.slide).copied().flatten() == Some(timestamp.time)
-        && timestamp.slide + 1 < slide_count
-    {
-        Timestamp::new(timestamp.slide + 1, EPSILON_STEP)
+fn epsilon_forward_target(timestamp: Timestamp, slide_count: usize) -> Timestamp {
+    let Some(slide) = scene_boundary_slide(timestamp, slide_count) else {
+        return Timestamp::default();
+    };
+    if timestamp.time.is_infinite() && slide < slide_count {
+        Timestamp::new(slide + 1, EPSILON_STEP)
+    } else if timestamp.time.is_infinite() {
+        Timestamp::at_end_of_slide(slide)
     } else {
-        Timestamp::new(timestamp.slide, timestamp.time + EPSILON_STEP)
+        Timestamp::new(slide, timestamp.time + EPSILON_STEP)
+    }
+}
+
+fn step_backward_on_slide(slide: usize, time: f64) -> Timestamp {
+    if time <= EPSILON_STEP {
+        Timestamp::new(slide, 0.0)
+    } else {
+        Timestamp::new(slide, time - EPSILON_STEP)
     }
 }
 
@@ -41,23 +69,36 @@ fn epsilon_backward_target(
     slide_durations: &[Option<f64>],
     minimum_slide_durations: &[Option<f64>],
 ) -> Timestamp {
-    if slide_count == 0 {
+    let Some(slide) = scene_boundary_slide(timestamp, slide_count) else {
         return Timestamp::default();
+    };
+
+    if timestamp.time.is_infinite() {
+        if slide == 0 {
+            return Timestamp::default();
+        }
+
+        let duration =
+            resolved_global_slide_duration(slide, slide_durations, minimum_slide_durations);
+        return step_backward_on_slide(slide, duration);
     }
 
     if timestamp.time > 0.0 {
-        return Timestamp::new(timestamp.slide, (timestamp.time - EPSILON_STEP).max(0.0));
+        return step_backward_on_slide(slide, timestamp.time);
     }
 
-    if timestamp.slide == 0 {
-        return Timestamp::new(0, 0.0);
+    if slide == 0 {
+        return Timestamp::default();
     }
 
-    let prev_slide = timestamp.slide - 1;
-    let prev_duration =
-        cached_slide_duration(prev_slide, slide_durations, minimum_slide_durations).unwrap_or(0.0);
-
-    Timestamp::new(prev_slide, (prev_duration - EPSILON_STEP).max(0.0))
+    let prev_slide = slide - 1;
+    if prev_slide == 0 {
+        Timestamp::default()
+    } else {
+        let prev_duration =
+            resolved_global_slide_duration(prev_slide, slide_durations, minimum_slide_durations);
+        step_backward_on_slide(prev_slide, prev_duration)
+    }
 }
 
 impl DocumentView {
@@ -221,11 +262,7 @@ impl DocumentView {
         self.services.update(cx, |services, cx| {
             let next = {
                 let execution = services.execution_state().read(cx);
-                epsilon_forward_target(
-                    execution.current_timestamp,
-                    execution.slide_count,
-                    &execution.slide_durations,
-                )
+                epsilon_forward_target(execution.current_timestamp, execution.slide_count)
             };
             services.seek_to(next);
         });
@@ -422,36 +459,35 @@ mod tests {
     #[test]
     fn epsilon_backward_wraps_to_previous_slide_end() {
         let target = epsilon_backward_target(
-            Timestamp::new(3, 0.0),
+            Timestamp::new(4, 0.0),
             5,
             &[Some(1.0), Some(2.0), Some(4.0), None, None],
             &[None; 5],
         );
 
-        assert_eq!(target.slide, 2);
+        assert_eq!(target.slide, 3);
         assert!((target.time - (4.0 - EPSILON_STEP)).abs() < 1e-12);
     }
 
     #[test]
-    fn epsilon_forward_wraps_to_next_slide_start() {
-        let target = epsilon_forward_target(
-            Timestamp::new(2, 4.0),
-            5,
-            &[Some(1.0), Some(2.0), Some(4.0), None, None],
-        );
+    fn epsilon_forward_from_slide_end_wraps_to_next_slide_start() {
+        let target = epsilon_forward_target(Timestamp::at_end_of_slide(3), 5);
 
-        assert_eq!(target, Timestamp::new(3, EPSILON_STEP));
+        assert_eq!(target, Timestamp::new(4, EPSILON_STEP));
+    }
+
+    #[test]
+    fn epsilon_forward_at_cached_duration_stays_in_slide() {
+        let target = epsilon_forward_target(Timestamp::new(3, 4.0), 5);
+
+        assert_eq!(target, Timestamp::new(3, 4.0 + EPSILON_STEP));
     }
 
     #[test]
     fn epsilon_forward_inside_slide_stays_in_slide() {
-        let target = epsilon_forward_target(
-            Timestamp::new(2, 1.25),
-            5,
-            &[Some(1.0), Some(2.0), Some(4.0), None, None],
-        );
+        let target = epsilon_forward_target(Timestamp::new(3, 1.25), 5);
 
-        assert_eq!(target, Timestamp::new(2, 1.25 + EPSILON_STEP));
+        assert_eq!(target, Timestamp::new(3, 1.25 + EPSILON_STEP));
     }
 }
 

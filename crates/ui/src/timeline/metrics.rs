@@ -34,11 +34,15 @@ pub(super) fn effective_durations(
     current_slide: usize,
     current_time: f64,
 ) -> Vec<Option<f64>> {
+    let current_visible_slide = current_slide.checked_sub(1);
     (0..slide_count)
         .map(|i| {
             let cached = durations.get(i).and_then(|d| *d);
             let minimum = minimum_durations.get(i).and_then(|d| *d);
-            let inferred = if i == current_slide && current_time > 0.0 {
+            let inferred = if Some(i) == current_visible_slide
+                && current_time.is_finite()
+                && current_time > 0.0
+            {
                 Some(current_time)
             } else {
                 None
@@ -95,16 +99,15 @@ pub(crate) fn visual_slide_time(
     current_time: f64,
     durations: &[Option<f64>],
 ) -> Option<(usize, f64)> {
-    if current_time < 0.0 {
-        if current_slide == 0 {
-            None
-        } else {
-            let prev = current_slide - 1;
-            let prev_dur = durations.get(prev).and_then(|d| *d).unwrap_or(0.0);
-            Some((prev, prev_dur))
-        }
+    let visible_slide = current_slide.checked_sub(1)?;
+    if current_time.is_infinite() {
+        let duration = durations
+            .get(visible_slide)
+            .and_then(|d| *d)
+            .unwrap_or_default();
+        Some((visible_slide, duration))
     } else {
-        Some((current_slide, current_time))
+        Some((visible_slide, current_time))
     }
 }
 

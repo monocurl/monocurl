@@ -12,11 +12,12 @@ use crate::{
 struct CacheEntry {
     state_after: RawHeapSnapshot<ExecutionState>,
     heap_snap: RawHeapSnapshot<VirtualHeap>,
+    slide_duration: f64,
 }
 
 impl CacheEntry {
     pub fn slide_duration(&self) -> f64 {
-        self.state_after.as_ref().timestamp.time.max(0.0)
+        self.slide_duration
     }
 }
 
@@ -40,8 +41,17 @@ impl ExecutionCache {
     }
 
     fn note_timestamp(&mut self, timestamp: Timestamp) {
+        debug_assert!(
+            timestamp.time >= 0.0 || timestamp.time.is_infinite(),
+            "cache timestamps must be non-negative: {:?}",
+            timestamp
+        );
+        if !timestamp.time.is_finite() {
+            return;
+        }
+
         if let Some(minimum) = self.minimum_durations.get_mut(timestamp.slide) {
-            *minimum = Some(minimum.unwrap_or(0.0).max(timestamp.time).max(0.0));
+            *minimum = Some(minimum.unwrap_or(0.0).max(timestamp.time));
         }
     }
 }
@@ -152,11 +162,22 @@ impl Executor {
     pub(crate) fn save_cache(&mut self) {
         assert!(!self.state.has_errors());
         self.cache.note_timestamp(self.state.timestamp);
+        let slide_duration = if self.state.timestamp.time.is_finite() {
+            self.state.timestamp.time
+        } else {
+            self.cache
+                .minimum_durations
+                .get(self.state.timestamp.slide)
+                .copied()
+                .flatten()
+                .unwrap_or_default()
+        };
         let heap_snap = snapshot_heap();
         let state_after = RawHeapSnapshot::new(&self.state);
         self.cache.entries[self.state.timestamp.slide] = Some(CacheEntry {
             state_after,
             heap_snap,
+            slide_duration,
         });
     }
 
@@ -290,6 +311,7 @@ mod tests {
         executor.cache.entries[1] = Some(CacheEntry {
             state_after: RawHeapSnapshot::new(&cached_state),
             heap_snap: snapshot_heap(),
+            slide_duration: 1.0,
         });
 
         executor.update_bytecode(changed);

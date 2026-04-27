@@ -59,7 +59,7 @@ fn test_mesh_append_assign_preserves_snapshot_follower_slot() {
     .unwrap_or_else(|result| panic!("executor should build, got errors: {:?}", result.errors));
 
     smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(target).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("seek failed: {e}"),

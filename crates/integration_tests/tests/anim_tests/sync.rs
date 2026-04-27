@@ -50,13 +50,13 @@ fn test_set_slide_can_seek_back_before_zero_after_finishing() {
     };
 
     smol::block_on(async {
-        let end = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let end = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(end).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
         }
 
-        let start = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0));
+        let start = executor.user_to_internal_timestamp(user_timestamp(0, 0.0));
         match executor.seek_to(start).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -64,8 +64,7 @@ fn test_set_slide_can_seek_back_before_zero_after_finishing() {
     });
 
     let r = collect_anim_result(executor, user_slide_count, vec![]);
-    r.assert_ok()
-        .assert_slide_time_approx(0.0, f64::MIN_POSITIVE);
+    r.assert_ok().assert_slide_time_approx(0.0, 0.0);
     r.param_leaders()[2]
         .assert_target_int(10)
         .assert_current_int(0);
@@ -112,7 +111,7 @@ fn test_mesh_label_mutation_after_set_then_lerp_elides_wrappers() {
     };
 
     smol::block_on(async {
-        let end = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+        let end = executor.user_to_internal_timestamp(user_slide_end(0));
         match executor.seek_to(end).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -209,7 +208,7 @@ fn test_lerp_midpoint_interpolates_live_function_label_mutation() {
     };
 
     let current = smol::block_on(async {
-        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        let mid = executor.user_to_internal_timestamp(user_timestamp(0, 0.5));
         match executor.seek_to(mid).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -247,7 +246,7 @@ fn test_lerp_midpoint_interpolates_live_operator_label_mutation() {
     };
 
     let current = smol::block_on(async {
-        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        let mid = executor.user_to_internal_timestamp(user_timestamp(0, 0.5));
         match executor.seek_to(mid).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -288,7 +287,7 @@ fn test_second_lerp_after_live_operator_mutation_keeps_previous_follower_state()
     };
 
     let current = smol::block_on(async {
-        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 1.5));
+        let mid = executor.user_to_internal_timestamp(user_timestamp(0, 1.5));
         match executor.seek_to(mid).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -331,7 +330,7 @@ fn test_second_lerp_after_live_function_mutation_keeps_previous_follower_state()
     };
 
     let current = smol::block_on(async {
-        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 1.5));
+        let mid = executor.user_to_internal_timestamp(user_timestamp(0, 1.5));
         match executor.seek_to(mid).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -369,7 +368,7 @@ fn test_stroke_operator_lerp_blends_from_identity_embed() {
     };
 
     let current = smol::block_on(async {
-        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        let mid = executor.user_to_internal_timestamp(user_timestamp(0, 0.5));
         match executor.seek_to(mid).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -419,7 +418,7 @@ fn test_point_map_operator_lerp_blends_from_identity_embed() {
     };
 
     let current = smol::block_on(async {
-        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        let mid = executor.user_to_internal_timestamp(user_timestamp(0, 0.5));
         match executor.seek_to(mid).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -549,7 +548,7 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
 
     smol::block_on(async {
         for slide in 0..user_slide_count {
-            let target = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(slide));
+            let target = executor.user_to_internal_timestamp(user_slide_end(slide));
             match executor.seek_to(target).await {
                 SeekToResult::SeekedTo(_) => {}
                 SeekToResult::Error(e) => {
@@ -571,7 +570,7 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
 
             let mut runtime_errors = Vec::new();
             smol::block_on(async {
-                let start = executor.user_to_internal_timestamp(Timestamp::new(slide, 0.0));
+                let start = executor.user_to_internal_timestamp(user_timestamp(slide, 0.0));
                 match executor.seek_to(start).await {
                     SeekToResult::SeekedTo(_) => {}
                     SeekToResult::Error(e) => {
@@ -583,7 +582,7 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
                 let max_slide = executor.total_sections();
                 loop {
                     let current = executor.internal_to_user_timestamp(executor.state.timestamp);
-                    if current.slide > slide {
+                    if visible_slide(current).is_some_and(|current_slide| current_slide > slide) {
                         break;
                     }
 
@@ -742,11 +741,12 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
         (slide4, SectionType::Slide),
         (slide5, SectionType::Slide),
     ];
-    let (mut executor, _) = build_anim_executor(&sections, &bundles)
+    let (mut executor, user_slide_count) = build_anim_executor(&sections, &bundles)
         .unwrap_or_else(|result| panic!("executor should build, got errors: {:?}", result.errors));
+    assert_eq!(user_slide_count, 6);
 
     smol::block_on(async {
-        let prefinal = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(4));
+        let prefinal = executor.user_to_internal_timestamp(user_slide_end(4));
         match executor.seek_to(prefinal).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("seek failed at prefinal slide end: {e}"),
@@ -754,7 +754,7 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
 
         for step in 0..=240 {
             let t = step as f64 / 240.0;
-            let internal = executor.user_to_internal_timestamp(Timestamp::new(5, t));
+            let internal = executor.user_to_internal_timestamp(user_timestamp(5, t));
             match executor.seek_to(internal).await {
                 SeekToResult::SeekedTo(_) => {}
                 SeekToResult::Error(e) => panic!("seek failed at final slide t={t}: {e}"),
@@ -764,6 +764,16 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
                 .await
                 .unwrap_or_else(|e| panic!("snapshot failed at final slide t={t}: {e}"));
         }
+
+        let final_end = executor.user_to_internal_timestamp(user_slide_end(user_slide_count - 1));
+        match executor.seek_to(final_end).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("seek failed at final slide end: {e}"),
+        }
+
+        let scene_end = executor.internal_to_user_timestamp(executor.state.timestamp);
+        assert_eq!(scene_end.slide, user_slide_count);
+        assert!(scene_end.time.is_infinite());
     });
 }
 
@@ -877,7 +887,7 @@ fn test_trans_preserves_fill_separate_from_stroke_at_midpoint() {
     };
 
     let current = smol::block_on(async {
-        let mid = executor.user_to_internal_timestamp(Timestamp::new(0, 0.5));
+        let mid = executor.user_to_internal_timestamp(user_timestamp(0, 0.5));
         match executor.seek_to(mid).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
@@ -917,7 +927,7 @@ fn assert_single_slide_scene_stays_stable<const N: usize>(
     smol::block_on(async {
         for step in 0..=steps {
             let t = step as f64 / steps as f64;
-            let ts = executor.user_to_internal_timestamp(Timestamp::new(0, t));
+            let ts = executor.user_to_internal_timestamp(user_timestamp(0, t));
             match executor.seek_to(ts).await {
                 SeekToResult::SeekedTo(_) => {}
                 SeekToResult::Error(e) => panic!("seek failed at t={t}: {e}"),
@@ -1097,7 +1107,7 @@ fn test_scale_scales_text_about_global_tree_center() {
 
     let (plain_center, plain_leaf_centers, scaled_center, scaled_leaf_centers) =
         smol::block_on(async {
-            let plain_ts = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(0));
+            let plain_ts = executor.user_to_internal_timestamp(user_slide_end(0));
             match executor.seek_to(plain_ts).await {
                 SeekToResult::SeekedTo(_) => {}
                 SeekToResult::Error(e) => panic!("seek failed at plain text state: {e}"),
@@ -1107,7 +1117,7 @@ fn test_scale_scales_text_about_global_tree_center() {
             let plain_leaf_centers = value_leaf_box_centers(&plain);
             drop(plain);
 
-            let scaled_ts = executor.user_to_internal_timestamp(Timestamp::at_end_of_slide(1));
+            let scaled_ts = executor.user_to_internal_timestamp(user_slide_end(1));
             match executor.seek_to(scaled_ts).await {
                 SeekToResult::SeekedTo(_) => {}
                 SeekToResult::Error(e) => panic!("seek failed at scaled text state: {e}"),
@@ -1196,21 +1206,21 @@ fn test_lerp_midpoint_interpolates_explicit_func_mesh_after_init_sync() {
     };
 
     let (start_sum, mid_sum, end_sum) = smol::block_on(async {
-        let start_ts = executor.user_to_internal_timestamp(Timestamp::new(0, 0.0));
+        let start_ts = executor.user_to_internal_timestamp(user_timestamp(0, 0.0));
         match executor.seek_to(start_ts).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected start seek error: {e}"),
         }
         let start = current_mesh_leader_value(&mut executor).await;
 
-        let mid_ts = executor.user_to_internal_timestamp(Timestamp::new(0, 2.0));
+        let mid_ts = executor.user_to_internal_timestamp(user_timestamp(0, 2.0));
         match executor.seek_to(mid_ts).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected midpoint seek error: {e}"),
         }
         let mid = current_mesh_leader_value(&mut executor).await;
 
-        let end_ts = executor.user_to_internal_timestamp(Timestamp::new(0, 4.0));
+        let end_ts = executor.user_to_internal_timestamp(user_timestamp(0, 4.0));
         match executor.seek_to(end_ts).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("unexpected end seek error: {e}"),
@@ -1262,7 +1272,7 @@ fn test_text_trans_h_to_b_preserves_hole_winding_at_end() {
     };
 
     let current = smol::block_on(async {
-        let end = executor.user_to_internal_timestamp(Timestamp::new(0, 1.0));
+        let end = executor.user_to_internal_timestamp(user_timestamp(0, 1.0));
         match executor.seek_to(end).await {
             SeekToResult::SeekedTo(_) => {}
             SeekToResult::Error(e) => panic!("seek failed at end: {e}"),

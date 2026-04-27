@@ -224,11 +224,8 @@ impl Render for Timeline {
                                 let bx = slide_xs[i];
                                 let gw = gap_ws[i];
                                 if local_x >= bx && local_x < bx + SLIDE_W {
-                                    services
-                                        .update(cx, |s, _| {
-                                            s.seek_to(Timestamp::right_before_slide(i))
-                                        })
-                                        .ok();
+                                    let target = Timestamp::at_end_of_slide(i);
+                                    services.update(cx, |s, _| s.seek_to(target)).ok();
                                     return;
                                 }
                                 let gap_start = bx + SLIDE_W;
@@ -240,7 +237,7 @@ impl Render for Timeline {
                                 if local_x >= gap_start && local_x < gap_end {
                                     let t = ((local_x - gap_start) / (PX_PER_SEC * zoom)) as f64;
                                     services
-                                        .update(cx, |s, _| s.seek_to(Timestamp::new(i, t.max(0.0))))
+                                        .update(cx, |s, _| s.seek_to(Timestamp::new(i + 1, t)))
                                         .ok();
                                     return;
                                 }

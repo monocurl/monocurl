@@ -3,7 +3,7 @@
 // stateful operators/subscripts, caching, error cases, and interaction with animations.
 
 use anim_tests::{LeaderInfo, run_anim, run_anim_with_stdlib, run_anim_with_stdlib_at};
-use executor::{heap::with_heap, value::Value};
+use executor::value::Value;
 
 // anim_tests helpers are in a sibling test file; re-export by including it
 #[path = "anim_tests.rs"]
@@ -356,118 +356,98 @@ fn test_stateful_add_after_set_animation() {
 
 #[test]
 fn test_mesh_assign_to_var_no_alias() {
-    // the original aliasing bug: var y = x shared leader_rc, so y = 20 also wrote x
     let r = run_anim(
         "
         mesh x = 0
         var y = x
         y = 20
+        print x
     ",
     );
-    r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 0, 0);
+    r.assert_transcript(&["0"]);
 }
 
 #[test]
 fn test_mesh_two_vars_from_same_mesh_are_independent() {
-    // a and b both initialised from the same mesh x; mutating b must leave x and a untouched
     let r = run_anim(
         "
         mesh x = 5
         var a = x
         var b = x
         b = 99
+        print x
+        print a
     ",
     );
-    r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 0, 5);
+    r.assert_transcript(&["5", "5"]);
 }
 
 #[test]
 fn test_mesh_var_chain_no_alias() {
-    // z → y → x chain: assigning to z must not touch x
     let r = run_anim(
         "
         mesh x = 0
         var y = x
         var z = y
         z = 99
+        print x
+        print y
     ",
     );
-    r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 0, 0);
+    r.assert_transcript(&["0", "0"]);
 }
 
 #[test]
 fn test_mesh_var_alias_mutation_then_read_mesh_unchanged() {
-    // mutate via alias then read mesh directly to confirm it kept its original value
     let r = run_anim(
         "
         mesh x = 42
         var y = x
         y = 7
-        let result = *x
+        print x
     ",
     );
-    r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 0, 42);
+    r.assert_transcript(&["42"]);
 }
 
 #[test]
 fn test_param_deref_copy_to_var_no_alias() {
-    // *x copies the leader value; assigning to y must not change param x
     let r = run_anim(
         "
         param x = 10
         var y = *x
         y = 20
+        print *x
     ",
     );
-    r.assert_ok();
-    r.param_leaders()[2].assert_target_int(10);
+    r.assert_transcript(&["10"]);
 }
 
 #[test]
 fn test_two_meshes_from_same_value_are_independent() {
-    // two separate meshes initialised to the same integer; modifying one must not affect the other
     let r = run_anim(
         "
         mesh a = 5
         mesh b = 5
         a = 99
+        print a
+        print b
     ",
     );
-    r.assert_ok();
-    assert_mesh_target_int(&r.leaders, 0, 99);
-    assert_mesh_target_int(&r.leaders, 1, 5);
+    r.assert_transcript(&["99", "5"]);
 }
 
 #[test]
 fn test_mesh_list_copy_no_alias() {
-    // copying a list out of a mesh into a var must deep-copy; mutation of the copy must not touch mesh
     let r = run_anim(
         "
         mesh x = [1, 2, 3]
         var y = x
         y[0] = 99
-        let result = (*x)[0]
+        print x[0]
     ",
     );
-    r.assert_ok();
-    // x's leader value should still have 1 at index 0
-    match &r
-        .leaders
-        .iter()
-        .find(|l| l.kind == executor::state::LeaderKind::Mesh)
-        .unwrap()
-        .target
-    {
-        Value::List(list) => match with_heap(|h| h.get(list.elements()[0].key()).clone()) {
-            Value::Integer(n) => assert_eq!(n, 1, "mesh list element 0 should be unchanged"),
-            other => panic!("expected integer, got {}", other.type_name()),
-        },
-        other => panic!("expected list, got {}", other.type_name()),
-    }
+    r.assert_transcript(&["1"]);
 }
 
 // ── lambda return stateful: compile-time error (rule 2) ───────────────────────
