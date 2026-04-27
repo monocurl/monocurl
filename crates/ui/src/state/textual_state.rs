@@ -297,6 +297,7 @@ pub struct ParameterPositionHint {
     pub active_index: usize,
     pub function_start: Location8,
     pub is_operator: bool,
+    pub prefer_up: bool,
 }
 
 #[derive(Clone, Debug, Default)]

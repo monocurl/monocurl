@@ -143,6 +143,7 @@ impl PopoverElement {
         Some(ParameterHintPopoverState {
             parameter_hint_state: state.parameter_position_state(),
             pos_in_container: pos,
+            prefer_up: hint.prefer_up,
         })
     }
 
@@ -586,6 +587,7 @@ struct AutoCompletePopoverState {
 struct ParameterHintPopoverState {
     parameter_hint_state: Rc<RefCell<ParameterPositionState>>,
     pos_in_container: Point<Pixels>,
+    prefer_up: bool,
 }
 
 struct ChildElementState {
@@ -658,7 +660,7 @@ impl Element for PopoverElement {
             children.push(ChildElementState {
                 popover_content,
                 pos_in_container,
-                prefer_up: false,
+                prefer_up: parameter_hint.prefer_up,
                 content_layout_id,
             });
         }
