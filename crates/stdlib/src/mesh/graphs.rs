@@ -7,6 +7,7 @@ use executor::{
     value::Value,
 };
 use geo::{
+    mesh::Mesh,
     mesh_build::SurfaceVertex,
     simd::{Float2, Float3, Float4},
 };
@@ -1966,6 +1967,7 @@ pub async fn mk_explicit_diff(
             tris,
             uniform: geo::mesh::Uniforms::default(),
             tag,
+            version: Mesh::fresh_version(),
         };
         mesh.debug_assert_consistent_topology();
         Value::Mesh(std::sync::Arc::new(mesh))

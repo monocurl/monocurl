@@ -569,6 +569,7 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
         let mesh = Mesh {
             dots: vec![Dot {
@@ -596,8 +597,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         append_mesh_into(&mut out, &mesh);
 
         assert_eq!(out.dots[0].inv, mesh_ref(1));

@@ -6,7 +6,7 @@ use std::{
 };
 
 use executor::{
-    executor::{Executor, SeekToResult, TextRenderQuality},
+    executor::{Executor, PlaybackAdvance, SeekToResult, TextRenderQuality},
     scene_snapshot::SceneSnapshot,
     time::Timestamp,
 };
@@ -425,23 +425,23 @@ async fn playback_iteration(
     root_text_rope: &Rope<TextAggregate>,
     version: usize,
 ) {
-    let mut last_update = shared.last_update_at.get();
     let tick_started_at = Instant::now();
-    let elapsed = (tick_started_at - shared.last_update_at.get()).as_secs_f64();
-    let target_dt = shared
-        .playback_mode
-        .get()
-        .default_time_interval()
-        .max(elapsed);
+    let elapsed = tick_started_at
+        .duration_since(shared.last_update_at.get())
+        .as_secs_f64();
+    let frame_interval =
+        Duration::from_secs_f64(shared.playback_mode.get().default_time_interval());
     let max_slide = max_slide(executor, shared.playback_mode.get());
 
-    shared.last_update_at.set(Instant::now());
+    shared.last_update_at.set(tick_started_at);
 
-    match executor.advance_playback(max_slide, target_dt).await {
-        Ok(true) => {}
-        Ok(false) => {
+    match executor.advance_playback(max_slide, elapsed).await {
+        Ok(PlaybackAdvance::Advanced) => {}
+        Ok(PlaybackAdvance::PreparedSection) => {
+            shared.last_update_at.set(Instant::now());
+        }
+        Ok(PlaybackAdvance::Finished) => {
             shared.is_playing.set(false);
-            last_update = Instant::now();
         }
         Err(_) => {
             shared.cancel_runtime_work();
@@ -467,9 +467,9 @@ async fn playback_iteration(
     .await;
     shared.snapshot_requested.set(false);
 
-    let full_elapsed = Instant::now().duration_since(last_update).as_secs_f64();
-    if shared.is_playing.get() && target_dt > full_elapsed {
-        Timer::after(Duration::from_secs_f64(target_dt - full_elapsed)).await;
+    let frame_elapsed = tick_started_at.elapsed();
+    if shared.is_playing.get() && frame_interval > frame_elapsed {
+        Timer::after(frame_interval - frame_elapsed).await;
     }
 }
 

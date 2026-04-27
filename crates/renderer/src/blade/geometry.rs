@@ -290,8 +290,8 @@ mod tests {
             ],
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         };
-
         let vertices = build_line_vertices(&mesh);
         assert_eq!(vertices.len(), LINE_VERTICES_PER_INSTANCE as usize);
         assert_eq!(vertices[0].pos, [1.0, 0.0, 0.0, 0.0]);
@@ -329,8 +329,8 @@ mod tests {
             ],
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         };
-
         let vertices = build_line_vertices(&mesh);
         assert!(vertices.is_empty());
     }
@@ -362,8 +362,8 @@ mod tests {
             ],
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         };
-
         let vertices = build_line_vertices(&mesh);
         assert!(vertices.is_empty());
     }
@@ -395,8 +395,8 @@ mod tests {
             ],
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         };
-
         let vertices = build_line_vertices(&mesh);
         assert_eq!(vertices.len(), (LINE_VERTICES_PER_INSTANCE * 2) as usize);
         assert_eq!(vertices[5].prev_tangent, [0.0, 0.0, 0.0, 0.0]);
@@ -430,8 +430,8 @@ mod tests {
             ],
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         };
-
         let vertices = build_line_vertices(&mesh);
         assert_eq!(vertices[0].tangent, [1.0, 0.0, 0.0, 0.0]);
         assert_eq!(vertices[6].tangent, [-1.0, -0.0, -0.0, 0.0]);
@@ -506,6 +506,7 @@ mod tests {
             lins: Vec::new(),
             uniform,
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         }
     }
 }

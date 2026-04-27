@@ -85,6 +85,7 @@ pub struct RuntimeError {
     pub error: ExecutorError,
     pub span: Span8,
     pub callstack: Vec<RuntimeCallFrame>,
+    pub hint: Option<String>,
 }
 
 impl ExecutorError {
@@ -340,7 +341,11 @@ impl std::error::Error for ExecutorError {}
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.error.fmt(f)
+        self.error.fmt(f)?;
+        if let Some(hint) = &self.hint {
+            write!(f, "\n\nhint: {hint}")?;
+        }
+        Ok(())
     }
 }
 

@@ -12,7 +12,7 @@ use compiler::cache::CompilerCache;
 use executor::{
     camera::parse_camera_value,
     error::ExecutorError,
-    executor::{Executor, SeekToResult},
+    executor::{Executor, PlaybackAdvance, SeekToResult},
     heap::{VRc, with_heap},
     state::LeaderKind,
     time::Timestamp,
@@ -593,8 +593,8 @@ fn run_anim_playback_impl(
         let max_slide = executor.total_sections();
         loop {
             match executor.advance_playback(max_slide, dt).await {
-                Ok(true) => {}
-                Ok(false) => break,
+                Ok(PlaybackAdvance::Advanced | PlaybackAdvance::PreparedSection) => {}
+                Ok(PlaybackAdvance::Finished) => break,
                 Err(e) => {
                     runtime_errors.push(e.to_string());
                     break;

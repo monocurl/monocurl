@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     error::ExecutorError,
-    executor::{SeekPrimitiveAnimSkipResult, SeekToResult},
+    executor::{PlaybackAdvance, SeekPrimitiveAnimSkipResult, SeekToResult},
     heap::{VRc, heap_replace, with_heap, with_heap_mut},
     state::{BakedPrimitiveAnim, ExecutionState},
     time::Timestamp,
@@ -84,6 +84,7 @@ impl Executor {
     }
 
     async fn seek_primitive_anim_skip(&mut self, max_slide: usize) -> SeekPrimitiveAnimSkipResult {
+        let mut advanced_section = false;
         loop {
             self.tick_yielder().await;
 
@@ -92,6 +93,7 @@ impl Executor {
                     && self.state.timestamp.slide + 1 < self.bytecode.sections.len()
                 {
                     self.advance_section();
+                    advanced_section = true;
                 } else {
                     return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
                 }
@@ -113,7 +115,7 @@ impl Executor {
             }
         }
 
-        SeekPrimitiveAnimSkipResult::PrimitiveAnim
+        SeekPrimitiveAnimSkipResult::PrimitiveAnim { advanced_section }
     }
 
     async fn step_primitive_anims(&mut self, dt: f64) -> Result<(), ExecutorError> {
@@ -162,21 +164,27 @@ impl Executor {
         Ok(())
     }
 
-    /// returns Ok(true) if there may be more anims to step through, Ok(false) if we've reached the end of the section, or Err if an error was encountered
+    /// advances playback by `dt`, stopping before spending frame time on the
+    /// first primitive prepared after a section transition.
     pub async fn advance_playback(
         &mut self,
         max_slide: usize,
         dt: f64,
-    ) -> Result<bool, ExecutorError> {
+    ) -> Result<PlaybackAdvance, ExecutorError> {
         debug_assert!(dt >= 0.0);
         self.state.pending_playback_time += dt;
 
         while self.state.pending_playback_time > 0.0 {
             match self.seek_primitive_anim_skip(max_slide).await {
-                SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
+                SeekPrimitiveAnimSkipResult::PrimitiveAnim { advanced_section } => {
+                    if advanced_section {
+                        self.state.pending_playback_time = 0.0;
+                        return Ok(PlaybackAdvance::PreparedSection);
+                    }
+                }
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
                     self.state.pending_playback_time = 0.0;
-                    return Ok(false);
+                    return Ok(PlaybackAdvance::Finished);
                 }
                 SeekPrimitiveAnimSkipResult::Error(e) => {
                     self.state.pending_playback_time = 0.0;
@@ -203,7 +211,7 @@ impl Executor {
             self.state.pending_playback_time -= step_dt;
         }
 
-        Ok(true)
+        Ok(PlaybackAdvance::Advanced)
     }
 
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
@@ -232,7 +240,7 @@ impl Executor {
 
         loop {
             match self.seek_primitive_anim_skip(target.slide).await {
-                SeekPrimitiveAnimSkipResult::PrimitiveAnim => {}
+                SeekPrimitiveAnimSkipResult::PrimitiveAnim { .. } => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
                     return SeekToResult::SeekedTo(self.state.timestamp);
                 }

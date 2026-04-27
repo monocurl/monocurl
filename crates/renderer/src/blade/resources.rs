@@ -21,7 +21,7 @@ pub(super) struct OffscreenTarget {
 }
 
 pub(super) struct CachedMesh {
-    pub(super) fingerprint: u64,
+    pub(super) version: u64,
     pub(super) triangles: Option<BufferWithCount>,
     pub(super) lines: Option<BufferWithCount>,
     pub(super) dots: Option<BufferWithCount>,

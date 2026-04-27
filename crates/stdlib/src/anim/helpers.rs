@@ -378,6 +378,7 @@ pub(super) fn collapse_mesh(mesh: &Mesh, center: Float3) -> Mesh {
             .collect(),
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
+        version: Mesh::fresh_version(),
     };
     mesh.debug_assert_consistent_topology();
     mesh

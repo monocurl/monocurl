@@ -691,8 +691,8 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
                     }
 
                     match executor.advance_playback(max_slide, 1.0 / 60.0).await {
-                        Ok(true) => {}
-                        Ok(false) => break,
+                        Ok(PlaybackAdvance::Advanced | PlaybackAdvance::PreparedSection) => {}
+                        Ok(PlaybackAdvance::Finished) => break,
                         Err(e) => {
                             runtime_errors.push(e.to_string());
                             break;

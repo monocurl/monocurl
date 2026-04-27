@@ -264,7 +264,7 @@ fn test_scene_snapshot_error_after_play_uses_play_span() {
 }
 
 #[test]
-fn test_init_scene_snapshot_type_error_uses_entire_init_section_span() {
+fn test_init_scene_snapshot_type_error_uses_last_executed_span_with_hint() {
     let init_src = "
         background = [1, 1, 1]
         let keep = 1
@@ -291,12 +291,8 @@ fn test_init_scene_snapshot_type_error_uses_entire_init_section_span() {
         );
     });
 
-    let expected_start = init_src
-        .find("background = [1, 1, 1]")
-        .expect("missing background assignment");
-    let expected_end =
-        init_src.find("let keep = 1").expect("missing keep binding") + "let keep = 1".len();
-    let expected = expected_start..expected_end;
+    let expected_start = init_src.find("let keep = 1").expect("missing keep binding");
+    let expected = expected_start..expected_start + "let keep = 1".len();
 
     let runtime_error = executor
         .state
@@ -304,6 +300,67 @@ fn test_init_scene_snapshot_type_error_uses_entire_init_section_span() {
         .last()
         .expect("expected recorded runtime error");
     assert_eq!(runtime_error.span, expected);
+    assert_eq!(
+        runtime_error.hint.as_deref(),
+        Some(
+            "the last executed line of the section was highlighted; the actual error may be elsewhere"
+        )
+    );
+    assert!(
+        runtime_error
+            .to_string()
+            .contains("hint: the last executed line")
+    );
+}
+
+#[test]
+fn test_scene_snapshot_mesh_error_names_mesh_and_uses_hint() {
+    let src = "
+        mesh bad = 1
+        play Set()
+        let after = 1
+    ";
+
+    let (mut executor, _user_slide_count) =
+        match build_anim_executor(&[(src, SectionType::Slide)], &stdlib_bundles(["anim"])) {
+            Ok(data) => data,
+            Err(result) => panic!("failed to build executor: {:?}", result.errors),
+        };
+
+    smol::block_on(async {
+        let target = executor.user_to_internal_timestamp(user_slide_end(0));
+        match executor.seek_to(target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+
+        assert!(
+            executor.capture_stable_scene_snapshot().await.is_err(),
+            "expected scene snapshot to fail"
+        );
+    });
+
+    let expected_start = src.find("let after = 1").expect("missing after binding");
+    let expected = expected_start..expected_start + "let after = 1".len();
+
+    let runtime_error = executor
+        .state
+        .errors
+        .last()
+        .expect("expected recorded runtime error");
+    assert_eq!(runtime_error.span, expected);
+    assert!(
+        runtime_error
+            .error
+            .to_string()
+            .contains("on-screen mesh 'bad'")
+    );
+    assert_eq!(
+        runtime_error.hint.as_deref(),
+        Some(
+            "the last executed line of the section was highlighted; the actual error may be elsewhere"
+        )
+    );
 }
 
 #[test]

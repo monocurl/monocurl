@@ -112,6 +112,36 @@ fn test_wait_parallel_playback_from_off_grid_start_keeps_true_end_time() {
 }
 
 #[test]
+fn test_playback_prepares_new_slide_without_spending_frame_dt() {
+    let bundles = stdlib_bundles(["anim"]);
+    let (mut executor, _) = build_anim_executor(
+        &[
+            ("play Wait(0.1)", SectionType::Slide),
+            ("play Wait(1.0)", SectionType::Slide),
+        ],
+        &bundles,
+    )
+    .unwrap_or_else(|result| panic!("executor should build, got errors: {:?}", result.errors));
+
+    smol::block_on(async {
+        let first_slide_end = executor.user_to_internal_timestamp(user_slide_end(0));
+        match executor.seek_to(first_slide_end).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("seek failed: {e}"),
+        }
+
+        let result = executor
+            .advance_playback(executor.total_sections(), 0.5)
+            .await
+            .expect("playback should not error");
+        assert_eq!(result, PlaybackAdvance::PreparedSection);
+    });
+
+    let timestamp = executor.internal_to_user_timestamp(executor.state.timestamp);
+    assert_eq!(timestamp, user_timestamp(1, 0.0));
+}
+
+#[test]
 fn test_no_animation_duration_is_zero() {
     let r = run_anim("let x = 42");
     r.assert_ok().assert_slide_time_approx(0.0, 1e-9);

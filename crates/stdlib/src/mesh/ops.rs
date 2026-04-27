@@ -10,7 +10,7 @@ use executor::{
     value::Value,
 };
 use geo::{
-    mesh::{Lin, Mesh},
+    mesh::{Lin, Mesh, make_mesh_mut},
     mesh_build::{BoundaryEdge, IndexedSurface, SurfaceVertex},
     simd::{Float3, Float4},
 };
@@ -509,6 +509,7 @@ fn dashed_mesh(mesh: &Mesh, dash_length: f32, gap_length: f32, offset: f32) -> M
             tris: Vec::new(),
             uniform: mesh.uniform.clone(),
             tag: mesh.tag.clone(),
+            version: Mesh::fresh_version(),
         };
         let mut dashed = dashed;
         dashed.normalize_line_dot_topology();
@@ -535,6 +536,7 @@ fn dashed_mesh(mesh: &Mesh, dash_length: f32, gap_length: f32, offset: f32) -> M
             tris: Vec::new(),
             uniform: mesh.uniform.clone(),
             tag: mesh.tag.clone(),
+            version: Mesh::fresh_version(),
         };
         dashed.normalize_line_dot_topology();
         dashed.debug_assert_consistent_topology();
@@ -865,7 +867,7 @@ pub async fn op_point_map(
                         return Ok(());
                     }
                     let positions = {
-                        let mesh = Arc::make_mut(arc);
+                        let mesh = arc.as_ref();
                         let mut positions = Vec::with_capacity(
                             mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3,
                         );
@@ -890,7 +892,7 @@ pub async fn op_point_map(
                         .into_iter()
                         .map(|value| float3_from_value(value, "f"))
                         .collect::<Result<Vec<_>, _>>()?;
-                    let mesh = Arc::make_mut(arc);
+                    let mesh = make_mesh_mut(arc);
                     let mut mapped_iter = mapped.into_iter();
                     for dot in &mut mesh.dots {
                         let original = dot.pos;
@@ -966,7 +968,7 @@ pub async fn op_color_map(
                         return Ok(());
                     }
                     let positions = {
-                        let mesh = Arc::make_mut(arc);
+                        let mesh = arc.as_ref();
                         let mut positions = Vec::with_capacity(
                             mesh.dots.len() + mesh.lins.len() * 2 + mesh.tris.len() * 3,
                         );
@@ -991,7 +993,7 @@ pub async fn op_color_map(
                         .into_iter()
                         .map(|value| float4_from_value(value, "f"))
                         .collect::<Result<Vec<_>, _>>()?;
-                    let mesh = Arc::make_mut(arc);
+                    let mesh = make_mesh_mut(arc);
                     let mut mapped_iter = mapped.into_iter();
                     for dot in &mut mesh.dots {
                         let original = dot.col;
@@ -1064,7 +1066,7 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                         return Ok(());
                     }
                     let positions = {
-                        let mesh = Arc::make_mut(arc);
+                        let mesh = arc.as_ref();
                         let mut positions = Vec::with_capacity(mesh.tris.len() * 3);
                         for tri in &mesh.tris {
                             positions.push(tri.a.pos);
@@ -1082,7 +1084,7 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                         .into_iter()
                         .map(|value| float2_from_value(value, "f"))
                         .collect::<Result<Vec<_>, _>>()?;
-                    let mesh = Arc::make_mut(arc);
+                    let mesh = make_mesh_mut(arc);
                     let mut mapped_iter = mapped.into_iter();
                     for tri in &mut mesh.tris {
                         let original = tri.a.uv;
@@ -1165,7 +1167,7 @@ pub async fn op_retagged(
                     if !keep {
                         return Ok(());
                     }
-                    let mesh = Arc::make_mut(arc);
+                    let mesh = make_mesh_mut(arc);
                     let tags = list_value(
                         mesh.tag
                             .iter()
@@ -1984,8 +1986,8 @@ mod tests {
             tris,
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         assert_eq!(mesh.tris.len(), 8);
         assert_eq!(mesh.lins.len(), 8);
         assert!(mesh.has_consistent_topology());
@@ -2003,6 +2005,7 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
         mesh.normalize_line_dot_topology();
 
@@ -2049,8 +2052,8 @@ mod tests {
             tris,
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         assert!(!mesh.lins.is_empty());
         assert!(mesh.has_consistent_topology());
     }
@@ -2105,8 +2108,8 @@ mod tests {
             }],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         recolor_mesh(&mut mesh, target, 1.0);
 
         let approx_eq =
@@ -2134,8 +2137,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         assert_eq!(dashed.len(), 2);
         assert_eq!(dashed[0].next, 1);
         assert_eq!(dashed[1].prev, 0);
@@ -2191,8 +2194,8 @@ mod tests {
             tris,
             uniform: Uniforms::default(),
             tag: vec![7],
+            version: Mesh::fresh_version(),
         };
-
         let MeshTree::List(children) = dashed_mesh(&mesh, 0.6, 0.4, 0.0) else {
             panic!("expected dashed surface to split into child meshes");
         };

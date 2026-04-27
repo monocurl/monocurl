@@ -7,7 +7,7 @@ use bytemuck::Pod;
 use executor::camera::CameraBasis;
 use image::RgbaImage;
 
-use crate::{RenderSize, RenderView, SceneRenderData, mesh_fingerprint};
+use crate::{RenderSize, RenderView, SceneRenderData};
 
 use super::{
     BladeRenderer, DEPTH_FORMAT, DEPTH_STEP, LINE_INDICES_PER_INSTANCE, LINE_VERTICES_PER_INSTANCE,
@@ -277,9 +277,9 @@ impl BladeRenderer {
 
     fn ensure_mesh(&mut self, mesh: &Arc<geo::mesh::Mesh>, frame_index: u64) -> usize {
         let key = Arc::as_ptr(mesh) as usize;
-        let fingerprint = mesh_fingerprint(mesh);
+        let version = mesh.version();
         if let Some(cached) = self.mesh_cache.get_mut(&key) {
-            if cached.fingerprint == fingerprint {
+            if cached.version == version {
                 cached.last_used_frame = frame_index;
                 return key;
             }
@@ -296,7 +296,7 @@ impl BladeRenderer {
         self.mesh_cache.insert(
             key,
             CachedMesh {
-                fingerprint,
+                version,
                 triangles,
                 lines,
                 dots,

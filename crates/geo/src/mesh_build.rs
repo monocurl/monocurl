@@ -384,8 +384,8 @@ mod tests {
             tris,
             uniform: Default::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         };
-
         assert!(mesh.has_consistent_topology());
         assert_eq!(mesh.tris[0].ab, -2);
         assert_eq!(mesh.tris[1].ab, -5);
@@ -430,8 +430,8 @@ mod tests {
             tris,
             uniform: Default::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         };
-
         assert!(mesh.has_consistent_topology());
         assert!(
             mesh.lins

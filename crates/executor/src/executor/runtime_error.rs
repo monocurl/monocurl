@@ -24,15 +24,14 @@ impl Executor {
         runtime_error
     }
 
-    pub fn record_runtime_error_at_root_init_section(
+    pub fn record_runtime_error_at_root_with_hint(
         &mut self,
         error: ExecutorError,
+        hint: impl Into<String>,
     ) -> RuntimeError {
         let mut runtime_error =
             self.build_runtime_error_at_stack(error, ExecutionState::ROOT_STACK_IDX);
-        if let Some(span) = self.latest_root_init_section_span() {
-            runtime_error.span = span;
-        }
+        runtime_error.hint = Some(hint.into());
         self.state.error(runtime_error.clone());
         runtime_error
     }
@@ -73,6 +72,7 @@ impl Executor {
             error,
             span: root_span.unwrap_or(fallback_span),
             callstack: recovered_callstack,
+            hint: None,
         }
     }
 
@@ -152,15 +152,6 @@ impl Executor {
             .sections
             .iter()
             .rev()
-            .find_map(|section| section_fallback_span_from_annotations(&section.annotations))
-    }
-
-    fn latest_root_init_section_span(&self) -> Option<Span8> {
-        self.bytecode
-            .sections
-            .iter()
-            .rev()
-            .filter(|section| section.flags.is_root_module && section.flags.is_init)
             .find_map(|section| section_fallback_span_from_annotations(&section.annotations))
     }
 
@@ -325,37 +316,15 @@ mod tests {
     }
 
     #[test]
-    fn record_runtime_error_at_root_init_section_prefers_latest_root_init_span() {
-        let mut init = SectionBytecode::new(SectionFlags {
-            is_stdlib: false,
-            is_library: false,
-            is_init: true,
-            is_root_module: true,
-        });
-        init.annotations = vec![
-            InstructionAnnotation { source_loc: 10..14 },
-            InstructionAnnotation { source_loc: 20..30 },
-        ];
-        init.instructions = vec![bytecode::Instruction::PushNil; 2];
+    fn record_runtime_error_at_root_with_hint_keeps_recovered_span() {
+        let mut executor = executor_with_root_annotations(&[(10, 14), (20, 30)]);
 
-        let mut slide = SectionBytecode::new(SectionFlags {
-            is_stdlib: false,
-            is_library: false,
-            is_init: false,
-            is_root_module: true,
-        });
-        slide.annotations = vec![InstructionAnnotation {
-            source_loc: 100..108,
-        }];
-        slide.instructions = vec![bytecode::Instruction::PushNil];
+        let root_idx = crate::state::ExecutionState::ROOT_STACK_IDX;
+        executor.state.stack_mut(root_idx).ip = (0, 2);
 
-        let mut executor = Executor::new(
-            Bytecode::new(vec![Arc::new(init), Arc::new(slide)]),
-            Vec::new(),
-        );
-
-        executor.record_runtime_error_at_root_init_section(
+        executor.record_runtime_error_at_root_with_hint(
             crate::error::ExecutorError::invalid_operation("test"),
+            "extra context",
         );
 
         let runtime_error = executor
@@ -363,6 +332,7 @@ mod tests {
             .errors
             .last()
             .expect("expected recorded runtime error");
-        assert_eq!(runtime_error.span, 10..30);
+        assert_eq!(runtime_error.span, 20..30);
+        assert_eq!(runtime_error.hint.as_deref(), Some("extra context"));
     }
 }

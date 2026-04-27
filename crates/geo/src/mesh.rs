@@ -1,4 +1,10 @@
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use crate::simd::{Float2, Float3, Float4};
 
@@ -88,7 +94,9 @@ impl Default for Uniforms {
     }
 }
 
-#[derive(Debug, Clone)]
+static NEXT_MESH_VERSION: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Debug)]
 pub struct Mesh {
     pub dots: Vec<Dot>,
     pub lins: Vec<Lin>,
@@ -97,9 +105,22 @@ pub struct Mesh {
     pub uniform: Uniforms,
 
     pub tag: Vec<isize>,
+    pub version: u64,
 }
 
 impl Mesh {
+    pub fn fresh_version() -> u64 {
+        NEXT_MESH_VERSION.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    pub fn bump_version(&mut self) {
+        self.version = Self::fresh_version();
+    }
+
     pub fn normalize_line_dot_topology(&mut self) {
         let original_line_count = self.lins.len();
         let mut created_inverses = vec![None; original_line_count];
@@ -263,6 +284,25 @@ impl Mesh {
 
         None
     }
+}
+
+impl Clone for Mesh {
+    fn clone(&self) -> Self {
+        Self {
+            dots: self.dots.clone(),
+            lins: self.lins.clone(),
+            tris: self.tris.clone(),
+            uniform: self.uniform.clone(),
+            tag: self.tag.clone(),
+            version: Self::fresh_version(),
+        }
+    }
+}
+
+pub fn make_mesh_mut(mesh: &mut Arc<Mesh>) -> &mut Mesh {
+    let mesh = Arc::make_mut(mesh);
+    mesh.bump_version();
+    mesh
 }
 
 #[derive(Clone, Copy)]
@@ -781,8 +821,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         assert!(mesh.has_consistent_topology());
     }
 
@@ -801,8 +841,8 @@ mod tests {
             tris: vec![tri(p, q, r, mesh_ref(0), mesh_ref(1), mesh_ref(2))],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         let report = mesh
             .topology_mismatch_report()
             .expect("surface boundary gap should be reported");
@@ -824,8 +864,8 @@ mod tests {
             tris: vec![tri(p, q, r, mesh_ref(0), mesh_ref(1), mesh_ref(2))],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         assert!(mesh.has_consistent_topology());
     }
 
@@ -837,6 +877,7 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
         mesh.lins[0].is_dom_sib = false;
 
@@ -857,8 +898,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         assert!(mesh.has_consistent_topology());
     }
 
@@ -870,8 +911,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         mesh.normalize_line_dot_topology();
 
         assert_eq!(mesh.lins.len(), 2);
@@ -893,8 +934,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         mesh.normalize_line_dot_topology();
 
         assert_eq!(mesh.dots.len(), 2);
@@ -913,8 +954,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         let report = mesh
             .topology_mismatch_report()
             .expect("line endpoint dot without backreference should fail");
@@ -929,8 +970,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         assert!(mesh.has_consistent_topology());
     }
 }

@@ -510,6 +510,7 @@ fn extract_component_mesh(
         tris,
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
+        version: Mesh::fresh_version(),
     };
     component.debug_assert_consistent_topology();
     component
@@ -699,6 +700,7 @@ fn prepare_planar_trans_mesh_pair(
         tris: Vec::new(),
         uniform: start.uniform.clone(),
         tag: start.tag.clone(),
+        version: Mesh::fresh_version(),
     };
     let mut end_mesh = Mesh {
         dots: Vec::new(),
@@ -706,8 +708,8 @@ fn prepare_planar_trans_mesh_pair(
         tris: Vec::new(),
         uniform: end.uniform.clone(),
         tag: end.tag.clone(),
+        version: Mesh::fresh_version(),
     };
-
     for i in 0..loop_count {
         let start_contour = &start_contours[i % start_contours.len()];
         let end_contour = &end_contours[i % end_contours.len()];
@@ -1053,6 +1055,7 @@ fn conform_samples_to_template(
             tris,
             uniform: uniform.clone(),
             tag: tag.to_vec(),
+            version: Mesh::fresh_version(),
         };
         out.debug_assert_consistent_topology();
         return out;
@@ -1240,6 +1243,7 @@ fn canonicalize_surface_template(mesh: &Mesh) -> Mesh {
         tris,
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
+        version: Mesh::fresh_version(),
     };
     out.debug_assert_consistent_topology();
     out
@@ -1542,8 +1546,8 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
         tris,
         uniform: source.uniform.clone(),
         tag: source.tag.clone(),
+        version: Mesh::fresh_version(),
     };
-
     out.debug_assert_consistent_topology();
     out
 }
@@ -1896,6 +1900,7 @@ fn mesh_from_ordered_path(path: &OrderedPath, uniform: &Uniforms, tag: &[isize])
         tris: Vec::new(),
         uniform: uniform.clone(),
         tag: tag.to_vec(),
+        version: Mesh::fresh_version(),
     };
     mesh.normalize_line_dot_topology();
     mesh
@@ -2206,6 +2211,7 @@ fn mesh_patharc_lerp(
             .collect(),
         uniform: lerp_uniforms(&start.uniform, &end.uniform, t),
         tag: end.tag.clone(),
+        version: Mesh::fresh_version(),
     };
     mesh.debug_assert_consistent_topology();
     Ok(mesh)
@@ -2251,6 +2257,7 @@ fn planar_mesh_patharc_lerp(
         tris,
         uniform: boundary.uniform,
         tag: boundary.tag,
+        version: Mesh::fresh_version(),
     };
     mesh.debug_assert_consistent_topology();
     Ok(mesh)
@@ -2379,6 +2386,7 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag,
+            version: Mesh::fresh_version(),
         })
     }
 
@@ -2415,6 +2423,7 @@ mod tests {
             tris,
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         }
     }
 
@@ -2511,8 +2520,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         let parts = split_mesh_contours(&mesh);
 
         assert_eq!(parts.len(), 2);
@@ -2551,6 +2560,7 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
         append_closed_contour(&mut start, &small);
         append_closed_contour(&mut start, &large);
@@ -2561,6 +2571,7 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
         append_closed_contour(&mut end, &large);
         append_closed_contour(&mut end, &small);
@@ -2747,6 +2758,7 @@ mod tests {
             )],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
         let target = Mesh {
             dots: vec![],
@@ -2771,8 +2783,8 @@ mod tests {
             ],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         let (aligned_source, aligned_target, _) =
             prepare_trans_mesh_pair(Some(&target), Some(&source))
                 .expect("pair prep should succeed");
@@ -2859,6 +2871,7 @@ mod tests {
             tris: vec![triangle],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
         let target = annulus_mesh(0.34, 0.82, 64);
 

@@ -842,7 +842,7 @@ fn format_runtime_error_message(
     root_text_rope: &Rope<TextAggregate>,
     runtime_error: &RuntimeError,
 ) -> String {
-    let mut message = runtime_error.error.to_string();
+    let mut message = runtime_error.to_string();
     if runtime_error.callstack.is_empty() {
         return message;
     }

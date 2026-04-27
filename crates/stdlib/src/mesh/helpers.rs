@@ -15,7 +15,7 @@ use executor::{
     value::{Value, container::List, lambda::Lambda},
 };
 use geo::{
-    mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
+    mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms, make_mesh_mut},
     mesh_build::{self, BoundaryEdge, IndexedLineMesh, IndexedSurface, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
@@ -45,7 +45,7 @@ impl MeshTree {
 
     pub(super) fn for_each_mut(&mut self, f: &mut impl FnMut(&mut Mesh)) {
         match self {
-            MeshTree::Mesh(arc) => f(Arc::make_mut(arc)),
+            MeshTree::Mesh(arc) => f(make_mesh_mut(arc)),
             MeshTree::List(children) => {
                 for child in children {
                     child.for_each_mut(f);
@@ -73,7 +73,7 @@ impl MeshTree {
                         None => true,
                     };
                     if keep {
-                        f(Arc::make_mut(arc));
+                        f(make_mesh_mut(arc));
                     }
                     Ok(())
                 }
@@ -1195,6 +1195,7 @@ pub(super) fn mesh_from_parts_with_dot_radius(
         tris,
         uniform,
         tag: vec![],
+        version: Mesh::fresh_version(),
     };
     mesh.normalize_line_dot_topology();
     mesh.debug_assert_consistent_topology();
@@ -1753,6 +1754,7 @@ mod tests {
             tris: Vec::new(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         }
     }
 
@@ -1802,8 +1804,8 @@ mod tests {
             tris: Vec::new(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         };
-
         let groups = mesh_position_groups(&mesh);
         assert_eq!(groups[0], groups[1]);
     }

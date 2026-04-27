@@ -8,7 +8,10 @@ use std::{
 };
 
 use anyhow::{Result, bail};
-use geo::{mesh::Mesh, simd::Float3};
+use geo::{
+    mesh::{Mesh, make_mesh_mut},
+    simd::Float3,
+};
 
 pub use document::SpanMarker;
 
@@ -402,7 +405,7 @@ fn render_tex_marked_system(
             .entry(marker.id.clone())
             .or_insert_with(Vec::new)
             .push(mesh_index);
-        Arc::make_mut(mesh).tag.clear();
+        make_mesh_mut(mesh).tag.clear();
     }
 
     output.span_mesh_indices = span_mesh_indices;
@@ -506,7 +509,7 @@ fn mesh_collection_bounds(meshes: &[Arc<Mesh>]) -> Option<(Float3, Float3)> {
 
 fn translate_meshes(meshes: &mut [Arc<Mesh>], delta: Float3) {
     for mesh in meshes {
-        translate_mesh(Arc::make_mut(mesh), delta);
+        translate_mesh(make_mesh_mut(mesh), delta);
     }
 }
 
@@ -534,7 +537,7 @@ fn apply_text_tags(output: RenderedOutput, tagged: &document::TaggedSource) -> V
         };
         for &mesh_index in mesh_indices {
             if let Some(mesh) = meshes.get_mut(mesh_index) {
-                Arc::make_mut(mesh).tag = span.tag.clone();
+                make_mesh_mut(mesh).tag = span.tag.clone();
             }
         }
     }
@@ -557,7 +560,7 @@ fn apply_system_text_tags(
         let Some(span) = spans.get(marker_index) else {
             continue;
         };
-        Arc::make_mut(mesh).tag = span.tag.clone();
+        make_mesh_mut(mesh).tag = span.tag.clone();
     }
     meshes
 }

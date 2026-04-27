@@ -8,10 +8,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot, SceneSnapshot};
-use geo::{
-    mesh::{Dot, Lin, Mesh, Tri},
-    simd::{Float2, Float3, Float4},
-};
+use geo::{mesh::Mesh, simd::Float3};
 pub use image::RgbaImage;
 
 use crate::blade::BladeRenderer;
@@ -38,14 +35,9 @@ pub fn scene_fingerprint(scene: &SceneRenderData) -> u64 {
     hash_background(&mut hasher, scene.background);
     hash_camera(&mut hasher, &scene.camera);
     for mesh in &scene.meshes {
-        mesh_fingerprint_into(&mut hasher, mesh);
+        (Arc::as_ptr(mesh) as usize).hash(&mut hasher);
+        mesh.version().hash(&mut hasher);
     }
-    hasher.finish()
-}
-
-pub(crate) fn mesh_fingerprint(mesh: &Mesh) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    mesh_fingerprint_into(&mut hasher, mesh);
     hasher.finish()
 }
 
@@ -194,77 +186,6 @@ fn hash_camera(hasher: &mut impl Hasher, camera: &CameraSnapshot) {
     camera.far.to_bits().hash(hasher);
 }
 
-fn mesh_fingerprint_into(hasher: &mut impl Hasher, mesh: &Mesh) {
-    mesh.uniform.alpha.to_bits().hash(hasher);
-    mesh.uniform
-        .stroke_miter_radius_scale
-        .to_bits()
-        .hash(hasher);
-    mesh.uniform.stroke_radius.to_bits().hash(hasher);
-    mesh.uniform.dot_radius.to_bits().hash(hasher);
-    mesh.uniform.dot_vertex_count.hash(hasher);
-    mesh.uniform.smooth.hash(hasher);
-    mesh.uniform.gloss.to_bits().hash(hasher);
-    mesh.uniform.z_index.hash(hasher);
-    mesh.uniform.img.hash(hasher);
-
-    mesh.dots.len().hash(hasher);
-    for dot in &mesh.dots {
-        hash_dot(hasher, dot);
-    }
-
-    mesh.lins.len().hash(hasher);
-    for line in &mesh.lins {
-        hash_line(hasher, line);
-    }
-
-    mesh.tris.len().hash(hasher);
-    for tri in &mesh.tris {
-        hash_tri(hasher, tri);
-    }
-}
-
-fn hash_dot(hasher: &mut impl Hasher, dot: &Dot) {
-    hash_float3(hasher, dot.pos);
-    hash_float3(hasher, dot.norm);
-    hash_float4(hasher, float4_tuple(dot.col));
-    dot.inv.hash(hasher);
-    dot.is_dom_sib.hash(hasher);
-}
-
-fn hash_line(hasher: &mut impl Hasher, line: &Lin) {
-    hash_float3(hasher, line.a.pos);
-    hash_float4(hasher, float4_tuple(line.a.col));
-    hash_float3(hasher, line.b.pos);
-    hash_float4(hasher, float4_tuple(line.b.col));
-    hash_float3(hasher, line.norm);
-    line.prev.hash(hasher);
-    line.next.hash(hasher);
-    line.inv.hash(hasher);
-    line.is_dom_sib.hash(hasher);
-}
-
-fn hash_tri(hasher: &mut impl Hasher, tri: &Tri) {
-    hash_float3(hasher, tri.a.pos);
-    hash_float4(hasher, float4_tuple(tri.a.col));
-    hash_float2(hasher, tri.a.uv);
-    hash_float3(hasher, tri.b.pos);
-    hash_float4(hasher, float4_tuple(tri.b.col));
-    hash_float2(hasher, tri.b.uv);
-    hash_float3(hasher, tri.c.pos);
-    hash_float4(hasher, float4_tuple(tri.c.col));
-    hash_float2(hasher, tri.c.uv);
-    tri.ab.hash(hasher);
-    tri.bc.hash(hasher);
-    tri.ca.hash(hasher);
-    tri.is_dom_sib.hash(hasher);
-}
-
-fn hash_float2(hasher: &mut impl Hasher, value: Float2) {
-    value.x.to_bits().hash(hasher);
-    value.y.to_bits().hash(hasher);
-}
-
 fn hash_float3(hasher: &mut impl Hasher, value: Float3) {
     value.x.to_bits().hash(hasher);
     value.y.to_bits().hash(hasher);
@@ -278,17 +199,13 @@ fn hash_float4(hasher: &mut impl Hasher, value: (f32, f32, f32, f32)) {
     value.3.to_bits().hash(hasher);
 }
 
-fn float4_tuple(value: Float4) -> (f32, f32, f32, f32) {
-    (value.x, value.y, value.z, value.w)
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot};
     use geo::{
-        mesh::{Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
+        mesh::{Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms, make_mesh_mut},
         simd::{Float2, Float3, Float4},
     };
 
@@ -352,7 +269,7 @@ mod tests {
         };
         let before = scene_fingerprint(&scene);
 
-        let mesh = Arc::make_mut(&mut scene.meshes[0]);
+        let mesh = make_mesh_mut(&mut scene.meshes[0]);
         mesh.tris[0].a.pos.x += 1.0;
 
         let after = scene_fingerprint(&scene);
@@ -568,6 +485,7 @@ mod tests {
                 z_index,
             },
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         }
     }
 
@@ -618,6 +536,7 @@ mod tests {
             tris: Vec::new(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         }
     }
 
@@ -660,6 +579,7 @@ mod tests {
             tris: Vec::new(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         }
     }
 
@@ -736,6 +656,7 @@ mod tests {
             }],
             uniform: Uniforms::default(),
             tag: Vec::new(),
+            version: Mesh::fresh_version(),
         }
     }
 }

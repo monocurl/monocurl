@@ -35,7 +35,7 @@ enum SeekPrimitiveResult {
 
 enum SeekPrimitiveAnimSkipResult {
     Error(ExecutorError),
-    PrimitiveAnim,
+    PrimitiveAnim { advanced_section: bool },
     NoAnimsLeft,
 }
 
@@ -43,6 +43,13 @@ enum SeekPrimitiveAnimSkipResult {
 pub enum SeekToResult {
     Error(ExecutorError),
     SeekedTo(Timestamp),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlaybackAdvance {
+    Advanced,
+    PreparedSection,
+    Finished,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

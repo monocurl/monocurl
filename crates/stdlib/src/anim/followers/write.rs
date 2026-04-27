@@ -756,8 +756,8 @@ mod tests {
             tris: vec![],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         let written = write_mesh(&mesh, 0, 1, 0.0);
 
         assert_eq!(written.lins[0].prev, -1);
@@ -791,8 +791,8 @@ mod tests {
             )],
             uniform: Uniforms::default(),
             tag: vec![],
+            version: Mesh::fresh_version(),
         };
-
         let embedded = prepare_write_embed_triplet(&list_value([]), &Value::Mesh(Arc::new(mesh)))
             .expect("write embed prep should succeed");
         let Value::List(embedded) = embedded else {
