@@ -10,8 +10,6 @@ use libtess2::{TessellationOptions, WindingRule};
 use tiny_skia_path::{Path, PathSegment, Point};
 use usvg::{FillRule, Node, Paint, Path as SvgPath, Tree};
 
-use crate::document;
-
 pub(crate) const DEFAULT_TEXT_STROKE_RADIUS: f32 = 0.55;
 const NORMAL_CURVE_SAMPLE_SPACING: f32 = 24.0;
 const HIGH_QUALITY_CURVE_SAMPLE_SPACING: f32 = 14.0;
@@ -28,6 +26,9 @@ pub(crate) enum CurveSampling {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ImportOptions {
     pub curve_sampling: CurveSampling,
+    // dvisvgm outputs y-down SVG coordinates, so we negate y to get Monocurl y-up.
+    // hayro-svg (PDF→SVG) leaves path data in y-up space, so no negation needed.
+    pub flip_y: bool,
 }
 
 pub(crate) struct RenderedSvg {
@@ -41,27 +42,23 @@ pub(crate) fn import(svg: &str, unit_scale: f32, options: ImportOptions) -> Resu
         meshes: Vec::new(),
         span_mesh_indices: HashMap::new(),
     };
-    collect_group(tree.root(), None, 1.0, unit_scale, options, &mut rendered)?;
+    collect_group(tree.root(), 1.0, unit_scale, options, &mut rendered)?;
     Ok(rendered)
 }
 
 fn collect_group(
     group: &usvg::Group,
-    inherited_span: Option<&str>,
     inherited_opacity: f32,
     unit_scale: f32,
     options: ImportOptions,
     rendered: &mut RenderedSvg,
 ) -> Result<()> {
-    let span = document::strip_span_prefix(group.id()).or(inherited_span);
     let opacity = inherited_opacity * group.opacity().get();
 
     for child in group.children() {
         match child {
-            Node::Group(group) => {
-                collect_group(group, span, opacity, unit_scale, options, rendered)?
-            }
-            Node::Path(path) => collect_path(path, span, opacity, unit_scale, options, rendered)?,
+            Node::Group(group) => collect_group(group, opacity, unit_scale, options, rendered)?,
+            Node::Path(path) => collect_path(path, opacity, unit_scale, options, rendered)?,
             _ => {}
         }
     }
@@ -71,7 +68,6 @@ fn collect_group(
 
 fn collect_path(
     path: &SvgPath,
-    inherited_span: Option<&str>,
     inherited_opacity: f32,
     unit_scale: f32,
     options: ImportOptions,
@@ -81,23 +77,22 @@ fn collect_path(
         return Ok(());
     }
 
-    let span = path
-        .id()
-        .strip_prefix(document::SPAN_ID_PREFIX)
-        .or(inherited_span);
-
     if let Some(fill) = path.fill() {
         if let Paint::Color(color) = fill.paint() {
             let (tag, color) =
                 decode_tag_and_color(*color, fill.opacity().get() * inherited_opacity);
             let even_odd = matches!(fill.rule(), FillRule::EvenOdd);
-            let contours = extract_contours(path.data(), path.abs_transform(), unit_scale, options);
+            let contours = extract_contours(
+                path.data(),
+                path.abs_transform(),
+                unit_scale,
+                options,
+                options.flip_y,
+            );
             if !contours.is_empty() {
-                push_mesh(
-                    filled_contours(&contours, color, tag, even_odd)?,
-                    span,
-                    rendered,
-                );
+                rendered
+                    .meshes
+                    .push(filled_contours(&contours, color, tag, even_odd)?);
             }
         }
     }
@@ -107,14 +102,17 @@ fn collect_path(
             if let Some(stroked_path) = path.data().stroke(&stroke.to_tiny_skia(), 1.0) {
                 let (tag, color) =
                     decode_tag_and_color(*color, stroke.opacity().get() * inherited_opacity);
-                let contours =
-                    extract_contours(&stroked_path, path.abs_transform(), unit_scale, options);
+                let contours = extract_contours(
+                    &stroked_path,
+                    path.abs_transform(),
+                    unit_scale,
+                    options,
+                    options.flip_y,
+                );
                 if !contours.is_empty() {
-                    push_mesh(
-                        filled_contours(&contours, color, tag, false)?,
-                        span,
-                        rendered,
-                    );
+                    rendered
+                        .meshes
+                        .push(filled_contours(&contours, color, tag, false)?);
                 }
             }
         }
@@ -123,23 +121,12 @@ fn collect_path(
     Ok(())
 }
 
-fn push_mesh(mesh: Mesh, span: Option<&str>, rendered: &mut RenderedSvg) {
-    let mesh_idx = rendered.meshes.len();
-    rendered.meshes.push(mesh);
-    if let Some(span) = span {
-        rendered
-            .span_mesh_indices
-            .entry(span.to_owned())
-            .or_default()
-            .push(mesh_idx);
-    }
-}
-
 fn extract_contours(
     path: &Path,
     transform: tiny_skia_path::Transform,
     unit_scale: f32,
     options: ImportOptions,
+    flip_y: bool,
 ) -> Vec<Vec<Float3>> {
     let mut contours = Vec::new();
     let mut current = Vec::new();
@@ -151,7 +138,7 @@ fn extract_contours(
         match segment {
             PathSegment::MoveTo(point) => {
                 flush_current_contour(&mut contours, &mut current, start);
-                let mapped = map_point(point, transform, unit_scale);
+                let mapped = map_point(point, transform, unit_scale, flip_y);
                 current.push(mapped);
                 cursor = mapped;
                 start = mapped;
@@ -161,7 +148,7 @@ fn extract_contours(
                 if !has_cursor {
                     continue;
                 }
-                let mapped = map_point(point, transform, unit_scale);
+                let mapped = map_point(point, transform, unit_scale, flip_y);
                 push_unique_point(&mut current, mapped);
                 cursor = mapped;
             }
@@ -169,8 +156,8 @@ fn extract_contours(
                 if !has_cursor {
                     continue;
                 }
-                let control = map_point(ctrl, transform, unit_scale);
-                let end = map_point(point, transform, unit_scale);
+                let control = map_point(ctrl, transform, unit_scale, flip_y);
+                let end = map_point(point, transform, unit_scale, flip_y);
                 let approx_length = (control - cursor).len() + (end - control).len();
                 let samples = curve_samples(approx_length, options);
                 for i in 1..=samples {
@@ -185,9 +172,9 @@ fn extract_contours(
                 if !has_cursor {
                     continue;
                 }
-                let control_a = map_point(ctrl_a, transform, unit_scale);
-                let control_b = map_point(ctrl_b, transform, unit_scale);
-                let end = map_point(point, transform, unit_scale);
+                let control_a = map_point(ctrl_a, transform, unit_scale, flip_y);
+                let control_b = map_point(ctrl_b, transform, unit_scale, flip_y);
+                let end = map_point(point, transform, unit_scale, flip_y);
                 let approx_length = (control_a - cursor).len()
                     + (control_b - control_a).len()
                     + (end - control_b).len();
@@ -214,10 +201,16 @@ fn extract_contours(
     contours
 }
 
-fn map_point(point: Point, transform: tiny_skia_path::Transform, unit_scale: f32) -> Float3 {
+fn map_point(
+    point: Point,
+    transform: tiny_skia_path::Transform,
+    unit_scale: f32,
+    flip_y: bool,
+) -> Float3 {
     let mut point = point;
     transform.map_point(&mut point);
-    Float3::new(point.x * unit_scale, -point.y * unit_scale, 0.0)
+    let y = if flip_y { -point.y } else { point.y };
+    Float3::new(point.x * unit_scale, y * unit_scale, 0.0)
 }
 
 fn curve_samples(approx_length: f32, options: ImportOptions) -> usize {
@@ -347,25 +340,4 @@ fn tessellate_planar_loops(
     }
 
     Ok((lins, tris))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn imports_basic_mathjax_tex_with_consistent_topology() {
-        let svg = mathjax_svg::render_svg("2 + 4", mathjax_svg::RenderOptions::new(36.0)).unwrap();
-        let rendered = import(
-            &svg,
-            1.0 / super::super::MATHJAX_UNITS_PER_EM,
-            ImportOptions {
-                curve_sampling: CurveSampling::Normal,
-            },
-        )
-        .unwrap();
-
-        assert!(!rendered.meshes.is_empty());
-        assert!(rendered.meshes.iter().all(Mesh::has_consistent_topology));
-    }
 }

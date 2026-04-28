@@ -1,14 +1,13 @@
 use std::{ops::Range, path::PathBuf};
 
 use gpui::*;
-use latex::SystemBackendStatus;
 use structs::assets::Assets;
 use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{
     components::{buttons::link_button, latex_warning::render_latex_warning},
     navbar_view::Navbar,
-    state::window_state::WindowState,
+    state::{user_settings::UserSettings, window_state::WindowState},
     theme::ThemeSettings,
 };
 
@@ -74,7 +73,6 @@ fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
 pub struct HomeView {
     navbar: Entity<Navbar>,
     state: Entity<WindowState>,
-    latex_backend_status: SystemBackendStatus,
 }
 
 impl HomeView {
@@ -87,15 +85,14 @@ impl HomeView {
             cx.notify();
         })
         .detach();
+        cx.observe_global::<UserSettings>(|_this, cx| {
+            cx.notify();
+        })
+        .detach();
 
         let navbar = cx.new(|cx| Navbar::new(state.downgrade(), cx));
-        let latex_backend_status = latex::system_backend_status();
 
-        Self {
-            navbar,
-            state,
-            latex_backend_status,
-        }
+        Self { navbar, state }
     }
 
     fn open(&mut self, path: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -482,7 +479,7 @@ impl Render for HomeView {
         div()
             .flex()
             .flex_col()
-            .children(render_latex_warning(self.latex_backend_status, theme))
+            .children(render_latex_warning(UserSettings::read(cx), theme))
             .child(self.navbar.clone())
             .child(body)
             .bg(theme.app_background)

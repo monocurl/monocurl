@@ -6,7 +6,6 @@ use std::{
 
 use exporter::EXPORT_CANCELLED_MESSAGE;
 use gpui::*;
-use latex::SystemBackendStatus;
 use structs::rope::{Attribute, Rope, TextAggregate};
 
 use crate::{
@@ -24,6 +23,7 @@ use crate::{
     state::{
         document_state::DocumentState,
         textual_state::LexData,
+        user_settings::UserSettings,
         window_state::{ActiveScreen, WindowState},
     },
     theme::ThemeSettings,
@@ -57,7 +57,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-space", TogglePlaying, Some("!editor")),
         KeyBinding::new("secondary-shift-space,", TogglePlaying, None),
         KeyBinding::new(",", PrevSlide, Some("!editor")),
-        KeyBinding::new("secondary-,", PrevSlide, None),
         KeyBinding::new(".", NextSlide, Some("!editor")),
         KeyBinding::new("secondary-.", NextSlide, None),
         KeyBinding::new("<", SceneStart, Some("!editor")),
@@ -193,7 +192,6 @@ pub struct DocumentView {
     state: DocumentState,
     services: Entity<ServiceManager>,
     window_state: WeakEntity<WindowState>,
-    latex_backend_status: SystemBackendStatus,
 
     navbar: Entity<Navbar>,
     editor: Entity<Editor>,

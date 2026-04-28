@@ -1,32 +1,33 @@
 use std::{
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::OnceLock,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::SystemBackendStatus;
+use crate::{SystemBackendConfig, SystemBackendStatus, SystemToolPaths};
 
 const TEX_BASENAME: &str = "monocurl";
 
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
-static AVAILABLE: OnceLock<SystemBackendStatus> = OnceLock::new();
 
-pub(crate) fn is_available() -> bool {
-    backend_status().is_available()
+pub(crate) fn discover_backend() -> SystemToolPaths {
+    SystemToolPaths {
+        latex: find_command("latex"),
+        dvisvgm: find_command("dvisvgm"),
+    }
 }
 
-pub(crate) fn backend_status() -> SystemBackendStatus {
-    *AVAILABLE.get_or_init(|| SystemBackendStatus {
-        latex: command_available("latex"),
-        dvisvgm: command_available("dvisvgm"),
-    })
+pub(crate) fn backend_status(config: &SystemBackendConfig) -> SystemBackendStatus {
+    SystemBackendStatus {
+        latex: command_available(&config.latex),
+        dvisvgm: command_available(&config.dvisvgm),
+    }
 }
 
-pub(crate) fn render_svg_document(document: &str) -> Result<String> {
+pub(crate) fn render_svg_document(document: &str, config: &SystemBackendConfig) -> Result<String> {
     let temp_dir = TempDir::new()?;
     let tex_path = temp_dir.path().join(format!("{TEX_BASENAME}.tex"));
     let dvi_path = temp_dir.path().join(format!("{TEX_BASENAME}.dvi"));
@@ -40,7 +41,7 @@ pub(crate) fn render_svg_document(document: &str) -> Result<String> {
     })?;
 
     run_command(
-        "latex",
+        &config.latex,
         vec![
             "-interaction=nonstopmode".into(),
             "-halt-on-error".into(),
@@ -50,7 +51,7 @@ pub(crate) fn render_svg_document(document: &str) -> Result<String> {
     )?;
 
     run_command(
-        "dvisvgm",
+        &config.dvisvgm,
         vec![
             dvi_path.display().to_string(),
             "-v".into(),
@@ -65,18 +66,18 @@ pub(crate) fn render_svg_document(document: &str) -> Result<String> {
         .with_context(|| format!("failed to read generated SVG `{}`", svg_path.display()))
 }
 
-fn command_available(command: &str) -> bool {
+fn command_available(command: &Path) -> bool {
     match Command::new(command).arg("--version").output() {
         Ok(_) => true,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
-        Err(_) => true,
+        Err(_) => false,
     }
 }
 
-fn run_command(command: &str, args: Vec<String>) -> Result<()> {
+fn run_command(command: &Path, args: Vec<String>) -> Result<()> {
     let output = Command::new(command).args(args).output().map_err(|error| {
+        let command = command.display();
         if error.kind() == std::io::ErrorKind::NotFound {
-            anyhow!("system LaTeX backend requires `{command}` on PATH")
+            anyhow!("system LaTeX backend requires `{command}`")
         } else {
             anyhow!("failed to start `{command}`: {error}")
         }
@@ -88,12 +89,84 @@ fn run_command(command: &str, args: Vec<String>) -> Result<()> {
 
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let command = command.display();
     bail!(
         "`{command}` exited with status {}{}\n{}",
         output.status,
         if stderr.is_empty() { "" } else { ":" },
         if stderr.is_empty() { stdout } else { stderr }
     );
+}
+
+fn find_command(name: &str) -> Option<PathBuf> {
+    let names = candidate_names(name);
+    for dir in env::var_os("PATH")
+        .into_iter()
+        .flat_map(|path| env::split_paths(&path).collect::<Vec<_>>())
+        .chain(common_command_dirs())
+    {
+        for name in &names {
+            let candidate = dir.join(name);
+            if command_available(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn candidate_names(name: &str) -> Vec<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut out = vec![name.to_owned()];
+        if !name.ends_with(".exe") {
+            out.push(format!("{name}.exe"));
+        }
+        out
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        vec![name.to_owned()]
+    }
+}
+
+fn common_command_dirs() -> Vec<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        [
+            "/Library/TeX/texbin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/usr/texbin",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        [
+            r"C:\texlive\2026\bin\windows",
+            r"C:\texlive\2025\bin\windows",
+            r"C:\texlive\2024\bin\windows",
+            r"C:\Program Files\MiKTeX\miktex\bin\x64",
+            r"C:\Program Files\MiKTeX 2.9\miktex\bin\x64",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
+    }
+
+    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+    {
+        ["/usr/local/bin", "/usr/bin", "/bin"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect()
+    }
 }
 
 struct TempDir {

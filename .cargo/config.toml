@@ -1,0 +1,11 @@
+# Build-time environment for tectonic's C/C++ dependencies.
+#
+# tectonic requires ICU (libicu-uc) at build time. On macOS with Homebrew:
+#   brew install icu4c
+#
+# ICU 77+ headers require C++17. Both vars are set here so `cargo build`
+# works without manually exporting them in the shell.
+
+[env]
+PKG_CONFIG_PATH = "/opt/homebrew/opt/icu4c/lib/pkgconfig"
+CXXFLAGS = "-std=c++17"

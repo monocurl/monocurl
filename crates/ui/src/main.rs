@@ -2,11 +2,14 @@ use std::borrow::Cow;
 
 use crate::{
     actions::{
-        Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide, Paste,
-        PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd,
-        SceneStart, ToggleHeadlessMode, TogglePlaying, TogglePresentationMode, Undo,
+        Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide,
+        OpenSettings, Paste, PrevSlide, Quit, Redo, SaveActiveDocument,
+        SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleHeadlessMode, TogglePlaying,
+        TogglePresentationMode, Undo,
     },
     editor::text_editor,
+    settings_window::SettingsWindow,
+    state::user_settings::UserSettings,
     theme::ThemeSettings,
     window::MonocurlWindow,
 };
@@ -20,6 +23,7 @@ mod editor;
 mod home_view;
 mod navbar_view;
 mod services;
+mod settings_window;
 mod state;
 mod theme;
 mod timeline;
@@ -46,7 +50,11 @@ impl MonocurlLauncher {
 
     fn setup_global_actions(cx: &mut App) {
         cx.on_action(|_: &Quit, cx| cx.quit());
-        cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+        cx.on_action(|_: &OpenSettings, cx| SettingsWindow::open(cx));
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("secondary-,", OpenSettings, None),
+        ]);
     }
 
     fn setup_menus(cx: &mut App) {
@@ -63,6 +71,8 @@ impl MonocurlLauncher {
             Menu {
                 name: "File".into(),
                 items: vec![
+                    MenuItem::action("Settings...", OpenSettings),
+                    MenuItem::separator(),
                     MenuItem::action("Save", SaveActiveDocument),
                     MenuItem::action("Save As", SaveActiveDocumentCustomPath),
                     MenuItem::separator(),
@@ -135,6 +145,7 @@ impl MonocurlLauncher {
         Application::new().run(|cx: &mut App| {
             Self::setup_fonts(cx);
             ThemeSettings::init(cx);
+            UserSettings::init(cx);
             Self::setup_modules(cx);
             Self::setup_global_actions(cx);
             Self::setup_menus(cx);

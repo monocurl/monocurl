@@ -51,6 +51,15 @@ impl DocumentView {
             cx.notify();
         })
         .detach();
+        cx.observe_global::<UserSettings>(|dv, cx| {
+            if let Some(window_state) = dv.window_state.upgrade() {
+                window_state.update(cx, |window_state, cx| {
+                    dv.on_imports_may_have_changed(window_state, cx);
+                });
+            }
+            cx.notify();
+        })
+        .detach();
 
         dirty.update(cx, |dirty, _| *dirty = false);
 
@@ -63,7 +72,6 @@ impl DocumentView {
             state,
             services,
             navbar: cx.new(move |cx| Navbar::new(window_state, cx)),
-            latex_backend_status: latex::system_backend_status(),
             editor: editor.clone(),
             viewport: viewport.clone(),
             timeline,
@@ -349,7 +357,7 @@ impl DocumentView {
             .relative()
             .flex()
             .flex_col()
-            .children(render_latex_warning(self.latex_backend_status, theme))
+            .children(render_latex_warning(UserSettings::read(cx), theme))
             .child(self.navbar.clone())
             .child(workspace)
             .text_color(theme.text_primary)

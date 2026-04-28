@@ -1,7 +1,9 @@
 use gpui::*;
-use latex::SystemBackendStatus;
 
-use crate::theme::{Theme, ThemeMode};
+use crate::{
+    state::user_settings::{LatexBackendPreference, UserSettings},
+    theme::{Theme, ThemeMode},
+};
 
 fn latex_install_url() -> &'static str {
     #[cfg(target_os = "macos")]
@@ -20,7 +22,7 @@ fn latex_install_url() -> &'static str {
     }
 }
 
-fn missing_latex_tools(status: SystemBackendStatus) -> &'static str {
+fn missing_latex_tools(status: latex::SystemBackendStatus) -> &'static str {
     match (status.latex, status.dvisvgm) {
         (true, true) => "",
         (false, true) => "latex",
@@ -74,93 +76,129 @@ fn latex_warning_palette(theme: Theme) -> (Rgba, Rgba, Rgba) {
     }
 }
 
-pub fn render_latex_warning(status: SystemBackendStatus, theme: Theme) -> Option<AnyElement> {
-    if status.is_available() {
-        return None;
-    }
+pub fn render_latex_warning(settings: &UserSettings, theme: Theme) -> Option<AnyElement> {
+    let (title, message, show_install) = match settings.latex_backend {
+        LatexBackendPreference::Bundled => {
+            let status = latex::bundled_backend_status();
+            if !status.bundle {
+                (
+                    "No local LaTeX bundle found".to_string(),
+                    "Tectonic will download TeX support files on demand. For offline or release builds, place a bundle at assets/tectonic/bundle, bundle.zip, or bundle.ttb, or set MONOCURL_TECTONIC_BUNDLE.".to_string(),
+                    false,
+                )
+            } else {
+                return None;
+            }
+        }
+        LatexBackendPreference::System => {
+            let Some(config) = settings.system_backend_config() else {
+                return Some(render_warning_banner(
+                    "System LaTeX paths not set".to_string(),
+                    "System backend is enabled, but latex and dvisvgm paths are incomplete. Monocurl will use the bundled backend until both paths are set.".to_string(),
+                    false,
+                    theme,
+                ));
+            };
+            let status = latex::system_backend_status(&config);
+            if status.is_available() {
+                return None;
+            }
+            let missing = missing_latex_tools(status);
+            (
+                "System LaTeX tools not available".to_string(),
+                format!(
+                    "Configured system backend is missing or cannot start: {missing}. Choose valid latex and dvisvgm binaries in Settings."
+                ),
+                true,
+            )
+        }
+    };
+    Some(render_warning_banner(title, message, show_install, theme))
+}
 
-    let missing = missing_latex_tools(status);
-    let message = format!(
-        "Missing on PATH: {missing}. Monocurl will use a limited MathJax fallback for Tex(...); Text(...) and Latex(...) still require the system LaTeX toolchain."
-    );
+fn render_warning_banner(
+    title: String,
+    message: String,
+    show_install: bool,
+    theme: Theme,
+) -> AnyElement {
     let install_url = latex_install_url();
     let (banner_bg, banner_border, accent) = latex_warning_palette(theme);
 
-    Some(
-        div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .items_start()
-            .justify_between()
-            .gap(px(16.0))
-            .px(px(14.0))
-            .py(px(10.0))
-            .border_b(px(1.0))
-            .border_color(banner_border)
-            .bg(banner_bg)
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_1()
-                    .items_start()
-                    .gap(px(10.0))
-                    .child(
-                        div()
-                            .w(px(18.0))
-                            .h(px(18.0))
-                            .mt(px(1.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .bg(accent)
-                            .text_color(gpui::black())
-                            .font_weight(FontWeight::BOLD)
-                            .child("!"),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_size(px(12.5))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(theme.text_primary)
-                                    .child("System LaTeX tools not found"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(theme.text_muted)
-                                    .child(message),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .id("install-latex-link")
-                    .px(px(10.0))
-                    .py(px(5.0))
-                    .rounded(px(6.0))
-                    .border_1()
-                    .border_color(banner_border)
-                    .bg(accent)
-                    .text_size(px(11.0))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(gpui::black())
-                    .hover(|style| style.opacity(0.92))
-                    .cursor_pointer()
-                    .child("Install LaTeX")
-                    .on_click(move |_, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        let _ = open::that(install_url);
-                    }),
-            )
-            .into_any_element(),
-    )
+    div()
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_start()
+        .justify_between()
+        .gap(px(16.0))
+        .px(px(14.0))
+        .py(px(10.0))
+        .border_b(px(1.0))
+        .border_color(banner_border)
+        .bg(banner_bg)
+        .child(
+            div()
+                .flex()
+                .flex_row()
+                .flex_1()
+                .items_start()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .w(px(18.0))
+                        .h(px(18.0))
+                        .mt(px(1.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded_full()
+                        .bg(accent)
+                        .text_color(gpui::black())
+                        .font_weight(FontWeight::BOLD)
+                        .child("!"),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.0))
+                        .child(
+                            div()
+                                .text_size(px(12.5))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(theme.text_primary)
+                                .child(title),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(11.0))
+                                .text_color(theme.text_muted)
+                                .child(message),
+                        ),
+                ),
+        )
+        .children(show_install.then(|| {
+            div()
+                .id("install-latex-link")
+                .px(px(10.0))
+                .py(px(5.0))
+                .rounded(px(6.0))
+                .border_1()
+                .border_color(banner_border)
+                .bg(accent)
+                .text_size(px(11.0))
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(gpui::black())
+                .hover(|style| style.opacity(0.92))
+                .cursor_pointer()
+                .child("Install LaTeX")
+                .on_click(move |_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    let _ = open::that(install_url);
+                })
+                .into_any_element()
+        }))
+        .into_any_element()
 }

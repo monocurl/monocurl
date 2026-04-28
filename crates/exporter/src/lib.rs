@@ -785,7 +785,8 @@ fn check_cancelled(cancel_flag: &AtomicBool) -> Result<()> {
 }
 
 fn bgra_to_rgba(mut frame: RgbaImage) -> RgbaImage {
-    for pixel in frame.as_mut().chunks_exact_mut(4) {
+    let data: &mut [u8] = frame.as_mut();
+    for pixel in data.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
     frame

@@ -24,8 +24,6 @@ fn main() {
         .filter_level(log::LevelFilter::Info)
         .init();
 
-    warn_if_system_latex_unavailable();
-
     match parse_cli(env::args_os().skip(1).collect()) {
         Ok(CliAction::Help(topic)) => {
             println!("{}", help_text(topic));
@@ -42,47 +40,6 @@ fn main() {
             eprintln!("Use `monocurl help` for usage.");
             process::exit(2);
         }
-    }
-}
-
-fn warn_if_system_latex_unavailable() {
-    let status = latex::system_backend_status();
-    if status.is_available() {
-        return;
-    }
-
-    eprintln!("warning: system LaTeX tools not found");
-    eprintln!(
-        "Missing on PATH: {}. Monocurl will use a limited MathJax fallback for Tex(...); Text(...) and Latex(...) still require the system LaTeX toolchain.",
-        missing_latex_tools(status),
-    );
-    eprintln!("Install LaTeX: {}", latex_install_url());
-    eprintln!();
-}
-
-fn latex_install_url() -> &'static str {
-    #[cfg(target_os = "macos")]
-    {
-        "https://tug.org/mactex/"
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        "https://miktex.org/download"
-    }
-
-    #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-    {
-        "https://www.latex-project.org/get/"
-    }
-}
-
-fn missing_latex_tools(status: latex::SystemBackendStatus) -> &'static str {
-    match (status.latex, status.dvisvgm) {
-        (true, true) => "",
-        (false, true) => "latex",
-        (true, false) => "dvisvgm",
-        (false, false) => "latex and dvisvgm",
     }
 }
 
@@ -205,6 +162,13 @@ impl CliCommand {
         }
     }
 
+    fn use_system_latex(&self) -> bool {
+        match self {
+            Self::Image(command) => command.use_system_latex,
+            Self::Video(command) => command.use_system_latex,
+        }
+    }
+
     fn export_kind(&self) -> ExportKind {
         match self {
             Self::Image(command) => ExportKind::Image {
@@ -239,6 +203,7 @@ struct ImageCommand {
     output_path: PathBuf,
     resolution: ResolutionPreset,
     timestamp: ImageTimestampSelection,
+    use_system_latex: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -247,6 +212,7 @@ struct VideoCommand {
     output_path: PathBuf,
     resolution: ResolutionPreset,
     fps: u32,
+    use_system_latex: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -255,7 +221,16 @@ enum ImageTimestampSelection {
     Exact(Timestamp),
 }
 
-fn parse_cli(args: Vec<OsString>) -> Result<CliAction> {
+fn parse_cli(mut args: Vec<OsString>) -> Result<CliAction> {
+    let mut use_system_latex = false;
+    while args
+        .first()
+        .is_some_and(|arg| is_flag(arg, "--system-latex"))
+    {
+        use_system_latex = true;
+        args.remove(0);
+    }
+
     let Some(command) = args.first() else {
         return Ok(CliAction::Help(HelpTopic::General));
     };
@@ -263,8 +238,8 @@ fn parse_cli(args: Vec<OsString>) -> Result<CliAction> {
     match command.to_string_lossy().as_ref() {
         "help" => parse_help(&args[1..]),
         "-h" | "--help" => Ok(CliAction::Help(HelpTopic::General)),
-        "image" => parse_image_command(&args[1..]),
-        "video" => parse_video_command(&args[1..]),
+        "image" => parse_image_command(&args[1..], use_system_latex),
+        "video" => parse_video_command(&args[1..], use_system_latex),
         other => bail!("unknown command `{other}`"),
     }
 }
@@ -281,7 +256,7 @@ fn parse_help(args: &[OsString]) -> Result<CliAction> {
     }
 }
 
-fn parse_image_command(args: &[OsString]) -> Result<CliAction> {
+fn parse_image_command(args: &[OsString], mut use_system_latex: bool) -> Result<CliAction> {
     let mut scene_path = None;
     let mut output_path = None;
     let mut resolution = ResolutionPreset::default();
@@ -318,6 +293,8 @@ fn parse_image_command(args: &[OsString]) -> Result<CliAction> {
                 bail!("image time must be non-negative");
             }
             time = Some(parsed_time);
+        } else if is_flag(arg, "--system-latex") {
+            use_system_latex = true;
         } else if looks_like_flag(arg) {
             bail!("unknown option `{}` for `image`", arg.to_string_lossy());
         } else if scene_path.is_none() {
@@ -346,10 +323,11 @@ fn parse_image_command(args: &[OsString]) -> Result<CliAction> {
         output_path,
         resolution,
         timestamp,
+        use_system_latex,
     })))
 }
 
-fn parse_video_command(args: &[OsString]) -> Result<CliAction> {
+fn parse_video_command(args: &[OsString], mut use_system_latex: bool) -> Result<CliAction> {
     let mut scene_path = None;
     let mut output_path = None;
     let mut resolution = ResolutionPreset::default();
@@ -377,6 +355,8 @@ fn parse_video_command(args: &[OsString]) -> Result<CliAction> {
             if fps == 0 {
                 bail!("video fps must be greater than zero");
             }
+        } else if is_flag(arg, "--system-latex") {
+            use_system_latex = true;
         } else if looks_like_flag(arg) {
             bail!("unknown option `{}` for `video`", arg.to_string_lossy());
         } else if scene_path.is_none() {
@@ -398,6 +378,7 @@ fn parse_video_command(args: &[OsString]) -> Result<CliAction> {
         output_path,
         resolution,
         fps,
+        use_system_latex,
     })))
 }
 
@@ -439,6 +420,8 @@ fn normalize_output_path(mut path: PathBuf, kind: CommandKind) -> PathBuf {
 }
 
 fn run_command(command: CliCommand) -> Result<()> {
+    configure_latex_backend(&command)?;
+
     let scene_path = command.scene_path().to_path_buf();
     let root_text = fs::read_to_string(&scene_path)
         .with_context(|| format!("failed to read scene {}", scene_path.display()))?;
@@ -470,6 +453,20 @@ fn run_command(command: CliCommand) -> Result<()> {
             Err(error)
         }
     }
+}
+
+fn configure_latex_backend(command: &CliCommand) -> Result<()> {
+    if !command.use_system_latex() {
+        latex::set_backend_config(latex::LatexBackendConfig::Bundled);
+        return Ok(());
+    }
+
+    let tools = latex::discover_system_backend();
+    let config = tools.into_config().ok_or_else(|| {
+        anyhow!("--system-latex requires both `latex` and `dvisvgm` to be available on PATH")
+    })?;
+    latex::set_backend_config(latex::LatexBackendConfig::System(config));
+    Ok(())
 }
 
 struct TerminalProgress {
@@ -577,6 +574,7 @@ Commands:
 Common options:
   -o, --output <path>          output path; extension is forced to .png or .mp4
   -r, --resolution <preset>    one of: {small}, {medium}, {large}
+  --system-latex               use latex and dvisvgm from PATH instead of bundled Tectonic
   -h, --help                   show command help
 
 Image options:
@@ -606,6 +604,7 @@ Options:
   -r, --resolution <preset>    one of: {small}, {medium}, {large}
   --slide <index>              slide to capture; if timestamp flags are used, missing values default to 0
   --time <seconds>             time within the slide; if neither timestamp flag is used, exports the final frame
+  --system-latex               use latex and dvisvgm from PATH instead of bundled Tectonic
   -h, --help                   show this message
 ",
             small = resolution_help(ResolutionPreset::Small),
@@ -621,6 +620,7 @@ Options:
   -o, --output <path>          output path; extension is forced to .mp4
   -r, --resolution <preset>    one of: {small}, {medium}, {large}
   --fps <number>               frames per second, default {fps}
+  --system-latex               use latex and dvisvgm from PATH instead of bundled Tectonic
   -h, --help                   show this message
 ",
             small = resolution_help(ResolutionPreset::Small),
@@ -655,6 +655,7 @@ mod tests {
         assert_eq!(command.output_path, PathBuf::from("scene.png"));
         assert_eq!(command.resolution, ResolutionPreset::Medium);
         assert_eq!(command.timestamp, ImageTimestampSelection::SceneEnd);
+        assert!(!command.use_system_latex);
     }
 
     #[test]
@@ -700,6 +701,22 @@ mod tests {
         assert_eq!(command.output_path, PathBuf::from("renders/out.mp4"));
         assert_eq!(command.resolution, ResolutionPreset::Large);
         assert_eq!(command.fps, 30);
+        assert!(!command.use_system_latex);
+    }
+
+    #[test]
+    fn parses_system_latex_option() {
+        let parsed = parse_cli(args(&["--system-latex", "image", "scene.mcs"])).unwrap();
+        let CliAction::Run(CliCommand::Image(command)) = parsed else {
+            panic!("expected image command");
+        };
+        assert!(command.use_system_latex);
+
+        let parsed = parse_cli(args(&["video", "scene.mcs", "--system-latex"])).unwrap();
+        let CliAction::Run(CliCommand::Video(command)) = parsed else {
+            panic!("expected video command");
+        };
+        assert!(command.use_system_latex);
     }
 
     #[test]

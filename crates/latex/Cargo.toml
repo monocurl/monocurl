@@ -6,7 +6,11 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 geo.workspace = true
+hayro-interpret.workspace = true
+hayro-svg.workspace = true
+roxmltree.workspace = true
 libtess2.workspace = true
-mathjax_svg.workspace = true
+tectonic.workspace = true
+tectonic_bundles.workspace = true
 tiny-skia-path.workspace = true
 usvg.workspace = true

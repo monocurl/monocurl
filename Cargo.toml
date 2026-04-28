@@ -7,7 +7,6 @@ members = [
     "crates/compiler",
     "crates/integration_tests",
     "crates/latex",
-    "crates/mathjax_svg",
     "crates/ui_cli_shared",
     "crates/executor",
     "crates/exporter",
@@ -29,7 +28,6 @@ edition = "2024"
 anyhow = "1.0.86"
 log = "0.4.25"
 env_logger = "0.11"
-boa_engine = "0.21.1"
 arrayvec = "0.7.6"
 arraydeque = "0.5.1"
 smallvec = "1.15.1"
@@ -49,6 +47,11 @@ usvg = "0.45.1"
 image = "0.25.5"
 mp4 = "0.14.0"
 openh264 = "0.9.3"
+hayro-interpret = "0.4.0"
+hayro-svg = "0.2.0"
+roxmltree = "0.20.0"
+tectonic = { version = "0.15", default-features = false, features = ["geturl-reqwest"] }
+tectonic_bundles = { version = "0.3", default-features = false }
 
 gpui = { path = "../gpui/crates/gpui" }
 
@@ -62,7 +65,6 @@ geo = { path = "crates/geo" }
 latex = { path = "crates/latex" }
 lexer = { path = "crates/lexer" }
 libtess2 = { path = "crates/libtess2" }
-mathjax_svg = { path = "crates/mathjax_svg" }
 parser = { path = "crates/parser" }
 renderer = { path = "crates/renderer" }
 inventory = "0.3"

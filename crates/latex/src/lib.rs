@@ -1,10 +1,12 @@
 mod document;
 mod svg;
 mod system;
+mod tectonic;
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex, OnceLock},
+    path::PathBuf,
+    sync::{Arc, Mutex, OnceLock, RwLock},
 };
 
 use anyhow::{Result, bail};
@@ -15,12 +17,52 @@ use geo::{
 
 pub use document::SpanMarker;
 
-const FONT_SIZE_AT_SCALE_1: f64 = 36.0;
-const MATHJAX_UNITS_PER_EM: f32 = 1000.0;
 const SYSTEM_SVG_UNITS_AT_SCALE_1: f32 = 36.0;
 const DEFAULT_NUMBER_SIGNIFICANT_DIGITS: usize = 6;
 const MAX_NUMBER_DECIMAL_PLACES: usize = 64;
 const NUMBER_GLYPH_TRACKING_AT_SCALE_1: f32 = 0.015;
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum LatexBackendConfig {
+    Bundled,
+    System(SystemBackendConfig),
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct SystemBackendConfig {
+    pub latex: PathBuf,
+    pub dvisvgm: PathBuf,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SystemToolPaths {
+    pub latex: Option<PathBuf>,
+    pub dvisvgm: Option<PathBuf>,
+}
+
+impl SystemToolPaths {
+    pub fn into_config(self) -> Option<SystemBackendConfig> {
+        Some(SystemBackendConfig {
+            latex: self.latex?,
+            dvisvgm: self.dvisvgm?,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BundledBackendStatus {
+    pub bundle: bool,
+}
+
+impl BundledBackendStatus {
+    pub fn is_available(self) -> bool {
+        true
+    }
+
+    pub fn is_self_contained(self) -> bool {
+        self.bundle
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SystemBackendStatus {
@@ -50,6 +92,7 @@ enum BackendKind {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct CacheKey {
     backend: BackendKind,
+    backend_config: LatexBackendConfig,
     source: String,
     scale_bits: u32,
     quality: RenderQuality,
@@ -68,9 +111,32 @@ pub struct RenderedOutput {
 }
 
 static CACHE: OnceLock<Mutex<HashMap<CacheKey, CacheEntry>>> = OnceLock::new();
+static BACKEND_CONFIG: OnceLock<RwLock<LatexBackendConfig>> = OnceLock::new();
 
-pub fn system_backend_status() -> SystemBackendStatus {
-    system::backend_status()
+pub fn backend_config() -> LatexBackendConfig {
+    backend_config_lock().read().unwrap().clone()
+}
+
+pub fn set_backend_config(config: LatexBackendConfig) {
+    let mut current = backend_config_lock().write().unwrap();
+    if *current != config {
+        *current = config;
+        cache().lock().unwrap().clear();
+    }
+}
+
+pub fn discover_system_backend() -> SystemToolPaths {
+    system::discover_backend()
+}
+
+pub fn bundled_backend_status() -> BundledBackendStatus {
+    BundledBackendStatus {
+        bundle: tectonic::bundle_is_available(),
+    }
+}
+
+pub fn system_backend_status(config: &SystemBackendConfig) -> SystemBackendStatus {
+    system::backend_status(config)
 }
 
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
@@ -87,7 +153,7 @@ pub fn render_text_with_quality(
         return Ok(Vec::new());
     }
 
-    render_tagged_system(
+    render_tagged_backend(
         BackendKind::Text,
         &tagged,
         scale,
@@ -110,27 +176,13 @@ pub fn render_tex_with_quality(
         return Ok(Vec::new());
     }
 
-    if system::is_available() {
-        return render_tagged_system(
-            BackendKind::Tex,
-            &tagged,
-            scale,
-            quality,
-            document::build_tex_document,
-        );
-    }
-
-    let markers = tagged
-        .spans
-        .iter()
-        .enumerate()
-        .map(|(index, span)| SpanMarker {
-            id: document::text_tag_marker_id(index),
-            range: span.range.clone(),
-        })
-        .collect::<Vec<_>>();
-    let output = render_tex_marked_with_quality(&tagged.source, scale, &markers, quality)?;
-    Ok(apply_text_tags(output, &tagged))
+    render_tagged_backend(
+        BackendKind::Tex,
+        &tagged,
+        scale,
+        quality,
+        document::build_tex_document,
+    )
 }
 
 pub fn format_number(
@@ -249,20 +301,7 @@ pub fn render_tex_marked_with_quality(
         });
     }
 
-    if system::is_available() {
-        return render_tex_marked_system(tex, scale, markers, quality);
-    }
-
-    let source = document::build_mathjax_source(tex, markers)?;
-    let font_size = FONT_SIZE_AT_SCALE_1 * scale as f64;
-    render_cached(BackendKind::Tex, source, scale, quality, |source| {
-        let svg = mathjax_svg::render_svg(&source, mathjax_svg::RenderOptions::new(font_size))?;
-        svg::import(
-            &svg,
-            font_size as f32 / MATHJAX_UNITS_PER_EM,
-            svg_import_options(quality),
-        )
-    })
+    render_tex_marked_backend(tex, scale, markers, quality)
 }
 
 pub fn render_latex(body: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
@@ -279,7 +318,7 @@ pub fn render_latex_with_quality(
         return Ok(Vec::new());
     }
 
-    render_tagged_system(
+    render_tagged_backend(
         BackendKind::Latex,
         &tagged,
         scale,
@@ -288,24 +327,39 @@ pub fn render_latex_with_quality(
     )
 }
 
-fn render_system(
+fn render_document(
     backend: BackendKind,
     source: String,
     scale: f32,
     quality: RenderQuality,
 ) -> Result<RenderedOutput> {
     validate_scale(scale)?;
-    render_cached(backend, source, scale, quality, |source| {
-        let svg = system::render_svg_document(&source)?;
-        svg::import(
-            &svg,
-            scale / SYSTEM_SVG_UNITS_AT_SCALE_1,
-            svg_import_options(quality),
-        )
-    })
+    let backend_config = backend_config();
+    render_cached(
+        backend,
+        backend_config.clone(),
+        source,
+        scale,
+        quality,
+        |source| {
+            let (svg, flip_y) = match &backend_config {
+                // after expand_glyph_uses, all paths have transforms applied once → y-down
+                LatexBackendConfig::Bundled => (tectonic::render_svg_document(&source)?, true),
+                // dvisvgm outputs standard SVG y-down coordinates; negate to get Monocurl y-up
+                LatexBackendConfig::System(config) => {
+                    (system::render_svg_document(&source, config)?, true)
+                }
+            };
+            svg::import(
+                &svg,
+                scale / SYSTEM_SVG_UNITS_AT_SCALE_1,
+                svg_import_options(quality, flip_y),
+            )
+        },
+    )
 }
 
-fn render_tagged_system<F>(
+fn render_tagged_backend<F>(
     backend: BackendKind,
     tagged: &document::TaggedSource,
     scale: f32,
@@ -325,12 +379,13 @@ where
         })
         .collect::<Vec<_>>();
     let source = document::apply_legacy_text_tags(&tagged.source, &marker_spans)?;
-    let output = render_system(backend, build_document(&source), scale, quality)?;
-    Ok(apply_system_text_tags(output, &tagged.spans))
+    let output = render_document(backend, build_document(&source), scale, quality)?;
+    Ok(apply_backend_text_tags(output, &tagged.spans))
 }
 
 fn render_cached<F>(
     backend: BackendKind,
+    backend_config: LatexBackendConfig,
     source: String,
     scale: f32,
     quality: RenderQuality,
@@ -341,6 +396,7 @@ where
 {
     let key = CacheKey {
         backend,
+        backend_config,
         source: source.clone(),
         scale_bits: scale.to_bits(),
         quality,
@@ -367,7 +423,7 @@ where
     })
 }
 
-fn render_tex_marked_system(
+fn render_tex_marked_backend(
     tex: &str,
     scale: f32,
     markers: &[SpanMarker],
@@ -382,7 +438,7 @@ fn render_tex_marked_system(
         })
         .collect::<Vec<_>>();
     let source = document::apply_legacy_text_tags(tex, &tagged_markers)?;
-    let mut output = render_system(
+    let mut output = render_document(
         BackendKind::Tex,
         document::build_tex_document(&source),
         scale,
@@ -528,23 +584,7 @@ fn translate_mesh(mesh: &mut Mesh, delta: Float3) {
     }
 }
 
-fn apply_text_tags(output: RenderedOutput, tagged: &document::TaggedSource) -> Vec<Arc<Mesh>> {
-    let mut meshes = output.meshes;
-    for (index, span) in tagged.spans.iter().enumerate() {
-        let marker = document::text_tag_marker_id(index);
-        let Some(mesh_indices) = output.span_mesh_indices.get(&marker) else {
-            continue;
-        };
-        for &mesh_index in mesh_indices {
-            if let Some(mesh) = meshes.get_mut(mesh_index) {
-                make_mesh_mut(mesh).tag = span.tag.clone();
-            }
-        }
-    }
-    meshes
-}
-
-fn apply_system_text_tags(
+fn apply_backend_text_tags(
     output: RenderedOutput,
     spans: &[document::TaggedSpan],
 ) -> Vec<Arc<Mesh>> {
@@ -569,12 +609,17 @@ fn cache() -> &'static Mutex<HashMap<CacheKey, CacheEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn svg_import_options(quality: RenderQuality) -> svg::ImportOptions {
+fn backend_config_lock() -> &'static RwLock<LatexBackendConfig> {
+    BACKEND_CONFIG.get_or_init(|| RwLock::new(LatexBackendConfig::Bundled))
+}
+
+fn svg_import_options(quality: RenderQuality, flip_y: bool) -> svg::ImportOptions {
     svg::ImportOptions {
         curve_sampling: match quality {
             RenderQuality::Normal => svg::CurveSampling::Normal,
             RenderQuality::High => svg::CurveSampling::High,
         },
+        flip_y,
     }
 }
 
@@ -582,7 +627,18 @@ fn svg_import_options(quality: RenderQuality) -> svg::ImportOptions {
 mod tests {
     use super::*;
     use geo::simd::Float3;
-    use usvg::{Node, Tree};
+
+    fn configure_test_backend() -> bool {
+        if bundled_backend_status().is_available() {
+            set_backend_config(LatexBackendConfig::Bundled);
+            return true;
+        }
+        let Some(config) = discover_system_backend().into_config() else {
+            return false;
+        };
+        set_backend_config(LatexBackendConfig::System(config));
+        true
+    }
 
     fn mesh_bounds(meshes: &[Arc<Mesh>]) -> Option<(Float3, Float3)> {
         let mut bounds: Option<(Float3, Float3)> = None;
@@ -610,21 +666,11 @@ mod tests {
         bounds
     }
 
-    fn collect_svg_ids(group: &usvg::Group, ids: &mut Vec<String>) {
-        if !group.id().is_empty() {
-            ids.push(group.id().to_owned());
-        }
-        for child in group.children() {
-            match child {
-                Node::Group(group) => collect_svg_ids(group, ids),
-                Node::Path(path) if !path.id().is_empty() => ids.push(path.id().to_owned()),
-                _ => {}
-            }
-        }
-    }
-
     #[test]
     fn tex_and_text_have_similar_scale() {
+        if !configure_test_backend() {
+            return;
+        }
         let text = render_text("2 + 4", 1.0).unwrap();
         let tex = render_tex("2 + 4", 1.0).unwrap();
         let (text_min, text_max) = mesh_bounds(&text).unwrap();
@@ -641,6 +687,9 @@ mod tests {
 
     #[test]
     fn tex_digits_and_letters_keep_expected_bounds() {
+        if !configure_test_backend() {
+            return;
+        }
         for source in ["4", "Hello"] {
             let text = render_text(source, 1.0).unwrap();
             let tex = render_tex(source, 1.0).unwrap();
@@ -665,6 +714,9 @@ mod tests {
 
     #[test]
     fn text_monocurl_has_consistent_topology() {
+        if !configure_test_backend() {
+            return;
+        }
         let meshes = render_text("Monocurl", 1.5).unwrap();
         for mesh in meshes {
             assert!(
@@ -703,48 +755,14 @@ mod tests {
 
     #[test]
     fn number_renderer_lays_out_cached_glyphs() {
+        if !configure_test_backend() {
+            return;
+        }
         let one = render_number_string_with_quality("1", 1.0, RenderQuality::Normal).unwrap();
         let two = render_number_string_with_quality("11", 1.0, RenderQuality::Normal).unwrap();
         let (one_min, one_max) = mesh_bounds(&one).unwrap();
         let (two_min, two_max) = mesh_bounds(&two).unwrap();
         assert!(one_max.x > one_min.x);
         assert!(two_max.x - two_min.x > one_max.x - one_min.x);
-    }
-
-    #[test]
-    fn tex_marked_spans_are_recovered_from_mathjax_svg() {
-        let source = document::build_mathjax_source(
-            "x+y",
-            &[SpanMarker {
-                id: "lhs".into(),
-                range: 0..1,
-            }],
-        )
-        .unwrap();
-        let svg = mathjax_svg::render_svg(&source, mathjax_svg::RenderOptions::new(36.0)).unwrap();
-        assert!(
-            svg.contains(r#"id="mc-span-lhs""#) || svg.contains(r#"id='mc-span-lhs'"#),
-            "raw MathJax SVG:\n{svg}"
-        );
-
-        let tree = Tree::from_str(&svg, &usvg::Options::default()).unwrap();
-        let mut ids = Vec::new();
-        collect_svg_ids(tree.root(), &mut ids);
-        assert!(
-            ids.iter().any(|id| id == "mc-span-lhs"),
-            "usvg ids: {ids:?}"
-        );
-
-        let rendered = render_tex_marked(
-            "x+y",
-            1.0,
-            &[SpanMarker {
-                id: "lhs".into(),
-                range: 0..1,
-            }],
-        )
-        .unwrap();
-        assert!(rendered.span_mesh_indices.contains_key("lhs"));
-        assert!(!rendered.span_mesh_indices["lhs"].is_empty());
     }
 }

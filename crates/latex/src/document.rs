@@ -1,11 +1,6 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Range,
-};
+use std::{collections::HashMap, ops::Range};
 
 use anyhow::{Result, bail};
-
-pub(crate) const SPAN_ID_PREFIX: &str = "mc-span-";
 
 const SHARED_MACROS: &str = "\\newcommand{\\pin}[2]{{\\color[RGB]{#1,255,255} #2}}\n\
 \\renewcommand{\\P}[2]{{\\color[RGB]{#1,255,255} #2}}\n\
@@ -54,13 +49,6 @@ pub(crate) fn build_latex_document(body: &str) -> String {
     format!("{LATEX_PREAMBLE}{SHARED_MACROS}\\begin{{document}}\n{body}{LATEX_POSTAMBLE}")
 }
 
-pub(crate) fn build_mathjax_source(tex: &str, markers: &[SpanMarker]) -> Result<String> {
-    Ok(format!(
-        "{SHARED_MACROS}{}",
-        apply_span_markers(tex, markers)?
-    ))
-}
-
 pub(crate) fn parse_text_tags(source: &str) -> Result<TaggedSource> {
     parse_text_tags_impl(source)
 }
@@ -94,14 +82,6 @@ pub(crate) fn apply_legacy_text_tags(source: &str, spans: &[TaggedSpan]) -> Resu
             close: "}".into(),
         }),
     ))
-}
-
-pub(crate) fn text_tag_marker_id(index: usize) -> String {
-    format!("text-tag-{index}")
-}
-
-pub(crate) fn strip_span_prefix(id: &str) -> Option<&str> {
-    id.strip_prefix(SPAN_ID_PREFIX)
 }
 
 fn parse_text_tags_impl(source: &str) -> Result<TaggedSource> {
@@ -140,58 +120,6 @@ fn parse_text_tags_impl(source: &str) -> Result<TaggedSource> {
     }
 
     Ok(TaggedSource { source: out, spans })
-}
-
-fn apply_span_markers(source: &str, markers: &[SpanMarker]) -> Result<String> {
-    if markers.is_empty() {
-        return Ok(source.to_owned());
-    }
-
-    let mut markers = markers.to_vec();
-    markers.sort_unstable_by_key(|marker| (marker.range.start, marker.range.end));
-
-    let mut seen_ids = HashSet::new();
-    for marker in &markers {
-        if marker.range.start >= marker.range.end || marker.range.end > source.len() {
-            bail!("span marker `{}` is out of bounds", marker.id);
-        }
-        if !source.is_char_boundary(marker.range.start)
-            || !source.is_char_boundary(marker.range.end)
-        {
-            bail!(
-                "span marker `{}` is not aligned to UTF-8 boundaries",
-                marker.id
-            );
-        }
-        let dom_id = span_dom_id(&marker.id);
-        if !seen_ids.insert(dom_id.clone()) {
-            bail!("duplicate span marker id `{}`", marker.id);
-        }
-    }
-    validate_nested_ranges(
-        markers.iter().map(|marker| marker.range.clone()),
-        "span markers are not properly nested",
-    )?;
-
-    Ok(apply_wrappers(
-        source,
-        markers.into_iter().map(|marker| Wrapper {
-            range: marker.range,
-            open: format!("\\cssId{{{}}}{{", span_dom_id(&marker.id)),
-            close: "}".into(),
-        }),
-    ))
-}
-
-fn span_dom_id(id: &str) -> String {
-    let sanitized = id
-        .chars()
-        .map(|ch| match ch {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '_' | '-' => ch,
-            _ => '_',
-        })
-        .collect::<String>();
-    format!("{SPAN_ID_PREFIX}{sanitized}")
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -412,8 +340,8 @@ fn legacy_text_tag_open(tag: &[isize]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        SpanMarker, TaggedSource, TaggedSpan, apply_legacy_text_tags, build_mathjax_source,
-        build_tex_document, build_text_document, parse_text_tags,
+        TaggedSource, TaggedSpan, apply_legacy_text_tags, build_tex_document, build_text_document,
+        parse_text_tags,
     };
 
     #[test]
@@ -426,19 +354,6 @@ mod tests {
     fn tex_document_wraps_input_in_display_math() {
         let doc = build_tex_document("x^2");
         assert!(doc.contains("\n\\[\nx^2\n\\]\n"));
-    }
-
-    #[test]
-    fn mathjax_source_wraps_marked_spans() {
-        let marked = build_mathjax_source(
-            "x+y",
-            &[SpanMarker {
-                id: "lhs".into(),
-                range: 0..1,
-            }],
-        )
-        .unwrap();
-        assert!(marked.contains(r"\cssId{mc-span-lhs}{x}"));
     }
 
     #[test]

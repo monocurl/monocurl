@@ -3,13 +3,16 @@
 #
 # Example: Text And Equations
 #
-# Text-like meshes can be animated just like geometry. This example uses Tex
-# because Monocurl can fall back to MathJax for Tex when system LaTeX is not
-# available. Plain Text(...) and Latex(...) are also available when the system
-# LaTeX toolchain is installed.
+# Text-like meshes can be animated just like geometry. Tex, Text, and Latex use
+# Monocurl's configured LaTeX backend: bundled Tectonic by default, or explicit
+# system latex + dvisvgm paths from settings.
 #
 # `\text_tag{...}{...}` tags parts of the rendered equation so TagTrans can
 # preserve corresponding terms across edits.
+#
+# This scene exercises fractions, integrals, sums, matrices, Greek letters,
+# amsmath/amssymb/amsfonts symbols, and tag-based animation — a comprehensive
+# bundle validation.
 
 import std.util
 import std.math
@@ -25,27 +28,187 @@ let Eq = |tex, at = [0, 0, 0], scale = 1|
     color{BLACK}
     Tex(tex, scale)
 
-slide "Write"
-mesh equation = Eq("a^2 + b^2 = c^2", [0, 0.7, 0], 1.15)
-mesh note = Eq("\text{Tex output is still a mesh}", [0, -1.0, 0], 0.65)
+let Label = |s, at = [0, 0, 0]|
+    centered_at{at}
+    color{GRAY}
+    Text(s, 0.45)
+
+
+# --- slide 1: basic algebra + tag animation ---
+
+mesh equation = Eq("a^2 + b^2 = c^2", [0, 0.5, 0], 1.15)
+mesh note = Label("Pythagorean theorem", [0, -0.7, 0])
+
+slide "Pythagorean Theorem"
 play Write(1.0, [&equation])
-play Fade(0.7, [&note])
-
-equation = Eq(
-    "\tag1{a^2} + \tag2{b^2} = \tag3{c^2}",
-    [0, 0.7, 0],
-    1.15
-)
-
-slide "Tag Terms"
-play TagTrans(0.8, [&equation])
+play Fade(1.0, [&note])
 
 equation = Eq(
     "\text_tag{3}{c^2} = \text_tag{1}{a^2} + \text_tag{2}{b^2}",
-    [0, 0.7, 0],
+    [0, 0.5, 0],
     1.15
 )
-note = Eq("\text{Same terms, different layout}", [0, -1.0, 0], 0.65)
 
-slide "Transform"
-play TagTrans(1.1, [&equation, &note])
+slide "Rearrange"
+play TagTrans(0.9, [&equation])
+
+equation = []
+note = []
+play Trans(0.5, [&equation, &note])
+
+
+# --- slide 2: fractions and square roots ---
+
+mesh frac1 = Eq("\frac{-b \pm \sqrt{b^2 - 4ac}}{2a}", [0, 0.6, 0], 1.1)
+mesh frac2 = Eq(
+    "\sqrt[n]{\frac{p}{q}} \in \mathbb{Q} \iff p, q \in \mathbb{Z}",
+    [0, -0.5, 0], 0.75
+)
+
+slide "Fractions and Roots"
+play Write(1.0, [&frac1])
+play Fade(0.8, [&frac2])
+
+frac1 = []
+frac2 = []
+play Trans(0.5, [&frac1, &frac2])
+
+
+# --- slide 3: integrals and sums ---
+
+mesh integral = Eq(
+    "\int_{-\infty}^{\infty} e^{-x^2}\, dx = \sqrt{\pi}",
+    [0, 0.65, 0], 1.0
+)
+mesh series = Eq(
+    "\sum_{n=0}^{\infty} \frac{x^n}{n!} = e^x",
+    [0, -0.45, 0], 0.9
+)
+
+slide "Calculus"
+play Write(1.1, [&integral])
+play Fade(0.8, [&series])
+
+integral = []
+series = []
+play Trans(0.5, [&integral, &series])
+
+
+# --- slide 4: Greek letters ---
+
+mesh euler = Eq("e^{i\pi} + 1 = 0", [0, 0.65, 0], 1.3)
+mesh greek = Eq(
+    "\alpha,\,\beta,\,\gamma,\,\delta,\,\Gamma,\,\Delta,\,\Sigma,\,\Omega,\,\nabla,\,\partial",
+    [0, -0.5, 0], 0.75
+)
+
+slide "Greek Letters"
+play Write(1.0, [&euler])
+play Fade(0.8, [&greek])
+
+euler = []
+greek = []
+play Trans(0.5, [&euler, &greek])
+
+
+# --- slide 5: matrices (amsmath) ---
+
+mesh mat = Eq(
+    "\begin{pmatrix} a & b \\\\ c & d \end{pmatrix} \begin{pmatrix} x \\\\ y \end{pmatrix} = \begin{pmatrix} ax+by \\\\ cx+dy \end{pmatrix}",
+    [0, 0.3, 0], 0.85
+)
+
+slide "Matrices"
+play Write(1.2, [&mat])
+
+mat = []
+play Trans(0.5, [&mat])
+
+
+# --- slide 6: amssymb / amsfonts symbols ---
+
+mesh symbols = Eq(
+    "\mathbb{R},\,\mathbb{C},\,\mathbb{Z},\,\mathcal{F},\,\mathcal{L},\,\mathcal{O}",
+    [0, 0.6, 0], 1.0
+)
+mesh sets = Eq(
+    "\forall \epsilon > 0\; \exists\, \delta > 0 : |x - a| < \delta \Rightarrow |f(x) - L| < \epsilon",
+    [0, -0.5, 0], 0.65
+)
+
+slide "Symbols"
+play Write(1.0, [&symbols])
+play Fade(0.8, [&sets])
+
+symbols = []
+sets = []
+play Trans(0.5, [&symbols, &sets])
+
+
+# --- slide 7: tag-based morph across complex expressions ---
+
+mesh lhs = Eq(
+    "\text_tag{1}{\nabla^2 \phi} = \text_tag{2}{\frac{1}{c^2} \frac{\partial^2 \phi}{\partial t^2}}",
+    [0, 0.4, 0], 1.0
+)
+
+slide "Wave Equation"
+play Write(1.0, [&lhs])
+
+lhs = Eq(
+    "\text_tag{2}{\frac{\partial^2 \phi}{\partial t^2}} = \text_tag{1}{c^2\,\nabla^2 \phi}",
+    [0, 0.4, 0], 1.0
+)
+
+slide "Rearranged"
+play TagTrans(1.0, [&lhs])
+
+lhs = []
+play Trans(0.5, [&lhs])
+
+
+# --- slide 8: align* (multi-line equation alignment) ---
+
+mesh aligned = Eq(
+    "\begin{aligned} f(x) &= x^2 + 2x + 1 \\\\ &= (x+1)^2 \end{aligned}",
+    [0, 0.4, 0], 0.9
+)
+mesh label_aligned = Label("align environment", [0, -0.6, 0])
+
+slide "Aligned Equations"
+play Write(1.1, [&aligned])
+play Fade(0.7, [&label_aligned])
+
+aligned = []
+label_aligned = []
+play Trans(0.5, [&aligned, &label_aligned])
+
+
+# --- slide 9: enumerate / itemize lists (Latex environment) ---
+
+mesh enum_list =
+    centered_at{[0, 0.3, 0]}
+    color{BLACK}
+    Latex(["\begin{enumerate}",
+  "\item Fundamental theorem of calculus: $\int_a^b f'(x)\,dx = f(b) - f(a)$",
+  "\item Basel problem: $\sum_{n=1}^{\infty} \frac{1}{n^2} = \frac{\pi^2}{6}$",
+  "\item Euler's identity: $e^{i\pi} + 1 = 0$",
+"\end{enumerate}"], 0.6)
+
+slide "Numbered List"
+play Write(1.2, [&enum_list])
+
+enum_list = []
+play Trans(0.5, [&enum_list])
+
+mesh bullet_list =
+    centered_at{[0, 0.3, 0]}
+    color{BLACK}
+    Latex(["\begin{itemize}",
+  "\item Sets: $\mathbb{N} \subset \mathbb{Z} \subset \mathbb{Q} \subset \mathbb{R} \subset \mathbb{C}$",
+  "\item Operators: $\nabla,\; \nabla^2,\; \partial_t,\; \mathcal{L},\; \mathcal{F}$",
+  "\item Norms: $\lVert x \rVert_p = \bigl(\sum_i |x_i|^p\bigr)^{1/p}$",
+"\end{itemize}"], 0.6)
+
+slide "Bullet List"
+play Write(1.2, [&bullet_list])
