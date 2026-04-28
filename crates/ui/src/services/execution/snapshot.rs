@@ -118,8 +118,6 @@ impl ExecutionService {
             ExecutionStatus::CompileError
         } else if executor.state.has_errors() {
             ExecutionStatus::RuntimeError
-        } else if is_loading {
-            ExecutionStatus::Seeking
         } else if is_playing {
             ExecutionStatus::Playing
         } else {
@@ -136,9 +134,10 @@ impl ExecutionService {
             None => (None, None, None, None),
         };
 
-        let transcript = match status {
-            ExecutionStatus::Seeking | ExecutionStatus::CompileError => None,
-            _ => Some(executor.state.transcript.sections.clone()),
+        let transcript = if is_loading || status == ExecutionStatus::CompileError {
+            None
+        } else {
+            Some(executor.state.transcript.sections.clone())
         };
 
         let snapshot = ExecutionSnapshot {
@@ -148,6 +147,7 @@ impl ExecutionService {
             meshes,
             current_timestamp,
             status,
+            is_loading,
             slide_count: executor.real_slide_count(),
             slide_names: executor.real_slide_names(),
             slide_durations: executor.real_slide_durations(),

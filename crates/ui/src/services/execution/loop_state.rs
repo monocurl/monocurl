@@ -435,11 +435,7 @@ async fn playback_iteration(
 
     shared.last_update_at.set(tick_started_at);
 
-    // primitive_anims is empty when we're at a section boundary or fresh start,
-    // meaning advance_playback will need to execute bytecode (potentially expensive)
-    if executor.state.primitive_anims.is_empty() {
-        emit_runtime_snapshot(executor, shared, sm_tx, root_text_rope, version, true, None).await;
-    }
+    emit_runtime_snapshot(executor, shared, sm_tx, root_text_rope, version, true, None).await;
 
     match executor.advance_playback(max_slide, elapsed).await {
         Ok(PlaybackAdvance::Advanced) => {}

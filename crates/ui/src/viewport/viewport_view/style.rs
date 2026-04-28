@@ -138,8 +138,16 @@ pub(super) fn with_alpha(color: Rgba, alpha: f32) -> Rgba {
 pub(super) fn ring_style_for(
     status: ExecutionStatus,
     is_presenting: bool,
+    is_loading: bool,
     theme: Theme,
 ) -> RingStyle {
+    if is_loading && matches!(status, ExecutionStatus::Playing | ExecutionStatus::Paused) {
+        return RingStyle {
+            color: with_alpha(theme.viewport_status_loading, 0.9),
+            width: 1.5,
+        };
+    }
+
     match status {
         ExecutionStatus::Playing | ExecutionStatus::Paused if is_presenting => RingStyle {
             color: with_alpha(theme.viewport_status_ring(status), 0.0),
@@ -148,10 +156,6 @@ pub(super) fn ring_style_for(
         ExecutionStatus::Playing | ExecutionStatus::Paused => RingStyle {
             color: theme.viewport_status_ring(status),
             width: 1.0,
-        },
-        ExecutionStatus::Seeking => RingStyle {
-            color: with_alpha(theme.viewport_status_loading, 0.9),
-            width: 1.5,
         },
         ExecutionStatus::RuntimeError => RingStyle {
             color: theme.viewport_status_runtime_error,
@@ -173,14 +177,14 @@ mod tests {
         let theme = Theme::dark();
 
         assert_eq!(
-            ring_style_for(ExecutionStatus::Playing, true, theme),
+            ring_style_for(ExecutionStatus::Playing, true, false, theme),
             RingStyle {
                 color: with_alpha(theme.viewport_status_playing, 0.0),
                 width: 0.0,
             }
         );
         assert_eq!(
-            ring_style_for(ExecutionStatus::Paused, true, theme),
+            ring_style_for(ExecutionStatus::Paused, true, false, theme),
             RingStyle {
                 color: with_alpha(theme.viewport_status_paused, 0.0),
                 width: 0.0,
@@ -188,16 +192,16 @@ mod tests {
         );
 
         assert_eq!(
-            ring_style_for(ExecutionStatus::Seeking, true, theme),
-            ring_style_for(ExecutionStatus::Seeking, false, theme)
+            ring_style_for(ExecutionStatus::Playing, true, true, theme),
+            ring_style_for(ExecutionStatus::Playing, false, true, theme)
         );
         assert_eq!(
-            ring_style_for(ExecutionStatus::RuntimeError, true, theme),
-            ring_style_for(ExecutionStatus::RuntimeError, false, theme)
+            ring_style_for(ExecutionStatus::RuntimeError, true, false, theme),
+            ring_style_for(ExecutionStatus::RuntimeError, false, false, theme)
         );
         assert_eq!(
-            ring_style_for(ExecutionStatus::CompileError, true, theme),
-            ring_style_for(ExecutionStatus::CompileError, false, theme)
+            ring_style_for(ExecutionStatus::CompileError, true, false, theme),
+            ring_style_for(ExecutionStatus::CompileError, false, false, theme)
         );
     }
 }

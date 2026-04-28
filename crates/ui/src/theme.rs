@@ -277,7 +277,6 @@ impl Theme {
         match status {
             ExecutionStatus::Playing => self.viewport_status_playing,
             ExecutionStatus::Paused => self.viewport_status_paused,
-            ExecutionStatus::Seeking => self.viewport_status_loading,
             ExecutionStatus::RuntimeError => self.viewport_status_runtime_error,
             ExecutionStatus::CompileError => self.viewport_status_compile_error,
         }

@@ -44,6 +44,7 @@ pub struct ExecutionSnapshot {
     pub meshes: Option<Vec<Arc<Mesh>>>,
     pub current_timestamp: Timestamp,
     pub status: ExecutionStatus,
+    pub is_loading: bool,
     pub slide_count: usize,
     pub slide_names: Vec<Option<String>>,
     pub slide_durations: Vec<Option<f64>>,
@@ -62,7 +63,6 @@ pub enum PlaybackMode {
 pub enum ExecutionStatus {
     Playing,
     Paused,
-    Seeking,
     RuntimeError,
     CompileError,
 }

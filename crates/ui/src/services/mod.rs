@@ -273,7 +273,7 @@ impl ServiceManager {
             }
             ServiceManagerMessage::ExecutionStateUpdated { snapshot } => {
                 self.execution_state.update(cx, |state, cx| {
-                    state.apply_snapshot(snapshot);
+                    state.apply_snapshot(snapshot, cx);
                     cx.notify();
                 });
             }

@@ -3,7 +3,7 @@ use gpui::*;
 
 use crate::{
     actions::{ZoomIn, ZoomOut},
-    services::{ExecutionStatus, ServiceManager},
+    services::ServiceManager,
     theme::ThemeSettings,
 };
 
@@ -36,7 +36,7 @@ impl Timeline {
         let execution_state = services.read(cx).execution_state().clone();
         cx.observe(&execution_state, |this, es, cx| {
             let exec = es.read(cx);
-            if exec.status != ExecutionStatus::Seeking {
+            if !exec.is_loading {
                 this.recenter_playhead_if_needed(cx);
                 cx.notify();
             }

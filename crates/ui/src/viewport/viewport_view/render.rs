@@ -49,6 +49,7 @@ impl Render for Viewport {
         let theme = ThemeSettings::theme(cx);
         let (
             status,
+            is_loading,
             params,
             timestamp,
             slide_count,
@@ -62,6 +63,7 @@ impl Render for Viewport {
             let execution = self.execution_state.read(cx);
             (
                 execution.status,
+                execution.is_loading,
                 execution.parameters.clone(),
                 execution.current_timestamp,
                 execution.slide_count,
@@ -95,7 +97,7 @@ impl Render for Viewport {
             meshes,
         };
 
-        let target_ring = ring_style_for(status, self.is_presenting, theme);
+        let target_ring = ring_style_for(status, self.is_presenting, is_loading, theme);
         match self.ring_style {
             Some(current) if current != target_ring => {
                 self.ring_previous = current;
