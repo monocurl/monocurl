@@ -6,6 +6,7 @@ use std::{
 
 use exporter::EXPORT_CANCELLED_MESSAGE;
 use gpui::*;
+use latex::SystemBackendStatus;
 use structs::rope::{Attribute, Rope, TextAggregate};
 
 use crate::{
@@ -192,6 +193,7 @@ pub struct DocumentView {
     state: DocumentState,
     services: Entity<ServiceManager>,
     window_state: WeakEntity<WindowState>,
+    latex_backend_status: SystemBackendStatus,
 
     navbar: Entity<Navbar>,
     editor: Entity<Editor>,

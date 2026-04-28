@@ -1,4 +1,5 @@
 use super::*;
+use crate::components::latex_warning::render_latex_warning;
 
 impl DocumentView {
     pub fn new(
@@ -62,6 +63,7 @@ impl DocumentView {
             state,
             services,
             navbar: cx.new(move |cx| Navbar::new(window_state, cx)),
+            latex_backend_status: latex::system_backend_status(),
             editor: editor.clone(),
             viewport: viewport.clone(),
             timeline,
@@ -347,6 +349,7 @@ impl DocumentView {
             .relative()
             .flex()
             .flex_col()
+            .children(render_latex_warning(self.latex_backend_status, theme))
             .child(self.navbar.clone())
             .child(workspace)
             .text_color(theme.text_primary)

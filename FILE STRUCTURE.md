@@ -97,6 +97,7 @@
   - src/text.rs: small helper structs for abstracting locations in utf8 or utf16
 - ui: contains all ui related code (everything is gpui)
   - src/components/buttons.rs: contains a button styled like a link
+  - src/components/latex_warning.rs: shared warning banner for missing system LaTeX tools, including OS-specific install links and the PATH-status message reused by home and document views
   - src/components/split_pane.rs: gpui element that implements vertical and horizontal split pane
   - src/editor: code related to the text editor. 
     - editor_view.rs: wrapper around `TextEditor`; bootstraps editor content from the internal file, handles periodic internal autosave, writes user saves, and suppresses the pending internal flush when a tab explicitly discards unsaved changes (including pathless scratch tabs that are about to be forgotten)
@@ -156,8 +157,8 @@
     - mod.rs: module root; keybinding registration including Command-K timeline/console toggling, shared `DocumentView` / `OpenDocument` structs, export-overlay state, and small shared helpers
     - actions.rs: document action handlers for save/close/presentation/playback/timeline navigation, timeline/console toggling, plus dependency invalidation hooks
     - export.rs: isolated export-job orchestration from the document side, including live-text gathering, output-path prompts, worker-thread polling, and export overlay state transitions
-    - render.rs: `DocumentView::new`, document/presentation layout composition, export overlay rendering, and the `Render` impl
-  - src/home_view.rs: code related to the actual home element (list of projects, creating and deleting); now themed from `theme.rs` and also owns the home-screen startup warning banner for missing system LaTeX tools plus its install link
+    - render.rs: `DocumentView::new`, document/presentation layout composition, export overlay rendering, shared LaTeX warning placement above the editor navbar, and the `Render` impl
+  - src/home_view.rs: code related to the actual home element (list of projects, creating and deleting); now themed from `theme.rs` and shows the shared startup warning banner for missing system LaTeX tools above the navbar
   - src/main.rs: init code that sets up menus, calls init sections of other modules, and launches the app; LaTeX backends are now initialized lazily on demand instead of blocking startup on a Tectonic warmup pass
   - src/navbar_view.rs: navbar element for switching tabs, navigating home, and toggling dark mode
   - src/theme.rs: semantic UI theme definitions, including the GPUI-global persisted `ThemeSettings`, light/dark `ThemeMode`, a white-by-default light palette for documents/viewport/editor, the dark palette, and text editor styling
