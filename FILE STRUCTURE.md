@@ -3,7 +3,7 @@
 - cli: binary crate for the `monocurl` command-line interface
   - src/main.rs: hand-rolled CLI parser and help text for `help` / `image` / `video`, `--system-latex` backend selection for exports, output-path normalization, small export-resolution presets, terminal progress rendering layered over the shared exporter crate, and final transcript printing for CLI runs that executed `print` statements
 - assets: checked-in resources copied into packaged apps
-  - tectonic/README.md: documents the local Tectonic seed bundle slot (`bundle/` or `bundle.zip`), the pinned upstream default bundle source, the `default_bundle_v33.index` fallback allowlist, and the on-demand network fallback used when a bundled support file is missing
+  - tectonic/README.md: upstream Tectonic MIT license notice for the bundled Tectonic-derived assets
   - tectonic/bundle.zip: generated seed bundle built from the warmed Tectonic cache for `default_bundle_v33`, covering the common LaTeX files Monocurl's text/Tex/Latex wrappers use without needing a first-run download
   - tectonic/default_bundle_v33.index: full upstream indexed-tar file list for Tectonic format serial 33, used to decide whether a local seed-bundle miss is a real support file that should trigger network fallback
 - compiler: converts AST into bytecode, performs static analysis
