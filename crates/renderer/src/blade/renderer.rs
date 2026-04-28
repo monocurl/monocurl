@@ -279,7 +279,11 @@ impl BladeRenderer {
         let key = Arc::as_ptr(mesh) as usize;
         let version = mesh.version();
         if let Some(cached) = self.mesh_cache.get_mut(&key) {
-            if cached.version == version {
+            let same_mesh = cached
+                .mesh
+                .upgrade()
+                .is_some_and(|cached_mesh| Arc::ptr_eq(&cached_mesh, mesh));
+            if same_mesh && cached.version == version {
                 cached.last_used_frame = frame_index;
                 return key;
             }
@@ -296,6 +300,7 @@ impl BladeRenderer {
         self.mesh_cache.insert(
             key,
             CachedMesh {
+                mesh: Arc::downgrade(mesh),
                 version,
                 triangles,
                 lines,

@@ -1,7 +1,8 @@
-use std::path::Path;
+use std::{path::Path, sync::Weak};
 
 use anyhow::{Context as _, Result};
 use blade_graphics as gpu;
+use geo::mesh::Mesh;
 use image::RgbaImage;
 
 use crate::RenderSize;
@@ -21,6 +22,7 @@ pub(super) struct OffscreenTarget {
 }
 
 pub(super) struct CachedMesh {
+    pub(super) mesh: Weak<Mesh>,
     pub(super) version: u64,
     pub(super) triangles: Option<BufferWithCount>,
     pub(super) lines: Option<BufferWithCount>,
