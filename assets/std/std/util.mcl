@@ -7,6 +7,12 @@ let identity = |x| x
 # build [start, start + step, ..., last < stop]; step defaults to 1.
 let range = |start, stop, step = 1| __monocurl__native__ range(start, stop, step)
 
+# sample_count uniformly spaced values from start through stop.
+let sample = |start, stop, sample_count| __monocurl__native__ sample(start, stop, sample_count)
+
+# sample_count uniformly spaced values from start up to, but not including, stop.
+let sample_clopen = |start, stop, sample_count| __monocurl__native__ sample_clopen(start, stop, sample_count)
+
 # element count of a list, map, or string.
 let len = |container| __monocurl__native__ len(container)
 

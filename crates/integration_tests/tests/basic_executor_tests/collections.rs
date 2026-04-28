@@ -154,6 +154,54 @@ fn test_to_string_joins_list_elements_recursively() {
     r.assert_string("A23nil4.5");
 }
 
+#[test]
+fn test_sample_includes_endpoint() {
+    let r = run_with_stdlib(
+        "
+        let result = sample(0, 1, 3)
+    ",
+        &["util"],
+    );
+    r.assert_float_list_approx(&[0.0, 0.5, 1.0], 1e-9);
+}
+
+#[test]
+fn test_sample_clopen_treats_endpoint_as_open() {
+    let r = run_with_stdlib(
+        "
+        let result = sample_clopen(0, 1, 2)
+    ",
+        &["util"],
+    );
+    r.assert_float_list_approx(&[0.0, 0.5], 1e-9);
+}
+
+#[test]
+fn test_sample_count_edge_cases() {
+    let r = run_with_stdlib(
+        "
+        let result = [
+            len(sample(0, 1, 0)),
+            sample(2, 4, 1)[0],
+            sample_clopen(2, 4, 1)[0]
+        ]
+    ",
+        &["util"],
+    );
+    r.assert_int_list(&[0, 2, 2]);
+}
+
+#[test]
+fn test_sample_rejects_negative_count() {
+    let r = run_with_stdlib(
+        "
+        let result = sample(0, 1, -1)
+    ",
+        &["util"],
+    );
+    r.assert_error("sample_count");
+}
+
 // -- operators --
 
 // -- collections: maps --

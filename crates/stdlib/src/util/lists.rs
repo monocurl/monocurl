@@ -91,6 +91,65 @@ pub async fn range(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
     )))
 }
 
+fn sampled_number(value: f64) -> Value {
+    if value.fract() == 0.0 {
+        Value::Integer(value as i64)
+    } else {
+        Value::Float(value)
+    }
+}
+
+async fn sample_with_endpoint(
+    executor: &mut Executor,
+    stack_idx: usize,
+    closed: bool,
+) -> Result<Value, ExecutorError> {
+    let start = read_float(executor, stack_idx, -3, "start")?;
+    let stop = read_float(executor, stack_idx, -2, "stop")?;
+    let sample_count = read_int(executor, stack_idx, -1, "sample_count")?;
+    let Ok(sample_count) = usize::try_from(sample_count) else {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "sample_count",
+            message: "must be non-negative",
+        });
+    };
+
+    let mut elements: SmallVec<[VRc; 4]> = SmallVec::with_capacity(sample_count);
+    for i in 0..sample_count {
+        executor.tick_yielder().await;
+
+        let x = if closed {
+            if sample_count == 1 {
+                start
+            } else if i + 1 == sample_count {
+                stop
+            } else {
+                start + (stop - start) * i as f64 / (sample_count - 1) as f64
+            }
+        } else {
+            start + (stop - start) * i as f64 / sample_count as f64
+        };
+        elements.push(VRc::new(sampled_number(x)));
+    }
+
+    Ok(Value::List(executor::value::container::List::new_with(
+        elements,
+    )))
+}
+
+#[stdlib_func]
+pub async fn sample(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    sample_with_endpoint(executor, stack_idx, true).await
+}
+
+#[stdlib_func]
+pub async fn sample_clopen(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    sample_with_endpoint(executor, stack_idx, false).await
+}
+
 #[stdlib_func]
 pub async fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     match executor
