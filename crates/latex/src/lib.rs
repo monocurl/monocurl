@@ -50,21 +50,6 @@ impl SystemToolPaths {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct BundledBackendStatus {
-    pub bundle: bool,
-}
-
-impl BundledBackendStatus {
-    pub fn is_available(self) -> bool {
-        true
-    }
-
-    pub fn is_self_contained(self) -> bool {
-        self.bundle
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SystemBackendStatus {
     pub latex: bool,
     pub dvisvgm: bool,
@@ -127,12 +112,6 @@ pub fn set_backend_config(config: LatexBackendConfig) {
 
 pub fn discover_system_backend() -> SystemToolPaths {
     system::discover_backend()
-}
-
-pub fn bundled_backend_status() -> BundledBackendStatus {
-    BundledBackendStatus {
-        bundle: tectonic::bundle_is_available(),
-    }
 }
 
 pub fn system_backend_status(config: &SystemBackendConfig) -> SystemBackendStatus {
@@ -629,14 +608,7 @@ mod tests {
     use geo::simd::Float3;
 
     fn configure_test_backend() -> bool {
-        if bundled_backend_status().is_available() {
-            set_backend_config(LatexBackendConfig::Bundled);
-            return true;
-        }
-        let Some(config) = discover_system_backend().into_config() else {
-            return false;
-        };
-        set_backend_config(LatexBackendConfig::System(config));
+        set_backend_config(LatexBackendConfig::Bundled);
         true
     }
 

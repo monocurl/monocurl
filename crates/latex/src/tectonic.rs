@@ -15,14 +15,6 @@ use tectonic::{
 };
 use tectonic_bundles::{Bundle, dir::DirBundle, zip::ZipBundle};
 
-pub(crate) fn is_available() -> bool {
-    true
-}
-
-pub(crate) fn bundle_is_available() -> bool {
-    local_bundle_path().is_some()
-}
-
 pub(crate) fn render_svg_document(document: &str) -> Result<String> {
     let pdf = render_pdf_document(document)?;
     pdf_to_svg(pdf)

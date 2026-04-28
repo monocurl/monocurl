@@ -77,43 +77,31 @@ fn latex_warning_palette(theme: Theme) -> (Rgba, Rgba, Rgba) {
 }
 
 pub fn render_latex_warning(settings: &UserSettings, theme: Theme) -> Option<AnyElement> {
-    let (title, message, show_install) = match settings.latex_backend {
-        LatexBackendPreference::Bundled => {
-            let status = latex::bundled_backend_status();
-            if !status.bundle {
-                (
-                    "No local LaTeX bundle found".to_string(),
-                    "Tectonic will download TeX support files on demand. For offline or release builds, place a bundle at assets/tectonic/bundle, bundle.zip, or bundle.ttb, or set MONOCURL_TECTONIC_BUNDLE.".to_string(),
-                    false,
-                )
-            } else {
-                return None;
-            }
-        }
-        LatexBackendPreference::System => {
-            let Some(config) = settings.system_backend_config() else {
-                return Some(render_warning_banner(
-                    "System LaTeX paths not set".to_string(),
-                    "System backend is enabled, but latex and dvisvgm paths are incomplete. Monocurl will use the bundled backend until both paths are set.".to_string(),
-                    false,
-                    theme,
-                ));
-            };
-            let status = latex::system_backend_status(&config);
-            if status.is_available() {
-                return None;
-            }
-            let missing = missing_latex_tools(status);
-            (
-                "System LaTeX tools not available".to_string(),
-                format!(
-                    "Configured system backend is missing or cannot start: {missing}. Choose valid latex and dvisvgm binaries in Settings."
-                ),
-                true,
-            )
-        }
+    if settings.latex_backend == LatexBackendPreference::Bundled {
+        return None;
+    }
+
+    let Some(config) = settings.system_backend_config() else {
+        return Some(render_warning_banner(
+            "System LaTeX paths not set".to_string(),
+            "System backend is enabled, but latex and dvisvgm paths are incomplete. Monocurl will use the bundled backend until both paths are set.".to_string(),
+            false,
+            theme,
+        ));
     };
-    Some(render_warning_banner(title, message, show_install, theme))
+    let status = latex::system_backend_status(&config);
+    if status.is_available() {
+        return None;
+    }
+    let missing = missing_latex_tools(status);
+    Some(render_warning_banner(
+        "System LaTeX tools not available".to_string(),
+        format!(
+            "Configured system backend is missing or cannot start: {missing}. Choose valid latex and dvisvgm binaries in Settings."
+        ),
+        true,
+        theme,
+    ))
 }
 
 fn render_warning_banner(
