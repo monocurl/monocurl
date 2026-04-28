@@ -1,6 +1,8 @@
 *.p12
 .DS_Store
 target
+dist/
+bundling/
 *.swp
 tmp
 .zed
