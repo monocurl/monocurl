@@ -1,15 +1,33 @@
+use std::env;
 use std::path::{Path, PathBuf};
 
 pub struct Assets;
 impl Assets {
     fn base_path() -> PathBuf {
-        let path = env!("CARGO_MANIFEST_DIR");
-        // this is manifest directory of crate instead of workspace
-        let mut base = PathBuf::from(path);
-        base.pop();
-        base.pop();
-        base.push("assets");
-        base
+        if let Ok(assets_dir) = env::var("MONOCURL_ASSETS_DIR") {
+            let assets_dir = PathBuf::from(assets_dir);
+            if assets_dir.exists() {
+                return assets_dir;
+            }
+        }
+
+        let exe_dir = env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(Path::to_path_buf));
+
+        if let Some(exe_dir) = exe_dir {
+            #[cfg(target_os = "macos")]
+            let candidate = exe_dir.join("..").join("Resources").join("assets");
+
+            #[cfg(not(target_os = "macos"))]
+            let candidate = exe_dir.join("assets");
+
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+
+        PathBuf::from("assets")
     }
 
     pub fn std_lib() -> PathBuf {
