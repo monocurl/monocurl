@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use gpui::{App, AppContext, Context, Entity, ScrollHandle, WeakEntity, Window};
+use gpui::{App, AppContext, Context, Entity, WeakEntity, Window};
 use serde::{Deserialize, Serialize};
 use structs::assets::Assets;
 use ui_cli_shared::doc_type::DocumentType;
@@ -13,6 +13,14 @@ const DEFAULT_SCENE_FILES: &[&str] = &[
     "language_basics.mcs",
     "example_camera_animations.mcs",
     "example_geometry_proof.mcs",
+    "example_text_and_equations.mcs",
+    "meshes_and_operators.mcs",
+    "animations.mcs",
+    "example_3d_surface.mcs",
+    "example_graphing_riemann_sums.mcs",
+    "example_algorithms_binary_search.mcs",
+    "example_image_mandala.mcs",
+    "parameters.mcs",
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -49,10 +57,6 @@ pub struct WindowState {
     pub screen: ActiveScreen,
     pub recently_opened: Vec<RecentlyOpened>,
     pub open_documents: Vec<OpenDocument>,
-
-    // a bit hacky to put here, but basically necessary since each view has its own
-    // navbar (which itself is necessary to allow for presentation mode)
-    pub navbar_scroll: ScrollHandle,
 }
 
 impl WindowState {
@@ -105,29 +109,19 @@ impl WindowState {
             .collect()
     }
 
-    fn default_state(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let weak_state = cx.weak_entity();
-        let open_documents: Vec<_> = Self::default_scene_paths()
-            .into_iter()
-            .map(|path| Self::make_open_document(path, weak_state.clone(), window, cx))
-            .collect();
+    fn default_state(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
+        let default_paths = Self::default_scene_paths();
 
-        let screen = open_documents
-            .first()
-            .map(|doc| ActiveScreen::Document(doc.clone()))
-            .unwrap_or(ActiveScreen::Home);
-        let recently_opened = open_documents
+        let screen = ActiveScreen::Home;
+        let recently_opened = default_paths
             .iter()
-            .map(|doc| RecentlyOpened {
-                path: doc.path.clone(),
-            })
+            .map(|doc| RecentlyOpened { path: doc.clone() })
             .collect();
 
         Self {
             screen,
             recently_opened,
-            open_documents,
-            navbar_scroll: ScrollHandle::new(),
+            open_documents: Vec::new(),
         }
     }
 
@@ -184,7 +178,6 @@ impl WindowState {
                 .filter(|recent| recent.path.exists())
                 .collect(),
             open_documents,
-            navbar_scroll: ScrollHandle::new(),
         })
     }
 
@@ -198,10 +191,6 @@ impl WindowState {
             ret.save();
             ret
         }
-    }
-
-    pub fn navbar_scroll(&self) -> &ScrollHandle {
-        &self.navbar_scroll
     }
 
     pub fn open_documents(&self) -> impl Iterator<Item = &OpenDocument> {

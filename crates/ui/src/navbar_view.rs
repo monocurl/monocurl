@@ -9,14 +9,28 @@ use crate::{
 
 pub struct Navbar {
     window_state: WeakEntity<WindowState>,
-    document_list: Entity<DocumentList>,
+    tab_scroll: ScrollHandle,
 }
 
-struct DocumentList {
-    window_state: WeakEntity<WindowState>,
-}
+impl Navbar {
+    pub fn new(state: WeakEntity<WindowState>, cx: &mut Context<Self>) -> Self {
+        if let Some(window_state) = state.upgrade() {
+            cx.observe(&window_state, |_this, _, cx| {
+                cx.notify();
+            })
+            .detach();
+        }
+        cx.observe_global::<ThemeSettings>(|_this, cx| {
+            cx.notify();
+        })
+        .detach();
 
-impl DocumentList {
+        Self {
+            window_state: state,
+            tab_scroll: ScrollHandle::new(),
+        }
+    }
+
     fn render_tab(
         &self,
         doc: &OpenDocument,
@@ -98,65 +112,6 @@ impl DocumentList {
             }))
             .cursor_pointer()
     }
-}
-
-impl Render for DocumentList {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let entity = self.window_state.upgrade().unwrap();
-        let state = entity.read(cx);
-        let theme = ThemeSettings::theme(cx);
-        let active = match state.screen {
-            ActiveScreen::Home => None,
-            ActiveScreen::Document(ref open_document) => Some(open_document.path.clone()),
-        };
-
-        if state.open_documents().next().is_none() {
-            return div().id("document-list").h_full().into_any_element();
-        }
-
-        div()
-            .flex()
-            .flex_row()
-            .flex_1()
-            .min_w_0()
-            .w_full()
-            .h_full()
-            .id("document-list")
-            .border_l(px(0.5))
-            .border_t(px(0.5))
-            .border_b(px(0.5))
-            .border_color(theme.navbar_border)
-            .children(
-                state
-                    .open_documents()
-                    .map(|doc| self.render_tab(doc, Some(&doc.path) == active.as_ref(), cx)),
-            )
-            .text_size(px(12.0))
-            .overflow_x_scroll()
-            .track_scroll(state.navbar_scroll())
-            .into_any_element()
-    }
-}
-
-impl Navbar {
-    pub fn new(state: WeakEntity<WindowState>, cx: &mut Context<Self>) -> Self {
-        let s = state.clone();
-        if let Some(window_state) = state.upgrade() {
-            cx.observe(&window_state, |_this, _, cx| {
-                cx.notify();
-            })
-            .detach();
-        }
-        cx.observe_global::<ThemeSettings>(|_this, cx| {
-            cx.notify();
-        })
-        .detach();
-
-        Self {
-            window_state: state,
-            document_list: cx.new(|_cx| DocumentList { window_state: s }),
-        }
-    }
 
     fn render_theme_toggle(&self, is_dark: bool, cx: &Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
@@ -210,12 +165,17 @@ impl Navbar {
             .gap_2()
             .px_3()
             .h_full()
+            .flex_none()
             .text_color(theme.text_muted)
             .child(div().text_xs().child("Dark"))
             .child(switch)
             .cursor_pointer()
             .hover(|style| style.opacity(0.92))
             .id("theme-toggle")
+            .on_scroll_wheel(|_event, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+            })
             .on_click(cx.listener(|_this, _, _, cx| {
                 ThemeSettings::toggle(cx);
             }))
@@ -227,6 +187,46 @@ impl Render for Navbar {
         let entity = self.window_state.upgrade().unwrap();
         let state = entity.read(cx);
         let theme = ThemeSettings::theme(cx);
+
+        let active = match state.screen {
+            ActiveScreen::Home => None,
+            ActiveScreen::Document(ref open_document) => Some(open_document.path.clone()),
+        };
+
+        let tabs: Vec<_> = state
+            .open_documents()
+            .map(|doc| self.render_tab(doc, Some(&doc.path) == active.as_ref(), cx))
+            .collect();
+
+        let document_list = if tabs.is_empty() {
+            div()
+                .id("document-list")
+                .h_full()
+                .flex_1()
+                .min_w_0()
+                .into_any_element()
+        } else {
+            div()
+                .flex()
+                .flex_row()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .id("document-list")
+                .border_l(px(0.5))
+                .border_t(px(0.5))
+                .border_b(px(0.5))
+                .border_color(theme.navbar_border)
+                .children(tabs)
+                .text_size(px(12.0))
+                .overflow_x_scroll()
+                .track_scroll(&self.tab_scroll)
+                .on_scroll_wheel(|_event, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .into_any_element()
+        };
 
         div()
             .flex()
@@ -245,6 +245,7 @@ impl Render for Navbar {
                     .items_center()
                     .h_full()
                     .flex_1()
+                    .min_w_0()
                     .child(
                         div()
                             .bg(if matches!(state.screen, ActiveScreen::Home) {
@@ -266,9 +267,10 @@ impl Render for Navbar {
                             .px_3()
                             .h_full()
                             .flex()
+                            .flex_none()
                             .items_center(),
                     )
-                    .child(div().flex_1().min_w_0().child(self.document_list.clone())),
+                    .child(document_list),
             )
             .child(
                 self.render_theme_toggle(
