@@ -119,6 +119,32 @@ fn test_exec_labeled_operator_arg_mutable() {
 }
 
 #[test]
+fn test_exec_labeled_operator_repeated_attribute_alias_uses_last_assignment() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        var inv = add{amount: 2} 40
+        [inv.amount, inv.amount] = [5, 7]
+        let result = inv.amount
+    ");
+    r.assert_int(7);
+}
+
+#[test]
+fn test_exec_labeled_operator_retains_attribute_lvalue_invalidated_by_base_assignment() {
+    let r = run("
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        var inv = add{amount: 2} 40
+        [inv.amount, inv, inv.amount] = [5, add{amount: 7} 40, 9]
+        let result = inv.amount
+    ");
+    r.assert_int(7);
+}
+
+#[test]
 fn test_exec_mesh_leader_labeled_attribute_mutable() {
     let r = run_section(
         "
@@ -130,6 +156,20 @@ fn test_exec_mesh_leader_labeled_attribute_mutable() {
         SectionType::Slide,
     );
     r.assert_int(45);
+}
+
+#[test]
+fn test_exec_mesh_leader_labeled_attribute_lvalue_survives_base_assignment() {
+    let r = run_section(
+        "
+        let hello = |origin, radius| origin + radius
+        mesh base = hello(origin: 10, radius: 2)
+        base.origin = base = hello(origin: 20, radius: 6)
+        let result = [base.origin, base.radius]
+    ",
+        SectionType::Slide,
+    );
+    r.assert_int_list(&[20, 6]);
 }
 
 #[test]

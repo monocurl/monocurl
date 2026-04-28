@@ -107,7 +107,8 @@ let angle_between = |u, v| arccos(dot(u, v) / (norm(u) * norm(v)))
 # (numbers, matching function invocations, operator embeds, elementwise lists).
 let lerp = |a, b, t| __monocurl__native__ lerp(a, b, t)
 
-# keyframes = [[t0, v0], [t1, v1], ...]; piecewise lerp across t.
+# keyframes = [t0 -> v0, t1 -> v1, ...]; piecewise lerp across t.
+# maps are sorted by numeric key; the old [[t0, v0], ...] form is still accepted.
 let keyframe_lerp = |keyframes, t| __monocurl__native__ keyframe_lerp(keyframes, t)
 
 # map x linearly from [in_min, in_max] to [out_min, out_max].

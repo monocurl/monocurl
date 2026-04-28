@@ -1,0 +1,60 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Example: Geometry Proof
+#
+# This is a lightweight Pythagorean-theorem style scene. The source is meant to
+# be readable: named points define a triangle, helper functions build squares
+# on its sides, and tags keep corresponding shapes paired through transforms.
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+let A = [-1.7, -0.6, 0]
+let B = [1.3, -0.6, 0]
+let C = [-1.7, 1.4, 0]
+let H0 = B
+let H1 = C
+let H2 = [-3.7, -1.6, 0]
+let H3 = [-0.7, -3.6, 0]
+
+let filled = operator |target, color_value, id|
+    tag{id} fill{alpha{0.2} color_value} stroke{color_value, 2} target
+
+let SquaresOnSides = ||
+    [
+        filled{BLUE, 10} shift{[-0.2, -2.1, 0]} Rect([3.0, 3.0]),
+        filled{ORANGE, 20} shift{[-2.7, 0.4, 0]} Rect([2.0, 2.0]),
+        filled{GREEN, 30} Polygon([H0, H1, H2, H3])
+    ]
+
+# The two smaller areas can be rearranged to match the larger square. This is
+# not a full proof animation; it is the practical mesh pattern a full proof
+# would build on: keep pieces tagged, then morph them to their next positions.
+let Rearranged = ||
+    [
+        filled{BLUE, 10} Polygon([H0, [-0.2, 0.4, 0], [-2.2, -2.6, 0], H3]),
+        filled{ORANGE, 20} Polygon([[-0.2, 0.4, 0], H1, H2, [-2.2, -2.6, 0]]),
+        filled{GREEN, 30} Polygon([H0, H1, H2, H3])
+    ]
+
+slide "Right Triangle"
+mesh triangle = filled{BLACK, 1} Triangle(A, B, C)
+play Grow(0.8)
+
+slide "Squares On Sides"
+mesh squares = SquaresOnSides()
+play Fade(0.8)
+
+slide "Rearrange"
+squares = Rearranged()
+play TagTrans(1.4)
+
+triangle = fade{0.3} triangle
+play Trans(0.5)

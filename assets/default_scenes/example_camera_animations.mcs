@@ -1,0 +1,69 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Example: Camera Animations
+#
+# This recreates the spirit of the old Monocurl intro scene for current
+# Monocurl. A flat grid becomes a colored height surface while the camera
+# moves into a 3-d view. The important pattern is that camera is animated like
+# any other scene leader: assign the destination camera, then play CameraLerp.
+
+import std.scene
+import std.mesh
+import std.color
+import std.math
+import std.anim
+
+background = WHITE
+
+let samples = 25
+let height = |x, y| 1.15 * ((x - 0.5) ^ 2 + (y - 0.5) ^ 2)
+let color_keys = [0 -> BLUE, 0.15 -> YELLOW, 0.3 -> ORANGE, 0.55 -> RED]
+
+let color_at = |pos, idx| {
+    let value = height(pos[0], -pos[1])
+    return keyframe_lerp(color_keys, value)
+}
+
+slide "Flat Grid"
+mesh grid = stroke{BLACK, 1.5} ColorGrid(
+    |pos, idx| BLACK,
+    [0, 1, samples],
+    [-1, 0, samples]
+)
+mesh axis =
+    shift{[0, 0, -0.01]}
+    Axis3d(
+        basis: [1r, 1d, 1b],
+        color: BLACK,
+        grid_color: LIGHT_GRAY,
+        [1u, 1u, 1b],
+        x_axis: [0, 1, "x", 0.25, 4, |x| x],
+        y_axis: [0, 1, "y", 0.25, 4, |y| y],
+        z_axis: [0, 1, "z", 0.25, 4, |z| z]
+    )
+
+play Fade(0.8, [&axis, &grid])
+
+let lift_grid = anim {
+    grid = stroke{BLACK, 1.5} ColorGrid(
+        color_at,
+        [0, 1, samples],
+        [-1, 0, samples]
+    )
+    play Trans(0.8, [&grid])
+
+    grid =
+        point_map{|point| [point[0], point[1], height(point[0], point[1] + 1)]}
+        grid
+    play Trans(1.8, [&grid])
+}
+
+let move_camera = anim {
+    camera = Camera([2.2, -2.1, 1.45], [0.5, -0.5, 0.35], [0, 0, 1])
+    play CameraLerp(&camera, 2.6)
+}
+
+slide "Surface And Camera"
+play [lift_grid, move_camera]
+play Wait(0.4)

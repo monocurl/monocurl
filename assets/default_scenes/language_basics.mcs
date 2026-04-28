@@ -1,0 +1,74 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Monocurl should feel familiar if you have written Python:
+# - `let` creates immutable names
+# - `var` creates mutable names
+# - lists use `[a, b, c]`
+# - functions use `|arg, default = value| expression`
+# - blocks use `{ ... return value }` when a function needs multiple steps
+# - labeled calls such as `DotRow(count: 8, y: 0)` make examples readable
+#
+# The examples below build a row of dots from a function, then call it again
+# using labels/default arguments to produce a new visual state.
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+let DotRow = |count, y = 0, color_value = BLUE| {
+    var ret = []
+    for (i in range(0, count)) {
+        let x = i - (count - 1) / 2
+        ret .= tag{i}
+            shift{[x * 0.75, y, 0]}
+            fill{alpha{0.22} color_value}
+            stroke{color_value, 2}
+            Circle(0.22)
+    }
+    return ret
+}
+
+# `block` is useful for building a mesh in stages. Inside a block, `.` is the
+# value being accumulated. This keeps compound helper meshes compact.
+let Bracket = |y, color_value = DARK_GRAY| block {
+    . stroke{color_value, 2} Line([-3.4, y, 0], [3.4, y, 0])
+    . stroke{color_value, 2} Line([-3.4, y - 0.22, 0], [-3.4, y + 0.22, 0])
+    . stroke{color_value, 2} Line([3.4, y - 0.22, 0], [3.4, y + 0.22, 0])
+}
+
+slide "Function Result"
+mesh dots = DotRow(5)
+mesh guide = Bracket(-0.65)
+play Fade(0.8, [&guide])
+play Grow(0.8, [&dots])
+
+# This is the same function call, but with labels. Labels are also how many
+# stdlib constructors and operators expose their more descriptive arguments.
+dots = DotRow(count: 8, y: 0.8, color_value: ORANGE)
+guide = Bracket(0.15, ORANGE)
+
+slide "Labeled Call"
+play TagTrans(1.0, [&dots, &guide])
+
+# Mutable values are useful when constructing data. Here the loop builds a
+# polyline point list before the mesh is created.
+let ZigZag = |count| {
+    var points = []
+    for (i in range(0, count)) {
+        let x = -3 + i * 6 / (count - 1)
+        var y = -0.85
+        if (i // 2 * 2 == i) { y = -1.35 }
+        points .= [x, y, 0]
+    }
+    return stroke{TEAL, 3} Polyline(points)
+}
+
+slide "Mutable Construction"
+mesh path = ZigZag(9)
+play Write(1.2, [&path])

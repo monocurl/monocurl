@@ -321,6 +321,94 @@ impl Compiler {
 }
 
 impl Compiler {
+    fn reference_argument_message() -> &'static str {
+        "reference arguments must be explicit &param, &mesh, &reference values, or list literals of references"
+    }
+
+    fn is_reference_argument_literal(expr: &Expression) -> bool {
+        match expr {
+            Expression::IdentifierReference(IdentifierReference::Reference(_)) => true,
+            Expression::Literal(Literal::Vector(elements)) => elements
+                .iter()
+                .all(|(_, element)| Self::is_reference_argument_literal(element)),
+            _ => false,
+        }
+    }
+
+    fn lambda_arg_info_for_expr(&mut self, expr: &Expression) -> Option<Vec<FunctionArgInfo>> {
+        match expr {
+            Expression::LambdaDefinition(lambda) => Some(
+                lambda
+                    .args
+                    .iter()
+                    .map(SymbolFunctionInfo::arg_info)
+                    .collect(),
+            ),
+            Expression::IdentifierReference(ir) => {
+                let name = ident_ref_name(ir);
+                let symbol = self.lookup(name, None, None)?;
+                match &symbol.function_info {
+                    SymbolFunctionInfo::Lambda { args } => Some(args.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn operator_arg_info_for_expr(&mut self, expr: &Expression) -> Option<Vec<FunctionArgInfo>> {
+        match expr {
+            Expression::OperationDefinition(operator) => match &*operator.lambda.1 {
+                Expression::LambdaDefinition(lambda) => Some(
+                    lambda
+                        .args
+                        .iter()
+                        .map(SymbolFunctionInfo::arg_info)
+                        .collect(),
+                ),
+                _ => None,
+            },
+            Expression::IdentifierReference(ir) => {
+                let name = ident_ref_name(ir);
+                let symbol = self.lookup(name, None, None)?;
+                match &symbol.function_info {
+                    SymbolFunctionInfo::Operator { args } => Some(args.clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn invocation_arg_index(
+        args: &[FunctionArgInfo],
+        arg_position: usize,
+        label: Option<&SpanTagged<IdentifierDeclaration>>,
+    ) -> Option<usize> {
+        label
+            .and_then(|(_, IdentifierDeclaration(label))| {
+                args.iter().position(|arg| arg.name == *label)
+            })
+            .or(Some(arg_position))
+    }
+
+    fn validate_reference_argument_syntax(
+        &mut self,
+        args: &[FunctionArgInfo],
+        arg_position: usize,
+        label: Option<&SpanTagged<IdentifierDeclaration>>,
+        value: &SpanTagged<Expression>,
+    ) {
+        let Some(arg_idx) = Self::invocation_arg_index(args, arg_position, label) else {
+            return;
+        };
+        if args.get(arg_idx).is_some_and(|arg| arg.is_reference)
+            && !Self::is_reference_argument_literal(&value.1)
+        {
+            self.error(value.0.clone(), Self::reference_argument_message());
+        }
+    }
+
     pub(super) fn compile_lambda_invoke(&mut self, l: &LambdaInvocation, span: &Span8) {
         if matches!(
             self.special_function_for_expr(&l.lambda.1),
@@ -337,6 +425,12 @@ impl Compiler {
         let stateful =
             is_stateful(&l.lambda.1) || l.arguments.1.iter().any(|(_, a)| is_stateful(&a.1));
         let num_args = l.arguments.1.len() as u32;
+
+        if let Some(args) = self.lambda_arg_info_for_expr(&l.lambda.1) {
+            for (arg_position, (label, arg)) in l.arguments.1.iter().enumerate() {
+                self.validate_reference_argument_syntax(&args, arg_position, label.as_ref(), arg);
+            }
+        }
 
         // doing arguments first is useful for stack
         // but it also guarantees deepest first ordering for references
@@ -377,6 +471,22 @@ impl Compiler {
 
         // span covering just `operator{args}`, excluding the operand
         let invoke_span = o.operator.0.start..o.arguments.0.end;
+
+        if let Some(args) = self.operator_arg_info_for_expr(&o.operator.1) {
+            if args.first().is_some_and(|arg| arg.is_reference)
+                && !Self::is_reference_argument_literal(&o.operand.1)
+            {
+                self.error(o.operand.0.clone(), Self::reference_argument_message());
+            }
+            for (arg_position, (label, arg)) in o.arguments.1.iter().enumerate() {
+                self.validate_reference_argument_syntax(
+                    &args,
+                    arg_position + 1,
+                    label.as_ref(),
+                    arg,
+                );
+            }
+        }
 
         self.compile_val(&o.operand.1, &o.operand.0);
         for (_, arg) in &o.arguments.1 {

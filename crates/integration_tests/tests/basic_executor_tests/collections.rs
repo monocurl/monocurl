@@ -41,6 +41,78 @@ fn test_exec_list_mutate_element() {
 }
 
 #[test]
+fn test_chained_assignment_to_invalidated_subscript_keeps_new_base() {
+    let r = run("
+        var xs = [0]
+        xs[0] = xs = [1, 2]
+        let result = xs[0]
+    ");
+    r.assert_int(1);
+}
+
+#[test]
+fn test_destructure_retains_subscript_lvalues_invalidated_by_middle_assignment() {
+    let r = run("
+        var xs = [0, 1, 2]
+        [xs[0], xs, xs[0]] = [10, [20, 30], 40]
+        let result = xs
+    ");
+    r.assert_int_list(&[20, 30]);
+}
+
+#[test]
+fn test_destructure_retains_nested_subscript_lvalues_invalidated_by_parent_assignment() {
+    let r = run("
+        var xs = [[0], [1]]
+        [xs[0][0], xs[0], xs[0][0]] = [10, [20], 30]
+        let result = xs[0]
+    ");
+    r.assert_int_list(&[30]);
+}
+
+#[test]
+fn test_repeated_alias_subscript_assignment_uses_last_assignment() {
+    let r = run("
+        var xs = [0, 1]
+        [xs[0], xs[0], xs[1]] = [10, 20, xs[0]]
+        let result = xs
+    ");
+    r.assert_int_list(&[20, 0]);
+}
+
+#[test]
+fn test_map_destructure_retains_subscript_lvalues_invalidated_by_map_assignment() {
+    let r = run("
+        var m = [\"a\" -> 0, \"b\" -> 1]
+        [m[\"a\"], m, m[\"a\"]] = [10, [\"a\" -> 20, \"b\" -> 30], 40]
+        let result = [m[\"a\"], m[\"b\"]]
+    ");
+    r.assert_int_list(&[20, 30]);
+}
+
+#[test]
+fn test_rhs_lvalues_are_snapshotted_before_destructure_writes() {
+    let r = run("
+        var x = 0
+        var y = 10
+        [x, y] = [y, x = 2]
+        let result = [x, y]
+    ");
+    r.assert_int_list(&[10, 2]);
+}
+
+#[test]
+fn test_retained_lhs_nested_lvalue_is_isolated_from_rhs_reassignment() {
+    let r = run("
+        var xs = [0]
+        var y = 5
+        [y, xs[0]] = [xs[0] = 7, y]
+        let result = [xs[0], y]
+    ");
+    r.assert_int_list(&[7, 7]);
+}
+
+#[test]
 fn test_exec_list_in_operator_found() {
     let r = run("
         let xs = [10, 20, 30]
@@ -131,6 +203,16 @@ fn test_map_integer_key() {
 }
 
 #[test]
+fn test_map_float_key() {
+    let r = run("
+        var m = [->]
+        m[1.5] = 100
+        let result = m[1.5]
+    ");
+    r.assert_int(100);
+}
+
+#[test]
 fn test_map_string_key() {
     let r = run(r#"
         var m = ["hello" -> 42]
@@ -152,12 +234,33 @@ fn test_map_list_key() {
 
 #[test]
 fn test_map_unhashable_key_error() {
-    // floats cannot be used as map keys
     let r = run("
         var m = [->]
-        m[1.5] = 0
+        m[nil] = 0
     ");
-    r.assert_error("cannot use float as a map key");
+    r.assert_error("cannot use nil as a map key");
+}
+
+#[test]
+fn test_keyframe_lerp_accepts_map() {
+    let r = run_with_stdlib(
+        "
+        let result = keyframe_lerp([0 -> 0, 0.5 -> 10, 1 -> 20], 0.25)
+    ",
+        &["math"],
+    );
+    r.assert_float(5.0);
+}
+
+#[test]
+fn test_keyframe_lerp_still_accepts_pair_list() {
+    let r = run_with_stdlib(
+        "
+        let result = keyframe_lerp([[0, 0], [0.5, 10], [1, 20]], 0.25)
+    ",
+        &["math"],
+    );
+    r.assert_float(5.0);
 }
 
 #[test]

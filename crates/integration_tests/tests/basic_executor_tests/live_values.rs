@@ -177,6 +177,32 @@ fn test_mesh_leader_append_assign_accepts_mesh_value() {
     assert_eq!(leaves.len(), 1);
 }
 
+#[test]
+fn test_mesh_leader_chained_assignment_to_invalidated_subscript_keeps_new_base() {
+    let r = run_section(
+        "
+        mesh base = [0, 1]
+        base[0] = base = [2, 3]
+        let result = base
+    ",
+        SectionType::Slide,
+    );
+    r.assert_int_list(&[2, 3]);
+}
+
+#[test]
+fn test_mesh_leader_destructure_retains_subscript_lvalues_invalidated_by_assignment() {
+    let r = run_section(
+        "
+        mesh base = [0, 1]
+        [base[0], base, base[0]] = [10, [20, 30], 40]
+        let result = base
+    ",
+        SectionType::Slide,
+    );
+    r.assert_int_list(&[20, 30]);
+}
+
 // -- labeled function invocations --
 #[test]
 fn test_labeled_elide() {
@@ -239,6 +265,44 @@ fn test_labeled_mutate_arg() {
         let result = inv.lbl
     ");
     r.assert_int(5);
+}
+
+#[test]
+fn test_labeled_destructure_repeated_attribute_alias_uses_last_assignment() {
+    let r = run("
+        let f = |x, y| x + y
+        var inv = f(lbl: 10, 30)
+        [inv.lbl, inv.lbl] = [5, 7]
+        let result = inv.lbl
+    ");
+    r.assert_int(7);
+}
+
+#[test]
+fn test_labeled_destructure_retains_attribute_lvalue_invalidated_by_base_assignment() {
+    let r = run("
+        let f = |x, y| x + y
+        var inv = f(lbl: 10, 30)
+        [inv.lbl, inv, inv.lbl] = [5, f(lbl: 7, rhs: 11), 9]
+        let result = [inv.lbl, inv.rhs]
+    ");
+    r.assert_int_list(&[7, 11]);
+}
+
+#[test]
+fn test_reference_parameter_rejects_labeled_attribute_lvalue() {
+    let r = run("
+        let f = |x, y| x + y
+        var inv = f(x: 1, y: 2)
+
+        let write = |&slot, value| {
+            slot = value
+            return []
+        }
+
+        write(inv.x = inv.x, 10)
+    ");
+    r.assert_error("reference arguments must be explicit");
 }
 
 #[test]

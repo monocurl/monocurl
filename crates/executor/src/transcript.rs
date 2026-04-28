@@ -212,6 +212,9 @@ fn write_hashable_key(key: &crate::value::container::HashableKey, out: &mut Stri
         HashableKey::Integer(n) => {
             let _ = write!(out, "{}", n);
         }
+        HashableKey::Float(bits) => {
+            let _ = write!(out, "{}", HashableKey::float_value(*bits));
+        }
         HashableKey::String(s) => {
             out.push('"');
             out.push_str(s);

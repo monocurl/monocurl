@@ -1,0 +1,62 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Example: Graphing And Riemann Sums
+#
+# A graph is just geometry in a coordinate system. This example builds axes,
+# samples a function into a Polyline, and approximates area with rectangles.
+# Increasing `n` makes the approximation better.
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+let f = |x| 0.3 * (x - 2.3) ^ 2 + 0.65
+let embed = operator |target|
+    in_space{[-4.1, -2.2, 0], 1.55r, 1.0u, 1b} target
+
+let Curve = || {
+    var points = []
+    for (i in range(0, 96)) {
+        let x = i * 4.0 / 95.0
+        points .= [x, f(x), 0]
+    }
+    return embed{} stroke{BLUE, 3} Polyline(points)
+}
+
+let Rectangles = |n| {
+    var ret = []
+    let dx = 4.0 / n
+    for (i in range(0, n)) {
+        let x = i * dx
+        let y = f(x)
+        ret .= tag{i}
+            shift{[x + dx / 2, y / 2, 0]}
+            fill{alpha{0.22} ORANGE}
+            stroke{ORANGE, 1.2}
+            Rect([dx, y])
+    }
+    return embed{} ret
+}
+
+slide "Function"
+mesh axes = embed{} stroke{DARK_GRAY, 2} [
+    Line([0, 0, 0], [4.35, 0, 0]),
+    Line([0, 0, 0], [0, 2.8, 0])
+]
+mesh curve = Curve()
+play Fade(0.5, [&axes])
+play Write(1.0, [&curve])
+
+slide
+mesh rects = Rectangles(n: 6)
+play Fade(0.8, [&rects])
+
+slide
+rects.n = 14
+play Lerp(1.1)

@@ -1,3 +1,6 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+
 import std.util
 import std.math
 import std.color

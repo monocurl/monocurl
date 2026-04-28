@@ -20,6 +20,10 @@ fn follow_heap_lvalues(mut key: HeapKey) -> (HeapKey, Value) {
     (key, value)
 }
 
+fn retained_lvalue(key: HeapKey) -> Value {
+    Value::Lvalue(VRc::retain_key(key))
+}
+
 impl Executor {
     fn exec_assign_dfs(&mut self, lhs: Value, rhs: Value, stack_idx: usize) -> ExecSingle {
         if let Value::List(llhs) = &lhs {
@@ -82,7 +86,7 @@ impl Executor {
 
     pub(super) fn exec_assign(&mut self, stack_idx: usize) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
-        let rhs = stack.pop();
+        let rhs = stack.pop().elide_lvalue_leader_rec();
         let lhs = stack.pop();
         let assigned = lhs.clone();
 
@@ -208,9 +212,7 @@ impl Executor {
                     let key = list.elements[idx].make_mut();
                     heap_replace(base_key, Value::List(list));
 
-                    self.state
-                        .stack_mut(stack_idx)
-                        .push(Value::WeakLvalue(VWeak::from(key)));
+                    self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                 }
                 Value::Map(mut map) => {
                     let key_hash = match HashableKey::try_from_value(&index) {
@@ -230,9 +232,7 @@ impl Executor {
                         }
                     };
                     heap_replace(base_key, Value::Map(map));
-                    self.state
-                        .stack_mut(stack_idx)
-                        .push(Value::WeakLvalue(VWeak::from(key)));
+                    self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                 }
                 Value::Leader(leader) => {
                     // push a weak lvalue for the leader's inner slot, then recurse
@@ -357,9 +357,7 @@ impl Executor {
                         };
                         inv.cache.0.take();
                         heap_replace(base_key, Value::InvokedFunction(inv));
-                        self.state
-                            .stack_mut(stack_idx)
-                            .push(Value::WeakLvalue(VWeak::from(key)));
+                        self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                     } else {
                         return ExecSingle::Error(ExecutorError::missing_labeled_argument(
                             attr_name.clone(),
@@ -379,9 +377,7 @@ impl Executor {
                         inv.cache.cached_result.take();
                         inv.cache.unmodified.take();
                         heap_replace(base_key, Value::InvokedOperator(inv));
-                        self.state
-                            .stack_mut(stack_idx)
-                            .push(Value::WeakLvalue(VWeak::from(key)));
+                        self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                     } else {
                         let key = {
                             let body = &mut inv.body;
@@ -392,9 +388,7 @@ impl Executor {
                         inv.cache.cached_result.take();
                         inv.cache.unmodified.take();
                         heap_replace(base_key, Value::InvokedOperator(inv));
-                        self.state
-                            .stack_mut(stack_idx)
-                            .push(Value::WeakLvalue(VWeak::from(key)));
+                        self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                         return self.exec_attribute(stack_idx, section_idx, true, string_index);
                     }
                 }
@@ -413,9 +407,7 @@ impl Executor {
                             };
                             reset_stateful_cache(&stateful);
                             heap_replace(base_key, Value::Stateful(stateful));
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(VWeak::from(key)));
+                            self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                         } else {
                             return ExecSingle::Error(ExecutorError::missing_labeled_argument(
                                 attr_name.clone(),
@@ -441,9 +433,7 @@ impl Executor {
                             };
                             reset_stateful_cache(&stateful);
                             heap_replace(base_key, Value::Stateful(stateful));
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(VWeak::from(key)));
+                            self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                         } else {
                             let key = {
                                 let body = &mut stateful.body;
@@ -456,9 +446,7 @@ impl Executor {
                             };
                             reset_stateful_cache(&stateful);
                             heap_replace(base_key, Value::Stateful(stateful));
-                            self.state
-                                .stack_mut(stack_idx)
-                                .push(Value::WeakLvalue(VWeak::from(key)));
+                            self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                             return self.exec_attribute(stack_idx, section_idx, true, string_index);
                         }
                     }

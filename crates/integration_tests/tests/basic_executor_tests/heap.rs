@@ -49,6 +49,30 @@ fn closure_allocated_slots_are_released_after_execution() {
 }
 
 #[test]
+fn retained_lvalue_reference_vectors_are_released_after_execution() {
+    assert_no_live_heap_growth(
+        r#"
+        param p = 0
+        mesh grid = [0, 1]
+
+        let accept = |&refs| {
+            return []
+        }
+
+        var i = 0
+        while (i < 30) {
+            accept([&p, &grid])
+            grid = [i, i + 10]
+            p = i
+            i = i + 1
+        }
+
+        let result = 0
+    "#,
+    );
+}
+
+#[test]
 fn freed_slots_are_reused_between_executor_runs() {
     let src = r#"
         var xs = []

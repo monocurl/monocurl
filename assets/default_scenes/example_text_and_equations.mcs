@@ -1,0 +1,51 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Example: Text And Equations
+#
+# Text-like meshes can be animated just like geometry. This example uses Tex
+# because Monocurl can fall back to MathJax for Tex when system LaTeX is not
+# available. Plain Text(...) and Latex(...) are also available when the system
+# LaTeX toolchain is installed.
+#
+# `\text_tag{...}{...}` tags parts of the rendered equation so TagTrans can
+# preserve corresponding terms across edits.
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+let Eq = |tex, at = [0, 0, 0], scale = 1|
+    centered_at{at}
+    color{BLACK}
+    Tex(tex, scale)
+
+slide "Write"
+mesh equation = Eq("a^2 + b^2 = c^2", [0, 0.7, 0], 1.15)
+mesh note = Eq("\text{Tex output is still a mesh}", [0, -1.0, 0], 0.65)
+play Write(1.0, [&equation])
+play Fade(0.7, [&note])
+
+equation = Eq(
+    "\tag1{a^2} + \tag2{b^2} = \tag3{c^2}",
+    [0, 0.7, 0],
+    1.15
+)
+
+slide "Tag Terms"
+play TagTrans(0.8, [&equation])
+
+equation = Eq(
+    "\text_tag{3}{c^2} = \text_tag{1}{a^2} + \text_tag{2}{b^2}",
+    [0, 0.7, 0],
+    1.15
+)
+note = Eq("\text{Same terms, different layout}", [0, -1.0, 0], 0.65)
+
+slide "Transform"
+play TagTrans(1.1, [&equation, &note])

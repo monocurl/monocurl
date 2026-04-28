@@ -43,14 +43,30 @@ impl List {
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub enum HashableKey {
     Integer(i64),
+    Float(u64),
     String(String),
     Vector(Vec<HashableKey>),
 }
 
 impl HashableKey {
+    fn float_bits(value: f64) -> u64 {
+        if value == 0.0 {
+            0.0f64.to_bits()
+        } else if value.is_nan() {
+            f64::NAN.to_bits()
+        } else {
+            value.to_bits()
+        }
+    }
+
+    pub fn float_value(bits: u64) -> f64 {
+        f64::from_bits(bits)
+    }
+
     pub fn try_from_value(val: &Value) -> Result<Self, ExecutorError> {
         match val {
             Value::Integer(n) => Ok(HashableKey::Integer(*n)),
+            Value::Float(f) => Ok(HashableKey::Float(Self::float_bits(*f))),
             Value::String(s) => Ok(HashableKey::String(s.clone())),
             Value::List(list) => {
                 let keys = list

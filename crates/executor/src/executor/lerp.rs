@@ -443,6 +443,7 @@ fn format_missing_keys(missing_from_a: &[&HashableKey], missing_from_b: &[&Hasha
 fn format_hashable_key(key: &HashableKey) -> String {
     match key {
         HashableKey::Integer(n) => n.to_string(),
+        HashableKey::Float(bits) => HashableKey::float_value(*bits).to_string(),
         HashableKey::String(s) => format!("{:?}", s),
         HashableKey::Vector(keys) => format!(
             "[{}]",

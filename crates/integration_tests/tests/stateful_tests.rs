@@ -693,6 +693,32 @@ fn test_ref_to_param_and_independent_stateful() {
 }
 
 #[test]
+fn test_stateful_assignment_through_reference_vector_retained_mesh_lvalue() {
+    let r = run_anim(
+        "
+        param driver = 4
+        param scalar = 1
+        mesh target = 0
+
+        let bump = |&slot, amount| {
+            slot = slot + amount
+            return []
+        }
+
+        bump(&scalar, 2)
+        target = $driver
+        driver = 9
+
+        mesh observed = target
+        mesh scalar_snapshot = scalar
+    ",
+    );
+    r.assert_ok();
+    r.assert_mesh_target_int(1, 9);
+    r.assert_mesh_target_int(2, 3);
+}
+
+#[test]
 fn test_stateful_mesh_plain_read_then_var_copy() {
     // copy a stateful mesh into a var; that copy must be independent of later param changes
     let r = run_anim(

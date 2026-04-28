@@ -48,7 +48,7 @@ impl Value {
 
     #[inline(always)]
     fn may_need_lvalue_leader_elision(&self) -> bool {
-        self.is_lvalue() || matches!(self, Value::List(_) | Value::Leader(_))
+        self.is_lvalue() || matches!(self, Value::List(_) | Value::Map(_) | Value::Leader(_))
     }
 
     /// creates owned copy of self which elides lvalues and leaders recursively
@@ -64,6 +64,16 @@ impl Value {
             Value::List(mut list) => {
                 list.elements = list.elements.iter().map(elided_heap_ref_value).collect();
                 Value::List(list)
+            }
+            Value::Map(map) => {
+                let mut out = Map::new();
+                for key in &map.insertion_order {
+                    let value_ref = map
+                        .get(key)
+                        .expect("map insertion order points to missing entry");
+                    out.insert(key.clone(), elided_heap_ref_value(value_ref));
+                }
+                Value::Map(out)
             }
             other => other,
         }

@@ -142,7 +142,110 @@ fn test_ref_lambda_called_with_value_reports_runtime_error_instead_of_panicking(
         }
         overwrite(1)
     ");
-    r.assert_error("cannot assign");
+    r.assert_error("reference arguments must be explicit");
+}
+
+#[test]
+fn test_assignment_materializes_explicit_rhs_reference() {
+    let r = run("
+        param source = 5
+        var sink = 0
+        sink = &source
+        source = 8
+        let result = sink
+    ");
+    r.assert_int(5);
+}
+
+#[test]
+fn test_assignment_materializes_nested_rhs_references() {
+    let r = run("
+        param source = 5
+        var sink = []
+        sink = [&source, [\"value\" -> &source]]
+        source = 8
+        let result = [sink[0], sink[1][\"value\"]]
+    ");
+    r.assert_int_list(&[5, 5]);
+}
+
+#[test]
+fn test_reference_parameter_accepts_explicit_param_and_mesh_references() {
+    let r = run("
+        param a = 1
+        mesh grid = [100, 200]
+
+        let write = |&slot, value| {
+            slot = value
+            return []
+        }
+
+        write(&a, 2)
+        write(&grid, [101, 201])
+
+        let result = [a, grid[0], grid[1]]
+    ");
+    r.assert_int_list(&[2, 101, 201]);
+}
+
+#[test]
+fn test_reference_parameter_accepts_list_literal_of_references() {
+    let r = run("
+        param a = 1
+        mesh grid = [2]
+
+        let accept = |&refs| {
+            return []
+        }
+
+        accept([&a, &grid])
+        let result = [a, grid[0]]
+    ");
+    r.assert_int_list(&[1, 2]);
+}
+
+#[test]
+fn test_reference_parameter_rejects_lvalue_from_assignment_expression() {
+    let r = run("
+        mesh grid = [100]
+        let write = |&slot, value| {
+            slot = value
+            return []
+        }
+
+        write(grid[0] = grid[0], 101)
+    ");
+    r.assert_error("reference arguments must be explicit");
+}
+
+#[test]
+fn test_reference_parameter_rejects_lambda_returned_reference_vector() {
+    let r = run("
+        param a = 1
+        let keep_refs = |refs| refs
+        let write = |&slot, value| {
+            slot = value
+            return []
+        }
+
+        write(keep_refs([&a])[0], 2)
+    ");
+    r.assert_error("reference arguments must be explicit");
+}
+
+#[test]
+fn test_lvalue_vector_argument_materializes_when_stored_in_var() {
+    let r = run("
+        param source = 1
+        mesh grid = [10]
+
+        let refs = [&source, grid[0] = grid[0]]
+        grid = [20]
+        source = 2
+
+        let result = [source, grid[0]]
+    ");
+    r.assert_int_list(&[2, 20]);
 }
 
 #[test]

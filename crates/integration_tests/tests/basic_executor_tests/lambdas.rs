@@ -366,7 +366,7 @@ fn test_exec_lambda_returns_lambda() {
 }
 
 #[test]
-fn test_exec_lambda_by_value_preserves_passed_reference() {
+fn test_exec_reference_arg_rejects_lambda_returned_reference() {
     let r = run("
         param x = 1
         let passthrough = |a| a
@@ -377,11 +377,11 @@ fn test_exec_lambda_by_value_preserves_passed_reference() {
         set(passthrough(&x))
         let result = x
     ");
-    r.assert_int(7);
+    r.assert_error("reference arguments must be explicit");
 }
 
 #[test]
-fn test_exec_lambda_capture_preserves_passed_reference() {
+fn test_exec_reference_arg_rejects_captured_returned_reference() {
     let r = run("
         param x = 1
         let passthrough = |a| {
@@ -395,7 +395,7 @@ fn test_exec_lambda_capture_preserves_passed_reference() {
         set(passthrough(&x))
         let result = x
     ");
-    r.assert_int(7);
+    r.assert_error("reference arguments must be explicit");
 }
 
 #[test]

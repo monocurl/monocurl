@@ -1,3 +1,16 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Example: Parameters
+#
+# `param` declares a live value. In presentation mode, Monocurl can expose
+# params as controls; changing a control updates every mesh expression that
+# reads the value with `$`.
+#
+# Keep the topology stable when you want smooth animation. Here the number of
+# petals and sample points is fixed, while params change positions, sizes, and
+# colors.
+
 import std.util
 import std.math
 import std.color
@@ -5,20 +18,89 @@ import std.mesh
 import std.anim
 import std.scene
 
-param radius = 0.75
-param offset = -1.5
+background = WHITE
 
-let horizontal = |x| x * 1r
+param radius = 1.05
+param spread = 0.55
+param phase = 0.0
+param wave = 0.55
 
-mesh track = stroke{LIGHT_GRAY, 1.5} Line([-3.0, -1.2, 0], [3.0, -1.2, 0])
-mesh moving = shift{delta: horizontal($offset)}
-    fill{alpha{0.22} CYAN}
-    stroke{BLUE}
-    Circle(radius: $radius)
+let palette = [0.0 -> BLUE, 0.45 -> TEAL, 0.72 -> ORANGE, 1.0 -> MAGENTA]
+
+let petal = operator |target, color_value, id|
+    tag{id}
+    fill{alpha{0.24} color_value}
+    stroke{color_value, 2}
+    target
+
+let knob = operator |target, color_value, id|
+    tag{id}
+    fill{alpha{0.32} color_value}
+    stroke{color_value, 2}
+    target
+
+let ParamFlower = |radius_value, spread_value, phase_value| {
+    var ret = []
+    for (i in range(0, 14)) {
+        let theta = phase_value + i * TAU / 14
+        let color_value = keyframe_lerp(palette, i / 13)
+        ret .= rotate{theta}
+            shift{[radius_value, 0, 0]}
+            petal{color_value, i}
+            Capsule(
+                [-0.20 - spread_value * 0.10, 0, 0],
+                [0.32 + spread_value * 0.32, 0, 0],
+                [0.08 + spread_value * 0.06, 0.24 + spread_value * 0.15]
+            )
+    }
+    return ret
+}
+
+let WavePlot = |wave_value, phase_value| {
+    var points = []
+    for (i in range(0, 72)) {
+        let x = -1.9 + i * 3.8 / 71
+        let y = wave_value * sin(2.7 * x + phase_value)
+        points .= [x, y, 0]
+    }
+    return [
+        stroke{LIGHT_GRAY, 1.2} Line([-2.05, 0, 0], [2.05, 0, 0]),
+        stroke{TEAL, 3} Polyline(points)
+    ]
+}
+
+let Slider = |at, width, value, color_value, id| [
+    shift{at} stroke{LIGHT_GRAY, 1.3} Line([-width / 2, 0, 0], [width / 2, 0, 0]),
+    shift{[at[0] - width / 2 + width * value, at[1], at[2]]}
+        knob{color_value, id}
+        Circle(0.09)
+]
+
+let ControlPreview = |radius_value, spread_value, wave_value| [
+    Slider([-2.8, -2.35, 0], 1.35, (radius_value - 0.7) / 1.2, BLUE, 100),
+    Slider([-1.15, -2.35, 0], 1.35, spread_value, ORANGE, 101),
+    Slider([0.50, -2.35, 0], 1.35, wave_value, TEAL, 102)
+]
 
 slide "Live Parameters"
-play Set([&track, &moving])
+mesh flower = shift{[-2.1, 0.35, 0]} ParamFlower($radius, $spread, $phase)
+mesh plot = shift{[2.1, 0.20, 0]} WavePlot($wave, $phase)
+mesh controls = ControlPreview($radius, $spread, $wave)
+play Fade(0.8)
 
-radius = 1.2
-offset = 1.5
-play Lerp(1.2, [&moving])
+# Assigning params changes the destination state of the dependent meshes. A
+# normal Lerp can then animate the followers into the new live state.
+radius = 1.55
+spread = 0.85
+phase = TAU / 9
+wave = 0.95
+play Lerp(1.3, [&flower, &plot, &controls])
+
+slide "Presentation Mode"
+# During a presentation, these same params can be dragged directly from the
+# controls panel. The scene code does not need a separate presentation branch.
+radius = 0.85
+spread = 0.28
+phase = TAU / 3
+wave = 0.35
+play Lerp(1.3, [&flower, &plot, &controls])

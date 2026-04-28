@@ -1,0 +1,67 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Monocurl animations use a leader/follower pattern:
+# - assign the destination state to a mesh leader
+# - call `play Lerp(...)`, `Trans(...)`, `Fade(...)`, etc.
+# - the follower is what moves on screen during the animation
+#
+# Animation blocks let you package a sequence. Lists let independent animations
+# run in parallel:
+#     play [move_ball, draw_path]
+#
+# Rate functions, also called progressors, change how time maps to motion.
+# Try replacing `bounce` with `smooth`, `linear`, or `elastic`.
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+mesh path = []
+mesh halo = []
+
+slide "Leader And Follower"
+mesh track = stroke{LIGHT_GRAY, 2} Line([-3.5, 0, 0], [3.5, 0, 0])
+mesh ball =
+    shift{[-3.1, 0, 0]}
+    fill{alpha{0.25} BLUE}
+    stroke{BLUE, 2}
+    Circle(0.35)
+play Fade(0.5, [&track, &ball])
+
+let move_ball = anim {
+    ball = shift{[3.1, 0, 0]} fill{alpha{0.25} ORANGE} stroke{ORANGE, 2} Circle(0.35)
+    play rate{bounce} Lerp(1.4, [&ball])
+}
+
+let draw_path = anim {
+    path = stroke{TEAL, 3} Line([-3.1, 0, 0], [3.1, 0, 0])
+    play Write(1.4, [&path], linear)
+}
+
+slide "Parallel Play"
+play [move_ball, draw_path]
+
+# A mesh operator produces another mesh, so animated destinations can be built
+# by ordinary mesh expressions.
+let Pulse = |radius, opacity|
+    shift{[3.1, 0, 0]}
+    fill{CLEAR}
+    stroke{alpha{opacity} MAGENTA, 3}
+    Circle(radius)
+
+let pulse = anim {
+    halo = Pulse(0.35, 1)
+    play Set([&halo])
+
+    halo = Pulse(1.15, 0)
+    play Trans(1.0, [&halo])
+}
+
+slide "Animation Blocks"
+play pulse

@@ -1,0 +1,83 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Monocurl is a programming language and desktop editor for mathematical
+# animation. You write scene code on the left, preview it live on the right,
+# and use the timeline below the viewport to move through slides and time.
+#
+# The editor is organized around:
+# - files: each .mcs file is a scene
+# - tabs: each open scene has one editor tab
+# - viewport: the current rendered frame
+# - timeline: slides and time within each slide
+# - presentation mode: the same scene shown as a slideshow, including params
+#
+# Useful habits:
+# - split an idea into slides with `slide "name"`
+# - use short mesh-building functions instead of duplicating geometry
+# - use comments like these for explanation, and let meshes do the visual work
+# - use Command-/ or Ctrl-/ to toggle line comments in the editor
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+let Panel = |at, size, color_value, id|
+    tag{id}
+    shift{at}
+    fill{alpha{0.16} color_value}
+    stroke{color_value, 2}
+    Rect(size)
+
+let Divider = |x|
+    stroke{LIGHT_GRAY, 2} Line([x, -2.6, 0], [x, 2.6, 0])
+
+slide "The Editor"
+mesh editor_panel = Panel([-2.7, 0.35, 0], [4.2, 4.3], BLUE, 1)
+mesh viewport_panel = Panel([2.55, 1.05, 0], [4.2, 2.7], GREEN, 2)
+mesh timeline_panel = Panel([2.55, -1.85, 0], [4.2, 1.0], ORANGE, 3)
+mesh chrome = [
+    Divider(-0.25),
+    stroke{LIGHT_GRAY, 2} Line([0.45, -0.95, 0], [4.65, -0.95, 0])
+]
+play Fade(0.8)
+
+# A Monocurl file is a sequence of slides. The timeline below represents the
+# slides in this file; the active frame is a slide plus a time offset.
+let Timeline = |active| {
+    var ret = []
+    for (i in range(0, 4)) {
+        var color_value = LIGHT_GRAY
+        if (i == active) { color_value = BLUE }
+        ret .= tag{i}
+            shift{[-2.1 + i * 1.4, -2.75, 0]}
+            fill{alpha{0.32} color_value}
+            stroke{color_value, 2}
+            Rect([1.1, 0.34])
+    }
+    return ret
+}
+
+slide "Slides"
+mesh slide_strip = Timeline(0)
+play Fade(0.6)
+
+slide_strip = Timeline(2)
+play TagTrans(0.9, [&slide_strip])
+
+# Presentation mode uses the same scene data. Parameters declared with `param`
+# can become live controls while presenting.
+param focus = 0.55
+let ParameterPosition = |focus_value| [-2.1 + focus_value * 4.2, -2.75, 0]
+
+slide "Parameters"
+mesh parameter_dot =
+    shift{ParameterPosition($focus)}
+    dotted{MAGENTA}
+    Dot()
+play Fade(0.5)

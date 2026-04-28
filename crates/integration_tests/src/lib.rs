@@ -221,6 +221,7 @@ fn value_summary_at(value: &Value, depth: usize) -> String {
 fn hashable_key_summary(key: &HashableKey) -> String {
     match key {
         HashableKey::Integer(value) => value.to_string(),
+        HashableKey::Float(bits) => HashableKey::float_value(*bits).to_string(),
         HashableKey::String(value) => format!("{value:?}"),
         HashableKey::Vector(values) => {
             let values = values

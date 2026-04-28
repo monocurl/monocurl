@@ -8,7 +8,12 @@ use ui_cli_shared::doc_type::DocumentType;
 use crate::document_view::{DocumentView, OpenDocument};
 
 pub const CHECK_FOR_WRONGLY_IMPORTED_EXTENSION: bool = false;
-const DEFAULT_SCENE_FILES: &[&str] = &["shapes.mcs", "graph.mcs", "parameters.mcs"];
+const DEFAULT_SCENE_FILES: &[&str] = &[
+    "welcome_to_monocurl.mcs",
+    "language_basics.mcs",
+    "example_camera_animations.mcs",
+    "example_geometry_proof.mcs",
+];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 enum ActiveScreenSerde {

@@ -162,7 +162,18 @@ fn choose_sample_count_from_mask(supported: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::choose_sample_count_from_mask;
+
+    #[derive(Debug)]
+    struct ClonePanics;
+
+    impl Clone for ClonePanics {
+        fn clone(&self) -> Self {
+            panic!("weak refs should not force Arc::make_mut to clone");
+        }
+    }
 
     #[test]
     fn chooses_highest_supported_count_not_exceeding_desired() {
@@ -170,5 +181,15 @@ mod tests {
         assert_eq!(choose_sample_count_from_mask(1 | 2 | 4), 4);
         assert_eq!(choose_sample_count_from_mask(1 | 2), 2);
         assert_eq!(choose_sample_count_from_mask(1), 1);
+    }
+
+    #[test]
+    fn weak_cache_refs_do_not_force_arc_make_mut_to_clone() {
+        let mut value = Arc::new(ClonePanics);
+        let weak = Arc::downgrade(&value);
+
+        let _ = Arc::make_mut(&mut value);
+
+        assert!(weak.upgrade().is_none());
     }
 }
