@@ -47,8 +47,8 @@ fn test_runtime_error_prefers_innermost_root_callsite_span() {
 #[test]
 fn test_eager_lambda_runtime_error_highlights_innermost_user_frame() {
     let src = "
-        let Bad = |center = 0| {
-            return centered_at{center} Circle(1)
+        let Bad = |point = 0| {
+            return center{point} Circle(1)
         }
 
         let q = Bad()
@@ -61,10 +61,8 @@ fn test_eager_lambda_runtime_error_highlights_innermost_user_frame() {
     );
     r.assert_error("expected list of length 3");
 
-    let expected_start = src
-        .find("centered_at{center}")
-        .expect("missing centered_at call");
-    let expected = expected_start..expected_start + "centered_at{center}".len();
+    let expected_start = src.find("center{point}").expect("missing center call");
+    let expected = expected_start..expected_start + "center{point}".len();
     assert!(!r.error_spans.is_empty(), "expected runtime error span");
     assert_eq!(r.error_spans[0], expected);
 }

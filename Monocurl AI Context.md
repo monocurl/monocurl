@@ -28,7 +28,7 @@ import std.scene
 background = WHITE
 
 slide "Intro"
-mesh title = centered_at{[0, 0.8, 0]} color{BLACK} Text("Hello", 0.8)
+mesh title = center{[0, 0.8, 0]} color{BLACK} Text("Hello", 0.8)
 mesh disk = shift{[0, -0.3, 0]} fill{alpha{0.25} BLUE} stroke{BLUE, 2} Circle(0.6)
 play Write(0.8, [&title])
 play Grow(0.8, [&disk])
@@ -46,7 +46,7 @@ is positive z. Import `std.math` for `PI`, `TAU`, `sin`, `cos`, `lerp`,
 
 Meshes are the visible values. Most primitive constructors are canonical,
 origin-based geometry. Place and style them with operators such as `shift`,
-`centered_at`, `scale`, `rotate`, `in_space`, `fill`, `stroke`, `color`,
+`center`, `scale`, `rotate`, `in_space`, `fill`, `stroke`, `color`,
 `fade`, `tag`, `z_index`, `next_to`, `to_side`, and `to_corner`.
 
 Operators transform a target mesh/value and are usually written before the
@@ -60,9 +60,10 @@ mesh c =
     Circle(0.5)
 ```
 
-Use slides as timeline/presentation boundaries. Put setup, helpers, and
-optional initial declarations before or inside slides; put `play` statements in
-slides.
+Use slides as timeline/presentation boundaries. The implicit initial section
+before the first `slide` is special: use it for imports, helper lambdas,
+top-level `param` declarations, and initial scene state such as `background`.
+Do not put `play` statements there; animations belong inside real slides.
 
 ```monocurl
 slide "First"
@@ -87,7 +88,8 @@ play pulse
 ```
 
 For compound mesh helpers, return a list of meshes. `block { ... }` initializes
-the implicit accumulator `_` to `[]`; lines beginning with `.` append to it:
+the implicit accumulator `_` to `[]`; lines beginning with `.` append to it,
+and `_` is implicitly returned at the end:
 
 ```monocurl
 let Axes = || block {
@@ -97,9 +99,46 @@ let Axes = || block {
 ```
 
 Text is geometry. Use `Text` for plain text, `Tex` for math, and `Latex` for a
-full LaTeX fragment. Use `text_tag{...}` inside text/Tex fragments and
-`TagTrans` when equations or compound meshes should morph by identity instead
-of by raw position.
+full LaTeX fragment.
+
+Tags are stable identities attached to mesh leaves. Use `tag{...}` on ordinary
+mesh pieces when later animations, filters, or style operators need to know
+which subpart is which. A filter lambda receives the mesh tag list, so patterns
+like `color{BLUE, |tags| 1 in tags}` can style only the tagged pieces.
+`TagTrans` and `TagBend` use tags to pair old and new subparts by identity
+instead of by raw order or position.
+
+`text_tag{...}` is the text/Tex/Latex version of this pattern. It wraps a string
+or text fragment so the generated glyph meshes carry that tag. This is useful
+both for equation transforms and for styling independent pieces of one text
+object:
+
+```monocurl
+let expression = [
+    text_tag{1} "x^2",
+    " + ",
+    text_tag{2} "2x",
+    " = ",
+    text_tag{3} "(x+1)^2 - 1",
+]
+
+let style_terms = operator |target|
+    color{ORANGE, |tags| 2 in tags}
+    color{BLUE, |tags| 1 in tags}
+    target
+
+mesh eq = style_terms{} Tex(expression, 0.9)
+play Write(1, [&eq])
+
+eq.tex = [
+    text_tag{3} "(x+1)^2 - 1",
+    " = ",
+    text_tag{1} "x^2",
+    " + ",
+    text_tag{2} "2x",
+]
+play TagTrans(1, [&eq])
+```
 
 ## Advanced Features
 
@@ -130,8 +169,8 @@ depend on names rather than on a fragile positional guess.
 Helper lambdas should also use meaningful labels at call sites:
 
 ```monocurl
-let Bubble = |center, radius, col|
-    centered_at{center}
+let Bubble = |pos, radius, col|
+    center{pos}
     fill{alpha{0.25} col}
     stroke{col, 2}
     Circle(radius)
@@ -166,7 +205,7 @@ The live-call rule is what makes this animate smoothly:
 
 ```monocurl
 let LabelDot = |pos, radius, col|
-    centered_at{pos}
+    center{pos}
     fill{alpha{0.3} col}
     stroke{col, 2}
     Circle(radius)
@@ -208,6 +247,8 @@ identity state is (`delta = [0, 0, 0]`) and what its acted state is
 idea lets `scale{...} x`, `rotate{...} x`, `fade{...} x`,
 `fill{...} x`, `stroke{...} x`, and user-defined operators animate cleanly.
 
+`rotate` is a strong example: it shows why operators are different from plain constructors—both the unrotated and rotated versions share identity through `rotate`’s internal `angle` argument, so the runtime can lerp from plain value to `rotate{...} x` safely.
+
 Operators can also keep their own live arguments:
 
 ```monocurl
@@ -245,10 +286,22 @@ After `Set`, or after a `Lerp`/`Trans`/`Fade`/`Grow`/`Write` finishes, the
 follower has caught up to the leader. The next assignment sets the next
 destination keyframe.
 
-Passing `&ball` targets that leader explicitly. Omitting targets usually means
-"all dirty leaders", which is convenient for simple scenes but too broad for
-parallel work. In `play [a, b]`, independent animations should not mutate the
-same mesh leader.
+Animations often infer their target leaders automatically. If you write
+`play Fade(0.5)` or `play Lerp(1)` after changing one or more mesh leaders, the
+primitive animation targets the currently dirty leaders. This keeps simple
+scenes concise.
+
+Pass `&ball` to target a leader explicitly: `play Lerp(1, [&ball])`. Do this in
+nontrivial scenes, and especially in parallel animations. In `play [a, b]`, a
+broad inferred target set can make both branches try to animate the same dirty
+leader, which is ambiguous or invalid. Split the work yourself by passing
+explicit references to each primitive animation:
+
+```monocurl
+left = shift{1l} left
+right = shift{1r} right
+play [Lerp(1, [&left]), Lerp(1, [&right])]
+```
 
 `param` uses the same leader/follower idea, but params are also exposed as
 presentation-mode controls. `param` declarations must be top-level. A plain
@@ -294,10 +347,8 @@ Prefer these patterns:
 
 Avoid these mistakes:
 
-- Do not call `__monocurl__native__` directly in generated scene code unless
-  writing stdlib internals.
 - Do not pass centers/normals to constructors that no longer expose them; use
-  `shift`, `centered_at`, `in_space`, or other mesh operators instead.
+  `shift`, `center`, `in_space`, or other mesh operators instead.
 - Do not store `$param` reactive expressions in `let`, `var`, or `param`; only
   store stateful values in `mesh` leaders.
 - Do not mutate the same mesh leader from two parallel animations.

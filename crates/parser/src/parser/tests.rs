@@ -1544,7 +1544,7 @@ mod test {
 
     #[test]
     fn test_newline_before_dot_after_operator_chain_in_if_starts_new_statement() {
-        let content = "block {\n    if (labels) {\n        . w{} centered_at{} Tex(\"A\", 1)\n        . w{} centered_at{} Tex(\"B\", 1)\n    }\n}";
+        let content = "block {\n    if (labels) {\n        . w{} center{} Tex(\"A\", 1)\n        . w{} center{} Tex(\"B\", 1)\n    }\n}";
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);

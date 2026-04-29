@@ -13,12 +13,12 @@ import std.scene
 background = WHITE
 
 let Plain = |text, at = ORIGIN, scale = 0.75|
-    centered_at{at}
+    center{at}
     color{BLACK}
     Text(text, scale)
 
 let Formula = |tex, at = ORIGIN, scale = 1|
-    centered_at{at}
+    center{at}
     color{BLACK}
     Tex(tex, scale)
 

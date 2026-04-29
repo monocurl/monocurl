@@ -120,7 +120,7 @@ let CellAt = |x, y, value, frontier, path| {
     }
 
     return tag{[x, y]}
-        centered_at{cell_center(x, y)}
+        center{cell_center(x, y)}
         fill{alpha{0.25} fill_color}
         stroke{stroke_color, 1.4}
         Square(CELL * 0.9)
@@ -152,7 +152,7 @@ let PrevArrows = |prev, dist, path| block {
 
 let Marker = |pos, color_value, id|
     tag{id}
-    centered_at{cell_center(pos[0], pos[1])}
+    center{cell_center(pos[0], pos[1])}
     fill{color_value}
     stroke{BLACK, 1.2}
     Circle(CELL * 0.20)

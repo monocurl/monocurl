@@ -25,7 +25,7 @@ let palette = [0.0 -> BLUE, 0.34 -> TEAL, 0.68 -> ORANGE, 1.0 -> MAGENTA]
 
 let Node = |pos, color_value, id|
     tag{id}
-    centered_at{pos}
+    center{pos}
     fill{alpha{0.42} color_value}
     stroke{color_value, 2}
     Circle(0.075)
@@ -56,12 +56,12 @@ let OrbitSystem = |radius_value, twist_value, lift_value, pulse_value, wave_valu
         . Node(pos, col, i)
     }
 
-    . centered_at{[0, 0.45, 0]} fill{BLACK} stroke{CLEAR} Circle(0.08)
+    . center{[0, 0.45, 0]} fill{BLACK} stroke{CLEAR} Circle(0.08)
     . Signal(wave_value, pulse_value)
 }
 
 let ParamHint = ||
-    centered_at{[0, 2.0, 0]}
+    center{[0, 2.0, 0]}
     color{BLACK}
     Text("presentation mode: edit orbit radius, twist, lift, pulse, and wave", 0.5)
 

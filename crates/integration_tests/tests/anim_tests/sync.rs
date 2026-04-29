@@ -294,7 +294,7 @@ fn test_lerp_of_mesh_operator_variants_after_label_mutation() {
 #[test]
 fn test_lerp_midpoint_interpolates_live_function_label_mutation() {
     let src = "
-        let make = |pos| centered_at{pos} Dot()
+        let make = |pos| center{pos} Dot()
 
         mesh x = make(pos: ORIGIN)
         play Set()
@@ -334,7 +334,7 @@ fn test_lerp_midpoint_interpolates_live_function_label_mutation() {
 #[test]
 fn test_lerp_midpoint_interpolates_live_operator_label_mutation() {
     let src = "
-        mesh x = centered_at{center: ORIGIN} Dot()
+        mesh x = center{center: ORIGIN} Dot()
         play Set()
 
         x.center = 2r
@@ -372,7 +372,7 @@ fn test_lerp_midpoint_interpolates_live_operator_label_mutation() {
 #[test]
 fn test_second_lerp_after_live_operator_mutation_keeps_previous_follower_state() {
     let src = "
-        mesh x = centered_at{center: ORIGIN} Dot()
+        mesh x = center{center: ORIGIN} Dot()
         play Set()
 
         x.center = 2r
@@ -413,7 +413,7 @@ fn test_second_lerp_after_live_operator_mutation_keeps_previous_follower_state()
 #[test]
 fn test_second_lerp_after_live_function_mutation_keeps_previous_follower_state() {
     let src = "
-        let make = |pos| centered_at{pos} Dot()
+        let make = |pos| center{pos} Dot()
 
         mesh x = make(pos: ORIGIN)
         play Set()
@@ -558,11 +558,11 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
                 . Tri([r + u, r, 0], [r + u, r + u, 0], [u, r + u, 0], 2)
                 . Tri([u, r + u, 0], [0, r + u, 0], [0, u, 0], 3)
                 if (labels) {
-                    . w{} centered_at{[(u + r) / 2, (u + r) / 2, 0]} Tex("C^2", 1)
+                    . w{} center{[(u + r) / 2, (u + r) / 2, 0]} Tex("C^2", 1)
                 }
             }
 
-            return centered_at{[-1.5, -0.5, 0]} scale{0.5} ret
+            return center{[-1.5, -0.5, 0]} scale{0.5} ret
         }
 
         let Right = |r, u, labels = 0| {
@@ -571,16 +571,16 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
                 . Tri([0, u, 0], [u, u + r, 0], [0, u + r, 0], 3)
                 . Tri([u, u, 0], [u, 0, 0], [u + r, 0, 0], 1)
                 . Tri([u + r, 0, 0], [u + r, u, 0], [u, u, 0], 2)
-                . centered_at{[(u + r) / 2, (u + r) / 2, 0]} stroke{WHITE} tag{[-1]} Rect([u + r, u + r])
+                . center{[(u + r) / 2, (u + r) / 2, 0]} stroke{WHITE} tag{[-1]} Rect([u + r, u + r])
 
                 if (labels) {
-                    . w{} centered_at{[u / 2, u / 2, 0]} Tex("A^2", 1)
+                    . w{} center{[u / 2, u / 2, 0]} Tex("A^2", 1)
                     let x = 0
-                    . w{} centered_at{[u + r / 2, u + r / 2, 0]} Tex("B^2", 1)
+                    . w{} center{[u + r / 2, u + r / 2, 0]} Tex("B^2", 1)
                 }
             }
 
-            return centered_at{[1.5, -0.5, 0]} scale{0.5} ret
+            return center{[1.5, -0.5, 0]} scale{0.5} ret
         }
 
         let R = 2
@@ -594,7 +594,7 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
         mesh ab_transfer = []
 
         let theorem =
-            centered_at{[0, 1, 0]} w{} Tex("\\pin1{C^2} = \\pin2{A^2} + \\pin3{B^2}", 1)
+            center{[0, 1, 0]} w{} Tex("\\pin1{C^2} = \\pin2{A^2} + \\pin3{B^2}", 1)
     "#;
 
     let slide0 = r#"
@@ -731,11 +731,11 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
                 . Tri([r + u, r, 0], [r + u, r + u, 0], [u, r + u, 0], 2)
                 . Tri([u, r + u, 0], [0, r + u, 0], [0, u, 0], 3)
                 if (labels) {
-                   . w{} tag{C2_TAG} centered_at{[(u + r) / 2, (u + r) / 2, 0]} Tex("C^2", 1)
+                   . w{} tag{C2_TAG} center{[(u + r) / 2, (u + r) / 2, 0]} Tex("C^2", 1)
                }
             }
 
-            return centered_at{[-1.5, -0.5, 0]} scale{0.5} ret
+            return center{[-1.5, -0.5, 0]} scale{0.5} ret
         }
 
         let Right = |r, u, labels = 0| {
@@ -744,16 +744,16 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
                 . Tri([0, u, 0], [u, u + r, 0], [0, u + r, 0], 3)
                 . Tri([u, u, 0], [u, 0, 0], [u + r, 0, 0], 1)
                 . Tri([u + r, 0, 0], [u + r, u, 0], [u, u, 0], 2)
-                . centered_at{[(u + r) / 2, (u + r) / 2, 0]} stroke{WHITE} tag{[-1]} Rect([u + r, u + r])
+                . center{[(u + r) / 2, (u + r) / 2, 0]} stroke{WHITE} tag{[-1]} Rect([u + r, u + r])
 
                 if (labels) {
-                   . w{} tag{A2_TAG} centered_at{[u / 2, u / 2, 0]} Tex("A^2", 1)
+                   . w{} tag{A2_TAG} center{[u / 2, u / 2, 0]} Tex("A^2", 1)
                    let x = 0
-                   . w{} tag{B2_TAG} centered_at{[u + r / 2, u + r / 2, 0]} Tex("B^2", 1)
+                   . w{} tag{B2_TAG} center{[u + r / 2, u + r / 2, 0]} Tex("B^2", 1)
                }
             }
 
-            return centered_at{[1.5, -0.5, 0]} scale{0.5} ret
+            return center{[1.5, -0.5, 0]} scale{0.5} ret
         }
 
         let R = 2
@@ -767,7 +767,7 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
         mesh ab_transfer = []
 
         let theorem =
-            centered_at{[0, 1, 0]} w{} Tex("\text_tag{1}{C^2} = \text_tag{2}{A^2} + \text_tag{3}{B^2}", 1)
+            center{[0, 1, 0]} w{} Tex("\text_tag{1}{C^2} = \text_tag{2}{A^2} + \text_tag{3}{B^2}", 1)
     "#;
 
     let slide0 = r#"

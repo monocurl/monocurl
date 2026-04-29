@@ -36,7 +36,7 @@ let arc_points = |center, start, stop, radius, samples| {
 }
 
 let TexLine = |tex, at = ORIGIN, scale = 1|
-    centered_at{at}
+    center{at}
     color{BLACK}
     Tex(tex, scale)
 
@@ -47,13 +47,13 @@ let AngleArc = |center, start, stop, radius, color_value, id|
 
 let AngleLabel = |tex, at, color_value, id|
     tag{id}
-    centered_at{at}
+    center{at}
     color{color_value}
     Tex(tex, 0.58)
 
 let Dot = |point, label, offset|
     [
-        centered_at{point} fill{BLACK} stroke{CLEAR} Circle(0.055),
+        center{point} fill{BLACK} stroke{CLEAR} Circle(0.055),
         TexLine(label, point + offset, 0.48)
     ]
 

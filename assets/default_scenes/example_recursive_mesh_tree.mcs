@@ -31,7 +31,7 @@ let Branch = |self, depth, at, dir, length, angle, shrink, id| {
         return fill{alpha{0.45} hue}
             stroke{hue, 1.4}
             tag{[0, id]}
-            centered_at{at}
+            center{at}
             Circle(0.07 + 0.05 * length)
     }
 
@@ -51,7 +51,7 @@ let RecursiveTree = |depth, angle, shrink|
 
 slide "Recursive Tree"
     mesh tree = RecursiveTree(depth: 2, angle: 0.52, shrink: 0.72)
-    mesh note = centered_at{[0, 1.95, 0]} color{BLACK} Text("one branch returns two smaller branches", 0.5)
+    mesh note = center{[0, 1.95, 0]} color{BLACK} Text("one branch returns two smaller branches", 0.5)
     
     
     play [Write(1.6, [&tree]), delay{1} Fade(0.6, [&note])]
