@@ -1,12 +1,14 @@
 use gpui::*;
 
 use crate::{
-    app_menu_bar::AppMenuBar,
     document_view::OpenDocument,
     home_view::HomeView,
     state::window_state::{ActiveScreen, WindowState},
     theme::{FontSet, ThemeSettings},
 };
+
+#[cfg(not(target_os = "macos"))]
+use crate::app_menu_bar::AppMenuBar;
 
 pub struct MonocurlWindow {
     state: Entity<WindowState>,
@@ -57,10 +59,6 @@ impl MonocurlWindow {
 impl Render for MonocurlWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let state = self.state.read(cx);
-        let is_presenting = match &state.screen {
-            ActiveScreen::Document(document) => document.view.read(cx).is_presenting(),
-            ActiveScreen::Home => false,
-        };
 
         let screen = match &state.screen {
             ActiveScreen::Home => self.render_home(cx).into_any_element(),
@@ -71,6 +69,11 @@ impl Render for MonocurlWindow {
 
         #[cfg(not(target_os = "macos"))]
         {
+            let is_presenting = match &state.screen {
+                ActiveScreen::Document(document) => document.view.read(cx).is_presenting(),
+                ActiveScreen::Home => false,
+            };
+
             if !is_presenting {
                 return div()
                     .relative()

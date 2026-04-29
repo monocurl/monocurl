@@ -118,8 +118,6 @@ struct ClosedContour {
     points: Vec<Float3>,
     colors: Vec<Float4>,
     normal: Float3,
-    #[allow(dead_code)]
-    signed_area: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -782,7 +780,6 @@ fn extract_closed_contours(mesh: &Mesh) -> Option<Vec<ClosedContour>> {
 
         let normal = closed_contour_normal(&mesh.lins, &line_indices, &points);
         contours.push(ClosedContour {
-            signed_area: signed_contour_area(&points, normal),
             points,
             colors,
             normal,
@@ -871,7 +868,6 @@ fn split_closed_contour_to_count(contour: &ClosedContour, target_segments: usize
     }
 
     ClosedContour {
-        signed_area: signed_contour_area(&points, contour.normal),
         points,
         colors,
         normal: contour.normal,
@@ -969,6 +965,7 @@ fn append_closed_contour(mesh: &mut Mesh, contour: &ClosedContour) {
     }
 }
 
+#[cfg(test)]
 fn signed_contour_area(points: &[Float3], normal: Float3) -> f32 {
     raw_contour_area_normal(points).dot(normal) * 0.5
 }
@@ -1776,13 +1773,11 @@ fn reverse_open_path(path: &mut OrderedPath) {
 
 fn align_closed_paths(source: &OrderedPath, target: &OrderedPath) -> (OrderedPath, OrderedPath) {
     let start_contour = ClosedContour {
-        signed_area: signed_contour_area(&source.points, source.normal),
         points: source.points.clone(),
         colors: source.colors.clone(),
         normal: source.normal,
     };
     let end_contour = ClosedContour {
-        signed_area: signed_contour_area(&target.points, target.normal),
         points: target.points.clone(),
         colors: target.colors.clone(),
         normal: target.normal,
@@ -2426,7 +2421,7 @@ mod tests {
         ClosedContour, append_closed_contour, canonicalize_surface_template,
         extract_closed_contours, match_tri_lin, pair_leaf_indices_by_tag, planar_mesh_patharc_lerp,
         prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair, read_planar_state,
-        same_mesh_topology, split_mesh_contours, vec3_patharc_lerp,
+        same_mesh_topology, signed_contour_area, split_mesh_contours, vec3_patharc_lerp,
     };
 
     fn line(a: Float3, b: Float3, prev: i32, next: i32) -> Lin {
@@ -2654,7 +2649,6 @@ mod tests {
             ],
             colors: vec![Float4::ONE; 4],
             normal: Float3::Z,
-            signed_area: 1.0,
         };
         let large = ClosedContour {
             points: vec![
@@ -2665,7 +2659,6 @@ mod tests {
             ],
             colors: vec![Float4::ONE; 4],
             normal: Float3::Z,
-            signed_area: 16.0,
         };
 
         let mut start = Mesh {
@@ -2754,7 +2747,6 @@ mod tests {
                 ],
                 colors: vec![Float4::new(0.0, 0.0, 0.0, 1.0); 4],
                 normal: Float3::Z,
-                signed_area: 4.0,
             },
         );
 
@@ -2802,7 +2794,6 @@ mod tests {
                 ],
                 colors: vec![Float4::new(0.0, 0.0, 0.0, 1.0); 4],
                 normal: Float3::Z,
-                signed_area: 4.0,
             },
         );
         set_stroke_color(&mut line, Float4::new(0.0, 0.0, 0.0, 1.0));
@@ -2899,11 +2890,11 @@ mod tests {
         let contours = extract_closed_contours(&mesh).expect("lerped mesh should stay closed");
         let positive = contours
             .iter()
-            .filter(|contour| contour.signed_area > 0.0)
+            .filter(|contour| signed_contour_area(&contour.points, contour.normal) > 0.0)
             .count();
         let negative = contours
             .iter()
-            .filter(|contour| contour.signed_area < 0.0)
+            .filter(|contour| signed_contour_area(&contour.points, contour.normal) < 0.0)
             .count();
 
         assert_eq!(contours.len(), 2);

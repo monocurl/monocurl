@@ -206,6 +206,7 @@ pub struct DocumentView {
 }
 
 impl DocumentView {
+    #[cfg(not(target_os = "macos"))]
     pub(crate) fn is_presenting(&self) -> bool {
         self.is_presenting
     }

@@ -17,6 +17,7 @@ use gpui::*;
 use structs::assets::Assets;
 
 mod actions;
+#[cfg(not(target_os = "macos"))]
 mod app_menu_bar;
 mod components;
 mod document_view;
