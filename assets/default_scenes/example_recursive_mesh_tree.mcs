@@ -25,6 +25,8 @@ let rot = |v, angle| [
 let LeafColor = [[0, TEAL], [0.45, GREEN], [1, ORANGE]]
 
 # recursive lambdas take themselves as parameters
+# this may appear be a bit weird at first 
+# but is the standard route in lambda calculus
 let Branch = |self, depth, at, dir, length, angle, shrink, id| {
     if (depth <= 0) {
         let hue = keyframe_lerp(LeafColor, (sin(id) + 1) / 2)
@@ -38,15 +40,15 @@ let Branch = |self, depth, at, dir, length, angle, shrink, id| {
     let end = at + length * dir
     let stroke_width = 0.7 + depth * 0.45
     return [
-        stroke{BLACK, stroke_width}
-            tag{[depth, id]}
-            Line(at, end),
+        stroke{BLACK, stroke_width} tag{[depth, id]} Line(at, end),
+        
         self(self, depth - 1, end, rot(dir, angle), length * shrink, angle, shrink, 2 * id),
         self(self, depth - 1, end, rot(dir, -angle), length * shrink, angle, shrink, 2 * id + 1)
     ]
 }
 
 let RecursiveTree = |depth, angle, shrink|
+    # note passing Branch to itself
     Branch(Branch, to_int(depth), [0, -2.15, 0], UP, 0.95, angle, shrink, 1)
 
 slide "Recursive Tree"

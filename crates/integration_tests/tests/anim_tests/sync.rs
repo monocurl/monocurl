@@ -602,9 +602,9 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
 
         start = [
             t,
-            w{} Label(t, "C", 1, [U, R, 0]),
-            w{} Label(t, "A", 1, LEFT),
-            w{} Label(t, "B", 1, DOWN)
+            w{} Label(t, "C", [U, R, 0], 1),
+            w{} Label(t, "A", LEFT, 1),
+            w{} Label(t, "B", DOWN, 1)
         ]
         play Fade(1, [], UP)
     "#;
@@ -775,9 +775,9 @@ fn test_rearrangement_scene_final_slide_seek_scan_stays_stable() {
 
         start = [
             t,
-            w{} Label(t, "C", 1, [U, R, 0]),
-            w{} Label(t, "A", 1, LEFT),
-            w{} Label(t, "B", 1, DOWN)
+            w{} Label(t, "C", [U, R, 0], 1),
+            w{} Label(t, "A", LEFT, 1),
+            w{} Label(t, "B", DOWN, 1)
         ]
         play Fade(1, [], UP)
     "#;

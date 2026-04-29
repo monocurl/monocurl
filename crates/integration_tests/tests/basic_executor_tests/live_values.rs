@@ -836,8 +836,8 @@ fn test_label_places_latex_to_requested_side() {
     let r = run_with_stdlib(
         "
         let target = Circle(1)
-        let right = Label(target, \"A\", 1, 1r)
-        let up = Label(target, \"B\", 1, 1u)
+        let right = Label(target, \"A\", 1r, 1)
+        let up = Label(target, \"B\", 1u, 1)
         let result = (mesh_center(right)[0] > mesh_right(target)[0]) + (mesh_center(up)[1] > mesh_up(target)[1])
     ",
         &["mesh"],
@@ -850,7 +850,7 @@ fn test_label_preserves_cross_axis_alignment() {
     let r = run_with_stdlib(
         "
         let target = shift{delta: [2, 3, 0]} Circle(1)
-        let left = Label(target, \"C\", 1, 1l)
+        let left = Label(target, \"C\", 1l, 1)
         let result = abs(mesh_center(left)[1] - mesh_center(target)[1]) < 0.001
     ",
         &["mesh", "math"],
@@ -1116,7 +1116,7 @@ fn test_label_matches_latex_next_to_geometry() {
     let r = run_with_stdlib(
         "
         let target = Circle(1)
-        let label = Label(target, \"C\", 1, 1l)
+        let label = Label(target, \"C\", 1l, 1)
         let reference = next_to{target, 1l, 0.1} Latex(\"C\", 1)
         let result = [label, reference]
     ",
@@ -1158,8 +1158,8 @@ fn test_label_buffer_controls_offset_distance() {
     let r = run_with_stdlib(
         "
         let target = Circle(1)
-        let near = mesh_center(Label(target, \"C\", 1, 1r, 0.1))
-        let far = mesh_center(Label(target, \"C\", 1, 1r, 0.6))
+        let near = mesh_center(Label(target, \"C\", 1r, 1, 0.1))
+        let far = mesh_center(Label(target, \"C\", 1r, 1, 0.6))
         let result = far[0] > near[0]
     ",
         &["mesh"],

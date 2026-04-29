@@ -167,7 +167,7 @@ let Brace = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_brace(targ
 
 let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(target, dir, buffer)
 
-let Label = |target, str, scale = 1, dir = 1u, buffer = 0.1|
+let Label = |target, str, dir = 1u, scale = 1, buffer = 0.1|
     __monocurl__native__ mk_label(target, str, scale, dir, buffer)
 
 let Number = |value, decimal_places = nil, include_sign = 0|
