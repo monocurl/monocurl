@@ -197,6 +197,40 @@ let badge_style = operator |target, col|
     target
 ```
 
+### set_default (Advanced)
+
+`set_default{name, value}` is an operator that pre-fills a named argument on a
+callable target without invoking it. It returns an identity/acted pair, so it is
+lerp-compatible like any other operator. `set_defaults{map}` sets multiple
+defaults at once.
+
+This is how `axis_style` is implemented — it wraps an axis constructor and
+pre-fills its `x_axis` or `y_axis` labeled argument:
+
+```monocurl
+# axis_style{"x", 0, 4, "x"} is roughly:
+#   set_default{"x_axis", [0, 4, "x", ...]} Axis2d(...)
+axis_style{"x", 0, 4, "x", 1, 4}
+axis_style{"y", 0, 5, "f(x)", 1, 4}
+Axis2d([1r * 0.5, 1u * 0.5])
+```
+
+Use `set_default` to build configuration operators that compose cleanly onto
+constructors without calling them:
+
+```monocurl
+let time_axis = operator |target|
+    set_default{"x_axis", [0, 10, "t", 1, 4, |x| x]}
+    set_default{"y_axis", [0, 5, "v", 0.5, 4, |y| y]}
+    target
+
+time_axis{} Axis2d([1r * 0.45, 1u * 0.45])
+```
+
+Prefer `axis_style` over raw `set_default` for axis configuration. Use raw
+`set_default` only when building a reusable operator that needs to pre-configure
+a constructor's named arguments in a way that no existing stdlib operator covers.
+
 ### References
 
 Reference parameters are prefixed with `&`. Use them when a helper needs to

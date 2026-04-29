@@ -1,11 +1,4 @@
-# This is a small Monocurl tutorial snippet.
-# For the full tutorial, go to https://monocurl.com/learn.
-#
-# Example: Recursive Meshes
-#
-# A mesh function can recurse through an explicit self argument. The pattern is
-# the same recursive lambda idea used in C++ or lambda calculus: define a branch,
-# then return smaller branches from the branch.
+# example: recursive meshes
 
 import std.util
 import std.math
@@ -24,8 +17,6 @@ let rot = |v, angle| [
 
 let LeafColor = [0 -> TEAL, 0.45 -> GREEN, 1 -> ORANGE]
 
-# Recursive lambdas take themselves as parameters. This may appear a bit weird
-# at first, but it is the standard route in lambda calculus.
 let Branch = |self, depth, at, dir, length, angle, shrink, id| {
     if (depth <= 0) {
         # keyframe_lerp gives repeated recursive leaves a controlled color range.
@@ -42,7 +33,6 @@ let Branch = |self, depth, at, dir, length, angle, shrink, id| {
     return [
         stroke{BLACK, stroke_width} tag{[depth, id]} Line(at, end),
 
-        # The recursive calls build left and right subtrees from the new endpoint.
         self(self, depth - 1, end, rot(dir, angle), length * shrink, angle, shrink, 2 * id),
         self(self, depth - 1, end, rot(dir, -angle), length * shrink, angle, shrink, 2 * id + 1)
     ]
@@ -53,8 +43,6 @@ let RecursiveTree = |depth, angle, shrink|
     Branch(Branch, to_int(depth), [0, -2.15, 0], UP, 0.95, angle, shrink, 1)
 
 slide "Recursive Tree"
-    # The recursive lambda receives itself explicitly, so it can run without
-    # requiring a named recursive declaration.
     mesh tree = RecursiveTree(depth: 2, angle: 0.52, shrink: 0.72)
     mesh note =
         center{[0, 1.95, 0]}
@@ -77,7 +65,6 @@ slide
     play Wait(1)
 
 slide
-    # Only the live arguments change; the tree helper stays reusable.
     tree.angle = 0.37
     tree.shrink = 0.78
     play Lerp(3)

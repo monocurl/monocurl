@@ -1,7 +1,4 @@
-# This is a small Monocurl tutorial snippet.
-# For the full tutorial, go to https://monocurl.com/learn.
-#
-# Example: Geometry Proof
+# example: geometry proof
 
 import std.util
 import std.math
@@ -94,8 +91,7 @@ let Dimensions = |x_offset = 0| [
 ]
 
 slide "Same Pieces"
-    # The whole proof is generated from three measurements, not point-by-point
-    # coordinates: base, height, and shear.
+    # the whole proof follows from just three measurements: base, height, shear
     mesh pieces = Pieces(tri_offset: 0)
     mesh outline = SlantOutline()
     mesh cut = CutGuide()
@@ -104,8 +100,7 @@ slide "Same Pieces"
     play Fade(0.8)
 
 slide "Move The Cut"
-    # One labeled argument moves the orange piece; tags keep the triangle and
-    # remainder semantically matched during the rearrangement.
+    # one labeled arg moves the piece; tags keep both parts matched across the rearrangement
     pieces.tri_offset = BASE
     outline = RectangleOutline()
     cut = []
@@ -114,7 +109,5 @@ slide "Move The Cut"
     play TagTrans(1.2)
 
 slide "Base Times Height"
-    # Once the pieces form a rectangle, the geometric proof reduces to the usual
-    # rectangle area formula.
     equation.tex = [text_tag{1} "A", " = ", text_tag{2} "b", text_tag{3} "h"]
     play Trans(0.7)
