@@ -10,6 +10,7 @@ import std.util
 import std.math
 import std.color
 import std.mesh
+import std.anim
 import std.scene
 
 background = [0.06, 0.07, 0.10, 1]
@@ -22,6 +23,7 @@ let TEAL = [0.06, 0.52, 0.58, 1]
 let BLUE = [0.33, 0.58, 0.88, 1]
 let GOLD = [0.91, 0.74, 0.30, 1]
 
+# Custom operators keep repeated fill/stroke recipes readable in dense stills.
 let glaze = operator |target, color_value, opacity = 0.6, width = 1.4|
     fill{alpha{opacity} color_value}
     stroke{INK, width}
@@ -35,6 +37,7 @@ let trim = operator |target, color_value = GOLD, width = 2.2|
 let petal_colors = [0.0 -> DEEP, 0.45 -> TEAL, 0.7 -> BLUE, 1.0 -> GOLD]
 
 let Petal = |theta, radius, length, width, id| {
+    # keyframe_lerp turns ring indices into a multi-stop radial color rhythm.
     let c = keyframe_lerp(petal_colors, id / 16)
     return tag{id}
         shift{[radius * cos(theta), radius * sin(theta), 0]}
@@ -43,14 +46,12 @@ let Petal = |theta, radius, length, width, id| {
         Capsule([-length / 2, 0, 0], [length / 2, 0, 0], width)
 }
 
-# using "block" avoids having to create a temporary variable
+
 let PetalRing = |count, radius, length, width, spin, base_id| block {
     for (i in range(0, count)) {
         let theta = spin + i * TAU / count
-        # append to return variable
         . Petal(theta, radius, length, width, base_id + i)
     }
-    # implicit return of return variable
 }
 
 let DotRing = |count, radius, dot_radius, color_value| block {

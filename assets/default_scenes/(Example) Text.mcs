@@ -53,14 +53,19 @@ let tag_palette = operator |target|
     target
 
 slide "Bare Text"
-    # Text is useful for labels and scene annotations, but it is still a mesh.
+    # Text/Tex are meshes, so they can use the same Write/Fade/TagTrans tools.
     mesh text_line = Plain(text: "Text is regular scene geometry.", at: [0, 0.45, 0], scale: 0.88)
     play Write(1.0)
 
-    mesh text_note = Plain(text: "Write draws letter contours over time.", at: [0, -0.45, 0], scale: 0.48)
+    mesh text_note = Plain(
+        text: "Write draws letter contours over time.",
+        at: [0, -0.45, 0],
+        scale: 0.48
+    )
     play Write(0.8)
 
 slide "Bare Tex"
+    # Clearing the old mesh leaders lets the next slide focus only on Tex.
     text_line = []
     text_note = []
     play Fade(0.4)
@@ -68,7 +73,11 @@ slide "Bare Tex"
     mesh bare_tex = Formula(tex: "\int_0^1 x^2\,dx = \frac{1}{3}", at: [0, 0.35, 0], scale: 1.05)
     play Write(1.1)
 
-    mesh tex_note = Plain(text: "Tex is just another mesh constructor.", at: [0, -0.55, 0], scale: 0.48)
+    mesh tex_note = Plain(
+        text: "Tex is just another mesh constructor.",
+        at: [0, -0.55, 0],
+        scale: 0.48
+    )
     play Fade(0.7)
 
 slide "Tagged Tex"
@@ -76,7 +85,7 @@ slide "Tagged Tex"
     tex_note = []
     play Fade(0.4)
 
-    # text_tag is a stdlib operator that encodes tags inside Tex source.
+    # text_tag gives subexpressions identities before LaTeX is converted to mesh.
     mesh styled = tag_palette{} Formula(
         tex: algebra_line("x^2", "2x", "(x+1)^2 - 1"),
         at: [0, 0.45, 0],
@@ -84,11 +93,15 @@ slide "Tagged Tex"
     )
     play Write(1.1)
 
-    mesh tag_note = Plain(text: "The operator owns the styling; the equation only names parts.", at: [0, -0.55, 0], scale: 0.42)
+    mesh tag_note = Plain(
+        text: "The operator owns the styling; the equation only names parts.",
+        at: [0, -0.55, 0],
+        scale: 0.42
+    )
     play Fade(0.7)
 
 slide "Less Repetition"
-    # Helper functions keep the formula readable without hand-writing tags.
+    # Tagged fragment helpers keep formulas readable without losing identities.
     styled.tex = derivative_line(0)
     play TagTrans(1.0)
 
@@ -96,6 +109,7 @@ slide "Less Repetition"
     play Trans(0.5)
 
 slide "Tag Transform"
+    # Tags can encode mathematical roles, so terms move by meaning, not position.
     styled.tex = derivative_line(1)
     play TagTrans(1.2)
 

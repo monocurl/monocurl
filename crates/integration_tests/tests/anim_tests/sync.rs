@@ -1017,6 +1017,96 @@ fn test_trans_preserves_fill_separate_from_stroke_at_midpoint() {
     );
 }
 
+#[test]
+fn test_tag_trans_preserves_colored_greek_tex_boundaries_after_write() {
+    let src = r#"
+        let AngleLabel = |tex, at, color_value, id|
+            tag{id}
+            center{at}
+            color{color_value}
+            Tex(tex, 0.58)
+
+        mesh angles = [
+            AngleLabel("\alpha", [-1.5, -0.5, 0], BLUE, 11),
+            AngleLabel("\beta", [1.5, -0.5, 0], ORANGE, 12)
+        ]
+        play Write(0.2)
+
+        angles = [
+            AngleLabel("\alpha", [-0.7, 1.5, 0], BLUE, 11),
+            AngleLabel("\beta", [0.7, 1.5, 0], ORANGE, 12)
+        ]
+        play TagTrans(1)
+    "#;
+
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["anim", "color", "mesh"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let current = smol::block_on(async {
+        let mid = executor.user_to_internal_timestamp(user_timestamp(0, 0.7));
+        match executor.seek_to(mid).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
+        }
+        current_mesh_leader_value(&mut executor).await
+    });
+
+    let mut leaves = Vec::new();
+    mesh_tree_leaves(&current, &mut leaves);
+
+    let mesh_rgb = |tag| {
+        let mut sum = geo::simd::Float3::ZERO;
+        let mut weight = 0.0;
+        for leaf in &leaves {
+            let Value::Mesh(mesh) = leaf else {
+                panic!("expected mesh leaf");
+            };
+            if mesh.tag.first().copied() != Some(tag) {
+                continue;
+            }
+            let uniform_alpha = mesh.uniform.alpha as f32;
+            for dot in &mesh.dots {
+                let alpha = dot.col.w * uniform_alpha;
+                sum += geo::simd::Float3::new(dot.col.x, dot.col.y, dot.col.z) * alpha;
+                weight += alpha;
+            }
+            for line in &mesh.lins {
+                for color in [line.a.col, line.b.col] {
+                    let alpha = color.w * uniform_alpha;
+                    sum += geo::simd::Float3::new(color.x, color.y, color.z) * alpha;
+                    weight += alpha;
+                }
+            }
+            for tri in &mesh.tris {
+                for color in [tri.a.col, tri.b.col, tri.c.col] {
+                    let alpha = color.w * uniform_alpha;
+                    sum += geo::simd::Float3::new(color.x, color.y, color.z) * alpha;
+                    weight += alpha;
+                }
+            }
+        }
+        assert!(weight > 0.0, "expected visible tagged mesh {tag}");
+        sum / weight
+    };
+
+    let alpha_label = mesh_rgb(11);
+    assert!(
+        alpha_label.x > 0.08 && alpha_label.y > 0.32 && alpha_label.z > 0.48,
+        "expected alpha label to stay blue, got {alpha_label:?}"
+    );
+
+    let beta_label = mesh_rgb(12);
+    assert!(
+        beta_label.x > 0.8 && beta_label.y > 0.55 && beta_label.z > 0.12,
+        "expected beta label to stay orange, got {beta_label:?}"
+    );
+}
+
 fn assert_single_slide_scene_stays_stable<const N: usize>(
     src: &str,
     bundles: [&str; N],

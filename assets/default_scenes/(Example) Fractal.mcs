@@ -22,13 +22,13 @@ let rot = |v, angle| [
     0
 ]
 
-let LeafColor = [[0, TEAL], [0.45, GREEN], [1, ORANGE]]
+let LeafColor = [0 -> TEAL, 0.45 -> GREEN, 1 -> ORANGE]
 
-# recursive lambdas take themselves as parameters
-# this may appear be a bit weird at first 
-# but is the standard route in lambda calculus
+# Recursive lambdas take themselves as parameters. This may appear a bit weird
+# at first, but it is the standard route in lambda calculus.
 let Branch = |self, depth, at, dir, length, angle, shrink, id| {
     if (depth <= 0) {
+        # keyframe_lerp gives repeated recursive leaves a controlled color range.
         let hue = keyframe_lerp(LeafColor, (sin(id) + 1) / 2)
         return fill{alpha{0.45} hue}
             stroke{hue, 1.4}
@@ -41,39 +41,44 @@ let Branch = |self, depth, at, dir, length, angle, shrink, id| {
     let stroke_width = 0.7 + depth * 0.45
     return [
         stroke{BLACK, stroke_width} tag{[depth, id]} Line(at, end),
-        
+
+        # The recursive calls build left and right subtrees from the new endpoint.
         self(self, depth - 1, end, rot(dir, angle), length * shrink, angle, shrink, 2 * id),
         self(self, depth - 1, end, rot(dir, -angle), length * shrink, angle, shrink, 2 * id + 1)
     ]
 }
 
 let RecursiveTree = |depth, angle, shrink|
-    # note passing Branch to itself
+    # Passing `Branch` as data keeps recursion explicit and easy to parameterize.
     Branch(Branch, to_int(depth), [0, -2.15, 0], UP, 0.95, angle, shrink, 1)
 
 slide "Recursive Tree"
+    # The recursive lambda receives itself explicitly, so it can run without
+    # requiring a named recursive declaration.
     mesh tree = RecursiveTree(depth: 2, angle: 0.52, shrink: 0.72)
-    mesh note = center{[0, 1.95, 0]} color{BLACK} Text("one branch returns two smaller branches", 0.5)
-    
-    
+    mesh note =
+        center{[0, 1.95, 0]}
+        color{BLACK}
+        Text("one branch returns two smaller branches", 0.5)
+
     play [Write(1.6, [&tree]), delay{1} Fade(0.6, [&note])]
-   
+
 slide "Integer Lerp"
-    
+    # identity-rate lerp makes integer depth pop one level at a time.
     tree.depth = 7
     play rate{identity} Lerp(3)
     play Wait(1)
 
 slide
+    # Lerp works through the recursive expression because the tags are stable.
     tree.angle = 0.74
     tree.shrink = 0.66
     play Lerp(3)
     play Wait(1)
 
 slide
+    # Only the live arguments change; the tree helper stays reusable.
     tree.angle = 0.37
     tree.shrink = 0.78
     play Lerp(3)
     play Wait(1)
- 
-    

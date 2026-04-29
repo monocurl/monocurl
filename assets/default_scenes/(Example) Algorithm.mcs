@@ -10,20 +10,21 @@ import std.mesh
 import std.anim
 import std.scene
 
-background = WHITE
-
 let W = 9
 let H = 6
 let START = [0, 3]
 let GOAL = [8, 2]
 let CELL = 0.58
 
+# The wall predicate keeps the maze definition close to the algorithm code.
 let wall_at = |x, y|
     (x == 3 and y != 0) or (x == 6 and y != 5)
 
 let cell_center = |x, y|
     [(x - (W - 1) / 2) * CELL, ((H - 1) / 2 - y) * CELL, 0]
 
+# `neighbors` isolates the graph topology from the search loop. `expand` can
+# then read like BFS: consume the current frontier, produce the next frontier.
 let empty_distances = || {
     var rows = []
     for (y in range(0, H)) {
@@ -41,9 +42,7 @@ let empty_distances = || {
 let empty_prev = || {
     var rows = []
     for (y in range(0, H)) {
-        var row = []
-        for (x in range(0, W)) { row .= nil }
-        rows .= row
+        rows .= map(range(0, W), |x| nil)
     }
     return rows
 }
@@ -54,48 +53,46 @@ let seeded_distances = || {
     return rows
 }
 
-let has_distance = |dist, x, y, value| {
-    if (x < 0 or x >= W or y < 0 or y >= H) { return 0 }
-    return dist[y][x] == value
-}
+let in_bounds = |x, y|
+    x >= 0 and x < W and y >= 0 and y < H
 
-let choose_prev = |dist, x, y, value| {
-    if (has_distance(dist, x - 1, y, value)) { return [x - 1, y] }
-    if (has_distance(dist, x + 1, y, value)) { return [x + 1, y] }
-    if (has_distance(dist, x, y - 1, value)) { return [x, y - 1] }
-    if (has_distance(dist, x, y + 1, value)) { return [x, y + 1] }
-    return nil
-}
+let passable = |x, y|
+    in_bounds(x, y) and not wall_at(x, y)
 
-let expand = |dist, prev, step| {
-    var next_dist = []
-    var next_prev = []
-    for (y in range(0, H)) {
-        var dist_row = []
-        var prev_row = []
-        for (x in range(0, W)) {
-            var value = dist[y][x]
-            var parent = prev[y][x]
-
-            if (value == -1) {
-                let candidate = choose_prev(dist, x, y, step - 1)
-                if (candidate != nil) {
-                    value = step
-                    parent = candidate
-                }
-            }
-
-            dist_row .= value
-            prev_row .= parent
+let neighbors = |point| block {
+    let x = point[0]
+    let y = point[1]
+    for (delta in [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        let nx = x + delta[0]
+        let ny = y + delta[1]
+        if (passable(nx, ny)) {
+            . [nx, ny]
         }
-        next_dist .= dist_row
-        next_prev .= prev_row
     }
-    return [next_dist, next_prev]
 }
 
-let on_path = |x, y, path| {
-    for (point in path) {
+let expand = |dist, prev, frontier, step| {
+    var next_dist = dist
+    var next_prev = prev
+    var next_frontier = []
+
+    for (point in frontier) {
+        for (candidate in neighbors(point)) {
+            let x = candidate[0]
+            let y = candidate[1]
+            if (next_dist[y][x] == -1) {
+                next_dist[y][x] = step
+                next_prev[y][x] = point
+                next_frontier .= candidate
+            }
+        }
+    }
+
+    return [next_dist, next_prev, next_frontier]
+}
+
+let contains_point = |x, y, points| {
+    for (point in points) {
         if (point[0] == x and point[1] == y) { return 1 }
     }
     return 0
@@ -108,10 +105,10 @@ let CellAt = |x, y, value, frontier, path| {
     if (value == -2) {
         fill_color = DARK_GRAY
         stroke_color = DARK_GRAY
-    } else if (on_path(x, y, path)) {
+    } else if (contains_point(x, y, path)) {
         fill_color = GREEN
         stroke_color = GREEN
-    } else if (frontier >= 0 and value == frontier) {
+    } else if (contains_point(x, y, frontier)) {
         fill_color = ORANGE
         stroke_color = ORANGE
     } else if (value >= 0) {
@@ -126,25 +123,26 @@ let CellAt = |x, y, value, frontier, path| {
         Square(CELL * 0.9)
 }
 
-let PrevArrow = |x, y, parent, path| {
-    let here = cell_center(x, y)
-    let there = cell_center(parent[0], parent[1])
-    let tail = 0.72 * here + 0.28 * there
-    let tip = 0.38 * here + 0.62 * there
-    var col = alpha{0.38} BLACK
-    if (on_path(x, y, path)) { col = GREEN }
-
-    return z_index{2}
-        tag{[200, x, y]}
-        stroke{col, 1.2}
-        Arrow(tail, tip)
-}
-
 let PrevArrows = |prev, dist, path| block {
+    let PrevArrow = |x, y, parent| {
+        let here = cell_center(x, y)
+        let there = cell_center(parent[0], parent[1])
+        # Short arrows point to the previous cell without filling the whole square.
+        let tail = lerp(here, there, 0.28)
+        let tip = lerp(here, there, 0.62)
+        var col = GRAY
+        if (contains_point(x, y, path)) { col = GREEN }
+
+        return z_index{2}
+            tag{[200, x, y]}
+            color{col}
+            Arrow(tail, tip)
+    }
+
     for (y in range(0, H)) {
         for (x in range(0, W)) {
             if (dist[y][x] > 0 and prev[y][x] != nil) {
-                . PrevArrow(x, y, prev[y][x], path)
+                . PrevArrow(x, y, prev[y][x])
             }
         }
     }
@@ -170,27 +168,36 @@ let Grid = |dist, prev, frontier, path| block {
 }
 
 slide "Wavefront Search"
+    # `frontier` is both the algorithm queue and the visual highlight.
     var dist = seeded_distances()
     var prev = empty_prev()
-    mesh grid = Grid(dist: dist, prev: prev, frontier: 0, path: [])
+    var frontier = [START]
+    mesh grid = Grid(dist: dist, prev: prev, frontier: frontier, path: [])
     play Fade(0.6)
 
+    # `print` is a cheap debugging probe: values appear inline and in the console.
+    print ["grid" -> [W, H], "start" -> START, "goal" -> GOAL]
+
     var step = 1
-    while (dist[GOAL[1]][GOAL[0]] == -1) {
-        let next = expand(dist, prev, step)
+    while (dist[GOAL[1]][GOAL[0]] == -1 and len(frontier) > 0) {
+        let next = expand(dist, prev, frontier, step)
         dist = next[0]
         prev = next[1]
+        frontier = next[2]
 
         grid.dist = dist
         grid.prev = prev
-        grid.frontier = step
-        play TagTrans(0.16)
+        grid.frontier = frontier
+        play TagTrans(0.5)
 
         step = step + 1
     }
+    print ["goal distance" -> dist[GOAL[1]][GOAL[0]]]
 
 slide "Shortest Path"
-    grid.frontier = -1
+    # Prev pointers are ordinary data, but assigning `grid.path` gives them a
+    # visual life because the mesh was built from labeled arguments.
+    grid.frontier = []
     grid.path = []
     play TagTrans(0.25)
 
@@ -199,7 +206,7 @@ slide "Shortest Path"
     while (current != nil) {
         path .= current
         grid.path = path
-        play TagTrans(0.12)
+        play Trans(0.2)
 
         if (current[0] == START[0] and current[1] == START[1]) { break }
         current = prev[current[1]][current[0]]

@@ -2266,15 +2266,17 @@ fn planar_mesh_patharc_lerp(
     };
     let mut lins = upranked.lins;
     let mut tris = upranked.tris;
+    let fill = start_fill.lerp(end_fill, t);
 
     if lins.len() == boundary.lins.len() {
         for (line, template) in lins.iter_mut().zip(&boundary.lins) {
             line.a.col = template.a.col;
             line.b.col = template.b.col;
         }
+    } else {
+        color_boundary_lines_from_template(&mut lins, &boundary, fill);
     }
 
-    let fill = start_fill.lerp(end_fill, t);
     for tri in &mut tris {
         tri.a.col = fill;
         tri.b.col = fill;
@@ -2291,6 +2293,42 @@ fn planar_mesh_patharc_lerp(
     };
     mesh.debug_assert_consistent_topology();
     Ok(mesh)
+}
+
+fn color_boundary_lines_from_template(lins: &mut [Lin], template: &Mesh, fallback: Float4) {
+    for line in lins {
+        line.a.col = boundary_color_at(template, line.a.pos).unwrap_or(fallback);
+        line.b.col = boundary_color_at(template, line.b.pos).unwrap_or(fallback);
+    }
+}
+
+fn boundary_color_at(mesh: &Mesh, point: Float3) -> Option<Float4> {
+    let mut best = None::<(f32, Float4)>;
+    for line in mesh.lins.iter().filter(|line| line.is_dom_sib) {
+        let delta = line.b.pos - line.a.pos;
+        let t = if delta.len_sq() <= 1e-12 {
+            0.0
+        } else {
+            ((point - line.a.pos).dot(delta) / delta.len_sq()).clamp(0.0, 1.0)
+        };
+        let closest = line.a.pos.lerp(line.b.pos, t);
+        let dist_sq = (point - closest).len_sq();
+        let color = line.a.col.lerp(line.b.col, t);
+        if best.is_none_or(|(best_dist, _)| dist_sq < best_dist) {
+            best = Some((dist_sq, color));
+        }
+    }
+
+    if best.is_none() {
+        for dot in mesh.dots.iter().filter(|dot| dot.is_dom_sib) {
+            let dist_sq = (point - dot.pos).len_sq();
+            if best.is_none_or(|(best_dist, _)| dist_sq < best_dist) {
+                best = Some((dist_sq, dot.col));
+            }
+        }
+    }
+
+    best.map(|(_, color)| color)
 }
 
 fn ensure_same_mesh_topology(

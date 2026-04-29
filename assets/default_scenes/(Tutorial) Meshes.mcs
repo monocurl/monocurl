@@ -1,0 +1,160 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Tutorial: Meshes And Operators
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+let Label = |text, at, scale = 0.32|
+    center{at}
+    color{BLACK}
+    Text(text, scale)
+
+let captioned = operator |target, label, at|
+    [
+        target,
+        Label(label, at, 0.24)
+    ]
+
+let Token = |shape, at, col, id|
+    tag{id}
+    center{at}
+    fill{alpha{0.2} col}
+    stroke{col, 2}
+    shape
+
+let ConstructorSet = || [
+    Token(Circle(0.38), [-2.4, 0.45, 0], BLUE, 1),
+    Token(Square(0.68), [-0.8, 0.45, 0], ORANGE, 2),
+    Token(RegularPolygon(6, 0.4), [0.8, 0.45, 0], GREEN, 3),
+    Token(Triangle([-0.36, -0.26, 0], [0.36, -0.26, 0], [0, 0.36, 0]), [2.4, 0.45, 0], MAGENTA, 4),
+    Label("Circle", [-2.4, -0.25, 0], 0.24),
+    Label("Square", [-0.8, -0.25, 0], 0.24),
+    Label("Polygon", [0.8, -0.25, 0], 0.24),
+    Label("Triangle", [2.4, -0.25, 0], 0.24)
+]
+
+let MeshTree = || [
+    tag{[10, 1]} stroke{DARK_GRAY, 2} Line([-2.5, 0, 0], [2.5, 0, 0]),
+    tag{[10, 2]} stroke{DARK_GRAY, 2} Line([0, -1.25, 0], [0, 1.25, 0]),
+    tag{[11, 1]} center{[-1.2, 0.45, 0]} fill{BLUE} Circle(0.08),
+    tag{[11, 2]} center{[0.55, -0.65, 0]} fill{ORANGE} Circle(0.08),
+    tag{[12, 1]} Label("a list of meshes is one mesh value", [0, 1.55, 0], 0.32)
+]
+
+let Styled = |at, radius, col|
+    shift{at}
+    fill{alpha{0.2} col}
+    stroke{col, 2}
+    Circle(radius)
+
+let TaggedGroup = || [
+    tag{1} center{[-1.4, 0, 0]} Circle(0.45),
+    tag{2} center{[0, 0, 0]} Circle(0.45),
+    tag{3} center{[1.4, 0, 0]} Circle(0.45)
+]
+
+let tag_palette = operator |target|
+    fill{alpha{0.28} MAGENTA, |tags| 3 in tags}
+    fill{alpha{0.28} ORANGE, |tags| 2 in tags}
+    fill{alpha{0.28} BLUE, |tags| 1 in tags}
+    stroke{BLACK, 2}
+    target
+
+let Badge = |text, at, col, id| [
+    tag{[20, id]}
+        center{at}
+        fill{alpha{0.16} col}
+        stroke{col, 2}
+        Rect([1.5, 0.6]),
+    tag{[21, id]}
+        Label(text, at, 0.27)
+]
+
+let badge_style = operator |target, col|
+    fill{alpha{0.18} col}
+    stroke{col, 2.2}
+    target
+
+let CustomOperatorDemo = || [
+    tag{1} center{[-1.4, 0, 0]} badge_style{BLUE} Square(0.72),
+    tag{2} center{[0, 0, 0]} badge_style{ORANGE} RegularPolygon(6, 0.44),
+    tag{3} center{[1.4, 0, 0]} badge_style{GREEN} Circle(0.4)
+]
+
+slide "Mesh Variables"
+    # `mesh` creates a leader/follower pair.
+    #
+    # The leader is the value this script edits. The follower is the visible
+    # copy in the viewport. A `play` statement is the moment where the follower
+    # is created, snapped, or animated toward the leader.
+    mesh title = Label("mesh variables are the visible state", [0, 1.45, 0], 0.42)
+    mesh dot = center{[0, 0, 0]} fill{alpha{0.25} BLUE} stroke{BLUE, 2} Circle(0.48)
+    play Grow(0.7)
+
+slide "Constructors"
+    # Constructors create canonical geometry. Operators place and style it.
+    title = Label("constructors make geometry", [0, 1.45, 0], 0.44)
+    dot = ConstructorSet()
+    play TagTrans(0.8, [&title, &dot])
+
+slide "Mesh Trees"
+    # Lists are valid mesh values, which makes compound diagrams easy to return
+    # from helpers.
+    title = Label("mesh trees can be plain lists", [0, 1.45, 0], 0.42)
+    dot = MeshTree()
+    play TagTrans(0.8, [&title, &dot])
+
+slide "Operators"
+    # Operators compose around a target. Label important args if you will mutate
+    # them later, because labels become editable fields on the mesh leader.
+    title = Label("operators transform and style", [0, 1.45, 0], 0.42)
+    dot = Styled(at: 1.4l, radius: 0.32, col: BLUE)
+    play TagTrans(0.7, [&title, &dot])
+
+    # These assignments edit the leader. `Lerp` then moves the visible follower
+    # from the previous styled dot to this new destination.
+    dot.at = 1.4r
+    dot.radius = 0.55
+    dot.col = ORANGE
+    play Lerp(0.9, [&dot])
+
+slide "Tags"
+    # Tags let filters style subparts by identity instead of by position.
+    title = Label("tags give subparts identities", [0, 1.45, 0], 0.42)
+    dot = tag_palette{} TaggedGroup()
+    play TagTrans(0.8, [&title, &dot])
+
+slide "Custom Mesh Helpers"
+    # A custom mesh helper should return ordinary mesh values, often lists.
+    title = Label("helpers package repeated visual units", [0, 1.45, 0], 0.42)
+    dot = [
+        Badge("source", [-1.75, 0.2, 0], BLUE, 1),
+        Badge("transform", [0, 0.2, 0], ORANGE, 2),
+        Badge("result", [1.75, 0.2, 0], GREEN, 3)
+    ]
+    play TagTrans(0.8, [&title, &dot])
+
+slide "Custom Operators"
+    # Custom operators remove repetitive chains of fill/stroke/transform code.
+    title = Label("operators are reusable styling verbs", [0, 1.45, 0], 0.42)
+    dot = CustomOperatorDemo()
+    play TagTrans(0.8, [&title, &dot])
+
+slide "Small Example"
+    # Combine constructors, helpers, operators, and tags into a compact scene.
+    title = Label("small scenes are just composed mesh expressions", [0, 1.45, 0], 0.38)
+    dot = [
+        tag{1} shift{[-1.4, 0, 0]} badge_style{BLUE} Circle(0.42),
+        tag{2} shift{[0, 0, 0]} badge_style{ORANGE} Square(0.72),
+        tag{3} shift{[1.4, 0, 0]} badge_style{GREEN} RegularPolygon(5, 0.45),
+        stroke{DARK_GRAY, 2} Line([-2.0, -0.7, 0], [2.0, -0.7, 0])
+    ]
+    play TagTrans(0.9, [&title, &dot])

@@ -103,10 +103,15 @@ impl HomeView {
         });
     }
 
-    fn import(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
-        log::info!("Adding project {:?}", path);
+    fn import_many(
+        &mut self,
+        paths: Vec<std::path::PathBuf>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        log::info!("Adding projects {:?}", paths);
 
-        self.state.update(cx, move |state, _cx| state.import(path))
+        self.state
+            .update(cx, move |state, _cx| state.import_many(paths))
     }
 
     fn create_default(&mut self, dtype: DocumentType, window: &mut Window, cx: &mut Context<Self>) {
@@ -403,7 +408,7 @@ impl HomeView {
                             let options = PathPromptOptions {
                                 files: true,
                                 directories: false,
-                                multiple: false,
+                                multiple: true,
                                 prompt: None,
                             };
                             let path = cx.prompt_for_paths(options);
@@ -412,21 +417,21 @@ impl HomeView {
                                 let Some(this) = this.upgrade() else {
                                     return;
                                 };
-                                let Some(path) = path
-                                    .await
-                                    .ok()
-                                    .map(|s| s.ok())
-                                    .flatten()
-                                    .flatten()
-                                    .map(|ps| ps.into_iter().next())
-                                    .flatten()
+                                let Some(paths) =
+                                    path.await.ok().map(|s| s.ok()).flatten().flatten()
                                 else {
                                     return;
                                 };
 
+                                if paths.is_empty() {
+                                    return;
+                                }
+
                                 let _ = app.update(move |app| {
                                     let _ = this.update(app, |this, cx| {
-                                        let _ = this.import(path, cx);
+                                        if let Err(err) = this.import_many(paths, cx) {
+                                            log::error!("{err}");
+                                        }
                                     });
                                 });
                             })

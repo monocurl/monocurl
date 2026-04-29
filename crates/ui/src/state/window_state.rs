@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gpui::{App, AppContext, Context, Entity, WeakEntity, Window};
 use serde::{Deserialize, Serialize};
@@ -9,19 +9,18 @@ use crate::document_view::{DocumentView, OpenDocument};
 
 pub const CHECK_FOR_WRONGLY_IMPORTED_EXTENSION: bool = false;
 const DEFAULT_SCENE_FILES: &[&str] = &[
-    "welcome_to_monocurl.mcs",
-    "language_basics.mcs",
-    "example_camera_animations.mcs",
-    "example_geometry_proof.mcs",
-    "example_text_and_equations.mcs",
-    "meshes_and_operators.mcs",
-    "example_recursive_mesh_tree.mcs",
-    "animations.mcs",
-    "example_3d_surface.mcs",
-    "example_graphing_riemann_sums.mcs",
-    "example_algorithms_wavefront_pathfinding.mcs",
-    "example_image_mandala.mcs",
-    "parameters.mcs",
+    "(Tutorial) Monocurl Overview.mcs",
+    "(Tutorial) Language Basics.mcs",
+    "(Tutorial) Meshes.mcs",
+    "(Tutorial) Animations.mcs",
+    "(Example) Text.mcs",
+    "(Example) Geometry Proof.mcs",
+    "(Example) Riemann Sum.mcs",
+    "(Example) Flow Field.mcs",
+    "(Example) Algorithm.mcs",
+    "(Example) Fractal.mcs",
+    "(Example) 3D Camera Animation.mcs",
+    "(Example) Image.mcs",
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,7 +240,7 @@ impl WindowState {
         self.import(path)
     }
 
-    pub fn import(&mut self, path: PathBuf) -> Result<(), String> {
+    fn validate_import_path(path: &Path) -> Result<(), String> {
         if CHECK_FOR_WRONGLY_IMPORTED_EXTENSION {
             match path
                 .extension()
@@ -260,8 +259,37 @@ impl WindowState {
             return Err(format!("File does not exist: {}", path.display()));
         }
 
-        self.recently_opened.retain(|recent| recent.path != path);
-        self.recently_opened.insert(0, RecentlyOpened { path });
+        Ok(())
+    }
+
+    pub fn import(&mut self, path: PathBuf) -> Result<(), String> {
+        self.import_many(vec![path])
+    }
+
+    pub fn import_many(&mut self, paths: Vec<PathBuf>) -> Result<(), String> {
+        let mut unique_paths = Vec::with_capacity(paths.len());
+        for path in paths {
+            if !unique_paths.contains(&path) {
+                unique_paths.push(path);
+            }
+        }
+        let mut paths = unique_paths;
+
+        if paths.is_empty() {
+            return Ok(());
+        }
+
+        for path in &paths {
+            Self::validate_import_path(path)?;
+        }
+
+        self.recently_opened
+            .retain(|recent| !paths.contains(&recent.path));
+
+        for path in paths.drain(..).rev() {
+            self.recently_opened.insert(0, RecentlyOpened { path });
+        }
+
         self.save();
         Ok(())
     }

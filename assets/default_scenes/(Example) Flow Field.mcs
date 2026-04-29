@@ -1,0 +1,173 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Example: Parameters
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+# Init-scope params become presentation controls. Meshes that read `$source`
+# and friends are resynced from those live values after each slide.
+param source = [-0.62, -0.22, 0]
+param sink = [0.64, 0.34, 0]
+param swirl = 0.38
+param pressure = 0.9
+
+let palette = [0 -> LIGHT_GRAY, 0.24 -> CYAN, 0.4 -> BLUE, 0.6 -> PURPLE, 1 -> RED]
+let scene_scale = [2.35, 1.35, 1]
+let bounds_x = [-2.75, 2.75]
+let bounds_y = [-1.55, 1.55]
+
+let to_scene = |handle| [scene_scale[0] * handle[0], scene_scale[1] * handle[1], 0]
+
+let safe_unit = |v| {
+    # Streamlines sometimes pass very close to a pole; avoid zero-length normals.
+    let n = norm(v)
+    if (n < 0.0001) { return 1r }
+    return v * (1 / n)
+}
+
+let flow_at = |pos, src, dst, swirl_value, pressure_value| {
+    # The field combines source/sink attraction with a tangential swirl term.
+    let src_delta = pos - src
+    let dst_delta = dst - pos
+    let src_d2 = max(0.12, dot(src_delta, src_delta))
+    let dst_d2 = max(0.12, dot(dst_delta, dst_delta))
+
+    let center_delta = pos - 0.5 * (src + dst)
+    let center_norm = max(0.35, norm(center_delta))
+    let tangent = [-center_delta[1], center_delta[0], 0] * (1 / center_norm)
+
+    let pressure_clamped = clamp(0.15, pressure_value, 1.8)
+    let swirl_clamped = clamp(-1.25, swirl_value, 1.25)
+    return pressure_clamped * (0.62 * src_delta * (1 / src_d2) + 0.82 * dst_delta * (1 / dst_d2)) +
+        0.42 * swirl_clamped * tangent
+}
+
+let FlowGrid = || block {
+    for (i in range(0, 10)) {
+        let x = bounds_x[0] + i * (bounds_x[1] - bounds_x[0]) / 9
+        . stroke{alpha{0.24} LIGHT_GRAY, 0.9}
+          Line([x, bounds_y[0], 0], [x, bounds_y[1], 0])
+    }
+
+    for (i in range(0, 7)) {
+        let y = bounds_y[0] + i * (bounds_y[1] - bounds_y[0]) / 6
+        . stroke{alpha{0.24} LIGHT_GRAY, 0.9}
+          Line([bounds_x[0], y, 0], [bounds_x[1], y, 0])
+    }
+
+    . fill{CLEAR}
+        stroke{alpha{0.55} LIGHT_GRAY, 1.3}
+        Rect([bounds_x[1] - bounds_x[0], bounds_y[1] - bounds_y[0]])
+}
+
+let Needle = |pos, src, dst, swirl_value, pressure_value, idx| {
+    let v = flow_at(pos, src, dst, swirl_value, pressure_value)
+    let strength = clamp(0, norm(v) / 3.2, 1)
+    let dir = safe_unit(v)
+    let len = 0.11 + 0.22 * strength
+    # keyframe_lerp is a compact way to turn many field samples into a gradient.
+    let col = keyframe_lerp(palette, strength)
+
+    return tag{[10, idx[0], idx[1]]}
+        color{col}
+        Arrow(pos - 0.5 * len * dir, pos + 0.5 * len * dir)
+}
+
+let NeedleField = |src, dst, swirl_value, pressure_value|
+    # Field handles the repeated sampling; Needle stays focused on one glyph.
+    Field(
+        |pos, idx| Needle(pos, src, dst, swirl_value, pressure_value, idx),
+        [bounds_x[0] + 0.24, bounds_x[1] - 0.24, 15],
+        [bounds_y[0] + 0.2, bounds_y[1] - 0.2, 9]
+    )
+
+let streamline_points = |seed, src, dst, swirl_value, pressure_value| {
+    var points = []
+    var pos = seed
+    for (i in range(0, 42)) {
+        # A fixed Euler step keeps the path deterministic for animation replay.
+        points .= pos
+        pos = pos + 0.105 * safe_unit(flow_at(pos, src, dst, swirl_value, pressure_value))
+    }
+    return points
+}
+
+let Streamline = |seed, src, dst, swirl_value, pressure_value, id| {
+    let pts = streamline_points(seed, src, dst, swirl_value, pressure_value)
+    let col = keyframe_lerp(palette, id / 13)
+    return z_index{1}
+        tag{[100, id]}
+        stroke{alpha{0.55} col, 1.8}
+        Polyline(pts)
+}
+
+let Streamlines = |src, dst, swirl_value, pressure_value| block {
+    for (i in range(0, 14)) {
+        let theta = TAU * i / 14
+        let seed = src + 0.18 * [cos(theta), sin(theta), 0]
+        . Streamline(seed, src, dst, swirl_value, pressure_value, i)
+    }
+}
+
+let Pole = |pos, color_value, sign, id| [
+    tag{id}
+        center{pos}
+        fill{alpha{0.18} color_value}
+        stroke{color_value, 2.4}
+        Circle(0.2),
+    tag{id + 1}
+        center{pos}
+        color{color_value}
+        Text(sign, 0.42),
+    tag{id + 2}
+        center{pos}
+        fill{CLEAR}
+        stroke{alpha{0.45} color_value, 1.2}
+        Circle(0.38)
+]
+
+let Plain = |text, at, scale = 0.42|
+    center{at}
+    color{BLACK}
+    Text(text, scale)
+
+let FlowScene = |src, dst, swirl_value, pressure_value| {
+    let src_pos = to_scene(src)
+    let dst_pos = to_scene(dst)
+    return [
+        FlowGrid(),
+        NeedleField(src_pos, dst_pos, swirl_value, pressure_value),
+        Streamlines(src_pos, dst_pos, swirl_value, pressure_value),
+        Pole(src_pos, ORANGE, "+", 200),
+        Pole(dst_pos, BLUE, "-", 210)
+    ]
+}
+
+slide "Live Flow"
+    # `$` reads keep the mesh tied to parameter leaders instead of one snapshot.
+    mesh field = FlowScene(src: $source, dst: $sink, swirl_value: $swirl, pressure_value: $pressure)
+    mesh note = Plain("presentation mode: drag source and sink", [0, 2.05, 0], 0.46)
+    play Fade(0.7)
+
+    # `print` shows the concrete parameter leaders at this point in playback.
+    print ["source" -> source, "sink" -> sink, "swirl" -> swirl, "pressure" -> pressure]
+
+slide "Scripted Change"
+    # Scripted param changes and presentation drags mutate the same leaders.
+    source = [-0.78, 0.42, 0]
+    sink = [0.74, -0.35, 0]
+    swirl = 0.95
+    pressure = 1.25
+    print [source, sink, swirl, pressure]
+    play Lerp(1.4)
+
+slide "Interactive Pause"
+    note = Plain("the same scene keeps reacting while paused", [0, 2.05, 0])
+    play Trans(0.45)
+    play Wait(5.0)
