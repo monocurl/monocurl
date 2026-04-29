@@ -204,3 +204,9 @@ pub struct DocumentView {
 
     focus_handle: FocusHandle,
 }
+
+impl DocumentView {
+    pub(crate) fn is_presenting(&self) -> bool {
+        self.is_presenting
+    }
+}

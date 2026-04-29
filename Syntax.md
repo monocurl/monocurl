@@ -7,7 +7,7 @@ import std.anim
 let var = 10
 let arr = [1, 2, 3, 4, 5]
 let dict = [:]
-let dict2 = ["hello":1, "world":2]
+let dict2 = ["hello" -> 1, "world" -> 2]
 let expr = 3 * 5 + 2
 # brace and line major
 for i in arr {
@@ -47,10 +47,10 @@ let g = f(2, 3)
 ### Dot Syntax
 ```monocurl
 var x = []
-x = x . 4
+x = x .. 4
 x .= 4
 x .= 5
-var f = || {
+var f = || block {
     . lerp 
     . normalize
     # equivalent to 

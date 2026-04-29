@@ -92,7 +92,7 @@ let expand = |dist, prev, frontier, step| {
 }
 
 let contains_point = |x, y, points| {
-    for (point in points) {
+    for (point in points) { 
         if (point[0] == x and point[1] == y) { return 1 }
     }
     return 0

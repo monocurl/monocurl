@@ -138,6 +138,9 @@ impl DocumentView {
         }
         log::info!("Toggled presentation mode to {}", self.is_presenting);
         cx.notify();
+        if let Some(window_state) = self.window_state.upgrade() {
+            window_state.update(cx, |_, cx| cx.notify());
+        }
     }
 
     pub(super) fn play_or_show_pause_hint(
