@@ -1,4 +1,3 @@
-- Monocurl AI Context.md: compact authoring guide for AI agents generating Monocurl scenes, structured to match the default tutorial chapters (overview, language basics, meshes/operators, animations) plus debug transcript guidance, patterns, anti-patterns, and references to the stdlib/tutorial scenes
 - bytecode: contains the enum of the Monocurl VM bytecode
   - src/lib.rs: Instruction / prototype definitions plus SectionBytecode metadata (flags, instruction annotations, source file name, imported-bundle display index). `LambdaPrototype` carries per-argument names alongside default/reference metadata so runtime live functions can address default arguments by name. `PushCopy` now carries an explicit copy mode (`Read` / `Reference` / `Raw`) so the compiler can preserve raw lvalue/reference values for selected slots without ad-hoc runtime elision rules, plain reads now materialize stateful mesh leaders without a separate current-value opcode, `IncrementByOne` now gives compiler-generated `for` induction vars a single in-place increment opcode instead of spelling that update as generic lvalue arithmetic, and `Observe` records the top-of-stack value into the execution transcript for `print` statements
 - cli: binary crate for the `monocurl` command-line interface
@@ -67,6 +66,11 @@
   - src/lib.rs: `Float3`-based contour input, tessellation options/error types, opt-in contour normalization for degenerate/redundant loop sets before triangulation, and safe triangle output extraction from `TESStesselator`
   - build.rs: compiles the vendored upstream C sources from `upstream/Source` and links them into the Rust crate
   - upstream/: git-cloned `https://github.com/memononen/libtess2` source tree with `.git` removed and `LICENSE.txt` retained
+- mcp: binary crate for the `monocurl-mcp` stdio MCP server
+  - docs/language-semantics.md: compact authoring guide for AI agents generating Monocurl scenes, structured to match the default tutorial chapters (overview, language basics, meshes/operators, animations) plus debug transcript guidance, patterns, anti-patterns, and references to the stdlib/tutorial scenes
+  - docs/stdlib.md: MCP-facing overview of the public stdlib wrapper modules, common imports, and authoring conventions
+  - src/main.rs: RMCP-backed stdio MCP server exposing Monocurl language and stdlib documentation through `resources/list` and `resources/read`, plus read-only `monocurl_check` and `monocurl_seek` tools that parse/compile source and optionally seek execution to return runtime diagnostics and transcript output
+  - server.github.example.json: placeholder MCP Registry metadata for a future GitHub-release/MCPB publishing flow
 - lexer: lexing utilites, contains token definition
   - src/lexer.rs: actually lexes a stream of characters, including the `print` keyword
   - src/token.rs: contains an enum of all of the tokens and helper functions related to them; `Print` is a control-flow-style keyword token

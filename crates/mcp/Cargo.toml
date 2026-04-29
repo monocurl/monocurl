@@ -1,0 +1,22 @@
+[package]
+name = "mcp"
+version = "0.1.0"
+edition.workspace = true
+
+[[bin]]
+name = "monocurl-mcp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+compiler.workspace = true
+executor.workspace = true
+lexer.workspace = true
+parser.workspace = true
+rmcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+smol.workspace = true
+stdlib.workspace = true
+structs.workspace = true
+tokio.workspace = true
