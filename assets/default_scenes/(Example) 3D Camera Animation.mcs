@@ -1,8 +1,4 @@
-# This is a small Monocurl tutorial snippet.
-# For the full tutorial, go to https://monocurl.com/learn.
-#
-# Example: Camera Animations
-#
+# example: 3d camera animation
 
 import std.util
 import std.math
@@ -39,25 +35,22 @@ slide "Flat Grid"
             z_axis: [0, 1, "z", 0.25, 4, |z| z]
         )
 
-    play Fade(0.8, [&axis, &grid])
-    
+    play Fade(0.8)
+
 slide "Surface And Camera"
-    background = RED
-    play Set()
-    
     # an anim block is analogous to a coroutine in other languages
     # it does nothing until it is played
     # (you can try experiment with the playhead to see when the
     # "Got here" is actually printed)
+    # anim blocks don't execute until played — scrub the timeline to see when "Got here" prints
     let lift_grid = anim {
-        # this only starts executing by line 74
         grid = stroke{BLACK, 1.5} ColorGrid(
             color_at,
             [0, 1, samples],
             [-1, 0, samples]
         )
         play Trans(0.8, [&grid])
-        
+
         print "Got here"
 
         grid =
@@ -67,8 +60,6 @@ slide "Surface And Camera"
     }
 
     let move_camera = anim {
-        # `camera` is a scene leader too; assigning it then playing CameraLerp keeps
-        # camera motion in the same model as mesh motion.
         camera = Camera([2.2, -2.1, 1.45], [0.5, -0.5, 0.35], [0, 0, 1])
         play CameraLerp(&camera, 2.6)
     }

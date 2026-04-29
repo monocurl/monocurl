@@ -1,7 +1,5 @@
-# This is a small Monocurl tutorial snippet.
-# For the full tutorial, go to https://monocurl.com/learn.
-#
-# Tutorial: Monocurl Overview
+# tutorial: monocurl overview
+# navigate with `.` (next slide) and `,` (prev slide) in the timeline
 
 import std.util
 import std.math
@@ -17,6 +15,7 @@ let Label = |text, at, scale = 0.38|
     color{BLACK}
     Text(text, scale)
 
+# each `Panel` is tagged so TagTrans can match pieces across slides by their id
 let Panel = |at, size, col, id, text| [
     tag{[10, id]}
         center{at}
@@ -95,34 +94,37 @@ let OutputModes = || [
 ]
 
 slide "What Monocurl Is"
-    # Monocurl is both a desktop editor and a programming language: code drives
-    # the rendered frame, and the app previews it live.
+    # monocurl: write code to produce math animations; the app previews the result live
+    # everything in this file is monocurl code — every pixel you see comes from it
     mesh title = Label("program mathematical animations", [0, 1.45, 0], 0.52)
     mesh flow = Workflow()
     play Fade(0.7)
 
 slide "Scene Structure"
-    # The init section configures the scene. Real animation starts at `slide`.
+    # code before the first `slide` keyword is the init section
+    # init holds imports, helper functions, params, and camera setup — no animations here
+    # each `slide` block is an animation segment; `play` statements go inside slides
     title = Label("a scene is init code plus slides", [0, 1.45, 0], 0.48)
     flow = SceneStructure()
+    # TagTrans morphs the previous diagram into this one, matching panels by their tag id
     play TagTrans(0.9)
 
 slide "Editor Layout"
-    # The editor keeps source, preview, and timeline visible together.
+    # editor on the left, viewport top-right, timeline bottom-right
+    # scrub the timeline bar to jump to any frame and preview it immediately
     title = Label("edit code, inspect frames, move through time", [0, 1.45, 0], 0.42)
     flow = EditorLayout()
     play TagTrans(0.9)
 
 slide "Timeline Shortcuts"
-    # Keyboard navigation is useful when checking slide boundaries and small
-    # time offsets while authoring an animation.
+    # these keys let you navigate time without leaving the keyboard
     title = Label("timeline navigation", [0, 1.45, 0], 0.48)
     flow = ShortcutStrip()
     play TagTrans(0.9)
 
 slide "Present And Export"
-    # The same scene can be presented interactively, exported as a still, or
-    # rendered as a video.
+    # cmd/ctrl-t: enter presentation mode (interactive param sliders, fullscreen)
+    # scenes can also export as still images or render as video files
     title = Label("one scene, several outputs", [0, 1.45, 0], 0.5)
     flow = OutputModes()
     play TagTrans(0.9)

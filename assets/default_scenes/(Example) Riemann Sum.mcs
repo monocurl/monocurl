@@ -1,7 +1,4 @@
-# This is a small Monocurl tutorial snippet.
-# For the full tutorial, go to https://monocurl.com/learn.
-#
-# Example: Riemann Rectangles
+# example: riemann rectangles
 
 import std.util
 import std.math
@@ -59,7 +56,7 @@ let Axes = ||
 
 
 slide "Area"
-    # Start with the exact integral before introducing the approximation.
+    # exact integral first, approximation second
     mesh def = center{[0, 1.65, 0]} Tex(tex: "\int_{0.5}^{4} f(x)\,dx", 0.82)
     mesh axes = Axes()
     play Fade(0.7)
@@ -68,7 +65,7 @@ slide "Area"
     play Write(1.0)
 
 slide "Left Rectangles"
-    # The same rectangle mesh grows from height 0 to the sampled left sum.
+    # height_scale lerps from 0 to 1 to grow the rectangles up from the axis
     mesh rects = Rectangles(height_scale: 0, selected: -1)
     play Fade(0.3)
 
@@ -106,12 +103,11 @@ slide "Rectangle Dimensions"
 
     mesh measure = Dimensions(rects: full_rects, index: 0)
     play Write(0.8)
-    # print is useful when a visual measurement needs a numerical sanity check.
     print ["rectangle" -> 0, "height" -> f(0.5), "dx" -> 3.5 / 7]
 
 slide "Build The Sum"
+    # tagged fragments let TransSubsetTo transfer measure labels into matching formula terms
     var total_def = def
-    # Carefully tag the equation so labels can transfer into matching terms.
     total_def.tex = [
         text_tag{-1} "\int_{0.5}^{4} f(x)dx",
         text_tag{0} "\ = \ ",
@@ -140,8 +136,7 @@ slide "Build The Sum"
 
         if (i < 2) {
             rects.selected = i + 1
-            # TransSubsetTo empties the transferable pieces from `measure`, so
-            # rebuild the next measurement from the saved full rectangle mesh.
+            # TransSubsetTo empties transferred pieces, so rebuild from the saved full_rects
             measure = Dimensions(full_rects, i + 1)
             play TagTrans(0.7)
         }

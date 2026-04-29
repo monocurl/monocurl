@@ -1,10 +1,4 @@
-# This is a small Monocurl tutorial snippet.
-# For the full tutorial, go to https://monocurl.com/learn.
-#
-# Example: Image Render
-#
-# This file intentionally has zero slides. It is meant to be exported as a
-# still image instead of played as an animation.
+# example: image render — no slides; export as a still image
 
 import std.util
 import std.math
@@ -23,7 +17,7 @@ let TEAL = [0.06, 0.52, 0.58, 1]
 let BLUE = [0.33, 0.58, 0.88, 1]
 let GOLD = [0.91, 0.74, 0.30, 1]
 
-# Custom operators keep repeated fill/stroke recipes readable in dense stills.
+# custom operators keep repeated fill/stroke recipes concise
 let glaze = operator |target, color_value, opacity = 0.6, width = 1.4|
     fill{alpha{opacity} color_value}
     stroke{INK, width}

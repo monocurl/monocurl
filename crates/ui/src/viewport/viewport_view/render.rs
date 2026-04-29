@@ -210,18 +210,6 @@ impl Render for Viewport {
                         .text_size(px(12.0))
                         .child(slide_label),
                 )
-                .child(
-                    div()
-                        .text_color(PRES_MUTED)
-                        .text_size(px(11.0))
-                        .child(time_label),
-                )
-                .children(title_label.clone().map(|title| {
-                    div()
-                        .text_color(PRES_MUTED)
-                        .text_size(px(11.0))
-                        .child(title)
-                }))
                 .children(self.show_pause_hint.then(|| div().flex_1()))
                 .children(self.show_pause_hint.then(render_pause_hint));
 

@@ -1,7 +1,4 @@
-# This is a small Monocurl tutorial snippet.
-# For the full tutorial, go to https://monocurl.com/learn.
-#
-# Example: Text, Tex, And Tags
+# example: text, tex, and tags
 
 import std.util
 import std.math

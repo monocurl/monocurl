@@ -1,7 +1,4 @@
-# This is a small Monocurl tutorial snippet.
-# For the full tutorial, go to https://monocurl.com/learn.
-#
-# Example: Algorithms
+# example: wavefront search
 
 import std.util
 import std.math
@@ -175,7 +172,6 @@ slide "Wavefront Search"
     mesh grid = Grid(dist: dist, prev: prev, frontier: frontier, path: [])
     play Fade(0.6)
 
-    # `print` is a cheap debugging probe: values appear inline and in the console.
     print ["grid" -> [W, H], "start" -> START, "goal" -> GOAL]
 
     var step = 1
