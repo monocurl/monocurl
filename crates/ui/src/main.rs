@@ -120,11 +120,13 @@ impl MonocurlLauncher {
     }
 
     fn create_window(cx: &mut App) {
+        let restore_bounds = Bounds::centered(None, size(px(1280.0), px(720.0)), cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some("Monocurl".into()),
                 ..Default::default()
             }),
+            window_bounds: Some(WindowBounds::Maximized(restore_bounds)),
             window_min_size: Some(size(px(520.), px(420.))),
             focus: true,
             ..Default::default()
