@@ -182,15 +182,18 @@ impl Render for Viewport {
             "Parameters",
             cx.listener(|viewport, _, _, cx| viewport.toggle_params(cx)),
         );
-        let reset_button = show_presentation_reset.then(|| {
-            render_small_toolbar_button(
-                "pres-camera-reset-btn",
-                "Reset Camera",
-                cx.listener(|viewport, _, _, cx| viewport.sync_viewport_camera(cx)),
-            )
-        });
-
         if self.show_params {
+            let reset_button = show_presentation_reset.then(|| {
+                div()
+                    .flex()
+                    .pb(px(8.0))
+                    .child(render_toolbar_button(
+                        "pres-camera-reset-btn",
+                        "Reset Camera",
+                        cx.listener(|viewport, _, _, cx| viewport.sync_viewport_camera(cx)),
+                    ))
+                    .into_any_element()
+            });
             let sidebar_header = div()
                 .flex()
                 .flex_row()
@@ -203,7 +206,6 @@ impl Render for Viewport {
                 .border_b(px(1.0))
                 .border_color(PRES_BORDER)
                 .child(params_button)
-                .children(reset_button)
                 .child(
                     div()
                         .text_color(PRES_TEXT)
@@ -213,7 +215,7 @@ impl Render for Viewport {
                 .children(self.show_pause_hint.then(|| div().flex_1()))
                 .children(self.show_pause_hint.then(render_pause_hint));
 
-            let params_body = if controls.is_empty() {
+            let params_body = if controls.is_empty() && reset_button.is_none() {
                 div()
                     .id("pres-params-list")
                     .flex_1()
@@ -227,6 +229,24 @@ impl Render for Viewport {
                             .child("No active parameters"),
                     )
                     .into_any_element()
+            } else if controls.is_empty() {
+                div()
+                    .id("pres-params-list")
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .px(px(12.0))
+                    .py(px(8.0))
+                    .children(reset_button)
+                    .child(
+                        div().flex_1().flex().items_center().justify_center().child(
+                            div()
+                                .text_color(PRES_MUTED)
+                                .text_size(px(12.0))
+                                .child("No active parameters"),
+                        ),
+                    )
+                    .into_any_element()
             } else {
                 div()
                     .id("pres-params-list")
@@ -235,6 +255,7 @@ impl Render for Viewport {
                     .track_scroll(&self.scroll_handle)
                     .px(px(12.0))
                     .py(px(8.0))
+                    .children(reset_button)
                     .children(controls)
                     .into_any_element()
             };
@@ -280,7 +301,13 @@ impl Render for Viewport {
             .flex_shrink_0()
             .bg(PRES_TOOLBAR_BG)
             .child(params_button)
-            .children(reset_button)
+            .children(show_presentation_reset.then(|| {
+                render_small_toolbar_button(
+                    "pres-camera-reset-btn",
+                    "Reset Camera",
+                    cx.listener(|viewport, _, _, cx| viewport.sync_viewport_camera(cx)),
+                )
+            }))
             .child(
                 div()
                     .text_color(PRES_TEXT)

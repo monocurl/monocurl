@@ -349,10 +349,27 @@ fn pan_camera(
 fn format_camera_surface(camera: &CameraSnapshot) -> String {
     format!(
         "Camera({}, {}, {})",
-        format_axis_vector(camera.position),
-        format_axis_vector(camera.look_at),
+        format_camera_point(camera.position),
+        format_camera_point(camera.look_at),
         format_axis_vector(camera.up)
     )
+}
+
+fn format_camera_point(point: Float3) -> String {
+    format!(
+        "[{}, {}, {}]",
+        format_point_scalar(point.x),
+        format_point_scalar(point.y),
+        format_point_scalar(point.z)
+    )
+}
+
+fn format_point_scalar(value: f32) -> String {
+    if value.abs() < 0.005 {
+        "0.00".to_string()
+    } else {
+        format!("{value:.2}")
+    }
 }
 
 fn format_axis_vector(vector: Float3) -> String {
@@ -394,9 +411,10 @@ fn format_axis_scalar(value: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    use executor::scene_snapshot::CameraSnapshot;
     use geo::simd::Float3;
 
-    use super::format_axis_vector;
+    use super::{format_axis_vector, format_camera_surface};
 
     #[test]
     fn format_axis_vector_uses_right_handed_depth_literals() {
@@ -409,6 +427,22 @@ mod tests {
         assert_eq!(
             format_axis_vector(Float3::new(-1.0, -2.0, 3.0)),
             "1.00l + 2.00d + 3.00b"
+        );
+    }
+
+    #[test]
+    fn format_camera_surface_keeps_position_and_look_at_components() {
+        let camera = CameraSnapshot {
+            position: Float3::new(0.0, -1.234, 4.0),
+            look_at: Float3::new(0.004, 2.0, -0.0),
+            up: Float3::Y,
+            near: 0.1,
+            far: 100.0,
+        };
+
+        assert_eq!(
+            format_camera_surface(&camera),
+            "Camera([0.00, -1.23, 4.00], [0.00, 2.00, 0.00], 1.00u)"
         );
     }
 }

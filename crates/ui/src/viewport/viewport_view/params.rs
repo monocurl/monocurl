@@ -558,11 +558,7 @@ fn render_slider_1d(
     } else {
         format!("{:.2}", value)
     };
-    let value_text = if is_locked {
-        format!("{} (locked)", base_value)
-    } else {
-        base_value
-    };
+    let value_text = base_value;
     let min_text = format_bound(min);
     let max_text = format_bound(max);
     let fill_color = if is_locked {
@@ -825,8 +821,7 @@ fn render_slider_2d(
     let x_max_text = format_bound(x_max);
     let y_min_text = format_bound(y_min);
     let y_max_text = format_bound(y_max);
-    let locked_suffix = if is_locked { " (locked)" } else { "" };
-    let header_text = format!("{}{}", value_text, locked_suffix);
+    let header_text = value_text;
 
     div()
         .flex()

@@ -14,7 +14,7 @@ param sink = [0.64, 0.34, 0]
 param swirl = 0.38
 param pressure = 0.9
 
-let palette = [0 -> LIGHT_GRAY, 0.24 -> CYAN, 0.4 -> BLUE, 0.6 -> PURPLE, 1 -> RED]
+let palette = zip(sample(0, 1, 5), [LIGHT_GRAY, CYAN, BLUE, PURPLE, RED])
 let scene_scale = [2.35, 1.35, 1]
 let bounds_x = [-2.75, 2.75]
 let bounds_y = [-1.55, 1.55]
@@ -43,24 +43,6 @@ let flow_at = |pos, src, dst, swirl_value, pressure_value| {
     let swirl_clamped = clamp(-1.25, swirl_value, 1.25)
     return pressure_clamped * (0.62 * src_delta * (1 / src_d2) + 0.82 * dst_delta * (1 / dst_d2)) +
         0.42 * swirl_clamped * tangent
-}
-
-let FlowGrid = || block {
-    for (i in range(0, 10)) {
-        let x = bounds_x[0] + i * (bounds_x[1] - bounds_x[0]) / 9
-        . stroke{alpha{0.24} LIGHT_GRAY, 0.9}
-          Line([x, bounds_y[0], 0], [x, bounds_y[1], 0])
-    }
-
-    for (i in range(0, 7)) {
-        let y = bounds_y[0] + i * (bounds_y[1] - bounds_y[0]) / 6
-        . stroke{alpha{0.24} LIGHT_GRAY, 0.9}
-          Line([bounds_x[0], y, 0], [bounds_x[1], y, 0])
-    }
-
-    . fill{CLEAR}
-        stroke{alpha{0.55} LIGHT_GRAY, 1.3}
-        Rect([bounds_x[1] - bounds_x[0], bounds_y[1] - bounds_y[0]])
 }
 
 let Needle = |pos, src, dst, swirl_value, pressure_value, idx| {
@@ -105,8 +87,9 @@ let Streamline = |seed, src, dst, swirl_value, pressure_value, id| {
 }
 
 let Streamlines = |src, dst, swirl_value, pressure_value| block {
-    for (i in range(0, 14)) {
-        let theta = TAU * i / 14
+    for (entry in enumerate(sample_clopen(0, TAU, 14))) {
+        let i = entry[0]
+        let theta = entry[1]
         let seed = src + 0.18 * [cos(theta), sin(theta), 0]
         . Streamline(seed, src, dst, swirl_value, pressure_value, i)
     }
@@ -138,7 +121,11 @@ let FlowScene = |src, dst, swirl_value, pressure_value| {
     let src_pos = to_scene(src)
     let dst_pos = to_scene(dst)
     return [
-        FlowGrid(),
+        stroke{alpha{0.24} LIGHT_GRAY, 0.9}
+            LineGrid([bounds_x[0], bounds_x[1], 10], [bounds_y[0], bounds_y[1], 7], 1),
+        fill{CLEAR}
+            stroke{alpha{0.55} LIGHT_GRAY, 1.3}
+            Rect([bounds_x[1] - bounds_x[0], bounds_y[1] - bounds_y[0]]),
         NeedleField(src_pos, dst_pos, swirl_value, pressure_value),
         Streamlines(src_pos, dst_pos, swirl_value, pressure_value),
         Pole(src_pos, ORANGE, "+", 200),
