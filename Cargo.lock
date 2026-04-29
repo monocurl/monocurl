@@ -3635,6 +3635,7 @@ dependencies = [
  "hayro-svg",
  "libtess2",
  "roxmltree",
+ "sha2",
  "tectonic",
  "tectonic_bundles",
  "tiny-skia-path",
