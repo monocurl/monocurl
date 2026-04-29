@@ -10,6 +10,8 @@ import std.mesh
 import std.anim
 import std.scene
 
+mesh t = Axis2d()
+
 background = WHITE
 
 param live_radius = 0.36
@@ -102,7 +104,7 @@ slide "Lerp Attributes"
     ball.radius = 0.62
     ball.col = MAGENTA
     trail = []
-    play Lerp(1.0, [&title, &ball, &trail])
+    play Trans(1.0)
 
 slide "Operator Lerp"
     # Operators know their identity state. That lets a plain follower lerp into
@@ -110,7 +112,7 @@ slide "Operator Lerp"
     # building intermediate meshes.
     title = Label("operators also interpolate", [0, 1.45, 0], 0.42)
     ball = rotate{radians: TAU / 8} scale{factor: 1.35} shift{delta: [1.15, 0, 0]} ball
-    play Lerp(1.0, [&title, &ball])
+    play Lerp(1, [&ball])
 
 slide "Trans"
     # Trans is useful when the destination mesh has different geometry.
@@ -165,7 +167,8 @@ slide "Parameters"
     #
     # `$live_radius` means "read the live follower value". Because that live
     # value is inside a labeled mesh call, the ball recomputes while the slider
-    # changes in presentation mode.
+    # changes in presentation mode 
+    # try (ctrl p, ctrl t, and then navigating to the end)
     title = Label("params can drive live meshes in presentation mode", [0, 1.45, 0], 0.34)
     ball = Ball(pos: [0, 0, 0], radius: $live_radius, col: GREEN)
     trail = FixedHud("Command/Ctrl-T: presentation mode", camera)
