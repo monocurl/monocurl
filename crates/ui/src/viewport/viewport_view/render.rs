@@ -5,7 +5,7 @@ use crate::{
     services::ServiceManager,
     theme::ThemeSettings,
     timeline::{slide_label, slide_title_label, visual_slide_time},
-    viewport::scene_renderer::SceneImageRevision,
+    viewport::scene_renderer::{SceneImageRevision, retired_image_limit_for_presentation},
 };
 
 use super::{
@@ -145,11 +145,10 @@ impl Render for Viewport {
         let previous_ring = self.ring_previous;
         let ring_animation_id = format!("viewport-ring-{}", self.ring_animation_nonce);
         let stage = div()
+            .relative()
             .flex()
             .flex_1()
             .size_full()
-            .bg(ring_style.color)
-            .p(px(ring_style.width))
             .child(render_scene_stage(
                 scene,
                 scene_revision,
@@ -157,15 +156,11 @@ impl Render for Viewport {
                 SceneStageMode::Presentation,
                 weak_vp.clone(),
             ))
-            .with_animation(
+            .child(render_presentation_ring(
+                previous_ring,
+                ring_style,
                 ring_animation_id,
-                Animation::new(RING_TRANSITION).with_easing(ease_in_out),
-                move |stage, delta| {
-                    stage
-                        .bg(lerp_rgba(previous_ring.color, ring_style.color, delta))
-                        .p(px(lerp_f32(previous_ring.width, ring_style.width, delta)))
-                },
-            );
+            ));
 
         let services_weak: WeakEntity<ServiceManager> = self.services.downgrade();
         let controls = parameter_controls(self, params.as_ref(), services_weak, weak_vp.clone());
@@ -358,6 +353,10 @@ fn render_scene_stage(
                 let weak_vp = weak_vp.clone();
                 move |_, bounds: Bounds<Pixels>, window, _cx| {
                     let layout = scene_stage_layout(bounds, mode);
+                    let retired_image_limit = retired_image_limit_for_presentation(matches!(
+                        mode,
+                        SceneStageMode::Presentation
+                    ));
                     let scene_image = weak_vp
                         .update(_cx, |viewport, _cx| {
                             viewport.scene_image_cache.image_for(
@@ -367,6 +366,7 @@ fn render_scene_stage(
                                 layout.image_bounds,
                                 layout.projection_bounds,
                                 window.scale_factor(),
+                                retired_image_limit,
                                 window,
                             )
                         })
@@ -584,6 +584,29 @@ fn paint_preview_frame_border(
     for edge in [top, bottom, left, right] {
         window.paint_quad(fill(edge, ring_style.color));
     }
+}
+
+fn render_presentation_ring(
+    previous_ring: RingStyle,
+    ring_style: RingStyle,
+    animation_id: String,
+) -> impl IntoElement {
+    div()
+        .absolute()
+        .top(px(0.0))
+        .left(px(0.0))
+        .w_full()
+        .h_full()
+        .border(px(ring_style.width))
+        .border_color(ring_style.color)
+        .with_animation(
+            animation_id,
+            Animation::new(RING_TRANSITION).with_easing(ease_in_out),
+            move |ring, delta| {
+                ring.border(px(lerp_f32(previous_ring.width, ring_style.width, delta)))
+                    .border_color(lerp_rgba(previous_ring.color, ring_style.color, delta))
+            },
+        )
 }
 
 fn render_pause_hint() -> impl IntoElement {

@@ -2,6 +2,9 @@ use gpui::*;
 
 use crate::theme::{FontSet, ThemeSettings};
 
+const MENU_BAR_HEIGHT: f32 = 24.0;
+const MENU_POPUP_WIDTH: f32 = 190.0;
+
 pub struct AppMenuBar {
     open_menu: Option<SharedString>,
 }
@@ -122,10 +125,16 @@ impl AppMenuBar {
         }
     }
 
-    fn render_menu(&self, menu: OwnedMenu, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_menu(
+        &self,
+        menu: OwnedMenu,
+        weak_bar: WeakEntity<Self>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = ThemeSettings::theme(cx);
         let is_open = self.open_menu.as_ref() == Some(&menu.name);
         let label = menu.name.clone();
+        let popup = is_open.then(|| self.render_menu_popup(menu.clone(), weak_bar, cx));
 
         div()
             .id(format!("menu-{label}"))
@@ -164,38 +173,103 @@ impl AppMenuBar {
                         cx.notify();
                     })),
             )
-            .on_hover(cx.listener(move |this, hover_enter, _window, cx| {
+            .children(popup)
+            .on_hover(cx.listener(move |this, hover_enter: &bool, _window, cx| {
                 if *hover_enter {
                     this.open_menu = Some(menu.name.clone());
                     cx.notify();
                 }
             }))
+            .into_any_element()
     }
 
-    fn render_open_menu(
+    fn render_menu_popup(
         &self,
-        menus: Vec<OwnedMenu>,
+        menu: OwnedMenu,
+        weak_bar: WeakEntity<Self>,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    ) -> AnyElement {
         let theme = ThemeSettings::theme(cx);
-        let open_menu = self.open_menu.as_ref()?;
-        let menu = menus.into_iter().find(|menu| &menu.name == open_menu)?;
 
-        Some(
-            div()
-                .id(format!("open-menu-{}", menu.name))
-                .w(px(190.0))
-                .py_1()
-                .border_1()
-                .border_color(theme.navbar_border)
-                .bg(theme.tab_background)
-                .children(
-                    menu.items
-                        .into_iter()
-                        .map(|item| self.render_menu_item(item, cx)),
-                )
-                .into_any_element(),
+        div()
+            .id(format!("open-menu-{}", menu.name))
+            .absolute()
+            .top(px(MENU_BAR_HEIGHT))
+            .left(px(0.0))
+            .w(px(MENU_POPUP_WIDTH))
+            .py_1()
+            .border_1()
+            .border_color(theme.navbar_border)
+            .bg(theme.tab_background)
+            .child(Self::render_outside_menu_tracker(weak_bar))
+            .children(
+                menu.items
+                    .into_iter()
+                    .map(|item| self.render_menu_item(item, cx)),
+            )
+            .into_any_element()
+    }
+
+    fn render_outside_menu_tracker(weak_bar: WeakEntity<Self>) -> impl IntoElement {
+        canvas(
+            |bounds, _, _| bounds,
+            move |popup_bounds, _, window, _cx| {
+                let menu_bar_bounds = Bounds::new(
+                    point(px(0.0), popup_bounds.origin.y - px(MENU_BAR_HEIGHT)),
+                    size(window.viewport_size().width, px(MENU_BAR_HEIGHT)),
+                );
+
+                {
+                    let weak_bar = weak_bar.clone();
+                    window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+                        if phase != DispatchPhase::Capture
+                            || menu_bar_bounds.contains(&event.position)
+                            || popup_bounds.contains(&event.position)
+                        {
+                            return;
+                        }
+
+                        Self::close_open_menu(&weak_bar, cx);
+                    });
+                }
+
+                {
+                    let weak_bar = weak_bar.clone();
+                    window.on_mouse_event(move |event: &MouseDownEvent, phase, _window, cx| {
+                        if phase != DispatchPhase::Capture
+                            || menu_bar_bounds.contains(&event.position)
+                            || popup_bounds.contains(&event.position)
+                        {
+                            return;
+                        }
+
+                        Self::close_open_menu(&weak_bar, cx);
+                    });
+                }
+
+                window.on_mouse_event(move |_: &MouseExitEvent, phase, _window, cx| {
+                    if phase == DispatchPhase::Capture {
+                        Self::close_open_menu(&weak_bar, cx);
+                    }
+                });
+            },
         )
+        .absolute()
+        .top(px(0.0))
+        .left(px(0.0))
+        .w_full()
+        .h_full()
+    }
+
+    fn close_open_menu(weak_bar: &WeakEntity<Self>, cx: &mut App) {
+        weak_bar
+            .update(cx, |this, cx| {
+                if this.open_menu.is_some() {
+                    this.open_menu = None;
+                    cx.notify();
+                }
+            })
+            .ok();
     }
 }
 
@@ -203,34 +277,31 @@ impl Render for AppMenuBar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
         let menus = Self::visible_menus(cx);
-        let open_menu = self.render_open_menu(menus.clone(), cx);
+        let weak_bar = cx.weak_entity();
 
         div()
             .id("app-menu-bar")
-            .flex()
-            .flex_col()
+            .relative()
             .w_full()
+            .h(px(MENU_BAR_HEIGHT))
             .flex_none()
-            .on_hover(cx.listener(|this, hover_enter: &bool, _window, cx| {
-                if !*hover_enter && this.open_menu.is_some() {
-                    this.open_menu = None;
-                    cx.notify();
-                }
-            }))
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .items_center()
                     .w_full()
-                    .h(px(24.0))
+                    .h(px(MENU_BAR_HEIGHT))
                     .flex_none()
                     .bg(theme.navbar_background)
                     .border_b(px(0.5))
                     .border_color(theme.navbar_border)
                     .font_family(FontSet::UI)
-                    .children(menus.into_iter().map(|menu| self.render_menu(menu, cx))),
+                    .children(
+                        menus
+                            .into_iter()
+                            .map(|menu| self.render_menu(menu, weak_bar.clone(), cx)),
+                    ),
             )
-            .children(open_menu)
     }
 }

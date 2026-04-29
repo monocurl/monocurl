@@ -42,6 +42,9 @@ slide "Flat Grid"
     play Fade(0.8, [&axis, &grid])
     
 slide "Surface And Camera"
+    background = RED
+    play Set()
+    
     # an anim block is analogous to a coroutine in other languages
     # it does nothing until it is played
     # (you can try experiment with the playhead to see when the

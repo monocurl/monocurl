@@ -386,10 +386,11 @@ async fn sync_to_target(
         executor.advance_to_target(target).await
     };
 
+    let target_superseded = shared.target.get() != target;
     match result {
         SeekToResult::SeekedTo(reached) => {
             shared.current_timestamp.set(reached);
-            if shared.target.get() == target {
+            if !target_superseded {
                 shared.target.set(reached);
             }
 
@@ -400,6 +401,10 @@ async fn sync_to_target(
         SeekToResult::Error(_) => {
             shared.cancel_runtime_work();
         }
+    }
+
+    if target_superseded {
+        return;
     }
 
     let scene_snapshot = capture_scene_snapshot(executor, shared)

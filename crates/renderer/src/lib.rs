@@ -1,14 +1,10 @@
 mod blade;
 
-use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot, SceneSnapshot};
-use geo::{mesh::Mesh, simd::Float3};
+use geo::mesh::Mesh;
 pub use image::RgbaImage;
 
 use crate::blade::BladeRenderer;
@@ -28,17 +24,6 @@ impl From<SceneSnapshot> for SceneRenderData {
             meshes: snapshot.meshes,
         }
     }
-}
-
-pub fn scene_fingerprint(scene: &SceneRenderData) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    hash_background(&mut hasher, scene.background);
-    hash_camera(&mut hasher, &scene.camera);
-    for mesh in &scene.meshes {
-        (Arc::as_ptr(mesh) as usize).hash(&mut hasher);
-        mesh.version().hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,42 +159,17 @@ impl Default for Renderer {
     }
 }
 
-fn hash_background(hasher: &mut impl Hasher, background: BackgroundSnapshot) {
-    hash_float4(hasher, background.color);
-}
-
-fn hash_camera(hasher: &mut impl Hasher, camera: &CameraSnapshot) {
-    hash_float3(hasher, camera.position);
-    hash_float3(hasher, camera.look_at);
-    hash_float3(hasher, camera.up);
-    camera.near.to_bits().hash(hasher);
-    camera.far.to_bits().hash(hasher);
-}
-
-fn hash_float3(hasher: &mut impl Hasher, value: Float3) {
-    value.x.to_bits().hash(hasher);
-    value.y.to_bits().hash(hasher);
-    value.z.to_bits().hash(hasher);
-}
-
-fn hash_float4(hasher: &mut impl Hasher, value: (f32, f32, f32, f32)) {
-    value.0.to_bits().hash(hasher);
-    value.1.to_bits().hash(hasher);
-    value.2.to_bits().hash(hasher);
-    value.3.to_bits().hash(hasher);
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
     use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot};
     use geo::{
-        mesh::{Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms, make_mesh_mut},
+        mesh::{Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
         simd::{Float2, Float3, Float4},
     };
 
-    use crate::{RenderOptions, RenderSize, Renderer, SceneRenderData, scene_fingerprint};
+    use crate::{RenderOptions, RenderSize, Renderer, SceneRenderData};
 
     #[test]
     fn renders_background_when_scene_is_empty() {
@@ -255,25 +215,6 @@ mod tests {
             center[1] > center[2],
             "expected higher z-index triangle to be visible at the center, got {center:?}"
         );
-    }
-
-    #[test]
-    fn scene_fingerprint_changes_when_mesh_geometry_changes() {
-        let mut scene = SceneRenderData {
-            background: BackgroundSnapshot::default(),
-            camera: CameraSnapshot::default(),
-            meshes: vec![Arc::new(flat_triangle_mesh(
-                Float4::new(1.0, 0.0, 0.0, 1.0),
-                0,
-            ))],
-        };
-        let before = scene_fingerprint(&scene);
-
-        let mesh = make_mesh_mut(&mut scene.meshes[0]);
-        mesh.tris[0].a.pos.x += 1.0;
-
-        let after = scene_fingerprint(&scene);
-        assert_ne!(before, after);
     }
 
     #[test]
