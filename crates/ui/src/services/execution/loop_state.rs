@@ -508,6 +508,7 @@ async fn capture_scene_snapshot(
         return Ok(None);
     }
 
+    shared.snapshot_requested.set(true);
     match ExecutionService::capture_stable_scene_snapshot(executor).await {
         Ok(scene_snapshot) => Ok(Some(scene_snapshot)),
         Err(_) => {
@@ -715,5 +716,25 @@ mod tests {
         assert!(runtime.requires_future_reset(&ExecutionMessage::SeekTo {
             target: Timestamp::new(1, 2.0),
         }));
+    }
+
+    #[test]
+    fn scene_snapshot_capture_keeps_runtime_pollable_until_snapshot_emits() {
+        let runtime = RuntimeState::new();
+        runtime.shared.has_compiler_error.set(false);
+        let current = runtime.executor.borrow().state.timestamp;
+        runtime.shared.current_timestamp.set(current);
+        runtime.shared.target.set(current);
+        assert!(!runtime.shared.needs_work());
+
+        smol::block_on(async {
+            let mut executor = runtime.executor.borrow_mut();
+            super::capture_scene_snapshot(&mut executor, &runtime.shared)
+                .await
+                .expect("snapshot capture should not record a runtime error")
+                .expect("default scene snapshot should be available");
+        });
+
+        assert!(runtime.shared.needs_work());
     }
 }

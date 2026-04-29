@@ -24,6 +24,9 @@ const ARROW_HEAD_RADIUS_OVER_LENGTH: f32 = 0.4;
 const ARROW_STEM_RADIUS_OVER_HEAD_RADIUS: f32 = 0.33;
 const ARROW_HEAD_WIDTH_OVER_RADIUS: f32 = 1.2;
 const ARROW_HEAD_DEPTH_OVER_RADIUS: f32 = 2.1;
+const ARROW_MAX_STEM_RADIUS_OVER_LENGTH: f32 = 0.045;
+const ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH: f32 = 0.22;
+const ARROW_MAX_HEAD_DEPTH_OVER_LENGTH: f32 = 0.35;
 
 #[derive(Clone, Copy)]
 pub(super) struct VectorLikeStyle {
@@ -32,6 +35,9 @@ pub(super) struct VectorLikeStyle {
     pub(super) stem_radius_over_head_radius: f32,
     pub(super) head_width_over_radius: f32,
     pub(super) head_depth_over_radius: f32,
+    pub(super) max_stem_radius_over_length: f32,
+    pub(super) max_head_half_width_over_length: f32,
+    pub(super) max_head_depth_over_length: f32,
 }
 
 const DEFAULT_VECTOR_LIKE_STYLE: VectorLikeStyle = VectorLikeStyle {
@@ -40,6 +46,9 @@ const DEFAULT_VECTOR_LIKE_STYLE: VectorLikeStyle = VectorLikeStyle {
     stem_radius_over_head_radius: ARROW_STEM_RADIUS_OVER_HEAD_RADIUS,
     head_width_over_radius: ARROW_HEAD_WIDTH_OVER_RADIUS,
     head_depth_over_radius: ARROW_HEAD_DEPTH_OVER_RADIUS,
+    max_stem_radius_over_length: ARROW_MAX_STEM_RADIUS_OVER_LENGTH,
+    max_head_half_width_over_length: ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH,
+    max_head_depth_over_length: ARROW_MAX_HEAD_DEPTH_OVER_LENGTH,
 };
 
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
@@ -277,9 +286,12 @@ pub(super) fn vector_like_mesh_with_style(
     ensure_limit("arrow samples", samples, MAX_CURVE_SAMPLES)?;
 
     let head_radius = (len * style.head_radius_over_length).min(style.max_head_radius);
-    let stem_radius = head_radius * style.stem_radius_over_head_radius;
-    let head_half_width = head_radius * style.head_width_over_radius;
-    let head_depth = head_radius * style.head_depth_over_radius;
+    let stem_radius = (head_radius * style.stem_radius_over_head_radius)
+        .min(len * style.max_stem_radius_over_length);
+    let head_half_width = (head_radius * style.head_width_over_radius)
+        .min(len * style.max_head_half_width_over_length);
+    let head_depth =
+        (head_radius * style.head_depth_over_radius).min(len * style.max_head_depth_over_length);
     let sinc = if alpha <= 1e-6 {
         1.0
     } else {
@@ -360,8 +372,21 @@ mod tests {
     use geo::simd::Float3;
 
     use super::{
-        closed_polyline, fan_tris, mesh_ref, open_polyline, triangle_mesh, vector_like_mesh,
+        ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH, closed_polyline, fan_tris, mesh_ref, open_polyline,
+        triangle_mesh, vector_like_mesh,
     };
+
+    fn mesh_y_radius(mesh: &geo::mesh::Mesh) -> f32 {
+        let tri_positions = mesh
+            .tris
+            .iter()
+            .flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]);
+        let lin_positions = mesh.lins.iter().flat_map(|lin| [lin.a.pos, lin.b.pos]);
+        tri_positions
+            .chain(lin_positions)
+            .map(|pos| pos.y.abs())
+            .fold(0.0, f32::max)
+    }
 
     #[test]
     fn closed_polyline_sets_reciprocal_links() {
@@ -439,6 +464,21 @@ mod tests {
         assert!(mesh.has_consistent_topology());
         assert!(mesh.lins.len() > 16);
         assert!(mesh.tris.len() > 16);
+    }
+
+    #[test]
+    fn vector_like_mesh_scales_down_for_short_arrows() {
+        let Value::Mesh(mesh) =
+            vector_like_mesh(Float3::ZERO, Float3::new(0.05, 0.0, 0.0), Float3::Z, 0.0).unwrap()
+        else {
+            panic!("expected mesh");
+        };
+
+        assert!(mesh.has_consistent_topology());
+        assert!(
+            mesh_y_radius(&mesh) <= 0.05 * ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH + 1e-5,
+            "short arrows should stay visually narrow"
+        );
     }
 }
 

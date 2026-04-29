@@ -1,0 +1,206 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Example: Algorithms
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+let W = 9
+let H = 6
+let START = [0, 3]
+let GOAL = [8, 2]
+let CELL = 0.58
+
+let wall_at = |x, y|
+    (x == 3 and y != 0) or (x == 6 and y != 5)
+
+let cell_center = |x, y|
+    [(x - (W - 1) / 2) * CELL, ((H - 1) / 2 - y) * CELL, 0]
+
+let empty_distances = || {
+    var rows = []
+    for (y in range(0, H)) {
+        var row = []
+        for (x in range(0, W)) {
+            var value = -1
+            if (wall_at(x, y)) { value = -2 }
+            row .= value
+        }
+        rows .= row
+    }
+    return rows
+}
+
+let empty_prev = || {
+    var rows = []
+    for (y in range(0, H)) {
+        var row = []
+        for (x in range(0, W)) { row .= nil }
+        rows .= row
+    }
+    return rows
+}
+
+let seeded_distances = || {
+    var rows = empty_distances()
+    rows[START[1]][START[0]] = 0
+    return rows
+}
+
+let has_distance = |dist, x, y, value| {
+    if (x < 0 or x >= W or y < 0 or y >= H) { return 0 }
+    return dist[y][x] == value
+}
+
+let choose_prev = |dist, x, y, value| {
+    if (has_distance(dist, x - 1, y, value)) { return [x - 1, y] }
+    if (has_distance(dist, x + 1, y, value)) { return [x + 1, y] }
+    if (has_distance(dist, x, y - 1, value)) { return [x, y - 1] }
+    if (has_distance(dist, x, y + 1, value)) { return [x, y + 1] }
+    return nil
+}
+
+let expand = |dist, prev, step| {
+    var next_dist = []
+    var next_prev = []
+    for (y in range(0, H)) {
+        var dist_row = []
+        var prev_row = []
+        for (x in range(0, W)) {
+            var value = dist[y][x]
+            var parent = prev[y][x]
+
+            if (value == -1) {
+                let candidate = choose_prev(dist, x, y, step - 1)
+                if (candidate != nil) {
+                    value = step
+                    parent = candidate
+                }
+            }
+
+            dist_row .= value
+            prev_row .= parent
+        }
+        next_dist .= dist_row
+        next_prev .= prev_row
+    }
+    return [next_dist, next_prev]
+}
+
+let on_path = |x, y, path| {
+    for (point in path) {
+        if (point[0] == x and point[1] == y) { return 1 }
+    }
+    return 0
+}
+
+let CellAt = |x, y, value, frontier, path| {
+    var fill_color = WHITE
+    var stroke_color = LIGHT_GRAY
+
+    if (value == -2) {
+        fill_color = DARK_GRAY
+        stroke_color = DARK_GRAY
+    } else if (on_path(x, y, path)) {
+        fill_color = GREEN
+        stroke_color = GREEN
+    } else if (frontier >= 0 and value == frontier) {
+        fill_color = ORANGE
+        stroke_color = ORANGE
+    } else if (value >= 0) {
+        fill_color = BLUE
+        stroke_color = BLUE
+    }
+
+    return tag{[x, y]}
+        centered_at{cell_center(x, y)}
+        fill{alpha{0.25} fill_color}
+        stroke{stroke_color, 1.4}
+        Square(CELL * 0.9)
+}
+
+let PrevArrow = |x, y, parent, path| {
+    let here = cell_center(x, y)
+    let there = cell_center(parent[0], parent[1])
+    let tail = 0.72 * here + 0.28 * there
+    let tip = 0.38 * here + 0.62 * there
+    var col = alpha{0.38} BLACK
+    if (on_path(x, y, path)) { col = GREEN }
+
+    return z_index{2}
+        tag{[200, x, y]}
+        stroke{col, 1.2}
+        Arrow(tail, tip)
+}
+
+let PrevArrows = |prev, dist, path| block {
+    for (y in range(0, H)) {
+        for (x in range(0, W)) {
+            if (dist[y][x] > 0 and prev[y][x] != nil) {
+                . PrevArrow(x, y, prev[y][x], path)
+            }
+        }
+    }
+}
+
+let Marker = |pos, color_value, id|
+    tag{id}
+    centered_at{cell_center(pos[0], pos[1])}
+    fill{color_value}
+    stroke{BLACK, 1.2}
+    Circle(CELL * 0.20)
+
+let Grid = |dist, prev, frontier, path| block {
+    for (y in range(0, H)) {
+        for (x in range(0, W)) {
+            . CellAt(x, y, dist[y][x], frontier, path)
+        }
+    }
+
+    . PrevArrows(prev, dist, path)
+    . Marker(START, BLUE, 100)
+    . Marker(GOAL, GREEN, 101)
+}
+
+slide "Wavefront Search"
+    var dist = seeded_distances()
+    var prev = empty_prev()
+    mesh grid = Grid(dist: dist, prev: prev, frontier: 0, path: [])
+    play Fade(0.6)
+
+    var step = 1
+    while (dist[GOAL[1]][GOAL[0]] == -1) {
+        let next = expand(dist, prev, step)
+        dist = next[0]
+        prev = next[1]
+
+        grid.dist = dist
+        grid.prev = prev
+        grid.frontier = step
+        play TagTrans(0.16)
+
+        step = step + 1
+    }
+
+slide "Shortest Path"
+    grid.frontier = -1
+    grid.path = []
+    play TagTrans(0.25)
+
+    var path = []
+    var current = GOAL
+    while (current != nil) {
+        path .= current
+        grid.path = path
+        play TagTrans(0.12)
+
+        if (current[0] == START[0] and current[1] == START[1]) { break }
+        current = prev[current[1]][current[0]]
+    }

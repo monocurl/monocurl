@@ -15,10 +15,11 @@ const DEFAULT_SCENE_FILES: &[&str] = &[
     "example_geometry_proof.mcs",
     "example_text_and_equations.mcs",
     "meshes_and_operators.mcs",
+    "example_recursive_mesh_tree.mcs",
     "animations.mcs",
     "example_3d_surface.mcs",
     "example_graphing_riemann_sums.mcs",
-    "example_algorithms_binary_search.mcs",
+    "example_algorithms_wavefront_pathfinding.mcs",
     "example_image_mandala.mcs",
     "parameters.mcs",
 ];

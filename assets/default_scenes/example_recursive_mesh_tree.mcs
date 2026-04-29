@@ -1,0 +1,77 @@
+# This is a small Monocurl tutorial snippet.
+# For the full tutorial, go to https://monocurl.com/learn.
+#
+# Example: Recursive Meshes
+#
+# A mesh function can recurse through an explicit self argument. The pattern is
+# the same recursive lambda idea used in C++ or lambda calculus: define a branch,
+# then return smaller branches from the branch.
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = WHITE
+
+let rot = |v, angle| [
+    cos(angle) * v[0] - sin(angle) * v[1],
+    sin(angle) * v[0] + cos(angle) * v[1],
+    0
+]
+
+let LeafColor = [[0, TEAL], [0.45, GREEN], [1, ORANGE]]
+
+# recursive lambdas take themselves as parameters
+let Branch = |self, depth, at, dir, length, angle, shrink, id| {
+    if (depth <= 0) {
+        let hue = keyframe_lerp(LeafColor, (sin(id) + 1) / 2)
+        return fill{alpha{0.45} hue}
+            stroke{hue, 1.4}
+            tag{[0, id]}
+            centered_at{at}
+            Circle(0.07 + 0.05 * length)
+    }
+
+    let end = at + length * dir
+    let stroke_width = 0.7 + depth * 0.45
+    return [
+        stroke{BLACK, stroke_width}
+            tag{[depth, id]}
+            Line(at, end),
+        self(self, depth - 1, end, rot(dir, angle), length * shrink, angle, shrink, 2 * id),
+        self(self, depth - 1, end, rot(dir, -angle), length * shrink, angle, shrink, 2 * id + 1)
+    ]
+}
+
+let RecursiveTree = |depth, angle, shrink|
+    Branch(Branch, to_int(depth), [0, -2.15, 0], UP, 0.95, angle, shrink, 1)
+
+slide "Recursive Tree"
+    mesh tree = RecursiveTree(depth: 2, angle: 0.52, shrink: 0.72)
+    mesh note = centered_at{[0, 1.95, 0]} color{BLACK} Text("one branch returns two smaller branches", 0.5)
+    
+    
+    play [Write(1.6, [&tree]), delay{1} Fade(0.6, [&note])]
+   
+slide "Integer Lerp"
+    
+    tree.depth = 7
+    play rate{identity} Lerp(3)
+    play Wait(1)
+
+slide
+    tree.angle = 0.74
+    tree.shrink = 0.66
+    play Lerp(3)
+    play Wait(1)
+
+slide
+    tree.angle = 0.37
+    tree.shrink = 0.78
+    play Lerp(3)
+    play Wait(1)
+ 
+    

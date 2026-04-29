@@ -2,10 +2,6 @@
 # For the full tutorial, go to https://monocurl.com/learn.
 #
 # Example: Geometry Proof
-#
-# This is a lightweight Pythagorean-theorem style scene. The source is meant to
-# be readable: named points define a triangle, helper functions build squares
-# on its sides, and tags keep corresponding shapes paired through transforms.
 
 import std.util
 import std.math
@@ -16,45 +12,109 @@ import std.scene
 
 background = WHITE
 
-let A = [-1.7, -0.6, 0]
-let B = [1.3, -0.6, 0]
-let C = [-1.7, 1.4, 0]
-let H0 = B
-let H1 = C
-let H2 = [-3.7, -1.6, 0]
-let H3 = [-0.7, -3.6, 0]
+let A = [-2.0, -1.05, 0]
+let B = [1.8, -1.05, 0]
+let C = [-0.45, 1.2, 0]
 
-let filled = operator |target, color_value, id|
-    tag{id} fill{alpha{0.2} color_value} stroke{color_value, 2} target
+let angle_of = |v| arctan2(v[1], v[0])
 
-let SquaresOnSides = ||
+let angle_ab = angle_of(B - A)
+let angle_ac = angle_of(C - A)
+let angle_bc = angle_of(C - B)
+let angle_ba = angle_of(A - B)
+let angle_ca = angle_of(A - C)
+let angle_cb = angle_of(B - C)
+
+let arc_points = |center, start, stop, radius, samples| {
+    var points = []
+    for (i in range(0, samples)) {
+        let t = i / (samples - 1)
+        let theta = start + t * (stop - start)
+        points .= center + radius * [cos(theta), sin(theta), 0]
+    }
+    return points
+}
+
+let TexLine = |tex, at = ORIGIN, scale = 1|
+    centered_at{at}
+    color{BLACK}
+    Tex(tex, scale)
+
+let AngleArc = |center, start, stop, radius, color_value, id|
+    tag{id}
+    stroke{color_value, 4}
+    Polyline(arc_points(center, start, stop, radius, 44))
+
+let AngleLabel = |tex, at, color_value, id|
+    tag{id}
+    centered_at{at}
+    color{color_value}
+    Tex(tex, 0.58)
+
+let Dot = |point, label, offset|
     [
-        filled{BLUE, 10} shift{[-0.2, -2.1, 0]} Rect([3.0, 3.0]),
-        filled{ORANGE, 20} shift{[-2.7, 0.4, 0]} Rect([2.0, 2.0]),
-        filled{GREEN, 30} Polygon([H0, H1, H2, H3])
+        centered_at{point} fill{BLACK} stroke{CLEAR} Circle(0.055),
+        TexLine(label, point + offset, 0.48)
     ]
 
-# The two smaller areas can be rearranged to match the larger square. This is
-# not a full proof animation; it is the practical mesh pattern a full proof
-# would build on: keep pieces tagged, then morph them to their next positions.
-let Rearranged = ||
-    [
-        filled{BLUE, 10} Polygon([H0, [-0.2, 0.4, 0], [-2.2, -2.6, 0], H3]),
-        filled{ORANGE, 20} Polygon([[-0.2, 0.4, 0], H1, H2, [-2.2, -2.6, 0]]),
-        filled{GREEN, 30} Polygon([H0, H1, H2, H3])
-    ]
+let TriangleDiagram = || [
+    stroke{BLACK, 2.4} [
+        Line(A, B),
+        Line(B, C),
+        Line(C, A)
+    ],
+    Dot(A, "A", [-0.2, -0.24, 0]),
+    Dot(B, "B", [0.2, -0.24, 0]),
+    Dot(C, "C", [0.0, 0.26, 0])
+]
 
-slide "Right Triangle"
-mesh triangle = filled{BLACK, 1} Triangle(A, B, C)
-play Grow(0.8)
+let angle_label_at = |center, start, stop, radius|
+    center + radius * [cos((start + stop) / 2), sin((start + stop) / 2), 0]
 
-slide "Squares On Sides"
-mesh squares = SquaresOnSides()
-play Fade(0.8)
+let AnglesAtTriangle = || [
+    AngleArc(A, angle_ab, angle_ac, 0.44, BLUE, 1),
+    AngleArc(B, angle_bc, angle_ba, 0.46, ORANGE, 2),
+    AngleArc(C, angle_ca, angle_cb, 0.40, GREEN, 3),
+    AngleLabel("\alpha", angle_label_at(A, angle_ab, angle_ac, 0.66), BLUE, 11),
+    AngleLabel("\beta", angle_label_at(B, angle_bc, angle_ba, 0.68), ORANGE, 12),
+    AngleLabel("\gamma", angle_label_at(C, angle_ca, angle_cb, 0.62), GREEN, 13)
+]
 
-slide "Rearrange"
-squares = Rearranged()
-play TagTrans(1.4)
+let ParallelThroughC = ||
+    dashed{lengths: [0.18, 0.10]}
+    stroke{DARK_GRAY, 2}
+    Line([-2.65, C[1], 0], [2.25, C[1], 0])
 
-triangle = fade{0.3} triangle
-play Trans(0.5)
+let AnglesOnLine = || [
+    AngleArc(C, -PI, angle_ca, 0.55, BLUE, 1),
+    AngleArc(C, angle_cb, 0, 0.55, ORANGE, 2),
+    AngleArc(C, angle_ca, angle_cb, 0.55, GREEN, 3),
+    AngleLabel("\alpha", angle_label_at(C, -PI, angle_ca, 0.84), BLUE, 11),
+    AngleLabel("\beta", angle_label_at(C, angle_cb, 0, 0.84), ORANGE, 12),
+    AngleLabel("\gamma", angle_label_at(C, angle_ca, angle_cb, 0.84), GREEN, 13)
+]
+
+slide "Triangle"
+    mesh triangle = TriangleDiagram()
+    play Write(1.0)
+
+slide "Interior Angles"
+    # The three colored arcs mark the angles we want to prove add to pi.
+    mesh angles = AnglesAtTriangle()
+    play Write(0.9)
+
+slide "Parallel Line"
+    # Alternate interior angles move alpha and beta to the parallel line.
+    mesh parallel = ParallelThroughC()
+    play Write(0.6)
+
+slide "Straight Angle"
+    angles = AnglesOnLine()
+    play TagTrans(1.2)
+
+    mesh equation = TexLine(
+        [text_tag{1} "\alpha", " + ", text_tag{3} "\gamma", " + ", text_tag{2} "\beta", " = \pi"],
+        [0, -2.0, 0],
+        0.82
+    )
+    play Write(0.8)

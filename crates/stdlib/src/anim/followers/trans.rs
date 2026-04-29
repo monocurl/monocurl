@@ -269,7 +269,19 @@ fn pair_leaf_indices_by_tag(
         }
     }
 
+    out.sort_by_key(|pairing| tag_pair_draw_order_key(source_leaves.len(), *pairing));
     out
+}
+
+fn tag_pair_draw_order_key(
+    source_len: usize,
+    pairing: (Option<usize>, Option<usize>),
+) -> (usize, usize) {
+    match pairing {
+        (Some(source_idx), target_idx) => (source_idx, target_idx.unwrap_or(usize::MAX)),
+        (None, Some(target_idx)) => (source_len + target_idx, target_idx),
+        (None, None) => (usize::MAX, usize::MAX),
+    }
 }
 
 fn tag_group_end(leaves: &[Arc<Mesh>], order: &[usize], start: usize) -> usize {
@@ -682,10 +694,7 @@ fn prepare_planar_trans_mesh_pair(
         None => return Ok(None),
     };
 
-    let Some(start_fill) = planar_fill_color(start) else {
-        return Ok(None);
-    };
-    let Some(end_fill) = planar_fill_color(end) else {
+    let Some((start_fill, end_fill)) = planar_fill_colors(start, end) else {
         return Ok(None);
     };
 
@@ -783,16 +792,28 @@ fn extract_closed_contours(mesh: &Mesh) -> Option<Vec<ClosedContour>> {
     Some(contours)
 }
 
-fn planar_fill_color(mesh: &Mesh) -> Option<Float4> {
+fn planar_fill_color(mesh: &Mesh) -> Option<Option<Float4>> {
     if mesh.tris.is_empty() {
-        return Some(Float4::ZERO);
+        return Some(None);
     }
 
     let color = mesh.tris.first()?.a.col;
     mesh.tris
         .iter()
         .all(|tri| tri.a.col == color && tri.b.col == color && tri.c.col == color)
-        .then_some(color)
+        .then_some(Some(color))
+}
+
+fn planar_fill_colors(start: &Mesh, end: &Mesh) -> Option<(Float4, Float4)> {
+    match (planar_fill_color(start)?, planar_fill_color(end)?) {
+        (Some(start), Some(end)) => Some((start, end)),
+        (Some(start), None) => Some((start, with_alpha(start, 0.0))),
+        (None, Some(end)) => Some((with_alpha(end, 0.0), end)),
+        (None, None) => Some((
+            with_alpha(representative_color(start), 0.0),
+            with_alpha(representative_color(end), 0.0),
+        )),
+    }
 }
 
 fn align_closed_contours(
@@ -1010,7 +1031,7 @@ fn conform_samples_to_template(
     if samples.is_empty() {
         return conform_constant_to_template(
             mesh_center(template),
-            Float4::ZERO,
+            with_alpha(representative_color(template), 0.0),
             uniform,
             tag,
             template,
@@ -1105,14 +1126,11 @@ fn match_tri_tri(source: &Mesh, target: &Mesh) -> (Mesh, Mesh) {
 }
 
 fn match_tri_lin(surface: &Mesh, line: &Mesh) -> Result<(Mesh, Mesh), ExecutorError> {
-    if let Some(mut upranked) = uprank_mesh(line)? {
-        for tri in &mut upranked.tris {
-            tri.a.col = Float4::ZERO;
-            tri.b.col = Float4::ZERO;
-            tri.c.col = Float4::ZERO;
-        }
+    if let Some(upranked) = uprank_mesh(line)? {
         if !upranked.tris.is_empty() {
-            return Ok(match_tri_tri(surface, &upranked));
+            let (surface, mut line) = match_tri_tri(surface, &upranked);
+            copy_tri_rgb_with_alpha(&mut line, &surface, 0.0);
+            return Ok((surface, line));
         }
     }
     Ok((
@@ -1269,6 +1287,18 @@ fn representative_color(mesh: &Mesh) -> Float4 {
         .or_else(|| mesh.lins.first().map(|line| line.a.col))
         .or_else(|| mesh.tris.first().map(|tri| tri.a.col))
         .unwrap_or(Float4::ONE)
+}
+
+fn with_alpha(color: Float4, alpha: f32) -> Float4 {
+    Float4::new(color.x, color.y, color.z, alpha)
+}
+
+fn copy_tri_rgb_with_alpha(target: &mut Mesh, source: &Mesh, alpha: f32) {
+    for (target, source) in target.tris.iter_mut().zip(&source.tris) {
+        target.a.col = with_alpha(source.a.col, alpha);
+        target.b.col = with_alpha(source.b.col, alpha);
+        target.c.col = with_alpha(source.c.col, alpha);
+    }
 }
 
 fn triangle_centroid(tri: &Tri) -> Float3 {
@@ -2356,9 +2386,9 @@ mod tests {
 
     use super::{
         ClosedContour, append_closed_contour, canonicalize_surface_template,
-        extract_closed_contours, pair_leaf_indices_by_tag, planar_mesh_patharc_lerp,
-        prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair, same_mesh_topology,
-        split_mesh_contours, vec3_patharc_lerp,
+        extract_closed_contours, match_tri_lin, pair_leaf_indices_by_tag, planar_mesh_patharc_lerp,
+        prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair, read_planar_state,
+        same_mesh_topology, split_mesh_contours, vec3_patharc_lerp,
     };
 
     fn line(a: Float3, b: Float3, prev: i32, next: i32) -> Lin {
@@ -2446,6 +2476,21 @@ mod tests {
         tessellated_mesh(&[circle_points(outer, samples), inner_pts])
     }
 
+    fn set_fill_color(mesh: &mut Mesh, color: Float4) {
+        for tri in &mut mesh.tris {
+            tri.a.col = color;
+            tri.b.col = color;
+            tri.c.col = color;
+        }
+    }
+
+    fn set_stroke_color(mesh: &mut Mesh, color: Float4) {
+        for line in &mut mesh.lins {
+            line.a.col = color;
+            line.b.col = color;
+        }
+    }
+
     fn capsule_mesh(half_len: f32, radius: f32, arc_samples: usize) -> Mesh {
         let mut contour = Vec::with_capacity(arc_samples * 2);
         for i in 0..arc_samples {
@@ -2495,6 +2540,37 @@ mod tests {
         let pairings = pair_leaf_indices_by_tag(&source, &target);
 
         assert_eq!(pairings, vec![(Some(0), Some(0)), (Some(1), None)]);
+    }
+
+    #[test]
+    fn pair_leaf_indices_by_tag_keeps_source_draw_order_across_tags() {
+        let source = vec![
+            tagged_mesh(vec![2]),
+            tagged_mesh(vec![0]),
+            tagged_mesh(vec![1]),
+        ];
+        let target = vec![
+            tagged_mesh(vec![0]),
+            tagged_mesh(vec![1]),
+            tagged_mesh(vec![2]),
+        ];
+
+        let pairings = pair_leaf_indices_by_tag(&source, &target);
+
+        assert_eq!(
+            pairings,
+            vec![(Some(0), Some(2)), (Some(1), Some(0)), (Some(2), Some(1))]
+        );
+    }
+
+    #[test]
+    fn pair_leaf_indices_by_tag_keeps_unmatched_sources_in_source_draw_order() {
+        let source = vec![tagged_mesh(vec![1]), tagged_mesh(vec![0])];
+        let target = vec![tagged_mesh(vec![0])];
+
+        let pairings = pair_leaf_indices_by_tag(&source, &target);
+
+        assert_eq!(pairings, vec![(Some(0), None), (Some(1), Some(0))]);
     }
 
     #[test]
@@ -2617,6 +2693,98 @@ mod tests {
         assert!(prepared_start.has_consistent_topology());
         assert!(prepared_end.has_consistent_topology());
         assert!(same_mesh_topology(&prepared_start, &prepared_end));
+    }
+
+    #[test]
+    fn prepare_planar_trans_mesh_pair_uses_target_fill_rgb_for_missing_start_fill() {
+        let mut source = Mesh {
+            dots: vec![],
+            lins: vec![],
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+            version: Mesh::fresh_version(),
+        };
+        append_closed_contour(
+            &mut source,
+            &ClosedContour {
+                points: vec![
+                    Float3::new(-1.0, -1.0, 0.0),
+                    Float3::new(1.0, -1.0, 0.0),
+                    Float3::new(1.0, 1.0, 0.0),
+                    Float3::new(-1.0, 1.0, 0.0),
+                ],
+                colors: vec![Float4::new(0.0, 0.0, 0.0, 1.0); 4],
+                normal: Float3::Z,
+                signed_area: 4.0,
+            },
+        );
+
+        let fill = Float4::new(0.8, 0.1, 0.2, 1.0);
+        let mut target = tessellated_mesh(&[circle_points(0.8, 16)]);
+        set_fill_color(&mut target, fill);
+
+        let Some((_, _, state)) =
+            prepare_planar_trans_mesh_pair(&source, &target).expect("planar prep should succeed")
+        else {
+            panic!("closed contours should use planar prep");
+        };
+        let Some((start_fill, end_fill)) =
+            read_planar_state(&state).expect("planar state should decode")
+        else {
+            panic!("planar state should be present");
+        };
+
+        assert_eq!(start_fill, Float4::new(fill.x, fill.y, fill.z, 0.0));
+        assert_eq!(end_fill, fill);
+    }
+
+    #[test]
+    fn match_tri_lin_keeps_surface_fill_rgb_on_transparent_line_side() {
+        let fill = Float4::new(0.1, 0.65, 0.9, 1.0);
+        let mut surface = tessellated_mesh(&[circle_points(0.8, 16)]);
+        set_fill_color(&mut surface, fill);
+
+        let mut line = Mesh {
+            dots: vec![],
+            lins: vec![],
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+            version: Mesh::fresh_version(),
+        };
+        append_closed_contour(
+            &mut line,
+            &ClosedContour {
+                points: vec![
+                    Float3::new(-1.0, -1.0, 0.0),
+                    Float3::new(1.0, -1.0, 0.0),
+                    Float3::new(1.0, 1.0, 0.0),
+                    Float3::new(-1.0, 1.0, 0.0),
+                ],
+                colors: vec![Float4::new(0.0, 0.0, 0.0, 1.0); 4],
+                normal: Float3::Z,
+                signed_area: 4.0,
+            },
+        );
+        set_stroke_color(&mut line, Float4::new(0.0, 0.0, 0.0, 1.0));
+
+        let (surface, line) = match_tri_lin(&surface, &line).expect("tri-line match should work");
+
+        for (surface, line) in surface.tris.iter().zip(&line.tris) {
+            assert_eq!(
+                line.a.col,
+                Float4::new(surface.a.col.x, surface.a.col.y, surface.a.col.z, 0.0)
+            );
+            assert_eq!(
+                line.b.col,
+                Float4::new(surface.b.col.x, surface.b.col.y, surface.b.col.z, 0.0)
+            );
+            assert_eq!(
+                line.c.col,
+                Float4::new(surface.c.col.x, surface.c.col.y, surface.c.col.z, 0.0)
+            );
+        }
     }
 
     #[test]

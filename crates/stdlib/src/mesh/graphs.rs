@@ -48,6 +48,9 @@ const AXIS_ARROW_STYLE: VectorLikeStyle = VectorLikeStyle {
     stem_radius_over_head_radius: 0.275,
     head_width_over_radius: 1.0,
     head_depth_over_radius: 1.732_050_8,
+    max_stem_radius_over_length: 0.04,
+    max_head_half_width_over_length: 0.18,
+    max_head_depth_over_length: 0.32,
 };
 
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
