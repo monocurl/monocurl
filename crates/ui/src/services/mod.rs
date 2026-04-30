@@ -28,7 +28,8 @@ mod execution;
 mod lexing;
 
 pub(crate) use execution::{
-    ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue, PlaybackMode,
+    ExecutionSnapshot, ExecutionStatus, MeshAttributeSnapshot, MeshEntrySnapshot,
+    ParameterSnapshot, ParameterValue, PlaybackMode, PresentationUpdateTarget,
 };
 
 fn scene_boundary_slide(timestamp: Timestamp, slide_count: usize) -> usize {
@@ -358,7 +359,10 @@ impl ServiceManager {
         })
     }
 
-    pub fn update_parameters(&mut self, updates: HashMap<String, ParameterValue>) {
+    pub fn update_parameters(
+        &mut self,
+        updates: HashMap<PresentationUpdateTarget, ParameterValue>,
+    ) {
         smol::block_on(async {
             self.execution_tx
                 .send(ExecutionMessage::UpdateParameters { updates })

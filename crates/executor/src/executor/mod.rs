@@ -1,5 +1,6 @@
 mod dispatch;
 mod memory;
+mod params;
 mod runtime_error;
 
 mod access;
@@ -16,7 +17,6 @@ use bytecode::Bytecode;
 use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
-use crate::heap::{heap_replace, with_heap_mut};
 use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
@@ -126,30 +126,6 @@ impl Executor {
         }
     }
 
-    pub fn update_parameter(&mut self, name: &str, value: Value) -> Result<(), ExecutorError> {
-        let param = self
-            .state
-            .active_params
-            .iter()
-            .find(|param| param.name == name)
-            .ok_or_else(|| ExecutorError::unknown_parameter(name))?;
-        let value = value.elide_lvalue().elide_leader();
-
-        let leader_cell_key = param.leader_cell.key();
-        let leader_value_key = param.leader_value;
-        let follower_value_key = param.follower_value;
-
-        heap_replace(leader_value_key, value.clone());
-        heap_replace(follower_value_key, value);
-        with_heap_mut(|h| {
-            if let Value::Leader(l) = &mut *h.get_mut(leader_cell_key) {
-                l.leader_version += 1;
-                l.follower_version += 1;
-            }
-        });
-        Ok(())
-    }
-
     pub fn set_text_render_quality(&mut self, quality: TextRenderQuality) {
         self.text_render_quality = quality;
     }
@@ -175,106 +151,5 @@ impl Executor {
         self.state.stack_mut(stack_idx).ip = (section_idx as u16, (instr_idx + 1) as u32);
 
         self.execute_instr(section_idx, stack_idx, instr).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::sync::Arc;
-
-    use bytecode::{Bytecode, SectionBytecode, SectionFlags};
-
-    use super::Executor;
-    use crate::{error::ExecutorError, heap::with_heap, state::LeaderKind, value::Value};
-
-    fn executor_with_sections(flags: &[SectionFlags]) -> Executor {
-        Executor::new(
-            Bytecode::new(
-                flags
-                    .iter()
-                    .cloned()
-                    .map(SectionBytecode::new)
-                    .map(Arc::new)
-                    .collect(),
-            ),
-            Vec::new(),
-        )
-    }
-
-    fn empty_executor() -> Executor {
-        executor_with_sections(&[SectionFlags {
-            is_stdlib: false,
-            is_library: false,
-            is_init: false,
-            is_root_module: true,
-        }])
-    }
-
-    #[test]
-    fn update_parameter_syncs_leader_and_follower() {
-        let mut executor = empty_executor();
-        executor
-            .state
-            .stack_mut(crate::state::ExecutionState::ROOT_STACK_IDX)
-            .push(Value::Integer(5));
-        executor.state.promote_to_leader(
-            crate::state::ExecutionState::ROOT_STACK_IDX,
-            LeaderKind::Param,
-            "speed".into(),
-        );
-
-        executor
-            .update_parameter("speed", Value::Float(2.5))
-            .unwrap();
-
-        let param = &executor.state.active_params[0];
-        let leader_val = with_heap(|h| h.get(param.leader_value).clone());
-        match leader_val {
-            Value::Float(value) => assert_eq!(value, 2.5),
-            other => panic!("expected float leader value, got {}", other.type_name()),
-        }
-        let follower_val = with_heap(|h| h.get(param.follower_value).clone());
-        match follower_val {
-            Value::Float(value) => assert_eq!(value, 2.5),
-            other => panic!("expected float follower value, got {}", other.type_name()),
-        }
-    }
-
-    #[test]
-    fn update_parameter_errors_for_missing_name() {
-        let mut executor = empty_executor();
-        let error = executor.update_parameter("missing", Value::Integer(1));
-        assert!(matches!(error, Err(ExecutorError::UnknownParameter(_))));
-    }
-
-    #[test]
-    fn update_parameter_elides_top_level_lvalue_value() {
-        let mut executor = empty_executor();
-        executor
-            .state
-            .stack_mut(crate::state::ExecutionState::ROOT_STACK_IDX)
-            .push(Value::Integer(5));
-        executor.state.promote_to_leader(
-            crate::state::ExecutionState::ROOT_STACK_IDX,
-            LeaderKind::Param,
-            "speed".into(),
-        );
-
-        executor
-            .update_parameter(
-                "speed",
-                Value::Lvalue(crate::heap::VRc::new(Value::Float(2.5))),
-            )
-            .unwrap();
-
-        let param = &executor.state.active_params[0];
-        match with_heap(|h| h.get(param.leader_value).clone()) {
-            Value::Float(value) => assert_eq!(value, 2.5),
-            other => panic!("expected float leader value, got {}", other.type_name()),
-        }
-        match with_heap(|h| h.get(param.follower_value).clone()) {
-            Value::Float(value) => assert_eq!(value, 2.5),
-            other => panic!("expected float follower value, got {}", other.type_name()),
-        }
     }
 }

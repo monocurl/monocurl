@@ -9,7 +9,9 @@ use gpui::*;
 use renderer::Renderer;
 
 use crate::{
-    services::ServiceManager, state::execution_state::ExecutionState, theme::ThemeSettings,
+    services::{PresentationUpdateTarget, ServiceManager},
+    state::execution_state::ExecutionState,
+    theme::ThemeSettings,
     viewport::scene_renderer::SceneImageCache,
 };
 
@@ -36,7 +38,7 @@ pub struct Viewport {
     scene_camera_version: u64,
     viewport_camera_version: u64,
     scroll_handle: ScrollHandle,
-    slider_bounds: HashMap<String, [f64; 4]>,
+    slider_bounds: HashMap<PresentationUpdateTarget, [f64; 4]>,
     ring_style: Option<RingStyle>,
     ring_previous: RingStyle,
     ring_animation_nonce: usize,

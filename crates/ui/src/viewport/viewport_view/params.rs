@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use gpui::*;
 
-use crate::services::{ParameterSnapshot, ParameterValue, ServiceManager};
+use crate::services::{
+    MeshAttributeSnapshot, MeshEntrySnapshot, ParameterSnapshot, ParameterValue,
+    PresentationUpdateTarget, ServiceManager,
+};
 
 use super::{
     Viewport,
@@ -44,12 +47,12 @@ impl AxisDrag {
 #[derive(Clone)]
 pub(super) enum DragState {
     Scalar {
-        name: String,
+        target: PresentationUpdateTarget,
         axis: AxisDrag,
         is_int: bool,
     },
     Plane {
-        name: String,
+        target: PresentationUpdateTarget,
         x_axis: AxisDrag,
         y_axis: AxisDrag,
         kind: Slider2dKind,
@@ -57,9 +60,9 @@ pub(super) enum DragState {
 }
 
 impl DragState {
-    fn name(&self) -> &str {
+    fn target(&self) -> &PresentationUpdateTarget {
         match self {
-            Self::Scalar { name, .. } | Self::Plane { name, .. } => name,
+            Self::Scalar { target, .. } | Self::Plane { target, .. } => target,
         }
     }
 
@@ -77,42 +80,50 @@ impl DragState {
 }
 
 impl Viewport {
-    fn is_dragging(&self, name: &str) -> bool {
+    fn is_dragging(&self, target: &PresentationUpdateTarget) -> bool {
         self.drag_state
             .as_ref()
-            .is_some_and(|state| state.name() == name)
+            .is_some_and(|state| state.target() == target)
     }
 
     fn end_drag(&mut self, cx: &mut Context<Self>) {
         if let Some(state) = &self.drag_state {
-            let (name, bounds) = match state {
-                DragState::Scalar { name, axis, .. } => (name, [axis.min, axis.max, 0.0, 0.0]),
+            let (target, bounds) = match state {
+                DragState::Scalar { target, axis, .. } => (target, [axis.min, axis.max, 0.0, 0.0]),
                 DragState::Plane {
-                    name,
+                    target,
                     x_axis,
                     y_axis,
                     ..
-                } => (name, [x_axis.min, x_axis.max, y_axis.min, y_axis.max]),
+                } => (target, [x_axis.min, x_axis.max, y_axis.min, y_axis.max]),
             };
-            self.slider_bounds.insert(name.clone(), bounds);
+            self.slider_bounds.insert(target.clone(), bounds);
         }
         self.drag_state = None;
         cx.notify();
     }
 
-    fn display_parameter_value(&self, name: &str, fallback: &ParameterValue) -> ParameterValue {
+    fn display_parameter_value(
+        &self,
+        target: &PresentationUpdateTarget,
+        fallback: &ParameterValue,
+    ) -> ParameterValue {
         self.drag_state
             .as_ref()
-            .filter(|state| state.name() == name)
+            .filter(|state| state.target() == target)
             .map(DragState::display_value)
             .unwrap_or_else(|| fallback.clone())
     }
 
-    fn display_parameter_bounds(&self, name: &str, fallback: [f64; 4]) -> [f64; 4] {
+    fn display_parameter_bounds(
+        &self,
+        target: &PresentationUpdateTarget,
+        fallback: [f64; 4],
+    ) -> [f64; 4] {
         match self
             .drag_state
             .as_ref()
-            .filter(|state| state.name() == name)
+            .filter(|state| state.target() == target)
         {
             Some(DragState::Scalar { axis, .. }) => {
                 let (min, max) = axis.bounds();
@@ -129,7 +140,7 @@ impl Viewport {
 
     fn begin_scalar_drag(
         &mut self,
-        name: &str,
+        target: &PresentationUpdateTarget,
         fallback_value: f64,
         is_int: bool,
         local_x: f32,
@@ -139,10 +150,10 @@ impl Viewport {
     ) -> ParameterValue {
         let axis = match &self.drag_state {
             Some(DragState::Scalar {
-                name: drag_name,
+                target: drag_target,
                 axis,
                 ..
-            }) if drag_name == name => *axis,
+            }) if drag_target == target => *axis,
             _ => AxisDrag {
                 value: fallback_value,
                 min: fallback_bounds[0],
@@ -153,7 +164,7 @@ impl Viewport {
         };
         let axis = axis_drag_target(local_x, width, axis);
         self.drag_state = Some(DragState::Scalar {
-            name: name.to_string(),
+            target: target.clone(),
             axis,
             is_int,
         });
@@ -163,7 +174,7 @@ impl Viewport {
 
     fn update_scalar_drag(
         &mut self,
-        name: &str,
+        target: &PresentationUpdateTarget,
         fallback_value: f64,
         is_int: bool,
         local_x: f32,
@@ -171,11 +182,11 @@ impl Viewport {
         fallback_bounds: [f64; 4],
         cx: &mut Context<Self>,
     ) -> Option<ParameterValue> {
-        if !self.is_dragging(name) {
+        if !self.is_dragging(target) {
             return None;
         }
         Some(self.begin_scalar_drag(
-            name,
+            target,
             fallback_value,
             is_int,
             local_x,
@@ -187,7 +198,7 @@ impl Viewport {
 
     fn begin_plane_drag(
         &mut self,
-        name: &str,
+        target: &PresentationUpdateTarget,
         fallback_x: f64,
         fallback_y: f64,
         kind: &Slider2dKind,
@@ -198,11 +209,11 @@ impl Viewport {
     ) -> ParameterValue {
         let (x_axis, y_axis) = match &self.drag_state {
             Some(DragState::Plane {
-                name: drag_name,
+                target: drag_target,
                 x_axis,
                 y_axis,
                 ..
-            }) if drag_name == name => (*x_axis, *y_axis),
+            }) if drag_target == target => (*x_axis, *y_axis),
             _ => (
                 AxisDrag {
                     value: fallback_x,
@@ -225,7 +236,7 @@ impl Viewport {
         let x_axis = axis_drag_target(local_x, f32::from(canvas.size.width), x_axis);
         let y_axis = axis_drag_target_inverted(local_y, f32::from(canvas.size.height), y_axis);
         self.drag_state = Some(DragState::Plane {
-            name: name.to_string(),
+            target: target.clone(),
             x_axis,
             y_axis,
             kind: kind.clone(),
@@ -236,7 +247,7 @@ impl Viewport {
 
     fn update_plane_drag(
         &mut self,
-        name: &str,
+        target: &PresentationUpdateTarget,
         fallback_x: f64,
         fallback_y: f64,
         kind: &Slider2dKind,
@@ -245,11 +256,11 @@ impl Viewport {
         fallback_bounds: [f64; 4],
         cx: &mut Context<Self>,
     ) -> Option<ParameterValue> {
-        if !self.is_dragging(name) {
+        if !self.is_dragging(target) {
             return None;
         }
         Some(self.begin_plane_drag(
-            name,
+            target,
             fallback_x,
             fallback_y,
             kind,
@@ -267,16 +278,19 @@ impl Viewport {
 
         let update = match &mut state {
             DragState::Scalar {
-                name, axis, is_int, ..
+                target,
+                axis,
+                is_int,
+                ..
             } => {
                 if !tick_axis_overdrag(axis, OVERDRAG_STEP_1D) {
                     self.drag_state = Some(state);
                     return;
                 }
-                (name.clone(), scalar_parameter_value(axis.value, *is_int))
+                (target.clone(), scalar_parameter_value(axis.value, *is_int))
             }
             DragState::Plane {
-                name,
+                target,
                 x_axis,
                 y_axis,
                 kind,
@@ -288,7 +302,7 @@ impl Viewport {
                     return;
                 }
                 (
-                    name.clone(),
+                    target.clone(),
                     plane_parameter_value(x_axis.value, y_axis.value, kind),
                 )
             }
@@ -308,52 +322,203 @@ pub(super) fn parameter_controls(
     services: WeakEntity<ServiceManager>,
     weak_vp: WeakEntity<Viewport>,
 ) -> Vec<AnyElement> {
-    let sorted: Vec<(String, ParameterValue, bool)> = params
-        .map(|params| {
-            params
-                .param_order
-                .iter()
-                .rev()
-                .filter_map(|name| {
-                    if is_hidden_param(name) {
-                        return None;
-                    }
-                    let is_locked = params.locked_params.contains(name);
-                    params.parameters.get(name).map(|value| {
-                        (
-                            name.clone(),
-                            viewport.display_parameter_value(name, value),
-                            is_locked,
-                        )
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let Some(params) = params else {
+        return Vec::new();
+    };
 
-    sorted
+    let mut controls = Vec::new();
+
+    for param in params
+        .params
         .iter()
-        .map(|(name, value, is_locked)| {
-            let stored_bounds = viewport
-                .slider_bounds
-                .get(name.as_str())
-                .copied()
-                .unwrap_or_else(|| default_bounds_for_value(value));
-            let bounds = viewport.display_parameter_bounds(name, stored_bounds);
-            render_param_control(
-                name,
-                value,
-                *is_locked,
-                bounds,
-                services.clone(),
-                weak_vp.clone(),
-            )
-        })
-        .collect()
+        .rev()
+        .filter(|param| !is_hidden_param(&param.name))
+    {
+        controls.push(render_control_for_target(
+            viewport,
+            &param.target,
+            &param.name,
+            &param.value,
+            param.locked,
+            0,
+            services.clone(),
+            weak_vp.clone(),
+        ));
+    }
+
+    for mesh in params
+        .meshes
+        .iter()
+        .rev()
+        .filter(|mesh| mesh.has_supported_control())
+    {
+        controls.push(render_mesh_group(
+            viewport,
+            mesh,
+            true,
+            services.clone(),
+            weak_vp.clone(),
+        ));
+    }
+
+    for mesh in params
+        .meshes
+        .iter()
+        .rev()
+        .filter(|mesh| !mesh.has_supported_control())
+    {
+        controls.push(render_mesh_group(
+            viewport,
+            mesh,
+            false,
+            services.clone(),
+            weak_vp.clone(),
+        ));
+    }
+
+    controls
 }
 
 fn is_hidden_param(name: &str) -> bool {
     HIDDEN_PARAMS.contains(&name)
+}
+
+fn render_control_for_target(
+    viewport: &Viewport,
+    target: &PresentationUpdateTarget,
+    name: &str,
+    value: &ParameterValue,
+    is_locked: bool,
+    depth: usize,
+    services: WeakEntity<ServiceManager>,
+    weak_vp: WeakEntity<Viewport>,
+) -> AnyElement {
+    let value = viewport.display_parameter_value(target, value);
+    let stored_bounds = viewport
+        .slider_bounds
+        .get(target)
+        .copied()
+        .unwrap_or_else(|| default_bounds_for_value(&value));
+    let bounds = viewport.display_parameter_bounds(target, stored_bounds);
+    let control = render_param_control(name, target, &value, is_locked, bounds, services, weak_vp);
+    if depth == 0 {
+        control
+    } else {
+        div()
+            .ml(px(depth as f32 * 12.0))
+            .child(control)
+            .into_any_element()
+    }
+}
+
+fn render_mesh_group(
+    viewport: &Viewport,
+    mesh: &MeshEntrySnapshot,
+    show_attributes: bool,
+    services: WeakEntity<ServiceManager>,
+    weak_vp: WeakEntity<Viewport>,
+) -> AnyElement {
+    let detail = if mesh.locked {
+        "animating"
+    } else if show_attributes {
+        ""
+    } else {
+        "No editable attributes"
+    };
+
+    let mut group = div()
+        .flex()
+        .flex_col()
+        .pt(px(8.0))
+        .pb(px(4.0))
+        .child(render_attribute_row(&mesh.name, detail, 0, false));
+
+    if show_attributes {
+        group = group.children(mesh.attributes.iter().map(|attribute| {
+            render_attribute_snapshot(
+                viewport,
+                attribute,
+                1,
+                mesh.locked,
+                services.clone(),
+                weak_vp.clone(),
+            )
+        }));
+    }
+
+    group.into_any_element()
+}
+
+fn render_attribute_snapshot(
+    viewport: &Viewport,
+    attribute: &MeshAttributeSnapshot,
+    depth: usize,
+    is_locked: bool,
+    services: WeakEntity<ServiceManager>,
+    weak_vp: WeakEntity<Viewport>,
+) -> AnyElement {
+    let mut rows = Vec::new();
+    if let Some(target) = &attribute.target {
+        if attribute.value.is_supported_control() {
+            rows.push(render_control_for_target(
+                viewport,
+                target,
+                &attribute.name,
+                &attribute.value,
+                is_locked,
+                depth,
+                services.clone(),
+                weak_vp.clone(),
+            ));
+        } else {
+            rows.push(render_attribute_row(
+                &attribute.name,
+                "(unsupported type)",
+                depth,
+                is_locked,
+            ));
+        }
+    } else {
+        rows.push(render_attribute_row(&attribute.name, "", depth, is_locked));
+    }
+
+    rows.extend(attribute.children.iter().map(|child| {
+        render_attribute_snapshot(
+            viewport,
+            child,
+            depth + 1,
+            is_locked,
+            services.clone(),
+            weak_vp.clone(),
+        )
+    }));
+
+    div().flex().flex_col().children(rows).into_any_element()
+}
+
+fn render_attribute_row(name: &str, detail: &str, depth: usize, is_locked: bool) -> AnyElement {
+    let label_color = if is_locked { PRES_MUTED } else { PRES_TEXT };
+    div()
+        .ml(px(depth as f32 * 12.0))
+        .flex()
+        .flex_row()
+        .items_baseline()
+        .justify_between()
+        .gap(px(8.0))
+        .py(px(3.0))
+        .child(
+            div()
+                .text_color(label_color)
+                .text_size(px(12.0))
+                .child(name.to_string()),
+        )
+        .children((!detail.is_empty()).then(|| {
+            div()
+                .text_color(PRES_MUTED)
+                .text_size(px(10.0))
+                .child(detail.to_string())
+        }))
+        .into_any_element()
 }
 
 fn scalar_parameter_value(value: f64, is_int: bool) -> ParameterValue {
@@ -543,6 +708,7 @@ fn paint_slider_2d_grid(window: &mut Window, bounds: Bounds<Pixels>) {
 
 fn render_slider_1d(
     name: String,
+    target: PresentationUpdateTarget,
     value: f64,
     is_int: bool,
     is_locked: bool,
@@ -572,7 +738,7 @@ fn render_slider_1d(
         SLIDER_THUMB
     };
     let label_color = if is_locked { PRES_MUTED } else { PRES_TEXT };
-    let name_for_canvas = name.clone();
+    let target_for_canvas = target.clone();
 
     div()
         .flex()
@@ -620,7 +786,7 @@ fn render_slider_1d(
                 .child(
                     div().w(px(SLIDER_1D_W)).h_full().child(
                         canvas(move |bounds, _, _| bounds, {
-                            let name = name_for_canvas.clone();
+                            let target = target_for_canvas.clone();
                             let services = services.clone();
                             let weak_vp = weak_vp.clone();
                             move |_, bounds: Bounds<Pixels>, window, _cx| {
@@ -669,7 +835,7 @@ fn render_slider_1d(
                                 }
 
                                 {
-                                    let name = name.clone();
+                                    let target = target.clone();
                                     let services = services.clone();
                                     let weak_vp = weak_vp.clone();
                                     window.on_mouse_event(
@@ -684,7 +850,7 @@ fn render_slider_1d(
                                             let value = weak_vp
                                                 .update(cx, |viewport, cx| {
                                                     viewport.begin_scalar_drag(
-                                                        &name,
+                                                        &target,
                                                         value,
                                                         is_int,
                                                         local_x,
@@ -698,7 +864,7 @@ fn render_slider_1d(
                                                 services
                                                     .update(cx, |services, _| {
                                                         services.update_parameters(HashMap::from([
-                                                            (name.clone(), value),
+                                                            (target.clone(), value),
                                                         ]))
                                                     })
                                                     .ok();
@@ -708,7 +874,7 @@ fn render_slider_1d(
                                 }
 
                                 {
-                                    let name = name.clone();
+                                    let target = target.clone();
                                     let services = services.clone();
                                     let weak_vp = weak_vp.clone();
                                     window.on_mouse_event(
@@ -718,9 +884,7 @@ fn render_slider_1d(
                                             }
                                             let dragging = weak_vp
                                                 .upgrade()
-                                                .map(|entity| {
-                                                    entity.read(cx).is_dragging(name.as_str())
-                                                })
+                                                .map(|entity| entity.read(cx).is_dragging(&target))
                                                 .unwrap_or(false);
                                             if !dragging {
                                                 return;
@@ -730,7 +894,7 @@ fn render_slider_1d(
                                             let value = weak_vp
                                                 .update(cx, |viewport, cx| {
                                                     viewport.update_scalar_drag(
-                                                        &name,
+                                                        &target,
                                                         value,
                                                         is_int,
                                                         local_x,
@@ -745,7 +909,7 @@ fn render_slider_1d(
                                                 services
                                                     .update(cx, |services, _| {
                                                         services.update_parameters(HashMap::from([
-                                                            (name.clone(), value),
+                                                            (target.clone(), value),
                                                         ]))
                                                     })
                                                     .ok();
@@ -785,6 +949,7 @@ fn render_slider_1d(
 
 fn render_slider_2d(
     name: String,
+    target: PresentationUpdateTarget,
     x: f64,
     y: f64,
     kind: Slider2dKind,
@@ -816,7 +981,7 @@ fn render_slider_2d(
         PRES_ACCENT
     };
     let label_color = if is_locked { PRES_MUTED } else { PRES_TEXT };
-    let name_for_canvas = name.clone();
+    let target_for_canvas = target.clone();
     let x_min_text = format_bound(x_min);
     let x_max_text = format_bound(x_max);
     let y_min_text = format_bound(y_min);
@@ -884,7 +1049,7 @@ fn render_slider_2d(
                             .flex_shrink_0()
                             .child(
                                 canvas(move |bounds, _, _| bounds, {
-                                    let name = name_for_canvas.clone();
+                                    let target = target_for_canvas.clone();
                                     let kind = kind.clone();
                                     let services = services.clone();
                                     let weak_vp = weak_vp.clone();
@@ -926,7 +1091,7 @@ fn render_slider_2d(
                                         }
 
                                         {
-                                            let name = name.clone();
+                                            let target = target.clone();
                                             let kind = kind.clone();
                                             let services = services.clone();
                                             let weak_vp = weak_vp.clone();
@@ -940,7 +1105,7 @@ fn render_slider_2d(
                                                     let value = weak_vp
                                                         .update(cx, |viewport, cx| {
                                                             viewport.begin_plane_drag(
-                                                                &name,
+                                                                &target,
                                                                 x,
                                                                 y,
                                                                 &kind,
@@ -956,7 +1121,7 @@ fn render_slider_2d(
                                                             .update(cx, |services, _| {
                                                                 services.update_parameters(
                                                                     HashMap::from([(
-                                                                        name.clone(),
+                                                                        target.clone(),
                                                                         value,
                                                                     )]),
                                                                 )
@@ -968,7 +1133,7 @@ fn render_slider_2d(
                                         }
 
                                         {
-                                            let name = name.clone();
+                                            let target = target.clone();
                                             let kind = kind.clone();
                                             let services = services.clone();
                                             let weak_vp = weak_vp.clone();
@@ -980,9 +1145,7 @@ fn render_slider_2d(
                                                     let dragging = weak_vp
                                                         .upgrade()
                                                         .map(|entity| {
-                                                            entity
-                                                                .read(cx)
-                                                                .is_dragging(name.as_str())
+                                                            entity.read(cx).is_dragging(&target)
                                                         })
                                                         .unwrap_or(false);
                                                     if !dragging {
@@ -991,7 +1154,7 @@ fn render_slider_2d(
                                                     let value = weak_vp
                                                         .update(cx, |viewport, cx| {
                                                             viewport.update_plane_drag(
-                                                                &name,
+                                                                &target,
                                                                 x,
                                                                 y,
                                                                 &kind,
@@ -1008,7 +1171,7 @@ fn render_slider_2d(
                                                             .update(cx, |services, _| {
                                                                 services.update_parameters(
                                                                     HashMap::from([(
-                                                                        name.clone(),
+                                                                        target.clone(),
                                                                         value,
                                                                     )]),
                                                                 )
@@ -1064,6 +1227,7 @@ fn render_slider_2d(
 
 fn render_param_control(
     name: &str,
+    target: &PresentationUpdateTarget,
     value: &ParameterValue,
     is_locked: bool,
     bounds: [f64; 4],
@@ -1073,6 +1237,7 @@ fn render_param_control(
     match value {
         ParameterValue::Float(value) => render_slider_1d(
             name.to_string(),
+            target.clone(),
             *value,
             false,
             is_locked,
@@ -1083,6 +1248,7 @@ fn render_param_control(
         .into_any_element(),
         ParameterValue::Int(value) => render_slider_1d(
             name.to_string(),
+            target.clone(),
             *value as f64,
             true,
             is_locked,
@@ -1093,6 +1259,7 @@ fn render_param_control(
         .into_any_element(),
         ParameterValue::Complex { re, im } => render_slider_2d(
             name.to_string(),
+            target.clone(),
             *re,
             *im,
             Slider2dKind::Complex,
@@ -1105,6 +1272,7 @@ fn render_param_control(
         .into_any_element(),
         ParameterValue::VectorFloat(values) if values.len() >= 2 => render_slider_2d(
             name.to_string(),
+            target.clone(),
             values[0],
             values[1],
             Slider2dKind::VectorFloat(values[2..].to_vec()),
@@ -1117,6 +1285,7 @@ fn render_param_control(
         .into_any_element(),
         ParameterValue::VectorInt(values) if values.len() >= 2 => render_slider_2d(
             name.to_string(),
+            target.clone(),
             values[0] as f64,
             values[1] as f64,
             Slider2dKind::VectorInt(values[2..].to_vec()),

@@ -2,16 +2,14 @@ mod diagnostics;
 mod loop_state;
 mod snapshot;
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
     scene_snapshot::{BackgroundSnapshot, CameraSnapshot},
     time::Timestamp,
     transcript::SectionTranscript,
+    value::MeshAttributePathSegment,
 };
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use geo::mesh::Mesh;
@@ -30,11 +28,74 @@ pub enum ParameterValue {
     Other,
 }
 
+impl ParameterValue {
+    pub fn is_supported_control(&self) -> bool {
+        match self {
+            Self::Int(_) | Self::Float(_) | Self::Complex { .. } => true,
+            Self::VectorInt(values) => values.len() >= 2,
+            Self::VectorFloat(values) => values.len() >= 2,
+            Self::Camera(_) | Self::Other => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum PresentationUpdateTarget {
+    Param {
+        leader_index: usize,
+    },
+    MeshAttribute {
+        leader_index: usize,
+        path: Vec<MeshAttributePathSegment>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParameterEntrySnapshot {
+    pub target: PresentationUpdateTarget,
+    pub name: String,
+    pub value: ParameterValue,
+    pub locked: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeshAttributeSnapshot {
+    pub target: Option<PresentationUpdateTarget>,
+    pub name: String,
+    pub value: ParameterValue,
+    pub children: Vec<MeshAttributeSnapshot>,
+}
+
+impl MeshAttributeSnapshot {
+    pub fn has_supported_control(&self) -> bool {
+        self.value.is_supported_control()
+            || self
+                .children
+                .iter()
+                .any(MeshAttributeSnapshot::has_supported_control)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MeshEntrySnapshot {
+    pub leader_index: usize,
+    pub name: String,
+    pub locked: bool,
+    pub attributes: Vec<MeshAttributeSnapshot>,
+}
+
+impl MeshEntrySnapshot {
+    pub fn has_supported_control(&self) -> bool {
+        self.attributes
+            .iter()
+            .any(MeshAttributeSnapshot::has_supported_control)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ParameterSnapshot {
-    pub parameters: HashMap<String, ParameterValue>,
-    pub locked_params: HashSet<String>,
-    pub param_order: Vec<String>,
+    pub params: Vec<ParameterEntrySnapshot>,
+    pub meshes: Vec<MeshEntrySnapshot>,
 }
 
 pub struct ExecutionSnapshot {
@@ -84,7 +145,7 @@ pub enum ExecutionMessage {
     },
     SetPlaybackMode(PlaybackMode),
     UpdateParameters {
-        updates: HashMap<String, ParameterValue>,
+        updates: HashMap<PresentationUpdateTarget, ParameterValue>,
     },
     TogglePlay,
     SeekTo {

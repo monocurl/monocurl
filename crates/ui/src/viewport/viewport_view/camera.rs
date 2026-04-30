@@ -10,7 +10,7 @@ use executor::{
 use geo::simd::Float3;
 use gpui::*;
 
-use crate::services::ParameterValue;
+use crate::services::{ParameterValue, PresentationUpdateTarget};
 
 use super::Viewport;
 
@@ -253,11 +253,21 @@ impl Viewport {
     }
 
     fn update_scene_camera_parameter(&mut self, camera: CameraSnapshot, cx: &mut Context<Self>) {
+        let target = self
+            .execution_state
+            .read(cx)
+            .parameters
+            .as_ref()
+            .and_then(|params| {
+                params
+                    .params
+                    .iter()
+                    .find(|param| param.name == "camera")
+                    .map(|param| param.target.clone())
+            })
+            .unwrap_or(PresentationUpdateTarget::Param { leader_index: 0 });
         self.services.update(cx, |services, _| {
-            services.update_parameters(HashMap::from([(
-                "camera".to_string(),
-                ParameterValue::Camera(camera),
-            )]))
+            services.update_parameters(HashMap::from([(target, ParameterValue::Camera(camera))]))
         });
     }
 }

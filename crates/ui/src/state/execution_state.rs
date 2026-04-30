@@ -1,6 +1,8 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use crate::services::{ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue};
+use crate::services::{
+    ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue, PresentationUpdateTarget,
+};
 use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot};
 use executor::time::Timestamp;
 use executor::transcript::SectionTranscript;
@@ -16,7 +18,7 @@ pub struct ExecutionState {
     pub camera: CameraSnapshot,
     pub camera_version: u64,
     pub meshes: Vec<Arc<Mesh>>,
-    pub parameter_state: HashMap<String, ParameterValue>,
+    pub parameter_state: HashMap<PresentationUpdateTarget, ParameterValue>,
 
     // runtime info reported by the executor thread
     pub current_timestamp: Timestamp,
@@ -94,7 +96,11 @@ impl ExecutionState {
         }
         self.slide_count = snapshot.slide_count;
         if let Some(ref params) = snapshot.parameters {
-            self.parameter_state = params.parameters.clone();
+            self.parameter_state = params
+                .params
+                .iter()
+                .map(|param| (param.target.clone(), param.value.clone()))
+                .collect();
         }
         self.parameters = snapshot.parameters;
         if let Some(transcript) = snapshot.transcript {

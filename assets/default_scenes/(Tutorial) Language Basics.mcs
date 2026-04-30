@@ -1,172 +1,94 @@
 # tutorial: language basics
-# navigate with `.` (next slide) and `,` (prev slide)
+#
+# This scene is intentionally flat: no slides, no meshes, no animations.
+# Open the console/transcript panel and read the print output from top to bottom.
+#
+# Things to try:
+# - change `count`
+# - append another point
+# - change the threshold in the control-flow example
+# - add your own print statement
 
 import std.util
 import std.math
-import std.color
-import std.mesh
-import std.anim
-import std.scene
 
-background = WHITE
+# values
+let count = 4
+let word = "frames"
+let offset = 1.5r + 0.25u
+let settings = ["count" -> count, "word" -> word, "offset" -> offset]
 
-let Label = |text, at, scale = 0.34|
-    center{at}
-    color{BLACK}
-    Text(text, scale)
+print "values"
+print settings
+print ["double count" -> 2 * count, "offset x" -> offset[0]]
 
-let Chip = |text, at, col, id| [
-    tag{[10, id]}
-        center{at}
-        fill{alpha{0.16} col}
-        stroke{col, 2}
-        Rect([1.25, 0.52]),
-    tag{[11, id]} Label(text, at, 0.25)
-]
+# let and var
+let base = 10
+# base = base + 10 (error)
+var total = base
+total = total + 3
+total = total * 2
 
-let ValueBoard = || [
-    Chip("numbers", [-2.25, 0.55, 0], BLUE, 1),
-    Chip("strings", [-0.75, 0.55, 0], ORANGE, 2),
-    Chip("lists", [0.75, 0.55, 0], GREEN, 3),
-    Chip("maps", [2.25, 0.55, 0], MAGENTA, 4),
-    # lambdas: `|args| body` — default args use `= value`; multiline bodies use `{ ... }`
-    Label("let f = |x, y = 1| x + y", [0, -0.45, 0], 0.34)
-]
+print "let and var"
+print ["base" -> base, "total" -> total]
 
-let Bar = |x, height, col, id|
-    tag{id}
-    center{[x, -1.0 + height / 2, 0]}
-    fill{alpha{0.24} col}
-    stroke{col, 2}
-    Rect([0.42, height])
+# lists and maps
+var points = []
+points .= [-1, 0, 0]
+points .= [0, 1, 0]
+points .= [1, 0, 0]
 
-let BarChart = |values| block {
-    for (i in range(0, len(values))) {
-        var col = BLUE
-        if (values[i] > 1.2) { col = ORANGE }
-        . Bar(-2.4 + i * 0.8, values[i], col, i)
+let labels = ["left" -> "start", "right" -> "end"]
+
+print "lists and maps"
+print ["points" -> points]
+print ["point count" -> len(points), "right label" -> labels["right"]]
+
+# control flow
+var above_threshold = []
+let values = [0.75, 1.35, 0.92, 1.52, 1.05, 1.25]
+let threshold = 1.15
+
+for (value in values) {
+    if (value > threshold) {
+        above_threshold .= value
     }
 }
 
-# labeled args like `count:`, `y:`, `col:` become editable fields on the returned mesh
-# that means later code can do `dots.count = 8` to mutate the arg by name
-let DotRow = |count, y = 0, col = BLUE| block {
-    for (i in range(0, count)) {
-        let x = i - (count - 1) / 2
-        . tag{i}
-            center{[x * 0.55, y, 0]}
-            fill{alpha{0.22} col}
-            stroke{col, 2}
-            Circle(0.16)
-    }
+var countdown = []
+var n = 3
+while (n > 0) {
+    countdown .= n
+    n = n - 1
 }
 
-# operators use braces `{}` and wrap around a target expression
-# `token_shift{delta: 1l, col: BLUE} Circle(0.32)` reads as "apply token_shift to a Circle"
-let token_shift = operator |target, delta, col|
-    shift{delta: delta}
-    fill{alpha{0.22} col}
-    stroke{col, 2}
-    target
+print "control flow"
+print ["threshold" -> threshold, "above threshold" -> above_threshold]
+print ["countdown" -> countdown]
 
-let Bracket = |width, y, col = DARK_GRAY| block {
-    . stroke{col, 2} Line([-width / 2, y, 0], [width / 2, y, 0])
-    . stroke{col, 2} Line([-width / 2, y - 0.18, 0], [-width / 2, y + 0.18, 0])
-    . stroke{col, 2} Line([width / 2, y - 0.18, 0], [width / 2, y + 0.18, 0])
+# lambdas
+let f = |x, y = 1| x * x + y
+let samples = [f(1), f(2), f(3, 0)]
+
+print "lambdas"
+print ["f(1)" -> f(1), "f(2)" -> f(2), "f(3, 0)" -> f(3, 0)]
+print ["samples" -> samples]
+
+# block accumulation
+let row = block {
+    . "alpha"
+    . "beta"
+    . "gamma"
 }
 
-# `block {}` uses an implicit accumulator `_`; lines starting with `.` append to it
-# equivalent to building a list manually, but without needing an explicit variable
-# `points .= v` is shorthand for `points = points .. v` (append v to points)
-let Path = |count| {
-    var points = []
-    for (i in range(0, count)) {
-        let x = -2.6 + i * 5.2 / (count - 1)
-        var y = -0.7
-        if (i // 2 * 2 == i) { y = -1.2 }
-        points .= [x, y, 0]
-    }
-    return stroke{TEAL, 3} Polyline(points)
+print "block accumulation"
+print ["block result" -> row]
+
+# recursion
+let fact = |self, x| {
+    if (x <= 1) { return 1 }
+    return x * self(self, x - 1)
 }
 
-let rotate_vec = |v, angle| [
-    cos(angle) * v[0] - sin(angle) * v[1],
-    sin(angle) * v[0] + cos(angle) * v[1],
-    0
-]
-
-# recursive lambdas pass themselves as `self` — there is no built-in self-reference
-# `Branch(Branch, ...)` starts the recursion; each call forwards `self` to the next level
-let Branch = |self, depth, at, dir, length, id| {
-    if (depth <= 0) {
-        return tag{[80, id]}
-            center{at}
-            fill{alpha{0.35} GREEN}
-            stroke{GREEN, 1.2}
-            Circle(0.06)
-    }
-
-    let end = at + length * dir
-    return [
-        tag{[81, depth, id]} stroke{BLACK, 0.7 + 0.35 * depth} Line(at, end),
-        self(self, depth - 1, end, rotate_vec(dir, 0.55), length * 0.72, 2 * id),
-        self(self, depth - 1, end, rotate_vec(dir, -0.55), length * 0.72, 2 * id + 1)
-    ]
-}
-
-let Tree = |depth|
-    Branch(Branch, to_int(depth), [0, -1.35, 0], 1u, 0.72, 1)
-
-slide "Values And Lambdas"
-    # `let` is immutable; `var` is mutable
-    # values: numbers, strings, lists, maps, lambdas, meshes, nil
-    # common vector shorthands: `1l` = left, `1r` = right, `1u` = up, `1d` = down
-    mesh board = ValueBoard()
-    play Fade(0.7)
-
-slide "Control Flow"
-    # `if`, `for`, `while` work as expected — `break` exits a loop
-    # good pattern: build data with control flow, then convert it to a mesh value at the end
-    board = BarChart([0.8, 1.3, 0.65, 1.6, 1.05, 1.45, 0.9])
-    play TagTrans(0.9)
-
-slide "Labeled Calls"
-    # calling `DotRow(count: 5, y: 0.25)` stores the labels on the result
-    # mutating `dots.count = 8` then replays the DotRow call with the new argument
-    mesh guide = Bracket(width: 3.2, y: -0.45)
-    mesh dots = DotRow(count: 5, y: 0.25, col: BLUE)
-    play Fade(0.5)
-
-    dots.count = 8
-    dots.y = 0.75
-    dots.col = ORANGE
-    guide.width = 4.4
-    guide.y = 0.05
-    play TagTrans(0.9)
-
-slide "Operators"
-    # operator call syntax: `op_name{labeled_args} target`
-    # operator args become editable fields too — same as labeled function args
-    mesh token = token_shift{delta: 1.2l, col: BLUE} Circle(radius: 0.32)
-    play Grow(0.5)
-
-    token.delta = 1.2r
-    token.radius = 0.48
-    token.col = MAGENTA
-    play Lerp(0.9)
-
-slide "Block Accumulation"
-    # inside `block {}`, dot lines (`. expr`) append to the implicit accumulator
-    # the block returns the accumulated list — useful when building many pieces in a loop
-    mesh path = Path(9)
-    play Write(1.1)
-
-slide "Recursive Functions"
-    # the `self(self, ...)` idiom is the standard recursive lambda pattern
-    # note that `Tree(depth: 2)` and `Tree(depth: 5)` produce very different shapes
-    mesh tree = Tree(depth: 2)
-    play Write(1.0)
-
-    tree.depth = 5
-    # rate{identity} makes the integer depth snap one level at a time instead of blending
-    play rate{identity} Lerp(2.0)
+print "recursion"
+print ["factorial 5" -> fact(fact, 5)]

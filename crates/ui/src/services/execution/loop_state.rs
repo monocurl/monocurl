@@ -24,7 +24,10 @@ use structs::{
 
 use crate::services::ServiceManagerMessage;
 
-use super::{ExecutionMessage, ExecutionService, ParameterValue, PlaybackMode, default_bytecode};
+use super::{
+    ExecutionMessage, ExecutionService, ParameterValue, PlaybackMode, PresentationUpdateTarget,
+    default_bytecode,
+};
 
 struct SharedRuntimeState {
     target: Cell<Timestamp>,
@@ -34,7 +37,7 @@ struct SharedRuntimeState {
     has_runtime_error: Cell<bool>,
     playback_mode: Cell<PlaybackMode>,
     library_sections: Cell<usize>,
-    pending_param_updates: RefCell<Vec<(String, ParameterValue)>>,
+    pending_param_updates: RefCell<Vec<(PresentationUpdateTarget, ParameterValue)>>,
     last_update_at: Cell<Instant>,
     snapshot_requested: Cell<bool>,
 }
@@ -356,13 +359,24 @@ fn apply_pending_parameter_updates(executor: &mut Executor, shared: &SharedRunti
     let updates = shared.pending_param_updates.take();
     let applied_parameters = !updates.is_empty();
 
-    for (name, value) in updates {
+    for (target, value) in updates {
         let Some(value) = ExecutionService::runtime_value_from_parameter(&value) else {
-            log::warn!("parameter update failed for {}: unsupported value", name);
+            log::warn!(
+                "parameter update failed for {:?}: unsupported value",
+                target
+            );
             continue;
         };
-        if let Err(error) = executor.update_parameter(&name, value) {
-            log::warn!("parameter update failed for {}: {}", name, error);
+        let result = match &target {
+            PresentationUpdateTarget::Param { leader_index } => {
+                executor.update_parameter_by_leader_index(*leader_index, value)
+            }
+            PresentationUpdateTarget::MeshAttribute { leader_index, path } => {
+                executor.update_mesh_attribute(*leader_index, path, value)
+            }
+        };
+        if let Err(error) = result {
+            log::warn!("parameter update failed for {:?}: {}", target, error);
         }
     }
 
@@ -707,7 +721,10 @@ mod tests {
     fn parameter_updates_keep_play_session_future() {
         let runtime = RuntimeState::new();
         let message = ExecutionMessage::UpdateParameters {
-            updates: HashMap::from([("speed".into(), ParameterValue::Float(2.0))]),
+            updates: HashMap::from([(
+                PresentationUpdateTarget::Param { leader_index: 0 },
+                ParameterValue::Float(2.0),
+            )]),
         };
 
         assert!(!runtime.requires_future_reset(&message));

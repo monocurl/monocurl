@@ -1,5 +1,7 @@
 # tutorial: meshes and operators
-# navigate with `.` (next slide) and `,` (prev slide)
+#
+# This scene keeps the init section small. Most mesh expressions are written
+# directly in the slide where they are used.
 
 import std.util
 import std.math
@@ -10,156 +12,97 @@ import std.scene
 
 background = WHITE
 
-let Label = |text, at, scale = 0.32|
-    center{at}
-    color{BLACK}
-    Text(text, scale)
+# `mesh` values are the visible state of the scene.
+# any meshes set in the "init" section (before slides)
+# are shown on screen automatically; all others must be animated
+mesh title = center{[0, 1.25, 0]} Text("Meshes", 0.75)
 
-let captioned = operator |target, label, at|
-    [
-        target,
-        Label(label, at, 0.24)
-    ]
-
-let Token = |shape, at, col, id|
-    tag{id}
-    center{at}
-    fill{alpha{0.2} col}
-    stroke{col, 2}
-    shape
-
-let ConstructorSet = || [
-    Token(Circle(0.38), [-2.4, 0.45, 0], BLUE, 1),
-    Token(Square(0.68), [-0.8, 0.45, 0], ORANGE, 2),
-    Token(RegularPolygon(6, 0.4), [0.8, 0.45, 0], GREEN, 3),
-    Token(Triangle([-0.36, -0.26, 0], [0.36, -0.26, 0], [0, 0.36, 0]), [2.4, 0.45, 0], MAGENTA, 4),
-    Label("Circle", [-2.4, -0.25, 0], 0.24),
-    Label("Square", [-0.8, -0.25, 0], 0.24),
-    Label("Polygon", [0.8, -0.25, 0], 0.24),
-    Label("Triangle", [2.4, -0.25, 0], 0.24)
-]
-
-let MeshTree = || [
-    tag{[10, 1]} stroke{DARK_GRAY, 2} Line([-2.5, 0, 0], [2.5, 0, 0]),
-    tag{[10, 2]} stroke{DARK_GRAY, 2} Line([0, -1.25, 0], [0, 1.25, 0]),
-    tag{[11, 1]} center{[-1.2, 0.45, 0]} fill{BLUE} Circle(0.08),
-    tag{[11, 2]} center{[0.55, -0.65, 0]} fill{ORANGE} Circle(0.08),
-    tag{[12, 1]} Label("a list of meshes is one mesh value", [0, 1.55, 0], 0.32)
-]
-
-# `Styled` labels its args so callers can later do `dot.at = 1.4r` to move it
-# without labeled args, mutating the position would require rebuilding the whole expression
-let Styled = |at, radius, col|
-    shift{at}
-    fill{alpha{0.2} col}
-    stroke{col, 2}
-    Circle(radius)
-
-let TaggedGroup = || [
-    tag{1} center{[-1.4, 0, 0]} Circle(0.45),
-    tag{2} center{[0, 0, 0]} Circle(0.45),
-    tag{3} center{[1.4, 0, 0]} Circle(0.45)
-]
-
-# a filter is a `|tags| bool` lambda passed as the last arg to an operator
-# the operator only applies to leaves whose tag list satisfies the filter
-let tag_palette = operator |target|
-    fill{alpha{0.28} MAGENTA, |tags| 3 in tags}
-    fill{alpha{0.28} ORANGE, |tags| 2 in tags}
-    fill{alpha{0.28} BLUE, |tags| 1 in tags}
-    stroke{BLACK, 2}
-    target
-
-let Badge = |text, at, col, id| [
-    tag{[20, id]}
-        center{at}
-        fill{alpha{0.16} col}
-        stroke{col, 2}
-        Rect([1.5, 0.6]),
-    tag{[21, id]}
-        Label(text, at, 0.27)
-]
-
-# a custom operator is a lambda that returns a styled version of `target`
-# `badge_style{BLUE} Square(0.72)` is much cleaner than repeating fill/stroke each time
-let badge_style = operator |target, col|
-    fill{alpha{0.18} col}
-    stroke{col, 2.2}
-    target
-
-let CustomOperatorDemo = || [
-    tag{1} center{[-1.4, 0, 0]} badge_style{BLUE} Square(0.72),
-    tag{2} center{[0, 0, 0]} badge_style{ORANGE} RegularPolygon(6, 0.44),
-    tag{3} center{[1.4, 0, 0]} badge_style{GREEN} Circle(0.4)
-]
+# here is a typical mesh construction:
+# the base mesh Circle(0.5) has a sequence of operators applied to it
+mesh item =
+    center{[0, 0, 0]} # setting the position
+    fill{alpha{0.22} BLUE} # setting the color
+    stroke{BLUE, 2}
+    Circle(0.5)
 
 slide "Mesh Variables"
-    # `mesh` creates a leader/follower pair:
-    #   leader  = the value the script currently holds
-    #   follower = the value the viewport is currently showing
-    # only a `play` statement updates the follower — the Animations tutorial covers this in depth
-    mesh title = Label("mesh variables are the visible state", [0, 1.45, 0], 0.42)
-    mesh dot = center{[0, 0, 0]} fill{alpha{0.25} BLUE} stroke{BLUE, 2} Circle(0.48)
-    play Grow(0.7)
+  
+    play Wait(4)
+    
+    item =
+        center{0l}
+        fill{alpha{0.22} ORANGE}
+        stroke{ORANGE, 2}
+        Square(0.85)
+        
+    play Trans()
 
 slide "Constructors"
-    # constructors create canonical, origin-centered geometry
-    # operators like `center{}`, `fill{}`, `stroke{}`, `shift{}` then place and style them
-    title = Label("constructors make geometry", [0, 1.45, 0], 0.44)
-    dot = ConstructorSet()
-    play TagTrans(0.8)
-
-slide "Mesh Trees"
-    # a list of meshes is itself a valid mesh — nest lists freely
-    # helper functions that return lists are the main way to build compound diagrams
-    title = Label("mesh trees can be plain lists", [0, 1.45, 0], 0.42)
-    dot = MeshTree()
-    play TagTrans(0.8)
+    # Constructors make basic geometry. Operators place and style it.
+    title = center{[0, 1.25, 0]} Text("Constructors", 0.75)
+    item = [
+        center{[-1.5, 0.15, 0]} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.38),
+        center{[0, 0.15, 0]} fill{alpha{0.22} ORANGE} stroke{ORANGE, 2} Square(0.7),
+        center{[1.5, 0.15, 0]} fill{alpha{0.22} GREEN} stroke{GREEN, 2} RegularPolygon(6, 0.42),
+        center{[-1.5, -0.65, 0]} Text("Circle", 0.5),
+        center{[0, -0.65, 0]} Text("Square", 0.5),
+        center{[1.5, -0.65, 0]} Text("Polygon", 0.5)
+    ]
+    play Set()
 
 slide "Operators"
-    # label operator args you intend to mutate — they become editable fields on the leader
-    # here `dot.at = 1.4r` then `play Lerp(...)` smoothly moves the circle to the right
-    title = Label("operators transform and style", [0, 1.45, 0], 0.42)
-    dot = Styled(at: 1.4l, radius: 0.32, col: BLUE)
-    play TagTrans(0.7)
+    # Operators use braces and wrap the target expression.
+    title = center{[0, 1.25, 0]} Text("Operators", 0.75)
+    item =
+        shift{1.4l}
+        fill{alpha{0.22} BLUE}
+        stroke{BLUE, 2}
+        Circle(0.42)
+    play Set()
+    play Wait(0.4)
 
-    dot.at = 1.4r
-    dot.radius = 0.55
-    dot.col = ORANGE
-    play Lerp(0.9, [&dot])
+    item =
+        shift{1.4r}
+        fill{alpha{0.22} MAGENTA}
+        stroke{MAGENTA, 2}
+        Circle(0.6)
+    play Set()
 
-slide "Tags"
-    # `tag{n}` attaches a numeric identity to a mesh leaf
-    # filters select subparts by identity rather than list position — stable across reorders
-    title = Label("tags give subparts identities", [0, 1.45, 0], 0.42)
-    dot = tag_palette{} TaggedGroup()
-    play TagTrans(0.8)
-
-slide "Custom Mesh Helpers"
-    # helpers are just lambdas that return mesh values — no special syntax
-    # returning a list of tagged pieces makes the result compatible with TagTrans
-    title = Label("helpers package repeated visual units", [0, 1.45, 0], 0.42)
-    dot = [
-        Badge("source", [-1.75, 0.2, 0], BLUE, 1),
-        Badge("transform", [0, 0.2, 0], ORANGE, 2),
-        Badge("result", [1.75, 0.2, 0], GREEN, 3)
+slide "Mesh Lists"
+    # A list of meshes is also considered a mesh. This is how most diagrams are built.
+    title = center{[0, 1.25, 0]} Text("Mesh lists", 0.75)
+    item = [
+        center{[-1.1, 0, 0]} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.42),
+        center{[0, 0, 0]} fill{alpha{0.22} ORANGE} stroke{ORANGE, 2} Square(0.72),
+        center{[1.1, 0, 0]} fill{alpha{0.22} GREEN} stroke{GREEN, 2} RegularPolygon(5, 0.44),
+        stroke{LIGHT_GRAY, 2} Line([-1.6, -0.65, 0], [1.6, -0.65, 0])
     ]
-    play TagTrans(0.8)
+    play Set()
 
-slide "Custom Operators"
-    # custom operators are the main way to avoid repeating fill/stroke chains
-    # `operator |target, col| ...` defines a function that receives and returns a mesh
-    title = Label("operators are reusable styling verbs", [0, 1.45, 0], 0.42)
-    dot = CustomOperatorDemo()
-    play TagTrans(0.8)
+slide "Tags And Filters"
+    # Tags give leaves stable identities. Filters can style a selected subset.
+    title = center{[0, 1.25, 0]} Text("Tags", 0.75)
+    item =
+        fade{0.2, |tags| not (2 in tags)}
+        [
+            tag{1} center{[-1.2, 0, 0]} fill{alpha{0.28} BLUE} stroke{BLUE, 2} Circle(0.45),
+            tag{2} center{[0, 0, 0]} fill{alpha{0.28} ORANGE} stroke{ORANGE, 2} Circle(0.45),
+            tag{3} center{[1.2, 0, 0]} fill{alpha{0.28} GREEN} stroke{GREEN, 2} Circle(0.45)
+        ]
+    print ["visible tags" -> mesh_tags(item)]
+    play Set()
 
-slide "Small Example"
-    # constructors → operators → tagged lists → a complete scene mesh
-    title = Label("small scenes are just composed mesh expressions", [0, 1.45, 0], 0.38)
-    dot = [
-        tag{1} shift{[-1.4, 0, 0]} badge_style{BLUE} Circle(0.42),
-        tag{2} shift{[0, 0, 0]} badge_style{ORANGE} Square(0.72),
-        tag{3} shift{[1.4, 0, 0]} badge_style{GREEN} RegularPolygon(5, 0.45),
-        stroke{DARK_GRAY, 2} Line([-2.0, -0.7, 0], [2.0, -0.7, 0])
+slide "Local Helpers"
+    # Put small helpers close to the slide that needs them.
+    let Badge = |text, pos, col| [
+        center{pos} fill{alpha{0.16} col} stroke{col, 2} Rect([1.35, 0.65]),
+        center{pos} Text(text, 0.5)
     ]
-    play TagTrans(0.9)
+
+    title = center{[0, 1.25, 0]} Text("Local helpers", 0.75)
+    item = [
+        Badge("source", [-1.5, 0, 0], BLUE),
+        Badge("style", [0, 0, 0], ORANGE),
+        Badge("result", [1.5, 0, 0], GREEN)
+    ]
+    play Set()

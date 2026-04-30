@@ -1,5 +1,7 @@
 # tutorial: animations
-# navigate with `.` (next slide) and `,` (prev slide)
+#
+# Animations sync mesh leaders to their visible followers. This scene keeps the
+# geometry simple so each play statement is easy to inspect.
 
 import std.util
 import std.math
@@ -9,148 +11,120 @@ import std.anim
 import std.scene
 
 background = WHITE
+param live_radius = 0.38
 
-# `param` is like `mesh` but exposed as an interactive slider in presentation mode
-param live_radius = 0.36
+mesh title = center{[0, 1.25, 0]} Text("Animations", 0.75)
+mesh ball =
+    center{[-1.5, 0, 0]}
+    fill{alpha{0.24} BLUE}
+    stroke{BLUE, 2}
+    Circle(0.45)
 
-# keep a reference to the original camera so FixedHud can stay anchored to the frame
-let ORIGINAL_CAMERA = Camera(4b)
-camera = ORIGINAL_CAMERA
+slide "Set And Wait"
+    # Set snaps followers to leaders. Wait adds time without changing anything.
+    play Set()
+    play Wait(0.45)
 
-let Label = |text, at, scale = 0.32|
-    center{at}
-    color{BLACK}
-    Text(text, scale)
+    ball =
+        center{[1.5, 0, 0]}
+        fill{alpha{0.24} ORANGE}
+        stroke{ORANGE, 2}
+        Circle(0.45)
+    play Set()
+    play Wait(0.45)
 
-# labeled args (`pos:`, `radius:`, `col:`) make this function interpolatable by Lerp
-# Lerp can blend between two Ball calls by interpolating each named arg independently
-let Ball = |pos, radius, col|
-    center{pos}
-    fill{alpha{0.24} col}
-    stroke{col, 2}
-    Circle(radius)
+slide "Lerp"
+    # Lerp moves smoothly from the current follower to the new leader.
+    title = center{[0, 1.25, 0]} Text("Lerp", 0.75)
+    ball =
+        center{[0, 0.05, 0]}
+        fill{alpha{0.24} MAGENTA}
+        stroke{MAGENTA, 2}
+        Circle(0.68)
+    print ["lerp destination" -> "center circle"]
+    play Lerp(1.0)
 
-slide "Wait And Set"
-    # the leader/follower model — the most important animation concept:
-    #   leader  = the value the script currently holds (what code reads)
-    #   follower = the value currently drawn in the viewport
-    # assigning to a mesh changes the leader immediately, but the viewport stays frozen
-    # only `play` updates the follower — every animation works this way
-    mesh ball = Ball(pos: [-2.4, 0, 0], radius: 0.32, col: BLUE)
-    mesh trail = []
-    mesh title = Label("animations synchronize leaders to followers", [0, 1.45, 0], 0.38)
+slide "Write And Grow"
+    # Write traces strokes. Grow expands a shape from its center.
+    title = center{[0, 1.25, 0]} Text("Write and Grow", 0.75)
+    ball = []
+    mesh path = stroke{TEAL, 3} Polyline([[-1.8, -0.35, 0], [0, 0.35, 0], [1.8, -0.35, 0]])
+    play Write(1.0)
 
-    # `Set` snaps the specified followers to match their current leaders instantly
-    # `trail` is excluded here intentionally — it stays invisible until the next slide
-    play Set([&ball, &title])
-    # `Wait` reserves time without touching any leader or follower
-    play Wait(0.35)
+    mesh ring =
+        fill{CLEAR}
+        stroke{MAGENTA, 3}
+        Circle(0.65)
+    play Grow(0.7)
 
-slide "Leader And Follower"
-    # right after this line, code reads an orange ball at the right —
-    # but the viewport still shows the blue ball because the follower hasn't moved yet
-    ball = Ball(pos: [2.4, 0, 0], radius: 0.32, col: ORANGE)
-    trail = stroke{TEAL, 3} Line([-2.4, 0, 0], [2.4, 0, 0])
-
-    # a list of animations plays them in parallel, each advancing its own followers
-    # parallel branches must each name the leader they own — two branches cannot share one
-    play [Lerp(1.2, [&ball]), Write(1.2, [&trail], linear)]
-
-slide "Lerp Attributes"
-    # because Ball used labeled args, the leader exposes `ball.pos`, `ball.radius`, `ball.col`
-    # Lerp reads the old follower state, the new leader state, interpolates each label,
-    # and reruns Ball at every frame — smooth morph without manual keyframes
-    title = Label("labeled arguments become keyframe controls", [0, 1.45, 0], 0.36)
-    ball.pos = [0, 0.15, 0]
-    ball.radius = 0.62
-    ball.col = MAGENTA
-    trail = []
-    play Trans(1.0)
-
-slide "Operator Lerp"
-    # operators record an identity state alongside the transformed state
-    # that lets Lerp smoothly interpolate from the original shape to the fully-transformed one
-    title = Label("operators also interpolate", [0, 1.45, 0], 0.42)
-    ball = rotate{radians: TAU / 8} scale{factor: 1.35} shift{delta: [1.15, 0, 0]} ball
-    play Lerp(1, [&ball])
+slide "Fade"
+    # To fade something out, assign it to [] and play Fade.
+    title = center{[0, 1.25, 0]} Text("Fade", 0.75)
+    path = []
+    ring = []
+    play Fade(0.7)
 
 slide "Trans"
-    # use Trans when the destination has different geometry and Lerp wouldn't produce
-    # a meaningful morph — it uses contour-matching heuristics to morph any two shapes
-    title = Label("Trans morphs between mesh shapes", [0, 1.45, 0], 0.4)
-    ball = fill{alpha{0.22} GREEN} stroke{GREEN, 2} Square(1.1)
-    play Trans(1.0)
+    # Trans morphs between different mesh shapes.
+    title = center{[0, 1.25, 0]} Text("Trans", 0.75)
+    ball =
+        center{[0, 0, 0]}
+        fill{alpha{0.24} GREEN}
+        stroke{GREEN, 2}
+        Circle(0.55)
+    play Grow(0.4)
+
+    ball =
+        center{[0, 0, 0]}
+        fill{alpha{0.24} GREEN}
+        stroke{GREEN, 2}
+        Square(1.0)
+    play Trans(0.9)
 
 slide "TagTrans"
-    # TagTrans is like Trans but only matches source and destination leaves with the same tag
-    # this means a tagged shape tracks its identity even when the list order changes
-    let Pair = |spread, col| [
-        tag{1} Ball([-spread, 0, 0], 0.26, col),
-        tag{2} Ball([spread, 0, 0], 0.26, col)
-    ]
-
-    title = Label("TagTrans follows tags, not list order", [0, 1.45, 0], 0.4)
-    ball = Pair(spread: 1.2, col: BLUE)
-    play TagTrans(0.8)
-
-    # tag{2} is now on the left and tag{1} on the right — TagTrans tracks them correctly
+    # TagTrans matches pieces with the same tag.
+    title = center{[0, 1.25, 0]} Text("TagTrans", 0.75)
     ball = [
-        tag{2} Ball([-1.2, 0, 0], 0.32, ORANGE),
-        tag{1} Ball([1.2, 0, 0], 0.32, BLUE)
+        tag{1} center{[-1.1, 0, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.36),
+        tag{2} center{[1.1, 0, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.36)
+    ]
+    play Trans(0.6)
+
+    ball = [
+        tag{2} center{[-1.1, 0, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.42),
+        tag{1} center{[1.1, 0, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.42)
     ]
     play TagTrans(1.0)
 
-slide "Parallel Blocks"
-    # `anim { ... }` creates an animation block — code inside doesn't run until played
-    # playing a list of anim blocks runs them in parallel; each block owns its leaders
-    let Ring = |radius, opacity, col|
-        fill{CLEAR}
-        stroke{alpha{opacity} col, 3}
-        Circle(radius)
-
-    let move_pair = anim {
-        ball = shift{delta: [0, 0.6, 0]} ball
-        play Lerp(0.9, [&ball])
-    }
-
-    let pulse = anim {
-        trail = Ring(radius: 0.4, opacity: 1, col: MAGENTA)
-        play Set([&trail])
-        trail.radius = 1.4
-        trail.opacity = 0
-        play Trans(0.9, [&trail])
-    }
-
-    play [move_pair, pulse]
-
 slide "Rates"
-    # rate functions remap animation time — wrap any animation with `rate{...}` to apply one
-    # common rates: linear, smooth (default), bounce, elastic, ease_in, ease_out
-    title = Label("rate functions change timing", [0, 1.45, 0], 0.4)
-    ball = Ball(pos: [-2.2, -0.4, 0], radius: 0.28, col: BLUE)
-    trail = Ball(pos: [-2.2, 0.45, 0], radius: 0.28, col: ORANGE)
+    # Rates change timing. Both dots travel for the same duration.
+    title = center{[0, 1.25, 0]} Text("Rates", 0.75)
+    ball = []
+    mesh linear_dot = center{[-1.7, -0.35, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.28)
+    mesh bounce_dot = center{[-1.7, 0.35, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.28)
     play Set()
 
-    ball.pos = [2.2, -0.4, 0]
-    trail.pos = [2.2, 0.45, 0]
-    play [rate{linear} Lerp(1.2, [&ball]), rate{bounce} Lerp(1.2, [&trail])]
+    linear_dot = center{[1.7, -0.35, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.28)
+    bounce_dot = center{[1.7, 0.35, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.28)
+    play [
+        rate{linear} Lerp(1.2, [&linear_dot]),
+        rate{bounce} Lerp(1.2, [&bounce_dot])
+    ]
 
 slide "Parameters"
-    # `$live_radius` reads the live param follower instead of the snapshot leader
-    # because ball is inside a labeled call, it recomputes whenever the follower changes
-    # in presentation mode (cmd/ctrl-t), the param becomes a draggable slider
-    let FixedHud = |text, live_camera|
-        # camera_transfer keeps this label anchored to the screen frame even as the camera moves
-        camera_transfer{ORIGINAL_CAMERA, live_camera}
-        center{[-2.55, -1.65, 0]}
-        color{BLACK}
-        Text(text, 0.22)
+    # `$live_radius` reads the live parameter follower. In presentation mode,
+    # dragging the parameter changes the mesh while the scene is paused.
+    title = center{[0, 1.25, 0]} Text("Parameters", 0.75)
+    linear_dot = []
+    bounce_dot = []
+    mesh live =
+        center{[0, 0, 0]}
+        fill{alpha{0.24} GREEN}
+        stroke{GREEN, 2}
+        Circle(radius: $live_radius)
+    print ["radius before" -> live_radius]
+    play Fade(0.6)
 
-    title = Label("params can drive live meshes in presentation mode", [0, 1.45, 0], 0.34)
-    ball = Ball(pos: [0, 0, 0], radius: $live_radius, col: GREEN)
-    trail = FixedHud("Command/Ctrl-T: presentation mode", camera)
-    play Fade(0.7)
-
-    # scripted param changes use the same leader/follower model as mesh changes
     live_radius = 0.8
+    print ["radius after" -> live_radius]
     play Lerp(1.0)

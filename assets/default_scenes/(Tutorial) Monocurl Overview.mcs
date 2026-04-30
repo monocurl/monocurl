@@ -1,5 +1,18 @@
 # tutorial: monocurl overview
-# navigate with `.` (next slide) and `,` (prev slide) in the timeline
+#
+# Keyboard shortcuts to try in the timeline:
+# - `.` moves to the next slide
+# - `,` moves to the previous slide
+# - `<` jumps to the start of the scene
+# - `>` jumps to the end of the scene
+# - `;` steps slightly backward
+# - `'` steps slightly forward
+# - Command/Ctrl-T toggles presentation mode
+#
+# Things to try while editing this file:
+# - change BLUE to ORANGE
+# - change [1.6, 0, 0] to [-1.6, 0, 0]
+# - change Lerp(1.0) to Lerp(2.0)
 
 import std.util
 import std.math
@@ -10,121 +23,67 @@ import std.scene
 
 background = WHITE
 
-let Label = |text, at, scale = 0.38|
-    center{at}
-    color{BLACK}
-    Text(text, scale)
+# init runs before the first slide. Put simple starting state here so the
+# viewport has something visible as soon as the file opens.
+mesh title = center{[0, 1.2, 0]} Text("Welcome to Monocurl", 0.7)
+mesh dot =
+    center{[0, 0, 0]}
+    fill{alpha{0.24} BLUE}
+    stroke{BLUE, 2}
+    Circle(0.45)
 
-# each `Panel` is tagged so TagTrans can match pieces across slides by their id
-let Panel = |at, size, col, id, text| [
-    tag{[10, id]}
-        center{at}
-        fill{alpha{0.14} col}
-        stroke{col, 2}
-        Rect(size),
-    tag{[11, id]}
-        Label(text, at, 0.34)
-]
+slide "First Look"
+    # press play or step through the slide. This first slide just holds the
+    # initial frame long enough for you to inspect it.
+    play Wait(0.5)
 
-let ArrowBetween = |from, to, id|
-    tag{[12, id]}
-    stroke{DARK_GRAY, 1.6}
-    Arrow(from, to)
+slide "Change One Value"
+    # assignment changes the destination. Lerp decides how the visible frame
+    # catches up to that destination.
+    title = center{[0, 1.2, 0]} Text("Change a value", 0.7)
+    dot =
+        center{[1.6, 0, 0]}
+        fill{alpha{0.24} ORANGE}
+        stroke{ORANGE, 2}
+        Circle(0.45)
+    play Lerp(1.0)
 
-let Workflow = || [
-    Panel([-2.8, 0.35, 0], [1.45, 1.1], BLUE, 1, ".mcs file"),
-    ArrowBetween([-2.0, 0.35, 0], [-1.1, 0.35, 0], 1),
-    Panel([0, 0.35, 0], [1.55, 1.1], ORANGE, 2, "runtime"),
-    ArrowBetween([0.9, 0.35, 0], [1.8, 0.35, 0], 2),
-    Panel([2.75, 0.35, 0], [1.7, 1.1], GREEN, 3, "viewport")
-]
-
-let SectionCard = |x, title, body, col, id| [
-    tag{[20, id]}
-        center{[x, -0.2, 0]}
-        fill{alpha{0.12} col}
-        stroke{col, 2}
-        Rect([1.75, 1.25]),
-    tag{[21, id]}
-        Label(title, [x, 0.15, 0], 0.32),
-    tag{[22, id]}
-        color{DARK_GRAY}
-        center{[x, -0.32, 0]}
-        Text(body, 0.24)
-]
-
-let SceneStructure = || [
-    SectionCard(-2.2, "init", "imports, helpers, params", BLUE, 1),
-    SectionCard(0, "slide", "mesh, assign, play", ORANGE, 2),
-    SectionCard(2.2, "slide", "next keyframe", GREEN, 3)
-]
-
-let EditorLayout = || [
-    Panel([-2.65, 0.25, 0], [2.55, 2.7], BLUE, 1, "editor"),
-    Panel([1.35, 0.9, 0], [3.15, 1.55], GREEN, 2, "viewport"),
-    Panel([1.35, -1.05, 0], [3.15, 0.95], ORANGE, 3, "timeline"),
-    stroke{DARK_GRAY, 1.4} Line([-1.1, -1.35, 0], [-1.1, 1.65, 0]),
-    stroke{DARK_GRAY, 1.4} Line([-0.2, -0.25, 0], [2.9, -0.25, 0])
-]
-
-let Key = |x, key, label, id| [
-    tag{[30, id]}
-        center{[x, 0.35, 0]}
-        fill{alpha{0.12} TEAL}
-        stroke{TEAL, 2}
-        Rect([0.7, 0.48]),
-    tag{[31, id]} Label(key, [x, 0.35, 0], 0.34),
-    tag{[32, id]} Label(label, [x, -0.18, 0], 0.22)
-]
-
-let ShortcutStrip = || [
-    Key(-2.55, ",", "prev slide", 1),
-    Key(-1.55, ".", "next slide", 2),
-    Key(-0.45, "<", "scene start", 3),
-    Key(0.55, ">", "scene end", 4),
-    Key(1.65, ";", "back step", 5),
-    Key(2.65, "'", "forward step", 6)
-]
-
-let OutputModes = || [
-    Panel([-2.2, 0.25, 0], [1.8, 1.25], MAGENTA, 1, "present"),
-    Panel([0, 0.25, 0], [1.8, 1.25], BLUE, 2, "image"),
-    Panel([2.2, 0.25, 0], [1.8, 1.25], GREEN, 3, "video"),
-    Label("Command/Ctrl-T enters presentation mode", [0, -1.05, 0], 0.28)
-]
-
-slide "What Monocurl Is"
-    # monocurl: write code to produce math animations; the app previews the result live
-    # everything in this file is monocurl code — every pixel you see comes from it
-    mesh title = Label("program mathematical animations", [0, 1.45, 0], 0.52)
-    mesh flow = Workflow()
+slide "Add A Mesh"
+    # mesh values can be text, lines, shapes, or lists of other meshes.
+    mesh line = stroke{TEAL, 3} Line([-1.8, -0.75, 0], [1.8, -0.75, 0])
+    mesh label = center{[0, -1.3, 0]} Text("new meshes appear after play", 0.5)
     play Fade(0.7)
 
-slide "Scene Structure"
-    # code before the first `slide` keyword is the init section
-    # init holds imports, helper functions, params, and camera setup — no animations here
-    # each `slide` block is an animation segment; `play` statements go inside slides
-    title = Label("a scene is init code plus slides", [0, 1.45, 0], 0.48)
-    flow = SceneStructure()
-    # TagTrans morphs the previous diagram into this one, matching panels by their tag id
-    play TagTrans(0.9)
+slide "Scrub The Timeline"
+    # Wait adds time without changing the scene. Scrub this slide to see the
+    # motion, pause, and second motion as separate parts of one slide.
+    title = center{[0, 1.2, 0]} Text("Scrub time", 0.7)
+    dot =
+        center{[-1.6, 0, 0]}
+        fill{alpha{0.24} GREEN}
+        stroke{GREEN, 2}
+        Circle(0.45)
+    play Lerp(0.8)
+    play Wait(0.4)
 
-slide "Editor Layout"
-    # editor on the left, viewport top-right, timeline bottom-right
-    # scrub the timeline bar to jump to any frame and preview it immediately
-    title = Label("edit code, inspect frames, move through time", [0, 1.45, 0], 0.42)
-    flow = EditorLayout()
-    play TagTrans(0.9)
+    dot =
+        center{[0, 0, 0]}
+        fill{alpha{0.24} MAGENTA}
+        stroke{MAGENTA, 2}
+        Circle(0.62)
+    play Lerp(0.8)
 
-slide "Timeline Shortcuts"
-    # these keys let you navigate time without leaving the keyboard
-    title = Label("timeline navigation", [0, 1.45, 0], 0.48)
-    flow = ShortcutStrip()
-    play TagTrans(0.9)
-
-slide "Present And Export"
-    # cmd/ctrl-t: enter presentation mode (interactive param sliders, fullscreen)
-    # scenes can also export as still images or render as video files
-    title = Label("one scene, several outputs", [0, 1.45, 0], 0.5)
-    flow = OutputModes()
-    play TagTrans(0.9)
+slide "Present Or Export"
+    # the same scene can be previewed, presented as slides, or exported.
+    title = center{[0, 1.2, 0]} Text("Present or export", 0.7)
+    dot = [
+        center{[-1.5, 0, 0]} fill{alpha{0.16} MAGENTA} stroke{MAGENTA, 2} Rect([1.3, 0.65]),
+        center{[0, 0, 0]} fill{alpha{0.16} BLUE} stroke{BLUE, 2} Rect([1.3, 0.65]),
+        center{[1.5, 0, 0]} fill{alpha{0.16} GREEN} stroke{GREEN, 2} Rect([1.3, 0.65]),
+        center{[-1.5, 0, 0]} Text("present", 0.5),
+        center{[0, 0, 0]} Text("image", 0.5),
+        center{[1.5, 0, 0]} Text("video", 0.5)
+    ]
+    line = []
+    label = []
+    play Trans(0.8)

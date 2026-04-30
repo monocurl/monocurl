@@ -1,12 +1,11 @@
-use std::collections::{HashMap, HashSet};
-
 use executor::{
     camera::camera_value_from_snapshot,
     error::RuntimeError,
     executor::Executor,
     heap::{VRc, with_heap},
     scene_snapshot::SceneSnapshot,
-    value::{Value, container::List},
+    state::LeaderKind,
+    value::{MeshAttributePathSegment, Value, container::List},
 };
 use futures::channel::mpsc::UnboundedSender;
 use structs::rope::{Rope, TextAggregate};
@@ -14,8 +13,9 @@ use structs::rope::{Rope, TextAggregate};
 use crate::{services::ServiceManagerMessage, state::diagnostics::Diagnostic};
 
 use super::{
-    ExecutionService, ExecutionSnapshot, ExecutionStatus, ParameterSnapshot, ParameterValue,
-    PlaybackMode, diagnostics::format_runtime_error_message,
+    ExecutionService, ExecutionSnapshot, ExecutionStatus, MeshAttributeSnapshot, MeshEntrySnapshot,
+    ParameterEntrySnapshot, ParameterSnapshot, ParameterValue, PlaybackMode,
+    PresentationUpdateTarget, diagnostics::format_runtime_error_message,
 };
 
 impl ExecutionService {
@@ -81,23 +81,137 @@ impl ExecutionService {
     }
 
     fn parameter_snapshot(executor: &Executor) -> ParameterSnapshot {
-        let mut parameters = HashMap::new();
-        let mut locked_params = HashSet::new();
-        let mut param_order = Vec::new();
-        for param in &executor.state.active_params {
-            let follower_val = with_heap(|h| h.get(param.follower_value).clone());
-            let value = Self::parameter_value_from_runtime(follower_val);
-            let cell_val = with_heap(|h| h.get(param.leader_cell.key()).clone());
-            if matches!(&cell_val, Value::Leader(l) if l.locked_by_anim.is_some()) {
-                locked_params.insert(param.name.clone());
+        let mut params = Vec::new();
+        let mut meshes = Vec::new();
+
+        for (leader_index, entry) in executor.state.leaders.iter().enumerate() {
+            let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
+            let locked = matches!(&cell_val, Value::Leader(l) if l.locked_by_anim.is_some());
+
+            match entry.kind {
+                LeaderKind::Param => {
+                    let follower_val = with_heap(|h| h.get(entry.follower_value).clone());
+                    params.push(ParameterEntrySnapshot {
+                        target: PresentationUpdateTarget::Param { leader_index },
+                        name: entry.name.clone(),
+                        value: Self::parameter_value_from_runtime(follower_val),
+                        locked,
+                    });
+                }
+                LeaderKind::Mesh => {
+                    let follower_val = with_heap(|h| h.get(entry.follower_value).clone());
+                    meshes.push(MeshEntrySnapshot {
+                        leader_index,
+                        name: entry.name.clone(),
+                        locked,
+                        attributes: Self::mesh_attributes_from_runtime(
+                            leader_index,
+                            follower_val,
+                            &[],
+                        ),
+                    });
+                }
             }
-            parameters.insert(param.name.clone(), value);
-            param_order.push(param.name.clone());
         }
-        ParameterSnapshot {
-            parameters,
-            locked_params,
-            param_order,
+
+        ParameterSnapshot { params, meshes }
+    }
+
+    fn mesh_attributes_from_runtime(
+        leader_index: usize,
+        value: Value,
+        parent_path: &[MeshAttributePathSegment],
+    ) -> Vec<MeshAttributeSnapshot> {
+        match value.elide_lvalue() {
+            Value::InvokedFunction(inv) => inv
+                .body
+                .labels
+                .iter()
+                .filter_map(|(arg_idx, name)| {
+                    let value = inv.body.arguments.get(*arg_idx)?.clone();
+                    Some(Self::mesh_labeled_attribute_snapshot(
+                        leader_index,
+                        parent_path,
+                        MeshAttributePathSegment::FunctionArgument(*arg_idx),
+                        name.clone(),
+                        value,
+                    ))
+                })
+                .collect(),
+            Value::InvokedOperator(inv) => {
+                let mut attributes = Vec::new();
+                for (arg_idx, name) in &inv.body.labels {
+                    let Some(value) = inv.body.arguments.get(*arg_idx).cloned() else {
+                        continue;
+                    };
+                    attributes.push(Self::mesh_labeled_attribute_snapshot(
+                        leader_index,
+                        parent_path,
+                        MeshAttributePathSegment::OperatorArgument(*arg_idx),
+                        name.clone(),
+                        value,
+                    ));
+                }
+
+                let mut operand_path = parent_path.to_vec();
+                operand_path.push(MeshAttributePathSegment::OperatorOperand);
+                let operand_attributes = Self::mesh_attributes_from_runtime(
+                    leader_index,
+                    inv.body.operand.as_ref().clone(),
+                    &operand_path,
+                );
+                if !operand_attributes.is_empty() {
+                    attributes.push(MeshAttributeSnapshot {
+                        target: None,
+                        name: "operand".into(),
+                        value: ParameterValue::Other,
+                        children: operand_attributes,
+                    });
+                }
+                attributes
+            }
+            Value::List(list) => list
+                .elements()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, element)| {
+                    let mut item_path = parent_path.to_vec();
+                    item_path.push(MeshAttributePathSegment::ListIndex(index));
+                    let attributes = Self::mesh_attributes_from_runtime(
+                        leader_index,
+                        with_heap(|h| h.get(element.key()).clone()),
+                        &item_path,
+                    );
+                    (!attributes.is_empty()).then(|| MeshAttributeSnapshot {
+                        target: None,
+                        name: format!("item {}", index + 1),
+                        value: ParameterValue::Other,
+                        children: attributes,
+                    })
+                })
+                .collect(),
+            Value::Stateful(_) => Vec::new(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn mesh_labeled_attribute_snapshot(
+        leader_index: usize,
+        parent_path: &[MeshAttributePathSegment],
+        segment: MeshAttributePathSegment,
+        name: String,
+        value: Value,
+    ) -> MeshAttributeSnapshot {
+        let mut path = parent_path.to_vec();
+        path.push(segment);
+        MeshAttributeSnapshot {
+            target: Some(PresentationUpdateTarget::MeshAttribute {
+                leader_index,
+                path: path.clone(),
+            }),
+            name,
+            value: Self::parameter_value_from_runtime(value.clone().elide_cached_wrappers_rec()),
+            children: Self::mesh_attributes_from_runtime(leader_index, value, &path),
         }
     }
 
@@ -113,7 +227,8 @@ impl ExecutionService {
         version: usize,
         scene_snapshot: Option<SceneSnapshot>,
     ) {
-        let parameters = Self::parameter_snapshot(executor);
+        let parameters = (playback_mode == PlaybackMode::Presentation)
+            .then(|| Self::parameter_snapshot(executor));
         let status = if has_compiler_error {
             ExecutionStatus::CompileError
         } else if executor.state.has_errors() {
@@ -152,7 +267,7 @@ impl ExecutionService {
             slide_names: executor.real_slide_names(),
             slide_durations: executor.real_slide_durations(),
             minimum_slide_durations: executor.real_minimum_slide_durations(),
-            parameters: (playback_mode == PlaybackMode::Presentation).then_some(parameters),
+            parameters,
             transcript: transcript.clone(),
         };
 
