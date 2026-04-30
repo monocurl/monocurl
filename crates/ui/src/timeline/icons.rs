@@ -24,7 +24,7 @@ fn icon_resource(icon: TransportIcon) -> String {
 
 pub(super) fn transport_icon(icon: TransportIcon, color: Rgba) -> impl IntoElement {
     svg()
-        .external_path(icon_resource(icon))
+        .path(icon_resource(icon))
         .text_color(color)
         .w(px(TRANSPORT_BTN_W))
         .h(px(TRANSPORT_BTN_H))

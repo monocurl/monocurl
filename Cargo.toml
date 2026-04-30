@@ -53,10 +53,13 @@ openh264 = "0.9.3"
 hayro-interpret = "0.4.0"
 hayro-svg = "0.2.0"
 roxmltree = "0.20.0"
-tectonic = { version = "0.15", default-features = false, features = ["geturl-reqwest"] }
-tectonic_bundles = { version = "0.3", default-features = false }
+tectonic = { version = "0.16.9", default-features = false, features = ["geturl-reqwest"] }
+tectonic_bundles = { version = "0.4.1", default-features = false }
+# keep xetex on the last engine that works with tectonic_xetex_layout 0.2.x;
+# layout 0.3.x conflicts with gpui's fontconfig stack.
+tectonic_engine_xetex = "=0.4.4"
 
-gpui = { path = "../gpui/crates/gpui" }
+gpui = "0.2.2"
 
 autocomplete = { path = "crates/autocomplete" }
 bytecode = { path = "crates/bytecode" }

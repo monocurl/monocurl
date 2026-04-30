@@ -104,7 +104,7 @@ impl SettingsWindow {
         };
 
         div()
-            .id(format!("latex-backend-{label}"))
+            .id(ElementId::Name(format!("latex-backend-{label}").into()))
             .px(px(12.0))
             .py(px(6.0))
             .rounded(px(5.0))
@@ -220,7 +220,9 @@ impl SettingsWindow {
             )
             .child(
                 div()
-                    .id(format!("choose-system-binary-{}", binary.label()))
+                    .id(ElementId::Name(
+                        format!("choose-system-binary-{}", binary.label()).into(),
+                    ))
                     .px(px(10.0))
                     .py(px(5.0))
                     .rounded(px(5.0))

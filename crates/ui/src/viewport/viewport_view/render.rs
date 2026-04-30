@@ -621,7 +621,7 @@ fn render_presentation_ring(
         .border(px(ring_style.width))
         .border_color(ring_style.color)
         .with_animation(
-            animation_id,
+            ElementId::Name(animation_id.into()),
             Animation::new(RING_TRANSITION).with_easing(ease_in_out),
             move |ring, delta| {
                 ring.border(px(lerp_f32(previous_ring.width, ring_style.width, delta)))

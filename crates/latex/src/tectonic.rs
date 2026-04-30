@@ -31,7 +31,7 @@ fn render_pdf_document(document: &str) -> Result<Vec<u8>> {
         )?))
     } else {
         config
-            .default_bundle(false, &mut status)
+            .default_bundle(false)
             .map_err(|e| anyhow!("failed to load tectonic bundle: {e}"))?
     };
 
@@ -110,12 +110,12 @@ impl LocalThenDefaultBundle {
         }
     }
 
-    fn ensure_fallback(&mut self, status: &mut dyn StatusBackend) -> Result<()> {
+    fn ensure_fallback(&mut self) -> Result<()> {
         if self.fallback.is_none() {
             let config = PersistentConfig::open(false)
                 .map_err(|e| anyhow!("failed to open tectonic config: {e}"))?;
             let fallback = config
-                .default_bundle(false, status)
+                .default_bundle(false)
                 .map_err(|e| anyhow!("failed to load fallback tectonic bundle: {e}"))?;
             self.fallback = Some(fallback);
         }
@@ -137,7 +137,7 @@ impl IoProvider for LocalThenDefaultBundle {
     ) -> OpenResult<InputHandle> {
         match self.local.input_open_name(name, status) {
             OpenResult::NotAvailable if self.should_try_fallback(name) => {
-                match self.ensure_fallback(status) {
+                match self.ensure_fallback() {
                     Ok(()) => self
                         .fallback
                         .as_mut()
@@ -157,7 +157,7 @@ impl IoProvider for LocalThenDefaultBundle {
     ) -> OpenResult<(InputHandle, Option<PathBuf>)> {
         match self.local.input_open_name_with_abspath(name, status) {
             OpenResult::NotAvailable if self.should_try_fallback(name) => {
-                match self.ensure_fallback(status) {
+                match self.ensure_fallback() {
                     Ok(()) => self
                         .fallback
                         .as_mut()
@@ -172,25 +172,22 @@ impl IoProvider for LocalThenDefaultBundle {
 }
 
 impl Bundle for LocalThenDefaultBundle {
-    fn get_digest(
-        &mut self,
-        status: &mut dyn StatusBackend,
-    ) -> Result<tectonic::io::digest::DigestData> {
-        match self.local.get_digest(status) {
+    fn get_digest(&mut self) -> Result<tectonic::io::digest::DigestData> {
+        match self.local.get_digest() {
             Ok(digest) => Ok(digest),
             Err(_) => {
-                self.ensure_fallback(status)?;
-                self.fallback.as_mut().unwrap().get_digest(status)
+                self.ensure_fallback()?;
+                self.fallback.as_mut().unwrap().get_digest()
             }
         }
     }
 
-    fn all_files(&mut self, status: &mut dyn StatusBackend) -> Result<Vec<String>> {
-        let mut files = self.local.all_files(status)?;
-        if let Some(fallback) = self.fallback.as_mut() {
-            files.extend(fallback.all_files(status)?);
+    fn all_files(&self) -> Vec<String> {
+        let mut files = self.local.all_files();
+        if let Some(fallback) = self.fallback.as_ref() {
+            files.extend(fallback.all_files());
         }
-        Ok(files)
+        files
     }
 }
 

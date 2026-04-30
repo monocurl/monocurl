@@ -9,6 +9,7 @@ assets/tectonic/bundle/
 *.swp
 tmp
 .zed
+.cargo/config.toml
 
 CLAUDE.md
 AGENTS.md

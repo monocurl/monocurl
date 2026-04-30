@@ -69,13 +69,14 @@ let g = |x| {
 }
 let samples = [f(1), f(2), f(3, 0)]
 
-# Recursive lambdas take themselves as an explicit `self` argument.
-let fact = |self, x| {
-    if (x <= 1) { return 1 }
-    return x * self(self, x - 1)
-}
 
-print ["factorial 5" -> fact(fact, 5)]
+# you can label arguments of lambdas to change them later on
+# the entire result is then recomputed on the new arguments
+var f_inv = f(x_arg: 2)
+print f_inv
+f_inv.x_arg = 3
+print f_inv
+
 
 # Lists use zero-based indexing. Maps use key -> value pairs.
 let map = ["left" -> "start", "right" -> "end"]
@@ -98,3 +99,11 @@ while (n > 0) {
     countdown .= n
     n = n - 1
 }
+
+# Recursive lambdas take themselves as an explicit `self` argument.
+let fact = |self, x| {
+    if (x <= 1) { return 1 }
+    return x * self(self, x - 1)
+}
+
+print ["factorial 5" -> fact(fact, 5)]

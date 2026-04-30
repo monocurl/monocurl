@@ -63,12 +63,12 @@ slide "Set"
     ball = Circle(rad: 0.5)
     # animations can typically infer the meshes to animate
     # but you may sometimes want fine grained control
-    # pass the meshes you want to animate via & (reference)
+    # and pass the meshes you want to animate via & (reference)
     play Set([&ball])
     play Wait(1.2)
 
 slide "Lerp"
-    title = center{1.3u} Text("Lerp moves", 0.8)
+    title = center{1.3u} Text("Lerp interpolates", 0.8)
     play Set()
 
     # Lerp interpolates from the current follower to the current leader.
