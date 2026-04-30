@@ -1,9 +1,10 @@
 [package]
-name = "ui"
+name = "monocurl"
 version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
+cli.workspace = true
 ui_cli_shared.workspace = true
 lexer.workspace = true
 compiler.workspace = true

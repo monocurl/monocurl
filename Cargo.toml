@@ -19,7 +19,7 @@ members = [
     "crates/stdlib",
     "crates/stdlib-macros",
     "crates/structs",
-    "crates/ui",
+    "crates/monocurl",
 ]
 
 [workspace.package]
@@ -78,7 +78,7 @@ inventory = "0.3"
 stdlib-macros = { path = "crates/stdlib-macros" }
 stdlib = { path = "crates/stdlib" }
 structs = { path = "crates/structs" }
-ui = { path = "crates/ui" }
+monocurl = { path = "crates/monocurl" }
 ui_cli_shared = { path = "crates/ui_cli_shared" }
 
 [profile.release]

@@ -1123,7 +1123,6 @@ name = "cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "env_logger",
  "executor",
  "exporter",
  "latex",
@@ -4341,6 +4340,40 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "monocurl"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytecode",
+ "cli",
+ "compiler",
+ "dirs 5.0.1",
+ "env_logger",
+ "executor",
+ "exporter",
+ "futures",
+ "geo",
+ "gpui",
+ "image",
+ "latex",
+ "lexer",
+ "log",
+ "notify-debouncer-full",
+ "open",
+ "parser",
+ "renderer",
+ "schemars",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "smol",
+ "stdlib",
+ "structs",
+ "ui_cli_shared",
+ "unicode-segmentation",
 ]
 
 [[package]]
@@ -7961,39 +7994,6 @@ dependencies = [
  "memoffset",
  "tempfile",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "ui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytecode",
- "compiler",
- "dirs 5.0.1",
- "env_logger",
- "executor",
- "exporter",
- "futures",
- "geo",
- "gpui",
- "image",
- "latex",
- "lexer",
- "log",
- "notify-debouncer-full",
- "open",
- "parser",
- "renderer",
- "schemars",
- "serde",
- "serde_json",
- "smallvec",
- "smol",
- "stdlib",
- "structs",
- "ui_cli_shared",
- "unicode-segmentation",
 ]
 
 [[package]]

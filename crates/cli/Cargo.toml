@@ -3,13 +3,8 @@ name = "cli"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "monocurl"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
-env_logger.workspace = true
 executor.workspace = true
 exporter.workspace = true
 latex.workspace = true

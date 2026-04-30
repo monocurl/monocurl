@@ -1,6 +1,6 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
-use std::borrow::Cow;
+use std::{borrow::Cow, env, process};
 
 use crate::{
     actions::{
@@ -172,6 +172,11 @@ fn main() {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)
         .init();
+
+    let args = env::args_os().skip(1).collect::<Vec<_>>();
+    if !args.is_empty() {
+        process::exit(cli::run(args));
+    }
 
     MonocurlLauncher::launch();
 }

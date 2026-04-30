@@ -1,7 +1,7 @@
 - bytecode: contains the enum of the Monocurl VM bytecode
   - src/lib.rs: Instruction / prototype definitions plus SectionBytecode metadata (flags, instruction annotations, source file name, imported-bundle display index). `LambdaPrototype` carries per-argument names alongside default/reference metadata so runtime live functions can address default arguments by name. `PushCopy` now carries an explicit copy mode (`Read` / `Reference` / `Raw`) so the compiler can preserve raw lvalue/reference values for selected slots without ad-hoc runtime elision rules, plain reads now materialize stateful mesh leaders without a separate current-value opcode, `IncrementByOne` now gives compiler-generated `for` induction vars a single in-place increment opcode instead of spelling that update as generic lvalue arithmetic, and `Observe` records the top-of-stack value into the execution transcript for `print` statements
-- cli: binary crate for the `monocurl` command-line interface
-  - src/main.rs: startup stale LaTeX SVG file-cache cleanup plus the hand-rolled CLI parser and help text for `help` / `image` / `video`, `--system-latex` backend selection for exports, output-path normalization, small export-resolution presets, terminal progress rendering layered over the shared exporter crate, and final transcript printing for CLI runs that executed `print` statements
+- cli: library crate for the command-line interface shared by the main `monocurl` executable
+  - src/lib.rs: `run(args)` entrypoint with startup stale LaTeX SVG file-cache cleanup plus the hand-rolled CLI parser and help text for `help` / `image` / `video`, `--system-latex` backend selection for exports, output-path normalization, small export-resolution presets, terminal progress rendering layered over the shared exporter crate, and final transcript printing for CLI runs that executed `print` statements
 - assets: checked-in resources copied into packaged apps
   - tectonic/README.md: upstream Tectonic MIT license notice for the bundled Tectonic-derived assets
   - tectonic/bundle.zip: generated seed bundle built from the warmed Tectonic cache for `default_bundle_v33`, covering the common LaTeX files Monocurl's text/Tex/Latex wrappers use without needing a first-run download
@@ -108,7 +108,7 @@
   - src/iterutil.rs: contains code for KLookahead iterator from a base iterator
   - src/rope.rs: a general purpose rope mostly used by the UI for an efficient text editor
   - src/text.rs: small helper structs for abstracting locations in utf8 or utf16
-- ui: contains all ui related code (everything is gpui)
+- monocurl: main `monocurl` executable crate in `crates/monocurl`, containing all UI related code (everything is gpui) and dispatching to the shared CLI library whenever the executable is launched with command-line arguments
   - src/components/buttons.rs: contains a button styled like a link
   - src/components/latex_warning.rs: shared warning banner for invalid system LaTeX tool paths, reused by home and document views. The bundled Tectonic backend stays silent because it can use the packaged seed bundle or download support files on demand
   - src/components/split_pane.rs: gpui element that implements vertical and horizontal split pane

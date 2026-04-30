@@ -1,11 +1,9 @@
 use std::{
     collections::HashMap,
-    env,
     ffi::{OsStr, OsString},
     fs,
     io::{self, Write},
     path::{Path, PathBuf},
-    process,
     sync::{Arc, atomic::AtomicBool},
 };
 
@@ -19,27 +17,27 @@ use renderer::RenderSize;
 
 const PROGRESS_BAR_WIDTH: usize = 28;
 
-fn main() {
-    env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Info)
-        .init();
+pub fn run(args: Vec<OsString>) -> i32 {
     clean_latex_file_cache();
 
-    match parse_cli(env::args_os().skip(1).collect()) {
+    match parse_cli(args) {
         Ok(CliAction::Help(topic)) => {
             println!("{}", help_text(topic));
+            0
         }
         Ok(CliAction::Run(command)) => {
             if let Err(error) = run_command(command) {
                 eprintln!("error: {error:#}");
-                process::exit(1);
+                1
+            } else {
+                0
             }
         }
         Err(error) => {
             eprintln!("error: {error}");
             eprintln!();
             eprintln!("Use `monocurl help` for usage.");
-            process::exit(2);
+            2
         }
     }
 }
