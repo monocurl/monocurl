@@ -810,6 +810,61 @@ fn test_stroke_operator_accepts_named_stroke_width() {
 }
 
 #[test]
+fn test_stroke_operator_default_width_preserves_existing_stroke_width() {
+    let r = run_with_stdlib(
+        "
+        let line = stroke{BLUE, 5} Line([0, 0, 0], [1, 0, 0])
+        let result = stroke{RED} line
+    ",
+        &["mesh", "color"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+
+    assert_eq!(meshes.len(), 1, "expected one stroked line mesh");
+    assert_eq!(
+        meshes[0].uniform.stroke_radius.to_bits(),
+        5.0f32.to_bits(),
+        "expected default nil stroke_width to preserve existing stroke radius"
+    );
+    assert!(
+        (meshes[0].lins[0].a.col.x - 0.9).abs() < 1e-6,
+        "expected default nil stroke_width to still recolor strokes"
+    );
+    assert_eq!(
+        meshes[0].lins[0].a.col.to_array(),
+        meshes[0].lins[0].b.col.to_array(),
+        "expected recolored stroke vertices to stay in sync"
+    );
+}
+
+#[test]
+fn test_stroke_operator_explicit_nil_width_preserves_existing_stroke_width() {
+    let r = run_with_stdlib(
+        "
+        let line = stroke{BLUE, 5} Line([0, 0, 0], [1, 0, 0])
+        let result = stroke{RED, nil} line
+    ",
+        &["mesh", "color"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+
+    assert_eq!(meshes.len(), 1, "expected one stroked line mesh");
+    assert_eq!(
+        meshes[0].uniform.stroke_radius.to_bits(),
+        5.0f32.to_bits(),
+        "expected explicit nil stroke_width to preserve existing stroke radius"
+    );
+}
+
+#[test]
 fn test_stroke_operator_uses_third_argument_filter_when_width_is_present() {
     let r = run_with_stdlib(
         "

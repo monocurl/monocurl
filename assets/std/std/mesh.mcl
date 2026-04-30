@@ -302,7 +302,7 @@ let fade = operator |target, opacity, filter = nil| {
     return [go(o: 1), go(o: opacity)]
 }
 
-let stroke = operator |target, color, stroke_width = 1.0, filter = nil| {
+let stroke = operator |target, color, stroke_width = nil, filter = nil| {
     let go = |c, level| __monocurl__native__ op_restroke(target, c, stroke_width, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }

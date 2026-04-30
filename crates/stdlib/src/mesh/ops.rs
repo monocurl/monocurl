@@ -713,14 +713,22 @@ pub async fn op_restroke(
 ) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
     let color = read_float4(executor, stack_idx, -4, "color").await?;
-    let stroke_width = crate::read_float(executor, stack_idx, -3, "stroke_width")? as f32;
+    let stroke_radius = match executor.state.stack(stack_idx).read_at(-3) {
+        Value::Nil => None,
+        value => match value.clone().elide_cached_wrappers_rec() {
+            Value::Nil => None,
+            _ => Some(crate::read_float(executor, stack_idx, -3, "stroke_width")? as f32),
+        },
+    }
+    .map(|stroke_width| stroke_width.max(0.0));
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     let level = read_level(executor, stack_idx, -1, "level")?;
-    let stroke_radius = stroke_width.max(0.0);
-    tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        mesh.uniform.stroke_radius = stroke_radius;
-    })
-    .await?;
+    if let Some(stroke_radius) = stroke_radius {
+        tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
+            mesh.uniform.stroke_radius = stroke_radius;
+        })
+        .await?;
+    }
     if level <= 0.0 {
         return Ok(tree.into_value());
     }
