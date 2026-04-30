@@ -72,5 +72,4 @@ import std.scene
 - Type/introspection: `type_of`, `is_list`, `is_map`, `is_mesh`,
   `is_callable`, `has_attr`, `get_attr`, `set_attr`, `get_defaults`,
   `set_default`, `set_defaults`, `runtime_error`.
-- Scene: `Camera`, `DEFAULT_CAMERA`, `DEFAULT_BACKGROUND`, `FRAME_X_RADIUS`,
-  `FRAME_Y_RADIUS`.
+- Scene: `Camera`, `DEFAULT_CAMERA`, `DEFAULT_BACKGROUND`.

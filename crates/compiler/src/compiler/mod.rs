@@ -27,7 +27,11 @@ use parser::ast::{
 };
 use stateful::is_stateful;
 use stdlib::registry::registry;
-use structs::text::{Count8, Span8};
+use structs::{
+    rope::{Attribute, RLEData, Rope},
+    text::{Count8, Span8},
+};
+use ui_cli_shared::static_analysis::StaticAnalysisData;
 use warnings::expression_statement_has_no_effect;
 
 use crate::cache::CompilerCache;
@@ -306,6 +310,45 @@ pub fn compile(
     let (cache, result) = c.finish();
     *compiler_cache = cache;
     result
+}
+
+pub fn static_analysis_rope(
+    compile: &CompileResult,
+    text_len: Count8,
+) -> Rope<Attribute<StaticAnalysisData>> {
+    let mut rope = Rope::default();
+
+    if text_len == 0 {
+        return rope;
+    }
+
+    rope = rope.replace_range(
+        0..0,
+        std::iter::once(RLEData {
+            codeunits: text_len,
+            attribute: StaticAnalysisData::None,
+        }),
+    );
+
+    for reference in &compile.root_references {
+        let analysis = match (&reference.symbol.function_info, &reference.invocation_spans) {
+            (SymbolFunctionInfo::Lambda { .. }, Some(_)) => StaticAnalysisData::FunctionInvocation,
+            (SymbolFunctionInfo::Operator { .. }, Some(_)) => {
+                StaticAnalysisData::OperatorInvocation
+            }
+            _ => continue,
+        };
+
+        rope = rope.replace_range(
+            reference.span.clone(),
+            std::iter::once(RLEData {
+                codeunits: reference.span.len(),
+                attribute: analysis,
+            }),
+        );
+    }
+
+    rope
 }
 
 impl Compiler {

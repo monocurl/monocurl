@@ -2,19 +2,20 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use compiler::cache::CompilerCache;
-use compiler::compiler::{CompileResult, CursorIdentifierType, SymbolFunctionInfo, compile};
+use compiler::compiler::{
+    CompileResult, CursorIdentifierType, SymbolFunctionInfo, compile, static_analysis_rope,
+};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use futures::{SinkExt, StreamExt};
 use lexer::token::Token;
 use parser::import_context::ParseImportContext;
 use parser::parser::{ParseArtifacts, Parser};
-use structs::rope::{Attribute, RLEData, Rope, TextAggregate};
+use structs::rope::{Attribute, Rope, TextAggregate};
 use structs::text::{Count8, Location8, Span8};
 
 use crate::state::diagnostics::{Diagnostic, DiagnosticType};
 use crate::state::textual_state::{
     AutoCompleteCategory, AutoCompleteItem, Cursor, ParameterHintArg, ParameterPositionHint,
-    StaticAnalysisData,
 };
 use crate::{
     services::{ServiceManagerMessage, execution::ExecutionMessage},
@@ -121,48 +122,6 @@ impl CompilationService {
             .unwrap();
     }
 
-    fn static_analysis_rope(
-        &self,
-        compile: &CompileResult,
-        text_rope: &Rope<TextAggregate>,
-    ) -> Rope<Attribute<StaticAnalysisData>> {
-        let mut rope = Rope::default();
-
-        if text_rope.codeunits() == 0 {
-            return rope;
-        }
-
-        rope = rope.replace_range(
-            0..0,
-            std::iter::once(RLEData {
-                codeunits: text_rope.codeunits(),
-                attribute: StaticAnalysisData::None,
-            }),
-        );
-
-        for reference in &compile.root_references {
-            let analysis = match (&reference.symbol.function_info, &reference.invocation_spans) {
-                (compiler::compiler::SymbolFunctionInfo::Lambda { .. }, Some(_)) => {
-                    StaticAnalysisData::FunctionInvocation
-                }
-                (compiler::compiler::SymbolFunctionInfo::Operator { .. }, Some(_)) => {
-                    StaticAnalysisData::OperatorInvocation
-                }
-                _ => continue,
-            };
-
-            rope = rope.replace_range(
-                reference.span.clone(),
-                std::iter::once(RLEData {
-                    codeunits: reference.span.len(),
-                    attribute: analysis,
-                }),
-            );
-        }
-
-        rope
-    }
-
     #[must_use]
     async fn recompile(
         &mut self,
@@ -178,7 +137,7 @@ impl CompilationService {
         let (parsed_bundles, parse_artifacts) =
             Parser::parse(parse_state, lex_rope.clone(), text_rope.clone(), cursor_pos);
         let compile_result = compile(compile_state, cursor_pos, &parsed_bundles);
-        let analysis_rope = self.static_analysis_rope(&compile_result, &text_rope);
+        let analysis_rope = static_analysis_rope(&compile_result, text_rope.codeunits());
 
         self.sm_tx
             .send(ServiceManagerMessage::UpdateStaticAnalysisRope {

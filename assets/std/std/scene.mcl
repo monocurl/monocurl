@@ -16,13 +16,3 @@ let Camera = |position = 4b, target = [0,0,0], up = 1u, near = 0.1, far = 100| _
 
 let DEFAULT_CAMERA     = __monocurl__native__ initial_camera()
 let DEFAULT_BACKGROUND = __monocurl__native__ initial_background()
-
-# viewport hints
-# canonical aspect ratios — useful when setting up orthographic bounds.
-let ASPECT_16_9 = 16 / 9
-let ASPECT_4_3  = 4 / 3
-let ASPECT_1_1  = 1
-
-# half-extents of the default 16:9 viewport at unit camera distance.
-let FRAME_X_RADIUS = 7.11111111111
-let FRAME_Y_RADIUS = 4

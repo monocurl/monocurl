@@ -8,6 +8,7 @@ use structs::{
     rope::{Attribute, RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str},
     text::{Count8, Count16, Location8, Span8, Span16},
 };
+pub use ui_cli_shared::static_analysis::StaticAnalysisData;
 
 use crate::{
     editor::text_editor::TextEditor,
@@ -15,14 +16,6 @@ use crate::{
 };
 
 pub type LexData = Token;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum StaticAnalysisData {
-    #[default]
-    None,
-    FunctionInvocation,
-    OperatorInvocation,
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoCompleteCategory {

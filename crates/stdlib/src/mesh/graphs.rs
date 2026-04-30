@@ -21,7 +21,7 @@ use super::{
 
 const MAX_CURVE_SAMPLES: usize = 1 << 14;
 const MAX_AXIS_TICKS: usize = 1 << 12;
-const MAX_GRID_CELLS: usize = 1 << 16;
+const MAX_GRID_CELLS: usize = 1 << 18;
 const MAX_LINE_GRID_POINTS: usize = 1 << 16;
 const MAX_FIELD_SAMPLES: usize = 1 << 16;
 const MAX_SURFACE_TRIANGLES: usize = 1 << 17;

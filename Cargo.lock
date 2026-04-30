@@ -1123,11 +1123,16 @@ name = "cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "compiler",
  "executor",
  "exporter",
  "latex",
+ "lexer",
  "log",
+ "parser",
  "renderer",
+ "structs",
+ "ui_cli_shared",
 ]
 
 [[package]]
@@ -1242,6 +1247,7 @@ dependencies = [
  "parser",
  "stdlib",
  "structs",
+ "ui_cli_shared",
 ]
 
 [[package]]

@@ -8,6 +8,7 @@ parser.workspace = true
 bytecode.workspace = true
 structs.workspace = true
 stdlib.workspace = true
+ui_cli_shared.workspace = true
 
 [dev-dependencies]
 lexer.workspace = true
