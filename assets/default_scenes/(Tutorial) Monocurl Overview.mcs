@@ -1,18 +1,21 @@
-# tutorial: monocurl overview
+# Monocurl - A programming language and desktop application for 
+# algorithmic animation.
 #
-# Keyboard shortcuts to try in the timeline:
+# This lesson is a snippet from monocurl.com/learn
+#
+# Keyboard shortcuts to try in the timeline (can also click):
 # - `.` moves to the next slide
 # - `,` moves to the previous slide
 # - `<` jumps to the start of the scene
 # - `>` jumps to the end of the scene
 # - `;` steps slightly backward
 # - `'` steps slightly forward
-# - Command/Ctrl-T toggles presentation mode
+# - Command/Ctrl-P toggles presentation mode
 #
 # Things to try while editing this file:
-# - change BLUE to ORANGE
-# - change [1.6, 0, 0] to [-1.6, 0, 0]
-# - change Lerp(1.0) to Lerp(2.0)
+# - replace BLUE with ORANGE
+# - replace [1.6, 0, 0] with [-1.6, 0, 0]
+# - replace Lerp(1.0) with Lerp(2.0)
 
 import std.util
 import std.math
@@ -46,7 +49,7 @@ slide "Change One Value"
         fill{alpha{0.24} ORANGE}
         stroke{ORANGE, 2}
         Circle(0.45)
-    play Lerp(1.0)
+    play Trans(1.0)
 
 slide "Add A Mesh"
     # mesh values can be text, lines, shapes, or lists of other meshes.
@@ -63,7 +66,7 @@ slide "Scrub The Timeline"
         fill{alpha{0.24} GREEN}
         stroke{GREEN, 2}
         Circle(0.45)
-    play Lerp(0.8)
+    play Trans(0.8)
     play Wait(0.4)
 
     dot =
@@ -71,10 +74,13 @@ slide "Scrub The Timeline"
         fill{alpha{0.24} MAGENTA}
         stroke{MAGENTA, 2}
         Circle(0.62)
-    play Lerp(0.8)
+    play Trans(0.8)
 
 slide "Present Or Export"
-    # the same scene can be previewed, presented as slides, or exported.
+    # the same scene can be previewed, presented as slides, or exported as image / video
+    # to present, use command / ctrl + p
+    # to export, use the file menu
+    
     title = center{[0, 1.2, 0]} Text("Present or export", 0.7)
     dot = [
         center{[-1.5, 0, 0]} fill{alpha{0.16} MAGENTA} stroke{MAGENTA, 2} Rect([1.3, 0.65]),

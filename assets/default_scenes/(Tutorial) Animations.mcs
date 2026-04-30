@@ -1,7 +1,8 @@
 # tutorial: animations
 #
-# Animations sync mesh leaders to their visible followers. This scene keeps the
-# geometry simple so each play statement is easy to inspect.
+# Animations are based on a leader/follower model. A mesh leader is the value
+# your code edits. Its follower is the value currently visible in the viewport.
+# A `play` statement decides how followers catch up to their leaders.
 
 import std.util
 import std.math
@@ -13,108 +14,161 @@ import std.scene
 background = WHITE
 param live_radius = 0.38
 
-mesh title = center{[0, 1.25, 0]} Text("Animations", 0.75)
+mesh title = center{[0, 1.3, 0]} Text("Leader and follower", 0.8)
 mesh ball =
-    center{[-1.5, 0, 0]}
+    center{[-1.6, 0, 0]}
     fill{alpha{0.24} BLUE}
     stroke{BLUE, 2}
     Circle(0.45)
 
-slide "Set And Wait"
-    # Set snaps followers to leaders. Wait adds time without changing anything.
-    play Set()
-    play Wait(0.45)
+slide "Leader And Follower"
+    # At the end of init, mesh leaders are synced to followers automatically.
+    # That is why the blue ball is already visible when the scene opens.
+    play Wait(1.2)
 
+    # This assignment changes the leader immediately. Code now reads the orange
+    # ball at the right, but the viewport still shows the old follower until a
+    # later play statement syncs it.
     ball =
-        center{[1.5, 0, 0]}
+        center{[1.6, 0, 0]}
         fill{alpha{0.24} ORANGE}
         stroke{ORANGE, 2}
         Circle(0.45)
-    play Set()
-    play Wait(0.45)
+    print ["leader changed" -> "orange ball on the right"]
+    print "the follower is still the old blue ball during the next Wait"
 
-slide "Lerp"
-    # Lerp moves smoothly from the current follower to the new leader.
-    title = center{[0, 1.25, 0]} Text("Lerp", 0.75)
+    play Wait(1.6)
+    play Lerp(1.4)
+    play Wait(0.8)
+
+slide "Set"
+    # Set snaps followers to leaders immediately. Use it when you want a jump,
+    # or when you want to reveal the current leader without interpolation.
+    title = center{[0, 1.3, 0]} Text("Set snaps", 0.8)
     ball =
-        center{[0, 0.05, 0]}
+        center{[-1.4, -0.15, 0]}
+        fill{alpha{0.24} GREEN}
+        stroke{GREEN, 2}
+        Circle(0.45)
+    play Set()
+    play Wait(1.2)
+
+    ball =
+        center{[1.4, -0.15, 0]}
         fill{alpha{0.24} MAGENTA}
         stroke{MAGENTA, 2}
-        Circle(0.68)
-    print ["lerp destination" -> "center circle"]
-    play Lerp(1.0)
+        Circle(0.45)
+    play Set()
+    play Wait(1.2)
 
-slide "Write And Grow"
-    # Write traces strokes. Grow expands a shape from its center.
-    title = center{[0, 1.25, 0]} Text("Write and Grow", 0.75)
+slide "Lerp"
+    # Lerp interpolates from the current follower to the current leader.
+    # It works best when the old and new mesh values have similar structure.
+    title = center{[0, 1.3, 0]} Text("Lerp moves", 0.8)
+    ball =
+        center{[0, 0, 0]}
+        fill{alpha{0.24} BLUE}
+        stroke{BLUE, 2}
+        Circle(0.65)
+    print ["lerp destination" -> "larger blue circle at center"]
+    play Lerp(1.5)
+    play Wait(1.0)
+
+slide "Labeled Keyframes"
+    # Lerp is especially useful with labeled function calls. The labels become
+    # editable fields on the mesh leader, so you can change just pos/radius/col.
+    let Ball = |pos, radius, col|
+        center{pos}
+        fill{alpha{0.24} col}
+        stroke{col, 2}
+        Circle(radius)
+
+    title = center{[0, 1.3, 0]} Text("Labeled keyframes", 0.8)
+    ball = Ball(pos: [-1.4, 0, 0], radius: 0.35, col: BLUE)
+    play Set()
+    play Wait(0.8)
+
+    ball.pos = [1.4, 0, 0]
+    ball.radius = 0.6
+    ball.col = ORANGE
+    print ["leader fields" -> ["pos" -> ball.pos, "radius" -> ball.radius]]
+    play Lerp(1.5)
+    play Wait(1.0)
+
+slide "Wait"
+    # Wait reserves timeline time. It does not update any follower, even if a
+    # leader is dirty. The next Lerp still starts from the old follower.
+    title = center{[0, 1.3, 0]} Text("Wait does not sync", 0.8)
+    ball =
+        center{[-1.4, 0, 0]}
+        fill{alpha{0.24} GREEN}
+        stroke{GREEN, 2}
+        Square(0.85)
+    print "leader is now a green square, but Wait will not show it yet"
+    play Wait(1.5)
+    play Trans(1.2)
+    play Wait(0.8)
+
+slide "Grow Fade Write"
+    # Grow, Fade, and Write are follower animations. They compare the current
+    # follower with the current leader, then stage a specialized transition.
+    title = center{[0, 1.3, 0]} Text("Grow Fade Write", 0.8)
     ball = []
     mesh path = stroke{TEAL, 3} Polyline([[-1.8, -0.35, 0], [0, 0.35, 0], [1.8, -0.35, 0]])
-    play Write(1.0)
+    play Write(1.2)
 
     mesh ring =
         fill{CLEAR}
         stroke{MAGENTA, 3}
         Circle(0.65)
-    play Grow(0.7)
+    play Grow(0.9)
+    play Wait(0.8)
 
-slide "Fade"
-    # To fade something out, assign it to [] and play Fade.
-    title = center{[0, 1.25, 0]} Text("Fade", 0.75)
     path = []
     ring = []
-    play Fade(0.7)
-
-slide "Trans"
-    # Trans morphs between different mesh shapes.
-    title = center{[0, 1.25, 0]} Text("Trans", 0.75)
-    ball =
-        center{[0, 0, 0]}
-        fill{alpha{0.24} GREEN}
-        stroke{GREEN, 2}
-        Circle(0.55)
-    play Grow(0.4)
-
-    ball =
-        center{[0, 0, 0]}
-        fill{alpha{0.24} GREEN}
-        stroke{GREEN, 2}
-        Square(1.0)
-    play Trans(0.9)
+    play Fade(0.9)
 
 slide "TagTrans"
-    # TagTrans matches pieces with the same tag.
-    title = center{[0, 1.25, 0]} Text("TagTrans", 0.75)
+    # TagTrans is Trans with identities. Matching tags move to matching tags,
+    # even if the list order changes.
+    title = center{[0, 1.3, 0]} Text("TagTrans", 0.8)
     ball = [
         tag{1} center{[-1.1, 0, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.36),
         tag{2} center{[1.1, 0, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.36)
     ]
-    play Trans(0.6)
+    play Trans(0.8)
+    play Wait(0.7)
 
     ball = [
         tag{2} center{[-1.1, 0, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.42),
         tag{1} center{[1.1, 0, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.42)
     ]
-    play TagTrans(1.0)
+    play TagTrans(1.2)
+    play Wait(0.8)
 
 slide "Rates"
-    # Rates change timing. Both dots travel for the same duration.
-    title = center{[0, 1.25, 0]} Text("Rates", 0.75)
+    # In parallel animations, use explicit targets so each branch owns a
+    # different leader. The two dots have the same duration but different rates.
+    title = center{[0, 1.3, 0]} Text("Rates", 0.8)
     ball = []
     mesh linear_dot = center{[-1.7, -0.35, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.28)
     mesh bounce_dot = center{[-1.7, 0.35, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.28)
     play Set()
+    play Wait(0.7)
 
     linear_dot = center{[1.7, -0.35, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.28)
     bounce_dot = center{[1.7, 0.35, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.28)
     play [
-        rate{linear} Lerp(1.2, [&linear_dot]),
-        rate{bounce} Lerp(1.2, [&bounce_dot])
+        rate{linear} Lerp(1.4, [&linear_dot]),
+        rate{bounce} Lerp(1.4, [&bounce_dot])
     ]
+    play Wait(0.8)
 
 slide "Parameters"
-    # `$live_radius` reads the live parameter follower. In presentation mode,
-    # dragging the parameter changes the mesh while the scene is paused.
-    title = center{[0, 1.25, 0]} Text("Parameters", 0.75)
+    # A param also has a leader and follower. A plain read like live_radius reads
+    # the leader. `$live_radius` reads the live follower, which is why the mesh
+    # can react to presentation-mode slider changes.
+    title = center{[0, 1.3, 0]} Text("Parameters", 0.8)
     linear_dot = []
     bounce_dot = []
     mesh live =
@@ -122,9 +176,9 @@ slide "Parameters"
         fill{alpha{0.24} GREEN}
         stroke{GREEN, 2}
         Circle(radius: $live_radius)
-    print ["radius before" -> live_radius]
-    play Fade(0.6)
+    print ["radius leader before" -> live_radius]
+    play Fade(0.8)
 
     live_radius = 0.8
-    print ["radius after" -> live_radius]
-    play Lerp(1.0)
+    print ["radius leader after" -> live_radius]
+    play Lerp(1.2)

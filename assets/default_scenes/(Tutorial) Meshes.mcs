@@ -1,7 +1,7 @@
 # tutorial: meshes and operators
 #
-# This scene keeps the init section small. Most mesh expressions are written
-# directly in the slide where they are used.
+# Meshes are the visible values in a scene. This tutorial keeps definitions
+# close to the slide that uses them so new code is easy to follow.
 
 import std.util
 import std.math
@@ -12,76 +12,111 @@ import std.scene
 
 background = WHITE
 
-# `mesh` values are the visible state of the scene.
-# any meshes set in the "init" section (before slides)
-# are shown on screen automatically; all others must be animated
-mesh title = center{[0, 1.25, 0]} Text("Meshes", 0.75)
-
-# here is a typical mesh construction:
-# the base mesh Circle(0.5) has a sequence of operators applied to it
+mesh title = center{[0, 1.3, 0]} Text("Meshes", 0.8)
 mesh item =
-    center{[0, 0, 0]} # setting the position
-    fill{alpha{0.22} BLUE} # setting the color
+    center{[0, 0, 0]}
+    fill{alpha{0.22} BLUE}
     stroke{BLUE, 2}
     Circle(0.5)
 
 slide "Mesh Variables"
-  
-    play Wait(4)
-    
+    # `mesh` creates visible scene state. Values created in init are visible
+    # immediately. Inside slides, use `play` to update what the viewport shows.
+    play Wait(1.5)
+
     item =
-        center{0l}
+        center{[0, 0, 0]}
         fill{alpha{0.22} ORANGE}
         stroke{ORANGE, 2}
-        Square(0.85)
-        
-    play Trans()
+        Square(0.9)
+    play Trans(1.4)
+    play Wait(1.0)
 
 slide "Constructors"
     # Constructors make basic geometry. Operators place and style it.
-    title = center{[0, 1.25, 0]} Text("Constructors", 0.75)
+    title = center{[0, 1.3, 0]} Text("Constructors", 0.8)
     item = [
-        center{[-1.5, 0.15, 0]} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.38),
-        center{[0, 0.15, 0]} fill{alpha{0.22} ORANGE} stroke{ORANGE, 2} Square(0.7),
-        center{[1.5, 0.15, 0]} fill{alpha{0.22} GREEN} stroke{GREEN, 2} RegularPolygon(6, 0.42),
-        center{[-1.5, -0.65, 0]} Text("Circle", 0.5),
-        center{[0, -0.65, 0]} Text("Square", 0.5),
-        center{[1.5, -0.65, 0]} Text("Polygon", 0.5)
+        center{[-1.55, 0.15, 0]} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.4),
+        center{[0, 0.15, 0]} fill{alpha{0.22} ORANGE} stroke{ORANGE, 2} Square(0.75),
+        center{[1.55, 0.15, 0]} fill{alpha{0.22} GREEN} stroke{GREEN, 2} RegularPolygon(6, 0.45),
+        center{[-1.55, -0.7, 0]} Text("Circle", 0.5),
+        center{[0, -0.7, 0]} Text("Square", 0.5),
+        center{[1.55, -0.7, 0]} Text("Polygon", 0.5)
     ]
     play Set()
+    play Wait(1.5)
 
-slide "Operators"
-    # Operators use braces and wrap the target expression.
-    title = center{[0, 1.25, 0]} Text("Operators", 0.75)
-    item =
-        shift{1.4l}
-        fill{alpha{0.22} BLUE}
+slide "Common Styling"
+    # A custom operator is useful when several meshes share the same style.
+    # This one extracts the repeated fill/stroke pair.
+    let soft_style = operator |target, col|
+        fill{alpha{0.2} col}
+        stroke{col, 2}
+        target
+
+    title = center{[0, 1.3, 0]} Text("Custom operator", 0.8)
+    item = [
+        center{[-1.3, 0, 0]} soft_style{BLUE} Circle(0.45),
+        center{[0, 0, 0]} soft_style{ORANGE} Square(0.75),
+        center{[1.3, 0, 0]} soft_style{GREEN} RegularPolygon(5, 0.48)
+    ]
+    play Trans(1.3)
+    play Wait(1.2)
+
+slide "Layout Operators"
+    # `next_to` positions one mesh next to another mesh.
+    # `to_side` positions a mesh near a side of the camera frame.
+    let base =
+        center{[-0.8, 0, 0]}
+        fill{alpha{0.18} BLUE}
         stroke{BLUE, 2}
-        Circle(0.42)
-    play Set()
-    play Wait(0.4)
+        Rect([1.25, 0.7])
 
-    item =
-        shift{1.4r}
-        fill{alpha{0.22} MAGENTA}
-        stroke{MAGENTA, 2}
-        Circle(0.6)
-    play Set()
+    title = center{[0, 1.3, 0]} Text("Layout operators", 0.8)
+    item = [
+        base,
+        next_to{base, 1r, 0.25} Text("next to", 0.5),
+        to_side{1d, 0.25} Text("to side", 0.5)
+    ]
+    play Trans(1.3)
+    play Wait(1.5)
+
+slide "Z Index"
+    # z_index controls draw order when meshes overlap.
+    title = center{[0, 1.3, 0]} Text("z index", 0.8)
+    item = [
+        z_index{0}
+            center{[-0.25, 0, 0]}
+            fill{alpha{0.35} BLUE}
+            stroke{BLUE, 2}
+            Rect([1.25, 0.95]),
+        z_index{1}
+            center{[0.25, 0, 0]}
+            fill{alpha{0.45} ORANGE}
+            stroke{ORANGE, 2}
+            Circle(0.58),
+        z_index{2}
+            center{[0.25, 0, 0]}
+            Text("front", 0.5)
+    ]
+    play Trans(1.3)
+    play Wait(1.5)
 
 slide "Mesh Lists"
-    # A list of meshes is also considered a mesh. This is how most diagrams are built.
-    title = center{[0, 1.25, 0]} Text("Mesh lists", 0.75)
+    # A list of meshes is also a mesh. This is how most diagrams are built.
+    title = center{[0, 1.3, 0]} Text("Mesh lists", 0.8)
     item = [
         center{[-1.1, 0, 0]} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.42),
         center{[0, 0, 0]} fill{alpha{0.22} ORANGE} stroke{ORANGE, 2} Square(0.72),
         center{[1.1, 0, 0]} fill{alpha{0.22} GREEN} stroke{GREEN, 2} RegularPolygon(5, 0.44),
         stroke{LIGHT_GRAY, 2} Line([-1.6, -0.65, 0], [1.6, -0.65, 0])
     ]
-    play Set()
+    play Trans(1.2)
+    play Wait(1.2)
 
 slide "Tags And Filters"
     # Tags give leaves stable identities. Filters can style a selected subset.
-    title = center{[0, 1.25, 0]} Text("Tags", 0.75)
+    title = center{[0, 1.3, 0]} Text("Tags", 0.8)
     item =
         fade{0.2, |tags| not (2 in tags)}
         [
@@ -90,19 +125,5 @@ slide "Tags And Filters"
             tag{3} center{[1.2, 0, 0]} fill{alpha{0.28} GREEN} stroke{GREEN, 2} Circle(0.45)
         ]
     print ["visible tags" -> mesh_tags(item)]
-    play Set()
-
-slide "Local Helpers"
-    # Put small helpers close to the slide that needs them.
-    let Badge = |text, pos, col| [
-        center{pos} fill{alpha{0.16} col} stroke{col, 2} Rect([1.35, 0.65]),
-        center{pos} Text(text, 0.5)
-    ]
-
-    title = center{[0, 1.25, 0]} Text("Local helpers", 0.75)
-    item = [
-        Badge("source", [-1.5, 0, 0], BLUE),
-        Badge("style", [0, 0, 0], ORANGE),
-        Badge("result", [1.5, 0, 0], GREEN)
-    ]
-    play Set()
+    play Trans(1.2)
+    play Wait(1.2)

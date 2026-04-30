@@ -3,48 +3,92 @@
 # This scene is intentionally flat: no slides, no meshes, no animations.
 # Open the console/transcript panel and read the print output from top to bottom.
 #
+# In normal slide scenes, a print statement only appears after the playhead has
+# reached that line. This file has all prints in init, so they appear immediately
+# after the scene runs.
+#
 # Things to try:
-# - change `count`
-# - append another point
-# - change the threshold in the control-flow example
+# - change `dynamic_value` from a string to a list
+# - append another point with `.=` below
+# - change `copied[0][0]` and confirm `original` does not change
 # - add your own print statement
 
 import std.util
 import std.math
 
-# values
-let count = 4
-let word = "frames"
-let offset = 1.5r + 0.25u
-let settings = ["count" -> count, "word" -> word, "offset" -> offset]
+print "monocurl is dynamically typed"
 
-print "values"
-print settings
-print ["double count" -> 2 * count, "offset x" -> offset[0]]
+# Monocurl is dynamically typed. A mutable name can hold a number now and a
+# string later. Use prints while authoring to check what a value currently is.
+var dynamic_value = 7
+print ["dynamic value" -> dynamic_value, "type" -> type_of(dynamic_value)]
 
-# let and var
-let base = 10
-# base = base + 10 (error)
-var total = base
-total = total + 3
-total = total * 2
+dynamic_value = "seven"
+print ["dynamic value" -> dynamic_value, "type" -> type_of(dynamic_value)]
 
-print "let and var"
-print ["base" -> base, "total" -> total]
+print "append operators"
 
-# lists and maps
+# `x .. y` returns a new list with y appended to x.
+# `x .= y` is shorthand for `x = x .. y`.
+# You will see `.=` often when building points, rows, paths, and other data.
 var points = []
 points .= [-1, 0, 0]
 points .= [0, 1, 0]
 points .= [1, 0, 0]
 
-let labels = ["left" -> "start", "right" -> "end"]
+let with_extra_point = points .. [2, 0, 0]
+
+print ["points after .=" -> points]
+print ["points .. [2, 0, 0]" -> with_extra_point]
+
+print "block accumulation"
+
+# `block {}` is another compact way to build a list. Inside the block, each
+# line that starts with `.` appends to an implicit accumulator, then the whole
+# block returns the accumulated list.
+let row = block {
+    . "alpha"
+    . "beta"
+    . "gamma"
+}
+
+print ["block result" -> row]
+
+print "deep copies"
+
+# Ordinary assignments are deep copies. Mutating `copied` below does not mutate
+# `original`, even though `copied` started from `original`.
+var original = [[0, 0, 0], [1, 1, 1]]
+var copied = original
+copied[0][0] = 99
+copied .= [2, 2, 2]
+
+print ["original" -> original]
+print ["copied" -> copied]
+
+print "let and var"
+
+# `let` creates an immutable name. `var` creates a mutable name.
+let base = 10
+# base = base + 10 # error: base was declared with let
+
+var total = base
+total = total + 3
+total = total * 2
+
+print ["base" -> base, "total" -> total]
 
 print "lists and maps"
-print ["points" -> points]
-print ["point count" -> len(points), "right label" -> labels["right"]]
 
-# control flow
+# Lists use zero-based indexing. Maps use key -> value pairs.
+let labels = ["left" -> "start", "right" -> "end"]
+
+print ["first point" -> points[0], "point count" -> len(points)]
+print ["right label" -> labels["right"]]
+
+print "control flow"
+
+# Use if, for, and while to build data before drawing or animating anything.
 var above_threshold = []
 let values = [0.75, 1.35, 0.92, 1.52, 1.05, 1.25]
 let threshold = 1.15
@@ -62,33 +106,24 @@ while (n > 0) {
     n = n - 1
 }
 
-print "control flow"
 print ["threshold" -> threshold, "above threshold" -> above_threshold]
 print ["countdown" -> countdown]
 
-# lambdas
+print "lambdas"
+
+# Lambdas use `|args| body`. Defaults go in the argument list.
 let f = |x, y = 1| x * x + y
 let samples = [f(1), f(2), f(3, 0)]
 
-print "lambdas"
 print ["f(1)" -> f(1), "f(2)" -> f(2), "f(3, 0)" -> f(3, 0)]
 print ["samples" -> samples]
 
-# block accumulation
-let row = block {
-    . "alpha"
-    . "beta"
-    . "gamma"
-}
+print "recursion"
 
-print "block accumulation"
-print ["block result" -> row]
-
-# recursion
+# Recursive lambdas take themselves as an explicit `self` argument.
 let fact = |self, x| {
     if (x <= 1) { return 1 }
     return x * self(self, x - 1)
 }
 
-print "recursion"
 print ["factorial 5" -> fact(fact, 5)]
