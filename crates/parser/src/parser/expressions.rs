@@ -126,7 +126,7 @@ impl SectionParser {
                 self.parse_string_literal()
             },
             ExactPred(Token::LBracket) => {
-                self.parse_map_or_vector_literal()
+                self.parse_map_or_list_literal()
             },
             /* monocurl internal */
             if InStdLibPredicate, ExactPred(Token::Native) => {

@@ -52,7 +52,7 @@ impl Executor {
             Instruction::PushEmptyMap => {
                 self.state.stack_mut(stack_idx).push(Value::Map(Map::new()));
             }
-            Instruction::PushEmptyVector => {
+            Instruction::PushEmptyList => {
                 self.state
                     .stack_mut(stack_idx)
                     .push(Value::List(List::new()));

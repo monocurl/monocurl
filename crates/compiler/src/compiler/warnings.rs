@@ -37,7 +37,7 @@ fn statement_has_effect(stmt: &Statement) -> bool {
 fn expression_has_effect(expr: &Expression) -> bool {
     match expr {
         Expression::Literal(literal) => match literal {
-            Literal::Vector(items) => items.iter().any(|(_, expr)| expression_has_effect(expr)),
+            Literal::List(items) => items.iter().any(|(_, expr)| expression_has_effect(expr)),
             Literal::Map(items) => items.iter().any(|((_, key), (_, value))| {
                 expression_has_effect(key) || expression_has_effect(value)
             }),

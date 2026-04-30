@@ -379,7 +379,7 @@ leader and follower have the same shape. lerp(a, b, t) evaluates recursively und
 
 - equal values stay fixed.
 - numbers interpolate linearly.
-- same-length lists (and maps with same keys) interpolate element by element, including vectors/colors.
+- same-length lists (and maps with same keys) interpolate element by element, including coordinate lists/colors.
 - live calls to the same labeled function interpolate labeled arguments and
   rerun the function.
 - live operators interpolate their labeled operator arguments.

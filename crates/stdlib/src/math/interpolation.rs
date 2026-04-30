@@ -102,7 +102,7 @@ fn parse_keyframe_map(keyframes: &Map) -> Result<Vec<(f64, Value)>, ExecutorErro
         let time = match time {
             HashableKey::Integer(n) => *n as f64,
             HashableKey::Float(bits) => HashableKey::float_value(*bits),
-            HashableKey::String(_) | HashableKey::Vector(_) => {
+            HashableKey::String(_) | HashableKey::List(_) => {
                 return Err(ExecutorError::InvalidArgument {
                     arg: "keyframes",
                     message: "map keys must be numeric keyframe times",

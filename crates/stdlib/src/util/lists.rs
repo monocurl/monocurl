@@ -14,7 +14,7 @@ use crate::read_float;
 use super::helpers::{compare_values, invoke_key_lambda, list_depth, read_int, read_rc_list};
 
 #[stdlib_func]
-pub async fn vector_len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub async fn list_len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)

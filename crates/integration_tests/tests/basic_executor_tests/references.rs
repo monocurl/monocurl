@@ -219,7 +219,7 @@ fn test_reference_parameter_rejects_lvalue_from_assignment_expression() {
 }
 
 #[test]
-fn test_reference_parameter_rejects_lambda_returned_reference_vector() {
+fn test_reference_parameter_rejects_lambda_returned_reference_list() {
     let r = run("
         param a = 1
         let keep_refs = |refs| refs
@@ -234,7 +234,7 @@ fn test_reference_parameter_rejects_lambda_returned_reference_vector() {
 }
 
 #[test]
-fn test_lvalue_vector_argument_materializes_when_stored_in_var() {
+fn test_lvalue_list_argument_materializes_when_stored_in_var() {
     let r = run("
         param source = 1
         mesh grid = [10]

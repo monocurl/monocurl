@@ -220,7 +220,7 @@ fn write_hashable_key(key: &crate::value::container::HashableKey, out: &mut Stri
             out.push_str(s);
             out.push('"');
         }
-        HashableKey::Vector(items) => {
+        HashableKey::List(items) => {
             out.push('[');
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {

@@ -17,7 +17,7 @@ fn key_to_value(k: &HashableKey) -> Value {
         HashableKey::Integer(n) => Value::Integer(*n),
         HashableKey::Float(bits) => Value::Float(HashableKey::float_value(*bits)),
         HashableKey::String(s) => Value::String(s.clone()),
-        HashableKey::Vector(v) => list_from(v.iter().map(key_to_value)),
+        HashableKey::List(v) => list_from(v.iter().map(key_to_value)),
     }
 }
 

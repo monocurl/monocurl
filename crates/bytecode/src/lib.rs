@@ -47,7 +47,7 @@ pub enum Instruction {
         index: u32,
     },
     PushEmptyMap,
-    PushEmptyVector,
+    PushEmptyList,
 
     // register tos as a leader; name_index into the string pool for debugging
     ConvertParam {

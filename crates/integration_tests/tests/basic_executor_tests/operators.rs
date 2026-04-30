@@ -306,7 +306,7 @@ fn test_exec_native_lerp_list_element() {
 }
 
 #[test]
-fn test_exec_native_lerp_vector() {
+fn test_exec_native_lerp_list() {
     let r = run_section(
         "
         let result = __monocurl__native__ lerp([0, 10, 20], [10, 20, 30], 0.25)
@@ -317,7 +317,7 @@ fn test_exec_native_lerp_vector() {
 }
 
 #[test]
-fn test_exec_native_lerp_nested_vector() {
+fn test_exec_native_lerp_nested_list() {
     let r = run_section(
         "
         let rows = __monocurl__native__ lerp([[0, 10], [20, 30]], [[10, 20], [30, 40]], 0.5)

@@ -49,7 +49,7 @@ fn closure_allocated_slots_are_released_after_execution() {
 }
 
 #[test]
-fn retained_lvalue_reference_vectors_are_released_after_execution() {
+fn retained_lvalue_reference_lists_are_released_after_execution() {
     assert_no_live_heap_growth(
         r#"
         param p = 0

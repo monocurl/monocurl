@@ -167,7 +167,7 @@ impl SectionParser {
         standard_parse_value(string)
     }
 
-    pub(super) fn parse_map_or_vector_literal(&mut self) -> SpanTagged<Expression> {
+    pub(super) fn parse_map_or_list_literal(&mut self) -> SpanTagged<Expression> {
         self.debug_assert_token_eq(Token::LBracket);
         let inner_range = self.precomputation.bracket_internal_range(self.token_index);
         let base_span = self.advance_token();
@@ -176,7 +176,7 @@ impl SectionParser {
             let end_span = self.read_token_best_effort(Token::RBracket);
             return (
                 base_span.start..end_span.end,
-                Expression::Literal(Literal::Vector(vec![])),
+                Expression::Literal(Literal::List(vec![])),
             );
         }
 
@@ -189,7 +189,7 @@ impl SectionParser {
         let literal = if self.read_if_token(Token::KeyValueMap).is_some() {
             Expression::Literal(Literal::Map(vec![]))
         } else {
-            let mut vector_entries = Vec::new();
+            let mut list_entries = Vec::new();
             let mut map_entries = Vec::new();
             let mut emitted_error = false;
 
@@ -199,7 +199,7 @@ impl SectionParser {
                     self.find_top_level_map_entry_delimiters(inner_range.end);
 
                 if let Some(key_value_token) = key_value_token {
-                    if !vector_entries.is_empty() && !emitted_error {
+                    if !list_entries.is_empty() && !emitted_error {
                         self.emit_error(
                             "Ambiguous Literal".into(),
                             "cannot decide if literal is list or map".into(),
@@ -228,7 +228,7 @@ impl SectionParser {
                         );
                         emitted_error = true;
                     }
-                    vector_entries.push(entry)
+                    list_entries.push(entry)
                 }
 
                 self.advance_newlines();
@@ -250,8 +250,8 @@ impl SectionParser {
                 }
             }
 
-            if !vector_entries.is_empty() {
-                Expression::Literal(Literal::Vector(vector_entries))
+            if !list_entries.is_empty() {
+                Expression::Literal(Literal::List(list_entries))
             } else {
                 Expression::Literal(Literal::Map(map_entries))
             }

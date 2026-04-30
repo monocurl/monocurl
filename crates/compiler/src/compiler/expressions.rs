@@ -14,7 +14,7 @@ impl Compiler {
                 Expression::IdentifierReference(_)
                     | Expression::Subscript(_)
                     | Expression::Property(_)
-                    | Expression::Literal(Literal::Vector(_))
+                    | Expression::Literal(Literal::List(_))
             )
         {
             self.error(span.clone(), "expression is not assignable");
@@ -135,7 +135,7 @@ impl Compiler {
                 self.emit_push(Instruction::PushString { index: idx }, span.clone());
             }
             Literal::Directional(d) => self.compile_directional(d, span),
-            Literal::Vector(elems) => self.compile_vector(mutable, elems, span),
+            Literal::List(elems) => self.compile_list(mutable, elems, span),
             Literal::Map(entries) => self.compile_map(entries, span),
         }
     }
@@ -149,7 +149,7 @@ impl Compiler {
             DirectionalLiteral::Forward(m) => (0.0, 0.0, -m),
             DirectionalLiteral::Backward(m) => (0.0, 0.0, *m),
         };
-        self.emit_push(Instruction::PushEmptyVector, span.clone());
+        self.emit_push(Instruction::PushEmptyList, span.clone());
         for component in [x, y, z] {
             let idx = self.intern_float(component);
             self.emit_push(Instruction::PushFloat { index: idx }, span.clone());
@@ -158,13 +158,13 @@ impl Compiler {
         }
     }
 
-    pub(super) fn compile_vector(
+    pub(super) fn compile_list(
         &mut self,
         mutable: bool,
         elems: &[SpanTagged<Expression>],
         span: &Span8,
     ) {
-        self.emit_push(Instruction::PushEmptyVector, span.clone());
+        self.emit_push(Instruction::PushEmptyList, span.clone());
         for elem in elems {
             self.compile_expr(mutable, None, &elem.1, &elem.0);
             self.emit(Instruction::Append, span.clone());
@@ -328,7 +328,7 @@ impl Compiler {
     fn is_reference_argument_literal(expr: &Expression) -> bool {
         match expr {
             Expression::IdentifierReference(IdentifierReference::Reference(_)) => true,
-            Expression::Literal(Literal::Vector(elements)) => elements
+            Expression::Literal(Literal::List(elements)) => elements
                 .iter()
                 .all(|(_, element)| Self::is_reference_argument_literal(element)),
             _ => false,

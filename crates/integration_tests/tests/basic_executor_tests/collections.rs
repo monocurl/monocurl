@@ -282,7 +282,7 @@ fn test_map_string_key() {
 
 #[test]
 fn test_map_list_key() {
-    // vectors of integers are hashable keys
+    // lists of integers are hashable keys
     let r = run("
         var m = [->]
         m[[1, 2]] = 99

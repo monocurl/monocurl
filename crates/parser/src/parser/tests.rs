@@ -234,16 +234,16 @@ mod test {
     }
 
     #[test]
-    fn test_empty_vector() {
+    fn test_empty_list() {
         let result = parse_expr_test("[]");
-        let expected = Expression::Literal(Literal::Vector(vec![]));
+        let expected = Expression::Literal(Literal::List(vec![]));
         assert_eq!(result.1, expected);
     }
 
     #[test]
-    fn test_vector_literal() {
+    fn test_list_literal() {
         let result = parse_expr_test("[1, 2, 3]");
-        let expected = Expression::Literal(Literal::Vector(vec![
+        let expected = Expression::Literal(Literal::List(vec![
             (1..2, Expression::Literal(Literal::Int(1))),
             (4..5, Expression::Literal(Literal::Int(2))),
             (7..8, Expression::Literal(Literal::Int(3))),
@@ -252,7 +252,7 @@ mod test {
     }
 
     #[test]
-    fn test_error_missing_vector_literal_separator() {
+    fn test_error_missing_list_literal_separator() {
         error_expr_test("[1 2 3]");
     }
 
@@ -285,14 +285,14 @@ mod test {
         let expected = Expression::Literal(Literal::Map(vec![(
             (
                 1..7,
-                Expression::Literal(Literal::Vector(vec![
+                Expression::Literal(Literal::List(vec![
                     (2..3, Expression::Literal(Literal::Int(1))),
                     (5..6, Expression::Literal(Literal::Int(2))),
                 ])),
             ),
             (
                 11..17,
-                Expression::Literal(Literal::Vector(vec![
+                Expression::Literal(Literal::List(vec![
                     (12..13, Expression::Literal(Literal::Int(3))),
                     (15..16, Expression::Literal(Literal::Int(4))),
                 ])),
@@ -350,7 +350,7 @@ mod test {
         let expected = Expression::BinaryOperator(BinaryOperator {
             lhs: (
                 0..6,
-                Box::new(Expression::Literal(Literal::Vector(vec![
+                Box::new(Expression::Literal(Literal::List(vec![
                     (1..2, Expression::Literal(Literal::Int(1))),
                     (4..5, Expression::Literal(Literal::Int(2))),
                 ]))),
@@ -1041,7 +1041,7 @@ mod test {
             var_name: (5..6, IdentifierDeclaration("i".to_string())),
             container: (
                 10..19,
-                Expression::Literal(Literal::Vector(vec![
+                Expression::Literal(Literal::List(vec![
                     (11..12, Expression::Literal(Literal::Int(1))),
                     (14..15, Expression::Literal(Literal::Int(2))),
                     (17..18, Expression::Literal(Literal::Int(3))),
@@ -1624,19 +1624,19 @@ mod test {
 
     // Edge cases
     #[test]
-    fn test_nested_vectors() {
+    fn test_nested_lists() {
         let result = parse_expr_test("[[1, 2], [3, 4]]");
-        let expected = Expression::Literal(Literal::Vector(vec![
+        let expected = Expression::Literal(Literal::List(vec![
             (
                 1..7,
-                Expression::Literal(Literal::Vector(vec![
+                Expression::Literal(Literal::List(vec![
                     (2..3, Expression::Literal(Literal::Int(1))),
                     (5..6, Expression::Literal(Literal::Int(2))),
                 ])),
             ),
             (
                 9..15,
-                Expression::Literal(Literal::Vector(vec![
+                Expression::Literal(Literal::List(vec![
                     (10..11, Expression::Literal(Literal::Int(3))),
                     (13..14, Expression::Literal(Literal::Int(4))),
                 ])),
@@ -1646,7 +1646,7 @@ mod test {
     }
 
     #[test]
-    fn test_nested_vector_destructure_assignment() {
+    fn test_nested_list_destructure_assignment() {
         let content = "[c, [d, a]] = [a, [b, d]]";
         let lexed = lex(content);
         let text_rope = Rope::from_str(content);
@@ -1664,11 +1664,11 @@ mod test {
         assert_eq!(op.op_type, BinaryOperatorType::Assign);
         assert!(matches!(
             op.lhs.1.as_ref(),
-            Expression::Literal(Literal::Vector(_))
+            Expression::Literal(Literal::List(_))
         ));
         assert!(matches!(
             op.rhs.1.as_ref(),
-            Expression::Literal(Literal::Vector(_))
+            Expression::Literal(Literal::List(_))
         ));
     }
 
@@ -1704,7 +1704,7 @@ mod test {
                 (1..2, Expression::Literal(Literal::Int(1))),
                 (
                     6..12,
-                    Expression::Literal(Literal::Vector(vec![
+                    Expression::Literal(Literal::List(vec![
                         (7..8, Expression::Literal(Literal::Int(1))),
                         (10..11, Expression::Literal(Literal::Int(2))),
                     ])),
@@ -1714,7 +1714,7 @@ mod test {
                 (14..15, Expression::Literal(Literal::Int(2))),
                 (
                     19..25,
-                    Expression::Literal(Literal::Vector(vec![
+                    Expression::Literal(Literal::List(vec![
                         (20..21, Expression::Literal(Literal::Int(3))),
                         (23..24, Expression::Literal(Literal::Int(4))),
                     ])),
@@ -1743,7 +1743,7 @@ mod test {
                             var_name: (16..17, IdentifierDeclaration("i".to_string())),
                             container: (
                                 21..30,
-                                Expression::Literal(Literal::Vector(vec![
+                                Expression::Literal(Literal::List(vec![
                                     (22..23, Expression::Literal(Literal::Int(1))),
                                     (25..26, Expression::Literal(Literal::Int(2))),
                                     (28..29, Expression::Literal(Literal::Int(3))),
@@ -1817,7 +1817,7 @@ mod test {
             ),
             operand: (
                 15..24,
-                Box::new(Expression::Literal(Literal::Vector(vec![
+                Box::new(Expression::Literal(Literal::List(vec![
                     (16..17, Expression::Literal(Literal::Int(1))),
                     (19..20, Expression::Literal(Literal::Int(2))),
                     (22..23, Expression::Literal(Literal::Int(3))),
@@ -2064,7 +2064,7 @@ mod test {
     }
 
     #[test]
-    fn test_error_ambiguous_vector_map() {
+    fn test_error_ambiguous_list_map() {
         error_expr_test("[1, 2 -> 3]");
     }
 

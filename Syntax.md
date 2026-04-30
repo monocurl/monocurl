@@ -5,12 +5,12 @@ import std.util
 import std.anim
 
 let var = 10
-let arr = [1, 2, 3, 4, 5]
+let list = [1, 2, 3, 4, 5]
 let dict = [:]
 let dict2 = ["hello" -> 1, "world" -> 2]
 let expr = 3 * 5 + 2
 # brace and line major
-for i in arr {
+for i in list {
     let q = i
     if q < 4 {
       break

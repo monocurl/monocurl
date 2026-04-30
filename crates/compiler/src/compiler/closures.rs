@@ -276,7 +276,7 @@ impl Compiler {
 
     // compile a block body: init `_ = []`, compile stmts, implicit `return _`
     pub(super) fn compile_block_body(&mut self, stmts: &[SpanTagged<Statement>], span: &Span8) {
-        self.emit_push(Instruction::PushEmptyVector, span.clone());
+        self.emit_push(Instruction::PushEmptyList, span.clone());
         self.emit(
             Instruction::ConvertVar {
                 allow_stateful: false,

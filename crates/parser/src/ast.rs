@@ -100,7 +100,7 @@ pub enum Literal {
     Float(f64),
     Directional(DirectionalLiteral),
     Imaginary(f64),
-    Vector(Vec<SpanTagged<Expression>>),
+    List(Vec<SpanTagged<Expression>>),
     Map(Vec<(SpanTagged<Expression>, SpanTagged<Expression>)>),
 }
 

@@ -23,7 +23,7 @@ else if (y < 5) {
   y = 6
 }
 else {
-  for (label in vector) {
+  for (label in list) {
     y = y + 5
   }
   while (y < 10) {
@@ -39,7 +39,7 @@ let y = block {
 }
 ```
 
-Dot syntax is a shorthand for appending to a vector, and is useful for building up pipelines of values implicitly via the `_` variable. Each block implicitly initializes `_` to `[]` and returns it at the end, so dot-appending to `_` accumulates a list of values without needing an explicit variable.
+Dot syntax is a shorthand for appending to a list, and is useful for building up pipelines of values implicitly via the `_` variable. Each block implicitly initializes `_` to `[]` and returns it at the end, so dot-appending to `_` accumulates a list of values without needing an explicit variable.
 ```
 var x = []
 x = x . 4
@@ -58,7 +58,7 @@ var f = || {
 }
 ```
 
-The primitives are ints, doubles, vectors, maps
+The primitives are ints, doubles, lists, maps
 ```
 let y = []
 let g = [->]

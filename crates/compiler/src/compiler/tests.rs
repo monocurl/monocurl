@@ -517,7 +517,7 @@ mod test {
         let result = test_compile(&[bundle0, bundle1]);
         no_errors(&result);
 
-        let vector_len_idx = registry().index_of("vector_len") as u16;
+        let list_len_idx = registry().index_of("list_len") as u16;
         let section = root_slide_section(&result);
         assert!(
             !section
@@ -529,9 +529,9 @@ mod test {
         assert!(
             !section.instructions.iter().any(|instr| matches!(
                 instr,
-                Instruction::NativeInvoke { index, .. } if *index == vector_len_idx
+                Instruction::NativeInvoke { index, .. } if *index == list_len_idx
             )),
-            "optimized stdlib range loop should not call vector_len"
+            "optimized stdlib range loop should not call list_len"
         );
         assert!(
             section
@@ -588,7 +588,7 @@ mod test {
         let result = test_compile(&[bundle0, bundle1]);
         no_errors(&result);
 
-        let vector_len_idx = registry().index_of("vector_len") as u16;
+        let list_len_idx = registry().index_of("list_len") as u16;
         let section = root_slide_section(&result);
         assert!(
             section
@@ -600,7 +600,7 @@ mod test {
         assert!(
             section.instructions.iter().any(|instr| matches!(
                 instr,
-                Instruction::NativeInvoke { index, .. } if *index == vector_len_idx
+                Instruction::NativeInvoke { index, .. } if *index == list_len_idx
             )),
             "shadowed range should still measure the produced list"
         );
@@ -633,7 +633,7 @@ mod test {
 
     #[test]
     fn test_integration_for_loop() {
-        // vector literal uses [] in Monocurl
+        // list literal uses [] in Monocurl
         no_errors(&compile_src("let xs = [1, 2, 3]\nfor x in xs {\n}"));
     }
 
@@ -682,8 +682,8 @@ mod test {
     }
 
     #[test]
-    fn test_integration_nested_vector() {
-        // [] for vectors in Monocurl
+    fn test_integration_nested_list() {
+        // [] for lists in Monocurl
         no_errors(&compile_src("let v = [1, [2, 3], 4]"));
     }
 

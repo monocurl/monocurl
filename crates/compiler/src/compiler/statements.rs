@@ -197,7 +197,7 @@ impl Compiler {
         let d = self.stack_delta(iter_pos);
         self.emit_copy(d, container_span.clone());
 
-        let len_idx = registry().index_of("vector_len") as u16;
+        let len_idx = registry().index_of("list_len") as u16;
         self.emit(
             Instruction::NativeInvoke {
                 index: len_idx,

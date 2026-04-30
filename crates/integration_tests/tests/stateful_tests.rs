@@ -499,7 +499,7 @@ fn test_higher_order_stateful_arg_stored_in_mesh() {
     r.assert_ok();
 }
 
-// ── lists/vectors cannot store stateful (rule 4) ──────────────────────────────
+// ── lists cannot store stateful (rule 4) ──────────────────────────────
 
 #[test]
 fn test_list_literal_with_stateful_is_error() {

@@ -50,7 +50,7 @@ fn test_block_lambda_fallthrough_is_runtime_error() {
 }
 
 #[test]
-fn test_empty_block_expression_returns_empty_vector() {
+fn test_empty_block_expression_returns_empty_list() {
     let r = run("let result = block {}");
     r.assert_int_list(&[]);
 }

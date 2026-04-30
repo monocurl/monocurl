@@ -312,7 +312,7 @@ impl Executor {
                         let b_val = with_heap(|h| h.get(b_key.key()).clone());
                         let lerped = self.lerp(a_val, b_val, t).await.map_err(|err| {
                             lerp_context(
-                                format!("cannot lerp vector element at index {}", index),
+                                format!("cannot lerp list element at index {}", index),
                                 err,
                             )
                         })?;
@@ -445,7 +445,7 @@ fn format_hashable_key(key: &HashableKey) -> String {
         HashableKey::Integer(n) => n.to_string(),
         HashableKey::Float(bits) => HashableKey::float_value(*bits).to_string(),
         HashableKey::String(s) => format!("{:?}", s),
-        HashableKey::Vector(keys) => format!(
+        HashableKey::List(keys) => format!(
             "[{}]",
             keys.iter()
                 .map(format_hashable_key)

@@ -223,7 +223,7 @@ fn hashable_key_summary(key: &HashableKey) -> String {
         HashableKey::Integer(value) => value.to_string(),
         HashableKey::Float(bits) => HashableKey::float_value(*bits).to_string(),
         HashableKey::String(value) => format!("{value:?}"),
-        HashableKey::Vector(values) => {
+        HashableKey::List(values) => {
             let values = values
                 .iter()
                 .map(hashable_key_summary)

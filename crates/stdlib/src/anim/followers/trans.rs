@@ -283,40 +283,40 @@ fn tag_groups_from_key(key: &HashableKey) -> Result<Vec<Vec<isize>>, ExecutorErr
             "string",
             "tag_map",
         )),
-        HashableKey::Vector(values) => tag_groups_from_key_vector(values),
+        HashableKey::List(values) => tag_groups_from_key_list(values),
     }
 }
 
-fn tag_groups_from_key_vector(values: &[HashableKey]) -> Result<Vec<Vec<isize>>, ExecutorError> {
+fn tag_groups_from_key_list(values: &[HashableKey]) -> Result<Vec<Vec<isize>>, ExecutorError> {
     if values.is_empty() {
         return Ok(vec![vec![]]);
     }
 
     let all_lists = values
         .iter()
-        .all(|value| matches!(value, HashableKey::Vector(_)));
+        .all(|value| matches!(value, HashableKey::List(_)));
     let any_lists = values
         .iter()
-        .any(|value| matches!(value, HashableKey::Vector(_)));
+        .any(|value| matches!(value, HashableKey::List(_)));
 
     if all_lists {
         values
             .iter()
             .map(|value| {
-                let HashableKey::Vector(tags) = value else {
+                let HashableKey::List(tags) = value else {
                     unreachable!();
                 };
-                tag_vector_from_key_vector(tags)
+                tag_list_from_key_list(tags)
             })
             .collect()
     } else if any_lists {
         Err(mixed_tag_map_list_error())
     } else {
-        tag_vector_from_key_vector(values).map(|tags| vec![tags])
+        tag_list_from_key_list(values).map(|tags| vec![tags])
     }
 }
 
-fn tag_vector_from_key_vector(values: &[HashableKey]) -> Result<Vec<isize>, ExecutorError> {
+fn tag_list_from_key_list(values: &[HashableKey]) -> Result<Vec<isize>, ExecutorError> {
     values.iter().map(tag_component_from_key).collect()
 }
 
@@ -325,7 +325,7 @@ fn tag_component_from_key(value: &HashableKey) -> Result<isize, ExecutorError> {
         HashableKey::Integer(n) => Ok(*n as isize),
         HashableKey::Float(bits) => tag_component_from_float(HashableKey::float_value(*bits)),
         HashableKey::String(_) => Err(ExecutorError::type_error_for("int", "string", "tag_map")),
-        HashableKey::Vector(_) => Err(ExecutorError::type_error_for("int", "list", "tag_map")),
+        HashableKey::List(_) => Err(ExecutorError::type_error_for("int", "list", "tag_map")),
     }
 }
 
@@ -362,7 +362,7 @@ fn tag_groups_from_list(list: &List) -> Result<Vec<Vec<isize>>, ExecutorError> {
                 let Value::List(tags) = value else {
                     unreachable!();
                 };
-                tag_vector_from_list(tags)
+                tag_list_from_list(tags)
             })
             .collect()
     } else if any_lists {
@@ -376,7 +376,7 @@ fn tag_groups_from_list(list: &List) -> Result<Vec<Vec<isize>>, ExecutorError> {
     }
 }
 
-fn tag_vector_from_list(list: &List) -> Result<Vec<isize>, ExecutorError> {
+fn tag_list_from_list(list: &List) -> Result<Vec<isize>, ExecutorError> {
     list.elements()
         .iter()
         .map(|key| {

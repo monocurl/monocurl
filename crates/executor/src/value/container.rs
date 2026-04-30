@@ -45,7 +45,7 @@ pub enum HashableKey {
     Integer(i64),
     Float(u64),
     String(String),
-    Vector(Vec<HashableKey>),
+    List(Vec<HashableKey>),
 }
 
 impl HashableKey {
@@ -77,7 +77,7 @@ impl HashableKey {
                             .map_err(|e| e)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(HashableKey::Vector(keys))
+                Ok(HashableKey::List(keys))
             }
             other => Err(ExecutorError::UnhashableKey(other.type_name())),
         }
@@ -86,7 +86,7 @@ impl HashableKey {
 
 #[derive(Clone)]
 /// map whose values are heap-allocated and accessed via owning heap refs.
-/// keys must be hashable (integers, strings, or vectors of hashable types).
+/// keys must be hashable (integers, strings, or lists of hashable types).
 /// insertion_order tracks the order keys were first inserted so iteration is deterministic.
 pub struct Map {
     pub entries: HashMap<HashableKey, VRc>,
