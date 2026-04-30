@@ -1,13 +1,10 @@
 use gpui::*;
 
-use crate::{
-    actions::{ZoomIn, ZoomOut},
-    theme::ThemeSettings,
-};
+use crate::theme::ThemeSettings;
 
 use super::{
     icons::{TRANSPORT_BTN_H, TRANSPORT_BTN_W, TransportIcon, transport_icon},
-    metrics::{TOOLBAR_H, ZOOM_LEVELS, slide_label, slide_title_label, visual_slide_time},
+    metrics::{TOOLBAR_H, slide_label, slide_title_label, visual_slide_time},
     timeline_view::{BottomPanelMode, Timeline},
 };
 
@@ -20,11 +17,9 @@ pub(super) fn render_toolbar(
     current_time: f64,
     durations: &[Option<f64>],
     cx: &mut Context<Timeline>,
-) -> impl IntoElement {
+) -> impl IntoElement + use<> {
     let theme = ThemeSettings::theme(cx);
     let svc = timeline.services.downgrade();
-    let this = cx.weak_entity();
-    let zoom_pct = ZOOM_LEVELS[timeline.zoom_idx];
 
     let nav_btn = |id: &'static str, icon: TransportIcon| {
         div()
@@ -122,83 +117,52 @@ pub(super) fn render_toolbar(
                 .child(title)
         }));
 
-    let zoom_group = div()
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(7.0))
-        .child(
-            div()
-                .id("tl-zoom-out")
-                .w(px(20.0))
-                .h(px(20.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(theme.timeline_transport_color)
-                .text_size(px(14.0))
-                .cursor_pointer()
-                .hover(|s| s.opacity(0.6))
-                .child("−")
-                .on_click({
-                    let this = this.clone();
-                    move |_, w, cx| {
-                        this.update(cx, |tl, cx| tl.zoom_out(&ZoomOut, w, cx)).ok();
-                    }
-                }),
-        )
-        .child(
-            div()
-                .text_color(theme.timeline_subtext)
-                .text_size(px(10.0))
-                .child(format!("{}%", zoom_pct))
-                .w(px(36.0))
-                .flex()
-                .justify_center(),
-        )
-        .child(
-            div()
-                .id("tl-zoom-in")
-                .w(px(20.0))
-                .h(px(20.0))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(theme.timeline_transport_color)
-                .text_size(px(14.0))
-                .cursor_pointer()
-                .hover(|s| s.opacity(0.6))
-                .child("+")
-                .on_click({
-                    move |_, w, cx| {
-                        this.update(cx, |tl, cx| tl.zoom_in(&ZoomIn, w, cx)).ok();
-                    }
-                }),
-        );
-
     let panel_mode = timeline.panel_mode;
-    let panel_toggle = {
+    let panel_tab = |id: &'static str, label: &'static str, mode: BottomPanelMode| {
+        let is_active = panel_mode == mode;
         let this = cx.weak_entity();
-        let label = match panel_mode {
-            BottomPanelMode::Timeline => "Console",
-            BottomPanelMode::Console => "Timeline",
-        };
         div()
-            .id("tl-panel-toggle")
-            .px(px(8.0))
-            .h(px(20.0))
+            .id(id)
             .flex()
+            .flex_none()
             .items_center()
             .justify_center()
+            .h_full()
+            .px(px(12.0))
+            .border_l(px(0.5))
+            .border_color(theme.navbar_border)
+            .bg(if is_active {
+                theme.tab_active_background
+            } else {
+                theme.tab_background
+            })
             .text_color(theme.timeline_text)
             .text_size(px(11.0))
             .cursor_pointer()
-            .hover(|s| s.opacity(0.6))
             .child(label)
             .on_click(move |_, _, cx| {
-                this.update(cx, |tl, cx| tl.toggle_panel_mode(cx)).ok();
+                this.update(cx, |tl, cx| tl.set_panel_mode(mode, cx)).ok();
             })
     };
+
+    let panel_tabs = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .h_full()
+        .border_t(px(0.5))
+        .border_b(px(0.5))
+        .border_color(theme.navbar_border)
+        .child(panel_tab(
+            "tl-tab-timeline",
+            "Timeline",
+            BottomPanelMode::Timeline,
+        ))
+        .child(panel_tab(
+            "tl-tab-console",
+            "Console",
+            BottomPanelMode::Console,
+        ));
 
     div()
         .flex()
@@ -213,6 +177,5 @@ pub(super) fn render_toolbar(
         .pl(px(24.0))
         .child(center_group)
         .child(div().flex_1())
-        .child(panel_toggle)
-        .child(zoom_group)
+        .child(panel_tabs)
 }

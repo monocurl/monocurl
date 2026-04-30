@@ -23,7 +23,7 @@ slide "Leader And Follower"
     # two variables are created:
     # 1. a "leader" variable that you can interact with on code
     # 2. a "follower" variable that is on screen (initially set to [])
-    # Changing x in code only affects the leader. To synchronize
+    # Changing `x` in code only affects the leader. To synchronize
     # the follower with the leader, you must use 
     # the play statement with animations
     #
@@ -42,7 +42,9 @@ slide "Leader And Follower"
         Circle(0.45)
 
     play Wait(1.6)
-    play Lerp(1.4)
+    # this animation actually syncs the follower to the leader
+    # causing an on screen update
+    play Set()
     play Wait(0.8)
 
 slide "Set"
@@ -125,7 +127,7 @@ slide "Trans"
     # Trans is a generalizez contour mending algorithm
     title = center{1.3u} Text("Trans", 0.8)
     ball = [
-        tag{1} center{1.1l} fill{soft(BLUE, 0.24)} stroke{BLUE, 2} Circle(0.36),
+        tag{1} center{1.1l} fill{soft(BLUE, 0.24)} stroke{BLUE, 2} Square(0.36),
         tag{2} center{1.1r} fill{soft(ORANGE, 0.24)} stroke{ORANGE, 2} Circle(0.36)
     ]
     play Trans(0.8)

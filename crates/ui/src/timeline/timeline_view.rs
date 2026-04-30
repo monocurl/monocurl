@@ -69,6 +69,13 @@ impl Timeline {
         cx.notify();
     }
 
+    pub fn set_panel_mode(&mut self, mode: BottomPanelMode, cx: &mut Context<Self>) {
+        if self.panel_mode != mode {
+            self.panel_mode = mode;
+            cx.notify();
+        }
+    }
+
     pub(super) fn zoom_factor(&self) -> f32 {
         ZOOM_LEVELS[self.zoom_idx] as f32 / 100.0
     }
@@ -189,6 +196,74 @@ impl Render for Timeline {
             cx,
         );
 
+        let zoom_controls = |this: WeakEntity<Timeline>, zoom_pct: u32| {
+            div()
+                .absolute()
+                .right(px(10.0))
+                .bottom(px(8.0))
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(6.0))
+                .px(px(6.0))
+                .h(px(24.0))
+                .rounded(px(4.0))
+                .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .child(
+                    div()
+                        .id("tl-zoom-out")
+                        .w(px(18.0))
+                        .h(px(18.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(theme.timeline_transport_color)
+                        .text_size(px(14.0))
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.6))
+                        .child("−")
+                        .on_click({
+                            let this = this.clone();
+                            move |_, w, cx| {
+                                w.prevent_default();
+                                cx.stop_propagation();
+                                this.update(cx, |tl, cx| tl.zoom_out(&ZoomOut, w, cx)).ok();
+                            }
+                        }),
+                )
+                .child(
+                    div()
+                        .text_color(theme.timeline_subtext)
+                        .text_size(px(10.0))
+                        .child(format!("{}%", zoom_pct))
+                        .w(px(34.0))
+                        .flex()
+                        .justify_center(),
+                )
+                .child(
+                    div()
+                        .id("tl-zoom-in")
+                        .w(px(18.0))
+                        .h(px(18.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(theme.timeline_transport_color)
+                        .text_size(px(14.0))
+                        .cursor_pointer()
+                        .hover(|s| s.opacity(0.6))
+                        .child("+")
+                        .on_click(move |_, w, cx| {
+                            w.prevent_default();
+                            cx.stop_propagation();
+                            this.update(cx, |tl, cx| tl.zoom_in(&ZoomIn, w, cx)).ok();
+                        }),
+                )
+        };
+
         let body: AnyElement = match self.panel_mode {
             BottomPanelMode::Timeline => {
                 let track = render_track(
@@ -202,49 +277,61 @@ impl Render for Timeline {
                     theme,
                 );
                 div()
-                    .id("tl-scroll")
+                    .relative()
                     .flex()
                     .flex_1()
-                    .overflow_x_scroll()
-                    .track_scroll(&self.scroll)
-                    .on_mouse_down(MouseButton::Left, {
-                        let services = self.services.downgrade();
-                        let scroll = self.scroll.clone();
-                        move |event, _window, cx| {
-                            if slide_count == 0 {
-                                return;
-                            }
-                            let bounds = scroll.bounds();
-                            let scroll_offset = scroll.offset();
-                            let local_x =
-                                f32::from(event.position.x - bounds.origin.x - scroll_offset.x);
-                            let last = slide_count - 1;
+                    .min_h_0()
+                    .child(
+                        div()
+                            .id("tl-scroll")
+                            .flex()
+                            .size_full()
+                            .overflow_x_scroll()
+                            .track_scroll(&self.scroll)
+                            .on_mouse_down(MouseButton::Left, {
+                                let services = self.services.downgrade();
+                                let scroll = self.scroll.clone();
+                                move |event, _window, cx| {
+                                    if slide_count == 0 {
+                                        return;
+                                    }
+                                    let bounds = scroll.bounds();
+                                    let scroll_offset = scroll.offset();
+                                    let local_x = f32::from(
+                                        event.position.x - bounds.origin.x - scroll_offset.x,
+                                    );
+                                    let last = slide_count - 1;
 
-                            for i in 0..slide_count {
-                                let bx = slide_xs[i];
-                                let gw = gap_ws[i];
-                                if local_x >= bx && local_x < bx + SLIDE_W {
-                                    let target = Timestamp::at_end_of_slide(i);
-                                    services.update(cx, |s, _| s.seek_to(target)).ok();
-                                    return;
+                                    for i in 0..slide_count {
+                                        let bx = slide_xs[i];
+                                        let gw = gap_ws[i];
+                                        if local_x >= bx && local_x < bx + SLIDE_W {
+                                            let target = Timestamp::at_end_of_slide(i);
+                                            services.update(cx, |s, _| s.seek_to(target)).ok();
+                                            return;
+                                        }
+                                        let gap_start = bx + SLIDE_W;
+                                        let gap_end = if i == last {
+                                            f32::INFINITY
+                                        } else {
+                                            gap_start + gw.max(MIN_GAP)
+                                        };
+                                        if local_x >= gap_start && local_x < gap_end {
+                                            let t = ((local_x - gap_start) / (PX_PER_SEC * zoom))
+                                                as f64;
+                                            services
+                                                .update(cx, |s, _| {
+                                                    s.seek_to(Timestamp::new(i + 1, t))
+                                                })
+                                                .ok();
+                                            return;
+                                        }
+                                    }
                                 }
-                                let gap_start = bx + SLIDE_W;
-                                let gap_end = if i == last {
-                                    f32::INFINITY
-                                } else {
-                                    gap_start + gw.max(MIN_GAP)
-                                };
-                                if local_x >= gap_start && local_x < gap_end {
-                                    let t = ((local_x - gap_start) / (PX_PER_SEC * zoom)) as f64;
-                                    services
-                                        .update(cx, |s, _| s.seek_to(Timestamp::new(i + 1, t)))
-                                        .ok();
-                                    return;
-                                }
-                            }
-                        }
-                    })
-                    .child(track)
+                            })
+                            .child(track),
+                    )
+                    .child(zoom_controls(cx.weak_entity(), ZOOM_LEVELS[self.zoom_idx]))
                     .into_any_element()
             }
             BottomPanelMode::Console => {
