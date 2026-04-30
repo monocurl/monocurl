@@ -129,9 +129,8 @@ slide
     # (With align*, this can be done via preprocessing each element with an additional tag component)
     
     let Equation = |lhs, rhs| {
-        let str = [lhs, "\ \tag5{=} \ ", rhs]
-        print to_string(str)
-        let latex = Latex(str)
+        let str = [lhs, eq, rhs]
+        let latex = Tex(str)
         let eq = tag_filter{|tag| 5 in tag} latex
         let pos = mesh_center(eq)
         return shift{[-pos[0], 0, 0]} palette{} latex
@@ -164,8 +163,7 @@ slide
     mesh curr = AlignedEquations(equations: [])
     
     play PushEquation(&curr, 
-        [sum_sq],
-        [a_sq, "+", two_ab, "+", b_sq]
+        "x", "y"
     )
     
     play PushEquation(&curr, 

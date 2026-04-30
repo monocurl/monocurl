@@ -163,26 +163,16 @@ impl Executor {
     fn recover_call_stack(&self, stack_idx: usize) -> std::vec::IntoIter<RecoveredFrame> {
         let mut frames = Vec::new();
         let mut cursor = Some(stack_idx);
-        let mut skip_current_ip = false;
 
         while let Some(idx) = cursor {
             let direct_parent_idx = self.state.stack_parent_idx(idx);
             let trace_parent_idx = self.state.stack_trace_parent_idx(idx);
             let parent_idx = trace_parent_idx.or(direct_parent_idx);
 
-            if let Some(parent_idx) = direct_parent_idx {
-                frames.push(RecoveredFrame {
-                    stack_idx: parent_idx,
-                    next_ip: self.state.stack_ip(parent_idx),
-                });
-            }
-
-            if !skip_current_ip {
-                frames.push(RecoveredFrame {
-                    stack_idx: idx,
-                    next_ip: self.state.stack_ip(idx),
-                });
-            }
+            frames.push(RecoveredFrame {
+                stack_idx: idx,
+                next_ip: self.state.stack_ip(idx),
+            });
             frames.extend(
                 self.state
                     .stack_call_stack(idx)
@@ -195,7 +185,6 @@ impl Executor {
                     }),
             );
             cursor = parent_idx;
-            skip_current_ip = direct_parent_idx.is_some() && direct_parent_idx == parent_idx;
         }
 
         frames.into_iter()
@@ -277,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn recover_call_stack_prioritizes_spawning_play_frame() {
+    fn recover_call_stack_keeps_spawned_child_before_parent() {
         let mut executor =
             executor_with_root_annotations(&[(10, 14), (20, 24), (30, 34), (40, 44)]);
 
@@ -296,7 +285,35 @@ mod tests {
             .map(|frame| executor.best_effort_span(frame.stack_idx, frame.next_ip))
             .collect();
 
-        assert_eq!(spans, vec![10..14, 20..24, 40..44, 30..34]);
+        assert_eq!(spans, vec![20..24, 40..44, 10..14, 30..34]);
+    }
+
+    #[test]
+    fn runtime_error_callstack_orders_spawn_parent_before_child() {
+        let mut executor =
+            executor_with_root_annotations(&[(10, 14), (20, 24), (30, 34), (40, 44)]);
+
+        let root_idx = crate::state::ExecutionState::ROOT_STACK_IDX;
+        executor.state.stack_mut(root_idx).ip = (0, 1);
+
+        let child_idx = executor
+            .state
+            .alloc_stack((0, 2), Some(root_idx), Some(root_idx))
+            .expect("failed to allocate child stack");
+        executor.state.stack_mut(child_idx).call_stack.push((0, 4));
+        executor.state.last_stack_idx = child_idx;
+
+        let runtime_error =
+            executor.build_runtime_error(crate::error::ExecutorError::invalid_operation("test"));
+
+        assert_eq!(
+            runtime_error
+                .callstack
+                .iter()
+                .map(|frame| frame.span.clone())
+                .collect::<Vec<_>>(),
+            vec![10..14, 40..44, 20..24]
+        );
     }
 
     #[test]
