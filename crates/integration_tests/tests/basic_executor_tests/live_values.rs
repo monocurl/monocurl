@@ -832,6 +832,21 @@ fn test_to_side_and_to_corner_use_default_camera_when_omitted() {
 }
 
 #[test]
+fn test_to_side_omitted_camera_matches_initial_camera() {
+    let r = run_with_stdlib(
+        "
+        let implicit = mesh_center(to_side{[1, 0, 0]} Square(2))
+        let explicit = mesh_center(to_side{DEFAULT_CAMERA, [1, 0, 0]} Square(2))
+        let buffered = mesh_center(to_side{[1, 0, 0], 0.1} Square(2))
+        let scaled_literal = mesh_center(to_side{0.2l} Square(2))
+        let result = [implicit[0], explicit[0], buffered[0], implicit[1], scaled_literal[0]]
+    ",
+        &["mesh", "scene"],
+    );
+    r.assert_float_list_approx(&[3.0, 3.0, 2.9, 0.0, -3.0], 1e-6);
+}
+
+#[test]
 fn test_label_places_latex_to_requested_side() {
     let r = run_with_stdlib(
         "

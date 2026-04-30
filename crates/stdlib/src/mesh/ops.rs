@@ -2,7 +2,8 @@ use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use executor::{
     camera::{
-        CameraBasis, CameraSnapshot, DEFAULT_CAMERA_ASPECT, DEFAULT_CAMERA_FOV, parse_camera_arg,
+        CameraBasis, DEFAULT_CAMERA_ASPECT, DEFAULT_CAMERA_FOV, initial_camera_snapshot,
+        parse_camera_arg,
     },
     error::ExecutorError,
     executor::Executor,
@@ -164,7 +165,7 @@ async fn read_camera_basis_or_default(
         .clone()
         .elide_lvalue();
     if matches!(value, Value::Nil) {
-        Ok(CameraSnapshot::default().basis())
+        Ok(initial_camera_snapshot().basis())
     } else {
         Ok(parse_camera_arg(executor, stack_idx, index, target)
             .await?

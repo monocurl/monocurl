@@ -23,6 +23,16 @@ pub struct CameraSnapshot {
     pub far: f32,
 }
 
+pub fn initial_camera_snapshot() -> CameraSnapshot {
+    CameraSnapshot {
+        position: Float3::new(0.0, 0.0, 4.0),
+        look_at: Float3::ZERO,
+        up: Float3::Y,
+        near: 0.1,
+        far: 100.0,
+    }
+}
+
 impl Default for CameraSnapshot {
     fn default() -> Self {
         Self {

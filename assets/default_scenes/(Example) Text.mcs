@@ -10,6 +10,8 @@ import std.scene
 # This highlights text, latex
 # and common strategies for text tagging
 
+let Subtext = |text| center{-0.5u} Text(text, 0.6)
+
 # this sets the styling that we'll use throughout the scene
 # with this, we only have to set tags properly
 # and this will handle styling
@@ -26,7 +28,7 @@ slide "Bare Text"
     mesh text_line = center{0.45u} Text("A label can be part of the diagram.", 0.8)
     play Write(1.3)
 
-    mesh subtext = center{-0.45u} Text("Letters are vector contours, so animations can trace them.", 0.6)
+    mesh subtext = Subtext("Letters are vector contours, so animations can trace them.")
     play Write(1.1)
 
 slide "Bare Tex"
@@ -41,7 +43,7 @@ slide "Bare Tex"
     )
     play Write(1.5)
 
-    subtext = center{-0.6u} Text("LaTeX can take a moment the first time; cached renders are quick.", 0.6)
+    subtext = Subtext("LaTeX can take a moment the first time; cached renders are quick.")
     play Fade(0.9)
 
 slide "Tagged Tex"
@@ -52,8 +54,8 @@ slide "Tagged Tex"
     # text_tag{...} and \tagN{...} both give subexpressions identities before rendering.
     # all examples of tagging are equivalent 
     # (except the exact tag they're given)
-    mesh styled = palette{} center{0.45u} Tex([
-        text_tag{1} "P(A\mid B)",
+    mesh styled = palette{} center{0.45u} Tex(tex: [
+        text_tag{[1, 2, 3]} "P(A\mid B)", # multi tag
         "\text_tag{5}{\ = \ }",
         "\frac{",
             "\tag2{P(B\mid A)}",
@@ -63,8 +65,10 @@ slide "Tagged Tex"
         "}"
     ])
     play Write(1.5)
+    
+    print to_string(styled.tex)
 
-    subtext = center{-0.6u} Text("Tags let each role keep its identity inside the formula.", 0.6)
+    subtext = Subtext("Tags let each role keep its identity inside the formula.")
     play Fade(0.9)
 
 slide "Tag Transform 1"
@@ -74,22 +78,23 @@ slide "Tag Transform 1"
         [
             "\tag1{\text{posterior}}",
             "\tag5{\ = \ }",
-            " \frac{",
-            "\tag2{\text{likelihood}}",
-            "\cdot ",
-            "\tag3{\text{prior}}",
+            "\frac{",
+                "\tag2{\text{likelihood}}",
+                "\cdot ",
+                "\tag3{\text{prior}}",
             "}{",
-            "\tag4{\text{evidence}}",
+            "    \tag4{\text{evidence}}",
             "}"
         ]
     )
     play TagTrans(1.4)
 
-    subtext = center{-0.6u} Text("Tags let each role keep its identity inside the formula.", 0.6)
+    subtext = Subtext("They also allow for customizing trans animations")
     play Trans(0.8)
 
 slide "Tag Transform 2"
-    styled = palette{} center{0.45u} Tex(
+
+    styled = palette{} center{0.45u} Tex(tex: 
         [
             "\tag1{\text{posterior}}",
             "\cdot ",
@@ -100,125 +105,83 @@ slide "Tag Transform 2"
             "\tag3{\text{prior}}"
         ]
     )
+    print to_string(styled.tex)
+
     play TagTrans(1.6)
-
-    subtext = center{-0.6u} Text("TagTrans follows the roles as the equation is rearranged.", 0.48)
-    play Trans(0.8, [&subtext])
-
-slide "Term Constants"
+    
+slide 
     styled = []
-    subtext = []
-    play Fade(0.6)
-
-    # constants are local here and only used for fragments repeated across rows.
-    let sum_sq = text_tag{1} "(a+b)^2"
-    let b_sq = text_tag{2} "b^2"
-    let a_sq = text_tag{3} "a^2"
-    let two_ab = text_tag{4} "2ab"
-    let eq = text_tag{5} "\ = \ "
-
-    mesh derivation = palette{} center{0.45u} Latex(
-        [
-            "\begin{align*}",
-            sum_sq,
-            " &",
-            eq,
-            " ",
-            a_sq,
-            " + ",
-            two_ab,
-            " + ",
-            b_sq,
-            "\end{align*}"
-        ],
-        0.72
-    )
-    play Write(1.5)
-
-    subtext = center{-0.75u} Text("Repeated TeX fragments can be constants used inside a larger list.", 0.48)
+    subtext = Subtext("Defining custom animations allows.")
     play Fade(0.9)
 
-slide "Align Steps"
-    # align* lets the algebraic manipulation grow one equation at a time.
+    # instead of having to repeatedly type tags
+    # you can save the entire value as a constant
     let sum_sq = text_tag{1} "(a+b)^2"
     let b_sq = text_tag{2} "b^2"
     let a_sq = text_tag{3} "a^2"
     let two_ab = text_tag{4} "2ab"
     let eq = text_tag{5} "\ = \ "
+    
+    # while it is possible to use latex align* for this
+    # it's slightly harder (but not impossible) to 
+    # be able to identify elements in each 
+    
+    let AlignedEquations = |equations| {
+       
+        
+        var latex = []
+        latex .= "\begin{align*}"
+        for (i in range(0, len(equations))) {
+            if (i == len(equations) - 1) {
+                latex .= equations[i]
+            }
+            else {
+                latex .= equations[i] .. "\\"
+            }
+        }
+        latex .= "\end{align*}"
+        
+        # set top to [0, 2, 0]
+        let position = |x| {
+            if (equations == []) { return [] }
+            
+            let ret = center{0l} x
+            let curr = mesh_direc(ret, 1u)
+            return shift{[0, 2 - curr[1], 0]} ret
+        }
+        
+        return position(palette{} Latex(latex))
+    }
+    
+    # animated 
+    let PushEquation = |&equations, lhs, rhs| anim {
+        let eqn = [lhs, "\ &\tag5{=} \ ", rhs]
+        if (equations.equations == []) {
+            equations.equations .= eqn
+            play Write()
+        }
+        else {
+            # strategy: compute the full mesh and extract 
+            # out the last row
+            # create an auxiliary mesh that transforms from second
+            # to last row to the last row
+            equations.equations .= eqn
+            play TagTrans()
+            
+            play Set(&equations)
+        }
 
-    derivation = palette{} center{0.45u} Latex(
-        [
-            "\begin{align*}",
-            sum_sq,
-            " &",
-            eq,
-            " ",
-            a_sq,
-            " + ",
-            two_ab,
-            " + ",
-            b_sq,
-            " \\ ",
-            sum_sq,
-            " - ",
-            b_sq,
-            " &",
-            eq,
-            " ",
-            a_sq,
-            " + ",
-            two_ab,
-            "\end{align*}"
-        ],
-        0.72
+    }
+    
+    mesh curr = AlignedEquations(equations: [])
+    
+    play PushEquation(&curr, 
+        [sum_sq],
+        [a_sq, "+", two_ab, "+", b_sq]
     )
-    play TagTrans(1.4)
-
-    subtext = center{-0.75u} Text("The align* block adds the next algebra step as a second row.", 0.48)
-    play Trans(0.8, [&subtext])
-
-slide "One More Row"
-    let sum_sq = text_tag{1} "(a+b)^2"
-    let b_sq = text_tag{2} "b^2"
-    let a_sq = text_tag{3} "a^2"
-    let two_ab = text_tag{4} "2ab"
-    let eq = text_tag{5} "\ = \ "
-
-    derivation = palette{} center{0.45u} Latex(
-        [
-            "\begin{align*}",
-            sum_sq,
-            " &",
-            eq,
-            " ",
-            a_sq,
-            " + ",
-            two_ab,
-            " + ",
-            b_sq,
-            " \\ ",
-            sum_sq,
-            " - ",
-            b_sq,
-            " &",
-            eq,
-            " ",
-            a_sq,
-            " + ",
-            two_ab,
-            " \\ ",
-            sum_sq,
-            " - ",
-            b_sq,
-            " &",
-            eq,
-            " ",
-            "\tag6{a(a+2b)}",
-            "\end{align*}"
-        ],
-        0.72
+    
+    play PushEquation(&curr, 
+        [sum_sq],
+        [a_sq, "+", b_sq, "+", two_ab]
     )
-    play TagTrans(1.4)
-
-    subtext = center{-0.75u} Text("Only reused fragments became constants; one-off terms stay inline.", 0.48)
-    play Trans(0.8, [&subtext])
+    

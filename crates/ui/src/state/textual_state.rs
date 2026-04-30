@@ -108,6 +108,18 @@ impl AutoCompleteState {
             .is_some_and(|ch| ch.is_ascii_digit())
     }
 
+    fn case_mismatch_count(query: &str, head: &str, indices: &[usize]) -> usize {
+        query
+            .chars()
+            .zip(indices.iter().copied())
+            .filter(|(query_ch, head_idx)| {
+                head.chars()
+                    .nth(*head_idx)
+                    .is_some_and(|head_ch| *query_ch != head_ch)
+            })
+            .count()
+    }
+
     fn refilter(&mut self, can_only_shrink: bool) {
         if self.token_starts_with_number() {
             self.filtered_items.clear();
@@ -155,6 +167,7 @@ impl AutoCompleteState {
             (
                 indices.iter().map(|x| *x * *x).sum::<usize>(),
                 self.items[*idx].head.len(),
+                Self::case_mismatch_count(&self.cursor_token, &self.items[*idx].head, indices),
             )
         });
 
@@ -1257,6 +1270,14 @@ mod tests {
         }
     }
 
+    fn filtered_autocomplete_heads(state: &AutoCompleteState) -> Vec<&str> {
+        state
+            .filtered_items
+            .iter()
+            .map(|(idx, _)| state.items[*idx].head.as_str())
+            .collect()
+    }
+
     #[test]
     fn grapheme_ascii() {
         assert_grapheme_boundaries("hello world");
@@ -1346,6 +1367,34 @@ mod tests {
 
         assert_eq!(state.filtered_items.len(), 1);
         assert!(state.recheck_should_display(Cursor::collapsed(state.cursor_at)));
+    }
+
+    #[test]
+    fn autocomplete_prefers_case_matches_as_final_tiebreaker() {
+        let mut state = AutoCompleteState {
+            cursor_at: Location8 { row: 0, col: 2 },
+            cursor_token: "ab".to_string(),
+            ..Default::default()
+        };
+        state.set_items(vec![
+            autocomplete_item("AB"),
+            autocomplete_item("Ab"),
+            autocomplete_item("ab"),
+        ]);
+
+        assert_eq!(filtered_autocomplete_heads(&state), vec!["ab", "Ab", "AB"]);
+    }
+
+    #[test]
+    fn autocomplete_case_tiebreaker_does_not_beat_match_quality() {
+        let mut state = AutoCompleteState {
+            cursor_at: Location8 { row: 0, col: 2 },
+            cursor_token: "ab".to_string(),
+            ..Default::default()
+        };
+        state.set_items(vec![autocomplete_item("AB"), autocomplete_item("axb")]);
+
+        assert_eq!(filtered_autocomplete_heads(&state), vec!["AB", "axb"]);
     }
 
     #[test]
