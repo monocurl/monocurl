@@ -29,5 +29,6 @@ serde_json.workspace = true
 schemars.workspace = true
 futures.workspace = true
 smol.workspace = true
+notify-debouncer-full.workspace = true
 renderer.workspace = true
 image.workspace = true

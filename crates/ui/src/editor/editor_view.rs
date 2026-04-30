@@ -1,13 +1,26 @@
-use std::path::PathBuf;
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
+use futures::{
+    StreamExt,
+    channel::mpsc::{UnboundedSender, unbounded},
+};
 use gpui::{
     App, AppContext, AsyncApp, Entity, IntoElement, Render, Subscription, WeakEntity, Window,
+};
+use notify_debouncer_full::{
+    DebounceEventResult, Debouncer, RecommendedCache, new_debouncer,
+    notify::{RecommendedWatcher, RecursiveMode},
 };
 
 use crate::{editor::text_editor::TextEditor, state::textual_state::TextualState};
 
-const SAVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
-const WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+const SAVE_INTERVAL: Duration = Duration::from_secs(5);
+const WATCH_DEBOUNCE: Duration = Duration::from_millis(200);
+
+type FileWatchDebouncer = Debouncer<RecommendedWatcher, RecommendedCache>;
 
 pub struct Editor {
     path: PathBuf,
@@ -16,6 +29,8 @@ pub struct Editor {
     dirty: Entity<bool>,
     save_dirty: Entity<bool>,
     last_disk_text: String,
+    watch_tx: UnboundedSender<()>,
+    _file_watcher: Option<FileWatchDebouncer>,
 
     _subscriptions: Vec<Subscription>,
 }
@@ -43,6 +58,7 @@ impl Editor {
         });
 
         let mut subscriptions = Vec::new();
+        let (watch_tx, mut watch_rx) = unbounded();
 
         subscriptions.push(cx.observe_window_activation(window, |editor, window, cx| {
             if !window.is_window_active() {
@@ -78,8 +94,7 @@ impl Editor {
         cx.spawn_in(
             window,
             async move |editor: WeakEntity<Editor>, window_cx| {
-                loop {
-                    smol::Timer::after(WATCH_INTERVAL).await;
+                while watch_rx.next().await.is_some() {
                     let finished = window_cx
                         .update(|window, cx| {
                             editor
@@ -98,6 +113,8 @@ impl Editor {
         )
         .detach();
 
+        let file_watcher = Self::watch_file(&path, &watch_tx);
+
         Self {
             path,
             editor,
@@ -105,8 +122,72 @@ impl Editor {
             dirty,
             save_dirty,
             last_disk_text: content,
+            watch_tx,
+            _file_watcher: file_watcher,
             _subscriptions: subscriptions,
         }
+    }
+
+    fn absolute_path(path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
+        }
+    }
+
+    fn watch_root(path: &Path) -> PathBuf {
+        path.parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    fn watch_file(path: &Path, watch_tx: &UnboundedSender<()>) -> Option<FileWatchDebouncer> {
+        let watched_path = Self::absolute_path(path);
+        let watch_root = Self::watch_root(&watched_path);
+        let watch_tx = watch_tx.clone();
+
+        let mut debouncer =
+            match new_debouncer(WATCH_DEBOUNCE, None, move |result: DebounceEventResult| {
+                match result {
+                    Ok(events) => {
+                        if events.iter().any(|event| {
+                            event.need_rescan()
+                                || event
+                                    .event
+                                    .paths
+                                    .iter()
+                                    .any(|path| Self::absolute_path(path) == watched_path)
+                        }) {
+                            let _ = watch_tx.unbounded_send(());
+                        }
+                    }
+                    Err(errors) => {
+                        for error in errors {
+                            log::warn!("File watcher error: {error}");
+                        }
+                    }
+                }
+            }) {
+                Ok(debouncer) => debouncer,
+                Err(error) => {
+                    log::warn!(
+                        "Unable to create file watcher for {}: {error}",
+                        path.display()
+                    );
+                    return None;
+                }
+            };
+
+        if let Err(error) = debouncer.watch(watch_root, RecursiveMode::NonRecursive) {
+            log::warn!("Unable to watch {}: {error}", path.display());
+            return None;
+        }
+
+        Some(debouncer)
     }
 
     pub fn undo(&mut self, window: &mut Window, cx: &mut App) {
@@ -165,6 +246,7 @@ impl Editor {
     pub fn save_to_path(&mut self, path: PathBuf, cx: &mut App) {
         self.path = path;
         self.write_to_disk(cx);
+        self._file_watcher = Self::watch_file(&self.path, &self.watch_tx);
     }
 
     fn reload_from_disk_if_changed(&mut self, window: &mut Window, cx: &mut App) {
