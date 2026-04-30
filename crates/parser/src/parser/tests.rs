@@ -274,6 +274,28 @@ mod test {
         assert_eq!(result.1, expected);
     }
 
+    #[test]
+    fn test_map_literal_with_list_key() {
+        let result = parse_expr_test("[[1, 2] -> [3, 4]]");
+        let expected = Expression::Literal(Literal::Map(vec![(
+            (
+                1..7,
+                Expression::Literal(Literal::Vector(vec![
+                    (2..3, Expression::Literal(Literal::Int(1))),
+                    (5..6, Expression::Literal(Literal::Int(2))),
+                ])),
+            ),
+            (
+                11..17,
+                Expression::Literal(Literal::Vector(vec![
+                    (12..13, Expression::Literal(Literal::Int(3))),
+                    (15..16, Expression::Literal(Literal::Int(4))),
+                ])),
+            ),
+        )]));
+        assert_eq!(result.1, expected);
+    }
+
     // Identifier tests
     #[test]
     fn test_identifier() {

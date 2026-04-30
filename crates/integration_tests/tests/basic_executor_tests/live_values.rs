@@ -325,6 +325,28 @@ fn test_labeled_error_on_unknown_label() {
     r.assert_error("no labeled argument");
 }
 
+#[test]
+fn test_labeled_live_function_subscript_list_after_mutation() {
+    let r = run("
+        let f = |x, y| [x, y, x + y]
+        var inv = f(x: 1, y: 2)
+        inv.x = 40
+        let result = inv[2]
+    ");
+    r.assert_int(42);
+}
+
+#[test]
+fn test_labeled_live_function_subscript_map_after_mutation() {
+    let r = run("
+        let f = |x| [\"value\" -> x]
+        var inv = f(x: 1)
+        inv.x = 42
+        let result = inv[\"value\"]
+    ");
+    r.assert_int(42);
+}
+
 // -- InvokedFunction mutation isolation: mutating one copy must not affect the other --
 
 #[test]
@@ -630,6 +652,58 @@ fn test_tag_split_is_exposed_in_mesh_stdlib() {
         &["mesh"],
     );
     r.assert_int(4);
+}
+
+#[test]
+fn test_tag_trans_embed_uses_grouped_tag_map() {
+    let r = run_section_with_stdlib(
+        "
+        let source = [
+            tag{0} Dot([-2, 0, 0]),
+            tag{1} Dot([2, 0, 0]),
+            tag{3} Dot([4, 0, 0])
+        ]
+        let dst = [
+            tag{2} Dot([0, 0, 0]),
+            tag{3} Dot([4, 0, 0])
+        ]
+        let embed = __monocurl__native__ tag_trans_embed_with_options_and_tag_map(source, dst, 1, [[[0], [1]] -> [[2]]])
+        let result =
+            (len(embed[0]) == 3) +
+            (2 in mesh_tags(embed[1][0])) +
+            (2 in mesh_tags(embed[1][1])) +
+            (3 in mesh_tags(embed[1][2]))
+    ",
+        SectionType::StandardLibrary,
+        &["mesh", "util"],
+    );
+    r.assert_int(4);
+}
+
+#[test]
+fn test_tag_trans_embed_tag_map_single_list_is_one_tag_group() {
+    let r = run_section_with_stdlib(
+        "
+        let source = [
+            tag{[0, 1]} Dot([-1, 0, 0]),
+            tag{4} Dot([1, 0, 0])
+        ]
+        let dst = [
+            tag{[2, 3]} Dot([-1, 0, 0]),
+            tag{4} Dot([1, 0, 0])
+        ]
+        let embed = __monocurl__native__ tag_trans_embed_with_options_and_tag_map(source, dst, 1, [[0, 1] -> [2, 3]])
+        let result =
+            (len(embed[0]) == 2) +
+            (0 in mesh_tags(embed[0][0])) +
+            (1 in mesh_tags(embed[0][0])) +
+            (2 in mesh_tags(embed[1][0])) +
+            (3 in mesh_tags(embed[1][0]))
+    ",
+        SectionType::StandardLibrary,
+        &["mesh", "util"],
+    );
+    r.assert_int(5);
 }
 
 #[test]

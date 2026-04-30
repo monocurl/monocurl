@@ -16,7 +16,6 @@ let Subtext = |text| center{-0.5u} Text(text, 0.6)
 # with this, we only have to set tags properly
 # and this will handle styling
 let palette = operator |target|
-    color{TEAL, |tag| 6 in tag}
     color{RED, |tag| 4 in tag}
     color{PURPLE, |tag| 3 in tag}
     color{ORANGE, |tag| 2 in tag}
@@ -114,60 +113,107 @@ slide
     subtext = Subtext("Text is a regular mesh, allowing you to do complex animations with regular Monocurl utilities")
     play Fade(0.9)
 
+slide "Complex Animation"
+    # This shows how you can transform between succesive inequalities
+    # 
+    # It's admittedly more tedious than other animation libraries
+    # but the upside is this is not special cased into the stdlib
+    # (allowing greater generality)
+    # Eventually, this may be more automated in a library
+    # to support the common operations
+
     # instead of having to repeatedly type tags
-    # you can save the entire value as a constant
-    let sum_sq = text_tag{1} "(a+b)^2"
-    let b_sq = text_tag{2} "b^2"
-    let a_sq = text_tag{3} "a^2"
-    let two_ab = text_tag{4} "2ab"
-    let eq = text_tag{5} "\ = \ "
+    # you can save the entire value as a constant and reference that
+    let x = text_tag{1} "x"
+    let x2 = text_tag{2} "x^2"
+    let y = text_tag{3} "y"
+    let y2 = text_tag{4} "y^2"
+    let ge = "\ \tag9{\ge} \ "
+    
+    let palette = operator |target|
+        color{ORANGE, |tag| 3 in tag or 4 in tag}
+        color{BLUE, |tag| 1 in tag or 2 in tag}
+        target
     
     # while it is possible to use latex align* for this purpose
-    # it's slightly harder (but not impossible) to recover
+    # it's slightly harder to recover
     # what "row/equation" each mesh came from, making the animations
-    # more 
-    # (With align*, this can be done via preprocessing each element with an additional tag component)
+    # more difficult
+    # (With align*, this can be done via preprocessing each element with an additional  tag component to keep row information)
     
-    let Equation = |lhs, rhs| {
-        let str = [lhs, eq, rhs]
-        let latex = Tex(str)
-        let eq = tag_filter{|tag| 5 in tag} latex
+    # make untagged portions fade in and out by giving them 
+    # row-unique tag
+    let retag_empty = operator |operand, new| 
+        tag_map{|old, leaf| {
+            if (old == []) { return tag{new} leaf }
+            else { return leaf }
+        }} operand
+    
+    let Inequality = |lhs, rhs, row_id| {
+        let latex = Tex([lhs, ge, rhs])
+        let eq = tag_filter{|tag| 9 in tag} latex
         let pos = mesh_center(eq)
-        return shift{[-pos[0], 0, 0]} palette{} latex
+        return retag_empty{-row_id - 100} shift{[-pos[0], 0, 0]} palette{} latex
     }
     
-    let AlignedEquations = |equations| {    
-        return to_side{1u} Stack(equations, 1d)
+    let AlignedInequalities = |equations| {    
+        return shift{2u} Stack(equations, 1d)
     }
     
-    # animated 
-    let PushEquation = |&equations, lhs, rhs| anim {
-        let eqn = Equation(lhs, rhs)
-        if (equations.equations == []) {
-            equations.equations .= eqn
+    let PushEquation = |&container, lhs, rhs, tag_map| anim {
+        let ie = Inequality(lhs, rhs, len(container.rows))
+        
+        if (container.rows == []) {
+            container.rows .= ie
             play Write()
         }
         else {
             # strategy: compute the full mesh and extract 
-            # out the last row
+            # out the last two rows
             # create an auxiliary mesh that transforms from second
             # to last row to the last row
-            equations.equations .= eqn
-            play TagTrans()
-            
-            play Set(&equations)
-        }
+            # then delete auxiliary and show full unmodified container
+            container.rows .= ie
 
+            # by accessing container[i] instead of container.rows[i]
+            # we access the SHIFTED / positioned mesh 
+            # which is what we want
+            let count = len(container.rows)
+            let map = container
+            mesh aux = map[count - 2]
+            play Set(&aux)
+            aux = map[count - 1] 
+            play set_default{"tag_map", tag_map} TagTrans(1, &aux)
+            aux = []
+            play Set()
+        }
     }
     
-    mesh curr = AlignedEquations(equations: [])
+    mesh curr = AlignedInequalities(rows: [])
     
+    # https://www.cantorsparadise.com/an-introduction-to-the-am-gm-inequality-38f7895e8f30
     play PushEquation(&curr, 
-        "x", "y"
+        ["(", x, "-", y, ")^2"],
+        ["\tag8{0}"],
+        [->]
     )
     
-    play PushEquation(&curr, 
-        [sum_sq],
-        [a_sq, "+", b_sq, "+", two_ab]
+    play PushEquation(&curr,
+        [x2, "-\tag7{2}", x, y, "+", y2],
+        ["\tag8{0}"],
+        [[1]->[[1], [2]],
+         [3]->[[3], [4]]]
     )
     
+    play PushEquation(&curr,
+        [x2, "+", y2],
+        ["\tag7{2}", x, y],
+        [->]
+    )
+    
+    [1 2 3]
+    play PushEquation(&curr,
+        ["\frac{" 1 3 4 5 x2, "+", y2, "}{", "\tag7{2}", "}"],
+        ["\tag7{2}", x, y],
+        [->]
+    )

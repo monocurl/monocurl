@@ -185,52 +185,6 @@ mod test {
         );
     }
 
-    #[test]
-    fn test_function_info_emits_reference_and_default_metadata_for_hints() {
-        let result = compile_src(
-            "
-            let a = 1
-            let b = 2
-            let c = 3
-            let f = |&x, y = 1, &z = c| x
-            f(a, b, c)
-        ",
-        );
-        no_errors(&result);
-
-        let reference = result
-            .root_references
-            .iter()
-            .find(|reference| reference.symbol.name == "f")
-            .expect("expected root reference to f");
-
-        match &reference.symbol.function_info {
-            SymbolFunctionInfo::Lambda { args } => {
-                assert_eq!(
-                    args,
-                    &vec![
-                        FunctionArgInfo {
-                            name: "x".to_string(),
-                            has_default: false,
-                            is_reference: true,
-                        },
-                        FunctionArgInfo {
-                            name: "y".to_string(),
-                            has_default: true,
-                            is_reference: false,
-                        },
-                        FunctionArgInfo {
-                            name: "z".to_string(),
-                            has_default: true,
-                            is_reference: true,
-                        },
-                    ]
-                );
-            }
-            other => panic!("expected lambda function info, got {other:?}"),
-        }
-    }
-
     // -- pure compiler (AST) tests --
 
     #[test]

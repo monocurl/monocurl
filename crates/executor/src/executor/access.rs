@@ -5,6 +5,8 @@ use crate::{
     value::{
         Value,
         container::HashableKey,
+        invoked_function::InvokedFunction,
+        invoked_operator::InvokedOperator,
         stateful::{StatefulNode, reset_stateful_cache},
     },
 };
@@ -168,7 +170,19 @@ impl Executor {
         ExecSingle::Continue
     }
 
-    pub(super) fn exec_subscript(&mut self, stack_idx: usize, mutable: bool) -> ExecSingle {
+    async fn read_subscript_value(&mut self, value: Value) -> Result<Value, ExecutorError> {
+        let mut value = value.elide_lvalue();
+        loop {
+            value = match value {
+                Value::Leader(ref leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
+                Value::InvokedFunction(ref inv) => InvokedFunction::value(inv, self).await?,
+                Value::InvokedOperator(ref inv) => InvokedOperator::value(inv, self).await?,
+                other => return Ok(other.elide_cached_wrappers_rec()),
+            };
+        }
+    }
+
+    pub(super) async fn exec_subscript(&mut self, stack_idx: usize, mutable: bool) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
         let index = stack.pop();
         let base = stack.pop();
@@ -176,132 +190,145 @@ impl Executor {
         let index = index.elide_cached_wrappers_rec();
 
         if mutable {
-            let base_key = match base.as_lvalue_key() {
-                Some(k) => k,
-                None => {
-                    return ExecSingle::Error(ExecutorError::CannotSubscript(base.type_name()));
-                }
-            };
+            return self.exec_mutable_subscript(stack_idx, base, index);
+        }
 
-            let (base_key, base_val) = follow_heap_lvalues(base_key);
-            if let Value::Leader(_) = &base_val {
-                with_heap_mut(|h| {
-                    if let Value::Leader(l) = &mut *h.get_mut(base_key) {
-                        l.last_modified_stack = Some(stack_idx);
-                        l.leader_version += 1;
-                    }
-                });
+        self.exec_read_subscript(stack_idx, base, index).await
+    }
+
+    fn exec_mutable_subscript(
+        &mut self,
+        stack_idx: usize,
+        base: Value,
+        index: Value,
+    ) -> ExecSingle {
+        let base_key = match base.as_lvalue_key() {
+            Some(k) => k,
+            None => {
+                return ExecSingle::Error(ExecutorError::CannotSubscript(base.type_name()));
             }
+        };
 
-            match base_val {
-                Value::List(mut list) => {
-                    let Value::Integer(idx) = index else {
-                        return ExecSingle::Error(ExecutorError::type_error(
-                            "int",
-                            index.type_name(),
-                        ));
-                    };
-                    let idx = idx as usize;
-                    if idx >= list.elements.len() {
-                        return ExecSingle::Error(ExecutorError::IndexOutOfBounds {
-                            index: idx,
-                            len: list.elements.len(),
-                        });
-                    }
-
-                    let key = list.elements[idx].make_mut();
-                    heap_replace(base_key, Value::List(list));
-
-                    self.state.stack_mut(stack_idx).push(retained_lvalue(key));
+        let (base_key, base_val) = follow_heap_lvalues(base_key);
+        if let Value::Leader(_) = &base_val {
+            with_heap_mut(|h| {
+                if let Value::Leader(l) = &mut *h.get_mut(base_key) {
+                    l.last_modified_stack = Some(stack_idx);
+                    l.leader_version += 1;
                 }
-                Value::Map(mut map) => {
-                    let key_hash = match HashableKey::try_from_value(&index) {
-                        Ok(k) => k,
-                        Err(e) => return ExecSingle::Error(e),
-                    };
+            });
+        }
 
-                    let key = {
-                        match map.get_mut(&key_hash) {
-                            Some(value_ref) => value_ref.make_mut(),
-                            None => {
-                                let new_ref = VRc::new(Value::Nil);
-                                let key = new_ref.key();
-                                map.insert(key_hash, new_ref);
-                                key
-                            }
+        match base_val {
+            Value::List(mut list) => {
+                let Value::Integer(idx) = index else {
+                    return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
+                };
+                let idx = idx as usize;
+                if idx >= list.elements.len() {
+                    return ExecSingle::Error(ExecutorError::IndexOutOfBounds {
+                        index: idx,
+                        len: list.elements.len(),
+                    });
+                }
+
+                let key = list.elements[idx].make_mut();
+                heap_replace(base_key, Value::List(list));
+
+                self.state.stack_mut(stack_idx).push(retained_lvalue(key));
+            }
+            Value::Map(mut map) => {
+                let key_hash = match HashableKey::try_from_value(&index) {
+                    Ok(k) => k,
+                    Err(e) => return ExecSingle::Error(e),
+                };
+
+                let key = {
+                    match map.get_mut(&key_hash) {
+                        Some(value_ref) => value_ref.make_mut(),
+                        None => {
+                            let new_ref = VRc::new(Value::Nil);
+                            let key = new_ref.key();
+                            map.insert(key_hash, new_ref);
+                            key
                         }
-                    };
-                    heap_replace(base_key, Value::Map(map));
-                    self.state.stack_mut(stack_idx).push(retained_lvalue(key));
-                }
-                Value::Leader(leader) => {
-                    // push a weak lvalue for the leader's inner slot, then recurse
-                    let stack = self.state.stack_mut(stack_idx);
-                    stack.push(Value::Lvalue(leader.leader_rc.clone()));
-                    stack.push(index);
-                    return self.exec_subscript(stack_idx, true);
-                }
-                _ => {
-                    return ExecSingle::Error(ExecutorError::CannotSubscript(base_val.type_name()));
-                }
-            }
-        } else {
-            if matches!(base, Value::Stateful(_)) || matches!(index, Value::Stateful(_)) {
-                return ExecSingle::Error(ExecutorError::stateful_subscript());
-            }
-
-            let base = base.elide_cached_wrappers_rec();
-            match &base {
-                Value::List(list) => {
-                    let Value::Integer(idx) = index else {
-                        return ExecSingle::Error(ExecutorError::type_error(
-                            "int",
-                            index.type_name(),
-                        ));
-                    };
-                    let idx = idx as usize;
-                    if idx >= list.elements.len() {
-                        return ExecSingle::Error(ExecutorError::IndexOutOfBounds {
-                            index: idx,
-                            len: list.elements.len(),
-                        });
                     }
-                    let val = with_heap(|h| h.get(list.elements[idx].key()).clone());
-                    self.state.stack_mut(stack_idx).push(val);
+                };
+                heap_replace(base_key, Value::Map(map));
+                self.state.stack_mut(stack_idx).push(retained_lvalue(key));
+            }
+            Value::Leader(leader) => {
+                return self.exec_mutable_subscript(
+                    stack_idx,
+                    Value::Lvalue(leader.leader_rc.clone()),
+                    index,
+                );
+            }
+            _ => {
+                return ExecSingle::Error(ExecutorError::CannotSubscript(base_val.type_name()));
+            }
+        }
+
+        ExecSingle::Continue
+    }
+
+    async fn exec_read_subscript(
+        &mut self,
+        stack_idx: usize,
+        base: Value,
+        index: Value,
+    ) -> ExecSingle {
+        let base = match self.read_subscript_value(base).await {
+            Ok(value) => value,
+            Err(error) => return ExecSingle::Error(error),
+        };
+        let index = match self.read_subscript_value(index).await {
+            Ok(value) => value,
+            Err(error) => return ExecSingle::Error(error),
+        };
+
+        if matches!(base, Value::Stateful(_)) || matches!(index, Value::Stateful(_)) {
+            return ExecSingle::Error(ExecutorError::stateful_subscript());
+        }
+
+        match base {
+            Value::List(list) => {
+                let Value::Integer(idx) = index else {
+                    return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
+                };
+                let idx = idx as usize;
+                if idx >= list.elements.len() {
+                    return ExecSingle::Error(ExecutorError::IndexOutOfBounds {
+                        index: idx,
+                        len: list.elements.len(),
+                    });
                 }
-                Value::Map(map) => {
-                    let key_hash = match HashableKey::try_from_value(&index) {
-                        Ok(k) => k,
-                        Err(e) => return ExecSingle::Error(e),
-                    };
-                    let val = map
-                        .get(&key_hash)
-                        .map(|k| with_heap(|h| h.get(k.key()).clone()))
-                        .unwrap_or(Value::Nil);
-                    self.state.stack_mut(stack_idx).push(val);
-                }
-                Value::String(s) => {
-                    let Value::Integer(idx) = index else {
-                        return ExecSingle::Error(ExecutorError::type_error(
-                            "int",
-                            index.type_name(),
-                        ));
-                    };
-                    let idx = idx as usize;
-                    let ch = s.chars().nth(idx).unwrap_or('\0');
-                    self.state
-                        .stack_mut(stack_idx)
-                        .push(Value::String(ch.to_string()));
-                }
-                Value::Leader(leader) => {
-                    let inner = with_heap(|h| h.get(leader.leader_rc.key()).clone());
-                    self.state.stack_mut(stack_idx).push(inner);
-                    self.state.stack_mut(stack_idx).push(index);
-                    return self.exec_subscript(stack_idx, false);
-                }
-                _ => {
-                    return ExecSingle::Error(ExecutorError::CannotSubscript(base.type_name()));
-                }
+                let val = with_heap(|h| h.get(list.elements[idx].key()).clone());
+                self.state.stack_mut(stack_idx).push(val);
+            }
+            Value::Map(map) => {
+                let key_hash = match HashableKey::try_from_value(&index) {
+                    Ok(k) => k,
+                    Err(e) => return ExecSingle::Error(e),
+                };
+                let val = map
+                    .get(&key_hash)
+                    .map(|k| with_heap(|h| h.get(k.key()).clone()))
+                    .unwrap_or(Value::Nil);
+                self.state.stack_mut(stack_idx).push(val);
+            }
+            Value::String(s) => {
+                let Value::Integer(idx) = index else {
+                    return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
+                };
+                let idx = idx as usize;
+                let ch = s.chars().nth(idx).unwrap_or('\0');
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::String(ch.to_string()));
+            }
+            _ => {
+                return ExecSingle::Error(ExecutorError::CannotSubscript(base.type_name()));
             }
         }
 

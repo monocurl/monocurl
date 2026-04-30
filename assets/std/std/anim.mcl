@@ -94,8 +94,8 @@ let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_h
 }
 
 # like Trans, but pairs sub-meshes by their `tag` rather than by order.
-let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_hint = 0| {
-    let embed = |start, dst| __monocurl__native__ tag_trans_embed_with_options(start, dst, similar_topo_hint)
+let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_hint = 0, tag_map = nil| {
+    let embed = |start, dst| __monocurl__native__ tag_trans_embed_with_options_and_tag_map(start, dst, similar_topo_hint, tag_map)
     let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
     return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }

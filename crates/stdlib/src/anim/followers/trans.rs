@@ -1,6 +1,17 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    sync::Arc,
+};
 
-use executor::{error::ExecutorError, executor::Executor, value::Value};
+use executor::{
+    error::ExecutorError,
+    executor::Executor,
+    heap::with_heap,
+    value::{
+        Value,
+        container::{HashableKey, List, Map},
+    },
+};
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
     simd::{Float2, Float3, Float4},
@@ -16,6 +27,23 @@ use super::super::helpers::{self, list_value, materialize_live_value, mesh_cente
 use super::{embed_triplet, lerp_uniforms, read_path_arc_value};
 
 const NORMAL_EPSILON: f32 = 1e-6;
+
+#[derive(Clone, Debug)]
+struct TagTransMapEntry {
+    source_tags: Vec<Vec<isize>>,
+    target_tags: Vec<Vec<isize>>,
+}
+
+#[derive(Clone, Debug)]
+struct TagTransMap {
+    entries: Vec<TagTransMapEntry>,
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+enum TagPairGroup {
+    Explicit(usize),
+    SelfTag(Vec<isize>),
+}
 
 #[stdlib_func]
 pub async fn trans_embed(
@@ -67,7 +95,7 @@ pub async fn tag_trans_embed(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    tag_trans_embed_impl(executor, stack_idx, -2, -1, true).await
+    tag_trans_embed_impl(executor, stack_idx, -2, -1, true, None).await
 }
 
 #[stdlib_func]
@@ -76,7 +104,25 @@ pub async fn tag_trans_embed_with_options(
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
     let similar_topo_hint = read_truthy_stack_value(executor, stack_idx, -1, "similar_topo_hint")?;
-    tag_trans_embed_impl(executor, stack_idx, -3, -2, similar_topo_hint).await
+    tag_trans_embed_impl(executor, stack_idx, -3, -2, similar_topo_hint, None).await
+}
+
+#[stdlib_func]
+pub async fn tag_trans_embed_with_options_and_tag_map(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let similar_topo_hint = read_truthy_stack_value(executor, stack_idx, -2, "similar_topo_hint")?;
+    let tag_map = read_optional_tag_trans_map(executor, stack_idx, -1)?;
+    tag_trans_embed_impl(
+        executor,
+        stack_idx,
+        -4,
+        -3,
+        similar_topo_hint,
+        tag_map.as_ref(),
+    )
+    .await
 }
 
 async fn tag_trans_embed_impl(
@@ -85,6 +131,7 @@ async fn tag_trans_embed_impl(
     start_index: i32,
     destination_index: i32,
     similar_topo_hint: bool,
+    tag_map: Option<&TagTransMap>,
 ) -> Result<Value, ExecutorError> {
     let start_value = executor.state.stack(stack_idx).read_at(start_index).clone();
     let destination_value = executor
@@ -103,6 +150,7 @@ async fn tag_trans_embed_impl(
             && start_leaves.len() <= 1
             && target_leaves.len() <= 1,
         similar_topo_hint,
+        tag_map,
     )?;
     Ok(embed_triplet(aligned, prepared_destination, state))
 }
@@ -159,6 +207,209 @@ fn read_planar_state(value: &Value) -> Result<Option<(Float4, Float4)>, Executor
         }
         _ => Ok(None),
     }
+}
+
+fn read_optional_tag_trans_map(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+) -> Result<Option<TagTransMap>, ExecutorError> {
+    match executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_cached_wrappers_rec()
+    {
+        Value::Nil => Ok(None),
+        Value::Map(map) => parse_tag_trans_map(&map).map(Some),
+        other => Err(ExecutorError::type_error_for(
+            "map / nil",
+            other.type_name(),
+            "tag_map",
+        )),
+    }
+}
+
+fn parse_tag_trans_map(map: &Map) -> Result<TagTransMap, ExecutorError> {
+    let mut entries = Vec::with_capacity(map.len());
+    for (source_key, target_ref) in map.iter() {
+        let source_tags = tag_groups_from_key(source_key)?;
+        let target_value = with_heap(|h| h.get(target_ref.key()).clone());
+        let target_tags = tag_groups_from_value(target_value)?;
+        entries.push(TagTransMapEntry {
+            source_tags,
+            target_tags,
+        });
+    }
+    validate_tag_trans_map(&entries)?;
+    Ok(TagTransMap { entries })
+}
+
+fn validate_tag_trans_map(entries: &[TagTransMapEntry]) -> Result<(), ExecutorError> {
+    let mut source_tags = HashMap::new();
+    let mut target_tags = HashMap::new();
+
+    for (entry_idx, entry) in entries.iter().enumerate() {
+        for tag in &entry.source_tags {
+            if source_tags.insert(tag.clone(), entry_idx).is_some() {
+                return Err(ExecutorError::invalid_invocation(format!(
+                    "tag_map mentions input tag {:?} more than once",
+                    tag
+                )));
+            }
+        }
+        for tag in &entry.target_tags {
+            if target_tags.insert(tag.clone(), entry_idx).is_some() {
+                return Err(ExecutorError::invalid_invocation(format!(
+                    "tag_map mentions output tag {:?} more than once",
+                    tag
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn tag_groups_from_key(key: &HashableKey) -> Result<Vec<Vec<isize>>, ExecutorError> {
+    match key {
+        HashableKey::Integer(n) => Ok(vec![vec![*n as isize]]),
+        HashableKey::Float(bits) => {
+            tag_component_from_float(HashableKey::float_value(*bits)).map(|tag| vec![vec![tag]])
+        }
+        HashableKey::String(_) => Err(ExecutorError::type_error_for(
+            "int / list / list of lists",
+            "string",
+            "tag_map",
+        )),
+        HashableKey::Vector(values) => tag_groups_from_key_vector(values),
+    }
+}
+
+fn tag_groups_from_key_vector(values: &[HashableKey]) -> Result<Vec<Vec<isize>>, ExecutorError> {
+    if values.is_empty() {
+        return Ok(vec![vec![]]);
+    }
+
+    let all_lists = values
+        .iter()
+        .all(|value| matches!(value, HashableKey::Vector(_)));
+    let any_lists = values
+        .iter()
+        .any(|value| matches!(value, HashableKey::Vector(_)));
+
+    if all_lists {
+        values
+            .iter()
+            .map(|value| {
+                let HashableKey::Vector(tags) = value else {
+                    unreachable!();
+                };
+                tag_vector_from_key_vector(tags)
+            })
+            .collect()
+    } else if any_lists {
+        Err(mixed_tag_map_list_error())
+    } else {
+        tag_vector_from_key_vector(values).map(|tags| vec![tags])
+    }
+}
+
+fn tag_vector_from_key_vector(values: &[HashableKey]) -> Result<Vec<isize>, ExecutorError> {
+    values.iter().map(tag_component_from_key).collect()
+}
+
+fn tag_component_from_key(value: &HashableKey) -> Result<isize, ExecutorError> {
+    match value {
+        HashableKey::Integer(n) => Ok(*n as isize),
+        HashableKey::Float(bits) => tag_component_from_float(HashableKey::float_value(*bits)),
+        HashableKey::String(_) => Err(ExecutorError::type_error_for("int", "string", "tag_map")),
+        HashableKey::Vector(_) => Err(ExecutorError::type_error_for("int", "list", "tag_map")),
+    }
+}
+
+fn tag_groups_from_value(value: Value) -> Result<Vec<Vec<isize>>, ExecutorError> {
+    match value.elide_cached_wrappers_rec() {
+        Value::Integer(n) => Ok(vec![vec![n as isize]]),
+        Value::Float(f) => tag_component_from_float(f).map(|tag| vec![vec![tag]]),
+        Value::List(list) => tag_groups_from_list(&list),
+        other => Err(ExecutorError::type_error_for(
+            "int / list / list of lists",
+            other.type_name(),
+            "tag_map",
+        )),
+    }
+}
+
+fn tag_groups_from_list(list: &List) -> Result<Vec<Vec<isize>>, ExecutorError> {
+    if list.is_empty() {
+        return Ok(vec![vec![]]);
+    }
+
+    let values = list
+        .elements()
+        .iter()
+        .map(|key| with_heap(|h| h.get(key.key()).clone()).elide_cached_wrappers_rec())
+        .collect::<Vec<_>>();
+    let all_lists = values.iter().all(|value| matches!(value, Value::List(_)));
+    let any_lists = values.iter().any(|value| matches!(value, Value::List(_)));
+
+    if all_lists {
+        values
+            .iter()
+            .map(|value| {
+                let Value::List(tags) = value else {
+                    unreachable!();
+                };
+                tag_vector_from_list(tags)
+            })
+            .collect()
+    } else if any_lists {
+        Err(mixed_tag_map_list_error())
+    } else {
+        values
+            .iter()
+            .map(tag_component_from_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map(|tags| vec![tags])
+    }
+}
+
+fn tag_vector_from_list(list: &List) -> Result<Vec<isize>, ExecutorError> {
+    list.elements()
+        .iter()
+        .map(|key| {
+            let value = with_heap(|h| h.get(key.key()).clone()).elide_cached_wrappers_rec();
+            tag_component_from_value(&value)
+        })
+        .collect()
+}
+
+fn tag_component_from_value(value: &Value) -> Result<isize, ExecutorError> {
+    match value {
+        Value::Integer(n) => Ok(*n as isize),
+        Value::Float(f) => tag_component_from_float(*f),
+        other => Err(ExecutorError::type_error_for(
+            "int",
+            other.type_name(),
+            "tag_map",
+        )),
+    }
+}
+
+fn tag_component_from_float(value: f64) -> Result<isize, ExecutorError> {
+    if value.fract() == 0.0 {
+        Ok(value as isize)
+    } else {
+        Err(ExecutorError::type_error_for("int", "float", "tag_map"))
+    }
+}
+
+fn mixed_tag_map_list_error() -> ExecutorError {
+    ExecutorError::invalid_invocation(
+        "tag_map entries must be either a tag list or a list of tag lists",
+    )
 }
 
 fn read_truthy_stack_value(
@@ -234,8 +485,12 @@ fn prepare_trans_value_like_by_tag(
     target_leaves: &[Arc<Mesh>],
     prefer_single_mesh: bool,
     similar_topo_hint: bool,
+    tag_map: Option<&TagTransMap>,
 ) -> Result<(Value, Value, Value), ExecutorError> {
-    let pairings = pair_leaf_indices_by_tag(source_leaves, &target_leaves);
+    let pairings = match tag_map {
+        Some(tag_map) => pair_leaf_indices_by_tag_map(source_leaves, target_leaves, tag_map),
+        None => pair_leaf_indices_by_tag(source_leaves, target_leaves),
+    };
     build_prepared_trans_values(
         source_leaves,
         target_leaves,
@@ -357,6 +612,86 @@ fn pair_leaf_indices_by_tag(
 
     out.sort_by_key(|pairing| tag_pair_draw_order_key(source_leaves.len(), *pairing));
     out
+}
+
+fn pair_leaf_indices_by_tag_map(
+    source_leaves: &[Arc<Mesh>],
+    target_leaves: &[Arc<Mesh>],
+    tag_map: &TagTransMap,
+) -> Vec<(Option<usize>, Option<usize>)> {
+    let source_lookup = tag_map_lookup(tag_map, |entry| &entry.source_tags);
+    let target_lookup = tag_map_lookup(tag_map, |entry| &entry.target_tags);
+    let mentioned_tags = tag_map_mentioned_tags(tag_map);
+
+    let mut source_groups: HashMap<TagPairGroup, Vec<usize>> = HashMap::new();
+    let mut target_groups: HashMap<TagPairGroup, Vec<usize>> = HashMap::new();
+    let mut unpaired_sources = Vec::new();
+    let mut unpaired_targets = Vec::new();
+
+    for (source_idx, source) in source_leaves.iter().enumerate() {
+        match tag_pair_group(&source.tag, &source_lookup, &mentioned_tags) {
+            Some(group) => source_groups.entry(group).or_default().push(source_idx),
+            None => unpaired_sources.push((Some(source_idx), None)),
+        }
+    }
+
+    for (target_idx, target) in target_leaves.iter().enumerate() {
+        match tag_pair_group(&target.tag, &target_lookup, &mentioned_tags) {
+            Some(group) => target_groups.entry(group).or_default().push(target_idx),
+            None => unpaired_targets.push((None, Some(target_idx))),
+        }
+    }
+
+    let mut group_keys = source_groups.keys().cloned().collect::<HashSet<_>>();
+    group_keys.extend(target_groups.keys().cloned());
+
+    let mut out = Vec::new();
+    for group in group_keys {
+        let source_group = source_groups.get(&group).map(Vec::as_slice).unwrap_or(&[]);
+        let target_group = target_groups.get(&group).map(Vec::as_slice).unwrap_or(&[]);
+        out.extend(pair_index_groups(source_group, target_group));
+    }
+    out.extend(unpaired_sources);
+    out.extend(unpaired_targets);
+
+    out.sort_by_key(|pairing| tag_pair_draw_order_key(source_leaves.len(), *pairing));
+    out
+}
+
+fn tag_map_lookup(
+    tag_map: &TagTransMap,
+    side: impl Fn(&TagTransMapEntry) -> &[Vec<isize>],
+) -> HashMap<Vec<isize>, usize> {
+    let mut lookup = HashMap::new();
+    for (entry_idx, entry) in tag_map.entries.iter().enumerate() {
+        for tag in side(entry) {
+            lookup.insert(tag.clone(), entry_idx);
+        }
+    }
+    lookup
+}
+
+fn tag_map_mentioned_tags(tag_map: &TagTransMap) -> HashSet<Vec<isize>> {
+    let mut mentioned_tags = HashSet::new();
+    for entry in &tag_map.entries {
+        mentioned_tags.extend(entry.source_tags.iter().cloned());
+        mentioned_tags.extend(entry.target_tags.iter().cloned());
+    }
+    mentioned_tags
+}
+
+fn tag_pair_group(
+    tag: &[isize],
+    explicit_lookup: &HashMap<Vec<isize>, usize>,
+    mentioned_tags: &HashSet<Vec<isize>>,
+) -> Option<TagPairGroup> {
+    if let Some(entry_idx) = explicit_lookup.get(tag) {
+        Some(TagPairGroup::Explicit(*entry_idx))
+    } else if mentioned_tags.contains(tag) {
+        None
+    } else {
+        Some(TagPairGroup::SelfTag(tag.to_vec()))
+    }
 }
 
 fn tag_pair_draw_order_key(
@@ -2525,8 +2860,9 @@ mod tests {
     use crate::mesh::helpers::tessellate_planar_loops;
 
     use super::{
-        ClosedContour, Value, append_closed_contour, canonicalize_surface_template,
-        extract_closed_contours, match_tri_lin, pair_leaf_indices_by_tag, planar_mesh_patharc_lerp,
+        ClosedContour, TagTransMap, TagTransMapEntry, Value, append_closed_contour,
+        canonicalize_surface_template, extract_closed_contours, match_tri_lin,
+        pair_leaf_indices_by_tag, pair_leaf_indices_by_tag_map, planar_mesh_patharc_lerp,
         prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair,
         prepare_trans_mesh_pair_with_similar_topo_hint, read_planar_state, same_mesh_topology,
         signed_contour_area, split_mesh_contours, vec3_patharc_lerp,
@@ -2712,6 +3048,45 @@ mod tests {
         let pairings = pair_leaf_indices_by_tag(&source, &target);
 
         assert_eq!(pairings, vec![(Some(0), None), (Some(1), Some(0))]);
+    }
+
+    #[test]
+    fn pair_leaf_indices_by_tag_map_groups_many_source_tags_to_one_target_tag() {
+        let source = vec![
+            tagged_mesh(vec![0]),
+            tagged_mesh(vec![1]),
+            tagged_mesh(vec![3]),
+        ];
+        let target = vec![tagged_mesh(vec![2]), tagged_mesh(vec![3])];
+        let tag_map = TagTransMap {
+            entries: vec![TagTransMapEntry {
+                source_tags: vec![vec![0], vec![1]],
+                target_tags: vec![vec![2]],
+            }],
+        };
+
+        let pairings = pair_leaf_indices_by_tag_map(&source, &target, &tag_map);
+
+        assert_eq!(
+            pairings,
+            vec![(Some(0), Some(0)), (Some(1), Some(0)), (Some(2), Some(1))]
+        );
+    }
+
+    #[test]
+    fn pair_leaf_indices_by_tag_map_does_not_self_match_mentioned_tags() {
+        let source = vec![tagged_mesh(vec![0]), tagged_mesh(vec![2])];
+        let target = vec![tagged_mesh(vec![2])];
+        let tag_map = TagTransMap {
+            entries: vec![TagTransMapEntry {
+                source_tags: vec![vec![0]],
+                target_tags: vec![vec![2]],
+            }],
+        };
+
+        let pairings = pair_leaf_indices_by_tag_map(&source, &target, &tag_map);
+
+        assert_eq!(pairings, vec![(Some(0), Some(0)), (Some(1), None)]);
     }
 
     #[test]

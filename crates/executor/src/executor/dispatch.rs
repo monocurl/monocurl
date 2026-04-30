@@ -335,7 +335,7 @@ impl Executor {
             }
 
             Instruction::Subscript { mutable } => {
-                return self.exec_subscript(stack_idx, mutable);
+                return self.exec_subscript(stack_idx, mutable).await;
             }
             Instruction::Attribute {
                 mutable,

@@ -181,7 +181,7 @@ impl SectionParser {
         }
 
         self.state.push_frame(|frame| {
-            frame.operating_range = inner_range;
+            frame.operating_range = inner_range.clone();
         });
 
         self.advance_newlines();
@@ -194,19 +194,46 @@ impl SectionParser {
             let mut emitted_error = false;
 
             loop {
-                let entry = self.parse_expr_best_effort();
-                if let Some(span) = self.read_if_token(Token::KeyValueMap) {
+                let entry_start = self.token_index;
+                let (key_value_token, entry_end) =
+                    self.find_top_level_map_entry_delimiters(inner_range.end);
+
+                if let Some(key_value_token) = key_value_token {
                     if !vector_entries.is_empty() && !emitted_error {
                         self.emit_error(
                             "Ambiguous Literal".into(),
                             "cannot decide if literal is list or map".into(),
-                            base_span.start..span.end,
+                            base_span.start..self.tokens[key_value_token].1.end,
                         );
                         emitted_error = true;
                     }
+
+                    self.state.push_frame(|frame| {
+                        frame.operating_range = entry_start..key_value_token;
+                    });
+                    let entry = self.parse_expr_best_effort();
+                    self.state.pop_frame();
+
+                    self.token_index = key_value_token;
+                    self.read_token_best_effort(Token::KeyValueMap);
+
+                    let value_start = self.token_index;
+                    self.state.push_frame(|frame| {
+                        frame.operating_range = value_start..entry_end;
+                    });
                     let value = self.parse_expr_best_effort();
+                    self.state.pop_frame();
+                    self.token_index = entry_end;
+
                     map_entries.push((entry, value));
                 } else {
+                    self.state.push_frame(|frame| {
+                        frame.operating_range = entry_start..entry_end;
+                    });
+                    let entry = self.parse_expr_best_effort();
+                    self.state.pop_frame();
+                    self.token_index = entry_end;
+
                     if !map_entries.is_empty() && !emitted_error {
                         self.emit_error(
                             "Ambiguous Literal".into(),
@@ -249,5 +276,31 @@ impl SectionParser {
         self.advance_newlines();
         let end_span = self.read_token_best_effort(Token::RBracket);
         (base_span.start..end_span.end, literal)
+    }
+
+    fn find_top_level_map_entry_delimiters(&self, range_end: usize) -> (Option<usize>, usize) {
+        let mut key_value_token = None;
+        let mut idx = self.token_index;
+
+        while idx < range_end {
+            match self.tokens[idx].0 {
+                Token::LParen | Token::LBracket | Token::LFlower => {
+                    idx = self
+                        .precomputation
+                        .bracket_partners
+                        .get(&idx)
+                        .map(|end| end.saturating_add(1).min(range_end))
+                        .unwrap_or(range_end);
+                }
+                Token::KeyValueMap => {
+                    key_value_token = Some(idx);
+                    idx += 1;
+                }
+                Token::Comma => return (key_value_token, idx),
+                _ => idx += 1,
+            }
+        }
+
+        (key_value_token, range_end)
     }
 }
