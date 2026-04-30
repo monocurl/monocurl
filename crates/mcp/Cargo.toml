@@ -13,10 +13,10 @@ compiler.workspace = true
 executor.workspace = true
 lexer.workspace = true
 parser.workspace = true
-rmcp.workspace = true
+rmcp = { version = "1.5.0", features = ["server", "transport-io"] }
 serde.workspace = true
 serde_json.workspace = true
 smol.workspace = true
 stdlib.workspace = true
 structs.workspace = true
-tokio.workspace = true
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
