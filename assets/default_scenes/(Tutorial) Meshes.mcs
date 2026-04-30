@@ -1,4 +1,5 @@
 # tutorial: meshes and operators
+# This lesson is a snippet from monocurl.com/learn
 #
 # Meshes are the visible values in a scene. This tutorial keeps definitions
 # close to the slide that uses them so new code is easy to follow.
@@ -12,9 +13,11 @@ import std.scene
 
 background = WHITE
 
-mesh title = center{[0, 1.3, 0]} Text("Meshes", 0.8)
+# a typical mesh is constructed by a series of operator invocation
+# (center{1.3u}) that apply to a base constructor (Text(...))
+mesh title = center{1.3u} Text("Meshes", 0.8)
 mesh item =
-    center{[0, 0, 0]}
+    center{0r}
     fill{alpha{0.22} BLUE}
     stroke{BLUE, 2}
     Circle(0.5)
@@ -25,7 +28,7 @@ slide "Mesh Variables"
     play Wait(1.5)
 
     item =
-        center{[0, 0, 0]}
+        center{0r}
         fill{alpha{0.22} ORANGE}
         stroke{ORANGE, 2}
         Square(0.9)
@@ -34,31 +37,31 @@ slide "Mesh Variables"
 
 slide "Constructors"
     # Constructors make basic geometry. Operators place and style it.
-    title = center{[0, 1.3, 0]} Text("Constructors", 0.8)
+    title = center{1.3u} Text("Constructors", 0.8)
     item = [
-        center{[-1.55, 0.15, 0]} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.4),
-        center{[0, 0.15, 0]} fill{alpha{0.22} ORANGE} stroke{ORANGE, 2} Square(0.75),
-        center{[1.55, 0.15, 0]} fill{alpha{0.22} GREEN} stroke{GREEN, 2} RegularPolygon(6, 0.45),
-        center{[-1.55, -0.7, 0]} Text("Circle", 0.5),
-        center{[0, -0.7, 0]} Text("Square", 0.5),
-        center{[1.55, -0.7, 0]} Text("Polygon", 0.5)
+        center{1.55l + 0.15u} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.4),
+        center{0.15u} color{ORANGE} Arrow(0.45l, 0.45r),
+        center{1.55r + 0.15u} fill{alpha{0.22} GREEN} stroke{GREEN, 2} Capsule(0.45l, 0.45r, 0.2),
+        center{1.55l + 0.7d} Text("Circle", 0.5),
+        center{0.7d} Text("Arrow", 0.5),
+        center{1.55r + 0.7d} Text("Capsule", 0.5)
     ]
     play Set()
     play Wait(1.5)
 
 slide "Common Styling"
-    # A custom operator is useful when several meshes share the same style.
+    # A custom operator defined in terms of stdlib operators is useful when several meshes share the same style.
     # This one extracts the repeated fill/stroke pair.
     let soft_style = operator |target, col|
         fill{alpha{0.2} col}
         stroke{col, 2}
         target
 
-    title = center{[0, 1.3, 0]} Text("Custom operator", 0.8)
+    title = center{1.3u} Text("Custom operator", 0.8)
     item = [
-        center{[-1.3, 0, 0]} soft_style{BLUE} Circle(0.45),
-        center{[0, 0, 0]} soft_style{ORANGE} Square(0.75),
-        center{[1.3, 0, 0]} soft_style{GREEN} RegularPolygon(5, 0.48)
+        center{1.3l} soft_style{BLUE} Circle(0.45),
+        center{0r} soft_style{ORANGE} Square(0.75),
+        center{1.3r} soft_style{GREEN} RegularPolygon(5, 0.48)
     ]
     play Trans(1.3)
     play Wait(1.2)
@@ -67,12 +70,12 @@ slide "Layout Operators"
     # `next_to` positions one mesh next to another mesh.
     # `to_side` positions a mesh near a side of the camera frame.
     let base =
-        center{[-0.8, 0, 0]}
+        center{0.8l}
         fill{alpha{0.18} BLUE}
         stroke{BLUE, 2}
         Rect([1.25, 0.7])
 
-    title = center{[0, 1.3, 0]} Text("Layout operators", 0.8)
+    title = center{1.3u} Text("Layout operators", 0.8)
     item = [
         base,
         next_to{base, 1r, 0.25} Text("next to", 0.5),
@@ -81,48 +84,28 @@ slide "Layout Operators"
     play Trans(1.3)
     play Wait(1.5)
 
-slide "Z Index"
-    # z_index controls draw order when meshes overlap.
-    title = center{[0, 1.3, 0]} Text("z index", 0.8)
-    item = [
-        z_index{0}
-            center{[-0.25, 0, 0]}
-            fill{alpha{0.35} BLUE}
-            stroke{BLUE, 2}
-            Rect([1.25, 0.95]),
-        z_index{1}
-            center{[0.25, 0, 0]}
-            fill{alpha{0.45} ORANGE}
-            stroke{ORANGE, 2}
-            Circle(0.58),
-        z_index{2}
-            center{[0.25, 0, 0]}
-            Text("front", 0.5)
-    ]
-    play Trans(1.3)
-    play Wait(1.5)
 
 slide "Mesh Lists"
     # A list of meshes is also a mesh. This is how most diagrams are built.
-    title = center{[0, 1.3, 0]} Text("Mesh lists", 0.8)
+    title = center{1.3u} Text("Mesh lists", 0.8)
     item = [
-        center{[-1.1, 0, 0]} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.42),
-        center{[0, 0, 0]} fill{alpha{0.22} ORANGE} stroke{ORANGE, 2} Square(0.72),
-        center{[1.1, 0, 0]} fill{alpha{0.22} GREEN} stroke{GREEN, 2} RegularPolygon(5, 0.44),
-        stroke{LIGHT_GRAY, 2} Line([-1.6, -0.65, 0], [1.6, -0.65, 0])
+        center{1.1l} fill{alpha{0.22} BLUE} stroke{BLUE, 2} Circle(0.42),
+        center{0r} fill{alpha{0.22} ORANGE} stroke{ORANGE, 2} Square(0.72),
+        center{1.1r} fill{alpha{0.22} GREEN} stroke{GREEN, 2} RegularPolygon(5, 0.44),
+        center{0.65d} stroke{LIGHT_GRAY, 2} Capsule(1.6l, 1.6r, 0.08)
     ]
     play Trans(1.2)
     play Wait(1.2)
 
 slide "Tags And Filters"
-    # Tags give leaves stable identities. Filters can style a selected subset.
-    title = center{[0, 1.3, 0]} Text("Tags", 0.8)
+    # Tags give specific stable identities. Filters can style a selected subset.
+    title = center{1.3u} Text("Tags", 0.8)
     item =
         fade{0.2, |tags| not (2 in tags)}
         [
-            tag{1} center{[-1.2, 0, 0]} fill{alpha{0.28} BLUE} stroke{BLUE, 2} Circle(0.45),
-            tag{2} center{[0, 0, 0]} fill{alpha{0.28} ORANGE} stroke{ORANGE, 2} Circle(0.45),
-            tag{3} center{[1.2, 0, 0]} fill{alpha{0.28} GREEN} stroke{GREEN, 2} Circle(0.45)
+            tag{[1, 2, 3]} center{1.2l} fill{alpha{0.28} BLUE} stroke{BLUE, 2} Circle(0.45),
+            tag{2} center{0r} fill{alpha{0.28} ORANGE} stroke{ORANGE, 2} Circle(0.45),
+            tag{3} center{1.2r} fill{alpha{0.28} GREEN} stroke{GREEN, 2} Circle(0.45)
         ]
     print ["visible tags" -> mesh_tags(item)]
     play Trans(1.2)

@@ -1,5 +1,5 @@
-# Monocurl - A programming language and desktop application for 
-# algorithmic animation.
+# Monocurl - A programming language and real-time 
+# desktop application for algorithmic animation.
 #
 # This lesson is a snippet from monocurl.com/learn
 #
@@ -14,7 +14,7 @@
 #
 # Things to try while editing this file:
 # - replace BLUE with ORANGE
-# - replace [1.6, 0, 0] with [-1.6, 0, 0]
+# - replace 1.6r with 1.6l
 # - replace Lerp(1.0) with Lerp(2.0)
 
 import std.util
@@ -28,24 +28,24 @@ background = WHITE
 
 # init runs before the first slide. Put simple starting state here so the
 # viewport has something visible as soon as the file opens.
-mesh title = center{[0, 1.2, 0]} Text("Welcome to Monocurl", 0.7)
+mesh title = center{1.2u} Text("Welcome to Monocurl", 0.7)
 mesh dot =
-    center{[0, 0, 0]}
+    center{0r}
     fill{alpha{0.24} BLUE}
     stroke{BLUE, 2}
-    Circle(0.45)
+    Circle(radius: 0.45)
 
 slide "First Look"
     # press play or step through the slide. This first slide just holds the
     # initial frame long enough for you to inspect it.
-    play Wait(0.5)
+    play Wait(3)
 
 slide "Change One Value"
     # assignment changes the destination. Lerp decides how the visible frame
     # catches up to that destination.
-    title = center{[0, 1.2, 0]} Text("Change a value", 0.7)
+    title = center{1.2u} Text("Change a value", 0.7)
     dot =
-        center{[1.6, 0, 0]}
+        center{1.6r}
         fill{alpha{0.24} ORANGE}
         stroke{ORANGE, 2}
         Circle(0.45)
@@ -53,16 +53,16 @@ slide "Change One Value"
 
 slide "Add A Mesh"
     # mesh values can be text, lines, shapes, or lists of other meshes.
-    mesh line = stroke{TEAL, 3} Line([-1.8, -0.75, 0], [1.8, -0.75, 0])
-    mesh label = center{[0, -1.3, 0]} Text("new meshes appear after play", 0.5)
+    mesh line = stroke{TEAL, 3} Line(1.8l + 0.75d, 1.8r + 0.75d)
+    mesh label = center{1.3d} Text("new meshes appear after play", 0.5)
     play Fade(0.7)
 
 slide "Scrub The Timeline"
     # Wait adds time without changing the scene. Scrub this slide to see the
     # motion, pause, and second motion as separate parts of one slide.
-    title = center{[0, 1.2, 0]} Text("Scrub time", 0.7)
+    title = center{1.2u} Text("Scrub time", 0.7)
     dot =
-        center{[-1.6, 0, 0]}
+        center{1.6l}
         fill{alpha{0.24} GREEN}
         stroke{GREEN, 2}
         Circle(0.45)
@@ -70,7 +70,7 @@ slide "Scrub The Timeline"
     play Wait(0.4)
 
     dot =
-        center{[0, 0, 0]}
+        center{0r}
         fill{alpha{0.24} MAGENTA}
         stroke{MAGENTA, 2}
         Circle(0.62)
@@ -79,17 +79,24 @@ slide "Scrub The Timeline"
 slide "Present Or Export"
     # the same scene can be previewed, presented as slides, or exported as image / video
     # to present, use command / ctrl + p
-    # to export, use the file menu
+    # to export (image or video), use the file menu
     
-    title = center{[0, 1.2, 0]} Text("Present or export", 0.7)
+    # PRO TIP: in presentation mode,
+    # press command / ctrl + t to hit the parameters editor
+    # there, you can control attributes in real time!
+    # on the first slide you can control the radius of the circle
+    
+    title = center{1.2u} Text("Present or export", 0.7)
     dot = [
-        center{[-1.5, 0, 0]} fill{alpha{0.16} MAGENTA} stroke{MAGENTA, 2} Rect([1.3, 0.65]),
-        center{[0, 0, 0]} fill{alpha{0.16} BLUE} stroke{BLUE, 2} Rect([1.3, 0.65]),
-        center{[1.5, 0, 0]} fill{alpha{0.16} GREEN} stroke{GREEN, 2} Rect([1.3, 0.65]),
-        center{[-1.5, 0, 0]} Text("present", 0.5),
-        center{[0, 0, 0]} Text("image", 0.5),
-        center{[1.5, 0, 0]} Text("video", 0.5)
+        center{1.5l} fill{alpha{0.16} MAGENTA} stroke{MAGENTA, 2} Rect([1.3, 0.65]),
+        center{0r} fill{alpha{0.16} BLUE} stroke{BLUE, 2} Rect([1.3, 0.65]),
+        center{1.5r} fill{alpha{0.16} GREEN} stroke{GREEN, 2} Rect([1.3, 0.65]),
+        center{1.5l} Text("present", 0.5),
+        center{0r} Text("image", 0.5),
+        center{1.5r} Text("video", 0.5)
     ]
     line = []
     label = []
     play Trans(0.8)
+    
+    

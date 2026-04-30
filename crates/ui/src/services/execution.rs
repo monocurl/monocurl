@@ -32,8 +32,8 @@ impl ParameterValue {
     pub fn is_supported_control(&self) -> bool {
         match self {
             Self::Int(_) | Self::Float(_) | Self::Complex { .. } => true,
-            Self::VectorInt(values) => values.len() >= 2,
-            Self::VectorFloat(values) => values.len() >= 2,
+            Self::VectorInt(values) => values.len() == 2,
+            Self::VectorFloat(values) => values.len() == 2,
             Self::Camera(_) | Self::Other => false,
         }
     }

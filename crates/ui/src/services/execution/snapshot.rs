@@ -160,14 +160,7 @@ impl ExecutionService {
                     inv.body.operand.as_ref().clone(),
                     &operand_path,
                 );
-                if !operand_attributes.is_empty() {
-                    attributes.push(MeshAttributeSnapshot {
-                        target: None,
-                        name: "operand".into(),
-                        value: ParameterValue::Other,
-                        children: operand_attributes,
-                    });
-                }
+                attributes.extend(operand_attributes);
                 attributes
             }
             Value::List(list) => list

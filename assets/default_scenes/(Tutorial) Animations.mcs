@@ -1,8 +1,5 @@
 # tutorial: animations
-#
-# Animations are based on a leader/follower model. A mesh leader is the value
-# your code edits. Its follower is the value currently visible in the viewport.
-# A `play` statement decides how followers catch up to their leaders.
+# This lesson is a snippet from monocurl.com/learn
 
 import std.util
 import std.math
@@ -11,31 +8,36 @@ import std.mesh
 import std.anim
 import std.scene
 
-background = WHITE
-param live_radius = 0.38
-
-mesh title = center{[0, 1.3, 0]} Text("Leader and follower", 0.8)
+mesh title = center{1.3u} Text("Leader and follower", 0.8)
 mesh ball =
-    center{[-1.6, 0, 0]}
+    center{1.6l}
     fill{alpha{0.24} BLUE}
     stroke{BLUE, 2}
     Circle(0.45)
 
 slide "Leader And Follower"
-    # At the end of init, mesh leaders are synced to followers automatically.
+    # Animations are based on a leader/follower model.
+    # when you say `mesh x = Circle(1)`
+    # two variables are created:
+    # 1. a "leader" variable that you can interact with on code
+    # 2. a "follower" variable that is on screen (initially set to [])
+    # Changing x in code only affects the leader. To synchronize
+    # the follower with the leader, you must use 
+    # the play statement with animations
+    #
+    # Special case: at the end of init, mesh leaders are synced to followers automatically.
     # That is why the blue ball is already visible when the scene opens.
+    
     play Wait(1.2)
 
     # This assignment changes the leader immediately. Code now reads the orange
     # ball at the right, but the viewport still shows the old follower until a
     # later play statement syncs it.
     ball =
-        center{[1.6, 0, 0]}
+        center{1.6r}
         fill{alpha{0.24} ORANGE}
         stroke{ORANGE, 2}
         Circle(0.45)
-    print ["leader changed" -> "orange ball on the right"]
-    print "the follower is still the old blue ball during the next Wait"
 
     play Wait(1.6)
     play Lerp(1.4)
@@ -44,33 +46,32 @@ slide "Leader And Follower"
 slide "Set"
     # Set snaps followers to leaders immediately. Use it when you want a jump,
     # or when you want to reveal the current leader without interpolation.
-    title = center{[0, 1.3, 0]} Text("Set snaps", 0.8)
+    title = center{1.3u} Text("Set snaps", 0.8)
     ball =
-        center{[-1.4, -0.15, 0]}
+        center{1.4l + 0.15d}
         fill{alpha{0.24} GREEN}
         stroke{GREEN, 2}
         Circle(0.45)
     play Set()
+    
     play Wait(1.2)
 
-    ball =
-        center{[1.4, -0.15, 0]}
-        fill{alpha{0.24} MAGENTA}
-        stroke{MAGENTA, 2}
-        Circle(0.45)
-    play Set()
+    ball = Circle(rad: 0.5)
+    # animations can typically infer the meshes to animate
+    # but you may sometimes want fine grained control
+    # pass the meshes you want to animate via & (reference)
+    play Set([&ball])
     play Wait(1.2)
 
 slide "Lerp"
+    title = center{1.3u} Text("Lerp moves", 0.8)
+    play Set()
+
     # Lerp interpolates from the current follower to the current leader.
-    # It works best when the old and new mesh values have similar structure.
-    title = center{[0, 1.3, 0]} Text("Lerp moves", 0.8)
-    ball =
-        center{[0, 0, 0]}
-        fill{alpha{0.24} BLUE}
-        stroke{BLUE, 2}
-        Circle(0.65)
-    print ["lerp destination" -> "larger blue circle at center"]
+    # The exact mechanics are intricate, but in short, it interpolates the arguments of the function from the leader and follower
+    # Consequently, the leader and follower need to be "the same function"
+    
+    ball = Circle(rad: 0.65)
     play Lerp(1.5)
     play Wait(1.0)
 
@@ -83,38 +84,27 @@ slide "Labeled Keyframes"
         stroke{col, 2}
         Circle(radius)
 
-    title = center{[0, 1.3, 0]} Text("Labeled keyframes", 0.8)
-    ball = Ball(pos: [-1.4, 0, 0], radius: 0.35, col: BLUE)
+    title = center{1.3u} Text("Labeled keyframes", 0.8)
+    ball = Ball(pos: 1.4l, radius: 0.35, col: BLUE)
     play Set()
     play Wait(0.8)
 
-    ball.pos = [1.4, 0, 0]
+    # ball is recomputed with the new arguments
+    ball.pos = 1.4r
     ball.radius = 0.6
     ball.col = ORANGE
-    print ["leader fields" -> ["pos" -> ball.pos, "radius" -> ball.radius]]
+
     play Lerp(1.5)
     play Wait(1.0)
 
-slide "Wait"
-    # Wait reserves timeline time. It does not update any follower, even if a
-    # leader is dirty. The next Lerp still starts from the old follower.
-    title = center{[0, 1.3, 0]} Text("Wait does not sync", 0.8)
-    ball =
-        center{[-1.4, 0, 0]}
-        fill{alpha{0.24} GREEN}
-        stroke{GREEN, 2}
-        Square(0.85)
-    print "leader is now a green square, but Wait will not show it yet"
-    play Wait(1.5)
-    play Trans(1.2)
-    play Wait(0.8)
 
 slide "Grow Fade Write"
-    # Grow, Fade, and Write are follower animations. They compare the current
-    # follower with the current leader, then stage a specialized transition.
-    title = center{[0, 1.3, 0]} Text("Grow Fade Write", 0.8)
+    # Grow, Fade, and Write are follower animations. They compare the meshes that are introduced and deleted 
+    # and show the introduced meshes and hide the deleted ones# 
+    
+    title = center{1.3u} Text("Grow Fade Write", 0.8)
     ball = []
-    mesh path = stroke{TEAL, 3} Polyline([[-1.8, -0.35, 0], [0, 0.35, 0], [1.8, -0.35, 0]])
+    mesh path = stroke{TEAL, 3} Polyline([1.8l + 0.35d, 0.35u, 1.8r + 0.35d])
     play Write(1.2)
 
     mesh ring =
@@ -128,57 +118,69 @@ slide "Grow Fade Write"
     ring = []
     play Fade(0.9)
 
-slide "TagTrans"
-    # TagTrans is Trans with identities. Matching tags move to matching tags,
-    # even if the list order changes.
-    title = center{[0, 1.3, 0]} Text("TagTrans", 0.8)
+
+slide "Trans"
+    # Trans is a generalizez contour mending algorithm
+    title = center{1.3u} Text("Trans", 0.8)
     ball = [
-        tag{1} center{[-1.1, 0, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.36),
-        tag{2} center{[1.1, 0, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.36)
+        tag{1} center{1.1l} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.36),
+        tag{2} center{1.1r} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.36)
     ]
     play Trans(0.8)
     play Wait(0.7)
 
+    # TagTrans is a specialization of trans that tells the matching
+    # algorithm to only match meshes with the same tag
+    # this gives you a lot more control
     ball = [
-        tag{2} center{[-1.1, 0, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.42),
-        tag{1} center{[1.1, 0, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.42)
+        tag{2} center{1.1l} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.42),
+        tag{1} center{1.1r} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.42)
     ]
     play TagTrans(1.2)
     play Wait(0.8)
 
-slide "Rates"
-    # In parallel animations, use explicit targets so each branch owns a
-    # different leader. The two dots have the same duration but different rates.
-    title = center{[0, 1.3, 0]} Text("Rates", 0.8)
-    ball = []
-    mesh linear_dot = center{[-1.7, -0.35, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.28)
-    mesh bounce_dot = center{[-1.7, 0.35, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.28)
+slide "Parallel Animations"
+    title = center{1.3u} Text("Parallel animations", 0.8)
+    mesh pulse = []
     play Set()
-    play Wait(0.7)
+    play Wait(0.6)
 
-    linear_dot = center{[1.7, -0.35, 0]} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.28)
-    bounce_dot = center{[1.7, 0.35, 0]} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.28)
+    # `anim { ... }` creates an animation block. It does not run immediately.
+    # It runs only when passed to `play`, similar to a coroutine / promises
+    #
+    # When `play` receives a list, the animations run in parallel and the scene
+    # waits until all branches finish. Parallel branches should operate on
+    # leaders, so here one branch owns `ball` and the other owns `pulse`.
+    #
+    # A reusable helper that returns an animation block and mutates a leader is
+    # called a progressor: playing it moves the scene state forward.
+  
+    
+    # "Progressor" animation that modifies the input argument
+    # and animates it
+    # note that the code is not executed until you actually invoke this lambda and play it
+    let MoveBy = |&m, delta| anim {
+        m = shift{delta} m
+        play Lerp(3.0, [&m])
+        print "See when I'm printed!"
+    }
+    
+    # simple anim_block; still not executed until the play
+    let pulse_ring = anim {
+        pulse =
+            fill{CLEAR}
+            stroke{MAGENTA, 3}
+            Circle(0.35)
+        play Grow(1.45, [&pulse])
+
+        pulse =
+            fill{CLEAR}
+            stroke{CLEAR, 3}
+            Circle(1.0)
+        play Trans(1.65, [&pulse])
+    }
+
     play [
-        rate{linear} Lerp(1.4, [&linear_dot]),
-        rate{bounce} Lerp(1.4, [&bounce_dot])
+        MoveBy(&ball, 0.7u),
+        pulse_ring
     ]
-    play Wait(0.8)
-
-slide "Parameters"
-    # A param also has a leader and follower. A plain read like live_radius reads
-    # the leader. `$live_radius` reads the live follower, which is why the mesh
-    # can react to presentation-mode slider changes.
-    title = center{[0, 1.3, 0]} Text("Parameters", 0.8)
-    linear_dot = []
-    bounce_dot = []
-    mesh live =
-        center{[0, 0, 0]}
-        fill{alpha{0.24} GREEN}
-        stroke{GREEN, 2}
-        Circle(radius: $live_radius)
-    print ["radius leader before" -> live_radius]
-    play Fade(0.8)
-
-    live_radius = 0.8
-    print ["radius leader after" -> live_radius]
-    play Lerp(1.2)

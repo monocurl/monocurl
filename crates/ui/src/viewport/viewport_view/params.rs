@@ -11,7 +11,7 @@ use super::{
     Viewport,
     style::{
         ESCAPE_SPEED_FAR_PX, ESCAPE_SPEED_MAX_MULT, ESCAPE_SPEED_NEAR_PX, OVERDRAG_STEP_1D,
-        OVERDRAG_STEP_2D, PRES_ACCENT, PRES_MUTED, PRES_TEXT, SLIDER_1D_CANVAS_H,
+        OVERDRAG_STEP_2D, PRES_ACCENT, PRES_BORDER, PRES_MUTED, PRES_TEXT, SLIDER_1D_CANVAS_H,
         SLIDER_1D_EDGE_GAP, SLIDER_1D_MAX, SLIDER_1D_MIN, SLIDER_1D_W, SLIDER_2D_BG,
         SLIDER_2D_DOT_R, SLIDER_2D_EDGE_GAP, SLIDER_2D_GRID, SLIDER_2D_GRID_DIVISIONS,
         SLIDER_2D_MAX, SLIDER_2D_MIN, SLIDER_2D_SIZE, SLIDER_FILL_LOCKED, SLIDER_THUMB,
@@ -327,31 +327,47 @@ pub(super) fn parameter_controls(
     };
 
     let mut controls = Vec::new();
-
-    for param in params
+    let visible_params: Vec<_> = params
         .params
         .iter()
         .rev()
         .filter(|param| !is_hidden_param(&param.name))
-    {
-        controls.push(render_control_for_target(
-            viewport,
-            &param.target,
-            &param.name,
-            &param.value,
-            param.locked,
-            0,
-            services.clone(),
-            weak_vp.clone(),
-        ));
-    }
-
-    for mesh in params
+        .collect();
+    let editable_meshes: Vec<_> = params
         .meshes
         .iter()
         .rev()
         .filter(|mesh| mesh.has_supported_control())
-    {
+        .collect();
+    let other_meshes: Vec<_> = params
+        .meshes
+        .iter()
+        .rev()
+        .filter(|mesh| !mesh.has_supported_control())
+        .collect();
+
+    controls.push(render_section_header("Parameters"));
+    if visible_params.is_empty() {
+        controls.push(render_empty_section_message("No active parameters"));
+    } else {
+        for param in visible_params {
+            controls.push(render_control_for_target(
+                viewport,
+                &param.target,
+                &param.name,
+                &param.value,
+                param.locked,
+                0,
+                services.clone(),
+                weak_vp.clone(),
+            ));
+        }
+    }
+
+    if !editable_meshes.is_empty() || !other_meshes.is_empty() {
+        controls.push(render_section_header("Meshes"));
+    }
+    for mesh in editable_meshes {
         controls.push(render_mesh_group(
             viewport,
             mesh,
@@ -361,12 +377,7 @@ pub(super) fn parameter_controls(
         ));
     }
 
-    for mesh in params
-        .meshes
-        .iter()
-        .rev()
-        .filter(|mesh| !mesh.has_supported_control())
-    {
+    for mesh in other_meshes {
         controls.push(render_mesh_group(
             viewport,
             mesh,
@@ -381,6 +392,29 @@ pub(super) fn parameter_controls(
 
 fn is_hidden_param(name: &str) -> bool {
     HIDDEN_PARAMS.contains(&name)
+}
+
+fn render_section_header(label: &str) -> AnyElement {
+    div()
+        .mt(px(8.0))
+        .pt(px(10.0))
+        .pb(px(4.0))
+        .border_t(px(1.0))
+        .border_color(PRES_BORDER)
+        .text_color(PRES_MUTED)
+        .text_size(px(10.0))
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(label.to_string())
+        .into_any_element()
+}
+
+fn render_empty_section_message(message: &str) -> AnyElement {
+    div()
+        .py(px(6.0))
+        .text_color(PRES_MUTED)
+        .text_size(px(12.0))
+        .child(message.to_string())
+        .into_any_element()
 }
 
 fn render_control_for_target(
