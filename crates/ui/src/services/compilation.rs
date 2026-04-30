@@ -234,8 +234,8 @@ impl CompilationService {
             let mut compile_action = BatchCompileAction::None;
             let mut emit_parameter_hint = false;
 
-            for message in std::iter::once(message)
-                .chain(std::iter::from_fn(|| self.rx.try_next().ok().flatten()))
+            for message in
+                std::iter::once(message).chain(std::iter::from_fn(|| self.rx.try_recv().ok()))
             {
                 match message {
                     CompilationMessage::UpdateLexRope {

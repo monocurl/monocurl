@@ -69,7 +69,7 @@
 - mcp: binary crate for the `monocurl-mcp` stdio MCP server
   - docs/language-semantics.md: compact authoring guide for AI agents generating Monocurl scenes, structured to match the default tutorial chapters (overview, language basics, meshes/operators, animations) plus debug transcript guidance, patterns, anti-patterns, and references to the stdlib/tutorial scenes
   - docs/stdlib.md: MCP-facing overview of the public stdlib wrapper modules, common imports, and authoring conventions
-  - src/main.rs: RMCP-backed stdio MCP server exposing Monocurl language and stdlib documentation through `resources/list` and `resources/read`, plus read-only `monocurl_check` and `monocurl_seek` tools that parse/compile source and optionally seek execution to return runtime diagnostics and transcript output
+  - src/main.rs: RMCP-backed docs-only stdio MCP server exposing Monocurl language and stdlib documentation through `resources/list` and `resources/read`; compile checks, execution, seeking, transcript output, and rendering intentionally live outside this context server
   - server.github.example.json: placeholder MCP Registry metadata for a future GitHub-release/MCPB publishing flow
 - lexer: lexing utilites, contains token definition
   - src/lexer.rs: actually lexes a stream of characters, including the `print` keyword

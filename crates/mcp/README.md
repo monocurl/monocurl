@@ -1,8 +1,8 @@
 # Monocurl MCP Server
 
 `monocurl-mcp` is a small stdio MCP server that exposes Monocurl authoring
-documentation as MCP resources and exposes read-only validation/execution tools.
-It does not edit or render scenes yet.
+documentation as MCP resources. It does not edit, validate, execute, or render
+scenes.
 
 ## Run From Source
 
@@ -44,36 +44,8 @@ Then point the client at `target/release/monocurl-mcp`.
 
 ## Tools
 
-- `monocurl_check`: parses and compiles a root scene, returning structured
-  parse/compiler diagnostics, warnings, slide count, and slide names.
-- `monocurl_seek`: parses, compiles, executes up to a requested timestamp, and
-  returns diagnostics, runtime errors, the reached timestamp, and transcript
-  entries from `print` statements.
-
-Both tools accept:
-
-```json
-{
-  "source": "slide\nprint 1 + 2\n",
-  "rootPath": "scene.mcl",
-  "openDocuments": {
-    "lib/helpers.mcl": "let helper = |x| x + 1\n"
-  }
-}
-```
-
-`monocurl_seek` also requires `slide` and optionally accepts `time` or `atEnd`:
-
-```json
-{
-  "source": "slide\nprint 1 + 2\n",
-  "slide": 1,
-  "atEnd": true
-}
-```
-
-Visible slides are addressed as `1..=slideCount`. `slide = 0` with
-`atEnd = true` refers to the pre-scene boundary.
+This server intentionally exposes no tools. Compile checks, execution, seeking,
+transcript output, and rendering belong in the Monocurl CLI/application layer.
 
 ## Publishing Through GitHub Later
 

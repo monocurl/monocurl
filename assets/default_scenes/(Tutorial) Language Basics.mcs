@@ -70,7 +70,7 @@ let g = |x| {
 let samples = [f(1), f(2), f(3, 0)]
 
 
-# you can label arguments of lambdas to change them later on
+# you can label arguments of function calls to change them later on
 # the entire result is then recomputed on the new arguments
 var f_inv = f(x_arg: 2)
 print f_inv

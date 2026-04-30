@@ -153,7 +153,7 @@ impl ServiceManager {
                     cx.update_entity(&sm, |sm, cx| {
                         sm.on_sm_message_recv(message, cx);
 
-                        while let Ok(Some(sub_message)) = sm_rx.try_next() {
+                        while let Ok(sub_message) = sm_rx.try_recv() {
                             sm.on_sm_message_recv(sub_message, cx);
                         }
                     })

@@ -16,7 +16,7 @@ mod test {
 
     use crate::cache::CompilerCache;
 
-    use super::super::{CompileResult, FunctionArgInfo, SymbolFunctionInfo, compile};
+    use super::super::{CompileResult, compile};
 
     fn empty_span() -> Span8 {
         0..0

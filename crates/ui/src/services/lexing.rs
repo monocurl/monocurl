@@ -87,7 +87,7 @@ impl LexingService {
                 }
             }
 
-            while let Ok(Some(message)) = self.rx.try_next() {
+            while let Ok(message) = self.rx.try_recv() {
                 match message {
                     LexingMessage::UpdateRope {
                         old,

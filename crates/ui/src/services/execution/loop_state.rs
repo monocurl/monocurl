@@ -638,7 +638,7 @@ mod tests {
     use structs::rope::{Rope, TextAggregate};
 
     use super::{RuntimeState, default_bytecode};
-    use crate::services::execution::{ExecutionMessage, ParameterValue};
+    use crate::services::execution::{ExecutionMessage, ParameterValue, PresentationUpdateTarget};
 
     #[test]
     fn update_bytecode_restores_live_executor_state_to_cache_point() {

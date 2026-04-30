@@ -4217,16 +4217,8 @@ name = "mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "compiler",
- "executor",
- "lexer",
- "parser",
  "rmcp",
- "serde",
  "serde_json",
- "smol",
- "stdlib",
- "structs",
  "tokio",
 ]
 
