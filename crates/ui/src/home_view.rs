@@ -20,7 +20,7 @@ const HOME_LOGO_CARD_MAX_WIDTH: f32 = 430.0;
 
 #[derive(Clone, Copy)]
 struct LogoMetrics {
-    sidebar_width: f32,
+    panel_width: f32,
     divider_width: f32,
     card_width: f32,
     card_padding: f32,
@@ -37,18 +37,18 @@ impl LogoMetrics {
         let expanded_width = (window_width * HOME_LOGO_WIDE_FRACTION)
             .clamp(HOME_LOGO_MIN_EXPANDED_WIDTH, HOME_LOGO_MAX_WIDTH);
         let available_width = (window_width - HOME_PROJECTS_TARGET_MIN_WIDTH).max(0.0);
-        let sidebar_width = expanded_width.min(available_width);
-        let expanded_progress = (sidebar_width / HOME_LOGO_MIN_EXPANDED_WIDTH).clamp(0.0, 1.0);
-        let card_width = (sidebar_width - 90.0).clamp(0.0, HOME_LOGO_CARD_MAX_WIDTH);
+        let panel_width = expanded_width.min(available_width);
+        let expanded_progress = (panel_width / HOME_LOGO_MIN_EXPANDED_WIDTH).clamp(0.0, 1.0);
+        let card_width = (panel_width - 90.0).clamp(0.0, HOME_LOGO_CARD_MAX_WIDTH);
         let logo_size = (card_width - 92.0).clamp(0.0, 320.0);
         let logo_padding = (logo_size * 0.125).clamp(0.0, 40.0);
         let card_padding = (card_width * 0.074).clamp(0.0, 32.0);
         let title_size = 12.0 + 12.0 * expanded_progress;
         let links_progress = ((card_width - 300.0) / 130.0).clamp(0.0, 1.0);
-        let divider_width = 0.5 * (sidebar_width / 80.0).clamp(0.0, 1.0);
+        let divider_width = 0.5 * (panel_width / 80.0).clamp(0.0, 1.0);
 
         Self {
-            sidebar_width,
+            panel_width,
             divider_width,
             card_width,
             card_padding,
@@ -218,8 +218,8 @@ impl HomeView {
             )
             .bg(theme.home_sidebar_background)
             .min_w(px(0.0))
-            .w(px(metrics.sidebar_width))
-            .max_w(px(metrics.sidebar_width))
+            .w(px(metrics.panel_width))
+            .max_w(px(metrics.panel_width))
             .into_any_element()
     }
 
@@ -472,14 +472,14 @@ impl Render for HomeView {
             .flex()
             .flex_row()
             .overflow_hidden()
-            .child(self.render_logo(logo_metrics, cx))
+            .child(div().flex_1().min_w_0().child(self.render_projects(cx)))
             .child(
                 div()
                     .w(px(logo_metrics.divider_width))
                     .h_full()
                     .bg(divider_color),
             )
-            .child(div().flex_1().min_w_0().child(self.render_projects(cx)));
+            .child(self.render_logo(logo_metrics, cx));
 
         div()
             .flex()

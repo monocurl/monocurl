@@ -11,12 +11,14 @@ import std.mesh
 import std.anim
 import std.scene
 
-background = WHITE
 let soft = |col, amount| lerp(WHITE, col, amount)
 
 # a typical mesh is constructed by a series of operator invocation
 # (center{1.3u}) that apply to a base constructor (Text(...))
 mesh title = center{1.3u + 2l} Text("Meshes", 0.8)
+
+# `mesh` creates visible scene state. Values created in init are visible immediately. 
+# Inside slides, use `play` to update what the viewport shows.
 mesh item =
     center{0r}
     fill{soft(BLUE, 0.22)}
@@ -26,8 +28,7 @@ mesh item =
 mesh coordinate_system = Axis2d()
 
 slide "Mesh Variables"
-    # `mesh` creates visible scene state. Values created in init are visible
-    # immediately. Inside slides, use `play` to update what the viewport shows.
+
     play Wait(1.5)
 
     coordinate_system = []
