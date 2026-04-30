@@ -8,11 +8,12 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use executor::time::Timestamp;
+use executor::{executor::SeekOptions, time::Timestamp};
 use exporter::{
     DEFAULT_EXPORT_SIZE, DEFAULT_VIDEO_FPS, EXPORT_CANCELLED_MESSAGE, ExportKind, ExportOutcome,
     ExportProgress, ExportRequest, ExportSettings, ImageExportTimestamp, SceneInspectionOutcome,
-    SceneInspectionRequest, SceneInspectionTimestamp, export_scene, inspect_scene,
+    SceneInspectionRequest, SceneInspectionTimestamp, export_scene,
+    inspect_scene_with_seek_options,
 };
 use renderer::RenderSize;
 
@@ -187,6 +188,7 @@ struct TranscriptCommand {
     scene_path: PathBuf,
     timestamp: TimestampSelection,
     use_system_latex: bool,
+    fast_seek: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -222,12 +224,16 @@ impl TimestampSelection {
 
 fn parse_cli(mut args: Vec<OsString>) -> Result<CliAction> {
     let mut use_system_latex = false;
-    while args
-        .first()
-        .is_some_and(|arg| is_flag(arg, "--system-latex"))
-    {
-        use_system_latex = true;
-        args.remove(0);
+    loop {
+        let Some(arg) = args.first() else {
+            break;
+        };
+        if is_flag(arg, "--system-latex") {
+            use_system_latex = true;
+            args.remove(0);
+        } else {
+            break;
+        }
     }
 
     let Some(command) = args.first() else {
@@ -381,6 +387,7 @@ fn parse_transcript_command(args: &[OsString], mut use_system_latex: bool) -> Re
     let mut scene_path = None;
     let mut slide = None;
     let mut time = None;
+    let mut fast_seek = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -407,6 +414,8 @@ fn parse_transcript_command(args: &[OsString], mut use_system_latex: bool) -> Re
             time = Some(parsed_time);
         } else if is_flag(arg, "--system-latex") {
             use_system_latex = true;
+        } else if is_fast_seek_flag(arg) {
+            fast_seek = true;
         } else if looks_like_flag(arg) {
             bail!(
                 "unknown option `{}` for `transcript`",
@@ -425,6 +434,7 @@ fn parse_transcript_command(args: &[OsString], mut use_system_latex: bool) -> Re
         scene_path,
         timestamp: TimestampSelection::from_parts(slide, time),
         use_system_latex,
+        fast_seek,
     })))
 }
 
@@ -448,6 +458,10 @@ fn is_flag(arg: &OsStr, expected: &str) -> bool {
 
 fn is_help_flag(arg: &OsStr) -> bool {
     is_flag(arg, "-h") || is_flag(arg, "--help")
+}
+
+fn is_fast_seek_flag(arg: &OsStr) -> bool {
+    is_flag(arg, "--fast-seek") || is_flag(arg, "-fast-seek")
 }
 
 fn looks_like_flag(arg: &OsStr) -> bool {
@@ -545,10 +559,13 @@ fn run_transcript_command(command: TranscriptCommand) -> Result<()> {
         open_documents: HashMap::new(),
         timestamp: command.timestamp.scene_inspection_timestamp(),
     };
+    let seek_options = SeekOptions {
+        fast_seek: command.fast_seek,
+    };
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
     let mut progress = TerminalProgress::new(CommandKind::Transcript);
-    let result = inspect_scene(request, cancel_flag, |update| {
+    let result = inspect_scene_with_seek_options(request, seek_options, cancel_flag, |update| {
         let _ = progress.update(&update);
     });
 
@@ -728,6 +745,7 @@ Video options:
 Transcript options:
   --slide <index>              zero-based slide to seek; missing timestamp values default to 0
   --time <seconds>             time within the slide; if neither timestamp flag is used, seeks scene end
+  --fast-seek, -fast-seek      skip strict transcript seek validation
 
 Examples:
   monocurl image lesson.mcs
@@ -782,6 +800,7 @@ Options:
   --slide <index>              zero-based slide to seek; missing timestamp values default to 0
   --time <seconds>             time within the slide; if neither timestamp flag is used, seeks scene end
   --system-latex               use latex and dvisvgm from PATH instead of bundled Tectonic
+  --fast-seek, -fast-seek      skip strict transcript seek validation
   -h, --help                   show this message
 "
         .into(),
@@ -888,6 +907,25 @@ mod tests {
             panic!("expected transcript command");
         };
         assert!(command.use_system_latex);
+        assert!(!command.fast_seek);
+    }
+
+    #[test]
+    fn parses_transcript_fast_seek_option() {
+        let parsed = parse_cli(args(&["transcript", "scene.mcs", "-fast-seek"])).unwrap();
+        let CliAction::Run(CliCommand::Transcript(command)) = parsed else {
+            panic!("expected transcript command");
+        };
+        assert!(command.fast_seek);
+    }
+
+    #[test]
+    fn rejects_fast_seek_for_export_commands() {
+        let error = parse_cli(args(&["image", "scene.mcs", "--fast-seek"])).unwrap_err();
+        assert!(error.to_string().contains("unknown option"));
+
+        let error = parse_cli(args(&["video", "scene.mcs", "-fast-seek"])).unwrap_err();
+        assert!(error.to_string().contains("unknown option"));
     }
 
     #[test]

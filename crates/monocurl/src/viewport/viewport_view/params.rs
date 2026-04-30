@@ -457,7 +457,7 @@ fn render_mesh_group(
     } else if show_attributes {
         ""
     } else {
-        "No editable attributes"
+        "No editable fields"
     };
 
     let mut group = div()

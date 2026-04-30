@@ -85,10 +85,17 @@ The transcript command parses, compiles, seeks the scene, and prints only
 Monocurl `print` output to stdout. Progress and runtime errors are written to
 stderr.
 
+Transcript seeking is strict by default. Strict seeking evaluates the normal
+`Lerp` interpolation path even for completed animations before snapping to the
+destination, and verifies scene snapshots after seek steps so invalid mesh,
+camera, or background states are reported. Pass `--fast-seek` or `-fast-seek`
+to use the GUI-style fast seek behavior that bypasses these extra checks
+
 Options:
 
 - `--slide <index>`: zero-based visible slide index to seek.
 - `--time <seconds>`: time within the selected slide.
+- `--fast-seek`, `-fast-seek`: skip strict transcript seek validation.
 
 If neither timestamp option is provided, transcript inspection seeks to the
 scene end. If only one timestamp option is provided, the missing slide or time

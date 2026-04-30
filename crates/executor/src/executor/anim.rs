@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 
 use crate::{
     error::ExecutorError,
-    executor::{PlaybackAdvance, SeekPrimitiveAnimSkipResult, SeekToResult},
+    executor::{PlaybackAdvance, SeekOptions, SeekPrimitiveAnimSkipResult, SeekToResult},
     heap::{VRc, heap_replace, with_heap, with_heap_mut},
     state::{BakedPrimitiveAnim, ExecutionState},
     time::Timestamp,
@@ -118,7 +118,11 @@ impl Executor {
         SeekPrimitiveAnimSkipResult::PrimitiveAnim { advanced_section }
     }
 
-    async fn step_primitive_anims(&mut self, dt: f64) -> Result<(), ExecutorError> {
+    async fn step_primitive_anims(
+        &mut self,
+        dt: f64,
+        options: SeekOptions,
+    ) -> Result<(), ExecutorError> {
         debug_assert!(self.state.execution_heads.is_empty());
         self.state.timestamp.time += dt;
         self.note_current_timestamp_in_cache();
@@ -141,7 +145,7 @@ impl Executor {
 
         for (baked, t) in &in_progress {
             self.state.last_stack_idx = baked.parent_stack_idx;
-            if let Err(err) = self.apply_primitive_anim_step(baked, *t).await {
+            if let Err(err) = self.apply_primitive_anim_step(baked, *t, options).await {
                 let runtime_error = self.build_runtime_error(err.clone());
                 self.state.error(runtime_error);
                 return Err(err);
@@ -151,7 +155,7 @@ impl Executor {
         for &i in finished_indices.iter().rev() {
             let baked = self.state.primitive_anims.remove(i);
             self.state.last_stack_idx = baked.parent_stack_idx;
-            if let Err(err) = self.apply_primitive_anim_step(&baked, 1.0).await {
+            if let Err(err) = self.apply_primitive_anim_step(&baked, 1.0, options).await {
                 self.release_primitive_anim_locks(&baked);
                 let runtime_error = self.build_runtime_error(err.clone());
                 self.state.error(runtime_error);
@@ -207,7 +211,8 @@ impl Executor {
                 self.state.timestamp
             );
 
-            self.step_primitive_anims(step_dt).await?;
+            self.step_primitive_anims(step_dt, SeekOptions::fast())
+                .await?;
             self.state.pending_playback_time -= step_dt;
         }
 
@@ -215,14 +220,31 @@ impl Executor {
     }
 
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
+        self.seek_to_with_options(target, SeekOptions::fast()).await
+    }
+
+    pub async fn seek_to_with_options(
+        &mut self,
+        target: Timestamp,
+        options: SeekOptions,
+    ) -> SeekToResult {
         self.rebase_at_cache_point(target);
-        self.advance_to_target(target).await
+        self.advance_to_target_with_options(target, options).await
     }
 
     /// advance the executor's live state forward to `target` without any rebase.
     /// caller must guarantee `self.state.timestamp <= target` and that the
     /// current state is a valid live execution point.
     pub async fn advance_to_target(&mut self, target: Timestamp) -> SeekToResult {
+        self.advance_to_target_with_options(target, SeekOptions::fast())
+            .await
+    }
+
+    pub async fn advance_to_target_with_options(
+        &mut self,
+        target: Timestamp,
+        options: SeekOptions,
+    ) -> SeekToResult {
         debug_assert!(
             !self.state.timestamp.time.is_nan() && !target.time.is_nan(),
             "advance_to_target requires comparable timestamps: current={:?}, target={:?}",
@@ -242,6 +264,9 @@ impl Executor {
             match self.seek_primitive_anim_skip(target.slide).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim { .. } => {}
                 SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
+                    if let Err(error) = self.verify_scene_snapshot_after_seek_step(options).await {
+                        return SeekToResult::Error(error);
+                    }
                     return SeekToResult::SeekedTo(self.state.timestamp);
                 }
                 SeekPrimitiveAnimSkipResult::Error(e) => return SeekToResult::Error(e),
@@ -250,6 +275,9 @@ impl Executor {
             if self.state.timestamp.slide == target.slide
                 && self.state.timestamp.time >= target.time
             {
+                if let Err(error) = self.verify_scene_snapshot_after_seek_step(options).await {
+                    return SeekToResult::Error(error);
+                }
                 return SeekToResult::SeekedTo(self.state.timestamp);
             }
             let next_end = self
@@ -266,16 +294,34 @@ impl Executor {
             });
             let dt = step_target - self.state.timestamp.time;
 
-            if let Err(e) = self.step_primitive_anims(dt).await {
+            if let Err(e) = self.step_primitive_anims(dt, options).await {
+                return SeekToResult::Error(e);
+            }
+            if let Err(e) = self.verify_scene_snapshot_after_seek_step(options).await {
                 return SeekToResult::Error(e);
             }
         }
+    }
+
+    async fn verify_scene_snapshot_after_seek_step(
+        &mut self,
+        options: SeekOptions,
+    ) -> Result<(), ExecutorError> {
+        if !options.verify_scene_snapshot_after_step() {
+            return Ok(());
+        }
+
+        self.capture_stable_scene_snapshot()
+            .await
+            .map(|_| ())
+            .map_err(|runtime_error| runtime_error.error)
     }
 
     async fn apply_primitive_anim_step(
         &mut self,
         baked: &BakedPrimitiveAnim,
         t: f64,
+        options: SeekOptions,
     ) -> Result<(), ExecutorError> {
         match &baked.anim {
             PrimitiveAnim::Set { .. } => {
@@ -285,12 +331,13 @@ impl Executor {
             }
             PrimitiveAnim::Wait { .. } => {}
             PrimitiveAnim::Lerp { lerp, .. } => {
-                if t >= 1.0 {
+                let should_snap_to_destination = t >= 1.0;
+                if should_snap_to_destination && !options.validate_lerp_completion() {
                     for (target, destination) in baked.targets.iter().zip(&baked.destinations) {
                         sync_baked_destination_to_follower(target, destination.clone());
                     }
                 } else {
-                    let t = self.eval_lerp_t(baked, t).await?;
+                    let t = self.eval_lerp_t(baked, t.min(1.0)).await?;
                     for (((target, start), end), state) in baked
                         .targets
                         .iter()
@@ -312,6 +359,11 @@ impl Executor {
                             self.lerp(start.clone(), end.clone(), t).await?
                         };
                         replace_follower_value(target, lerped);
+                    }
+                    if should_snap_to_destination {
+                        for (target, destination) in baked.targets.iter().zip(&baked.destinations) {
+                            sync_baked_destination_to_follower(target, destination.clone());
+                        }
                     }
                 }
             }

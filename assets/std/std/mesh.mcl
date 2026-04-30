@@ -7,17 +7,48 @@
 
 # primitive constructors
 
+## [overview]
+## A single point in 3-D space, rendered as a filled circle in the viewport.
+## [parameters]
+## point: position vector, default [0,0,0]
+## [example]
+## ```
+## mesh p = fill{CYAN} Dot([1, 0, 0])
+## ```
 let Dot = |point=[0,0,0]| __monocurl__native__ mk_dot(point)
 
+## [overview]
+## A circle centered at the origin in the XY plane.
+## Apply stroke or fill operators to style it, and shift to reposition.
+## [parameters]
+## radius: radius of the circle
+## samples: number of line segments used to approximate the curve (default 64)
+## [example]
+## ```
+## mesh c = stroke{CYAN} Circle(1.5)
+## ```
 let Circle = |radius, samples = 64|
     __monocurl__native__ mk_circle(radius, samples)
 
+## [overview]
+## An annulus (ring) between two concentric circles, both centered at the origin.
+## [parameters]
+## inner: inner radius
+## outer: outer radius
 let Annulus = |inner, outer|
     __monocurl__native__ mk_annulus(inner, outer)
 
+## [overview]
+## A square centered at the origin with sides parallel to the axes.
+## [parameters]
+## width: side length
 let Square = |width|
     __monocurl__native__ mk_square(width)
 
+## [overview]
+## An axis-aligned rectangle centered at the origin.
+## [parameters]
+## size: [width, height] list
 let Rect = |size| {
     var width = 0
     var height = 0
@@ -25,18 +56,51 @@ let Rect = |size| {
     return __monocurl__native__ mk_rect(width, height)
 }
 
+## [overview]
+## A regular n-gon inscribed in a circle of the given circumradius, centered at the origin.
+## [parameters]
+## n: number of sides
+## circumradius: radius of the circumscribed circle
 let RegularPolygon = |n, circumradius|
     __monocurl__native__ mk_regular_polygon(n, circumradius)
 
+## [overview]
+## A closed polygon from an ordered list of vertices.
+## [parameters]
+## vertices: list of 3-D points forming the boundary
+## normal_hint: hint for face orientation (default 1b = positive z)
 let Polygon = |vertices, normal_hint = 1b|
     __monocurl__native__ mk_polygon(vertices, normal_hint)
 
+## [overview]
+## An open polyline through the given vertices.
+## [parameters]
+## vertices: ordered list of 3-D points
+## normal_hint: hint for stroke normal (default 1b)
 let Polyline = |vertices, normal_hint = 1b|
     __monocurl__native__ mk_polyline(vertices, normal_hint)
 
+## [overview]
+## A straight line segment between two points.
+## [parameters]
+## start: start point (default origin)
+## end: end point (default [1,0,0])
+## normal: stroke normal direction (default 1b)
+## [example]
+## ```
+## mesh l = stroke{WHITE} Line([0,0,0], [2,1,0])
+## ```
 let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
     __monocurl__native__ mk_line(start, end, normal)
 
+## [overview]
+## A directed arrow from start to end, with an arrowhead at the tip.
+## path_arc bends the shaft: positive values arc away from the viewer.
+## [parameters]
+## start: tail position (default origin)
+## end: tip position (default [1,0,0])
+## normal: stroke normal direction (default 1b)
+## path_arc: curvature of the shaft in radians (default 0 = straight)
 let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0|
     __monocurl__native__ mk_arrow(start, end, normal, path_arc)
 

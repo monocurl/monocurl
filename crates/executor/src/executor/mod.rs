@@ -46,6 +46,29 @@ pub enum SeekToResult {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SeekOptions {
+    pub fast_seek: bool,
+}
+
+impl SeekOptions {
+    pub const fn fast() -> Self {
+        Self { fast_seek: true }
+    }
+
+    pub const fn strict() -> Self {
+        Self { fast_seek: false }
+    }
+
+    pub(crate) fn validate_lerp_completion(self) -> bool {
+        !self.fast_seek
+    }
+
+    pub(crate) fn verify_scene_snapshot_after_step(self) -> bool {
+        !self.fast_seek
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlaybackAdvance {
     Advanced,
     PreparedSection,

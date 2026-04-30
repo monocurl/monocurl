@@ -16,7 +16,7 @@ use compiler::{
 };
 use executor::{
     error::{RuntimeCallFrame, RuntimeError},
-    executor::{Executor, SeekToResult, TextRenderQuality},
+    executor::{Executor, SeekOptions, SeekToResult, TextRenderQuality},
     time::Timestamp,
 };
 use image::ImageFormat;
@@ -217,7 +217,30 @@ pub fn inspect_scene(
     mut on_progress: impl FnMut(ExportProgress),
 ) -> Result<SceneInspectionOutcome> {
     smol::block_on(async {
-        inspect_scene_async(request, cancel_flag.as_ref(), &mut on_progress).await
+        inspect_scene_async(
+            request,
+            SeekOptions::fast(),
+            cancel_flag.as_ref(),
+            &mut on_progress,
+        )
+        .await
+    })
+}
+
+pub fn inspect_scene_with_seek_options(
+    request: SceneInspectionRequest,
+    seek_options: SeekOptions,
+    cancel_flag: Arc<AtomicBool>,
+    mut on_progress: impl FnMut(ExportProgress),
+) -> Result<SceneInspectionOutcome> {
+    smol::block_on(async {
+        inspect_scene_async(
+            request,
+            seek_options,
+            cancel_flag.as_ref(),
+            &mut on_progress,
+        )
+        .await
     })
 }
 
@@ -284,6 +307,7 @@ async fn export_scene_async(
 
 async fn inspect_scene_async(
     request: SceneInspectionRequest,
+    seek_options: SeekOptions,
     cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<SceneInspectionOutcome> {
@@ -303,9 +327,10 @@ async fn inspect_scene_async(
         SceneInspectionTimestamp::Exact(timestamp) => {
             emit_progress_checked(cancel_flag, on_progress, "Seeking scene", 2, 3)?;
             let internal_target = prepared.executor.user_to_internal_timestamp(timestamp);
-            let internal = seek_internal_timestamp(
+            let internal = seek_internal_timestamp_with_options(
                 &mut prepared.executor,
                 internal_target,
+                seek_options,
                 &prepared.root_text_rope,
             )
             .await?;
@@ -313,7 +338,12 @@ async fn inspect_scene_async(
         }
         SceneInspectionTimestamp::SceneEnd => {
             emit_progress_checked(cancel_flag, on_progress, "Seeking scene end", 2, 3)?;
-            resolve_scene_end_timestamp(&mut prepared.executor, &prepared.root_text_rope).await?
+            resolve_scene_end_timestamp_with_options(
+                &mut prepared.executor,
+                &prepared.root_text_rope,
+                seek_options,
+            )
+            .await?
         }
     };
     check_cancelled(cancel_flag)?;
@@ -448,9 +478,18 @@ async fn resolve_scene_end_timestamp(
     executor: &mut Executor,
     root_text_rope: &Rope<TextAggregate>,
 ) -> Result<Timestamp> {
-    let internal = seek_internal_timestamp(
+    resolve_scene_end_timestamp_with_options(executor, root_text_rope, SeekOptions::fast()).await
+}
+
+async fn resolve_scene_end_timestamp_with_options(
+    executor: &mut Executor,
+    root_text_rope: &Rope<TextAggregate>,
+    seek_options: SeekOptions,
+) -> Result<Timestamp> {
+    let internal = seek_internal_timestamp_with_options(
         executor,
         Timestamp::new(executor.total_sections(), f64::INFINITY),
+        seek_options,
         root_text_rope,
     )
     .await?;
@@ -692,7 +731,17 @@ async fn seek_internal_timestamp(
     target: Timestamp,
     root_text_rope: &Rope<TextAggregate>,
 ) -> Result<Timestamp> {
-    match executor.seek_to(target).await {
+    seek_internal_timestamp_with_options(executor, target, SeekOptions::fast(), root_text_rope)
+        .await
+}
+
+async fn seek_internal_timestamp_with_options(
+    executor: &mut Executor,
+    target: Timestamp,
+    seek_options: SeekOptions,
+    root_text_rope: &Rope<TextAggregate>,
+) -> Result<Timestamp> {
+    match executor.seek_to_with_options(target, seek_options).await {
         SeekToResult::SeekedTo(timestamp) => Ok(timestamp),
         SeekToResult::Error(error) => {
             let message = executor
