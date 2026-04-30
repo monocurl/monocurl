@@ -5,7 +5,16 @@ use rmcp::{
 use serde_json::json;
 
 const LANGUAGE_SEMANTICS: &str = include_str!("../docs/language-semantics.md");
+const AI_OVERVIEW: &str = include_str!("../docs/ai-overview.md");
+const LANGUAGE_BASICS: &str = include_str!("../docs/language-basics.md");
+const MESHES_AND_OPERATORS: &str = include_str!("../docs/meshes-and-operators.md");
+const ANIMATIONS: &str = include_str!("../docs/animations.md");
+const PARAMS_CAMERA_BACKGROUND: &str = include_str!("../docs/params-camera-background.md");
+const DEBUGGING_PATTERNS: &str = include_str!("../docs/debugging-patterns.md");
+const CHEAT_SHEET: &str = include_str!("../docs/cheat-sheet.md");
 const STDLIB_DOCS: &str = include_str!("../docs/stdlib.md");
+const CLI_DOCS: &str = include_str!("../docs/cli.md");
+const RIEMANN_RECTANGLES_EXAMPLE: &str = include_str!("../docs/riemann-rectangles.mcs");
 
 const STD_UTIL: &str = include_str!("../../../assets/std/std/util.mcl");
 const STD_MATH: &str = include_str!("../../../assets/std/std/math.mcl");
@@ -28,10 +37,66 @@ const RESOURCES: &[DocResource] = &[
     DocResource {
         uri: "monocurl://docs/language-semantics",
         name: "language-semantics",
-        title: "Monocurl Language Semantics",
-        description: "Compact authoring guide for AI agents writing Monocurl scenes.",
+        title: "Monocurl AI Context Index",
+        description: "Index of split Monocurl authoring context resources.",
         mime_type: "text/markdown",
         text: LANGUAGE_SEMANTICS,
+    },
+    DocResource {
+        uri: "monocurl://docs/ai-overview",
+        name: "ai-overview",
+        title: "Monocurl AI Overview",
+        description: "Project overview, scene skeleton, init/slide rules, UI notes, and timeline shortcuts.",
+        mime_type: "text/markdown",
+        text: AI_OVERVIEW,
+    },
+    DocResource {
+        uri: "monocurl://docs/language-basics",
+        name: "language-basics",
+        title: "Monocurl Language Basics",
+        description: "Values, assignment, control flow, lambdas, block accumulation, calls, operators, set_default, and references.",
+        mime_type: "text/markdown",
+        text: LANGUAGE_BASICS,
+    },
+    DocResource {
+        uri: "monocurl://docs/meshes",
+        name: "meshes",
+        title: "Monocurl Meshes And Operators",
+        description: "Mesh values, mesh trees, tags, filters, and text tags.",
+        mime_type: "text/markdown",
+        text: MESHES_AND_OPERATORS,
+    },
+    DocResource {
+        uri: "monocurl://docs/animations",
+        name: "animations",
+        title: "Monocurl Animations",
+        description: "Leader/follower semantics, Wait, Set, Lerp, morphs, animation blocks, parallelism, and rates.",
+        mime_type: "text/markdown",
+        text: ANIMATIONS,
+    },
+    DocResource {
+        uri: "monocurl://docs/params-camera",
+        name: "params-camera",
+        title: "Monocurl Params, Camera, And Background",
+        description: "Params, stateful values, presentation controls, camera, and background.",
+        mime_type: "text/markdown",
+        text: PARAMS_CAMERA_BACKGROUND,
+    },
+    DocResource {
+        uri: "monocurl://docs/debugging-patterns",
+        name: "debugging-patterns",
+        title: "Monocurl Debugging, Patterns, And Examples",
+        description: "Print transcripts, authoring patterns, anti-patterns, examples to imitate, and formatting conventions.",
+        mime_type: "text/markdown",
+        text: DEBUGGING_PATTERNS,
+    },
+    DocResource {
+        uri: "monocurl://docs/cheat-sheet",
+        name: "cheat-sheet",
+        title: "Monocurl Cheat Sheet",
+        description: "Compact imports, common constructors, operators, animations, utilities, colors, and scene constants.",
+        mime_type: "text/markdown",
+        text: CHEAT_SHEET,
     },
     DocResource {
         uri: "monocurl://docs/stdlib",
@@ -40,6 +105,22 @@ const RESOURCES: &[DocResource] = &[
         description: "Overview of the public stdlib wrapper modules and authoring conventions.",
         mime_type: "text/markdown",
         text: STDLIB_DOCS,
+    },
+    DocResource {
+        uri: "monocurl://docs/cli",
+        name: "cli-usage",
+        title: "Monocurl Binary and CLI",
+        description: "How to launch the shared GUI/CLI binary and run image, video, and transcript commands.",
+        mime_type: "text/markdown",
+        text: CLI_DOCS,
+    },
+    DocResource {
+        uri: "monocurl://examples/riemann-rectangles",
+        name: "riemann-rectangles-example",
+        title: "Riemann Rectangles Example Scene",
+        description: "Complete Monocurl scene demonstrating graph helpers, tags, text tags, transcript prints, and multi-slide animation flow.",
+        mime_type: "text/x-monocurl",
+        text: RIEMANN_RECTANGLES_EXAMPLE,
     },
     DocResource {
         uri: "monocurl://stdlib/util",
@@ -130,7 +211,7 @@ impl ServerHandler for MonocurlDocs {
             )
             .with_protocol_version(ProtocolVersion::V_2025_11_25)
             .with_instructions(
-                "Use resources/list and resources/read to load Monocurl language semantics, stdlib documentation, and raw stdlib wrapper sources. Validation and execution should be handled outside this documentation server."
+                "Use resources/list and resources/read to load split Monocurl authoring context, stdlib documentation, CLI invocation guidance, and raw stdlib wrapper sources. Validation and execution should be handled outside this documentation server with the monocurl binary."
                     .to_string(),
             )
     }
@@ -199,7 +280,37 @@ mod tests {
         assert!(
             resources
                 .iter()
+                .any(|resource| resource.raw.uri == "monocurl://docs/ai-overview")
+        );
+        assert!(
+            resources
+                .iter()
+                .any(|resource| resource.raw.uri == "monocurl://docs/language-basics")
+        );
+        assert!(
+            resources
+                .iter()
+                .any(|resource| resource.raw.uri == "monocurl://docs/animations")
+        );
+        assert!(
+            resources
+                .iter()
+                .any(|resource| resource.raw.uri == "monocurl://docs/cheat-sheet")
+        );
+        assert!(
+            resources
+                .iter()
                 .any(|resource| resource.raw.uri == "monocurl://docs/stdlib")
+        );
+        assert!(
+            resources
+                .iter()
+                .any(|resource| resource.raw.uri == "monocurl://docs/cli")
+        );
+        assert!(
+            resources
+                .iter()
+                .any(|resource| resource.raw.uri == "monocurl://examples/riemann-rectangles")
         );
         assert!(
             resources
@@ -213,6 +324,21 @@ mod tests {
         let resource = MonocurlDocs::find_resource("monocurl://stdlib/mesh").unwrap();
         assert!(resource.text.contains("let Circle"));
         assert!(resource.text.contains("let Text"));
+    }
+
+    #[test]
+    fn finds_split_context_resource() {
+        let resource = MonocurlDocs::find_resource("monocurl://docs/language-basics").unwrap();
+        assert!(resource.text.contains("Block Accumulation"));
+        assert!(resource.text.contains("Reference parameters"));
+    }
+
+    #[test]
+    fn finds_complete_example_resource() {
+        let resource =
+            MonocurlDocs::find_resource("monocurl://examples/riemann-rectangles").unwrap();
+        assert!(resource.text.contains("slide \"Left Rectangles\""));
+        assert!(resource.text.contains("TransSubsetTo"));
     }
 
     #[test]

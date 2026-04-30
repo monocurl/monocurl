@@ -11,7 +11,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use executor::time::Timestamp;
 use exporter::{
     DEFAULT_EXPORT_SIZE, DEFAULT_VIDEO_FPS, EXPORT_CANCELLED_MESSAGE, ExportKind, ExportOutcome,
-    ExportProgress, ExportRequest, ExportSettings, ImageExportTimestamp, export_scene,
+    ExportProgress, ExportRequest, ExportSettings, ImageExportTimestamp, SceneInspectionOutcome,
+    SceneInspectionRequest, SceneInspectionTimestamp, export_scene, inspect_scene,
 };
 use renderer::RenderSize;
 
@@ -52,6 +53,7 @@ fn clean_latex_file_cache() {
 enum CommandKind {
     Image,
     Video,
+    Transcript,
 }
 
 impl CommandKind {
@@ -59,6 +61,7 @@ impl CommandKind {
         match self {
             Self::Image => "Exporting Image",
             Self::Video => "Exporting Video",
+            Self::Transcript => "Inspecting Scene",
         }
     }
 
@@ -66,6 +69,7 @@ impl CommandKind {
         match self {
             Self::Image => "Image Export Complete",
             Self::Video => "Video Export Complete",
+            Self::Transcript => "Transcript Ready",
         }
     }
 
@@ -73,6 +77,7 @@ impl CommandKind {
         match self {
             Self::Image => "Image Export Failed",
             Self::Video => "Video Export Failed",
+            Self::Transcript => "Transcript Failed",
         }
     }
 
@@ -80,13 +85,15 @@ impl CommandKind {
         match self {
             Self::Image => "Image Export Canceled",
             Self::Video => "Video Export Canceled",
+            Self::Transcript => "Transcript Canceled",
         }
     }
 
-    fn extension(self) -> &'static str {
+    fn extension(self) -> Option<&'static str> {
         match self {
-            Self::Image => "png",
-            Self::Video => "mp4",
+            Self::Image => Some("png"),
+            Self::Video => Some("mp4"),
+            Self::Transcript => None,
         }
     }
 }
@@ -96,6 +103,7 @@ enum HelpTopic {
     General,
     Image,
     Video,
+    Transcript,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -143,61 +151,15 @@ enum CliAction {
 enum CliCommand {
     Image(ImageCommand),
     Video(VideoCommand),
+    Transcript(TranscriptCommand),
 }
 
 impl CliCommand {
-    fn kind(&self) -> CommandKind {
-        match self {
-            Self::Image(_) => CommandKind::Image,
-            Self::Video(_) => CommandKind::Video,
-        }
-    }
-
-    fn scene_path(&self) -> &Path {
-        match self {
-            Self::Image(command) => &command.scene_path,
-            Self::Video(command) => &command.scene_path,
-        }
-    }
-
-    fn output_path(&self) -> &Path {
-        match self {
-            Self::Image(command) => &command.output_path,
-            Self::Video(command) => &command.output_path,
-        }
-    }
-
     fn use_system_latex(&self) -> bool {
         match self {
             Self::Image(command) => command.use_system_latex,
             Self::Video(command) => command.use_system_latex,
-        }
-    }
-
-    fn export_kind(&self) -> ExportKind {
-        match self {
-            Self::Image(command) => ExportKind::Image {
-                timestamp: match command.timestamp {
-                    ImageTimestampSelection::SceneEnd => ImageExportTimestamp::SceneEnd,
-                    ImageTimestampSelection::Exact(timestamp) => {
-                        ImageExportTimestamp::Exact(timestamp)
-                    }
-                },
-            },
-            Self::Video(_) => ExportKind::Video,
-        }
-    }
-
-    fn export_settings(&self) -> ExportSettings {
-        match self {
-            Self::Image(command) => ExportSettings {
-                render_size: command.resolution.render_size(),
-                fps: DEFAULT_VIDEO_FPS,
-            },
-            Self::Video(command) => ExportSettings {
-                render_size: command.resolution.render_size(),
-                fps: command.fps,
-            },
+            Self::Transcript(command) => command.use_system_latex,
         }
     }
 }
@@ -207,7 +169,7 @@ struct ImageCommand {
     scene_path: PathBuf,
     output_path: PathBuf,
     resolution: ResolutionPreset,
-    timestamp: ImageTimestampSelection,
+    timestamp: TimestampSelection,
     use_system_latex: bool,
 }
 
@@ -220,10 +182,42 @@ struct VideoCommand {
     use_system_latex: bool,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+struct TranscriptCommand {
+    scene_path: PathBuf,
+    timestamp: TimestampSelection,
+    use_system_latex: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum ImageTimestampSelection {
+enum TimestampSelection {
     SceneEnd,
     Exact(Timestamp),
+}
+
+impl TimestampSelection {
+    fn from_parts(slide: Option<usize>, time: Option<f64>) -> Self {
+        match (slide, time) {
+            (None, None) => Self::SceneEnd,
+            (slide, time) => {
+                Self::Exact(Timestamp::new(slide.unwrap_or(0) + 1, time.unwrap_or(0.0)))
+            }
+        }
+    }
+
+    fn image_export_timestamp(self) -> ImageExportTimestamp {
+        match self {
+            Self::SceneEnd => ImageExportTimestamp::SceneEnd,
+            Self::Exact(timestamp) => ImageExportTimestamp::Exact(timestamp),
+        }
+    }
+
+    fn scene_inspection_timestamp(self) -> SceneInspectionTimestamp {
+        match self {
+            Self::SceneEnd => SceneInspectionTimestamp::SceneEnd,
+            Self::Exact(timestamp) => SceneInspectionTimestamp::Exact(timestamp),
+        }
+    }
 }
 
 fn parse_cli(mut args: Vec<OsString>) -> Result<CliAction> {
@@ -245,6 +239,7 @@ fn parse_cli(mut args: Vec<OsString>) -> Result<CliAction> {
         "-h" | "--help" => Ok(CliAction::Help(HelpTopic::General)),
         "image" => parse_image_command(&args[1..], use_system_latex),
         "video" => parse_video_command(&args[1..], use_system_latex),
+        "transcript" => parse_transcript_command(&args[1..], use_system_latex),
         other => bail!("unknown command `{other}`"),
     }
 }
@@ -255,6 +250,7 @@ fn parse_help(args: &[OsString]) -> Result<CliAction> {
         [topic] => match topic.to_string_lossy().as_ref() {
             "image" => Ok(CliAction::Help(HelpTopic::Image)),
             "video" => Ok(CliAction::Help(HelpTopic::Video)),
+            "transcript" => Ok(CliAction::Help(HelpTopic::Transcript)),
             other => bail!("unknown help topic `{other}`"),
         },
         _ => bail!("help accepts at most one topic"),
@@ -315,13 +311,7 @@ fn parse_image_command(args: &[OsString], mut use_system_latex: bool) -> Result<
         output_path.unwrap_or_else(|| default_output_path(&scene_path, CommandKind::Image)),
         CommandKind::Image,
     );
-    let timestamp = match (slide, time) {
-        (None, None) => ImageTimestampSelection::SceneEnd,
-        (slide, time) => ImageTimestampSelection::Exact(Timestamp::new(
-            slide.unwrap_or(0) + 1,
-            time.unwrap_or(0.0),
-        )),
-    };
+    let timestamp = TimestampSelection::from_parts(slide, time);
 
     Ok(CliAction::Run(CliCommand::Image(ImageCommand {
         scene_path,
@@ -387,6 +377,57 @@ fn parse_video_command(args: &[OsString], mut use_system_latex: bool) -> Result<
     })))
 }
 
+fn parse_transcript_command(args: &[OsString], mut use_system_latex: bool) -> Result<CliAction> {
+    let mut scene_path = None;
+    let mut slide = None;
+    let mut time = None;
+
+    let mut index = 0;
+    while index < args.len() {
+        let arg = &args[index];
+        if is_help_flag(arg) {
+            return Ok(CliAction::Help(HelpTopic::Transcript));
+        }
+
+        if is_flag(arg, "--slide") {
+            let value = string_value(required_value(args, &mut index, arg)?, arg)?;
+            slide = Some(
+                value
+                    .parse()
+                    .with_context(|| format!("invalid slide index `{value}`"))?,
+            );
+        } else if is_flag(arg, "--time") {
+            let value = string_value(required_value(args, &mut index, arg)?, arg)?;
+            let parsed_time = value
+                .parse()
+                .with_context(|| format!("invalid time `{value}`"))?;
+            if parsed_time < 0.0 {
+                bail!("transcript time must be non-negative");
+            }
+            time = Some(parsed_time);
+        } else if is_flag(arg, "--system-latex") {
+            use_system_latex = true;
+        } else if looks_like_flag(arg) {
+            bail!(
+                "unknown option `{}` for `transcript`",
+                arg.to_string_lossy()
+            );
+        } else if scene_path.is_none() {
+            scene_path = Some(PathBuf::from(arg));
+        } else {
+            bail!("unexpected positional argument `{}`", arg.to_string_lossy());
+        }
+        index += 1;
+    }
+
+    let scene_path = scene_path.ok_or_else(|| anyhow!("missing scene path for `transcript`"))?;
+    Ok(CliAction::Run(CliCommand::Transcript(TranscriptCommand {
+        scene_path,
+        timestamp: TimestampSelection::from_parts(slide, time),
+        use_system_latex,
+    })))
+}
+
 fn required_value<'a>(args: &'a [OsString], index: &mut usize, flag: &OsStr) -> Result<&'a OsStr> {
     *index += 1;
     args.get(*index)
@@ -415,44 +456,111 @@ fn looks_like_flag(arg: &OsStr) -> bool {
 
 fn default_output_path(scene_path: &Path, kind: CommandKind) -> PathBuf {
     let mut output = scene_path.to_path_buf();
-    output.set_extension(kind.extension());
+    if let Some(extension) = kind.extension() {
+        output.set_extension(extension);
+    }
     output
 }
 
 fn normalize_output_path(mut path: PathBuf, kind: CommandKind) -> PathBuf {
-    path.set_extension(kind.extension());
+    if let Some(extension) = kind.extension() {
+        path.set_extension(extension);
+    }
     path
 }
 
 fn run_command(command: CliCommand) -> Result<()> {
-    configure_latex_backend(&command)?;
+    configure_latex_backend(command.use_system_latex())?;
 
-    let scene_path = command.scene_path().to_path_buf();
+    match command {
+        CliCommand::Image(command) => run_export_command(
+            CommandKind::Image,
+            command.scene_path,
+            command.output_path,
+            ExportKind::Image {
+                timestamp: command.timestamp.image_export_timestamp(),
+            },
+            ExportSettings {
+                render_size: command.resolution.render_size(),
+                fps: DEFAULT_VIDEO_FPS,
+            },
+        ),
+        CliCommand::Video(command) => run_export_command(
+            CommandKind::Video,
+            command.scene_path,
+            command.output_path,
+            ExportKind::Video,
+            ExportSettings {
+                render_size: command.resolution.render_size(),
+                fps: command.fps,
+            },
+        ),
+        CliCommand::Transcript(command) => run_transcript_command(command),
+    }
+}
+
+fn run_export_command(
+    kind: CommandKind,
+    scene_path: PathBuf,
+    output_path: PathBuf,
+    export_kind: ExportKind,
+    settings: ExportSettings,
+) -> Result<()> {
     let root_text = fs::read_to_string(&scene_path)
         .with_context(|| format!("failed to read scene {}", scene_path.display()))?;
     let request = ExportRequest {
         root_text,
         root_path: scene_path,
         open_documents: HashMap::new(),
-        output_path: command.output_path().to_path_buf(),
-        kind: command.export_kind(),
-        settings: command.export_settings(),
+        output_path,
+        kind: export_kind,
+        settings,
     };
 
     let cancel_flag = Arc::new(AtomicBool::new(false));
-    let mut progress = TerminalProgress::new(command.kind());
+    let mut progress = TerminalProgress::new(kind);
     let result = export_scene(request, cancel_flag, |update| {
         let _ = progress.update(&update);
     });
 
     match result {
         Ok(outcome) => {
-            progress.finish(command.kind(), &outcome)?;
+            progress.finish_export(kind, &outcome)?;
+            Ok(())
+        }
+        Err(error) => {
+            progress.fail(kind, error.to_string() == EXPORT_CANCELLED_MESSAGE)?;
+            Err(error)
+        }
+    }
+}
+
+fn run_transcript_command(command: TranscriptCommand) -> Result<()> {
+    let scene_path = command.scene_path;
+    let root_text = fs::read_to_string(&scene_path)
+        .with_context(|| format!("failed to read scene {}", scene_path.display()))?;
+    let request = SceneInspectionRequest {
+        root_text,
+        root_path: scene_path,
+        open_documents: HashMap::new(),
+        timestamp: command.timestamp.scene_inspection_timestamp(),
+    };
+
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let mut progress = TerminalProgress::new(CommandKind::Transcript);
+    let result = inspect_scene(request, cancel_flag, |update| {
+        let _ = progress.update(&update);
+    });
+
+    match result {
+        Ok(outcome) => {
+            progress.finish_transcript(&outcome)?;
+            print_transcript(&outcome)?;
             Ok(())
         }
         Err(error) => {
             progress.fail(
-                command.kind(),
+                CommandKind::Transcript,
                 error.to_string() == EXPORT_CANCELLED_MESSAGE,
             )?;
             Err(error)
@@ -460,8 +568,8 @@ fn run_command(command: CliCommand) -> Result<()> {
     }
 }
 
-fn configure_latex_backend(command: &CliCommand) -> Result<()> {
-    if !command.use_system_latex() {
+fn configure_latex_backend(use_system_latex: bool) -> Result<()> {
+    if !use_system_latex {
         latex::set_backend_config(latex::LatexBackendConfig::Bundled);
         return Ok(());
     }
@@ -471,6 +579,15 @@ fn configure_latex_backend(command: &CliCommand) -> Result<()> {
         anyhow!("--system-latex requires both `latex` and `dvisvgm` to be available on PATH")
     })?;
     latex::set_backend_config(latex::LatexBackendConfig::System(config));
+    Ok(())
+}
+
+fn print_transcript(outcome: &SceneInspectionOutcome) -> Result<()> {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    for entry in &outcome.transcript {
+        writeln!(stdout, "{}", entry.text())?;
+    }
     Ok(())
 }
 
@@ -515,7 +632,7 @@ impl TerminalProgress {
         Ok(())
     }
 
-    fn finish(&mut self, kind: CommandKind, outcome: &ExportOutcome) -> io::Result<()> {
+    fn finish_export(&mut self, kind: CommandKind, outcome: &ExportOutcome) -> io::Result<()> {
         self.clear_line()?;
         eprintln!("{}", kind.success_title());
         eprintln!("Saved to {}", outcome.output_path.display());
@@ -529,6 +646,17 @@ impl TerminalProgress {
                 eprintln!("  {}", entry.text());
             }
         }
+        Ok(())
+    }
+
+    fn finish_transcript(&mut self, outcome: &SceneInspectionOutcome) -> io::Result<()> {
+        self.clear_line()?;
+        eprintln!("{}", CommandKind::Transcript.success_title());
+        eprintln!(
+            "Reached slide {} at {}",
+            outcome.timestamp.slide.saturating_sub(1),
+            format_time(outcome.timestamp.time)
+        );
         Ok(())
     }
 
@@ -567,32 +695,45 @@ fn help_text(topic: HelpTopic) -> String {
 Monocurl CLI
 
 Usage:
-  monocurl help [image|video]
+  monocurl
+  monocurl help [image|video|transcript]
   monocurl image <scene path> [options]
   monocurl video <scene path> [options]
+  monocurl transcript <scene path> [options]
+
+Running `monocurl` with no arguments launches the desktop app. Running the same
+binary with arguments uses the CLI.
 
 Commands:
   help                         show this message or subcommand help
   image                        export a still frame as PNG
   video                        export a full scene as MP4
+  transcript                   seek a scene and print `print` output to stdout
 
-Common options:
-  -o, --output <path>          output path; extension is forced to .png or .mp4
-  -r, --resolution <preset>    one of: {small}, {medium}, {large}
+Global options:
   --system-latex               use latex and dvisvgm from PATH instead of bundled Tectonic
   -h, --help                   show command help
 
+Export options:
+  -o, --output <path>          output path; extension is forced to .png or .mp4
+  -r, --resolution <preset>    one of: {small}, {medium}, {large}
+
 Image options:
-  --slide <index>              slide to capture; if timestamp flags are used, missing values default to 0
+  --slide <index>              zero-based slide to capture; if timestamp flags are used, missing values default to 0
   --time <seconds>             time within the slide; if neither timestamp flag is used, exports the final frame
 
 Video options:
   --fps <number>               frames per second, default {fps}
 
+Transcript options:
+  --slide <index>              zero-based slide to seek; missing timestamp values default to 0
+  --time <seconds>             time within the slide; if neither timestamp flag is used, seeks scene end
+
 Examples:
   monocurl image lesson.mcs
   monocurl image lesson.mcs --slide 2 --time 1.25 --resolution large
   monocurl video lesson.mcs --resolution medium --fps 30
+  monocurl transcript lesson.mcs --slide 0 --time 0.5
 ",
             small = resolution_help(ResolutionPreset::Small),
             medium = resolution_help(ResolutionPreset::Medium),
@@ -607,7 +748,7 @@ Usage:
 Options:
   -o, --output <path>          output path; extension is forced to .png
   -r, --resolution <preset>    one of: {small}, {medium}, {large}
-  --slide <index>              slide to capture; if timestamp flags are used, missing values default to 0
+  --slide <index>              zero-based slide to capture; if timestamp flags are used, missing values default to 0
   --time <seconds>             time within the slide; if neither timestamp flag is used, exports the final frame
   --system-latex               use latex and dvisvgm from PATH instead of bundled Tectonic
   -h, --help                   show this message
@@ -633,12 +774,31 @@ Options:
             large = resolution_help(ResolutionPreset::Large),
             fps = DEFAULT_VIDEO_FPS,
         ),
+        HelpTopic::Transcript => "\
+Usage:
+  monocurl transcript <scene path> [options]
+
+Options:
+  --slide <index>              zero-based slide to seek; missing timestamp values default to 0
+  --time <seconds>             time within the slide; if neither timestamp flag is used, seeks scene end
+  --system-latex               use latex and dvisvgm from PATH instead of bundled Tectonic
+  -h, --help                   show this message
+"
+        .into(),
     }
 }
 
 fn resolution_help(preset: ResolutionPreset) -> String {
     let size = preset.render_size();
     format!("{} ({}x{})", preset.as_str(), size.width, size.height)
+}
+
+fn format_time(time: f64) -> String {
+    if time.is_infinite() {
+        "end".into()
+    } else {
+        format!("{time:.3}s")
+    }
 }
 
 #[cfg(test)]
@@ -659,7 +819,7 @@ mod tests {
         assert_eq!(command.scene_path, PathBuf::from("scene.mcs"));
         assert_eq!(command.output_path, PathBuf::from("scene.png"));
         assert_eq!(command.resolution, ResolutionPreset::Medium);
-        assert_eq!(command.timestamp, ImageTimestampSelection::SceneEnd);
+        assert_eq!(command.timestamp, TimestampSelection::SceneEnd);
         assert!(!command.use_system_latex);
     }
 
@@ -680,7 +840,7 @@ mod tests {
 
         assert_eq!(
             command.timestamp,
-            ImageTimestampSelection::Exact(Timestamp::new(3, 1.25))
+            TimestampSelection::Exact(Timestamp::new(3, 1.25))
         );
     }
 
@@ -722,6 +882,34 @@ mod tests {
             panic!("expected video command");
         };
         assert!(command.use_system_latex);
+
+        let parsed = parse_cli(args(&["transcript", "scene.mcs", "--system-latex"])).unwrap();
+        let CliAction::Run(CliCommand::Transcript(command)) = parsed else {
+            panic!("expected transcript command");
+        };
+        assert!(command.use_system_latex);
+    }
+
+    #[test]
+    fn parses_transcript_command_with_timestamp() {
+        let parsed = parse_cli(args(&[
+            "transcript",
+            "scene.mcs",
+            "--slide",
+            "1",
+            "--time",
+            "0.75",
+        ]))
+        .unwrap();
+        let CliAction::Run(CliCommand::Transcript(command)) = parsed else {
+            panic!("expected transcript command");
+        };
+
+        assert_eq!(command.scene_path, PathBuf::from("scene.mcs"));
+        assert_eq!(
+            command.timestamp,
+            TimestampSelection::Exact(Timestamp::new(2, 0.75))
+        );
     }
 
     #[test]
@@ -733,6 +921,10 @@ mod tests {
         assert_eq!(
             parse_cli(args(&["--help"])).unwrap(),
             CliAction::Help(HelpTopic::General)
+        );
+        assert_eq!(
+            parse_cli(args(&["help", "transcript"])).unwrap(),
+            CliAction::Help(HelpTopic::Transcript)
         );
     }
 

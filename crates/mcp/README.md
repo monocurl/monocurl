@@ -34,7 +34,16 @@ Then point the client at `target/release/monocurl-mcp`.
 ## Resources
 
 - `monocurl://docs/language-semantics`
+- `monocurl://docs/ai-overview`
+- `monocurl://docs/language-basics`
+- `monocurl://docs/meshes`
+- `monocurl://docs/animations`
+- `monocurl://docs/params-camera`
+- `monocurl://docs/debugging-patterns`
+- `monocurl://docs/cheat-sheet`
 - `monocurl://docs/stdlib`
+- `monocurl://docs/cli`
+- `monocurl://examples/riemann-rectangles`
 - `monocurl://stdlib/util`
 - `monocurl://stdlib/math`
 - `monocurl://stdlib/color`
@@ -46,6 +55,7 @@ Then point the client at `target/release/monocurl-mcp`.
 
 This server intentionally exposes no tools. Compile checks, execution, seeking,
 transcript output, and rendering belong in the Monocurl CLI/application layer.
+See `monocurl://docs/cli` for the shared GUI/CLI binary invocation details.
 
 ## Publishing Through GitHub Later
 

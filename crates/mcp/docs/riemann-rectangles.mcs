@@ -1,0 +1,156 @@
+# example: riemann rectangles
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+
+# This scene highlights how tags can be useful for constructing
+# precise animations / transformations
+# Moreover, the in_space operator can be helpful for converting
+# between axis-space and global-space coordinate systems
+
+# function we'll integrate
+let f = |x| 0.5 * ((x - 1.5) ^ 2) + 2
+
+let graph_origin = [-0.8, -1.7, 0]
+let graph_unit = 0.45
+let embed_graph = operator |target|
+    in_space{graph_origin, 1r * graph_unit, 1u * graph_unit}
+    target
+
+let RectAt = |pos, width, height, fill_color, id|
+    fill{fill_color}
+    stroke{CLEAR}
+    tag{id}
+    center{pos}
+    Rect([width, height])
+
+let rect_colors = [0 -> RED, 1 -> YELLOW]
+let Rectangles = |height_scale, selected = -1|
+    embed_graph{} block {
+        let n = 7
+        let delta = 3.5 / n
+        for (i in range(0, n)) {
+            let x = 0.5 + delta * (i + 0.5)
+            let sample_x = 0.5 + delta * i
+            let height = f(sample_x) * height_scale
+            # keyframe_lerp creates a smooth color ramp across repeated bars.
+            let col = keyframe_lerp(rect_colors, i / n)
+            var rect = RectAt([x, height / 2, 0], delta, height, col, i)
+            if (selected >= 0 and i != selected) {
+                rect = fill{lerp(WHITE, col, 0.16)} rect
+            }
+
+            . rect
+        }
+    }
+
+let Curve = ||
+    z_index{1}
+    stroke{BLACK}
+    embed_graph{} ExplicitFunc(|x| f(x), [0, 4, 160])
+
+let Axes = ||
+    shift{graph_origin}
+    axis_style{"x", -0.5, 4, "x", 1, 0}
+    axis_style{"y", -0.5, 4, "f(x)", 1, 0}
+    Axis2d([1r * graph_unit, 1u * graph_unit])
+
+
+slide "Area"
+    # exact integral first, approximation second
+    mesh def = center{[0, 1.65, 0]} Tex(tex: "\int_{0.5}^{4} f(x)\,dx", 0.82)
+    mesh axes = Axes()
+    play Fade(0.7)
+
+    mesh graph = Curve()
+    play Write(1.0)
+
+slide "Left Rectangles"
+    # height_scale lerps from 0 to 1 to grow the rectangles up from the axis
+    mesh rects = Rectangles(height_scale: 0, selected: -1)
+    play Fade(0.3)
+
+    rects.height_scale = 1
+    play Lerp(0.9)
+
+slide "Rectangle Dimensions"
+    # Rectangle ids double as tags, so tag_filter can isolate one bar for labels.
+    let full_rects = rects
+    rects.selected = 0
+    axes = color{LIGHT_GRAY} axes
+    graph = color{GRAY} graph
+    play TagTrans(0.7)
+
+    let Dimensions = |rects, index| {
+        let selection = tag_filter{|tag| index in tag} rects
+        let left = Measure(selection, 1l)
+        let bot = Measure(selection, 1d)
+
+        return [
+            left, Label(
+                left,
+                ["\[", text_tag{1 + 3 * index} ["f(", 0.5 * (1 + index), ")"], "\]"],
+                1l,
+                0.6
+            ),
+            bot, Label(
+                bot,
+                ["\[", text_tag{2 + 3 * index} "\Delta x", "\]"],
+                1d,
+                0.6
+            )
+        ]
+    }
+
+    mesh measure = Dimensions(rects: full_rects, index: 0)
+    play Write(0.8)
+    print ["rectangle" -> 0, "height" -> f(0.5), "dx" -> 3.5 / 7]
+
+slide "Build The Sum"
+    # tagged fragments let TransSubsetTo transfer measure labels into matching formula terms
+    var total_def = def
+    total_def.tex = [
+        text_tag{-1} "\int_{0.5}^{4} f(x)dx",
+        text_tag{0} "\ = \ ",
+        text_tag{1} "f(0.5)",
+        text_tag{2} "\Delta x",
+        text_tag{3} "+",
+        text_tag{4} "f(1)",
+        text_tag{5} "\Delta x",
+        text_tag{6} "+",
+        text_tag{7} "f(1.5)",
+        text_tag{8} "\Delta x",
+        text_tag{9} "+ \ldots"
+    ]
+    def = tag_filter{|tag| -1 in tag} total_def
+    play Trans(0.7)
+
+    for (i in range(0, 3)) {
+        # Move the measurement labels into the corresponding formula tags.
+        play TransSubsetTo(
+            &measure, |tag| len(tag) > 0,
+            tag_filter{|tag| 3 * i <= tag[0] and tag[0] < 3 * (i + 1)} total_def,
+            &def,
+            1.1,
+            1
+        )
+
+        if (i < 2) {
+            rects.selected = i + 1
+            # TransSubsetTo empties transferred pieces, so rebuild from the saved full_rects
+            measure = Dimensions(full_rects, i + 1)
+            play TagTrans(0.7)
+        }
+    }
+
+    rects = full_rects
+    axes = Axes()
+    graph = Curve()
+    def = total_def
+    measure = []
+    play TagTrans(0.9)

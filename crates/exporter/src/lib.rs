@@ -108,6 +108,26 @@ pub struct ExportOutcome {
     pub transcript: Vec<executor::transcript::TranscriptEntry>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SceneInspectionTimestamp {
+    Exact(Timestamp),
+    SceneEnd,
+}
+
+#[derive(Clone, Debug)]
+pub struct SceneInspectionRequest {
+    pub root_text: String,
+    pub root_path: PathBuf,
+    pub open_documents: HashMap<PathBuf, String>,
+    pub timestamp: SceneInspectionTimestamp,
+}
+
+#[derive(Clone, Debug)]
+pub struct SceneInspectionOutcome {
+    pub timestamp: Timestamp,
+    pub transcript: Vec<executor::transcript::TranscriptEntry>,
+}
+
 struct PreparedScene {
     executor: Executor,
     root_text_rope: Rope<TextAggregate>,
@@ -191,6 +211,16 @@ pub fn export_scene(
     })
 }
 
+pub fn inspect_scene(
+    request: SceneInspectionRequest,
+    cancel_flag: Arc<AtomicBool>,
+    mut on_progress: impl FnMut(ExportProgress),
+) -> Result<SceneInspectionOutcome> {
+    smol::block_on(async {
+        inspect_scene_async(request, cancel_flag.as_ref(), &mut on_progress).await
+    })
+}
+
 async fn export_scene_async(
     request: ExportRequest,
     cancel_flag: &AtomicBool,
@@ -250,6 +280,49 @@ async fn export_scene_async(
             .await
         }
     }
+}
+
+async fn inspect_scene_async(
+    request: SceneInspectionRequest,
+    cancel_flag: &AtomicBool,
+    on_progress: &mut dyn FnMut(ExportProgress),
+) -> Result<SceneInspectionOutcome> {
+    check_cancelled(cancel_flag)?;
+
+    let mut prepared = prepare_scene(
+        &request.root_text,
+        &request.root_path,
+        &request.open_documents,
+        cancel_flag,
+        on_progress,
+        0,
+        3,
+    )?;
+
+    let timestamp = match request.timestamp {
+        SceneInspectionTimestamp::Exact(timestamp) => {
+            emit_progress_checked(cancel_flag, on_progress, "Seeking scene", 2, 3)?;
+            let internal_target = prepared.executor.user_to_internal_timestamp(timestamp);
+            let internal = seek_internal_timestamp(
+                &mut prepared.executor,
+                internal_target,
+                &prepared.root_text_rope,
+            )
+            .await?;
+            prepared.executor.internal_to_user_timestamp(internal)
+        }
+        SceneInspectionTimestamp::SceneEnd => {
+            emit_progress_checked(cancel_flag, on_progress, "Seeking scene end", 2, 3)?;
+            resolve_scene_end_timestamp(&mut prepared.executor, &prepared.root_text_rope).await?
+        }
+    };
+    check_cancelled(cancel_flag)?;
+
+    emit_progress_checked(cancel_flag, on_progress, "Collected transcript", 3, 3)?;
+    Ok(SceneInspectionOutcome {
+        timestamp,
+        transcript: collect_transcript(&prepared.executor),
+    })
 }
 
 fn prepare_scene(

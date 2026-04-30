@@ -1,8 +1,8 @@
 # Monocurl Stdlib Documentation
 
-The Monocurl standard library lives under `assets/std/std/*.mcl`. These files
-are public language-level wrappers over native runtime functions. Prefer these
-wrappers when authoring scenes; calls named `__monocurl__native__ ...` are
+The Monocurl standard library resources exposed by this MCP server are public
+language-level wrappers over native runtime functions. Prefer these wrappers
+when authoring scenes; calls named `__monocurl__native__ ...` are
 implementation details.
 
 Most scenes import the full public surface:
