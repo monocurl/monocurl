@@ -111,7 +111,7 @@ slide "Tag Transform 2"
     
 slide 
     styled = []
-    subtext = Subtext("Defining custom animations allows.")
+    subtext = Subtext("Text is a regular mesh, allowing you to do complex animations with regular Monocurl utilities")
     play Fade(0.9)
 
     # instead of having to repeatedly type tags
@@ -122,40 +122,28 @@ slide
     let two_ab = text_tag{4} "2ab"
     let eq = text_tag{5} "\ = \ "
     
-    # while it is possible to use latex align* for this
-    # it's slightly harder (but not impossible) to 
-    # be able to identify elements in each 
+    # while it is possible to use latex align* for this purpose
+    # it's slightly harder (but not impossible) to recover
+    # what "row/equation" each mesh came from, making the animations
+    # more 
+    # (With align*, this can be done via preprocessing each element with an additional tag component)
     
-    let AlignedEquations = |equations| {
-       
-        
-        var latex = []
-        latex .= "\begin{align*}"
-        for (i in range(0, len(equations))) {
-            if (i == len(equations) - 1) {
-                latex .= equations[i]
-            }
-            else {
-                latex .= equations[i] .. "\\"
-            }
-        }
-        latex .= "\end{align*}"
-        
-        # set top to [0, 2, 0]
-        let position = |x| {
-            if (equations == []) { return [] }
-            
-            let ret = center{0l} x
-            let curr = mesh_direc(ret, 1u)
-            return shift{[0, 2 - curr[1], 0]} ret
-        }
-        
-        return position(palette{} Latex(latex))
+    let Equation = |lhs, rhs| {
+        let str = [lhs, "\ \tag5{=} \ ", rhs]
+        print to_string(str)
+        let latex = Latex(str)
+        let eq = tag_filter{|tag| 5 in tag} latex
+        let pos = mesh_center(eq)
+        return shift{[-pos[0], 0, 0]} palette{} latex
+    }
+    
+    let AlignedEquations = |equations| {    
+        return to_side{1u} Stack(equations, 1d)
     }
     
     # animated 
     let PushEquation = |&equations, lhs, rhs| anim {
-        let eqn = [lhs, "\ &\tag5{=} \ ", rhs]
+        let eqn = Equation(lhs, rhs)
         if (equations.equations == []) {
             equations.equations .= eqn
             play Write()

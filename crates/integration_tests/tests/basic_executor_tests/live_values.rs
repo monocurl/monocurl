@@ -808,8 +808,8 @@ fn test_to_side_and_to_corner_smoke() {
     let r = run_with_stdlib(
         "
         let cam = Camera(10b, [0, 0, 0], 1u)
-        let side = mesh_center(to_side{cam, 1r} Circle(1))
-        let corner = mesh_center(to_corner{cam, [1, 1, 0], 0.1} Circle(1))
+        let side = mesh_center(to_side{1r, 0.1, cam} Circle(1))
+        let corner = mesh_center(to_corner{[1, 1, 0], 0.1, cam} Circle(1))
         let result = (side[0] > 0) + (corner[0] > 0) + (corner[1] > 0)
     ",
         &["mesh", "scene"],
@@ -836,14 +836,15 @@ fn test_to_side_omitted_camera_matches_initial_camera() {
     let r = run_with_stdlib(
         "
         let implicit = mesh_center(to_side{[1, 0, 0]} Square(2))
-        let explicit = mesh_center(to_side{DEFAULT_CAMERA, [1, 0, 0]} Square(2))
+        let explicit = mesh_center(to_side{[1, 0, 0], 0.1, DEFAULT_CAMERA} Square(2))
         let buffered = mesh_center(to_side{[1, 0, 0], 0.1} Square(2))
         let scaled_literal = mesh_center(to_side{0.2l} Square(2))
-        let result = [implicit[0], explicit[0], buffered[0], implicit[1], scaled_literal[0]]
+        let zero_buffer = mesh_center(to_side{[1, 0, 0], 0} Square(2))
+        let result = [implicit[0], explicit[0], buffered[0], implicit[1], scaled_literal[0], zero_buffer[0]]
     ",
         &["mesh", "scene"],
     );
-    r.assert_float_list_approx(&[3.0, 3.0, 2.9, 0.0, -3.0], 1e-6);
+    r.assert_float_list_approx(&[2.9, 2.9, 2.9, 0.0, -2.9, 3.0], 1e-6);
 }
 
 #[test]

@@ -1725,8 +1725,8 @@ pub async fn op_to_side(executor: &mut Executor, stack_idx: usize) -> Result<Val
         return Ok(tree.into_value());
     }
     let side = read_float3(executor, stack_idx, -5, "dir")?;
-    let camera = read_camera_basis_or_default(executor, stack_idx, -4, "camera").await?;
-    let buffer = crate::read_float(executor, stack_idx, -3, "buffer")? as f32;
+    let buffer = crate::read_float(executor, stack_idx, -4, "buffer")? as f32;
+    let camera = read_camera_basis_or_default(executor, stack_idx, -3, "camera").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
         return Ok(tree.into_value());
@@ -1757,8 +1757,8 @@ pub async fn op_to_corner(
     if side.y == 0.0 {
         side.y = 1.0;
     }
-    let camera = read_camera_basis_or_default(executor, stack_idx, -4, "camera").await?;
-    let buffer = crate::read_float(executor, stack_idx, -3, "buffer")? as f32;
+    let buffer = crate::read_float(executor, stack_idx, -4, "buffer")? as f32;
+    let camera = read_camera_basis_or_default(executor, stack_idx, -3, "camera").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
         return Ok(tree.into_value());

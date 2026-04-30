@@ -372,36 +372,12 @@ let camera_transfer = operator |target, original_camera, live_camera, filter = n
     let go = |level| __monocurl__native__ op_camera_transfer(target, original_camera, live_camera, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let to_side = operator |target, camera = nil, dir = [0, 0, 0], buffer = 0, filter = nil| {
-    if (__monocurl__native__ is_list(camera)) {
-        if (__monocurl__native__ is_number(dir)) {
-            if (__monocurl__native__ is_number(buffer)) {
-                let go = |level| __monocurl__native__ op_to_side(target, camera, nil, dir, filter, level)
-                return [go(level: 0), go(level: 1)]
-            }
-            let go = |level| __monocurl__native__ op_to_side(target, camera, nil, dir, buffer, level)
-            return [go(level: 0), go(level: 1)]
-        }
-        let go = |level| __monocurl__native__ op_to_side(target, camera, nil, buffer, filter, level)
-        return [go(level: 0), go(level: 1)]
-    }
-    let go = |level| __monocurl__native__ op_to_side(target, dir, camera, buffer, filter, level)
+let to_side = operator |target, dir = [0, 0, 0], buffer = 0.1, camera = nil, filter = nil| {
+    let go = |level| __monocurl__native__ op_to_side(target, dir, buffer, camera, filter, level)
     return [go(level: 0), go(level: 1)]
 }
-let to_corner = operator |target, camera = nil, dir = [1, 1, 0], buffer = 0, filter = nil| {
-    if (__monocurl__native__ is_list(camera)) {
-        if (__monocurl__native__ is_number(dir)) {
-            if (__monocurl__native__ is_number(buffer)) {
-                let go = |level| __monocurl__native__ op_to_corner(target, camera, nil, dir, filter, level)
-                return [go(level: 0), go(level: 1)]
-            }
-            let go = |level| __monocurl__native__ op_to_corner(target, camera, nil, dir, buffer, level)
-            return [go(level: 0), go(level: 1)]
-        }
-        let go = |level| __monocurl__native__ op_to_corner(target, camera, nil, buffer, filter, level)
-        return [go(level: 0), go(level: 1)]
-    }
-    let go = |level| __monocurl__native__ op_to_corner(target, dir, camera, buffer, filter, level)
+let to_corner = operator |target, dir = [1, 1, 0], buffer = 0.1, camera = nil, filter = nil| {
+    let go = |level| __monocurl__native__ op_to_corner(target, dir, buffer, camera, filter, level)
     return [go(level: 0), go(level: 1)]
 }
 let matched_edge = operator |target, ref, dir, filter = nil| {
