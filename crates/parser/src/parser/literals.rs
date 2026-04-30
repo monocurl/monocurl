@@ -208,31 +208,17 @@ impl SectionParser {
                         emitted_error = true;
                     }
 
-                    self.state.push_frame(|frame| {
-                        frame.operating_range = entry_start..key_value_token;
-                    });
-                    let entry = self.parse_expr_best_effort();
-                    self.state.pop_frame();
+                    let entry = self.parse_literal_entry(entry_start..key_value_token);
 
                     self.token_index = key_value_token;
                     self.read_token_best_effort(Token::KeyValueMap);
 
                     let value_start = self.token_index;
-                    self.state.push_frame(|frame| {
-                        frame.operating_range = value_start..entry_end;
-                    });
-                    let value = self.parse_expr_best_effort();
-                    self.state.pop_frame();
-                    self.token_index = entry_end;
+                    let value = self.parse_literal_entry(value_start..entry_end);
 
                     map_entries.push((entry, value));
                 } else {
-                    self.state.push_frame(|frame| {
-                        frame.operating_range = entry_start..entry_end;
-                    });
-                    let entry = self.parse_expr_best_effort();
-                    self.state.pop_frame();
-                    self.token_index = entry_end;
+                    let entry = self.parse_literal_entry(entry_start..entry_end);
 
                     if !map_entries.is_empty() && !emitted_error {
                         self.emit_error(
@@ -276,6 +262,24 @@ impl SectionParser {
         self.advance_newlines();
         let end_span = self.read_token_best_effort(Token::RBracket);
         (base_span.start..end_span.end, literal)
+    }
+
+    fn parse_literal_entry(&mut self, range: std::ops::Range<usize>) -> SpanTagged<Expression> {
+        self.state.push_frame(|frame| {
+            frame.operating_range = range.clone();
+        });
+        let entry = self.parse_expr_best_effort();
+        self.advance_newlines();
+        if self.token_index < range.end {
+            self.emit_error(
+                "Invalid Literal Entry".into(),
+                "literal entries must be valid expressions separated by ','".into(),
+                self.tokens[self.token_index].1.clone(),
+            );
+        }
+        self.state.pop_frame();
+        self.token_index = range.end;
+        entry
     }
 
     fn find_top_level_map_entry_delimiters(&self, range_end: usize) -> (Option<usize>, usize) {

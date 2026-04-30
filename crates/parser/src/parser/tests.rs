@@ -252,6 +252,11 @@ mod test {
     }
 
     #[test]
+    fn test_error_missing_vector_literal_separator() {
+        error_expr_test("[1 2 3]");
+    }
+
+    #[test]
     fn test_empty_map() {
         let result = parse_expr_test("[->]");
         let expected = Expression::Literal(Literal::Map(vec![]));

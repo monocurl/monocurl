@@ -120,13 +120,15 @@ slide "Complex Animation"
     # but the upside is this is not special cased into the stdlib
     # (allowing greater generality)
     # Eventually, this may be more automated in a library
-    # to support the common operations
+    # to support the common operations /behavior at least
 
     # instead of having to repeatedly type tags
     # you can save the entire value as a constant and reference that
     let x = text_tag{1} "x"
+    let a = text_tag{1} "a"
     let x2 = text_tag{2} "x^2"
     let y = text_tag{3} "y"
+    let b = text_tag{3} "b"
     let y2 = text_tag{4} "y^2"
     let ge = "\ \tag9{\ge} \ "
     
@@ -139,7 +141,7 @@ slide "Complex Animation"
     # it's slightly harder to recover
     # what "row/equation" each mesh came from, making the animations
     # more difficult
-    # (With align*, this can be done via preprocessing each element with an additional  tag component to keep row information)
+    # (With align*, it would be done via preprocessing each element with an additional tag component to keep row information)
     
     # make untagged portions fade in and out by giving them 
     # row-unique tag
@@ -160,7 +162,7 @@ slide "Complex Animation"
         return shift{2u} Stack(equations, 1d)
     }
     
-    let PushEquation = |&container, lhs, rhs, tag_map| anim {
+    let PushEquation = |&container, lhs, rhs, tag_map=nil| anim {
         let ie = Inequality(lhs, rhs, len(container.rows))
         
         if (container.rows == []) {
@@ -179,10 +181,9 @@ slide "Complex Animation"
             # we access the SHIFTED / positioned mesh 
             # which is what we want
             let count = len(container.rows)
-            let map = container
-            mesh aux = map[count - 2]
+            mesh aux = container[count - 2]
             play Set(&aux)
-            aux = map[count - 1] 
+            aux = container[count - 1] 
             play set_default{"tag_map", tag_map} TagTrans(1, &aux)
             aux = []
             play Set()
@@ -194,8 +195,7 @@ slide "Complex Animation"
     # https://www.cantorsparadise.com/an-introduction-to-the-am-gm-inequality-38f7895e8f30
     play PushEquation(&curr, 
         ["(", x, "-", y, ")^2"],
-        ["\tag8{0}"],
-        [->]
+        ["\tag8{0}"]
     )
     
     play PushEquation(&curr,
@@ -207,13 +207,16 @@ slide "Complex Animation"
     
     play PushEquation(&curr,
         [x2, "+", y2],
-        ["\tag7{2}", x, y],
-        [->]
+        ["\tag7{2}", x, y]
     )
     
-    [1 2 3]
     play PushEquation(&curr,
-        ["\frac{" 1 3 4 5 x2, "+", y2, "}{", "\tag7{2}", "}"],
-        ["\tag7{2}", x, y],
+        ["\frac{", x2, "+", y2, "}{", "\tag7{2}", "}"],
+        [x, y]
+    )
+    
+    play PushEquation(&curr,
+        ["\frac{", x2, "+", y2, "}{", "\tag7{2}", "}"],
+        ["\sqrt{", a, b, "}"],
         [->]
     )
