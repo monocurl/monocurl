@@ -87,15 +87,15 @@ let Write = |time = 1, &meshes = [], rate = smooth| {
 }
 
 # interpolate by matching points between start and end meshes.
-let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth| {
-    let embed = |start, dst| __monocurl__native__ trans_embed(start, dst)
+let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_hint = 0| {
+    let embed = |start, dst| __monocurl__native__ trans_embed_with_options(start, dst, similar_topo_hint)
     let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
     return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
 
 # like Trans, but pairs sub-meshes by their `tag` rather than by order.
-let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth| {
-    let embed = |start, dst| __monocurl__native__ tag_trans_embed(start, dst)
+let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_hint = 0| {
+    let embed = |start, dst| __monocurl__native__ tag_trans_embed_with_options(start, dst, similar_topo_hint)
     let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
     return PrimitiveAnim(time, &meshes, embed, lerp, rate)
 }
@@ -203,29 +203,29 @@ let Copy = |&from, &into| anim {
     play Set([&into])
 }
 
-let TransSubsetTo = |&from, filter, target, &into, time=1, tagged=0, path_arc = 0, rate = smooth| anim {
+let TransSubsetTo = |&from, filter, target, &into, time=1, tagged=0, path_arc = 0, rate = smooth, similar_topo_hint = 0| anim {
     mesh aux = []
     play TransferSubset(&from, &aux, filter)
 
     aux = target
     if (tagged) {
-        play TagTrans(time, &aux, path_arc, rate)
+        play TagTrans(time, &aux, path_arc, rate, similar_topo_hint)
     } else {
-        play Trans(time, &aux, path_arc, rate)
+        play Trans(time, &aux, path_arc, rate, similar_topo_hint)
     }
 
     play Transfer(&aux, &into)
 }
 
-let TransSubsetCopy = |&from, filter, target, &into, time=1, tagged=0, path_arc = 0, rate = smooth| anim {
+let TransSubsetCopy = |&from, filter, target, &into, time=1, tagged=0, path_arc = 0, rate = smooth, similar_topo_hint = 0| anim {
     mesh aux = []
     play CopySubset(&from, &aux, filter)
 
     aux = target
     if (tagged) {
-        play TagTrans(time, &aux, path_arc, rate)
+        play TagTrans(time, &aux, path_arc, rate, similar_topo_hint)
     } else {
-        play Trans(time, &aux, path_arc, rate)
+        play Trans(time, &aux, path_arc, rate, similar_topo_hint)
     }
 
     play Transfer(&aux, &into)

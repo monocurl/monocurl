@@ -13,6 +13,13 @@ let sample = |start, stop, sample_count| __monocurl__native__ sample(start, stop
 # sample_count uniformly spaced values from start up to, but not including, stop.
 let sample_clopen = |start, stop, sample_count| __monocurl__native__ sample_clopen(start, stop, sample_count)
 
+# n copies of item.
+let const_list = |item, n| {
+    var out = []
+    for (i in range(0, n)) { out .= item }
+    return out
+}
+
 # element count of a list, map, or string.
 let len = |container| __monocurl__native__ len(container)
 

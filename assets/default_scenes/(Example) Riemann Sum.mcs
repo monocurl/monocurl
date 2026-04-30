@@ -7,9 +7,15 @@ import std.mesh
 import std.anim
 import std.scene
 
+
+# This scene highlights how tags can be useful for constructing
+# precise animations / transformations
+# Moreover, the in_space operator can be helpful for converting
+# between axis-space and global-space coordinate systems
+
+# function we'll integrate
 let f = |x| 0.5 * ((x - 1.5) ^ 2) + 2
 
-# Embedding graph coordinates once keeps axis, curve, and rectangles aligned.
 let graph_origin = [-0.8, -1.7, 0]
 let graph_unit = 0.45
 let embed_graph = operator |target|

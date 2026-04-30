@@ -1,4 +1,4 @@
-# example: flow field
+# example: flow field / parameters
 
 import std.util
 import std.math
@@ -7,8 +7,13 @@ import std.mesh
 import std.anim
 import std.scene
 
-# Init-scope params become presentation controls. Meshes that read `$source`
-# and friends are resynced from those live values after each slide.
+# Init-scope params become presentation controls
+# 
+# If you enter presentation mode (Ctrl + P)
+# and then toggle parameters (Ctrl + T),
+# on the last slide, you will be able to edit parameters by hand
+# and see the scene dynamically react!
+
 param source = [-0.62, -0.22, 0]
 param sink = [0.64, 0.34, 0]
 param swirl = 0.38
@@ -22,7 +27,6 @@ let bounds_y = [-1.55, 1.55]
 let to_scene = |handle| [scene_scale[0] * handle[0], scene_scale[1] * handle[1], 0]
 
 let safe_unit = |v| {
-    # Streamlines sometimes pass very close to a pole; avoid zero-length normals.
     let n = norm(v)
     if (n < 0.0001) { return 1r }
     return v * (1 / n)
@@ -112,11 +116,6 @@ let Pole = |pos, color_value, sign, id| [
         Circle(0.38)
 ]
 
-let Plain = |text, at, scale = 0.42|
-    center{at}
-    color{BLACK}
-    Text(text, scale)
-
 let FlowScene = |src, dst, swirl_value, pressure_value| {
     let src_pos = to_scene(src)
     let dst_pos = to_scene(dst)
@@ -134,16 +133,18 @@ let FlowScene = |src, dst, swirl_value, pressure_value| {
 }
 
 slide "Live Flow"
-    # `$` reads keep the mesh tied to parameter leaders instead of one snapshot.
+    # `$` reads keep the mesh tied to parameter instead of one snapshot / current value
     mesh field = FlowScene(src: $source, dst: $sink, swirl_value: $swirl, pressure_value: $pressure)
-    mesh note = Plain("presentation mode: drag source and sink", [0, 2.05, 0], 0.46)
+    mesh note = center{2u} Text(text: "presentation mode: drag source and sink", 0.7)
     play Fade(0.7)
 
     # `print` shows the concrete parameter leaders at this point in playback.
     print ["source" -> source, "sink" -> sink, "swirl" -> swirl, "pressure" -> pressure]
 
 slide "Scripted Change"
-    # Scripted param changes and presentation drags mutate the same leaders.
+    # you can modifiy parameters in code and animate
+    # them similar to meshes with lerp
+    # the mesh followers will react dynamically 
     source = [-0.78, 0.42, 0]
     sink = [0.74, -0.35, 0]
     swirl = 0.95
@@ -152,6 +153,8 @@ slide "Scripted Change"
     play Lerp(1.4)
 
 slide "Interactive Pause"
-    note = Plain("the same scene keeps reacting while paused", [0, 2.05, 0])
+    # here you can edit the parameters in presentation mode
+    # the true power of parameters
+    note.text = "the same scene keeps reacting while paused"
     play Trans(0.45)
     play Wait(5.0)

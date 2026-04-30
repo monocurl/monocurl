@@ -7,7 +7,7 @@ import std.mesh
 import std.anim
 import std.scene
 
-let samples = 25
+let samples = 24
 let height = |x, y| 1.15 * ((x - 0.5) ^ 2 + (y - 0.5) ^ 2)
 let color_keys = [0 -> BLUE, 0.15 -> YELLOW, 0.3 -> ORANGE, 0.55 -> RED]
 
@@ -24,25 +24,25 @@ slide "Flat Grid"
         [-1, 0, samples]
     )
     mesh axis =
-        shift{[0, 0, -0.01]}
+        shift{[0, 0, -0.01]} # draw below function
+        axis_style{"x", 0, 1, "x"}
+        axis_style{"y", 0, 1, "y"}
+        axis_style{"z", 0, 1, "z"}
         Axis3d(
             basis: [1r, 1d, 1b],
             color: BLACK,
             grid_color: LIGHT_GRAY,
-            [1u, 1u, 1b],
-            x_axis: [0, 1, "x", 0.25, 4, |x| x],
-            y_axis: [0, 1, "y", 0.25, 4, |y| y],
-            z_axis: [0, 1, "z", 0.25, 4, |z| z]
+            [1u, 1u, 1b]
         )
+    mesh monocurl = center{0.7u} Text("Monocurl", 2)
 
-    play Fade(0.8)
+    play [Fade(0.8, [&axis, &grid]), Write(0.8, &monocurl)]
 
 slide "Surface And Camera"
     # an anim block is analogous to a coroutine in other languages
     # it does nothing until it is played
     # (you can try experiment with the playhead to see when the
     # "Got here" is actually printed)
-    # anim blocks don't execute until played — scrub the timeline to see when "Got here" prints
     let lift_grid = anim {
         grid = stroke{BLACK, 1.5} ColorGrid(
             color_at,
@@ -59,6 +59,9 @@ slide "Surface And Camera"
         play Trans(1.8, [&grid])
     }
 
+    # camera lerp is a specialize anim for interpolating 
+    # camera positions, lerp "works" as well 
+    # but is visually less pelaseing
     let move_camera = anim {
         camera = Camera([2.2, -2.1, 1.45], [0.5, -0.5, 0.35], [0, 0, 1])
         play CameraLerp(&camera, 2.6)

@@ -22,8 +22,31 @@ pub async fn trans_embed(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let start_value = executor.state.stack(stack_idx).read_at(-2).clone();
-    let destination_value = executor.state.stack(stack_idx).read_at(-1).clone();
+    trans_embed_impl(executor, stack_idx, -2, -1, true).await
+}
+
+#[stdlib_func]
+pub async fn trans_embed_with_options(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let similar_topo_hint = read_truthy_stack_value(executor, stack_idx, -1, "similar_topo_hint")?;
+    trans_embed_impl(executor, stack_idx, -3, -2, similar_topo_hint).await
+}
+
+async fn trans_embed_impl(
+    executor: &mut Executor,
+    stack_idx: usize,
+    start_index: i32,
+    destination_index: i32,
+    similar_topo_hint: bool,
+) -> Result<Value, ExecutorError> {
+    let start_value = executor.state.stack(stack_idx).read_at(start_index).clone();
+    let destination_value = executor
+        .state
+        .stack(stack_idx)
+        .read_at(destination_index)
+        .clone();
     let start = materialize_live_value(executor, &start_value).await?;
     let destination = materialize_live_value(executor, &destination_value).await?;
     let start_leaves = contour_separated_leaves(&start)?;
@@ -34,6 +57,7 @@ pub async fn trans_embed(
         matches!(destination, Value::Mesh(_))
             && start_leaves.len() <= 1
             && target_leaves.len() <= 1,
+        similar_topo_hint,
     )?;
     Ok(embed_triplet(aligned, prepared_destination, state))
 }
@@ -43,8 +67,31 @@ pub async fn tag_trans_embed(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let start_value = executor.state.stack(stack_idx).read_at(-2).clone();
-    let destination_value = executor.state.stack(stack_idx).read_at(-1).clone();
+    tag_trans_embed_impl(executor, stack_idx, -2, -1, true).await
+}
+
+#[stdlib_func]
+pub async fn tag_trans_embed_with_options(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let similar_topo_hint = read_truthy_stack_value(executor, stack_idx, -1, "similar_topo_hint")?;
+    tag_trans_embed_impl(executor, stack_idx, -3, -2, similar_topo_hint).await
+}
+
+async fn tag_trans_embed_impl(
+    executor: &mut Executor,
+    stack_idx: usize,
+    start_index: i32,
+    destination_index: i32,
+    similar_topo_hint: bool,
+) -> Result<Value, ExecutorError> {
+    let start_value = executor.state.stack(stack_idx).read_at(start_index).clone();
+    let destination_value = executor
+        .state
+        .stack(stack_idx)
+        .read_at(destination_index)
+        .clone();
     let start = materialize_live_value(executor, &start_value).await?;
     let destination = materialize_live_value(executor, &destination_value).await?;
     let start_leaves = contour_separated_leaves(&start)?;
@@ -55,6 +102,7 @@ pub async fn tag_trans_embed(
         matches!(destination, Value::Mesh(_))
             && start_leaves.len() <= 1
             && target_leaves.len() <= 1,
+        similar_topo_hint,
     )?;
     Ok(embed_triplet(aligned, prepared_destination, state))
 }
@@ -113,6 +161,30 @@ fn read_planar_state(value: &Value) -> Result<Option<(Float4, Float4)>, Executor
     }
 }
 
+fn read_truthy_stack_value(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<bool, ExecutorError> {
+    match executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_cached_wrappers_rec()
+    {
+        Value::Integer(value) => Ok(value != 0),
+        Value::Float(value) => Ok(value != 0.0),
+        Value::Complex { re, im } => Ok(re != 0.0 || im != 0.0),
+        other => Err(ExecutorError::type_error_for(
+            "truthy number",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
 #[derive(Clone)]
 struct ClosedContour {
     points: Vec<Float3>,
@@ -145,18 +217,32 @@ fn prepare_trans_value_like(
     source_leaves: &[Arc<Mesh>],
     target_leaves: &[Arc<Mesh>],
     prefer_single_mesh: bool,
+    similar_topo_hint: bool,
 ) -> Result<(Value, Value, Value), ExecutorError> {
     let pairings = pair_leaf_indices_in_order(source_leaves.len(), target_leaves.len());
-    build_prepared_trans_values(source_leaves, target_leaves, pairings, prefer_single_mesh)
+    build_prepared_trans_values(
+        source_leaves,
+        target_leaves,
+        pairings,
+        prefer_single_mesh,
+        similar_topo_hint,
+    )
 }
 
 fn prepare_trans_value_like_by_tag(
     source_leaves: &[Arc<Mesh>],
     target_leaves: &[Arc<Mesh>],
     prefer_single_mesh: bool,
+    similar_topo_hint: bool,
 ) -> Result<(Value, Value, Value), ExecutorError> {
     let pairings = pair_leaf_indices_by_tag(source_leaves, &target_leaves);
-    build_prepared_trans_values(source_leaves, target_leaves, pairings, prefer_single_mesh)
+    build_prepared_trans_values(
+        source_leaves,
+        target_leaves,
+        pairings,
+        prefer_single_mesh,
+        similar_topo_hint,
+    )
 }
 
 fn build_prepared_trans_values(
@@ -164,6 +250,7 @@ fn build_prepared_trans_values(
     target_leaves: &[Arc<Mesh>],
     pairings: Vec<(Option<usize>, Option<usize>)>,
     prefer_single_mesh: bool,
+    similar_topo_hint: bool,
 ) -> Result<(Value, Value, Value), ExecutorError> {
     let mut starts = Vec::with_capacity(pairings.len());
     let mut ends = Vec::with_capacity(pairings.len());
@@ -172,7 +259,8 @@ fn build_prepared_trans_values(
     for (source_idx, target_idx) in pairings {
         let source = source_idx.map(|idx| source_leaves[idx].as_ref());
         let target = target_idx.map(|idx| target_leaves[idx].as_ref());
-        let (start, end, state) = prepare_trans_mesh_pair(source, target)?;
+        let (start, end, state) =
+            prepare_trans_mesh_pair_with_similar_topo_hint(source, target, similar_topo_hint)?;
         starts.push(Value::Mesh(Arc::new(start)));
         ends.push(Value::Mesh(Arc::new(end)));
         states.push(state);
@@ -568,18 +656,37 @@ fn remap_mesh_ref(value: i32, direct_map: &[Option<usize>], mesh_map: &[Option<u
         .unwrap_or(-1)
 }
 
+#[cfg(test)]
 fn prepare_trans_mesh_pair(
     source: Option<&Mesh>,
     target: Option<&Mesh>,
 ) -> Result<(Mesh, Mesh, Value), ExecutorError> {
+    prepare_trans_mesh_pair_with_similar_topo_hint(source, target, false)
+}
+
+fn prepare_trans_mesh_pair_with_similar_topo_hint(
+    source: Option<&Mesh>,
+    target: Option<&Mesh>,
+    similar_topo_hint: bool,
+) -> Result<(Mesh, Mesh, Value), ExecutorError> {
     match (source, target) {
         (Some(source), Some(target)) if mesh_has_content(source) && mesh_has_content(target) => {
-            if let Some((start, end, state)) = prepare_planar_trans_mesh_pair(source, target)? {
-                return Ok((start, end, state));
-            }
+            if similar_topo_hint {
+                if same_mesh_topology(source, target) {
+                    return Ok((source.clone(), target.clone(), Value::Nil));
+                }
 
-            if same_mesh_topology(source, target) {
-                return Ok((source.clone(), target.clone(), Value::Nil));
+                if let Some((start, end, state)) = prepare_planar_trans_mesh_pair(source, target)? {
+                    return Ok((start, end, state));
+                }
+            } else {
+                if let Some((start, end, state)) = prepare_planar_trans_mesh_pair(source, target)? {
+                    return Ok((start, end, state));
+                }
+
+                if same_mesh_topology(source, target) {
+                    return Ok((source.clone(), target.clone(), Value::Nil));
+                }
             }
 
             let prepared = match (mesh_rank(source), mesh_rank(target)) {
@@ -2418,10 +2525,11 @@ mod tests {
     use crate::mesh::helpers::tessellate_planar_loops;
 
     use super::{
-        ClosedContour, append_closed_contour, canonicalize_surface_template,
+        ClosedContour, Value, append_closed_contour, canonicalize_surface_template,
         extract_closed_contours, match_tri_lin, pair_leaf_indices_by_tag, planar_mesh_patharc_lerp,
-        prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair, read_planar_state,
-        same_mesh_topology, signed_contour_area, split_mesh_contours, vec3_patharc_lerp,
+        prepare_planar_trans_mesh_pair, prepare_trans_mesh_pair,
+        prepare_trans_mesh_pair_with_similar_topo_hint, read_planar_state, same_mesh_topology,
+        signed_contour_area, split_mesh_contours, vec3_patharc_lerp,
     };
 
     fn line(a: Float3, b: Float3, prev: i32, next: i32) -> Lin {
@@ -2900,6 +3008,28 @@ mod tests {
         assert_eq!(contours.len(), 2);
         assert_eq!(positive, 1);
         assert_eq!(negative, 1);
+    }
+
+    #[test]
+    fn prepare_trans_mesh_pair_can_use_similar_topo_hint_for_exact_topology() {
+        let mut source = tessellated_mesh(&[circle_points(0.8, 16)]);
+        let mut target = source.clone();
+        set_fill_color(&mut source, Float4::new(0.2, 0.4, 0.8, 1.0));
+        set_fill_color(&mut target, Float4::new(0.9, 0.3, 0.1, 1.0));
+
+        let (_, _, planar_state) =
+            prepare_trans_mesh_pair_with_similar_topo_hint(Some(&source), Some(&target), false)
+                .expect("planar-first pair prep should succeed");
+        assert!(
+            read_planar_state(&planar_state)
+                .expect("planar state should decode")
+                .is_some()
+        );
+
+        let (_, _, exact_state) =
+            prepare_trans_mesh_pair_with_similar_topo_hint(Some(&source), Some(&target), true)
+                .expect("exact-first pair prep should succeed");
+        assert!(matches!(exact_state, Value::Nil));
     }
 
     #[test]

@@ -426,11 +426,11 @@ let tag_split = |target, filter = nil| __monocurl__native__ tag_split(target, fi
 let mesh_collapse = |target| __monocurl__native__ mesh_collapse(target)
 let contour_separate = operator |target| [target, __monocurl__native__ mesh_contour_separate(target)]
 
-let trans = |start, end, t, path_arc = 0| {
+let trans = |start, end, t, path_arc = 0, similar_topo_hint = 0| {
     var aligned_start = 0
     var aligned_end = 0
     var state = 0
-    [aligned_start, aligned_end, state] = __monocurl__native__ trans_embed(start, end)
+    [aligned_start, aligned_end, state] = __monocurl__native__ trans_embed_with_options(start, end, similar_topo_hint)
     return __monocurl__native__ trans_lerp_value(aligned_start, aligned_end, state, t, path_arc)
 }
 

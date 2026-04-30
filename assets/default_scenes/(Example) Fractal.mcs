@@ -1,4 +1,4 @@
-# example: recursive meshes
+# example: fractals / recursive meshes
 
 import std.util
 import std.math
@@ -7,23 +7,22 @@ import std.mesh
 import std.anim
 import std.scene
 
-background = WHITE
-
 let rot = |v, angle| [
     cos(angle) * v[0] - sin(angle) * v[1],
     sin(angle) * v[0] + cos(angle) * v[1],
     0
 ]
 
-let LeafColor = [0 -> TEAL, 0.45 -> GREEN, 1 -> ORANGE]
+let leaf_colors = [0 -> TEAL, 0.45 -> GREEN, 1 -> ORANGE]
 
+# notice that recursive functions take themselves as parameters
+# this is familiar if you've seen untyped lambda calculus
 let Branch = |self, depth, at, dir, length, angle, shrink, id| {
     if (depth <= 0) {
-        # keyframe_lerp gives repeated recursive leaves a controlled color range.
-        let hue = keyframe_lerp(LeafColor, (sin(id) + 1) / 2)
-        return fill{alpha{0.45} hue}
+        let hue = keyframe_lerp(leaf_colors, (sin(id) + 1) / 2)
+        return 
+            fill{alpha{0.45} hue}
             stroke{hue, 1.4}
-            tag{[0, id]}
             center{at}
             Circle(0.07 + 0.05 * length)
     }
@@ -31,23 +30,24 @@ let Branch = |self, depth, at, dir, length, angle, shrink, id| {
     let end = at + length * dir
     let stroke_width = 0.7 + depth * 0.45
     return [
-        stroke{BLACK, stroke_width} tag{[depth, id]} Line(at, end),
+        stroke{BLACK, stroke_width} Line(at, end),
 
+        # recursive calls
         self(self, depth - 1, end, rot(dir, angle), length * shrink, angle, shrink, 2 * id),
+        
         self(self, depth - 1, end, rot(dir, -angle), length * shrink, angle, shrink, 2 * id + 1)
     ]
 }
 
 let RecursiveTree = |depth, angle, shrink|
-    # Passing `Branch` as data keeps recursion explicit and easy to parameterize.
+    # the to_int here allows for integer lerping of depth
     Branch(Branch, to_int(depth), [0, -2.15, 0], UP, 0.95, angle, shrink, 1)
 
 slide "Recursive Tree"
     mesh tree = RecursiveTree(depth: 2, angle: 0.52, shrink: 0.72)
     mesh note =
-        center{[0, 1.95, 0]}
-        color{BLACK}
-        Text("one branch returns two smaller branches", 0.5)
+        center{2u}
+        Text("one branch returns two smaller branches")
 
     play [Write(1.6, [&tree]), delay{1} Fade(0.6, [&note])]
 

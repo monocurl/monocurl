@@ -177,6 +177,17 @@ fn test_sample_clopen_treats_endpoint_as_open() {
 }
 
 #[test]
+fn test_const_list_duplicates_item() {
+    let r = run_with_stdlib(
+        "
+        let result = const_list(\"x\", 3)
+    ",
+        &["util"],
+    );
+    r.assert_string_list(&["x", "x", "x"]);
+}
+
+#[test]
 fn test_sample_count_edge_cases() {
     let r = run_with_stdlib(
         "
