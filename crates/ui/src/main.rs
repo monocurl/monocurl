@@ -35,6 +35,12 @@ mod window;
 pub struct MonocurlLauncher;
 
 impl MonocurlLauncher {
+    fn clean_latex_file_cache() {
+        if let Err(error) = latex::clean_stale_file_cache() {
+            log::warn!("unable to clean stale LaTeX SVG cache: {error:#}");
+        }
+    }
+
     fn setup_fonts(cx: &mut App) {
         cx.text_system()
             .add_fonts(vec![
@@ -146,6 +152,8 @@ impl MonocurlLauncher {
     }
 
     fn launch() {
+        Self::clean_latex_file_cache();
+
         Application::new().run(|cx: &mut App| {
             Self::setup_fonts(cx);
             ThemeSettings::init(cx);

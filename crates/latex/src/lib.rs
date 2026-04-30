@@ -8,6 +8,7 @@ mod system;
 mod tectonic;
 mod types;
 
+pub use cache::clean_stale_file_cache;
 pub use config::{
     backend_config, discover_system_backend, set_backend_config, system_backend_status,
 };

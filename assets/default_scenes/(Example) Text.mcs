@@ -54,7 +54,7 @@ slide "Tagged Tex"
     # all examples of tagging are equivalent 
     # (except the exact tag they're given)
     mesh styled = palette{} center{0.45u} Tex(tex: [
-        text_tag{[1, 2, 3]} "P(A\mid B)", # multi tag
+        text_tag{[1, 20, 30]} "P(A\mid B)", # multi tag
         "\text_tag{5}{\ = \ }",
         "\frac{",
             "\tag2{P(B\mid A)}",
@@ -75,7 +75,7 @@ slide "Tag Transform 1"
     # tagtrans can match contours exactly as you desire
     styled = palette{} center{0.45u} Tex(
         [
-            "\tag1{\text{posterior}}",
+            "\text_tag{1,20,30}{\text{posterior}}",
             "\tag5{\ = \ }",
             "\frac{",
                 "\tag2{\text{likelihood}}",
@@ -95,7 +95,7 @@ slide "Tag Transform 2"
 
     styled = palette{} center{0.45u} Tex(tex: 
         [
-            "\tag1{\text{posterior}}",
+            "\text_tag{1,20,30}{\text{posterior}}",
             "\cdot ",
             "\tag4{\text{evidence}}",
             "\tag5{\ = \ }",
@@ -131,9 +131,11 @@ slide "Complex Animation"
     let x = text_tag{1} "x"
     let a = text_tag{1} "a"
     let x2 = text_tag{2} "x^2"
+    let ap = text_tag{2} "a"
     let y = text_tag{3} "y"
     let b = text_tag{3} "b"
     let y2 = text_tag{4} "y^2"
+    let bp = text_tag{4} "b"
     let ge = "\ \tag9{\ge} \ "
     
     let palette = operator |target|
@@ -156,6 +158,7 @@ slide "Complex Animation"
         }} operand
     
     let Inequality = |lhs, rhs, row_id| {
+        print to_string(lhs)
         let latex = Tex([lhs, ge, rhs])
         let ge = tag_filter{|tag| 9 in tag} latex
         let pos = mesh_center(ge)
@@ -207,6 +210,7 @@ slide "Complex Animation"
     play PushEquation(&curr,
         [x2, "-\tag7{2}", x, y, "+", y2],
         ["\tag8{0}"],
+        # x becomes x and x^2 in next line
         [[1]->[[1], [2]],
          [3]->[[3], [4]]]
     )
@@ -222,7 +226,7 @@ slide "Complex Animation"
     )
     
     play PushEquation(&curr,
-        ["\text{Letting $a=x^2$ and $b=y^2$}\quad", "\frac{", a, "+", b, "}{", "\tag7{2}", "}"],
-        ["\sqrt{", a, b, "}"],
-        [->]
+        ["\text{Letting $",ap,"=",x2,"$ and $",bp,"=",y2,"$ \quad}",
+         "\frac{", ap, "+", bp, "}{", "\tag7{2}", "}"],
+        ["\sqrt{", a, b, "}"]
     )

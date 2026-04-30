@@ -1,12 +1,13 @@
 use std::{
     collections::HashMap,
     fmt::Write as _,
-    fs,
+    fs, io,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
+    time::{Duration, SystemTime},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use geo::mesh::Mesh;
 use sha2::{Digest, Sha256};
 
@@ -17,6 +18,9 @@ use crate::{
 
 const SYSTEM_SVG_UNITS_AT_SCALE_1: f32 = 36.0;
 const LATEX_SVG_CACHE_VERSION: &[u8] = b"monocurl-latex-svg-cache-v1";
+const LATEX_SVG_FILE_CACHE_MAX_AGE_DAYS: u64 = 30;
+const LATEX_SVG_FILE_CACHE_MAX_AGE: Duration =
+    Duration::from_secs(60 * 60 * 24 * LATEX_SVG_FILE_CACHE_MAX_AGE_DAYS);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct CacheKey {
@@ -37,6 +41,13 @@ static CACHE: OnceLock<Mutex<HashMap<CacheKey, CacheEntry>>> = OnceLock::new();
 
 pub(crate) fn clear_memory_cache() {
     cache().lock().unwrap().clear();
+}
+
+pub fn clean_stale_file_cache() -> Result<usize> {
+    let cutoff = SystemTime::now()
+        .checked_sub(LATEX_SVG_FILE_CACHE_MAX_AGE)
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    clean_latex_svg_file_cache_before(&latex_svg_cache_root(), cutoff)
 }
 
 pub(crate) fn render_cached<F>(
@@ -127,6 +138,60 @@ fn latex_svg_cache_root() -> PathBuf {
     std::env::temp_dir().join("monocurl").join("latex_svg")
 }
 
+fn clean_latex_svg_file_cache_before(root: &Path, cutoff: SystemTime) -> Result<usize> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("failed to read LaTeX SVG cache root {}", root.display())
+            });
+        }
+    };
+
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to read LaTeX SVG cache entry under {}",
+                root.display()
+            )
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().with_context(|| {
+            format!("failed to inspect LaTeX SVG cache entry {}", path.display())
+        })?;
+
+        if file_type.is_dir() {
+            removed += clean_latex_svg_file_cache_before(&path, cutoff)?;
+            remove_empty_cache_dir(&path);
+        } else if file_type.is_file() && is_latex_svg_cache_file(&path) {
+            let metadata = entry.metadata().with_context(|| {
+                format!("failed to inspect LaTeX SVG cache file {}", path.display())
+            })?;
+            if metadata.modified().is_ok_and(|modified| modified < cutoff) {
+                fs::remove_file(&path).with_context(|| {
+                    format!(
+                        "failed to remove stale LaTeX SVG cache file {}",
+                        path.display()
+                    )
+                })?;
+                removed += 1;
+            }
+        }
+    }
+
+    Ok(removed)
+}
+
+fn is_latex_svg_cache_file(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()) == Some("svg")
+}
+
+fn remove_empty_cache_dir(path: &Path) {
+    let _ = fs::remove_dir(path);
+}
+
 fn latex_svg_cache_hash(backend_config: &LatexBackendConfig, source: &str) -> String {
     let mut hasher = Sha256::new();
     hash_field(&mut hasher, b"version", LATEX_SVG_CACHE_VERSION);
@@ -188,9 +253,22 @@ fn svg_import_options(quality: RenderQuality, flip_y: bool) -> svg::ImportOption
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::{
+        path::PathBuf,
+        time::{Duration, SystemTime},
+    };
 
     use super::*;
+
+    fn test_cache_root(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "monocurl-latex-cache-test-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        root
+    }
 
     #[test]
     fn latex_svg_cache_hashes_are_stable_hex_keys() {
@@ -235,5 +313,56 @@ mod tests {
             .and_then(|path| path.parent())
             .and_then(|path| path.file_name());
         assert_eq!(root.and_then(|name| name.to_str()), Some("latex_svg"));
+    }
+
+    #[test]
+    fn clean_latex_svg_file_cache_removes_svg_files_before_cutoff() {
+        let root = test_cache_root("remove");
+        let stale_dir = root.join("ab");
+        let mixed_dir = root.join("cd");
+        fs::create_dir_all(&stale_dir).unwrap();
+        fs::create_dir_all(&mixed_dir).unwrap();
+
+        let stale_svg = stale_dir.join("cdef.svg");
+        let stale_text = mixed_dir.join("keep.txt");
+        fs::write(&stale_svg, "<svg/>").unwrap();
+        fs::write(&stale_text, "not cache").unwrap();
+
+        let cutoff = SystemTime::now() + Duration::from_secs(60);
+        let removed = clean_latex_svg_file_cache_before(&root, cutoff).unwrap();
+
+        assert_eq!(removed, 1);
+        assert!(!stale_svg.exists());
+        assert!(!stale_dir.exists());
+        assert!(stale_text.exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clean_latex_svg_file_cache_keeps_svg_files_after_cutoff() {
+        let root = test_cache_root("keep");
+        let cache_dir = root.join("ab");
+        fs::create_dir_all(&cache_dir).unwrap();
+
+        let fresh_svg = cache_dir.join("cdef.svg");
+        fs::write(&fresh_svg, "<svg/>").unwrap();
+
+        let removed = clean_latex_svg_file_cache_before(&root, SystemTime::UNIX_EPOCH).unwrap();
+
+        assert_eq!(removed, 0);
+        assert!(fresh_svg.exists());
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn clean_latex_svg_file_cache_missing_root_is_noop() {
+        let root = test_cache_root("missing");
+        fs::remove_dir_all(&root).unwrap();
+
+        let removed = clean_latex_svg_file_cache_before(&root, SystemTime::now()).unwrap();
+
+        assert_eq!(removed, 0);
     }
 }

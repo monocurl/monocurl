@@ -23,6 +23,7 @@ fn main() {
     env_logger::Builder::from_default_env()
         .filter_level(log::LevelFilter::Info)
         .init();
+    clean_latex_file_cache();
 
     match parse_cli(env::args_os().skip(1).collect()) {
         Ok(CliAction::Help(topic)) => {
@@ -40,6 +41,12 @@ fn main() {
             eprintln!("Use `monocurl help` for usage.");
             process::exit(2);
         }
+    }
+}
+
+fn clean_latex_file_cache() {
+    if let Err(error) = latex::clean_stale_file_cache() {
+        log::warn!("unable to clean stale LaTeX SVG cache: {error:#}");
     }
 }
 
