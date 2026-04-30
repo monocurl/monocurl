@@ -16,6 +16,7 @@ let palette = zip(sample(0, 1, 5), [LIGHT_GRAY, CYAN, BLUE, PURPLE, RED])
 let scene_scale = [2.35, 1.35, 1]
 let bounds_x = [-2.75, 2.75]
 let bounds_y = [-1.55, 1.55]
+let soft = |col, amount| lerp(WHITE, col, amount)
 
 let to_scene = |handle| [scene_scale[0] * handle[0], scene_scale[1] * handle[1], 0]
 
@@ -79,7 +80,7 @@ let Streamline = |seed, src, dst, swirl_value, pressure_value, id| {
     let col = keyframe_lerp(palette, id / 13)
     return z_index{1}
         tag{[100, id]}
-        stroke{alpha{0.55} col, 1.8}
+        stroke{soft(col, 0.55), 1.8}
         Polyline(pts)
 }
 
@@ -94,7 +95,7 @@ let Streamlines = |src, dst, swirl_value, pressure_value| block {
 
 let Pole = |pos, color_value, sign, id| [
     center{pos}
-    fill{alpha{0.18} color_value}
+    fill{soft(color_value, 0.18)}
     stroke{color_value, 2.4}
     Circle(0.2),
     
@@ -104,7 +105,7 @@ let Pole = |pos, color_value, sign, id| [
     
     center{pos}
     fill{CLEAR}
-    stroke{alpha{0.45} color_value, 1.2}
+    stroke{soft(color_value, 0.45), 1.2}
     Circle(0.38)
 ]
 
@@ -112,10 +113,10 @@ let FlowScene = |src, dst, swirl_value, pressure_value| {
     let src_pos = to_scene(src)
     let dst_pos = to_scene(dst)
     return [
-        stroke{alpha{0.24} LIGHT_GRAY, 0.9}
+        stroke{soft(LIGHT_GRAY, 0.24), 0.9}
             LineGrid([bounds_x[0], bounds_x[1], 10], [bounds_y[0], bounds_y[1], 7], 1),
         fill{CLEAR}
-            stroke{alpha{0.55} LIGHT_GRAY, 1.3}
+            stroke{soft(LIGHT_GRAY, 0.55), 1.3}
             Rect([bounds_x[1] - bounds_x[0], bounds_y[1] - bounds_y[0]]),
             
         NeedleField(src_pos, dst_pos, swirl_value, pressure_value),

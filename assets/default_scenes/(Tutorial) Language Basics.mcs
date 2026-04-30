@@ -22,11 +22,12 @@ print dynamic_value
 # `x .= y` is shorthand for `x = x .. y`.
 # You will see `.=` often when building points, rows, paths, and other data.
 var points = []
-points .= 1l # "1l" means 1 left
-points .= 1u
-points .= 1r
+points .= ["hello", 1, []]
+points .= 1l # "1l" means 1 left [-1, 0, 0]
+points .= 1u # 1u means 1 up [0, 1, 0]
+points = points .. 1r
 
-print points .. 2r
+print points 
 
 # `block {}` is another compact way to build a list. Inside the block, each
 # line that starts with `.` appends to an implicit accumulator, then the whole

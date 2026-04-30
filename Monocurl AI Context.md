@@ -849,7 +849,7 @@ import std.scene
   `keyframe_lerp`, `map_range`, `deg_to_rad`, `rad_to_deg`.
 - Colors: `RED`, `ORANGE`, `YELLOW`, `GREEN`, `TEAL`, `CYAN`, `BLUE`,
   `PURPLE`, `MAGENTA`, `WHITE`, `LIGHT_GRAY`, `GRAY`, `DARK_GRAY`, `BLACK`,
-  `CLEAR`, `rgb`, `hsv`, `alpha`, `mix`.
+  `CLEAR`, `rgb`, `hsv`, and `alpha`.
 - Type/introspection: `type_of`, `is_list`, `is_map`, `is_mesh`,
   `is_callable`, `has_attr`, `get_attr`, `set_attr`, `get_defaults`,
   `set_default`, `set_defaults`, `runtime_error`.

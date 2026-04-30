@@ -50,7 +50,7 @@ let CellAt = |x, y, value, frontier, path| {
 
     return 
         center{cell_center(x, y)}
-        fill{alpha{0.25} fill_color}
+        fill{lerp(WHITE, fill_color, 0.25)}
         stroke{stroke_color, 1.4}
         Square(CELL * 0.9)
 }

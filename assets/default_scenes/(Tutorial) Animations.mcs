@@ -8,10 +8,12 @@ import std.mesh
 import std.anim
 import std.scene
 
+let soft = |col, amount| lerp(WHITE, col, amount)
+
 mesh title = center{1.3u} Text("Leader and follower", 0.8)
 mesh ball =
     center{1.6l}
-    fill{alpha{0.24} BLUE}
+    fill{soft(BLUE, 0.24)}
     stroke{BLUE, 2}
     Circle(0.45)
 
@@ -35,7 +37,7 @@ slide "Leader And Follower"
     # later play statement syncs it.
     ball =
         center{1.6r}
-        fill{alpha{0.24} ORANGE}
+        fill{soft(ORANGE, 0.24)}
         stroke{ORANGE, 2}
         Circle(0.45)
 
@@ -49,7 +51,7 @@ slide "Set"
     title = center{1.3u} Text("Set snaps", 0.8)
     ball =
         center{1.4l + 0.15d}
-        fill{alpha{0.24} GREEN}
+        fill{soft(GREEN, 0.24)}
         stroke{GREEN, 2}
         Circle(0.45)
     play Set()
@@ -80,7 +82,7 @@ slide "Labeled Keyframes"
     # editable fields on the mesh leader, so you can change just pos/radius/col.
     let Ball = |pos, radius, col|
         center{pos}
-        fill{alpha{0.24} col}
+        fill{soft(col, 0.24)}
         stroke{col, 2}
         Circle(radius)
 
@@ -123,8 +125,8 @@ slide "Trans"
     # Trans is a generalizez contour mending algorithm
     title = center{1.3u} Text("Trans", 0.8)
     ball = [
-        tag{1} center{1.1l} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.36),
-        tag{2} center{1.1r} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.36)
+        tag{1} center{1.1l} fill{soft(BLUE, 0.24)} stroke{BLUE, 2} Circle(0.36),
+        tag{2} center{1.1r} fill{soft(ORANGE, 0.24)} stroke{ORANGE, 2} Circle(0.36)
     ]
     play Trans(0.8)
     play Wait(0.7)
@@ -133,8 +135,8 @@ slide "Trans"
     # algorithm to only match meshes with the same tag
     # this gives you a lot more control
     ball = [
-        tag{2} center{1.1l} fill{alpha{0.24} ORANGE} stroke{ORANGE, 2} Circle(0.42),
-        tag{1} center{1.1r} fill{alpha{0.24} BLUE} stroke{BLUE, 2} Circle(0.42)
+        tag{2} center{1.1l} fill{soft(ORANGE, 0.24)} stroke{ORANGE, 2} Circle(0.42),
+        tag{1} center{1.1r} fill{soft(BLUE, 0.24)} stroke{BLUE, 2} Circle(0.42)
     ]
     play TagTrans(1.2)
     play Wait(0.8)

@@ -42,7 +42,7 @@ let Rectangles = |height_scale, selected = -1|
             let col = keyframe_lerp(rect_colors, i / n)
             var rect = RectAt([x, height / 2, 0], delta, height, col, i)
             if (selected >= 0 and i != selected) {
-                rect = fade{0.16} rect
+                rect = fill{lerp(WHITE, col, 0.16)} rect
             }
 
             . rect
@@ -82,8 +82,8 @@ slide "Rectangle Dimensions"
     # Rectangle ids double as tags, so tag_filter can isolate one bar for labels.
     let full_rects = rects
     rects.selected = 0
-    axes = fade{0.2} axes
-    graph = fade{0.2} graph
+    axes = color{LIGHT_GRAY} axes
+    graph = color{GRAY} graph
     play TagTrans(0.7)
 
     let Dimensions = |rects, index| {

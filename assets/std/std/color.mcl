@@ -43,6 +43,3 @@ let alpha = operator |target, a| {
     [r, g, b, old_alpha] = __monocurl__native__ expect_list("color", target, 4)
     return [target, [r, g, b, a]]
 }
-
-# linear blend between two colors in RGBA.
-let mix = |a, b, t| a + (b - a) * t

@@ -25,13 +25,14 @@ import std.anim
 import std.scene
 
 background = WHITE
+let soft = |col, amount| lerp(WHITE, col, amount)
 
 # init runs before the first slide. Put simple starting state here so the
 # viewport has something visible as soon as the file opens.
 mesh title = center{1.2u} Text("Welcome to Monocurl", 0.7)
 mesh dot =
     center{0r}
-    fill{alpha{0.24} BLUE}
+    fill{soft(BLUE, 0.24)}
     stroke{BLUE, 2}
     Circle(radius: 0.45)
 
@@ -46,7 +47,7 @@ slide "Change One Value"
     title = center{1.2u} Text("Change a value", 0.7)
     dot =
         center{1.6r}
-        fill{alpha{0.24} ORANGE}
+        fill{soft(ORANGE, 0.24)}
         stroke{ORANGE, 2}
         Circle(0.45)
     play Trans(1.0)
@@ -63,7 +64,7 @@ slide "Scrub The Timeline"
     title = center{1.2u} Text("Scrub time", 0.7)
     dot =
         center{1.6l}
-        fill{alpha{0.24} GREEN}
+        fill{soft(GREEN, 0.24)}
         stroke{GREEN, 2}
         Circle(0.45)
     play Trans(0.8)
@@ -71,7 +72,7 @@ slide "Scrub The Timeline"
 
     dot =
         center{0r}
-        fill{alpha{0.24} MAGENTA}
+        fill{soft(MAGENTA, 0.24)}
         stroke{MAGENTA, 2}
         Circle(0.62)
     play Trans(0.8)
@@ -88,9 +89,9 @@ slide "Present Or Export"
     
     title = center{1.2u} Text("Present or export", 0.7)
     dot = [
-        center{1.5l} fill{alpha{0.16} MAGENTA} stroke{MAGENTA, 2} Rect([1.3, 0.65]),
-        center{0r} fill{alpha{0.16} BLUE} stroke{BLUE, 2} Rect([1.3, 0.65]),
-        center{1.5r} fill{alpha{0.16} GREEN} stroke{GREEN, 2} Rect([1.3, 0.65]),
+        center{1.5l} fill{soft(MAGENTA, 0.16)} stroke{MAGENTA, 2} Rect([1.3, 0.65]),
+        center{0r} fill{soft(BLUE, 0.16)} stroke{BLUE, 2} Rect([1.3, 0.65]),
+        center{1.5r} fill{soft(GREEN, 0.16)} stroke{GREEN, 2} Rect([1.3, 0.65]),
         center{1.5l} Text("present", 0.5),
         center{0r} Text("image", 0.5),
         center{1.5r} Text("video", 0.5)
