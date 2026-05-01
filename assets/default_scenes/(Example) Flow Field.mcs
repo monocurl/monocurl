@@ -95,8 +95,7 @@ let Streamlines = |src, dst, swirl_value, pressure_value| block {
 
 let Pole = |pos, color_value, sign, id| [
     center{pos}
-    fill{soft(color_value, 0.18)}
-    stroke{color_value, 2.4}
+    fill{soft(color_value, 0.18)} stroke{color_value, 2.4}
     Circle(0.2),
     
     center{pos}
@@ -104,8 +103,7 @@ let Pole = |pos, color_value, sign, id| [
     Text(sign, 0.42),
     
     center{pos}
-    fill{CLEAR}
-    stroke{soft(color_value, 0.45), 1.2}
+    fill{CLEAR} stroke{soft(color_value, 0.45), 1.2}
     Circle(0.38)
 ]
 

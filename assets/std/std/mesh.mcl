@@ -15,8 +15,10 @@
 ## ```
 ## mesh p = fill{CYAN} Dot([1, 0, 0])
 ## ```
-let Dot = |point=[0,0,0]| __monocurl__native__ mk_dot(point)
+let Dot = |point = [0, 0, 0]| __monocurl__native__ mk_dot(point)
 
+## [options]
+## important: true
 ## [overview]
 ## A circle centered at the origin in the XY plane.
 ## Apply stroke or fill operators to style it, and shift to reposition.
@@ -24,7 +26,7 @@ let Dot = |point=[0,0,0]| __monocurl__native__ mk_dot(point)
 ## radius: radius of the circle
 ## samples: number of line segments used to approximate the curve (default 64)
 ## [example]
-## ```
+## ```mcl image
 ## mesh c = stroke{CYAN} Circle(1.5)
 ## ```
 let Circle = |radius, samples = 64|
@@ -104,6 +106,15 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
 let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0|
     __monocurl__native__ mk_arrow(start, end, normal, path_arc)
 
+## [overview]
+## Circular arc centered at the origin in the XY plane.
+## [parameters]
+## radius: arc radius
+## theta: [start, end] angles in radians
+## [example]
+## ```
+## mesh arc = stroke{CYAN} Arc(1, [0, PI])
+## ```
 let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
     var theta_start = 0
     var theta_end = 0
@@ -111,6 +122,17 @@ let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
     return __monocurl__native__ mk_arc(radius, theta_start, theta_end)
 }
 
+## [overview]
+## Rounded capsule between two center points.
+## [parameters]
+## start_center: center of the first cap
+## end_center: center of the second cap
+## radii: single radius or [start_radius, end_radius]
+## normal: stroke normal direction
+## [example]
+## ```
+## mesh pill = fill{alpha{0.18} BLUE} Capsule(LEFT, RIGHT, 0.25)
+## ```
 let Capsule = |start_center, end_center, radii = 0.4, normal = 1b| {
     var start_radius = 0
     var end_radius = 0
@@ -123,23 +145,58 @@ let Capsule = |start_center, end_center, radii = 0.4, normal = 1b| {
     return __monocurl__native__ mk_capsule(start_center, end_center, start_radius, end_radius, normal)
 }
 
+## [overview]
+## Filled triangle from three vertices.
+## [parameters]
+## p: first vertex
+## q: second vertex
+## r: third vertex
+## normal_hint: hint for face orientation
 let Triangle = |p, q, r, normal_hint = 1b|
     __monocurl__native__ mk_triangle(p, q, r, normal_hint)
 
-# 3-d primitives
+# Three D primitives
 
+## [overview]
+## 3-D sphere centered at the origin.
+## [parameters]
+## radius: sphere radius
+## sample_depth: subdivision depth
 let Sphere = |radius, sample_depth = 2|
     __monocurl__native__ mk_sphere(radius, sample_depth)
 
+## [overview]
+## Rectangular prism centered at the origin.
+## [parameters]
+## dimensions: [width, height, depth]
 let RectangularPrism = |dimensions|
     __monocurl__native__ mk_rect_prism(dimensions)
 
+## [overview]
+## Cylinder oriented along a direction.
+## [parameters]
+## radius: cylinder radius
+## height: cylinder height
+## direction: axis direction, default 1u
+## sample_count: radial samples
 let Cylinder = |radius, height, direction = 1u, sample_count = 32|
     __monocurl__native__ mk_cylinder(radius, height, direction, sample_count)
 
+## [overview]
+## Cone from apex to base center.
+## [parameters]
+## apex: cone tip
+## base: base center
+## radius: base radius
+## sample_count: radial samples
 let Cone = |apex = [0, 1, 0], base = [0, 0, 0], radius = 1, sample_count = 32|
     __monocurl__native__ mk_cone(apex, base, radius, sample_count)
 
+## [overview]
+## Torus centered at the origin.
+## [parameters]
+## radii: [major_radius, minor_radius]
+## samples: [major_samples, minor_samples]
 let Torus = |radii = [1, 0.3], samples = [48, 24]| {
     var major_radius = 0
     var minor_radius = 0
@@ -150,6 +207,11 @@ let Torus = |radii = [1, 0.3], samples = [48, 24]| {
     return __monocurl__native__ mk_torus(major_radius, minor_radius, major_samples, minor_samples)
 }
 
+## [overview]
+## Rectangular plane offset from the origin.
+## [parameters]
+## dist: distance along the plane normal
+## size: [width, height]
 let Plane = |dist = 0, size = [4, 4]| {
     var width = 0
     var height = 0
@@ -159,15 +221,37 @@ let Plane = |dist = 0, size = [4, 4]| {
 
 # visual / graphical
 
+## [overview]
+## Bezier curve through control points.
+## [parameters]
+## control_points: ordered control points
 let Bezier = |control_points|
     __monocurl__native__ mk_bezier(control_points)
 
+## [overview]
+## Arrow-like vector from a tail by a delta.
+## [parameters]
+## delta: vector displacement
+## tail: starting point
+## normal: stroke normal direction
 let Vector = |delta = 1r, tail = [0, 0, 0], normal = 1b|
     __monocurl__native__ mk_vector(tail, delta, normal)
 
+## [overview]
+## Vector with a smaller head, useful for dense fields.
 let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1b|
     __monocurl__native__ mk_half_vector(tail, delta, normal)
 
+## [overview]
+## Place a bundled or project image into the scene.
+## [parameters]
+## name: image asset name or path
+## center: image center
+## size: [width, height]
+## [example]
+## ```
+## mesh logo = Image("monocurl-1024.png", ORIGIN, [1.2, 1.2])
+## ```
 let Image = |name, center = [0, 0, 0], size = [1, 1]| {
     var width = 0
     var height = 0
@@ -175,6 +259,18 @@ let Image = |name, center = [0, 0, 0], size = [1, 1]| {
     return __monocurl__native__ mk_image(name, center, width, height)
 }
 
+## [overview]
+## Sample a color function over a rectangular grid.
+## [parameters]
+## color_at: function from position to RGBA color
+## x_min_max_samples: [x_min, x_max, samples]
+## y_min_max_samples: [y_min, y_max, samples]
+## smooth: smooth interpolation flag or mask function
+## mask: optional function deciding which positions render
+## [example]
+## ```
+## mesh heat = ColorGrid(|p| hsv(norm(p) / 2, 0.7, 0.9), [-2, 2, 60], [-1, 1, 30])
+## ```
 let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], smooth = 0, mask = |pos| 1| {
     var actual_smooth = smooth
     var actual_mask = mask
@@ -193,6 +289,12 @@ let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = 
     return __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, actual_smooth, actual_mask, color_at)
 }
 
+## [overview]
+## Build a rectangular grid of line segments.
+## [parameters]
+## x_min_max_samples: [x_min, x_max, samples]
+## y_min_max_samples: [y_min, y_max, samples]
+## subdivision: subdivisions per grid segment
 let LineGrid = |x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], subdivision = 16| {
     var x_min = 0
     var x_max = 0
@@ -205,6 +307,17 @@ let LineGrid = |x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21]
     return __monocurl__native__ mk_line_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, subdivision)
 }
 
+## [overview]
+## Sample a mesh-producing function over a rectangular field.
+## [parameters]
+## mesh_at: function from position and index to a mesh
+## x_min_max_samples: [x_min, x_max, samples]
+## y_min_max_samples: [y_min, y_max, samples]
+## mask: optional function deciding which positions render
+## [example]
+## ```
+## mesh arrows = Field(|p, idx| Arrow(p, p + 0.2 * normalize(p)), [-2, 2, 12], [-1, 1, 7])
+## ```
 let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], mask = |pos| 1| {
     var x_min = 0
     var x_max = 0
@@ -219,26 +332,104 @@ let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 
 
 # text / labels
 
+## [options]
+## important: true
+## [overview]
+## Plain text converted to mesh geometry.
+## [parameters]
+## text: string to render
+## scale: text scale
+## [example]
+## ```mcl image
+## mesh title = center{UP} Text("Monocurl", 0.8)
+## ```
 let Text = |text, scale = 1| __monocurl__native__ mk_text(text, scale)
 
+## [options]
+## important: true
+## [overview]
+## Math text converted through TeX into mesh geometry.
+## [parameters]
+## tex: TeX math fragment or tagged text fragments
+## scale: text scale
+## [example]
+## ```
+## mesh eq = Tex("a^2 + b^2 = c^2", 0.8)
+## ```
 let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 
+## [overview]
+## Full LaTeX fragment converted into mesh geometry.
 let Latex = |latex, scale = 1| __monocurl__native__ mk_latex(latex, scale)
 
+## [overview]
+## Attach tags to text fragments before they become mesh contours.
+## [description]
+## Use text tags for equation transforms and selective coloring inside Tex/Latex.
+## [example]
+## ```
+## mesh eq = Tex([text_tag{1} "x", " + ", text_tag{2} "1"], 0.8)
+## ```
 let text_tag = operator |target, tag| [target, __monocurl__native__ text_tag_encode(target, tag)]
 
+## [overview]
+## Brace drawn next to a target mesh.
+## [parameters]
+## target: mesh to brace
+## dir: side direction
+## buffer: distance from target
 let Brace = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_brace(target, dir, buffer)
 
+## [overview]
+## Measurement marker drawn next to a target mesh.
 let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(target, dir, buffer)
 
+## [overview]
+## Text label placed relative to a target mesh.
+## [parameters]
+## target: mesh to label
+## str: label text
+## dir: direction from the target
+## scale: text scale
+## buffer: distance from target
+## [example]
+## ```
+## mesh labeled = [seg, Label(seg, "length", UP)]
+## ```
 let Label = |target, str, dir = 1u, scale = 1, buffer = 0.1|
     __monocurl__native__ mk_label(target, str, scale, dir, buffer)
 
+## [overview]
+## Number rendered as text with optional formatting.
+## [parameters]
+## value: numeric value
+## decimal_places: optional fixed decimal count
+## include_sign: include plus sign for positive values when truthy
 let Number = |value, decimal_places = nil, include_sign = 0|
     __monocurl__native__ mk_number(value, decimal_places, include_sign)
 
 # graphing
 
+## [options]
+## important: true
+## [overview]
+## Pre-fill axis options on an axis constructor.
+## [description]
+## This is a configuration operator; it composes before Axis1d, Axis2d, or Axis3d.
+## [parameters]
+## target: axis constructor target
+## axis: "x", "y", or "z"
+## min: minimum axis value
+## max: maximum axis value
+## axis_title: optional label
+## tick_spacing: distance between ticks
+## major_tick_rate: major tick interval in tick counts
+## label_map: function from value to tick label
+## arrow_extrusion: arrowhead length
+## [example]
+## ```
+## mesh axes = axis_style{"x", 0, 4, "x"} axis_style{"y", 0, 3, "y"} Axis2d()
+## ```
 let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacing = 0.25, major_tick_rate = 4, label_map = (|x| x), arrow_extrusion = 0.2| {
     if (axis != "x" and axis != "y" and axis != "z") {
         return __monocurl__native__ runtime_error("axis_style axis must be x, y, or z")
@@ -249,15 +440,29 @@ let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacin
     return [go(level: 0), go(level: 1)]
 }
 
+## [overview]
+## One-dimensional axis mesh.
 let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis1d(basis, normal, color, x_axis)
 
+## [options]
+## important: true
+## [overview]
+## Two-dimensional coordinate axes, optionally with grid lines.
+## [example]
+## ```mcl image
+## mesh axes = axis_style{"x", -2, 2, "x"} axis_style{"y", -1, 3, "f(x)"} Axis2d()
+## ```
 let Axis2d = |basis = [1r, 1u], color = [0, 0, 0, 1], grid_color = nil, x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis2d(basis, color, x_axis, y_axis, grid_color)
 
+## [overview]
+## Three-dimensional coordinate axes, optionally with grid lines.
 let Axis3d = |basis = [1r, 1u, 1b], color = [0, 0, 0, 1], grid_color = nil, label_up = [1u, 1u, 1b], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], y_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2], z_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis3d(basis, color, label_up, x_axis, y_axis, z_axis, grid_color)
 
+## [overview]
+## Polar coordinate axis mesh.
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
     var theta_min = 0
     var theta_max = 0
@@ -272,6 +477,15 @@ let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1
     return __monocurl__native__ mk_polar_axis(center, theta_min, theta_max, theta_unit, theta_tick_step, radius_min, radius_max, radius_unit, radius_tick_step)
 }
 
+## [overview]
+## Sample a 3-D parametric curve function.
+## [parameters]
+## f: function from t to point
+## t_min_max_samples: [t_min, t_max, samples]
+## [example]
+## ```
+## mesh spiral = stroke{CYAN} ParametricFunc(|t| [cos(t), sin(t), t / TAU], [0, TAU * 3, 180])
+## ```
 let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
     var min = 0
     var max = 0
@@ -280,6 +494,14 @@ let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
     return __monocurl__native__ mk_parametric(f, min, max, samples)
 }
 
+## [options]
+## important: true
+## [overview]
+## Sample y = f(x) as a polyline in the XY plane.
+## [example]
+## ```mcl image
+## mesh graph = stroke{CYAN} ExplicitFunc(|x| sin(x), [-PI, PI, 160])
+## ```
 let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128]| {
     var min = 0
     var max = 0
@@ -288,6 +510,8 @@ let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128]| {
     return __monocurl__native__ mk_explicit(f, min, max, samples)
 }
 
+## [overview]
+## Sample z = f(x, y) as a 3-D surface.
 let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21]| {
     var x_min = 0
     var x_max = 0
@@ -300,6 +524,8 @@ let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-
     return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
 }
 
+## [overview]
+## Sample an implicit 2-D contour f(x, y) = 0.
 let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 41], y_min_max_samples = [-1, 1, 41]| {
     var x_min = 0
     var x_max = 0
@@ -312,6 +538,14 @@ let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 41], y_min_max_samples = [-
     return __monocurl__native__ mk_implicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
 }
 
+## [overview]
+## Fill the signed area between two explicit functions.
+## [parameters]
+## f: first function
+## g: second function
+## x_min_max_samples: [x_min, x_max, samples]
+## fills: [lower_fill, upper_fill]
+## tags: tags assigned to the two filled regions
 let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]], tags = [[], []]| {
     var min = 0
     var max = 0
@@ -328,26 +562,64 @@ let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0
 
 # layout / grouping
 
+## [overview]
+## Lay meshes out in a line along a direction.
+## [parameters]
+## meshes: list of meshes to arrange
+## dir: stacking direction
+## align_dir: optional alignment direction
 let Stack = |meshes, dir, align_dir = [0, 0, 0]| __monocurl__native__ mk_stack(meshes, dir, align_dir)
 
+## [overview]
+## Stack meshes along the x axis.
 let XStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1r, align_dir)
+## [overview]
+## Stack meshes along the y axis.
 let YStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1u, align_dir)
+## [overview]
+## Stack meshes along the z axis.
 let ZStack = |meshes, align_dir = [0, 0, 0]| Stack(meshes, 1b, align_dir)
 
+## [overview]
+## Arrange a nested list of meshes as a grid.
 let Grid = |mesh_array| __monocurl__native__ mk_grid(mesh_array)
 
+## [overview]
+## Arrange a nested list of meshes as a table.
 let Table = |mesh_array| __monocurl__native__ mk_table(mesh_array)
 
+## [overview]
+## Rectangle around the visible bounds of a mesh.
+## [parameters]
+## target: mesh to bound
+## buffer: extra spacing around the bounds
 let BoundingBox = |target, buffer = 0.1|
     __monocurl__native__ mk_bounding_box(target, buffer)
 
 # transform operators
 
+## [options]
+## important: true
+## [overview]
+## Translate a mesh by a vector.
+## [parameters]
+## target: mesh target
+## delta: translation vector
+## filter: optional tag filter
+## [example]
+## ```
+## mesh moved = shift{2r + 1u} Circle(0.4)
+## ```
 let shift = operator |target, delta, filter = nil| {
     let go = |d| __monocurl__native__ op_shift(target, d, filter)
     return [go(d: [0, 0, 0]), go(d: delta)]
 }
 
+## [overview]
+## Scale a mesh uniformly or per axis.
+## [parameters]
+## factor: scalar or vector scale
+## filter: optional tag filter
 let scale = operator |target, factor = 1, filter = nil| {
     let go = |s| __monocurl__native__ op_scale(target, s, filter)
     if (__monocurl__native__ is_list(factor)) {
@@ -356,63 +628,137 @@ let scale = operator |target, factor = 1, filter = nil| {
     return [go(s: 1), go(s: factor)]
 }
 
+## [overview]
+## Rotate a mesh around an axis and optional pivot.
+## [parameters]
+## radians: rotation angle
+## axis: rotation axis, default 1b
+## pivot: optional point to rotate around
+## filter: optional tag filter
 let rotate = operator |target, radians, axis = 1b, pivot = nil, filter = nil| {
     let go = |angle| __monocurl__native__ op_rotate(target, angle, axis, pivot, filter)
     return [go(angle: 0), go(angle: radians)]
 }
 
+## [overview]
+## Multiply mesh opacity by an opacity value.
 let fade = operator |target, opacity, filter = nil| {
     let go = |o| __monocurl__native__ op_fade(target, o, filter)
     return [go(o: 1), go(o: opacity)]
 }
 
+## [options]
+## important: true
+## [overview]
+## Set stroke color and optional stroke width.
+## [parameters]
+## color: stroke color
+## stroke_width: optional width
+## filter: optional tag filter
+## [example]
+## ```
+## mesh outline = fill{CLEAR} stroke{CYAN, 2} Circle(1)
+## ```
 let stroke = operator |target, color, stroke_width = nil, filter = nil| {
     let go = |c, level| __monocurl__native__ op_restroke(target, c, stroke_width, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
+## [options]
+## important: true
+## [overview]
+## Set fill color.
+## [parameters]
+## color: fill color
+## filter: optional tag filter
 let fill = operator |target, color, filter = nil| {
     let go = |c, level| __monocurl__native__ op_refill(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
+## [overview]
+## Set dotted stroke color.
 let dotted = operator |target, color, filter = nil| {
     let go = |c, level| __monocurl__native__ op_redot(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
+## [options]
+## important: true
+## [overview]
+## Recolor both fill and stroke where applicable.
 let color = operator |target, color, filter = nil| {
     let go = |c, level| __monocurl__native__ op_recolor(target, c, filter, level)
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
+## [overview]
+## Override the normal hint used for rendering or strokes.
 let normal_hint = operator |target, normal, filter = nil| {
     let go = |n, level| __monocurl__native__ op_normal_hint(target, n, filter, level)
     return [go(n: normal, level: 0), go(n: normal, level: 1)]
 }
 
+## [options]
+## important: true
+## [overview]
+## Replace mesh tags, optionally filtered by existing tags.
+## [description]
+## Tags are stable identities for filters and tag-aware animations.
+## [example]
+## ```
+## mesh pair = [tag{1} Circle(0.3), tag{2} Square(0.4)]
+## ```
 let tag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_retagged(target, |old| tag, filter)]
 
+## [overview]
+## Apply an image texture to a mesh.
 let textured = operator |target, image, filter = nil| [target, __monocurl__native__ op_retextured(target, image, filter)]
+## [overview]
+## Assign a draw ordering hint to a mesh.
 let z_index = operator |target, z_index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, z_index, filter)]
+## [overview]
+## Add glossy lighting amount to a mesh.
 let gloss = operator |target, amount = 0.5, filter = nil| [target, __monocurl__native__ op_gloss(target, amount, filter)]
+## [overview]
+## Map every point of a mesh through a function.
 let point_map = operator |target, f, filter = nil| {
     let go = |level| __monocurl__native__ op_point_map(target, f, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Map mesh colors through a function.
 let color_map = operator |target, f, filter = nil| {
     let go = |level| __monocurl__native__ op_color_map(target, f, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Map mesh UV coordinates through a function.
 let uv_map = operator |target, f, filter = nil| {
     let go = |level| __monocurl__native__ op_uv_map(target, f, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Map mesh tags through a function.
 let tag_map = operator |target, f| [target, __monocurl__native__ op_tag_map(target, f)]
+## [overview]
+## Apply a mapping function only to tag-filtered subsets.
 let subset_map = operator |target, filter, f| [target, __monocurl__native__ op_subset_map(target, filter, f)]
+## [overview]
+## Increase mesh rank for draw ordering.
 let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_uprank(target, filter)]
+## [overview]
+## Decrease mesh rank for draw ordering.
 let downrank = operator |target, filter = nil| [target, __monocurl__native__ op_downrank(target, filter)]
+## [overview]
+## Convert surface-like geometry to wireframe display.
 let wireframe = operator |target, filter = nil| [target, __monocurl__native__ op_wireframe(target, filter)]
+## [overview]
+## Convert strokes to dashed strokes.
+## [parameters]
+## lengths: dash length or [dash, gap]
+## offset: phase offset
+## filter: optional tag filter
 let dashed = operator |target, lengths = [0.2, 0.1], offset = 0, filter = nil| {
     var dash = 0
     var gap = 0
@@ -424,48 +770,111 @@ let dashed = operator |target, lengths = [0.2, 0.1], offset = 0, filter = nil| {
     }
     return [target, __monocurl__native__ op_dashed(target, dash, gap, offset, filter)]
 }
+## [overview]
+## Subdivide mesh geometry for smoother downstream transforms.
 let subdivide = operator |target, factor = 2, filter = nil| [__monocurl__native__ op_subdivide(target, 1, filter), __monocurl__native__ op_subdivide(target, factor, filter)]
+## [overview]
+## Tessellate mesh geometry to the requested depth.
 let tesselated = operator |target, depth = 1, filter = nil| [__monocurl__native__ op_tesselated(target, 0, filter), __monocurl__native__ op_tesselated(target, depth, filter)]
+## [overview]
+## Extrude a mesh by a delta vector.
 let extrude = operator |target, delta, filter = nil| [__monocurl__native__ op_extrude(target, [0, 0, 0], filter), __monocurl__native__ op_extrude(target, delta, filter)]
+## [overview]
+## Revolve mesh geometry around an axis rotation.
 let revolve = operator |target, rotation, filter = nil| [__monocurl__native__ op_revolve(target, [0, 0, 0], filter), __monocurl__native__ op_revolve(target, rotation, filter)]
+## [overview]
+## Move a mesh so its center lies at a point.
 let center = operator |target, center, filter = nil| {
     let go = |level| __monocurl__native__ op_centered(target, center, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Keep a mesh fixed relative to the frame while camera changes.
+## [parameters]
+## original_camera: camera at the original frame
+## live_camera: current or stateful camera
+## filter: optional tag filter
 let camera_transfer = operator |target, original_camera, live_camera, filter = nil| {
     let go = |level| __monocurl__native__ op_camera_transfer(target, original_camera, live_camera, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Move a mesh near one side of the camera frame.
+## [parameters]
+## dir: side direction, such as 1u or 1d
+## buffer: distance from the side
+## camera: optional camera, default current camera
 let to_side = operator |target, dir = [0, 0, 0], buffer = 0.1, camera = nil, filter = nil| {
     let go = |level| __monocurl__native__ op_to_side(target, dir, buffer, camera, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Move a mesh near a corner of the camera frame.
 let to_corner = operator |target, dir = [1, 1, 0], buffer = 0.1, camera = nil, filter = nil| {
     let go = |level| __monocurl__native__ op_to_corner(target, dir, buffer, camera, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Place one edge of a mesh against an edge of a reference mesh.
 let matched_edge = operator |target, ref, dir, filter = nil| {
     let go = |level| __monocurl__native__ op_matched_edge(target, ref, dir, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Place a mesh next to a reference mesh.
+## [parameters]
+## ref: reference mesh
+## dir: side direction
+## buffer: gap between meshes
+## [example]
+## ```
+## mesh label = next_to{base, RIGHT, 0.2} Text("area")
+## ```
 let next_to = operator |target, ref, dir = 1r, buffer = 0.1, filter = nil| {
     let go = |level| __monocurl__native__ op_next_to(target, ref, dir, buffer, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Project a screen-space point along a ray into mesh space.
 let projected = operator |target, screen, ray = 1b, filter = nil| {
     let go = |level| __monocurl__native__ op_projected(target, screen, ray, filter, level)
     return [go(level: 0), go(level: 1)]
 }
+## [overview]
+## Interpret a mesh inside a local coordinate space.
+## [parameters]
+## axis_center: local origin
+## x_unit: local x basis
+## y_unit: local y basis
+## z_unit: local z basis
+## [example]
+## ```
+## mesh graph = in_space{origin, 0.4r, 0.4u} ExplicitFunc(|x| x * x, [0, 3, 80])
+## ```
 let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1b, filter = nil| {
     let go = |level| __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit, filter, level)
     return [go(level: 0), go(level: 1)]
 }
 
+## [overview]
+## Keep only mesh leaves matching a tag filter.
 let tag_filter = operator |target, filter| [target, __monocurl__native__ tag_filter(target, filter)]
+## [overview]
+## Split a mesh into [matching, non_matching] by tag filter.
 let tag_split = |target, filter = nil| __monocurl__native__ tag_split(target, filter)
+## [overview]
+## Collapse nested mesh lists into a flatter mesh.
 let mesh_collapse = |target| __monocurl__native__ mesh_collapse(target)
+## [overview]
+## Separate contours so morphing can treat them independently.
 let contour_separate = operator |target| [target, __monocurl__native__ mesh_contour_separate(target)]
 
+## [overview]
+## Compute an intermediate Trans morph value between two meshes.
+## [parameters]
+## start: source mesh
+## end: destination mesh
+## t: normalized interpolation amount
 let trans = |start, end, t, path_arc = 0, similar_topo_hint = 0| {
     var aligned_start = 0
     var aligned_end = 0
@@ -474,6 +883,8 @@ let trans = |start, end, t, path_arc = 0, similar_topo_hint = 0| {
     return __monocurl__native__ trans_lerp_value(aligned_start, aligned_end, state, t, path_arc)
 }
 
+## [overview]
+## Compute an intermediate Bend morph value between two meshes.
 let bend = |start, end, t| {
     var aligned_start = 0
     var aligned_end = 0
@@ -484,25 +895,69 @@ let bend = |start, end, t| {
 
 # queries
 
+## [overview]
+## Left x bound of a mesh.
 let mesh_left = |target| __monocurl__native__ mesh_left(target)
+## [overview]
+## Right x bound of a mesh.
 let mesh_right = |target| __monocurl__native__ mesh_right(target)
+## [overview]
+## Up y bound of a mesh.
 let mesh_up = |target| __monocurl__native__ mesh_up(target)
+## [overview]
+## Down y bound of a mesh.
 let mesh_down = |target| __monocurl__native__ mesh_down(target)
+## [overview]
+## Forward z bound of a mesh.
 let mesh_forward = |target| __monocurl__native__ mesh_forward(target)
+## [overview]
+## Backward z bound of a mesh.
 let mesh_backward = |target| __monocurl__native__ mesh_backward(target)
+## [overview]
+## Extreme bound of a mesh along a direction.
 let mesh_direc = |target, direc| __monocurl__native__ mesh_direc(target, direc)
+## [overview]
+## Width of a mesh bounding box.
 let mesh_width = |target| __monocurl__native__ mesh_width(target)
+## [overview]
+## Height of a mesh bounding box.
 let mesh_height = |target| __monocurl__native__ mesh_height(target)
+## [overview]
+## Center of a mesh bounding box.
 let mesh_center = |target| __monocurl__native__ mesh_center(target)
+## [overview]
+## Draw rank of a mesh.
 let mesh_rank = |target| __monocurl__native__ mesh_rank(target)
+## [overview]
+## Tags present in a mesh.
 let mesh_tags = |target| __monocurl__native__ mesh_tags(target)
+## [overview]
+## Sample a point on a mesh at normalized position t.
 let mesh_sample = |target, t| __monocurl__native__ mesh_sample(target, t)
+## [overview]
+## Sample a normal on a mesh at normalized position t.
 let mesh_normal = |target, t| __monocurl__native__ mesh_normal(target, t)
+## [overview]
+## Sample a tangent on a mesh at normalized position t.
 let mesh_tangent = |target, t| __monocurl__native__ mesh_tangent(target, t)
+## [overview]
+## Test whether a mesh contains a point.
 let mesh_contains = |target, point| __monocurl__native__ mesh_contains(target, point)
+## [overview]
+## Distance from a point to a mesh.
 let mesh_dist = |target, test_point| __monocurl__native__ mesh_dist(target, test_point)
+## [overview]
+## Raycast against a mesh from a source along a direction.
 let mesh_raycast = |target, src, direction| __monocurl__native__ mesh_raycast(target, src, direction)
+## [overview]
+## Raw vertex set of a mesh.
 let mesh_vertex_set = |target| __monocurl__native__ mesh_vertex_set(target)
+## [overview]
+## Raw edge set of a mesh.
 let mesh_edge_set = |target| __monocurl__native__ mesh_edge_set(target)
+## [overview]
+## Raw triangle set of a mesh.
 let mesh_triangle_set = |target| __monocurl__native__ mesh_triangle_set(target)
+## [overview]
+## Number of contours in a mesh.
 let mesh_contour_count = |target| __monocurl__native__ mesh_contour_count(target)

@@ -7,6 +7,19 @@
 # constructors
 
 # build a camera from a position, a target point, and an up vector.
+## [overview]
+## Build a perspective camera from a position, target, up vector, and clipping range.
+## [parameters]
+## position: camera position, default 4b
+## target: point the camera looks at, default origin
+## up: camera up direction, default 1u
+## near: near clipping plane
+## far: far clipping plane
+## [example]
+## ```
+## camera = Camera(position: [2, 1, 5], target: ORIGIN)
+## play CameraLerp(&camera, 1)
+## ```
 let Camera = |position = 4b, target = [0,0,0], up = 1u, near = 0.1, far = 100| __monocurl__native__ mk_camera(position, target, up, near, far)
 
 
@@ -14,5 +27,17 @@ let Camera = |position = 4b, target = [0,0,0], up = 1u, near = 0.1, far = 100| _
 # these two names are conventional — `mesh camera = DEFAULT_CAMERA` /
 # `state background = DEFAULT_BACKGROUND` give you a sensible starting scene.
 
-let DEFAULT_CAMERA     = __monocurl__native__ initial_camera()
+## [overview]
+## Initial camera used by new scenes.
+## [example]
+## ```
+## camera = DEFAULT_CAMERA
+## ```
+let DEFAULT_CAMERA = __monocurl__native__ initial_camera()
+## [overview]
+## Initial background color used by new scenes.
+## [example]
+## ```
+## background = DEFAULT_BACKGROUND
+## ```
 let DEFAULT_BACKGROUND = __monocurl__native__ initial_background()

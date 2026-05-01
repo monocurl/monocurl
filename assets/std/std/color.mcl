@@ -1,40 +1,124 @@
 # colors are RGBA lists of length 4 in [0, 1].
 # all constants are fully opaque unless their name says otherwise.
 
-let RED        = [0.9, 0.3, 0.2, 1]
-let ORANGE     = [1.0, 0.7, 0.2, 1]
-let YELLOW     = [1.0, 1.0, 0.0, 1]
-let GREEN      = [0.2, 0.6, 0.3, 1]
-let TEAL       = [0.2, 0.7, 0.7, 1]
-let CYAN       = [0.1, 0.7, 0.9, 1]
-let BLUE       = [0.1, 0.4, 0.6, 1]
-let NAVY       = [0.05, 0.1, 0.4, 1]
-let PURPLE     = [0.6, 0.4, 0.7, 1]
-let MAGENTA    = [0.9, 0.2, 0.7, 1]
-let PINK       = [1.0, 0.6, 0.7, 1]
-let BROWN      = [0.5, 0.3, 0.2, 1]
+## [overview]
+## Warm red RGBA color constant.
+## [example]
+## ```mcl image
+## mesh dot = fill{RED} Circle(0.4)
+## ```
+let RED = [0.9, 0.3, 0.2, 1]
+## [overview]
+## Warm orange RGBA color constant.
+let ORANGE = [1.0, 0.7, 0.2, 1]
+## [overview]
+## Bright yellow RGBA color constant.
+let YELLOW = [1.0, 1.0, 0.0, 1]
+## [overview]
+## Green RGBA color constant.
+let GREEN = [0.2, 0.6, 0.3, 1]
+## [overview]
+## Teal RGBA color constant.
+let TEAL = [0.2, 0.7, 0.7, 1]
+## [overview]
+## Cyan RGBA color constant.
+let CYAN = [0.1, 0.7, 0.9, 1]
+## [overview]
+## Blue RGBA color constant.
+let BLUE = [0.1, 0.4, 0.6, 1]
+## [overview]
+## Dark blue RGBA color constant.
+let NAVY = [0.05, 0.1, 0.4, 1]
+## [overview]
+## Purple RGBA color constant.
+let PURPLE = [0.6, 0.4, 0.7, 1]
+## [overview]
+## Magenta RGBA color constant.
+let MAGENTA = [0.9, 0.2, 0.7, 1]
+## [overview]
+## Pink RGBA color constant.
+let PINK = [1.0, 0.6, 0.7, 1]
+## [overview]
+## Brown RGBA color constant.
+let BROWN = [0.5, 0.3, 0.2, 1]
 
-let WHITE      = [1.0, 1.0, 1.0, 1]
+## [overview]
+## White RGBA color constant.
+let WHITE = [1.0, 1.0, 1.0, 1]
+## [overview]
+## Light gray RGBA color constant.
 let LIGHT_GRAY = [0.7, 0.7, 0.7, 1]
-let GRAY       = [0.5, 0.5, 0.5, 1]
-let DARK_GRAY  = [0.3, 0.3, 0.3, 1]
-let BLACK      = [0.0, 0.0, 0.0, 1]
+## [overview]
+## Middle gray RGBA color constant.
+let GRAY = [0.5, 0.5, 0.5, 1]
+## [overview]
+## Dark gray RGBA color constant.
+let DARK_GRAY = [0.3, 0.3, 0.3, 1]
+## [overview]
+## Black RGBA color constant.
+let BLACK = [0.0, 0.0, 0.0, 1]
 
 # fully transparent black — handy as an "invisible" fill.
-let CLEAR      = [0.0, 0.0, 0.0, 0]
+## [overview]
+## Fully transparent black, useful for invisible fills and empty strokes.
+## [example]
+## ```mcl image
+## mesh ring = fill{CLEAR} stroke{CYAN} Circle(1)
+## ```
+let CLEAR = [0.0, 0.0, 0.0, 0]
 
 # ─── constructors ───────────────────────────────────────────────────────────
 
 # r, g, b in [0, 1]; alpha defaults to fully opaque.
-let rgb  = |r, g, b, a = 1| [r, g, b, a]
+## [overview]
+## Build an RGBA color from red, green, blue, and optional alpha components.
+## [parameters]
+## r: red component in [0, 1]
+## g: green component in [0, 1]
+## b: blue component in [0, 1]
+## a: alpha component in [0, 1], default 1
+## [example]
+## ```
+## mesh item = fill{rgb(0.2, 0.7, 0.9, 0.25)} Circle(1)
+## ```
+let rgb = |r, g, b, a = 1| [r, g, b, a]
 
 # h in [0, 1], s, v, a in [0, 1].
-let hsv  = |h, s, v, a = 1| __monocurl__native__ hsv(h, s, v, a)
+## [overview]
+## Build an RGBA color from HSV components.
+## [parameters]
+## h: hue wrapped over [0, 1]
+## s: saturation in [0, 1]
+## v: value in [0, 1]
+## a: alpha component in [0, 1], default 1
+## [example]
+## ```
+## let palette = [hsv(0.55, 0.7, 0.9), hsv(0.85, 0.5, 0.9)]
+## ```
+let hsv = |h, s, v, a = 1| __monocurl__native__ hsv(h, s, v, a)
 
 # grayscale shade at given luminance.
+## [overview]
+## Build a gray RGBA color from one luminance value and optional alpha.
+## [parameters]
+## v: gray value in [0, 1]
+## a: alpha component in [0, 1], default 1
+## [example]
+## ```
+## mesh label = color{gray_shade(0.25)} Text("dim")
+## ```
 let gray_shade = |v, a = 1| [v, v, v, a]
 
 # replace the alpha component of a color.
+## [overview]
+## Return a color with the same RGB channels and a new alpha component.
+## [parameters]
+## target: source RGBA color
+## a: replacement alpha component
+## [example]
+## ```mcl image
+## mesh disk = fill{alpha{0.16} BLUE} Circle(1)
+## ```
 let alpha = operator |target, a| {
     var r = 0
     var g = 0

@@ -6,41 +6,86 @@
 # ease-in/ease-out feel.
 
 # the pure identity; equivalent to "no easing."
+## [overview]
+## Identity rate function: animation progress equals time progress.
+## [parameters]
+## t: normalized time in [0, 1]
+## [example]
+## ```
+## play rate{linear} Lerp(1, [&dot])
+## ```
 let linear = |t| t
 
 # smoother-step, monotone, symmetric around t=0.5. this matches old libmc.
+## [overview]
+## Default ease-in/ease-out rate for most animations.
+## [parameters]
+## t: normalized time in [0, 1]
+## [example]
+## ```
+## play Lerp(1, [&dot], smooth)
+## ```
 let smooth = |t| {
     let s = 1 - t
     return t * t * t * (10 * s * s + 5 * s * t + t * t)
 }
 
 # old libmc smooth ease-in.
+## [overview]
+## Rate that starts slowly and accelerates.
 let smooth_in = |t| 2 * smooth(0.5 * t)
 
 # old libmc smooth ease-out.
+## [overview]
+## Rate that starts quickly and settles slowly.
 let smooth_out = |t| 2 * smooth(0.5 * (t + 1)) - 1
 
 # explicit alias for callers that want the named 5th-order smoothstep.
+## [overview]
+## Fifth-order smoothstep rate.
 let smoother = |t| t * t * t * (t * (t * 6 - 15) + 10)
 
 # gentle cosine-based ease.
+## [overview]
+## Cosine ease-in/ease-out rate.
 let cosine = |t| (1 - __monocurl__native__ cos(3.141592653589793 * t)) / 2
 
 # ease functions raised to some power; higher = more aggressive.
-let ease_in    = |t, p = 3| __monocurl__native__ pow(t, p)
-let ease_out   = |t, p = 3| 1 - __monocurl__native__ pow(1 - t, p)
+## [overview]
+## Power ease-in rate; larger p makes the start slower and the end sharper.
+## [parameters]
+## t: normalized time in [0, 1]
+## p: power, default 3
+let ease_in = |t, p = 3| __monocurl__native__ pow(t, p)
+## [overview]
+## Power ease-out rate; larger p makes the start sharper and the end slower.
+## [parameters]
+## t: normalized time in [0, 1]
+## p: power, default 3
+let ease_out = |t, p = 3| 1 - __monocurl__native__ pow(1 - t, p)
+## [overview]
+## Symmetric power ease-in/ease-out rate.
+## [parameters]
+## t: normalized time in [0, 1]
+## p: power, default 3
 let ease_in_out = |t, p = 3| {
     if (t < 0.5) { return ease_in(2 * t, p) / 2 }
     return 1 - ease_in(2 * (1 - t), p) / 2
 }
 
 # exponential-style; fast start, slow end.
+## [overview]
+## Exponential ease-out rate.
 let exponential = |t| 1 - __monocurl__native__ pow(2, -10 * t)
 
 # bounce-out — a few decaying overshoots.
+## [overview]
+## Bounce-out rate with decaying rebounds near the end.
 let bounce = |t| __monocurl__native__ rate_bounce(t)
 
 # elastic-out — overshoots then rings in.
+## [overview]
+## Elastic-out rate that overshoots and rings into place.
 let elastic = |t| __monocurl__native__ rate_elastic(t)
 
 # primitive animations
@@ -48,17 +93,65 @@ let elastic = |t| __monocurl__native__ rate_elastic(t)
 # animations eventually decompose into one of these.
 
 # do nothing for `time` seconds.
+## [overview]
+## Reserve time on the current slide without changing any followers.
+## [parameters]
+## time: duration in seconds, default 1
+## [example]
+## ```
+## play Wait(0.5)
+## ```
 let Wait = |time = 1| __monocurl__native__ wait(time)
 
 # instantly snap follower(s) to leader. Omitting `vars` targets all dirty leaders.
+## [options]
+## important: true
+## [overview]
+## Snap selected followers to their current leader values.
+## [parameters]
+## vars: optional list of leader references; [] targets all dirty leaders
+## [example]
+## ```
+## mesh dot = Circle(0.2)
+## play Set([&dot])
+## ```
 let Set = |vars = []| __monocurl__native__ set(vars)
 
 # general primitive animation constructor.
 # optional `embed` maps `(start, dst) -> [a, b, state]`.
 # optional `lerp` overrides interpolation with `|a, b, state, t| ...`.
+## [overview]
+## Low-level primitive animation wrapper used by higher-level animations.
+## [parameters]
+## time: duration in seconds
+## vars: leader references to animate
+## embed: optional function mapping follower and leader into interpolation endpoints
+## lerp: optional interpolation function
+## rate: timing function
 let PrimitiveAnim = |time = 1, &vars = [], embed = nil, lerp = nil, rate = smooth| __monocurl__native__ lerp_anim(&vars, time, rate, embed, lerp)
 
 # standard value lerp with only the rate function exposed.
+## [options]
+## important: true
+## [overview]
+## Interpolate selected followers toward their leaders using value interpolation.
+## [description]
+## `Lerp` recursively interpolates normal values: equal values stay fixed, numbers and complex numbers blend linearly, same-length lists and same-key maps lerp elementwise, matching labeled function calls lerp only their labeled arguments and rerun the function, and matching operator chains lerp operands plus labeled operator arguments. Unlabeled call arguments must already match exactly.
+## [parameters]
+## time: duration in seconds
+## vars: optional leader references; [] asks Monocurl to find dirty leaders
+## rate: timing function, default smooth
+## [example]
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh ball = center{center: 1.2l} fill{color: BLUE} Circle(radius: 0.35)
+## slide "labeled lerp"
+## play Set()
+## ball.center = 1.2r
+## ball.color = ORANGE
+## ball.radius = 0.6
+## play Lerp(1)
+## ```
 let Lerp = |time = 1, &vars = [], rate = smooth| PrimitiveAnim(time, &vars, nil, nil, rate)
 
 # follower animations
@@ -66,6 +159,17 @@ let Lerp = |time = 1, &vars = [], rate = smooth| PrimitiveAnim(time, &vars, nil,
 # before letting a standard interpolation finish the job.
 
 # points start co-located at the mesh centroid and grow outward.
+## [overview]
+## Reveal newly introduced mesh content by growing it outward from its center.
+## [parameters]
+## time: duration in seconds
+## meshes: optional leader references
+## rate: timing function
+## [example]
+## ```
+## mesh ring = stroke{CYAN} Circle(1)
+## play Grow(0.8, [&ring])
+## ```
 let Grow = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ grow_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ mesh_lerp_value(a, b, t)
@@ -73,6 +177,20 @@ let Grow = |time = 1, &meshes = [], rate = smooth| {
 }
 
 # interpolate opacity from 0 (or along `delta`) to full.
+## [options]
+## important: true
+## [overview]
+## Fade newly introduced content in and removed content out.
+## [parameters]
+## time: duration in seconds
+## meshes: optional leader references
+## delta: optional entrance/exit offset
+## rate: timing function
+## [example]
+## ```
+## note = []
+## play Fade(0.5, [&note])
+## ```
 let Fade = |time = 1, &meshes = [], delta = [0, 0, 0], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ fade_embed(start, dst, delta)
     let lerp = |a, b, state, t| __monocurl__native__ mesh_lerp_value(a, b, t)
@@ -80,6 +198,19 @@ let Fade = |time = 1, &meshes = [], delta = [0, 0, 0], rate = smooth| {
 }
 
 # tracing animation for line / polyline content.
+## [options]
+## important: true
+## [overview]
+## Draw stroke and text contours progressively.
+## [parameters]
+## time: duration in seconds
+## meshes: optional leader references
+## rate: timing function
+## [example]
+## ```
+## mesh title = Text("Monocurl", 0.8)
+## play Write(1, [&title])
+## ```
 let Write = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ write_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ write_lerp_value(a, b, state, t)
@@ -87,6 +218,27 @@ let Write = |time = 1, &meshes = [], rate = smooth| {
 }
 
 # interpolate by matching points between start and end meshes.
+## [options]
+## important: true
+## [overview]
+## Morph between different mesh geometry by building a point/contour/surface matching plan.
+## [description]
+## `Trans` is the general-purpose geometry morph. It may split, reorder, and match mesh components so unrelated shapes can still transform, which is flexible but can occasionally pick a surprising correspondence.
+## [parameters]
+## time: duration in seconds
+## meshes: optional leader references; [] asks Monocurl to find dirty mesh leaders
+## path_arc: 0 for straight motion, or a 3-vector whose direction and magnitude bend point paths through an arc
+## rate: timing function
+## similar_topo_hint: when truthy, first try to match start and end meshes vertex-by-vertex using the same triangle graph; useful when you authored matching topology and want control over the correspondence instead of the general matcher
+## [example]
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh shape = fill{color: alpha{0.14} CYAN} stroke{color: CYAN} Triangle(1.2l, 1.2r, 1u)
+## slide "trans"
+## play Set()
+## shape = fill{color: alpha{0.14} ORANGE} stroke{color: ORANGE} Circle(radius: 1)
+## play Trans(1.2)
+## ```
 let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_hint = 0| {
     let embed = |start, dst| __monocurl__native__ trans_embed_with_options(start, dst, similar_topo_hint)
     let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
@@ -94,6 +246,24 @@ let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_h
 }
 
 # like Trans, but pairs sub-meshes by their `tag` rather than by order.
+## [options]
+## important: true
+## [overview]
+## Morph meshes by matching tagged subparts before matching geometry.
+## [description]
+## Use `TagTrans` when a scene has logical identities, such as terms in an equation or pieces in a proof. Tags decide which submesh is paired first; `Trans` then handles the geometry inside each pair.
+## [parameters]
+## time: duration in seconds
+## meshes: optional leader references; [] asks Monocurl to find dirty mesh leaders
+## path_arc: 0 for straight motion, or a 3-vector whose direction and magnitude bend point paths through an arc
+## rate: timing function
+## similar_topo_hint: when truthy, first try vertex-by-vertex interpolation for tagged pairs with the same triangle graph
+## tag_map: optional function that remaps source tags before matching
+## [example]
+## ```
+## pair = [tag{1} Circle(0.3), tag{2} Square(0.4)]
+## play TagTrans(1, [&pair])
+## ```
 let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_hint = 0, tag_map = nil| {
     let embed = |start, dst| __monocurl__native__ tag_trans_embed_with_options_and_tag_map(start, dst, similar_topo_hint, tag_map)
     let lerp = |a, b, state, t| __monocurl__native__ trans_lerp_value(a, b, state, t, path_arc)
@@ -101,6 +271,25 @@ let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_top
 }
 
 # line-based geometric interpolation that accumulates edge rotations.
+## [options]
+## important: true
+## [overview]
+## Morph line-based geometry by carrying local edge rotations through the path.
+## [description]
+## `Bend` is best for curves, polylines, and stroke-like shapes whose local direction should rotate smoothly. Unlike `Trans`, it does not run the full topology matcher; use `Trans` for unrelated filled shapes and `Bend` when the path structure itself is meaningful.
+## [parameters]
+## time: duration in seconds
+## meshes: optional leader references
+## rate: timing function
+## [example]
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh path = stroke{color: CYAN, stroke_width: 4} Polyline([1.4l, 0.4l + 0.7u, 0.4r + 0.4d, 1.4r])
+## slide "bend"
+## play Set()
+## path = stroke{color: ORANGE, stroke_width: 4} Polyline([1.4l, 0.8l + 0.6d, 0.7r + 0.7u, 1.4r])
+## play Bend(1.2)
+## ```
 let Bend = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ bend_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ bend_lerp_value(a, b, t)
@@ -108,6 +297,8 @@ let Bend = |time = 1, &meshes = [], rate = smooth| {
 }
 
 # like Bend, but pairs sub-meshes by tag first.
+## [overview]
+## Bend morph that pairs tagged subparts before matching geometry.
 let TagBend = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ tag_bend_embed(start, dst)
     let lerp = |a, b, state, t| __monocurl__native__ bend_lerp_value(a, b, t)
@@ -115,6 +306,17 @@ let TagBend = |time = 1, &meshes = [], rate = smooth| {
 }
 
 # camera-aware lerp over the camera leader.
+## [overview]
+## Interpolate a camera leader with camera-specific motion.
+## [parameters]
+## camera: camera leader reference
+## time: duration in seconds
+## rate: timing function
+## [example]
+## ```
+## camera = Camera([2, 1, 5])
+## play CameraLerp(&camera, 1)
+## ```
 let CameraLerp = |&camera, time = 1, rate = smooth| {
     let embed = |start, dst| __monocurl__native__ camera_lerp_embed(start, dst)
     let value_lerp = |start, end, state, t| __monocurl__native__ camera_lerp_value(start, end, t)
@@ -124,6 +326,17 @@ let CameraLerp = |&camera, time = 1, rate = smooth| {
 # indication animations
 
 # highlight a mesh to `color` and back.
+## [overview]
+## Temporarily change a mesh leader to a highlight color and then restore it.
+## [parameters]
+## value: mesh leader reference
+## color: highlight color
+## time: total duration
+## rate: timing function
+## [example]
+## ```
+## play Highlight(&equation, YELLOW)
+## ```
 let Highlight = |&value, color, time = 1, rate = smooth| anim {
     var highlighted = 0
     var original = 0
@@ -140,6 +353,13 @@ let Highlight = |&value, color, time = 1, rate = smooth| anim {
 }
 
 # brief moving write-window over stroke of a mesh.
+## [overview]
+## Sweep a moving write-window over a mesh and then restore it.
+## [parameters]
+## value: mesh leader reference
+## time: duration in seconds
+## lead: optional leading edge rate
+## trail: optional trailing edge rate
 let Flash = |&value, time = 1, lead = nil, trail = nil| {
     let lead_fn = |t| {
         if (__monocurl__native__ is_nil(lead)) {
@@ -179,31 +399,66 @@ let Flash = |&value, time = 1, lead = nil, trail = nil| {
 # transfer animations
 # move / duplicate content from one leader into another, keyed by tag.
 
+## [overview]
+## Move all mesh content from one leader into another and clear the source.
+## [parameters]
+## from: source mesh leader reference
+## into: destination mesh leader reference
+## [example]
+## ```
+## play Transfer(&old_group, &new_group)
+## ```
 let Transfer = |&from, &into| anim {
     into = [into, from]
     from = []
     play Set([&from, &into])
 }
 
-let TransferSubset = |&from, &into, filter=nil| anim {
+## [overview]
+## Move only the tagged subset matching a filter into another leader.
+## [parameters]
+## from: source mesh leader reference
+## into: destination mesh leader reference
+## filter: tag filter for content to move
+let TransferSubset = |&from, &into, filter = nil| anim {
     let split = __monocurl__native__ tag_split(from, filter)
     into = [into, split[0]]
     from = split[1]
     play Set([&from, &into])
 }
 
-let CopySubset = |&from, &into, filter=nil| anim {
+## [overview]
+## Copy the tagged subset matching a filter into another leader.
+## [parameters]
+## from: source mesh leader reference
+## into: destination mesh leader reference
+## filter: tag filter for content to copy
+let CopySubset = |&from, &into, filter = nil| anim {
     let split = __monocurl__native__ tag_split(from, filter)
     into = [into, split[0]]
     play Set([&into])
 }
 
+## [overview]
+## Copy all mesh content from one leader into another without clearing the source.
 let Copy = |&from, &into| anim {
     into = [into, from]
     play Set([&into])
 }
 
-let TransSubsetTo = |&from, filter, target, &into, time=1, tagged=0, path_arc = 0, rate = smooth, similar_topo_hint = 0| anim {
+## [overview]
+## Move a tagged subset into an auxiliary target, morph it, then transfer it into another leader.
+## [parameters]
+## from: source mesh leader reference
+## filter: tag filter for content to move
+## target: target mesh for the subset
+## into: destination mesh leader reference
+## time: morph duration
+## tagged: use TagTrans when truthy, Trans otherwise
+## path_arc: arc control passed through to Trans/TagTrans
+## rate: timing function for the morph
+## similar_topo_hint: when truthy, first try vertex-by-vertex interpolation for subset pairs with the same triangle graph
+let TransSubsetTo = |&from, filter, target, &into, time = 1, tagged = 0, path_arc = 0, rate = smooth, similar_topo_hint = 0| anim {
     mesh aux = []
     play TransferSubset(&from, &aux, filter)
 
@@ -217,7 +472,19 @@ let TransSubsetTo = |&from, filter, target, &into, time=1, tagged=0, path_arc = 
     play Transfer(&aux, &into)
 }
 
-let TransSubsetCopy = |&from, filter, target, &into, time=1, tagged=0, path_arc = 0, rate = smooth, similar_topo_hint = 0| anim {
+## [overview]
+## Copy a tagged subset into an auxiliary target, morph it, then transfer it into another leader.
+## [parameters]
+## from: source mesh leader reference
+## filter: tag filter for content to copy
+## target: target mesh for the copied subset
+## into: destination mesh leader reference
+## time: morph duration
+## tagged: use TagTrans when truthy, Trans otherwise
+## path_arc: arc control passed through to Trans/TagTrans
+## rate: timing function for the morph
+## similar_topo_hint: when truthy, first try vertex-by-vertex interpolation for subset pairs with the same triangle graph
+let TransSubsetCopy = |&from, filter, target, &into, time = 1, tagged = 0, path_arc = 0, rate = smooth, similar_topo_hint = 0| anim {
     mesh aux = []
     play CopySubset(&from, &aux, filter)
 
@@ -231,19 +498,49 @@ let TransSubsetCopy = |&from, filter, target, &into, time=1, tagged=0, path_arc 
     play Transfer(&aux, &into)
 }
 
+## [overview]
+## Run a list of animations with staggered offsets.
+## [parameters]
+## anims: list of animation blocks
+## average_offset: average delay between neighboring starts
+## unit_map: rate used to distribute offsets
+## [example]
+## ```
+## play LaggedMap(map(dots, |&d| Grow(0.4, [&d])), 0.08)
+## ```
 let LaggedMap = |anims, average_offset = 0.1, unit_map = smooth| __monocurl__native__ lagged_map(anims, average_offset, unit_map)
 
+## [overview]
+## Slow an animation by a multiplicative factor.
+## [example]
+## ```
+## play slow{2} Write(1, [&path])
+## ```
 let slow = operator |target, factor = 2| [target, __monocurl__native__ anim_time_scale(target, factor)]
 
+## [overview]
+## Speed an animation up by a multiplicative factor.
 let fast = operator |target, factor = 2| [target, __monocurl__native__ anim_time_scale(target, 1 / factor)]
 
-let delay = operator |target, time = 1| {
-    let go = |dt| anim {
-        play Wait(dt)
-        play target
-    }
-    return [target, go(dt: time)]
-}
+## [overview]
+## Delay an animation block by playing Wait before it.
+## [parameters]
+## target: animation to delay
+## time: delay duration
+## [example]
+## ```
+## play [Write(1, [&a]), delay{0.2} Write(1, [&b])]
+## ```
+let delay = operator |target, time = 1| [target, anim {
+    play Wait(time)
+    play target
+}]
 
 # override the rate function on a primitive animation.
+## [overview]
+## Replace the rate function on a primitive animation.
+## [example]
+## ```
+## play rate{bounce} Lerp(1, [&ball])
+## ```
 let rate = operator |target, rate| [target, __monocurl__native__ anim_with_rate(target, rate)]
