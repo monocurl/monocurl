@@ -16,12 +16,12 @@ const STDLIB_DOCS: &str = include_str!("../docs/stdlib.md");
 const CLI_DOCS: &str = include_str!("../docs/cli.md");
 const RIEMANN_RECTANGLES_EXAMPLE: &str = include_str!("../docs/riemann-rectangles.mcs");
 
-const STD_UTIL: &str = include_str!("../../../assets/std/std/util.mcl");
-const STD_MATH: &str = include_str!("../../../assets/std/std/math.mcl");
-const STD_COLOR: &str = include_str!("../../../assets/std/std/color.mcl");
-const STD_MESH: &str = include_str!("../../../assets/std/std/mesh.mcl");
-const STD_ANIM: &str = include_str!("../../../assets/std/std/anim.mcl");
-const STD_SCENE: &str = include_str!("../../../assets/std/std/scene.mcl");
+const STD_UTIL: &str = include_str!("../docs/std/util.mcl");
+const STD_MATH: &str = include_str!("../docs/std/math.mcl");
+const STD_COLOR: &str = include_str!("../docs/std/color.mcl");
+const STD_MESH: &str = include_str!("../docs/std/mesh.mcl");
+const STD_ANIM: &str = include_str!("../docs/std/anim.mcl");
+const STD_SCENE: &str = include_str!("../docs/std/scene.mcl");
 
 #[derive(Clone, Copy)]
 struct DocResource {

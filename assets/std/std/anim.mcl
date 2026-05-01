@@ -124,7 +124,6 @@ let Wait = |time = 1| __monocurl__native__ wait(time)
 ## background = [0.035, 0.045, 0.060, 1]
 ## mesh dot = fill{CYAN} Circle(0.2)
 ## slide "set"
-## play Set([&dot])
 ## play Wait(1)
 ## dot = fill{ORANGE} Square(0.4)
 ## play Set([&dot])
@@ -159,7 +158,6 @@ let PrimitiveAnim = |time = 1, &vars = [], embed = nil, lerp = nil, rate = smoot
 ## background = [0.035, 0.045, 0.060, 1]
 ## mesh ball = center{center: 1.2l} fill{color: BLUE} Circle(radius: 0.35)
 ## slide "labeled lerp"
-## play Set()
 ## ball.center = 1.2r
 ## ball.color = ORANGE
 ## ball.radius = 0.6
@@ -171,20 +169,19 @@ let PrimitiveAnim = |time = 1, &vars = [], embed = nil, lerp = nil, rate = smoot
 ## mesh blue = center{center: 1.2l + 0.4u} fill{color: BLUE} Circle(radius: 0.25)
 ## mesh gold = center{center: 1.2l + 0.4d} fill{color: YELLOW} Circle(radius: 0.25)
 ## slide "selected leaders"
-## play Set()
 ## blue.center = 1.2r + 0.4u
 ## gold.center = 1.2r + 0.4d
-## play Lerp(1, [&blue])
+## play rate{bounce} Lerp(1, [&blue])
 ## play Set([&gold])
+## play Wait(1)
 ## ```
 ## [example]
 ## ```mcl video
 ## background = [0.035, 0.045, 0.060, 1]
-## mesh ball = center{center: 1.2l} fill{color: ORANGE} Circle(radius: 0.25)
-## slide "rate"
-## play Set()
-## ball.center = 1.2r
-## play rate{bounce} Lerp(1.2, [&ball])
+## mesh square = center{center: 1.2l} fill{ORANGE} Square(0.25)
+## slide "operator lerp"
+## square = rotate{90dg} square
+## play Lerp(1.2)
 ## ```
 let Lerp = |time = 1, &vars = [], rate = smooth| PrimitiveAnim(time, &vars, nil, nil, rate)
 

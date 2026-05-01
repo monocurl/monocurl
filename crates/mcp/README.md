@@ -7,7 +7,7 @@ scenes.
 ## Run From Source
 
 ```sh
-cargo run -p mcp --bin monocurl-mcp
+cargo run -p monocurl-mcp --bin monocurl-mcp
 ```
 
 Example local MCP client configuration:
@@ -17,7 +17,7 @@ Example local MCP client configuration:
   "mcpServers": {
     "monocurl": {
       "command": "cargo",
-      "args": ["run", "-p", "mcp", "--bin", "monocurl-mcp"]
+      "args": ["run", "-p", "monocurl-mcp", "--bin", "monocurl-mcp"]
     }
   }
 }
@@ -26,7 +26,7 @@ Example local MCP client configuration:
 For a release build:
 
 ```sh
-cargo build --release -p mcp --bin monocurl-mcp
+cargo build --release -p monocurl-mcp --bin monocurl-mcp
 ```
 
 Then point the client at `target/release/monocurl-mcp`.
