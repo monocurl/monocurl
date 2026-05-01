@@ -1,0 +1,13 @@
+[package]
+name = "stdlib"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+executor.workspace = true
+geo.workspace = true
+inventory.workspace = true
+latex.workspace = true
+libtess2.workspace = true
+smallvec.workspace = true
+stdlib-macros.workspace = true

@@ -1,0 +1,13 @@
+[package]
+name = "libtess2"
+version = "0.1.0"
+edition = "2024"
+license-file = "upstream/LICENSE.txt"
+links = "tess2_upstream"
+readme = "README.md"
+
+[dependencies]
+geo.workspace = true
+
+[build-dependencies]
+cc.workspace = true

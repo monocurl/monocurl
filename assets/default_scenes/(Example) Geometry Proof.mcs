@@ -1,0 +1,141 @@
+# example: geometry proof
+import std.scene
+import std.mesh
+import std.anim
+import std.util
+import std.color
+import std.math
+
+background = BLACK
+camera = Camera(3b)
+
+let Tri = |p, q, r, t|
+    fill{PURPLE} stroke{WHITE} tag{t} Triangle(p, q, r)
+    
+let w = operator |target| color{WHITE} target
+
+let Left = |r, u, labels = 0| {
+    return center{[-1.5, -0.5, 0]} scale{0.5} block {
+        . Tri([0, 0, 0], [r, 0, 0], [0, u, 0], 0)
+        . Tri([r, 0, 0], [r + u, 0, 0], [r + u, r, 0], 1)
+        . Tri([r + u, r, 0], [r + u, r + u, 0], [u, r + u, 0], 2)
+        . Tri([0, u, 0], [u, r + u, 0], [0, r + u, 0], 3)
+        
+        if (labels) {
+           . w{} center{[(u + r) / 2, (u + r) / 2, 0]} Tex("C^2", 1)
+        }
+    }
+}
+
+let Right = |r, u, labels = 0| {
+    return center{[1.5, -0.5, 0]} scale{0.5} block {
+        . Tri([u    , u, 0], [u, u + r, 0], [0, u,     0], 0)
+        . Tri([0    , u, 0], [u, u + r, 0], [0, u + r, 0], 3)
+        . Tri([u    , u, 0], [u, 0    , 0], [u + r, 0, 0], 1)
+        . Tri([u + r, 0, 0], [u + r, u, 0], [u    , u, 0], 2)
+        
+        . center{[(u + r) / 2, (u + r) / 2, 0]} 
+          downrank{} 
+          stroke{WHITE} 
+          tag{-1} 
+          Rect([u + r, u + r])
+        
+        if (labels) {
+           . w{} center{[u / 2, u / 2, 0]} Tex("A^2")
+           . w{} center{[u + r / 2, u + r / 2, 0]} Tex("B^2")
+        }
+    }
+}
+
+let q = Right(1, 1)
+let R = 2
+let U = 1
+
+mesh equation = []
+
+let theorem = w{} center{[0, 1, 0]} Tex(
+    "\tag1{C^2} = \tag2{A^2} + \tag3{B^2}"
+)
+
+slide "Intro"
+    let t = Tri(0l, [R, 0, 0], [0, U, 0], 0)
+    
+    mesh start = [
+        t,
+        w{} Label(t, "C", [U, R, 0]),
+        w{} Label(t, "A", 1l),
+        w{} Label(t, "B", 1d)
+    ]
+    
+    # empty list means infer meshes automatically
+    play Fade(1, [], UP)
+
+slide 
+    start = tag_filter{|t| 0 in t} Left(R, U, 0)
+    play TagTrans(1)
+
+slide 
+    mesh left = []
+    # just a renaming basically, but can be helpful
+    play Transfer(&start, &left)
+    
+    left = Left(r: R, u: U, labels: 0)
+    play Trans(1)
+
+slide 
+
+    mesh right = left
+    play Set()
+    
+    right = Right(r: R, u: U, labels: 0)
+    
+    # set_default is a way to set a later default argument 
+    # on the function invocation without setting all 
+    # the earlier ones, which is useful when there's many
+    # 
+    # in this case, this sets an option that tells the 
+    # trans matching algorithm to recognize that the initial
+    # and final meshes have similar mesh strucutres.
+    # In this case, that makes the resultant animation
+    # look more like rotating the triangle instead of a deformation
+    # (try disabling it)
+    play set_default{"similar_topo_hint", 1} TagTrans(1.5)
+
+slide "Keyframes"
+
+    left.labels = 1
+    right.labels = 1
+    play Fade(1)
+    
+    let rs = [0 -> 2, 1 -> 2, 2 -> 0.75, 4 -> 0.75]
+    let us = [0 -> 1, 1 -> 2, 2 -> 0.75, 4 -> 2]
+    
+    var last_time = 0
+    for (time in map_keys(rs)) {
+        left.r = right.r = rs[time]
+        left.u = right.u = us[time]
+    
+        play Lerp(time - last_time)
+        last_time = time
+    }
+
+slide "Equation"
+    
+    mesh c_dump = []
+    mesh ab_dump = []
+    # write the non transferred portions
+    equation = tag_filter{|t| t == []} theorem
+
+    play [
+        Write(1, [&equation]),
+        TransSubsetTo(
+            &left, |tag| tag == [],  
+            tag_filter{|t| 1 in t} theorem,
+            &c_dump
+        ),
+        TransSubsetTo(
+            &right, |tag| tag == [], 
+            tag_filter{|t| 2 in t or 3 in t} theorem, 
+            &ab_dump
+        ) 
+    ]

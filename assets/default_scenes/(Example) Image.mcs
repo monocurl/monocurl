@@ -1,0 +1,101 @@
+# example: image render — no slides; export as a still image
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = [0.06, 0.07, 0.10, 1]
+camera = Camera(6b)
+
+let INK = [0.88, 0.9, 0.95, 1]
+let DARK = [0.12, 0.14, 0.20, 1]
+let DEEP = [0.07, 0.30, 0.39, 1]
+let TEAL = [0.06, 0.52, 0.58, 1]
+let BLUE = [0.33, 0.58, 0.88, 1]
+let GOLD = [0.91, 0.74, 0.30, 1]
+
+let petal_colors = [0.0 -> DEEP, 0.45 -> TEAL, 0.7 -> BLUE, 1.0 -> GOLD]
+
+# custom operators keep repeated fill/stroke recipes concise
+# they also allow for consistent 
+let glaze = operator |target, color_value, opacity = 0.6, width = 1.4|
+    fill{alpha{opacity} color_value}
+    stroke{INK, width}
+    target
+
+let trim = operator |target, color_value = GOLD, width = 2.2|
+    fill{CLEAR}
+    stroke{color_value, width}
+    target
+
+let Petal = |theta, radius, length, width, id| {
+    # keyframe_lerp turns ring indices into a multi-stop radial color rhythm.
+    let c = keyframe_lerp(petal_colors, id / 16)
+    return tag{id}
+        shift{[radius * cos(theta), radius * sin(theta), 0]}
+        rotate{theta}
+        glaze{c, 0.5, 1.1}
+        Capsule([-length / 2, 0, 0], [length / 2, 0, 0], width)
+}
+
+let PetalRing = |count, radius, length, width, spin, base_id| block {
+    # sample_clopen is almost useful here
+    # but we need the index
+    for (i in range(0, count)) {
+        let theta = spin + i * TAU / count
+        . Petal(theta, radius, length, width, base_id + i)
+    }
+}
+
+let DotRing = |count, radius, dot_radius, color_value| block {
+    for (i in range(0, count)) {
+        let theta = i * TAU / count
+        . fill{color_value}
+          stroke{DARK, 0.8}
+          shift{[radius * cos(theta), radius * sin(theta), 0]}
+          Circle(dot_radius)
+    }
+}
+
+let Diamond = |theta, radius, size, id| {
+    let c = keyframe_lerp([0.0 -> GOLD, 0.4 -> BLUE, 1.0 -> TEAL], id / 8)
+    return
+        shift{[radius * cos(theta), radius * sin(theta), 0]}
+        rotate{theta}
+        glaze{c, 0.85, 0.9}
+        rotate{TAU / 8}
+        scale{[1.0, 0.65, 1]}
+        Square(size)
+}
+
+let DiamondRing = |count, radius, size, spin, base_id| block {
+    for (i in range(0, count)) {
+        . Diamond(spin + i * TAU / count, radius, size, base_id + i)
+    }
+}
+
+mesh core = [
+    PetalRing(8, 1.22, 2.24, [0.12, 0.34], 0, 0),
+    PetalRing(8, 0.88, 1.44, [0.12, 0.24], TAU / 16, 20)
+]
+
+mesh outline = [
+    trim{TEAL, 2.2} Annulus(1.10, 1.16),
+    trim{GOLD, 1.8} Annulus(1.70, 1.76),
+    trim{INK, 0.9} Annulus(2.05, 2.08)
+]
+
+mesh accents = [
+    DiamondRing(8, 1.72, 0.50, 0, 100),
+    DotRing(36, 2.16, 0.03, GOLD)
+]
+
+mesh center = [
+    fill{alpha{0.45} TEAL} Annulus(0.18, 0.40),
+    trim{GOLD, 2.0} Annulus(0.50, 0.58),
+    glaze{DEEP, 0.85, 0.9} Circle(0.12)
+]
+

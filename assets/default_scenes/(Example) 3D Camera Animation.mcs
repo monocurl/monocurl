@@ -1,0 +1,72 @@
+# example: 3d camera animation
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let samples = 24
+let height = |x, y| 1.15 * ((x - 0.5) ^ 2 + (y - 0.5) ^ 2)
+let color_keys = [0 -> BLUE, 0.15 -> YELLOW, 0.3 -> ORANGE, 0.55 -> RED]
+
+let color_at = |pos, idx| {
+    let value = height(pos[0], -pos[1])
+    # keyframe_lerp turns a scalar field into a smooth multi-stop surface gradient.
+    return keyframe_lerp(color_keys, value)
+}
+
+slide "Flat Grid"
+    mesh grid = stroke{BLACK, 1.5} ColorGrid(
+        |pos, idx| BLACK,
+        [0, 1, samples],
+        [-1, 0, samples]
+    )
+    mesh axis =
+        shift{[0, 0, -0.01]} # draw below function
+        axis_style{"x", 0, 1, "x"}
+        axis_style{"y", 0, 1, "y"}
+        axis_style{"z", 0, 1, "z"}
+        Axis3d(
+            basis: [1r, 1d, 1b],
+            color: BLACK,
+            grid_color: LIGHT_GRAY,
+            [1u, 1u, 1b]
+        )
+    mesh monocurl = center{0.7u} Text("Monocurl", 2)
+
+    play [Fade(0.8, [&axis, &grid]), Write(0.8, &monocurl)]
+
+slide "Surface And Camera"
+    # an anim block is analogous to a coroutine in other languages
+    # it does nothing until it is played
+    # (you can try experiment with the playhead to see when the
+    # "Got here" is actually printed)
+    let lift_grid = anim {
+        grid = stroke{BLACK, 1.5} ColorGrid(
+            color_at,
+            [0, 1, samples],
+            [-1, 0, samples]
+        )
+        play Trans(0.8, [&grid])
+
+        print "Got here"
+
+        grid =
+            point_map{|point| [point[0], point[1], height(point[0], point[1] + 1)]}
+            grid
+        play Trans(1.8, [&grid])
+    }
+
+    # camera lerp is a specialize anim for interpolating 
+    # camera positions, lerp "works" as well 
+    # but is visually less pelaseing
+    let move_camera = anim {
+        camera = Camera([2.2, -2.1, 1.45], [0.5, -0.5, 0.35], [0, 0, 1])
+        play CameraLerp(&camera, 2.6)
+    }
+
+
+    play [lift_grid, move_camera]
+    play Wait(0.4)

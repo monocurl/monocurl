@@ -1,0 +1,232 @@
+# example: text, tex, and tags
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+# This highlights text, latex
+# and common strategies for text tagging
+
+let Subtext = |text| center{-0.5u} Text(text, 0.6)
+
+# this sets the styling that we'll use throughout the scene
+# with this, we only have to set tags properly
+# and this will handle styling
+let palette = operator |target|
+    color{RED, |tag| 4 in tag}
+    color{PURPLE, |tag| 3 in tag}
+    color{ORANGE, |tag| 2 in tag}
+    color{BLUE, |tag| 1 in tag}
+    target
+
+slide "Bare Text"
+    # Text/Tex are meshes, so they can use the same Write/Fade/TagTrans tools.
+    mesh text_line = center{0.45u} Text("A label can be part of the diagram.", 0.8)
+    play Write(1.3)
+
+    mesh subtext = Subtext("Letters are outline contours, so animations can trace them.")
+    play Write(1.1)
+
+slide "Bare Tex"
+    # Clearing the old mesh leaders lets the next slide focus only on Tex.
+    text_line = []
+    subtext = []
+    play Fade(0.6)
+
+    mesh bare_tex = center{0.45u} Tex(
+        "P(A \mid B) = \frac{P(B\mid A)P(A)}{P(B)}"
+
+    )
+    play Write(1.5)
+
+    subtext = Subtext("LaTeX can take a moment the first time; cached renders are quick.")
+    play Fade(0.9)
+
+slide "Tagged Tex"
+    bare_tex = []
+    subtext = []
+    play Fade(0.6)
+
+    # text_tag{...} and \tagN{...} both give subexpressions identities before rendering.
+    # all examples of tagging are equivalent 
+    # (except the exact tag they're given)
+    mesh styled = palette{} center{0.45u} Tex(tex: [
+        text_tag{[1, 20, 30]} "P(A\mid B)", # multi tag
+        "\text_tag{5}{\ = \ }",
+        "\frac{",
+            "\tag2{P(B\mid A)}",
+            "\tag3{P(A)}",
+        "}{",
+            "\tag4{P(B)}",
+        "}"
+    ])
+    play Write(1.5)
+    
+    print to_string(styled.tex)
+
+    subtext = Subtext("Tags let each role keep its identity inside the formula.")
+    play Fade(0.9)
+
+slide "Tag Transform 1"
+    # By aligning tags of new mesh with the old mesh
+    # tagtrans can match contours exactly as you desire
+    styled = palette{} center{0.45u} Tex(
+        [
+            "\text_tag{1,20,30}{\text{posterior}}",
+            "\tag5{\ = \ }",
+            "\frac{",
+                "\tag2{\text{likelihood}}",
+                "\cdot ",
+                "\tag3{\text{prior}}",
+            "}{",
+            "    \tag4{\text{evidence}}",
+            "}"
+        ]
+    )
+    play TagTrans(1.4)
+
+    subtext = Subtext("They also allow for customizing trans animations")
+    play Trans(0.8)
+
+slide "Tag Transform 2"
+
+    styled = palette{} center{0.45u} Tex(tex: 
+        [
+            "\text_tag{1,20,30}{\text{posterior}}",
+            "\cdot ",
+            "\tag4{\text{evidence}}",
+            "\tag5{\ = \ }",
+            "\tag2{\text{likelihood}}",
+            "\cdot ",
+            "\tag3{\text{prior}}"
+        ]
+    )
+    print to_string(styled.tex)
+
+    play TagTrans(1.6)
+    
+slide 
+    styled = []
+    subtext = shift{0.5d} Subtext("Text is a regular mesh, allowing you to do complex animations with regular Monocurl utilities")
+    play Fade(0.9)
+
+slide "Complex Animation"
+    # This shows how you can transform between succesive inequalities
+    # line-by-line
+    # 
+    # It's admittedly more tedious than other animation libraries
+    # but the upside is this is not special cased into the stdlib
+    # (allowing greater generality)
+    #
+    # LLM's can also be helpful in removing some of the tediousness
+    #
+    # Eventually, this may be more automated in a library
+    # to support the common operations/behavior at least
+
+    # instead of having to repeatedly type tags
+    # you can save the entire value as a constant and reference that
+    let x = text_tag{1} "x"
+    let a = text_tag{1} "a"
+    let x2 = text_tag{2} "x^2"
+    let ap = text_tag{2} "a"
+    let y = text_tag{3} "y"
+    let b = text_tag{3} "b"
+    let y2 = text_tag{4} "y^2"
+    let bp = text_tag{4} "b"
+    let ge = "\ \tag9{\ge} \ "
+    
+    let palette = operator |target|
+        color{ORANGE, |tag| 3 in tag or 4 in tag}
+        color{BLUE, |tag| 1 in tag or 2 in tag}
+        target
+    
+    # while it is possible to use latex align* for this purpose
+    # it's slightly harder to recover
+    # what "row/equation" each mesh came from, making the animations
+    # more difficult
+    # (With align*, it would be done via preprocessing each element with an additional tag component to keep row information)
+    
+    # make untagged portions fade in and out by giving them 
+    # row-unique tag
+    let retag_empty = operator |operand, new| 
+        tag_map{|old, leaf| {
+            if (old == []) { return tag{new} leaf }
+            return leaf
+        }} operand
+    
+    let Inequality = |lhs, rhs, row_id| {
+        print to_string(lhs)
+        let latex = Tex([lhs, ge, rhs])
+        let ge = tag_filter{|tag| 9 in tag} latex
+        let pos = mesh_center(ge)
+        return retag_empty{-row_id - 100} shift{[1-pos[0], 0, 0]} palette{} latex
+    }
+    
+    let AlignedInequalities = |equations| {    
+        return shift{2u} Stack(equations, 1d)
+    }
+    
+    let PushEquation = |&container, lhs, rhs, tag_map=nil| anim {
+        let ie = Inequality(lhs, rhs, len(container.rows))
+        
+        if (container.rows == []) {
+            container.rows .= ie
+            play Write(1)
+        }
+        else {
+            # strategy: compute the full mesh and extract 
+            # out the last two rows
+            # create an auxiliary mesh that transforms from second
+            # to last row to the last row
+            # then delete auxiliary and show full unmodified container
+            container.rows .= ie
+
+            # by accessing container[i] instead of container.rows[i]
+            # we access the SHIFTED / positioned mesh 
+            # which is what we want
+            let count = len(container.rows)
+            mesh tmp = container[count - 2]
+            play Set(&tmp)
+            tmp = container[count - 1]
+            play set_default{"tag_map", tag_map} TagTrans(1, &tmp)
+            tmp = []
+            play Set()
+        }
+
+        play Wait(1)
+    }
+    
+    mesh curr = AlignedInequalities(rows: [])
+    
+    # https://www.cantorsparadise.com/an-introduction-to-the-am-gm-inequality-38f7895e8f30
+    play PushEquation(&curr, 
+        ["(", x, "-", y, ")^2"],
+        ["\tag8{0}"]
+    )
+    
+    play PushEquation(&curr,
+        [x2, "-\tag7{2}", x, y, "+", y2],
+        ["\tag8{0}"],
+        # x becomes x and x^2 in next line
+        [[1]->[[1], [2]],
+         [3]->[[3], [4]]]
+    )
+    
+    play PushEquation(&curr,
+        [x2, "+", y2],
+        ["\tag7{2}", x, y]
+    )
+    
+    play PushEquation(&curr,
+        ["\frac{", x2, "+", y2, "}{", "\tag7{2}", "}"],
+        [x, y]
+    )
+    
+    play PushEquation(&curr,
+        ["\text{Letting $",ap,"=",x2,"$ and $",bp,"=",y2,"$ \quad}",
+         "\frac{", ap, "+", bp, "}{", "\tag7{2}", "}"],
+        ["\sqrt{", a, b, "}"]
+    )

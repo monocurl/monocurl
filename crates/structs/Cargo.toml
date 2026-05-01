@@ -1,0 +1,9 @@
+[package]
+name = "structs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arrayvec.workspace = true
+arraydeque.workspace = true
+futures.workspace = true

@@ -1,0 +1,47 @@
+# scene-level defaults: camera rig, background, and render hints.
+#
+# Camera is the only "special" mesh — the renderer treats it as the view
+# transform rather than drawable geometry. Every scene has exactly one
+# camera leader, typically bound via `camera = DEFAULT_CAMERA`.
+
+# constructors
+
+# build a camera from a position, a target point, and an up vector.
+## [overview]
+## Build a perspective camera from a position, target, up vector, and clipping range.
+## [description]
+## The value is a tagged map consumed specially by the renderer. Animate the camera leader with `CameraLerp` rather than plain `Lerp` for smoother up-vector motion.
+## [parameters]
+## up: preferred screen-up direction; it should not be parallel to the view direction
+## near: near clipping plane distance
+## far: far clipping plane distance
+## [example]
+## ```
+## camera = Camera(position: [2, 1, 5], target: ORIGIN)
+## play CameraLerp(&camera, 1)
+## ```
+let Camera = |position = 4b, target = [0,0,0], up = 1u, near = 0.1, far = 100| __monocurl__native__ mk_camera(position, target, up, near, far)
+
+
+# defaults
+# these two names are conventional — `camera = DEFAULT_CAMERA` /
+# `background = DEFAULT_BACKGROUND` give you a sensible starting scene.
+
+## [overview]
+## Initial camera used by new scenes.
+## [description]
+## Equivalent to a camera at `[0, 0, 4]`, looking at the origin with `UP` as the up vector.
+## [example]
+## ```
+## camera = DEFAULT_CAMERA
+## ```
+let DEFAULT_CAMERA = __monocurl__native__ initial_camera()
+## [overview]
+## Initial background color used by new scenes.
+## [description]
+## A solid white background value. Assign `background = BLACK` or another RGBA color/map to change it.
+## [example]
+## ```
+## background = DEFAULT_BACKGROUND
+## ```
+let DEFAULT_BACKGROUND = __monocurl__native__ initial_background()

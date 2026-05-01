@@ -1,0 +1,14 @@
+[package]
+name = "integration_tests"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+compiler.workspace = true
+executor = { path = "../executor", features = ["capture_tos", "test_heap_tracking"] }
+geo.workspace = true
+lexer.workspace = true
+parser.workspace = true
+stdlib.workspace = true
+structs.workspace = true
+smol.workspace = true

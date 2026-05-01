@@ -1,0 +1,18 @@
+[package]
+name = "latex"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+geo.workspace = true
+hayro-interpret.workspace = true
+hayro-svg.workspace = true
+roxmltree.workspace = true
+sha2.workspace = true
+libtess2.workspace = true
+tectonic.workspace = true
+tectonic_bundles.workspace = true
+tectonic_engine_xetex.workspace = true
+tiny-skia-path.workspace = true
+usvg.workspace = true

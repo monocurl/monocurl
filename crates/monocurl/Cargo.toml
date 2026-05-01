@@ -1,0 +1,35 @@
+[package]
+name = "monocurl"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+cli.workspace = true
+ui_cli_shared.workspace = true
+lexer.workspace = true
+compiler.workspace = true
+parser.workspace = true
+executor.workspace = true
+exporter.workspace = true
+geo.workspace = true
+latex.workspace = true
+stdlib.workspace = true
+structs.workspace = true
+bytecode.workspace = true
+
+anyhow.workspace = true
+smallvec.workspace = true
+log.workspace = true
+env_logger.workspace = true
+gpui.workspace = true
+unicode-segmentation.workspace = true
+open.workspace = true
+dirs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+futures.workspace = true
+smol.workspace = true
+notify-debouncer-full.workspace = true
+renderer.workspace = true
+image.workspace = true

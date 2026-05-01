@@ -1,0 +1,140 @@
+pub(super) const SLIDE_W: f32 = 80.0;
+pub(super) const SLIDE_H: f32 = 60.0;
+pub(super) const TOOLBAR_H: f32 = 30.0;
+pub(super) const PADDING_H: f32 = 16.0;
+/// extra clickable space appended past the last slide's gap so clicks beyond
+/// the scene's current end still seek
+pub(super) const END_PADDING: f32 = 400.0;
+pub(super) const PADDING_V: f32 = 16.0;
+pub(super) const LABEL_GAP: f32 = 5.0;
+pub(super) const LABEL_MAX_LINES: usize = 2;
+pub(super) const LABEL_LINE_H: f32 = 13.0;
+pub(super) const LABEL_TEXT_H: f32 = LABEL_LINE_H * LABEL_MAX_LINES as f32;
+pub(super) const CONTENT_H: f32 = PADDING_V + SLIDE_H + LABEL_GAP + LABEL_TEXT_H + PADDING_V;
+pub(super) const LABEL_FONT_SIZE: f32 = 11.0;
+pub(super) const DUR_FONT_SIZE: f32 = 9.0;
+pub(super) const PX_PER_SEC: f32 = 40.0;
+pub(super) const MIN_GAP: f32 = 6.0;
+
+pub(super) const ZOOM_LEVELS: [u32; 9] = [25, 50, 75, 100, 150, 200, 300, 400, 800];
+pub(super) const DEFAULT_ZOOM_IDX: usize = 3;
+
+pub(super) fn gap_w(duration: Option<f64>, zoom: f32) -> f32 {
+    duration.map_or(MIN_GAP, |d| (d as f32 * PX_PER_SEC * zoom).max(MIN_GAP))
+}
+
+pub(super) fn painted_gap_w(duration: Option<f64>, zoom: f32) -> f32 {
+    duration.map_or(0.0, |d| (d as f32 * PX_PER_SEC * zoom).max(0.0))
+}
+
+pub(super) fn effective_durations(
+    slide_count: usize,
+    durations: &[Option<f64>],
+    minimum_durations: &[Option<f64>],
+    current_slide: usize,
+    current_time: f64,
+) -> Vec<Option<f64>> {
+    let current_visible_slide = current_slide.checked_sub(1);
+    (0..slide_count)
+        .map(|i| {
+            let cached = durations.get(i).and_then(|d| *d);
+            let minimum = minimum_durations.get(i).and_then(|d| *d);
+            let inferred = if Some(i) == current_visible_slide
+                && current_time.is_finite()
+                && current_time > 0.0
+            {
+                Some(current_time)
+            } else {
+                None
+            };
+            cached
+                .or(minimum)
+                .map(|d| inferred.map_or(d, |t| d.max(t)))
+                .or(inferred)
+        })
+        .collect()
+}
+
+pub(super) fn compute_slide_xs(
+    slide_count: usize,
+    durations: &[Option<f64>],
+    zoom: f32,
+) -> Vec<f32> {
+    let mut xs = Vec::with_capacity(slide_count);
+    let mut x = PADDING_H;
+    for i in 0..slide_count {
+        xs.push(x);
+        x += SLIDE_W + gap_w(durations.get(i).and_then(|d| *d), zoom);
+    }
+    xs
+}
+
+pub(super) fn compute_gap_ws(slide_count: usize, durations: &[Option<f64>], zoom: f32) -> Vec<f32> {
+    (0..slide_count)
+        .map(|i| gap_w(durations.get(i).and_then(|d| *d), zoom))
+        .collect()
+}
+
+pub(super) fn compute_painted_gap_ws(
+    slide_count: usize,
+    durations: &[Option<f64>],
+    zoom: f32,
+) -> Vec<f32> {
+    (0..slide_count)
+        .map(|i| painted_gap_w(durations.get(i).and_then(|d| *d), zoom))
+        .collect()
+}
+
+pub(super) fn compute_track_width(slide_count: usize, durations: &[Option<f64>], zoom: f32) -> f32 {
+    if slide_count == 0 {
+        return 200.0;
+    }
+    let slide_xs = compute_slide_xs(slide_count, durations, zoom);
+    let last = slide_count - 1;
+    slide_xs[last] + SLIDE_W + gap_w(durations.get(last).and_then(|d| *d), zoom) + END_PADDING
+}
+
+pub(crate) fn visual_slide_time(
+    current_slide: usize,
+    current_time: f64,
+    durations: &[Option<f64>],
+) -> Option<(usize, f64)> {
+    let visible_slide = current_slide.checked_sub(1)?;
+    if current_time.is_infinite() {
+        let duration = durations
+            .get(visible_slide)
+            .and_then(|d| *d)
+            .unwrap_or_default();
+        Some((visible_slide, duration))
+    } else {
+        Some((visible_slide, current_time))
+    }
+}
+
+pub(crate) fn slide_label(slide: usize, slide_count: usize) -> String {
+    let slide_number = (slide + 1).min(slide_count);
+    format!("Slide {} / {}", slide_number, slide_count)
+}
+
+pub(crate) fn slide_title_label(slide: usize, slide_names: &[Option<String>]) -> Option<String> {
+    slide_names.get(slide).and_then(|name| name.clone())
+}
+
+pub(super) fn compute_playhead_x(
+    current_slide: usize,
+    current_time: f64,
+    slide_xs: &[f32],
+    gap_ws: &[f32],
+    durations: &[Option<f64>],
+    zoom: f32,
+) -> f32 {
+    match visual_slide_time(current_slide, current_time, durations) {
+        None => PADDING_H,
+        Some((slide, time)) => {
+            let x = slide_xs.get(slide).copied().unwrap_or(PADDING_H);
+            let gap = gap_ws.get(slide).copied().unwrap_or(MIN_GAP);
+            let time_px = ((time as f32) * PX_PER_SEC * zoom).min(gap);
+            x + SLIDE_W + time_px
+        }
+    }
+}

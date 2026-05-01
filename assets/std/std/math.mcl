@@ -1,0 +1,318 @@
+# mathematical constants, scalar functions, and vector operations.
+#
+# note: element-wise arithmetic on lists (u + v, a * u, -u) is built into the
+# language, so linear algebra reads naturally without helper functions.
+# scalar / vector dispatch is handled by the runtime; use (+, -, *, /) freely.
+
+# constants
+## [overview]
+## Euler's number.
+let E = 2.7182818284590452
+## [overview]
+## Pi in radians.
+let PI = 3.1415926535897932
+## [overview]
+## Full circle constant, equal to 2 * PI.
+## [example]
+## ```
+## let wave = |x| sin(x * TAU)
+## ```
+let TAU = 6.2831853071795864
+
+# canonical lists of length 3. Direction-suffix literals (1l, 1r, 1u, 1d, 1f, 1b)
+# produce the same values; in the right-handed viewport, forward is negative z.
+## [overview]
+## Origin point [0, 0, 0].
+let ORIGIN = [0, 0, 0]
+## [overview]
+## Zero vector [0, 0, 0].
+let ZERO_V = [0, 0, 0]
+## [overview]
+## Vector with all components equal to 1.
+let ONE_V = [1, 1, 1]
+## [overview]
+## Unit vector pointing left in scene coordinates.
+let LEFT = 1l
+## [overview]
+## Unit vector pointing right in scene coordinates.
+## [example]
+## ```
+## mesh dot = center{RIGHT * 2} Circle(0.2)
+## ```
+let RIGHT = 1r
+## [overview]
+## Unit vector pointing up in scene coordinates.
+let UP = 1u
+## [overview]
+## Unit vector pointing down in scene coordinates.
+let DOWN = 1d
+## [overview]
+## Unit vector pointing forward; with the default camera this is negative z.
+let FORWARD = 1f
+## [overview]
+## Unit vector pointing backward; with the default camera this is positive z, from the origin toward the camera.
+let BACKWARD = 1b
+
+# basis vectors
+## [overview]
+## X-axis basis vector, equal to RIGHT.
+let X_HAT = RIGHT
+## [overview]
+## Y-axis basis vector, equal to UP.
+let Y_HAT = UP
+## [overview]
+## Z-axis basis vector, equal to BACKWARD.
+let Z_HAT = BACKWARD
+
+# scalar functions
+## [overview]
+## Square root.
+let sqrt = |x| __monocurl__native__ sqrt(x)
+## [overview]
+## Cube root.
+let cbrt = |x| __monocurl__native__ cbrt(x)
+## [overview]
+## Exponential function e^x.
+let exp = |x| __monocurl__native__ exp(x)
+## [overview]
+## Natural logarithm.
+let ln = |x| __monocurl__native__ ln(x)
+## [overview]
+## Logarithm with optional base, defaulting to E.
+let log = |x, base = E| ln(x) / ln(base)
+## [overview]
+## Base-2 logarithm.
+let log2 = |x| log(x, 2)
+## [overview]
+## Base-10 logarithm.
+let log10 = |x| log(x, 10)
+
+## [overview]
+## Sine of an angle in radians.
+let sin = |x| __monocurl__native__ sin(x)
+## [overview]
+## Cosine of an angle in radians.
+let cos = |x| __monocurl__native__ cos(x)
+## [overview]
+## Tangent of an angle in radians.
+let tan = |x| __monocurl__native__ tan(x)
+## [overview]
+## Cotangent of an angle in radians.
+let cot = |x| 1 / tan(x)
+## [overview]
+## Secant of an angle in radians.
+let sec = |x| 1 / cos(x)
+## [overview]
+## Cosecant of an angle in radians.
+let csc = |x| 1 / sin(x)
+
+## [overview]
+## Inverse sine, returning radians.
+let arcsin = |x| __monocurl__native__ arcsin(x)
+## [overview]
+## Inverse cosine, returning radians.
+let arccos = |x| __monocurl__native__ arccos(x)
+## [overview]
+## Inverse tangent, returning radians.
+let arctan = |x| __monocurl__native__ arctan(x)
+## [overview]
+## Two-argument inverse tangent, returning radians.
+let arctan2 = |y, x| __monocurl__native__ arctan2(y, x)
+
+## [overview]
+## Hyperbolic sine.
+let sinh = |x| __monocurl__native__ sinh(x)
+## [overview]
+## Hyperbolic cosine.
+let cosh = |x| __monocurl__native__ cosh(x)
+## [overview]
+## Hyperbolic tangent.
+let tanh = |x| __monocurl__native__ tanh(x)
+
+## [overview]
+## Absolute value.
+let abs = |x| __monocurl__native__ abs(x)
+## [overview]
+## Sign of a number: -1, 0, or 1.
+let sign = |x| __monocurl__native__ sign(x)
+## [overview]
+## Largest integer not greater than x.
+let floor = |x| __monocurl__native__ floor(x)
+## [overview]
+## Smallest integer not less than x.
+let ceil = |x| __monocurl__native__ ceil(x)
+## [overview]
+## Round to the nearest integer.
+let round = |x| __monocurl__native__ round(x)
+## [overview]
+## Truncate fractional part.
+let trunc = |x| __monocurl__native__ trunc(x)
+## [overview]
+## Euclidean remainder of n divided by m.
+## [description]
+## The result has the sign of the divisor, so `mod(-1, 4)` returns `3`.
+let mod = |n, m| __monocurl__native__ mod_func(n, m)
+
+# pairwise min / max of numbers.
+## [overview]
+## Pairwise minimum of two numbers.
+let min = |a, b| __monocurl__native__ min(a, b)
+## [overview]
+## Pairwise maximum of two numbers.
+let max = |a, b| __monocurl__native__ max(a, b)
+
+# x pinned to [low, high].
+## [overview]
+## Pin x to the inclusive range [low, high].
+## [example]
+## ```
+## let opacity = clamp(0, raw_opacity, 1)
+## ```
+let clamp = |low, x, high| min(high, max(low, x))
+
+# common activation / util shapes.
+## [overview]
+## Rectified linear unit, max(0, x).
+let relu = |x| max(0, x)
+## [overview]
+## Logistic sigmoid.
+let sigmoid = |x| 1 / (1 + exp(-x))
+
+# combinatorics & integer utilities
+## [overview]
+## Factorial of a non-negative integer.
+let factorial = |n| __monocurl__native__ factorial(n)
+## [overview]
+## Number of ways to choose r items from n.
+## [description]
+## Returns 0 when `r < 0` or `r > n`.
+let choose = |n, r| __monocurl__native__ choose(n, r)
+## [overview]
+## Number of ordered arrangements of r items from n.
+## [description]
+## Returns 0 when `r < 0` or `r > n`.
+let permute = |n, r| __monocurl__native__ permute(n, r)
+## [overview]
+## Greatest common divisor.
+let gcd = |n, m| __monocurl__native__ gcd(n, m)
+## [overview]
+## Least common multiple.
+let lcm = |n, m| __monocurl__native__ lcm(n, m)
+## [overview]
+## Test whether n is prime.
+let is_prime = |n| __monocurl__native__ is_prime(n)
+
+# deterministic scene randomness backed by executor state. these may only be
+# called from the root frame; using them inside lambda bodies/defaults errors.
+## [options]
+## important: true
+## [overview]
+## Deterministic scene random float in [low, high].
+## [description]
+## Random helpers advance executor state and are only allowed in the root frame, not inside lambdas or default arguments. Re-running the same scene uses the same deterministic sequence.
+## [example]
+## ```
+## let jitter = random(-0.1, 0.1)
+## ```
+let random = |low = 0, high = 1| __monocurl__native__ random(low, high)
+## [options]
+## important: true
+## [overview]
+## Deterministic scene random integer in [low, high).
+## [description]
+## `high` is exclusive and must be greater than `low`. Like `random`, this can only be called from the root frame.
+let randint = |low, high|         __monocurl__native__ randint(low, high)
+
+# statistics
+## [overview]
+## Mean of a numeric list.
+let mean = |v| __monocurl__native__ mean(v)
+## [overview]
+## Variance of a numeric list.
+## [description]
+## Population variance: divides by `len(v)`, not `len(v) - 1`.
+let variance = |v| __monocurl__native__ variance(v)
+## [overview]
+## Standard deviation of a numeric list.
+let std_dev = |v| sqrt(variance(v))
+
+# vector operations
+# many obvious linear operations (u + v, c * u, -u) are built in as binary ops
+# over lists; these exposed natives are the ones that aren't element-wise.
+
+## [overview]
+## Dot product of two vectors.
+let dot = |u, v| __monocurl__native__ dot(u, v)
+## [overview]
+## Cross product of two 3-D vectors.
+let cross = |u, v| __monocurl__native__ cross(u, v)
+## [overview]
+## Euclidean length of a vector.
+let norm = |v| sqrt(dot(v, v))
+## [overview]
+## Unit vector in the same direction as v.
+## [description]
+## Does not guard against the zero vector.
+let normalize = |v| v * (1 / norm(v))
+# projection of u onto v.
+## [overview]
+## Projection of vector u onto vector v.
+let proj = |u, v| v * (dot(u, v) / dot(v, v))
+
+# angle between two vectors, in radians.
+## [overview]
+## Angle between two vectors, in radians.
+let angle_between = |u, v| arccos(dot(u, v) / (norm(u) * norm(v)))
+
+# interpolation
+# full interpolation: follows the rules described in Monocurl Language.md
+# (numbers, matching function invocations, operator embeds, elementwise lists).
+## [options]
+## important: true
+## [overview]
+## Interpolate between values according to Monocurl's value interpolation rules.
+## [description]
+## Rules are applied in order: equal values return the first value unchanged; numbers and complex numbers blend linearly; invoked operators are matched by operator-stack depth, with deeper chains peeled through their operator embed; matching invoked operators must use the same operator and labels, then lerp the operand and labeled arguments; matching live functions must call the same lambda with the same labels, then lerp labeled arguments and rerun the function; lists require equal length and maps require equal keys, then lerp elementwise. Differing unlabeled call arguments and unrelated non-numeric values are interpolation errors.
+## [example]
+## ```
+## let midway = lerp(LEFT, RIGHT, 0.5)
+## let purple = lerp(BLUE, MAGENTA, 0.5)
+## ```
+let lerp = |a, b, t| __monocurl__native__ lerp(a, b, t)
+
+# keyframes = [t0 -> v0, t1 -> v1, ...]; piecewise lerp across t.
+# maps are sorted by numeric key; the old [[t0, v0], ...] form is still accepted.
+## [options]
+## important: true
+## [overview]
+## Piecewise interpolation through keyed values.
+## [description]
+## Map keyframes are sorted by numeric key; the older `[[time, value], ...]` list form is still accepted. Values outside the first/last keyframe clamp to the endpoint value.
+## [parameters]
+## keyframes: map or list of t -> value pairs
+## t: normalized lookup point
+## [example]
+## ```
+## let col = keyframe_lerp([0 -> BLUE, 0.5 -> CYAN, 1 -> WHITE], phase)
+## ```
+let keyframe_lerp = |keyframes, t| __monocurl__native__ keyframe_lerp(keyframes, t)
+
+# map x linearly from [in_min, in_max] to [out_min, out_max].
+## [overview]
+## Remap x linearly from one interval into another.
+## [example]
+## ```
+## let opacity = map_range(frame, 0, 30, 0, 1)
+## ```
+let map_range = |x, in_min, in_max, out_min, out_max| out_min + (x - in_min) / (in_max - in_min) * (out_max - out_min)
+
+# degrees / radians conversions. (The `dg` literal suffix already produces
+# radians from a degree literal; these are for runtime values.)
+## [overview]
+## Convert degrees to radians.
+## [description]
+## Numeric literals can use the `dg` suffix; use this for runtime values.
+let deg_to_rad = |x| x * (PI / 180)
+## [overview]
+## Convert radians to degrees.
+let rad_to_deg = |x| x * (180 / PI)

@@ -1,0 +1,19 @@
+[package]
+name = "exporter"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+bytecode.workspace = true
+compiler.workspace = true
+executor.workspace = true
+image.workspace = true
+lexer.workspace = true
+mp4.workspace = true
+openh264.workspace = true
+parser.workspace = true
+renderer.workspace = true
+smol.workspace = true
+stdlib.workspace = true
+structs.workspace = true

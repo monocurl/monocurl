@@ -1,0 +1,14 @@
+[package]
+name = "compiler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+parser.workspace = true
+bytecode.workspace = true
+structs.workspace = true
+stdlib.workspace = true
+ui_cli_shared.workspace = true
+
+[dev-dependencies]
+lexer.workspace = true

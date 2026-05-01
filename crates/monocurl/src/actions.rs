@@ -1,0 +1,67 @@
+use gpui::actions;
+
+actions!(app, [Quit, OpenSettings]);
+
+actions!(
+    document,
+    [
+        SaveActiveDocumentCustomPath,
+        SaveActiveDocument,
+        CloseActiveDocument,
+        ExportImage,
+        ExportVideo
+    ]
+);
+
+actions!(
+    text_input,
+    [
+        Backspace,
+        Delete,
+        BackspaceWord,
+        BackspaceLine,
+        Enter,
+        Tab,
+        Untab,
+        ToggleComment,
+        Up,
+        Left,
+        Right,
+        Down,
+        SelectLeft,
+        SelectRight,
+        SelectUp,
+        SelectDown,
+        SelectAll,
+        Home,
+        End,
+        ShowCharacterPalette,
+        Paste,
+        Cut,
+        Copy,
+    ]
+);
+
+actions!(
+    editor,
+    [
+        Undo,
+        Redo,
+        UnfocusEditor,
+        ToggleHeadlessMode,
+        TogglePresentationMode,
+        ToggleParamsPanel,
+        ToggleTimelineConsole,
+        SyncViewportCamera,
+        PlayOrShowPauseHint,
+        TogglePlaying,
+        SceneStart,
+        SceneEnd,
+        PrevSlide,
+        NextSlide,
+        EpsilonForward,
+        EpsilonBackward,
+        ZoomIn,
+        ZoomOut,
+    ]
+);

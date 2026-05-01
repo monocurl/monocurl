@@ -1,0 +1,17 @@
+[package]
+name = "cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow.workspace = true
+compiler.workspace = true
+executor.workspace = true
+exporter.workspace = true
+latex.workspace = true
+lexer.workspace = true
+log.workspace = true
+parser.workspace = true
+renderer.workspace = true
+structs.workspace = true
+ui_cli_shared.workspace = true

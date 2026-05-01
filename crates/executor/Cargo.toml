@@ -1,0 +1,16 @@
+[package]
+name = "executor"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+capture_tos = []
+test_heap_tracking = []
+
+[dependencies]
+bytecode.workspace = true
+geo.workspace = true
+smallvec.workspace = true
+structs.workspace = true
+smol.workspace = true

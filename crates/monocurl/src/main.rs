@@ -1,0 +1,182 @@
+#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+
+use std::{borrow::Cow, env, process};
+
+use crate::{
+    actions::{
+        Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide,
+        OpenSettings, Paste, PrevSlide, Quit, Redo, SaveActiveDocument,
+        SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleHeadlessMode, TogglePlaying,
+        TogglePresentationMode, Undo,
+    },
+    editor::text_editor,
+    settings_window::SettingsWindow,
+    state::user_settings::UserSettings,
+    theme::ThemeSettings,
+    window::MonocurlWindow,
+};
+use gpui::*;
+use structs::assets::Assets;
+
+mod actions;
+#[cfg(not(target_os = "macos"))]
+mod app_menu_bar;
+mod components;
+mod document_view;
+mod editor;
+mod home_view;
+mod navbar_view;
+mod services;
+mod settings_window;
+mod state;
+mod theme;
+mod timeline;
+mod viewport;
+mod window;
+
+pub struct MonocurlLauncher;
+
+impl MonocurlLauncher {
+    fn clean_latex_file_cache() {
+        if let Err(error) = latex::clean_stale_file_cache() {
+            log::warn!("unable to clean stale LaTeX SVG cache: {error:#}");
+        }
+    }
+
+    fn setup_fonts(cx: &mut App) {
+        cx.text_system()
+            .add_fonts(vec![
+                Cow::Owned(std::fs::read(Assets::font("IBMPlexMono-Regular.ttf")).unwrap()),
+                Cow::Owned(std::fs::read(Assets::font("IBMPlexMono-Italic.ttf")).unwrap()),
+            ])
+            .unwrap();
+
+        cx.text_system()
+            .add_fonts(vec![Cow::Owned(
+                std::fs::read(Assets::font("Lilex-Regular.ttf")).unwrap(),
+            )])
+            .unwrap();
+    }
+
+    fn setup_global_actions(cx: &mut App) {
+        cx.on_action(|_: &Quit, cx| cx.quit());
+        cx.on_action(|_: &OpenSettings, cx| SettingsWindow::open(cx));
+        cx.bind_keys([
+            KeyBinding::new("cmd-q", Quit, None),
+            KeyBinding::new("secondary-,", OpenSettings, None),
+        ]);
+    }
+
+    fn setup_menus(cx: &mut App) {
+        cx.set_menus(vec![
+            Menu {
+                name: "Monocurl".into(),
+                items: vec![
+                    #[cfg(target_os = "macos")]
+                    MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
+                    MenuItem::separator(),
+                    MenuItem::action("Quit Monocurl", Quit),
+                ],
+            },
+            Menu {
+                name: "File".into(),
+                items: vec![
+                    MenuItem::action("Settings...", OpenSettings),
+                    MenuItem::separator(),
+                    MenuItem::action("Save", SaveActiveDocument),
+                    MenuItem::action("Save As", SaveActiveDocumentCustomPath),
+                    MenuItem::separator(),
+                    MenuItem::action("Export as Image", ExportImage),
+                    MenuItem::action("Export as Video", ExportVideo),
+                    MenuItem::separator(),
+                    MenuItem::action("Present", TogglePresentationMode),
+                    MenuItem::action("Toggle Headless Mode", ToggleHeadlessMode),
+                ],
+            },
+            Menu {
+                name: "Edit".into(),
+                items: vec![
+                    MenuItem::os_action("Undo", Undo, OsAction::Undo),
+                    MenuItem::os_action("Redo", Redo, OsAction::Redo),
+                    MenuItem::separator(),
+                    MenuItem::os_action("Cut", Cut, OsAction::Cut),
+                    MenuItem::os_action("Copy", Copy, OsAction::Copy),
+                    MenuItem::os_action("Paste", Paste, OsAction::Paste),
+                ],
+            },
+            Menu {
+                name: "Editor".into(),
+                items: vec![
+                    MenuItem::action("Toggle Playing", TogglePlaying),
+                    MenuItem::action("Epsilon Forward", EpsilonForward),
+                    MenuItem::action("Epsilon Backward", EpsilonBackward),
+                    MenuItem::action("Next Slide", NextSlide),
+                    MenuItem::action("Previous Slide", PrevSlide),
+                    MenuItem::action("Scene Start", SceneStart),
+                    MenuItem::action("Scene End", SceneEnd),
+                ],
+            },
+            Menu {
+                name: "Help".into(),
+                items: vec![],
+            },
+        ]);
+    }
+
+    fn setup_modules(cx: &mut App) {
+        document_view::init(cx);
+        text_editor::init(cx);
+    }
+
+    fn create_window(cx: &mut App) {
+        let restore_bounds = Bounds::centered(None, size(px(1280.0), px(720.0)), cx);
+        let options = WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some("Monocurl".into()),
+                ..Default::default()
+            }),
+            window_bounds: Some(WindowBounds::Maximized(restore_bounds)),
+            window_min_size: Some(size(px(520.), px(420.))),
+            focus: true,
+            ..Default::default()
+        };
+        cx.open_window(options, |window, cx| {
+            cx.new(|cx| MonocurlWindow::new(window, cx))
+        })
+        .unwrap();
+
+        cx.on_window_closed(|cx| {
+            if cx.windows().is_empty() {
+                cx.quit();
+            }
+        })
+        .detach();
+    }
+
+    fn launch() {
+        Self::clean_latex_file_cache();
+
+        Application::new().run(|cx: &mut App| {
+            Self::setup_fonts(cx);
+            ThemeSettings::init(cx);
+            UserSettings::init(cx);
+            Self::setup_modules(cx);
+            Self::setup_global_actions(cx);
+            Self::setup_menus(cx);
+            Self::create_window(cx);
+        });
+    }
+}
+
+fn main() {
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Info)
+        .init();
+
+    let args = env::args_os().skip(1).collect::<Vec<_>>();
+    if !args.is_empty() {
+        process::exit(cli::run(args));
+    }
+
+    MonocurlLauncher::launch();
+}
