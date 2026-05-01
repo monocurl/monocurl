@@ -78,13 +78,10 @@ impl AppMenuBar {
             OwnedMenuItem::Action {
                 name,
                 action,
-                checked,
                 ..
             } => {
-                let label = if checked { format!("* {name}") } else { name };
-
                 div()
-                    .id(format!("menu-item-{label}"))
+                    .id((ElementId::from("menu-item"), name.clone()))
                     .w_full()
                     .px_3()
                     .py_1()
@@ -95,7 +92,7 @@ impl AppMenuBar {
                         let hover = theme.row_hover_overlay;
                         move |this| this.bg(hover)
                     })
-                    .child(label)
+                    .child(name)
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_menu = None;
                         window.prevent_default();
@@ -106,7 +103,7 @@ impl AppMenuBar {
                     .into_any_element()
             }
             OwnedMenuItem::Submenu(submenu) => div()
-                .id(format!("menu-submenu-{}", submenu.name))
+                .id((ElementId::from("menu-submenu"), submenu.name.clone()))
                 .w_full()
                 .px_3()
                 .py_1()
@@ -137,14 +134,14 @@ impl AppMenuBar {
         let popup = is_open.then(|| self.render_menu_popup(menu.clone(), weak_bar, cx));
 
         div()
-            .id(format!("menu-{label}"))
+            .id((ElementId::from("menu"), label.clone()))
             .relative()
             .h_full()
             .flex()
             .items_center()
             .child(
                 div()
-                    .id(format!("menu-trigger-{label}"))
+                    .id((ElementId::from("menu-trigger"), label.clone()))
                     .px_3()
                     .h_full()
                     .flex()
@@ -192,7 +189,7 @@ impl AppMenuBar {
         let theme = ThemeSettings::theme(cx);
 
         div()
-            .id(format!("open-menu-{}", menu.name))
+            .id((ElementId::from("open-menu"), menu.name.clone()))
             .absolute()
             .top(px(MENU_BAR_HEIGHT))
             .left(px(0.0))
