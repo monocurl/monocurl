@@ -84,8 +84,12 @@ let CLEAR = [0.0, 0.0, 0.0, 0]
 let rgb = |r, g, b, a = 1| [r, g, b, a]
 
 # h in [0, 1], s, v, a in [0, 1].
+## [options]
+## important: true
 ## [overview]
 ## Build an RGBA color from HSV components.
+## [description]
+## Hue wraps modulo 1, so `hsv(1.1, s, v)` is the same hue as `hsv(0.1, s, v)`.
 ## [parameters]
 ## h: hue wrapped over [0, 1]
 ## s: saturation in [0, 1]
@@ -110,11 +114,12 @@ let hsv = |h, s, v, a = 1| __monocurl__native__ hsv(h, s, v, a)
 let gray_shade = |v, a = 1| [v, v, v, a]
 
 # replace the alpha component of a color.
+## [options]
+## important: true
 ## [overview]
 ## Return a color with the same RGB channels and a new alpha component.
-## [parameters]
-## target: source RGBA color
-## a: replacement alpha component
+## [description]
+## This is an operator so it composes naturally inside styling, for example `fill{alpha{0.16} BLUE}`.
 ## [example]
 ## ```mcl image
 ## mesh disk = fill{alpha{0.16} BLUE} Circle(1)

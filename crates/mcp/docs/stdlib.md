@@ -5,6 +5,11 @@ language-level wrappers over native runtime functions. Prefer these wrappers
 when authoring scenes; calls named `__monocurl__native__ ...` are
 implementation details.
 
+For exact signatures, examples, and per-function notes, read the raw wrapper
+resources under `monocurl://stdlib/*`. Those files contain structured `##`
+documentation blocks next to the public wrapper definitions, and are usually
+the best reference when authoring or debugging a scene.
+
 Most scenes import the full public surface:
 
 ```monocurl
@@ -37,11 +42,22 @@ import std.scene
 - Construct geometry first, then place/style/tag it with operators such as
   `center`, `shift`, `fill`, `stroke`, `tag`, `scale`, `rotate`, `to_side`,
   and `to_corner`.
+- Most primitive meshes are canonical and origin-based. Use `shift`/`center`
+  for placement, and use `in_space{origin, x_unit, y_unit, z_unit}` when a mesh
+  is authored in a local coordinate system such as graph axes and must be
+  embedded into the global scene.
 - `mesh` and `param` declarations create leaders whose follower values can be
   animated. Pass references like `&title` to animations.
 - Animation helpers eventually lower to primitive animations such as `Wait`,
   `Set`, and `Lerp`. Higher-level helpers like `Grow`, `Fade`, `Write`,
   `Trans`, `TagTrans`, `Bend`, and `CameraLerp` are the preferred public API.
+- Use `Lerp` when the leader and follower are the same live expression shape.
+  Use `Trans`/`TagTrans` for mesh topology changes, and use `CameraLerp` for
+  camera movement because it interpolates camera orientation more smoothly than
+  a structural value `Lerp`.
+- `uprank` and `downrank` change mesh topology rank: dots to lines to filled
+  surfaces, and back down to boundaries/dots. They are geometry tools, not
+  z-order controls.
 - Text-like constructors are `Text`, `Tex`, and `Latex`. Use `text_tag{...}`
   when fragments need stable tags for later transforms.
 - Scene-level `background` and `camera` are ordinary top-level names with

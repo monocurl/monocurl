@@ -3,25 +3,36 @@
 
 # identity function; useful as a default key / mapper.
 ## [overview]
-## Return the input unchanged.
+## Return the input unchanged, usually as a default mapper or sort key.
+## [example]
+## ```
+## let same = map(values, identity)
+## ```
 let identity = |x| x
 
 # build [start, start + step, ..., last < stop]; step defaults to 1.
+## [options]
+## important: true
 ## [overview]
-## Build a half-open numeric range.
+## Build a half-open numeric range, optimized by the compiler in simple `for` loops.
+## [description]
+## `range(start, stop, step)` includes `start` and stops before `stop`; a negative step counts down and a zero step is an error. When all three inputs are integral, the returned values are integers.
 ## [parameters]
-## start: first value
-## stop: exclusive upper bound
-## step: increment, default 1
+## step: increment; may be negative, but not zero
 ## [example]
 ## ```
 ## for (i in range(0, 4)) { print i }
+## for (i in range(3, -1, -1)) { print i }
 ## ```
 let range = |start, stop, step = 1| __monocurl__native__ range(start, stop, step)
 
 # sample_count uniformly spaced values from start through stop.
+## [options]
+## important: true
 ## [overview]
 ## Build uniformly spaced samples including both endpoints.
+## [description]
+## Use this for plotted sample points where the final endpoint must be present. `sample(a, b, 1)` returns `[a]`, not `[b]`.
 ## [example]
 ## ```
 ## let xs = sample(-2, 2, 9)
@@ -31,11 +42,21 @@ let sample = |start, stop, sample_count| __monocurl__native__ sample(start, stop
 # sample_count uniformly spaced values from start up to, but not including, stop.
 ## [overview]
 ## Build uniformly spaced samples including start but excluding stop.
+## [description]
+## Useful for periodic samples where including both endpoints would duplicate the seam.
+## [example]
+## ```
+## let angles = sample_clopen(0, TAU, 12)
+## ```
 let sample_clopen = |start, stop, sample_count| __monocurl__native__ sample_clopen(start, stop, sample_count)
 
 # n copies of item.
 ## [overview]
 ## Build a list containing n copies of item.
+## [example]
+## ```
+## let placeholders = const_list([], 3)
+## ```
 let const_list = |item, n| {
     var out = []
     for (i in range(0, n)) { out .= item }
@@ -45,16 +66,22 @@ let const_list = |item, n| {
 # element count of a list, map, or string.
 ## [overview]
 ## Return the length of a list, map, or string.
+## [description]
+## String length counts characters, not bytes.
 let len = |container| __monocurl__native__ len(container)
 
-# reverse a list, map iteration order, or string.
+# reverse a list or string.
 ## [overview]
-## Reverse a list, map iteration order, or string.
+## Reverse a list or string.
 let reverse = |v| __monocurl__native__ reverse(v)
 
 # stable sort; a key lambda may be supplied for custom orderings.
+## [options]
+## important: true
 ## [overview]
 ## Stable sort with an optional key function.
+## [description]
+## The key lambda is evaluated once per element; elements with equal keys keep their input order.
 ## [example]
 ## ```
 ## let ordered = sort(points, |p| p[0])
@@ -62,11 +89,10 @@ let reverse = |v| __monocurl__native__ reverse(v)
 let sort = |v, key = identity| __monocurl__native__ sort(v, key)
 
 # apply f to every element, returning a new list.
+## [options]
+## important: true
 ## [overview]
 ## Map a function over a list.
-## [parameters]
-## v: input list
-## f: function applied to each element
 ## [example]
 ## ```
 ## let dots = map(sample(-1, 1, 5), |x| center{[x, 0, 0]} Dot())
@@ -78,6 +104,8 @@ let map = |v, f| {
 }
 
 # keep only elements satisfying predicate.
+## [options]
+## important: true
 ## [overview]
 ## Keep only elements for which predicate returns truthy.
 ## [example]
@@ -95,6 +123,8 @@ let filter = |v, predicate| {
 # left fold with seed: reduce([a, b, c], seed, f) = f(f(f(seed, a), b), c).
 ## [overview]
 ## Fold a list from left to right with an explicit seed.
+## [description]
+## `reduce([a, b, c], seed, f)` evaluates like `f(f(f(seed, a), b), c)`.
 ## [example]
 ## ```
 ## let total = reduce(values, 0, |acc, x| acc + x)
@@ -116,7 +146,11 @@ let zip = |u, v| __monocurl__native__ zip(u, v)
 
 # [[0, v[0]], [1, v[1]], ...]
 ## [overview]
-## Pair every list element with its index.
+## Pair every list element with its zero-based index.
+## [example]
+## ```
+## for ([i, piece] in enumerate(pieces)) { print [i, piece] }
+## ```
 let enumerate = |v| __monocurl__native__ enumerate(v)
 
 # true when every element is truthy.
@@ -147,6 +181,10 @@ let count = |v, predicate| {
 # sum of elements — works for numbers and (element-wise) for lists.
 ## [overview]
 ## Sum a list; list values are added element-wise by the language.
+## [example]
+## ```
+## let centroid = sum(points) / len(points)
+## ```
 let sum = |v| {
     var s = 0
     for (x in v) { s = s + x }
@@ -165,40 +203,62 @@ let product = |v| {
 # max / min of a non-empty list. For pairwise use math.max / math.min.
 ## [overview]
 ## Maximum element of a non-empty list, optionally by key.
+## [description]
+## Errors on an empty list. Use `std.math.max(a, b)` for pairwise numeric maximum.
 let max_of = |v, key = identity| __monocurl__native__ max_of(v, key)
 ## [overview]
 ## Minimum element of a non-empty list, optionally by key.
+## [description]
+## Errors on an empty list. Use `std.math.min(a, b)` for pairwise numeric minimum.
 let min_of = |v, key = identity| __monocurl__native__ min_of(v, key)
 
 # map helpers
 ## [overview]
-## Keys from a map.
+## Keys from a map in insertion order.
 let map_keys = |m| __monocurl__native__ map_keys(m)
 ## [overview]
-## Values from a map.
+## Values from a map in insertion order.
 let map_values = |m| __monocurl__native__ map_values(m)
 ## [overview]
-## Key/value pairs from a map.
+## Key/value pairs from a map in insertion order.
+## [example]
+## ```
+## for ([key, value] in map_items(stats)) { print [key, value] }
+## ```
 let map_items = |m| __monocurl__native__ map_items(m)
 
 # first n elements of a list.
 ## [overview]
 ## First n elements of a list.
+## [description]
+## Negative counts are treated as zero.
 let take = |v, n| __monocurl__native__ take(v, n)
 
 # list with the first n elements removed.
 ## [overview]
 ## List with the first n elements removed.
+## [description]
+## Negative counts are treated as zero.
 let drop = |v, n| __monocurl__native__ drop(v, n)
 
 # subset by index list: ret[i] = src[indexes[i]]
 ## [overview]
 ## Select list elements by index list.
+## [description]
+## Indexes are zero-based and must be in bounds; duplicates are allowed and preserve the order of `indexes`.
+## [example]
+## ```
+## let corners = list_subset(points, [0, 2, 3])
+## ```
 let list_subset = |src, indexes| __monocurl__native__ list_subset(src, indexes)
 
 # concatenate one level of nesting.
 ## [overview]
 ## Concatenate one level of nested lists.
+## [example]
+## ```
+## let all_terms = flatten(rows)
+## ```
 let flatten = |v| {
     var out = []
     for (x in v) {
@@ -209,7 +269,9 @@ let flatten = |v| {
 
 # maximum nesting depth of a list (0 for atoms).
 ## [overview]
-## Maximum nesting depth of a value.
+## Maximum list nesting depth of a value.
+## [description]
+## Atoms have depth 0; `[1, 2]` has depth 1.
 let depth = |v| __monocurl__native__ depth(v)
 
 # string utilities
@@ -230,17 +292,25 @@ let str_upper = |s| __monocurl__native__ str_upper(s)
 let str_lower = |s| __monocurl__native__ str_lower(s)
 ## [overview]
 ## Join strings with a separator.
+## [example]
+## ```
+## let label = str_join(["x", "y", "z"], ", ")
+## ```
 let str_join = |parts, sep = ""| __monocurl__native__ str_join(parts, sep)
 
 # type coercion
 ## [overview]
 ## Convert a value to a string.
+## [description]
+## Uses the same stringification rules as text constructors, so lists become concatenated text fragments.
 let to_string = |x| __monocurl__native__ to_string(x)
 ## [overview]
-## Convert a value to an integer.
+## Convert an integer, float, or numeric string to an integer.
+## [description]
+## Float conversion truncates toward zero; strings are trimmed before parsing.
 let to_int = |x| __monocurl__native__ to_int(x)
 ## [overview]
-## Convert a value to a float.
+## Convert an integer, float, or numeric string to a float.
 let to_float = |x| __monocurl__native__ to_float(x)
 
 # real / imaginary parts; non-complex numbers have zero imaginary part.
@@ -257,13 +327,15 @@ let imag = |x| __monocurl__native__ imag(x)
 ## Runtime type name for a value.
 let type_of = |x| __monocurl__native__ type_of(x)
 ## [overview]
-## Test whether a live call has a named argument attribute.
+## Test whether a live function/operator value has a named argument attribute.
 let has_attr = |x, name| __monocurl__native__ has_attr(x, name)
 ## [overview]
-## Read a named live-call argument attribute.
+## Read a named argument attribute from a live function/operator value.
 let get_attr = |x, name| __monocurl__native__ get_attr(x, name)
 ## [overview]
 ## Return a value with a named live-call argument changed.
+## [description]
+## This is the dynamic form of `ball.radius = 0.8`; it returns the updated value so it works inside expressions.
 ## [example]
 ## ```
 ## ball = set_attr(ball, "radius", 0.8)
@@ -271,17 +343,25 @@ let get_attr = |x, name| __monocurl__native__ get_attr(x, name)
 let set_attr = |x, name, value| __monocurl__native__ set_attr(x, name, value)
 ## [overview]
 ## Read callable default arguments.
+## [description]
+## Returns the names that can be pre-filled with `set_default` or `set_defaults`.
 let get_defaults = |x| __monocurl__native__ get_defaults(x)
 ## [overview]
 ## Pre-fill one named default argument on a callable target.
 ## [description]
-## This is mainly for building configuration operators such as axis_style.
+## This is mainly for building configuration operators such as `axis_style`. Because it is an operator, it interpolates from the callable's original default to the replacement during `Lerp`.
+## [example]
+## ```
+## play set_default{"similar_topo_hint", 1} TagTrans(1.5, [&shape])
+## ```
 let set_default = operator |target, name, value| {
     let go = |level| __monocurl__native__ set_default(target, name, value, level)
     return [go(level: 0), go(level: 1)]
 }
 ## [overview]
 ## Pre-fill multiple named default arguments on a callable target.
+## [description]
+## Map keys must be strings naming defaults on the target.
 let set_defaults = operator |target, defaults| {
     let go = |level| __monocurl__native__ set_defaults(target, defaults, level)
     return [go(level: 0), go(level: 1)]

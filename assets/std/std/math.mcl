@@ -50,7 +50,7 @@ let DOWN = 1d
 ## Unit vector pointing forward; with the default camera this is negative z.
 let FORWARD = 1f
 ## [overview]
-## Unit vector pointing backward; with the default camera this is positive z.
+## Unit vector pointing backward; with the default camera this is positive z, from the origin toward the camera.
 let BACKWARD = 1b
 
 # basis vectors
@@ -79,9 +79,6 @@ let exp = |x| __monocurl__native__ exp(x)
 let ln = |x| __monocurl__native__ ln(x)
 ## [overview]
 ## Logarithm with optional base, defaulting to E.
-## [parameters]
-## x: value to evaluate
-## base: logarithm base, default E
 let log = |x, base = E| ln(x) / ln(base)
 ## [overview]
 ## Base-2 logarithm.
@@ -151,7 +148,9 @@ let round = |x| __monocurl__native__ round(x)
 ## Truncate fractional part.
 let trunc = |x| __monocurl__native__ trunc(x)
 ## [overview]
-## Remainder of n divided by m.
+## Euclidean remainder of n divided by m.
+## [description]
+## The result has the sign of the divisor, so `mod(-1, 4)` returns `3`.
 let mod = |n, m| __monocurl__native__ mod_func(n, m)
 
 # pairwise min / max of numbers.
@@ -165,10 +164,6 @@ let max = |a, b| __monocurl__native__ max(a, b)
 # x pinned to [low, high].
 ## [overview]
 ## Pin x to the inclusive range [low, high].
-## [parameters]
-## low: lower bound
-## x: value to clamp
-## high: upper bound
 ## [example]
 ## ```
 ## let opacity = clamp(0, raw_opacity, 1)
@@ -189,9 +184,13 @@ let sigmoid = |x| 1 / (1 + exp(-x))
 let factorial = |n| __monocurl__native__ factorial(n)
 ## [overview]
 ## Number of ways to choose r items from n.
+## [description]
+## Returns 0 when `r < 0` or `r > n`.
 let choose = |n, r| __monocurl__native__ choose(n, r)
 ## [overview]
 ## Number of ordered arrangements of r items from n.
+## [description]
+## Returns 0 when `r < 0` or `r > n`.
 let permute = |n, r| __monocurl__native__ permute(n, r)
 ## [overview]
 ## Greatest common divisor.
@@ -205,18 +204,23 @@ let is_prime = |n| __monocurl__native__ is_prime(n)
 
 # deterministic scene randomness backed by executor state. these may only be
 # called from the root frame; using them inside lambda bodies/defaults errors.
+## [options]
+## important: true
 ## [overview]
 ## Deterministic scene random float in [low, high].
 ## [description]
-## Random helpers use executor state and should be called from the root frame, not inside lambdas or defaults.
-## [parameters]
-## low: lower bound, default 0
-## high: upper bound, default 1
+## Random helpers advance executor state and are only allowed in the root frame, not inside lambdas or default arguments. Re-running the same scene uses the same deterministic sequence.
+## [example]
+## ```
+## let jitter = random(-0.1, 0.1)
+## ```
 let random = |low = 0, high = 1| __monocurl__native__ random(low, high)
+## [options]
+## important: true
 ## [overview]
-## Deterministic scene random integer in [low, high].
+## Deterministic scene random integer in [low, high).
 ## [description]
-## Random helpers use executor state and should be called from the root frame, not inside lambdas or defaults.
+## `high` is exclusive and must be greater than `low`. Like `random`, this can only be called from the root frame.
 let randint = |low, high|         __monocurl__native__ randint(low, high)
 
 # statistics
@@ -225,6 +229,8 @@ let randint = |low, high|         __monocurl__native__ randint(low, high)
 let mean = |v| __monocurl__native__ mean(v)
 ## [overview]
 ## Variance of a numeric list.
+## [description]
+## Population variance: divides by `len(v)`, not `len(v) - 1`.
 let variance = |v| __monocurl__native__ variance(v)
 ## [overview]
 ## Standard deviation of a numeric list.
@@ -245,6 +251,8 @@ let cross = |u, v| __monocurl__native__ cross(u, v)
 let norm = |v| sqrt(dot(v, v))
 ## [overview]
 ## Unit vector in the same direction as v.
+## [description]
+## Does not guard against the zero vector.
 let normalize = |v| v * (1 / norm(v))
 # projection of u onto v.
 ## [overview]
@@ -265,13 +273,10 @@ let angle_between = |u, v| arccos(dot(u, v) / (norm(u) * norm(v)))
 ## Interpolate between values according to Monocurl's value interpolation rules.
 ## [description]
 ## Rules are applied in order: equal values return the first value unchanged; numbers and complex numbers blend linearly; invoked operators are matched by operator-stack depth, with deeper chains peeled through their operator embed; matching invoked operators must use the same operator and labels, then lerp the operand and labeled arguments; matching live functions must call the same lambda with the same labels, then lerp labeled arguments and rerun the function; lists require equal length and maps require equal keys, then lerp elementwise. Differing unlabeled call arguments and unrelated non-numeric values are interpolation errors.
-## [parameters]
-## a: start value
-## b: end value
-## t: normalized interpolation amount
 ## [example]
 ## ```
 ## let midway = lerp(LEFT, RIGHT, 0.5)
+## let purple = lerp(BLUE, MAGENTA, 0.5)
 ## ```
 let lerp = |a, b, t| __monocurl__native__ lerp(a, b, t)
 
@@ -279,6 +284,8 @@ let lerp = |a, b, t| __monocurl__native__ lerp(a, b, t)
 # maps are sorted by numeric key; the old [[t0, v0], ...] form is still accepted.
 ## [overview]
 ## Piecewise interpolation through keyed values.
+## [description]
+## Map keyframes are sorted by numeric key; the older `[[time, value], ...]` list form is still accepted. Values outside the first/last keyframe clamp to the endpoint value.
 ## [parameters]
 ## keyframes: map or list of t -> value pairs
 ## t: normalized lookup point
@@ -291,12 +298,18 @@ let keyframe_lerp = |keyframes, t| __monocurl__native__ keyframe_lerp(keyframes,
 # map x linearly from [in_min, in_max] to [out_min, out_max].
 ## [overview]
 ## Remap x linearly from one interval into another.
+## [example]
+## ```
+## let opacity = map_range(frame, 0, 30, 0, 1)
+## ```
 let map_range = |x, in_min, in_max, out_min, out_max| out_min + (x - in_min) / (in_max - in_min) * (out_max - out_min)
 
 # degrees / radians conversions. (The `dg` literal suffix already produces
 # radians from a degree literal; these are for runtime values.)
 ## [overview]
 ## Convert degrees to radians.
+## [description]
+## Numeric literals can use the `dg` suffix; use this for runtime values.
 let deg_to_rad = |x| x * (PI / 180)
 ## [overview]
 ## Convert radians to degrees.
