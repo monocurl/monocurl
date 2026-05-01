@@ -49,6 +49,7 @@ let CellAt = |x, y, value, frontier, path| {
     }
 
     return 
+        tag{[x,y]}
         center{cell_center(x, y)}
         fill{lerp(WHITE, fill_color, 0.25)}
         stroke{stroke_color, 1.4}
@@ -65,7 +66,7 @@ let PrevArrows = |prev, dist, path| block {
         var col = GRAY
         if (contains_point(x, y, path)) { col = GREEN }
 
-        return color{col} Arrow(tail, tip)
+        return tag{[100, x, y]} color{col} Arrow(tail, tip)
     }
 
     for (y in range(0, H)) {
