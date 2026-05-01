@@ -42,6 +42,8 @@ let Circle = |radius, samples = 64|
 let Annulus = |inner, outer|
     __monocurl__native__ mk_annulus(inner, outer)
 
+## [options]
+## important: true
 ## [overview]
 ## A square centered at the origin with sides parallel to the axes.
 ## [example]
@@ -51,6 +53,8 @@ let Annulus = |inner, outer|
 let Square = |width|
     __monocurl__native__ mk_square(width)
 
+## [options]
+## important: true
 ## [overview]
 ## An axis-aligned rectangle centered at the origin.
 ## [parameters]
@@ -117,12 +121,16 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
 ## [description]
 ## `path_arc` bends the shaft by rotating along a circular arc instead of a straight segment. Its sign is relative to `normal`; use `0` for a straight arrow.
 ## [parameters]
+## start: tail position, default origin
+## end: tip position, default [1, 0, 0]
 ## normal: preferred plane normal for the arrow body
 ## path_arc: signed arc angle in radians, default 0
 ## [example]
 ## ```
 ## mesh curved = color{ORANGE} Arrow(1.2l, 1.2r, 1b, PI / 3)
 ## ```
+## [options]
+## important: true
 let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0|
     __monocurl__native__ mk_arrow(start, end, normal, path_arc)
 
@@ -279,6 +287,8 @@ let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1b|
 ## [description]
 ## The image is rendered as a textured upright rectangle in the XY plane. `name` may be a bundled asset name or a project-relative path resolved by the runtime.
 ## [parameters]
+## name: image asset name or path, relative to the currently invoked scene or library
+## center: image center
 ## size: `[width, height]`
 ## [example]
 ## ```
@@ -296,13 +306,17 @@ let Image = |name, center = [0, 0, 0], size = [1, 1]| {
 ## [description]
 ## By default each visible cell gets one flat color sampled at the cell corner. Pass `smooth = 1` to color vertices for smooth interpolation, or pass a callable as the fourth argument to use it as the mask while keeping flat colors. `color_at` receives `(pos, [ix, iy])`; `mask` receives `pos`.
 ## [parameters]
+## color_at: function from cell 3d position and 2d index to RGBA color
 ## x_min_max_samples: `[x_min, x_max, samples]`
 ## y_min_max_samples: `[y_min, y_max, samples]`
-## smooth: truthy for vertex color interpolation, or a mask function
+## smooth: truthy for vertex color interpolation, falsey for flat cells, or a mask function
+## mask: optional function deciding which positions render
 ## [example]
 ## ```
 ## mesh heat = ColorGrid(|p, idx| hsv(norm(p) / 2, 0.7, 0.9), [-2, 2, 60], [-1, 1, 30])
 ## ```
+## [options]
+## important: true
 let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], smooth = 0, mask = |pos| 1| {
     var actual_smooth = smooth
     var actual_mask = mask
@@ -333,6 +347,8 @@ let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = 
 ## ```
 ## mesh grid = stroke{LIGHT_GRAY} LineGrid([-2, 2, 9], [-1, 1, 5])
 ## ```
+## [options]
+## important: true
 let LineGrid = |x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], subdivision = 16| {
     var x_min = 0
     var x_max = 0
@@ -350,12 +366,16 @@ let LineGrid = |x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21]
 ## [description]
 ## `mesh_at` receives `(pos, [ix, iy])`; `mask` receives `pos`. Calls are batched internally, so this is the preferred way to build repeated arrows/glyphs on a grid.
 ## [parameters]
+## mesh_at: function from position and index to a mesh
 ## x_min_max_samples: `[x_min, x_max, samples]`
 ## y_min_max_samples: `[y_min, y_max, samples]`
+## mask: optional function deciding which subset of cells to include
 ## [example]
 ## ```
 ## mesh arrows = Field(|p, idx| Arrow(p, p + 0.2 * normalize(p)), [-2, 2, 12], [-1, 1, 7])
 ## ```
+## [options]
+## important: true
 let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], mask = |pos| 1| {
     var x_min = 0
     var x_max = 0
@@ -424,6 +444,8 @@ let Brace = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_brace(targ
 ## ```
 ## mesh width = [seg, Measure(seg, DOWN), Label(seg, "w", DOWN)]
 ## ```
+## [options]
+## important: true
 let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(target, dir, buffer)
 
 ## [overview]
@@ -959,6 +981,8 @@ let revolve = operator |target, rotation, filter = nil| [__monocurl__native__ op
 ## ```
 ## mesh title = center{1.2u} Text("Title", 0.8)
 ## ```
+## [options]
+## important: true
 let center = operator |target, center, filter = nil| {
     let go = |level| __monocurl__native__ op_centered(target, center, filter, level)
     return [go(level: 0), go(level: 1)]
@@ -990,6 +1014,8 @@ let camera_transfer = operator |target, original_camera, live_camera, filter = n
 ## ```
 ## mesh caption = to_side{DOWN, 0.2} Text("caption", 0.5)
 ## ```
+## [options]
+## important: true
 let to_side = operator |target, dir = [0, 0, 0], buffer = 0.1, camera = nil, filter = nil| {
     let go = |level| __monocurl__native__ op_to_side(target, dir, buffer, camera, filter, level)
     return [go(level: 0), go(level: 1)]
@@ -1002,6 +1028,8 @@ let to_side = operator |target, dir = [0, 0, 0], buffer = 0.1, camera = nil, fil
 ## ```
 ## mesh badge = to_corner{UP + RIGHT, 0.2} Text("1")
 ## ```
+## [options]
+## important: true
 let to_corner = operator |target, dir = [1, 1, 0], buffer = 0.1, camera = nil, filter = nil| {
     let go = |level| __monocurl__native__ op_to_corner(target, dir, buffer, camera, filter, level)
     return [go(level: 0), go(level: 1)]
@@ -1024,6 +1052,8 @@ let matched_edge = operator |target, ref, dir, filter = nil| {
 ## ```
 ## mesh label = next_to{base, RIGHT, 0.2} Text("area")
 ## ```
+## [options]
+## important: true
 let next_to = operator |target, ref, dir = 1r, buffer = 0.1, filter = nil| {
     let go = |level| __monocurl__native__ op_next_to(target, ref, dir, buffer, filter, level)
     return [go(level: 0), go(level: 1)]
@@ -1063,6 +1093,8 @@ let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 
 ## ```
 ## mesh selected = tag_filter{|tags| 2 in tags} group
 ## ```
+## [options]
+## important: true
 let tag_filter = operator |target, filter| [target, __monocurl__native__ tag_filter(target, filter)]
 ## [overview]
 ## Split a mesh into [matching, non_matching] by tag filter.

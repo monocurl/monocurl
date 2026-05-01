@@ -100,6 +100,8 @@ let elastic = |t| __monocurl__native__ rate_elastic(t)
 # animations eventually decompose into one of these.
 
 # do nothing for `time` seconds.
+## [options]
+## important: true
 ## [overview]
 ## Reserve time on the current slide without changing any followers.
 ## [description]
@@ -118,8 +120,13 @@ let Wait = |time = 1| __monocurl__native__ wait(time)
 ## [description]
 ## Passing `[]` asks Monocurl to snap every dirty leader. Pass explicit references in larger scenes to avoid syncing unrelated state.
 ## [example]
-## ```
-## mesh dot = Circle(0.2)
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh dot = fill{CYAN} Circle(0.2)
+## slide "set"
+## play Set([&dot])
+## play Wait(1)
+## dot = fill{ORANGE} Square(0.4)
 ## play Set([&dot])
 ## ```
 let Set = |vars = []| __monocurl__native__ set(vars)
@@ -158,6 +165,27 @@ let PrimitiveAnim = |time = 1, &vars = [], embed = nil, lerp = nil, rate = smoot
 ## ball.radius = 0.6
 ## play Lerp(1)
 ## ```
+## [example]
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh blue = center{center: 1.2l + 0.4u} fill{color: BLUE} Circle(radius: 0.25)
+## mesh gold = center{center: 1.2l + 0.4d} fill{color: YELLOW} Circle(radius: 0.25)
+## slide "selected leaders"
+## play Set()
+## blue.center = 1.2r + 0.4u
+## gold.center = 1.2r + 0.4d
+## play Lerp(1, [&blue])
+## play Set([&gold])
+## ```
+## [example]
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh ball = center{center: 1.2l} fill{color: ORANGE} Circle(radius: 0.25)
+## slide "rate"
+## play Set()
+## ball.center = 1.2r
+## play rate{bounce} Lerp(1.2, [&ball])
+## ```
 let Lerp = |time = 1, &vars = [], rate = smooth| PrimitiveAnim(time, &vars, nil, nil, rate)
 
 # follower animations
@@ -168,13 +196,17 @@ let Lerp = |time = 1, &vars = [], rate = smooth| PrimitiveAnim(time, &vars, nil,
 ## [overview]
 ## Reveal newly introduced mesh content by growing it outward from its center.
 ## [description]
-## The follower starts co-located at the destination mesh centroid and expands to the leader. Best for appearing objects; use `Fade` for opacity-only entrances.
+## `Grow` compares the current follower with the destination leader. Meshes introduced by the leader start collapsed at their centroid and expand into place; meshes deleted from the leader shrink back to their centroid. Best for appearing objects; use `Fade` for opacity-only entrances.
 ## [parameters]
 ## meshes: optional leader references; [] asks Monocurl to infer dirty mesh leaders
 ## [example]
-## ```
-## mesh ring = stroke{CYAN} Circle(1)
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh ring = stroke{CYAN, 3} Circle(1)
+## slide "grow"
 ## play Grow(0.8, [&ring])
+## ring = []
+## play Grow(0.6, [&ring])
 ## ```
 let Grow = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ grow_embed(start, dst)
@@ -188,14 +220,18 @@ let Grow = |time = 1, &meshes = [], rate = smooth| {
 ## [overview]
 ## Fade newly introduced content in and removed content out.
 ## [description]
-## `Fade` compares current follower and destination leader. Assigning a leader to `[]` and then playing `Fade` fades the old visible content out instead of snapping it away; `delta` adds an entrance/exit offset.
+## `Fade` compares the current follower with the destination leader. Meshes introduced by the leader fade in; meshes deleted from the leader fade out. `delta` adds an entrance/exit offset, so content can fade while sliding.
 ## [parameters]
 ## meshes: optional leader references
 ## delta: optional entrance/exit offset
 ## [example]
-## ```
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh note = center{center: 0.8l} fill{color: CYAN} Circle(radius: 0.3)
+## slide "fade"
+## play Fade(0.6, [&note], 0.2d)
 ## note = []
-## play Fade(0.5, [&note])
+## play Fade(0.6, [&note], 0.2d)
 ## ```
 let Fade = |time = 1, &meshes = [], delta = [0, 0, 0], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ fade_embed(start, dst, delta)
@@ -209,13 +245,17 @@ let Fade = |time = 1, &meshes = [], delta = [0, 0, 0], rate = smooth| {
 ## [overview]
 ## Draw stroke and text contours progressively.
 ## [description]
-## `Write` orders line and text contours and reveals them with a moving trace. It is most useful for strokes, `Text`, `Tex`, and `Latex`.
+## `Write` compares the current follower with the destination leader. Stroke/text contours introduced by the leader are traced in; contours deleted from the leader are traced out. It is most useful for strokes, `Text`, `Tex`, and `Latex`.
 ## [parameters]
 ## meshes: optional leader references
 ## [example]
-## ```
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
 ## mesh title = Text("Monocurl", 0.8)
+## slide "write"
 ## play Write(1, [&title])
+## title = []
+## play Write(0.7, [&title])
 ## ```
 let Write = |time = 1, &meshes = [], rate = smooth| {
     let embed = |start, dst| __monocurl__native__ write_embed(start, dst)
@@ -263,9 +303,19 @@ let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_h
 ## similar_topo_hint: when truthy, first try vertex-by-vertex interpolation for tagged pairs with the same triangle graph
 ## tag_map: optional function that remaps source tags before matching
 ## [example]
-## ```
-## pair = [tag{1} Circle(0.3), tag{2} Square(0.4)]
-## play TagTrans(1, [&pair])
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## mesh pair = [
+##     tag{1} center{1.1l} fill{alpha{0.22} BLUE} stroke{BLUE} Circle(0.35),
+##     tag{2} center{1.1r} fill{alpha{0.22} ORANGE} stroke{ORANGE} Square(0.55)
+## ]
+## slide "tag trans"
+## play Set()
+## pair = [
+##     tag{2} center{1.1l} fill{alpha{0.22} ORANGE} stroke{ORANGE} Square(0.55),
+##     tag{1} center{1.1r} fill{alpha{0.22} BLUE} stroke{BLUE} Circle(0.35)
+## ]
+## play TagTrans(1.2, [&pair])
 ## ```
 let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_hint = 0, tag_map = nil| {
     let embed = |start, dst| __monocurl__native__ tag_trans_embed_with_options_and_tag_map(start, dst, similar_topo_hint, tag_map)
@@ -274,8 +324,6 @@ let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_top
 }
 
 # line-based geometric interpolation that accumulates edge rotations.
-## [options]
-## important: true
 ## [overview]
 ## Morph line-based geometry by carrying local edge rotations through the path.
 ## [description]
@@ -533,6 +581,8 @@ let TransSubsetCopy = |&from, filter, target, &into, time = 1, tagged = 0, path_
 ## ```
 let LaggedMap = |anims, average_offset = 0.1, unit_map = smooth| __monocurl__native__ lagged_map(anims, average_offset, unit_map)
 
+# timing operators
+
 ## [overview]
 ## Slow an animation by a multiplicative factor.
 ## [description]
@@ -562,7 +612,8 @@ let delay = operator |target, time = 1| [target, anim {
     play target
 }]
 
-# override the rate function on a primitive animation.
+## [options]
+## important: true
 ## [overview]
 ## Replace the rate function on a primitive animation.
 ## [description]

@@ -40,6 +40,8 @@ let range = |start, stop, step = 1| __monocurl__native__ range(start, stop, step
 let sample = |start, stop, sample_count| __monocurl__native__ sample(start, stop, sample_count)
 
 # sample_count uniformly spaced values from start up to, but not including, stop.
+## [options]
+## important: true
 ## [overview]
 ## Build uniformly spaced samples including start but excluding stop.
 ## [description]
@@ -51,6 +53,8 @@ let sample = |start, stop, sample_count| __monocurl__native__ sample(start, stop
 let sample_clopen = |start, stop, sample_count| __monocurl__native__ sample_clopen(start, stop, sample_count)
 
 # n copies of item.
+## [options]
+## important: true
 ## [overview]
 ## Build a list containing n copies of item.
 ## [example]
@@ -64,6 +68,8 @@ let const_list = |item, n| {
 }
 
 # element count of a list, map, or string.
+## [options]
+## important: true
 ## [overview]
 ## Return the length of a list, map, or string.
 ## [description]
@@ -76,8 +82,6 @@ let len = |container| __monocurl__native__ len(container)
 let reverse = |v| __monocurl__native__ reverse(v)
 
 # stable sort; a key lambda may be supplied for custom orderings.
-## [options]
-## important: true
 ## [overview]
 ## Stable sort with an optional key function.
 ## [description]
@@ -89,8 +93,6 @@ let reverse = |v| __monocurl__native__ reverse(v)
 let sort = |v, key = identity| __monocurl__native__ sort(v, key)
 
 # apply f to every element, returning a new list.
-## [options]
-## important: true
 ## [overview]
 ## Map a function over a list.
 ## [example]
@@ -104,8 +106,6 @@ let map = |v, f| {
 }
 
 # keep only elements satisfying predicate.
-## [options]
-## important: true
 ## [overview]
 ## Keep only elements for which predicate returns truthy.
 ## [example]
@@ -144,7 +144,6 @@ let reduce = |v, seed, binary| {
 ## ```
 let zip = |u, v| __monocurl__native__ zip(u, v)
 
-# [[0, v[0]], [1, v[1]], ...]
 ## [overview]
 ## Pair every list element with its zero-based index.
 ## [example]
@@ -346,6 +345,8 @@ let set_attr = |x, name, value| __monocurl__native__ set_attr(x, name, value)
 ## [description]
 ## Returns the names that can be pre-filled with `set_default` or `set_defaults`.
 let get_defaults = |x| __monocurl__native__ get_defaults(x)
+## [options]
+## important: true
 ## [overview]
 ## Pre-fill one named default argument on a callable target.
 ## [description]

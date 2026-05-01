@@ -282,6 +282,8 @@ let lerp = |a, b, t| __monocurl__native__ lerp(a, b, t)
 
 # keyframes = [t0 -> v0, t1 -> v1, ...]; piecewise lerp across t.
 # maps are sorted by numeric key; the old [[t0, v0], ...] form is still accepted.
+## [options]
+## important: true
 ## [overview]
 ## Piecewise interpolation through keyed values.
 ## [description]
