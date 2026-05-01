@@ -120,6 +120,24 @@ fn test_exec_runtime_error_list_scalar_multiply_bad_element() {
 }
 
 #[test]
+fn test_exec_runtime_error_list_scalar_divide_bad_element() {
+    let r = run(r#"
+        let x = [1, "hello"] / 2
+    "#);
+    r.assert_error("list element [1]");
+    r.assert_error("unsupported binary op / on string and int");
+}
+
+#[test]
+fn test_exec_runtime_error_list_scalar_divide_by_zero() {
+    let r = run("
+        let x = [1, 2] / 0
+    ");
+    r.assert_error("list element [0]");
+    r.assert_error("division by zero");
+}
+
+#[test]
 fn test_exec_runtime_error_list_negate_bad_element() {
     let r = run(r#"
         let x = -[1, "hello"]

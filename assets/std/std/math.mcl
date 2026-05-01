@@ -1,6 +1,6 @@
 # mathematical constants, scalar functions, and vector operations.
 #
-# note: element-wise arithmetic on lists (u + v, a * u, -u) is built into the
+# note: element-wise arithmetic on lists (u + v, a * u, u / a, -u) is built into the
 # language, so linear algebra reads naturally without helper functions.
 # scalar / vector dispatch is handled by the runtime; use (+, -, *, /) freely.
 
@@ -237,7 +237,7 @@ let variance = |v| __monocurl__native__ variance(v)
 let std_dev = |v| sqrt(variance(v))
 
 # vector operations
-# many obvious linear operations (u + v, c * u, -u) are built in as binary ops
+# many obvious linear operations (u + v, c * u, u / c, -u) are built in as binary ops
 # over lists; these exposed natives are the ones that aren't element-wise.
 
 ## [overview]

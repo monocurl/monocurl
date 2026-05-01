@@ -152,11 +152,11 @@ pub(crate) fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, 
         (Value::List(lhs_list), Value::List(rhs_list), BinOp::Sub) => {
             return combine_lists(lhs_list, rhs_list, BinOp::Sub);
         }
-        (Value::List(list), rhs, BinOp::Mul) if !matches!(rhs, Value::List(_)) => {
-            return multiply_list(list, rhs, false);
+        (Value::List(list), rhs, op) if op.is_list_scalar() && !matches!(rhs, Value::List(_)) => {
+            return apply_list_scalar(list, rhs, op, false);
         }
-        (lhs, Value::List(list), BinOp::Mul) if !matches!(lhs, Value::List(_)) => {
-            return multiply_list(list, lhs, true);
+        (lhs, Value::List(list), op) if op.is_list_scalar() && !matches!(lhs, Value::List(_)) => {
+            return apply_list_scalar(list, lhs, op, true);
         }
         _ => {}
     }
@@ -311,25 +311,29 @@ fn combine_lists(lhs: &List, rhs: &List, op: BinOp) -> Result<Value, ExecutorErr
     }))
 }
 
-fn multiply_list(list: &List, scalar: &Value, scalar_on_lhs: bool) -> Result<Value, ExecutorError> {
+fn apply_list_scalar(
+    list: &List,
+    scalar: &Value,
+    op: BinOp,
+    scalar_on_lhs: bool,
+) -> Result<Value, ExecutorError> {
     let mut elements = Vec::with_capacity(list.len());
 
     for (idx, key) in list.elements.iter().enumerate() {
         let elem_value = with_heap(|h| h.get(key.key()).clone());
-        let product = match elem_value {
-            Value::List(inner) => multiply_list(&inner, scalar, scalar_on_lhs)
-                .map_err(|err| list_index_err(BinOp::Mul.name(), idx, err))?,
+        let applied = match elem_value {
+            Value::List(inner) => apply_list_scalar(&inner, scalar, op, scalar_on_lhs)
+                .map_err(|err| list_index_err(op.name(), idx, err))?,
             other => {
                 let (lhs, rhs) = if scalar_on_lhs {
                     (scalar.clone(), other)
                 } else {
                     (other, scalar.clone())
                 };
-                eval_binary(&lhs, &rhs, BinOp::Mul)
-                    .map_err(|err| list_index_err(BinOp::Mul.name(), idx, err))?
+                eval_binary(&lhs, &rhs, op).map_err(|err| list_index_err(op.name(), idx, err))?
             }
         };
-        elements.push(crate::heap::VRc::new(product));
+        elements.push(crate::heap::VRc::new(applied));
     }
 
     Ok(Value::List(List {
@@ -379,6 +383,10 @@ fn eval_float_binary(a: f64, b: f64, op: BinOp) -> Result<Value, ExecutorError> 
 }
 
 impl BinOp {
+    fn is_list_scalar(self) -> bool {
+        matches!(self, BinOp::Mul | BinOp::Div)
+    }
+
     pub(crate) fn name(self) -> &'static str {
         match self {
             BinOp::Add => "+",

@@ -197,6 +197,31 @@ fn test_exec_scalar_multiply_nested_list() {
 }
 
 #[test]
+fn test_exec_vector_divide_by_scalar() {
+    let r = run("
+        let result = [2, 4, 9] / 2
+    ");
+    r.assert_float_list(&[1.0, 2.0, 4.5]);
+}
+
+#[test]
+fn test_exec_scalar_divide_by_vector() {
+    let r = run("
+        let result = 12 / [2, 3, 4]
+    ");
+    r.assert_float_list(&[6.0, 4.0, 3.0]);
+}
+
+#[test]
+fn test_exec_scalar_divide_nested_list() {
+    let r = run("
+        let rows = [[2, 4], [8, 16]] / 2
+        let result = rows[1]
+    ");
+    r.assert_float_list(&[4.0, 8.0]);
+}
+
+#[test]
 fn test_exec_nested_list_addition() {
     let r = run("
         let rows = [[1, 2], [3, 4]] + [[10, 20], [30, 40]]
