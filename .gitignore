@@ -1,4 +1,5 @@
 *.p12
+*.pem
 .DS_Store
 target
 dist/

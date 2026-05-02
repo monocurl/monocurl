@@ -1,0 +1,51 @@
+{
+  "name": "@enigmurl/monocurl-mcp",
+  "version": "0.2.1",
+  "mcpName": "io.github.enigmurl/monocurl-mcp",
+  "description": "Docs for the Monocurl animation language, standard library, examples, and CLI usage.",
+  "type": "module",
+  "bin": {
+    "monocurl-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist/index.js",
+    "manifest.json",
+    "README.md"
+  ],
+  "scripts": {
+    "sync:docs": "node scripts/sync-docs.mjs",
+    "build": "npm run check && esbuild src/index.ts --bundle --platform=node --format=esm --target=node20 --loader:.md=text --loader:.mcs=text --loader:.mcl=text --outfile=dist/index.js && esbuild src/resources.test.ts --bundle --platform=node --format=esm --target=node20 --loader:.md=text --loader:.mcs=text --loader:.mcl=text --outfile=dist/resources.test.js && esbuild src/server.test.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/server.test.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/resources.test.js dist/server.test.js",
+    "prepare:mcpb": "npm run build && mcpb validate manifest.json && mcpb pack . ../../dist/monocurl-mcp-node.mcpb"
+  },
+  "keywords": [
+    "monocurl",
+    "animation",
+    "math",
+    "mcp",
+    "documentation"
+  ],
+  "author": {
+    "name": "enigmurl",
+    "email": "43832426+enigmurl@users.noreply.github.com",
+    "url": "https://monocurl.com"
+  },
+  "license": "GPL-3.0-only",
+  "homepage": "https://monocurl.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/monocurl/monocurl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/monocurl/monocurl/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.7.0"
+  }
+}

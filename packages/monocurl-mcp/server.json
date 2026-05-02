@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.enigmurl/monocurl-mcp",
+  "title": "Monocurl MCP",
+  "description": "Docs for the Monocurl animation language, standard library, examples, and CLI usage.",
+  "version": "0.2.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@enigmurl/monocurl-mcp",
+      "version": "0.2.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

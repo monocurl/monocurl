@@ -12,7 +12,6 @@ members = [
     "crates/exporter",
     "crates/geo",
     "crates/libtess2",
-    "crates/monocurl-mcp",
     "crates/lexer",
     "crates/parser",
     "crates/renderer",
@@ -71,7 +70,6 @@ geo = { path = "crates/geo" }
 latex = { path = "crates/latex" }
 lexer = { path = "crates/lexer" }
 libtess2 = { path = "crates/libtess2" }
-monocurl-mcp = { path = "crates/monocurl-mcp" }
 parser = { path = "crates/parser" }
 renderer = { path = "crates/renderer" }
 inventory = "0.3"

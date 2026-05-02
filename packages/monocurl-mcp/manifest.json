@@ -1,0 +1,46 @@
+{
+  "manifest_version": "0.3",
+  "name": "monocurl-mcp",
+  "display_name": "monocurl-mcp",
+  "version": "0.2.1",
+  "description": "Docs for the Monocurl animation language, standard library, examples, and CLI usage.",
+  "author": {
+    "name": "monocurl",
+    "email": "43832426+enigmurl@users.noreply.github.com",
+    "url": "https://monocurl.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/monocurl/monocurl"
+  },
+  "homepage": "https://monocurl.com",
+  "documentation": "https://monocurl.com/docs",
+  "support": "https://github.com/monocurl/monocurl/issues",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/index.js"
+      ],
+      "env": {}
+    }
+  },
+  "keywords": [
+    "monocurl",
+    "animation",
+    "math",
+    "mcp",
+    "documentation"
+  ],
+  "license": "GPL-3.0-only",
+  "compatibility": {
+    "platforms": [
+      "darwin",
+      "win32",
+      "linux"
+    ]
+  }
+}

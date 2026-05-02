@@ -1,0 +1,9 @@
+node_modules/
+src/
+scripts/
+package-lock.json
+package.json
+server.json
+tsconfig.json
+dist/resources.js
+dist/resources.test.js
