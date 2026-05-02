@@ -151,7 +151,6 @@ pub(super) fn render_toolbar(
         .items_center()
         .h_full()
         .border_t(px(0.5))
-        .border_b(px(0.5))
         .border_color(theme.navbar_border)
         .child(panel_tab(
             "tl-tab-timeline",

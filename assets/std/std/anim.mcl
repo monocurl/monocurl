@@ -248,7 +248,7 @@ let Fade = |time = 1, &meshes = [], delta = [0, 0, 0], rate = smooth| {
 ## [example]
 ## ```mcl video
 ## background = [0.035, 0.045, 0.060, 1]
-## mesh title = Text("Monocurl", 0.8)
+## mesh title = color{WHITE} Text("Monocurl", 0.8)
 ## slide "write"
 ## play Write(1, [&title])
 ## title = []

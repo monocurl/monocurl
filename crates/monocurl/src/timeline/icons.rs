@@ -19,7 +19,7 @@ fn icon_resource(icon: TransportIcon) -> String {
         TransportIcon::Pause => "timeline/player-pause.svg",
         TransportIcon::NextSlide => "timeline/player-skip-forward.svg",
     };
-    Assets::image(name).to_string_lossy().into_owned()
+    Assets::image_resource(name)
 }
 
 pub(super) fn transport_icon(icon: TransportIcon, color: Rgba) -> impl IntoElement {

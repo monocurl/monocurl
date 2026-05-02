@@ -1,6 +1,15 @@
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
-use std::{borrow::Cow, env, process};
+use std::{
+    borrow::Cow,
+    env, fs,
+    io::ErrorKind,
+    path::{Component, Path, PathBuf},
+    process,
+};
 
 use crate::{
     actions::{
@@ -35,6 +44,63 @@ mod viewport;
 mod window;
 
 pub struct MonocurlLauncher;
+
+struct MonocurlAssetSource;
+
+impl MonocurlAssetSource {
+    fn resolve(path: &str) -> Option<PathBuf> {
+        let path = Path::new(path);
+        if path.is_absolute() {
+            return Some(path.to_path_buf());
+        }
+
+        let mut clean_path = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::Normal(part) => clean_path.push(part),
+                Component::CurDir => {}
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+            }
+        }
+
+        Some(Assets::asset(clean_path))
+    }
+}
+
+impl AssetSource for MonocurlAssetSource {
+    fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+        let Some(path) = Self::resolve(path) else {
+            return Ok(None);
+        };
+
+        match fs::read(path) {
+            Ok(data) => Ok(Some(Cow::Owned(data))),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
+        let Some(path) = Self::resolve(path) else {
+            return Ok(Vec::new());
+        };
+
+        let entries = match fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+
+        Ok(entries
+            .filter_map(|entry| {
+                entry
+                    .ok()
+                    .and_then(|entry| entry.file_name().into_string().ok())
+                    .map(SharedString::from)
+            })
+            .collect())
+    }
+}
 
 impl MonocurlLauncher {
     fn clean_latex_file_cache() {
@@ -156,15 +222,17 @@ impl MonocurlLauncher {
     fn launch() {
         Self::clean_latex_file_cache();
 
-        Application::new().run(|cx: &mut App| {
-            Self::setup_fonts(cx);
-            ThemeSettings::init(cx);
-            UserSettings::init(cx);
-            Self::setup_modules(cx);
-            Self::setup_global_actions(cx);
-            Self::setup_menus(cx);
-            Self::create_window(cx);
-        });
+        Application::new()
+            .with_assets(MonocurlAssetSource)
+            .run(|cx: &mut App| {
+                Self::setup_fonts(cx);
+                ThemeSettings::init(cx);
+                UserSettings::init(cx);
+                Self::setup_modules(cx);
+                Self::setup_global_actions(cx);
+                Self::setup_menus(cx);
+                Self::create_window(cx);
+            });
     }
 }
 
