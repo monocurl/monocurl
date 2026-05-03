@@ -394,8 +394,10 @@ let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 
 ## important: true
 ## [overview]
 ## Plain text converted to mesh geometry.
+## [parameters]
+## text: string/list text fragments; use `text_tag{...}` on fragments that need stable mesh tags after rendering
 ## [description]
-## Use `Text` for literal text. It still returns mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply.
+## Use `Text` for literal text. It still returns mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply. Apply `text_tag{...}` inside the text argument when only part of the rendered text should be addressable; apply `tag{...}` outside `Text` when the whole rendered label should share one identity.
 ## [example]
 ## ```mcl image
 ## mesh title = center{UP} Text("Monocurl", 0.8)
@@ -406,27 +408,46 @@ let Text = |text, scale = 1| __monocurl__native__ mk_text(text, scale)
 ## important: true
 ## [overview]
 ## Math text converted through TeX into mesh geometry.
+## [description]
+## `Tex` accepts a raw TeX string or a list of string-compatible fragments. Fragments wrapped in `text_tag{...}` become tagged mesh contours after rendering, which makes individual terms usable with `tag_filter`, filtered styling, `TagTrans`, and subset-transfer animations. Raw TeX can also contain `\text_tag{1,2}{...}` or shorthand wrappers like `\tag2{...}`.
 ## [parameters]
 ## tex: TeX math fragment, string/list text fragments, or `text_tag{...}` fragments
+## scale: text scale in scene units
 ## [example]
 ## ```
-## mesh eq = Tex("a^2 + b^2 = c^2", 0.8)
+## mesh eq = Tex([text_tag{1} "a^2", " + ", text_tag{2} "b^2", " = ", text_tag{3} "c^2"], 0.8)
+## mesh raw = Tex("\tag1{a^2} + \tag2{b^2} = \tag3{c^2}", 0.8)
+## mesh word = Tex("\tag1{text} + \tag2{more}", 0.8)
 ## ```
 let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 
 ## [overview]
 ## Full LaTeX fragment converted into mesh geometry.
 ## [description]
-## Use this when the input already contains document-level LaTeX structure; use `Tex` for ordinary displayed math.
+## Use this when the input already contains document-level LaTeX structure; use `Tex` for ordinary displayed math. `Latex` supports the same text tagging markers as `Tex`, so `\text_tag{...}{...}`, `\tag2{...}`, and `text_tag{...}` fragments all become ordinary mesh tags after rendering.
 let Latex = |latex, scale = 1| __monocurl__native__ mk_latex(latex, scale)
 
 ## [overview]
 ## Attach tags to text fragments before they become mesh contours.
 ## [description]
-## Use text tags for equation transforms and selective coloring inside `Tex`/`Latex`. The tag can be an integer or a list of integers; the wrapper lowers to the LaTeX `\text_tag{...}{...}` marker before rendering.
+## Use text tags for equation transforms and selective coloring inside `Text`, `Tex`, and `Latex`. The tag can be an integer or a list of integers; the wrapper lowers to the LaTeX `\text_tag{...}{...}` marker before rendering. The rendered contours from that fragment then carry the requested tag list, just as if they had been tagged with `tag{...}` after they became meshes. Place `text_tag{...}` inside the text constructor for fragment-level identity. Place `tag{...}` outside the text constructor only when the entire rendered text mesh should share one identity. Raw TeX strings can use `\text_tag{1,2}{...}` or the numbered shorthand `\tag2{...}` directly. Nested text tags are allowed; the innermost tag owns the overlapping contours.
+## [parameters]
+## target: string-compatible text fragment to tag before rendering
+## tag: integer tag or list of integer tags; `[]` is allowed for an explicitly empty tag list
 ## [example]
 ## ```
-## mesh eq = Tex([text_tag{1} "x", " + ", text_tag{2} "1"], 0.8)
+## mesh eq = Tex([text_tag{1} "x", " + ", text_tag{[2, 10]} "1"], 0.8)
+## mesh highlighted = color{ORANGE, |tags| 2 in tags} eq
+##
+## let term_palette = operator |target|
+##     color{BLUE, |tags| 1 in tags}
+##     color{ORANGE, |tags| 2 in tags}
+##     color{MAGENTA, |tags| 3 in tags}
+##     target
+##
+## mesh raw = term_palette{} Tex("\tag1{x^2} + \tag2{2x} + \tag3{1}", 0.8)
+## mesh label = term_palette{} Text([text_tag{1} "left", " / ", text_tag{2} "right"], 0.5)
+## mesh raw_label = term_palette{} Text("\tag1{text} / \tag2{label}", 0.5)
 ## ```
 let text_tag = operator |target, tag| [target, __monocurl__native__ text_tag_encode(target, tag)]
 
@@ -837,7 +858,7 @@ let normal_hint = operator |target, normal, filter = nil| {
 ## [overview]
 ## Replace mesh tags, optionally filtered by existing tags.
 ## [description]
-## Tags are stable identities for filters and tag-aware animations. A scalar tag becomes a one-element tag list; a list can give one mesh several identities.
+## Tags are stable identities for filters and tag-aware animations. A scalar tag becomes a one-element tag list; a list can give one mesh several identities. Use `tag{...}` after construction for whole mesh leaves. For text/Tex/LaTeX fragments, prefer `text_tag{...}` inside the constructor so only the generated contours for that fragment receive the tag.
 ## [example]
 ## ```
 ## mesh pair = [tag{1} Circle(0.3), tag{2} Square(0.4)]
@@ -1088,10 +1109,11 @@ let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 
 ## [overview]
 ## Keep only mesh leaves matching a tag filter.
 ## [description]
-## The filter receives the full tag list for each mesh leaf, not one tag at a time.
+## A scalar or list filter matches leaves containing any requested tag. A predicate filter receives the full tag list for each mesh leaf, not one tag at a time. Tags produced by `text_tag{...}` are ordinary mesh tags here, so this can select individual text or formula fragments after rendering.
 ## [example]
 ## ```
 ## mesh selected = tag_filter{|tags| 2 in tags} group
+## mesh warm_terms = tag_filter{[2, 3]} equation
 ## ```
 ## [options]
 ## important: true
@@ -1099,7 +1121,7 @@ let tag_filter = operator |target, filter| [target, __monocurl__native__ tag_fil
 ## [overview]
 ## Split a mesh into [matching, non_matching] by tag filter.
 ## [description]
-## Useful for transfer animations and custom progressors that need to move part of a mesh tree.
+## Useful for transfer animations and custom progressors that need to move part of a mesh tree. The filter rules match `tag_filter`, including text tags recovered from `Text`, `Tex`, and `Latex`.
 let tag_split = |target, filter = nil| __monocurl__native__ tag_split(target, filter)
 ## [overview]
 ## Collapse nested mesh lists into a flatter mesh.
