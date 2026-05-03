@@ -1,5 +1,7 @@
 # Monocurl
 
+![Monocurl Editor](.github/assets/monocurl-editor.webp)
+
 Monocurl is a desktop application and programming language for creating mathematical animations. It is built for the workflow where code, preview, timeline, presentation controls, and rendered output all live in one place.
 
 [Website](https://monocurl.com) | [Learn](https://monocurl.com/learn) | [Documentation](https://monocurl.com/docs) | [Releases](https://github.com/monocurl/monocurl/releases)
