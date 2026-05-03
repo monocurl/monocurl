@@ -199,8 +199,8 @@ let Lerp = |time = 1, &vars = [], rate = smooth| PrimitiveAnim(time, &vars, nil,
 ## [example]
 ## ```mcl video
 ## background = [0.035, 0.045, 0.060, 1]
-## mesh ring = stroke{CYAN, 3} Circle(1)
 ## slide "grow"
+## mesh ring = stroke{CYAN, 3} Circle(1)
 ## play Grow(0.8, [&ring])
 ## ring = []
 ## play Grow(0.6, [&ring])
@@ -224,8 +224,8 @@ let Grow = |time = 1, &meshes = [], rate = smooth| {
 ## [example]
 ## ```mcl video
 ## background = [0.035, 0.045, 0.060, 1]
-## mesh note = center{center: 0.8l} fill{color: CYAN} Circle(radius: 0.3)
 ## slide "fade"
+## mesh note = center{center: 0.8l} fill{color: CYAN} Circle(radius: 0.3)
 ## play Fade(0.6, [&note], 0.2d)
 ## note = []
 ## play Fade(0.6, [&note], 0.2d)
@@ -248,8 +248,8 @@ let Fade = |time = 1, &meshes = [], delta = [0, 0, 0], rate = smooth| {
 ## [example]
 ## ```mcl video
 ## background = [0.035, 0.045, 0.060, 1]
-## mesh title = color{WHITE} Text("Monocurl", 0.8)
 ## slide "write"
+## mesh title = color{WHITE} Text("Monocurl", 0.8)
 ## play Write(1, [&title])
 ## title = []
 ## play Write(0.7, [&title])
