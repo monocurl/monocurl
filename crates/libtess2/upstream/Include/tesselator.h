@@ -187,7 +187,7 @@ struct TESSalloc
 // tessNewTess() - Creates a new tesselator.
 // Use tessDeleteTess() to delete the tesselator.
 // Parameters:
-//   alloc - pointer to a filled TESSalloc struct or NULL to use default malloc based allocator.
+//   alloc - pointer to a filled TESSalloc struct.
 // Returns:
 //   new tesselator object.
 TESStesselator* tessNewTess( TESSalloc* alloc );

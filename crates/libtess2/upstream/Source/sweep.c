@@ -29,11 +29,17 @@
 ** Author: Eric Veach, July 1994.
 */
 
+#if defined(__has_include) && __has_include(<assert.h>)
 #include <assert.h>
+#else
+#define assert(expr) ((void)0)
+#endif
+#if defined(__has_include) && __has_include(<float.h>)
 #include <float.h>
+#else
+#define FLT_MIN 1.17549435082228750796873653722224568e-38F
+#endif
 #include <stddef.h>
-#include <setjmp.h>		/* longjmp */
-
 #include "mesh.h"
 #include "geom.h"
 #include "tess.h"
@@ -210,11 +216,11 @@ static ActiveRegion *AddRegionBelow( TESStesselator *tess,
 */
 {
 	ActiveRegion *regNew = (ActiveRegion *)bucketAlloc( tess->regionPool );
-	if (regNew == NULL) longjmp(tess->env,1);
+	if (regNew == NULL) __builtin_trap();
 
 	regNew->eUp = eNewUp;
 	regNew->nodeUp = dictInsertBefore( tess->dict, regAbove->nodeUp, regNew );
-	if (regNew->nodeUp == NULL) longjmp(tess->env,1);
+	if (regNew->nodeUp == NULL) __builtin_trap();
 	regNew->fixUpperEdge = FALSE;
 	regNew->sentinel = FALSE;
 	regNew->dirty = FALSE;
@@ -309,14 +315,14 @@ static TESShalfEdge *FinishLeftRegions( TESStesselator *tess,
 			* ConnectRightVertex, now is the time to fix it.
 			*/
 			e = tessMeshConnect( tess->mesh, ePrev->Lprev, e->Sym );
-			if (e == NULL) longjmp(tess->env,1);
-			if ( !FixUpperEdge( tess, reg, e ) ) longjmp(tess->env,1);
+			if (e == NULL) __builtin_trap();
+			if ( !FixUpperEdge( tess, reg, e ) ) __builtin_trap();
 		}
 
 		/* Relink edges so that ePrev->Onext == e */
 		if( ePrev->Onext != e ) {
-			if ( !tessMeshSplice( tess->mesh, e->Oprev, e ) ) longjmp(tess->env,1);
-			if ( !tessMeshSplice( tess->mesh, ePrev, e ) ) longjmp(tess->env,1);
+			if ( !tessMeshSplice( tess->mesh, e->Oprev, e ) ) __builtin_trap();
+			if ( !tessMeshSplice( tess->mesh, ePrev, e ) ) __builtin_trap();
 		}
 		FinishRegion( tess, regPrev );	/* may change reg->eUp */
 		ePrev = reg->eUp;
@@ -368,8 +374,8 @@ static void AddRightEdges( TESStesselator *tess, ActiveRegion *regUp,
 
 		if( e->Onext != ePrev ) {
 			/* Unlink e from its current position, and relink below ePrev */
-			if ( !tessMeshSplice( tess->mesh, e->Oprev, e ) ) longjmp(tess->env,1);
-			if ( !tessMeshSplice( tess->mesh, ePrev->Oprev, e ) ) longjmp(tess->env,1);
+			if ( !tessMeshSplice( tess->mesh, e->Oprev, e ) ) __builtin_trap();
+			if ( !tessMeshSplice( tess->mesh, ePrev->Oprev, e ) ) __builtin_trap();
 		}
 		/* Compute the winding number and "inside" flag for the new regions */
 		reg->windingNumber = regPrev->windingNumber - e->winding;
@@ -382,7 +388,7 @@ static void AddRightEdges( TESStesselator *tess, ActiveRegion *regUp,
 		if( ! firstTime && CheckForRightSplice( tess, regPrev )) {
 			AddWinding( e, ePrev );
 			DeleteRegion( tess, regPrev );
-			if ( !tessMeshDelete( tess->mesh, ePrev ) ) longjmp(tess->env,1);
+			if ( !tessMeshDelete( tess->mesh, ePrev ) ) __builtin_trap();
 		}
 		firstTime = FALSE;
 		regPrev = reg;
@@ -405,7 +411,7 @@ static void SpliceMergeVertices( TESStesselator *tess, TESShalfEdge *e1,
 * e1->Org is kept, while e2->Org is discarded.
 */
 {
-	if ( !tessMeshSplice( tess->mesh, e1, e2 ) ) longjmp(tess->env,1); 
+	if ( !tessMeshSplice( tess->mesh, e1, e2 ) ) __builtin_trap(); 
 }
 
 static void VertexWeights( TESSvertex *isect, TESSvertex *org, TESSvertex *dst,
@@ -484,8 +490,8 @@ static int CheckForRightSplice( TESStesselator *tess, ActiveRegion *regUp )
 		/* eUp->Org appears to be below eLo */
 		if( ! VertEq( eUp->Org, eLo->Org )) {
 			/* Splice eUp->Org into eLo */
-			if ( tessMeshSplitEdge( tess->mesh, eLo->Sym ) == NULL) longjmp(tess->env,1);
-			if ( !tessMeshSplice( tess->mesh, eUp, eLo->Oprev ) ) longjmp(tess->env,1);
+			if ( tessMeshSplitEdge( tess->mesh, eLo->Sym ) == NULL) __builtin_trap();
+			if ( !tessMeshSplice( tess->mesh, eUp, eLo->Oprev ) ) __builtin_trap();
 			regUp->dirty = regLo->dirty = TRUE;
 
 		} else if( eUp->Org != eLo->Org ) {
@@ -502,8 +508,8 @@ static int CheckForRightSplice( TESStesselator *tess, ActiveRegion *regUp )
 		if (regionAbove != NULL) {
 			regionAbove->dirty = TRUE;
 		}
-		if (tessMeshSplitEdge( tess->mesh, eUp->Sym ) == NULL) longjmp(tess->env,1);
-		if ( !tessMeshSplice( tess->mesh, eLo->Oprev, eUp ) ) longjmp(tess->env,1);
+		if (tessMeshSplitEdge( tess->mesh, eUp->Sym ) == NULL) __builtin_trap();
+		if ( !tessMeshSplice( tess->mesh, eLo->Oprev, eUp ) ) __builtin_trap();
 	}
 	return TRUE;
 }
@@ -545,8 +551,8 @@ static int CheckForLeftSplice( TESStesselator *tess, ActiveRegion *regUp )
 			regionAbove->dirty = TRUE;
 		}
 		e = tessMeshSplitEdge( tess->mesh, eUp );
-		if (e == NULL) longjmp(tess->env,1);
-		if ( !tessMeshSplice( tess->mesh, eLo->Sym, e ) ) longjmp(tess->env,1);
+		if (e == NULL) __builtin_trap();
+		if ( !tessMeshSplice( tess->mesh, eLo->Sym, e ) ) __builtin_trap();
 		e->Lface->inside = regUp->inside;
 	} else {
 		if( EdgeSign( eLo->Dst, eUp->Dst, eLo->Org ) > 0 ) return FALSE;
@@ -554,8 +560,8 @@ static int CheckForLeftSplice( TESStesselator *tess, ActiveRegion *regUp )
 		/* eUp->Dst is below eLo, so splice eUp->Dst into eLo */
 		regUp->dirty = regLo->dirty = TRUE;
 		e = tessMeshSplitEdge( tess->mesh, eLo );
-		if (e == NULL) longjmp(tess->env,1);    
-		if ( !tessMeshSplice( tess->mesh, eUp->Lnext, eLo->Sym ) ) longjmp(tess->env,1);
+		if (e == NULL) __builtin_trap();    
+		if ( !tessMeshSplice( tess->mesh, eUp->Lnext, eLo->Sym ) ) __builtin_trap();
 		e->Rface->inside = regUp->inside;
 	}
 	return TRUE;
@@ -654,10 +660,10 @@ static int CheckForIntersect( TESStesselator *tess, ActiveRegion *regUp )
 		*/
 		if( dstLo == tess->event ) {
 			/* Splice dstLo into eUp, and process the new region(s) */
-			if (tessMeshSplitEdge( tess->mesh, eUp->Sym ) == NULL) longjmp(tess->env,1);
-			if ( !tessMeshSplice( tess->mesh, eLo->Sym, eUp ) ) longjmp(tess->env,1);
+			if (tessMeshSplitEdge( tess->mesh, eUp->Sym ) == NULL) __builtin_trap();
+			if ( !tessMeshSplice( tess->mesh, eLo->Sym, eUp ) ) __builtin_trap();
 			regUp = TopLeftRegion( tess, regUp );
-			if (regUp == NULL) longjmp(tess->env,1);
+			if (regUp == NULL) __builtin_trap();
 			eUp = RegionBelow(regUp)->eUp;
 			FinishLeftRegions( tess, RegionBelow(regUp), regLo );
 			AddRightEdges( tess, regUp, eUp->Oprev, eUp, eUp, TRUE );
@@ -665,8 +671,8 @@ static int CheckForIntersect( TESStesselator *tess, ActiveRegion *regUp )
 		}
 		if( dstUp == tess->event ) {
 			/* Splice dstUp into eLo, and process the new region(s) */
-			if (tessMeshSplitEdge( tess->mesh, eLo->Sym ) == NULL) longjmp(tess->env,1);
-			if ( !tessMeshSplice( tess->mesh, eUp->Lnext, eLo->Oprev ) ) longjmp(tess->env,1); 
+			if (tessMeshSplitEdge( tess->mesh, eLo->Sym ) == NULL) __builtin_trap();
+			if ( !tessMeshSplice( tess->mesh, eUp->Lnext, eLo->Oprev ) ) __builtin_trap(); 
 			regLo = regUp;
 			regUp = TopRightRegion( regUp );
 			e = RegionBelow(regUp)->eUp->Rprev;
@@ -681,13 +687,13 @@ static int CheckForIntersect( TESStesselator *tess, ActiveRegion *regUp )
 		*/
 		if( EdgeSign( dstUp, tess->event, &isect ) >= 0 ) {
 			RegionAbove(regUp)->dirty = regUp->dirty = TRUE;
-			if (tessMeshSplitEdge( tess->mesh, eUp->Sym ) == NULL) longjmp(tess->env,1);
+			if (tessMeshSplitEdge( tess->mesh, eUp->Sym ) == NULL) __builtin_trap();
 			eUp->Org->s = tess->event->s;
 			eUp->Org->t = tess->event->t;
 		}
 		if( EdgeSign( dstLo, tess->event, &isect ) <= 0 ) {
 			regUp->dirty = regLo->dirty = TRUE;
-			if (tessMeshSplitEdge( tess->mesh, eLo->Sym ) == NULL) longjmp(tess->env,1);
+			if (tessMeshSplitEdge( tess->mesh, eLo->Sym ) == NULL) __builtin_trap();
 			eLo->Org->s = tess->event->s;
 			eLo->Org->t = tess->event->t;
 		}
@@ -703,16 +709,16 @@ static int CheckForIntersect( TESStesselator *tess, ActiveRegion *regUp )
 	* the mesh (ie. eUp->Lface) to be smaller than the faces in the
 	* unprocessed original contours (which will be eLo->Oprev->Lface).
 	*/
-	if (tessMeshSplitEdge( tess->mesh, eUp->Sym ) == NULL) longjmp(tess->env,1);
-	if (tessMeshSplitEdge( tess->mesh, eLo->Sym ) == NULL) longjmp(tess->env,1);
-	if ( !tessMeshSplice( tess->mesh, eLo->Oprev, eUp ) ) longjmp(tess->env,1);
+	if (tessMeshSplitEdge( tess->mesh, eUp->Sym ) == NULL) __builtin_trap();
+	if (tessMeshSplitEdge( tess->mesh, eLo->Sym ) == NULL) __builtin_trap();
+	if ( !tessMeshSplice( tess->mesh, eLo->Oprev, eUp ) ) __builtin_trap();
 	eUp->Org->s = isect.s;
 	eUp->Org->t = isect.t;
 	eUp->Org->pqHandle = pqInsert( &tess->alloc, tess->pq, eUp->Org );
 	if (eUp->Org->pqHandle == INV_HANDLE) {
 		pqDeletePriorityQ( &tess->alloc, tess->pq );
 		tess->pq = NULL;
-		longjmp(tess->env,1);
+		__builtin_trap();
 	}
 	GetIntersectData( tess, eUp->Org, orgUp, dstUp, orgLo, dstLo );
 	RegionAbove(regUp)->dirty = regUp->dirty = regLo->dirty = TRUE;
@@ -760,12 +766,12 @@ static void WalkDirtyRegions( TESStesselator *tess, ActiveRegion *regUp )
 				*/
 				if( regLo->fixUpperEdge ) {
 					DeleteRegion( tess, regLo );
-					if ( !tessMeshDelete( tess->mesh, eLo ) ) longjmp(tess->env,1);
+					if ( !tessMeshDelete( tess->mesh, eLo ) ) __builtin_trap();
 					regLo = RegionBelow( regUp );
 					eLo = regLo->eUp;
 				} else if( regUp->fixUpperEdge ) {
 					DeleteRegion( tess, regUp );
-					if ( !tessMeshDelete( tess->mesh, eUp ) ) longjmp(tess->env,1);
+					if ( !tessMeshDelete( tess->mesh, eUp ) ) __builtin_trap();
 					regUp = RegionAbove( regLo );
 					eUp = regUp->eUp;
 				}
@@ -799,7 +805,7 @@ static void WalkDirtyRegions( TESStesselator *tess, ActiveRegion *regUp )
 			/* A degenerate loop consisting of only two edges -- delete it. */
 			AddWinding( eLo, eUp );
 			DeleteRegion( tess, regUp );
-			if ( !tessMeshDelete( tess->mesh, eUp ) ) longjmp(tess->env,1);
+			if ( !tessMeshDelete( tess->mesh, eUp ) ) __builtin_trap();
 			regUp = RegionAbove( regLo );
 		}
 	}
@@ -855,15 +861,15 @@ static void ConnectRightVertex( TESStesselator *tess, ActiveRegion *regUp,
 	* through vEvent, or may coincide with new intersection vertex
 	*/
 	if( VertEq( eUp->Org, tess->event )) {
-		if ( !tessMeshSplice( tess->mesh, eTopLeft->Oprev, eUp ) ) longjmp(tess->env,1);
+		if ( !tessMeshSplice( tess->mesh, eTopLeft->Oprev, eUp ) ) __builtin_trap();
 		regUp = TopLeftRegion( tess, regUp );
-		if (regUp == NULL) longjmp(tess->env,1);
+		if (regUp == NULL) __builtin_trap();
 		eTopLeft = RegionBelow( regUp )->eUp;
 		FinishLeftRegions( tess, RegionBelow(regUp), regLo );
 		degenerate = TRUE;
 	}
 	if( VertEq( eLo->Org, tess->event )) {
-		if ( !tessMeshSplice( tess->mesh, eBottomLeft, eLo->Oprev ) ) longjmp(tess->env,1);
+		if ( !tessMeshSplice( tess->mesh, eBottomLeft, eLo->Oprev ) ) __builtin_trap();
 		eBottomLeft = FinishLeftRegions( tess, regLo, NULL );
 		degenerate = TRUE;
 	}
@@ -881,7 +887,7 @@ static void ConnectRightVertex( TESStesselator *tess, ActiveRegion *regUp,
 		eNew = eUp;
 	}
 	eNew = tessMeshConnect( tess->mesh, eBottomLeft->Lprev, eNew );
-	if (eNew == NULL) longjmp(tess->env,1);
+	if (eNew == NULL) __builtin_trap();
 
 	/* Prevent cleanup, otherwise eNew might disappear before we've even
 	* had a chance to mark it as a temporary edge.
@@ -923,13 +929,13 @@ static void ConnectLeftDegenerate( TESStesselator *tess,
 
 	if( ! VertEq( e->Dst, vEvent )) {
 		/* General case -- splice vEvent into edge e which passes through it */
-		if (tessMeshSplitEdge( tess->mesh, e->Sym ) == NULL) longjmp(tess->env,1);
+		if (tessMeshSplitEdge( tess->mesh, e->Sym ) == NULL) __builtin_trap();
 		if( regUp->fixUpperEdge ) {
 			/* This edge was fixable -- delete unused portion of original edge */
-			if ( !tessMeshDelete( tess->mesh, e->Onext ) ) longjmp(tess->env,1);
+			if ( !tessMeshDelete( tess->mesh, e->Onext ) ) __builtin_trap();
 			regUp->fixUpperEdge = FALSE;
 		}
-		if ( !tessMeshSplice( tess->mesh, vEvent->anEdge, e ) ) longjmp(tess->env,1);
+		if ( !tessMeshSplice( tess->mesh, vEvent->anEdge, e ) ) __builtin_trap();
 		SweepEvent( tess, vEvent );	/* recurse */
 		return;
 	}
@@ -948,10 +954,10 @@ static void ConnectLeftDegenerate( TESStesselator *tess,
 		*/
 		assert( eTopLeft != eTopRight );   /* there are some left edges too */
 		DeleteRegion( tess, reg );
-		if ( !tessMeshDelete( tess->mesh, eTopRight ) ) longjmp(tess->env,1);
+		if ( !tessMeshDelete( tess->mesh, eTopRight ) ) __builtin_trap();
 		eTopRight = eTopLeft->Oprev;
 	}
-	if ( !tessMeshSplice( tess->mesh, vEvent->anEdge, eTopRight ) ) longjmp(tess->env,1);
+	if ( !tessMeshSplice( tess->mesh, vEvent->anEdge, eTopRight ) ) __builtin_trap();
 	if( ! EdgeGoesLeft( eTopLeft )) {
 		/* e->Dst had no left-going edges -- indicate this to AddRightEdges() */
 		eTopLeft = NULL;
@@ -1009,15 +1015,15 @@ static void ConnectLeftVertex( TESStesselator *tess, TESSvertex *vEvent )
 	if( regUp->inside || reg->fixUpperEdge) {
 		if( reg == regUp ) {
 			eNew = tessMeshConnect( tess->mesh, vEvent->anEdge->Sym, eUp->Lnext );
-			if (eNew == NULL) longjmp(tess->env,1);
+			if (eNew == NULL) __builtin_trap();
 		} else {
 			TESShalfEdge *tempHalfEdge= tessMeshConnect( tess->mesh, eLo->Dnext, vEvent->anEdge);
-			if (tempHalfEdge == NULL) longjmp(tess->env,1);
+			if (tempHalfEdge == NULL) __builtin_trap();
 
 			eNew = tempHalfEdge->Sym;
 		}
 		if( reg->fixUpperEdge ) {
-			if ( !FixUpperEdge( tess, reg, eNew ) ) longjmp(tess->env,1);
+			if ( !FixUpperEdge( tess, reg, eNew ) ) __builtin_trap();
 		} else {
 			ComputeWinding( tess, AddRegionBelow( tess, regUp, eNew ));
 		}
@@ -1065,7 +1071,7 @@ static void SweepEvent( TESStesselator *tess, TESSvertex *vEvent )
 	* This takes care of all the left-going edges from vEvent.
 	*/
 	regUp = TopLeftRegion( tess, e->activeRegion );
-	if (regUp == NULL) longjmp(tess->env,1);
+	if (regUp == NULL) __builtin_trap();
 	reg = RegionBelow( regUp );
 	eTopLeft = reg->eUp;
 	eBottomLeft = FinishLeftRegions( tess, reg, NULL );
@@ -1096,10 +1102,10 @@ static void AddSentinel( TESStesselator *tess, TESSreal smin, TESSreal smax, TES
 {
 	TESShalfEdge *e;
 	ActiveRegion *reg = (ActiveRegion *)bucketAlloc( tess->regionPool );
-	if (reg == NULL) longjmp(tess->env,1);
+	if (reg == NULL) __builtin_trap();
 
 	e = tessMeshMakeEdge( tess->mesh );
-	if (e == NULL) longjmp(tess->env,1);
+	if (e == NULL) __builtin_trap();
 
 	e->Org->s = smax;
 	e->Org->t = t;
@@ -1114,7 +1120,7 @@ static void AddSentinel( TESStesselator *tess, TESSreal smin, TESSreal smax, TES
 	reg->sentinel = TRUE;
 	reg->dirty = FALSE;
 	reg->nodeUp = dictInsert( tess->dict, reg );
-	if (reg->nodeUp == NULL) longjmp(tess->env,1);
+	if (reg->nodeUp == NULL) __builtin_trap();
 }
 
 
@@ -1128,7 +1134,7 @@ static void InitEdgeDict( TESStesselator *tess )
 	TESSreal smin, smax, tmin, tmax;
 
 	tess->dict = dictNewDict( &tess->alloc, tess, EdgeLeq );
-	if (tess->dict == NULL) longjmp(tess->env,1);
+	if (tess->dict == NULL) __builtin_trap();
 
 	/* If the bbox is empty, ensure that sentinels are not coincident by slightly enlarging it. */
 	w = (tess->bmax[0] - tess->bmin[0]) + (TESSreal)0.01;
@@ -1186,7 +1192,7 @@ static void RemoveDegenerateEdges( TESStesselator *tess )
 			/* Zero-length edge, contour has at least 3 edges */
 
 			SpliceMergeVertices( tess, eLnext, e );	/* deletes e->Org */
-			if ( !tessMeshDelete( tess->mesh, e ) ) longjmp(tess->env,1); /* e is a self-loop */
+			if ( !tessMeshDelete( tess->mesh, e ) ) __builtin_trap(); /* e is a self-loop */
 			e = eLnext;
 			eLnext = e->Lnext;
 		}
@@ -1195,10 +1201,10 @@ static void RemoveDegenerateEdges( TESStesselator *tess )
 
 			if( eLnext != e ) {
 				if( eLnext == eNext || eLnext == eNext->Sym ) { eNext = eNext->next; }
-				if ( !tessMeshDelete( tess->mesh, eLnext ) ) longjmp(tess->env,1);
+				if ( !tessMeshDelete( tess->mesh, eLnext ) ) __builtin_trap();
 			}
 			if( e == eNext || e == eNext->Sym ) { eNext = eNext->next; }
-			if ( !tessMeshDelete( tess->mesh, e ) ) longjmp(tess->env,1);
+			if ( !tessMeshDelete( tess->mesh, e ) ) __builtin_trap();
 		}
 	}
 }

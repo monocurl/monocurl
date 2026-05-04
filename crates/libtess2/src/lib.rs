@@ -1,18 +1,43 @@
 #![doc = include_str!("../README.md")]
 
 use std::{
-    collections::HashSet, error::Error, f32::consts::PI, ffi::c_int, fmt, mem::size_of,
-    ptr::NonNull, slice,
+    alloc::{Layout, alloc, dealloc, handle_alloc_error},
+    collections::HashSet,
+    error::Error,
+    f32::consts::PI,
+    ffi::{c_int, c_uint, c_void},
+    fmt,
+    mem::size_of,
+    ptr::{NonNull, copy_nonoverlapping},
+    slice,
 };
 
 pub use geo::simd::Float3;
 
 mod raw {
-    use std::ffi::{c_int, c_void};
+    use std::ffi::{c_int, c_uint, c_void};
 
     pub type TESSindex = c_int;
     pub type TESSreal = f32;
     pub type TESStesselator = c_void;
+
+    pub type TessAllocFn = unsafe extern "C" fn(*mut c_void, c_uint) -> *mut c_void;
+    pub type TessReallocFn = unsafe extern "C" fn(*mut c_void, *mut c_void, c_uint) -> *mut c_void;
+    pub type TessFreeFn = unsafe extern "C" fn(*mut c_void, *mut c_void);
+
+    #[repr(C)]
+    pub struct TESSalloc {
+        pub memalloc: Option<TessAllocFn>,
+        pub memrealloc: Option<TessReallocFn>,
+        pub memfree: Option<TessFreeFn>,
+        pub user_data: *mut c_void,
+        pub mesh_edge_bucket_size: c_int,
+        pub mesh_vertex_bucket_size: c_int,
+        pub mesh_face_bucket_size: c_int,
+        pub dict_node_bucket_size: c_int,
+        pub region_bucket_size: c_int,
+        pub extra_vertices: c_int,
+    }
 
     pub const TESS_UNDEF: TESSindex = !0;
 
@@ -33,7 +58,7 @@ mod raw {
 
     #[link(name = "tess2_upstream", kind = "static")]
     unsafe extern "C" {
-        pub fn tessNewTess(alloc: *mut c_void) -> *mut TESStesselator;
+        pub fn tessNewTess(alloc: *mut TESSalloc) -> *mut TESStesselator;
         pub fn tessDeleteTess(tess: *mut TESStesselator);
         pub fn tessAddContour(
             tess: *mut TESStesselator,
@@ -57,6 +82,83 @@ mod raw {
         pub fn tessGetElementCount(tess: *mut TESStesselator) -> c_int;
         pub fn tessGetElements(tess: *mut TESStesselator) -> *const TESSindex;
         pub fn tessGetStatus(tess: *mut TESStesselator) -> c_int;
+    }
+}
+
+const ALLOC_ALIGN: usize = 16;
+const ALLOC_HEADER_SIZE: usize = ALLOC_ALIGN;
+
+fn tess_allocation_layout(size: usize) -> Layout {
+    Layout::from_size_align(ALLOC_HEADER_SIZE + size.max(1), ALLOC_ALIGN)
+        .expect("libtess2 allocation layout should fit")
+}
+
+unsafe fn allocation_base(ptr: *mut c_void) -> *mut u8 {
+    unsafe { ptr.cast::<u8>().sub(ALLOC_HEADER_SIZE) }
+}
+
+unsafe extern "C" fn tess_memalloc(_user_data: *mut c_void, size: c_uint) -> *mut c_void {
+    let size = size as usize;
+    let layout = tess_allocation_layout(size);
+    let base = unsafe { alloc(layout) };
+    if base.is_null() {
+        handle_alloc_error(layout);
+    }
+
+    unsafe {
+        base.cast::<usize>().write(size);
+        base.add(ALLOC_HEADER_SIZE).cast()
+    }
+}
+
+unsafe extern "C" fn tess_memrealloc(
+    user_data: *mut c_void,
+    ptr: *mut c_void,
+    size: c_uint,
+) -> *mut c_void {
+    if ptr.is_null() {
+        return unsafe { tess_memalloc(user_data, size) };
+    }
+
+    let old_base = unsafe { allocation_base(ptr) };
+    let old_size = unsafe { old_base.cast::<usize>().read() };
+    let new_ptr = unsafe { tess_memalloc(user_data, size) };
+    unsafe {
+        copy_nonoverlapping(
+            ptr.cast::<u8>(),
+            new_ptr.cast::<u8>(),
+            old_size.min(size as usize),
+        );
+        tess_memfree(user_data, ptr);
+    }
+    new_ptr
+}
+
+unsafe extern "C" fn tess_memfree(_user_data: *mut c_void, ptr: *mut c_void) {
+    if ptr.is_null() {
+        return;
+    }
+
+    let base = unsafe { allocation_base(ptr) };
+    let size = unsafe { base.cast::<usize>().read() };
+    let layout = tess_allocation_layout(size);
+    unsafe {
+        dealloc(base, layout);
+    }
+}
+
+fn tess_allocator() -> raw::TESSalloc {
+    raw::TESSalloc {
+        memalloc: Some(tess_memalloc),
+        memrealloc: Some(tess_memrealloc),
+        memfree: Some(tess_memfree),
+        user_data: std::ptr::null_mut(),
+        mesh_edge_bucket_size: 0,
+        mesh_vertex_bucket_size: 0,
+        mesh_face_bucket_size: 0,
+        dict_node_bucket_size: 0,
+        region_bucket_size: 0,
+        extra_vertices: 0,
     }
 }
 
@@ -163,7 +265,8 @@ pub struct Tessellator {
 
 impl Tessellator {
     pub fn new() -> Result<Self, TessError> {
-        let raw = unsafe { raw::tessNewTess(std::ptr::null_mut()) };
+        let mut alloc = tess_allocator();
+        let raw = unsafe { raw::tessNewTess(&mut alloc) };
         let raw = NonNull::new(raw).ok_or(TessError::CreateFailed)?;
         Ok(Self { raw })
     }

@@ -30,10 +30,13 @@
 */
 
 //#include "tesos.h"
+#if defined(__has_include) && __has_include(<assert.h>)
 #include <assert.h>
+#else
+#define assert(expr) ((void)0)
+#endif
 #include "mesh.h"
 #include "geom.h"
-#include <math.h>
 
 int tesvertLeq( TESSvertex *u, TESSvertex *v )
 {
@@ -87,7 +90,7 @@ TESSreal tesedgeSign( TESSvertex *u, TESSvertex *v, TESSvertex *w )
 
 	if( gapL + gapR > 0 ) {
 		TESSreal result = (v->t - w->t) * gapL + (v->t - u->t) * gapR;
-		return isnan(result) ? 0 : result;
+		return result != result ? 0 : result;
 	}
 	/* vertical line */
 	return 0;
@@ -176,25 +179,6 @@ int tesvertCCW( TESSvertex *u, TESSvertex *v, TESSvertex *w )
 
 #ifndef FOR_TRITE_TEST_PROGRAM
 #define Interpolate(a,x,b,y)	RealInterpolate(a,x,b,y)
-#else
-
-/* Claim: the ONLY property the sweep algorithm relies on is that
-* MIN(x,y) <= r <= MAX(x,y).  This is a nasty way to test that.
-*/
-#include <stdlib.h>
-extern int RandomInterpolate;
-
-double Interpolate( double a, double x, double b, double y)
-{
-	printf("*********************%d\n",RandomInterpolate);
-	if( RandomInterpolate ) {
-		a = 1.2 * drand48() - 0.1;
-		a = (a < 0) ? 0 : ((a > 1) ? 1 : a);
-		b = 1.0 - a;
-	}
-	return RealInterpolate(a,x,b,y);
-}
-
 #endif
 
 #define Swap(a,b)	do { TESSvertex *t = a; a = b; b = t; } while (0)

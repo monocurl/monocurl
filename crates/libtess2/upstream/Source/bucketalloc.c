@@ -29,8 +29,7 @@
 ** Author: Mikko Mononen, July 2009.
 */
 
-#include <stdio.h>
-#include <stdlib.h>
+#include <stddef.h>
 #include "../Include/tesselator.h"
 
 //#define CHECK_BOUNDS
@@ -165,7 +164,7 @@ void bucketFree( struct BucketAlloc *ba, void *ptr )
 	}
 	else
 	{
-		printf("ERROR! pointer 0x%p does not belong to allocator '%s'\n", ba->name);
+		__builtin_trap();
 	}
 #else
 	// Add the node in front of the free list.
