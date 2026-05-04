@@ -6,6 +6,11 @@ Monocurl is dynamically typed. Assignments are deep copies, so ordinary value
 assignment cannot create reference cycles. Values include numbers, strings,
 lists, maps, lambdas, operators, meshes, animation blocks, and `nil`.
 
+String literals use `%` as the escape marker instead of `\`. Common escapes are
+`%n`, `%t`, `%r`, `%"`, `%'`, `%%`, and `%\`. Backslashes are otherwise
+ordinary characters, which keeps LaTeX strings readable: `Tex("\sqrt{x}")` does
+not need doubled backslashes.
+
 Use `let` for immutable names and `var` for mutable construction state:
 
 ```monocurl

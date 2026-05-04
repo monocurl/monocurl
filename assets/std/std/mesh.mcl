@@ -397,7 +397,7 @@ let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 
 ## [parameters]
 ## text: string/list text fragments; use `text_tag{...}` on fragments that need stable mesh tags after rendering
 ## [description]
-## Use `Text` for literal text. It still returns mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply. Apply `text_tag{...}` inside the text argument when only part of the rendered text should be addressable; apply `tag{...}` outside `Text` when the whole rendered label should share one identity.
+## Use `Text` for literal text. It still returns mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply. Apply `text_tag{...}` inside the text argument when only part of the rendered text should be addressable; apply `tag{...}` outside `Text` when the whole rendered label should share one identity. String escapes use `%`, not `\`: write `%"` for a quote, `%%` for a literal percent sign, and LaTeX-style backslashes directly.
 ## [example]
 ## ```mcl image
 ## mesh title = center{UP} Text("Monocurl", 0.8)
@@ -409,7 +409,7 @@ let Text = |text, scale = 1| __monocurl__native__ mk_text(text, scale)
 ## [overview]
 ## Math text converted through TeX into mesh geometry.
 ## [description]
-## `Tex` accepts a raw TeX string or a list of string-compatible fragments. Fragments wrapped in `text_tag{...}` become tagged mesh contours after rendering, which makes individual terms usable with `tag_filter`, filtered styling, `TagTrans`, and subset-transfer animations. Raw TeX can also contain `\text_tag{1,2}{...}` or shorthand wrappers like `\tag2{...}`.
+## `Tex` accepts a raw TeX string or a list of string-compatible fragments. Fragments wrapped in `text_tag{...}` become tagged mesh contours after rendering, which makes individual terms usable with `tag_filter`, filtered styling, `TagTrans`, and subset-transfer animations. Raw TeX can also contain `\text_tag{1,2}{...}` or shorthand wrappers like `\tag2{...}`. Monocurl strings escape with `%`, not `\`, so LaTeX commands can usually be written directly, such as `"\frac{a}{b}"`; use `%%` when the string itself needs a percent character.
 ## [parameters]
 ## tex: TeX math fragment, string/list text fragments, or `text_tag{...}` fragments
 ## scale: text scale in scene units

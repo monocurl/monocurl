@@ -43,6 +43,11 @@ slide "Intro"
     play Write(0.8, [&title])
 ```
 
+String escapes use `%`, not `\`. Backslashes are ordinary characters so LaTeX
+commands can be written directly, for example `Tex("\frac{x}{2}")`. Use `%"`,
+`%n`, `%%`, and `%\` when a string needs a quote, newline, literal percent, or
+explicit escaped backslash.
+
 The code before the first `slide` is the init section. Use init for imports,
 helpers, custom operators, top-level `param` declarations, initial `mesh`
 leaders, `background`, and `camera`. Do not put `play` statements in init.

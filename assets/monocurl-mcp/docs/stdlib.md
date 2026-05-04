@@ -59,7 +59,9 @@ import std.scene
   surfaces, and back down to boundaries/dots. They are geometry tools, not
   z-order controls.
 - Text-like constructors are `Text`, `Tex`, and `Latex`. Use `text_tag{...}`
-  when fragments need stable tags for later transforms.
+  when fragments need stable tags for later transforms. Monocurl string escapes
+  use `%`, not `\`, so ordinary LaTeX commands can be written directly; use
+  `%%` only when the string needs an actual percent character.
 - Scene-level `background` and `camera` are ordinary top-level names with
   special meaning to the renderer.
 
