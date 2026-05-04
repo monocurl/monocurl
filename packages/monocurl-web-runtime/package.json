@@ -1,0 +1,45 @@
+{
+  "name": "@enigmurl/monocurl-web-runtime",
+  "version": "0.1.0",
+  "description": "Browser-side TypeScript controller for the Monocurl WebAssembly runtime.",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm run check && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "monocurl",
+    "wasm",
+    "animation",
+    "math"
+  ],
+  "author": {
+    "name": "enigmurl",
+    "email": "43832426+enigmurl@users.noreply.github.com",
+    "url": "https://monocurl.com"
+  },
+  "license": "GPL-3.0-only",
+  "homepage": "https://monocurl.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/monocurl/monocurl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/monocurl/monocurl/issues"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

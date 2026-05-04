@@ -1,6 +1,19 @@
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+type JsValue = String;
+
+#[cfg(target_arch = "wasm32")]
+fn js_error(message: String) -> JsValue {
+    JsValue::from_str(&message)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn js_error(message: String) -> JsValue {
+    message
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub struct Runtime {
     controller: runtime::RuntimeController,
@@ -65,6 +78,18 @@ impl Runtime {
             runtime::RuntimeCommand::SetPlaybackMode(runtime::PlaybackMode::Preview),
             0.0,
         );
+    }
+
+    pub fn load_bytecode_json(&self, json: &str) -> Result<(), JsValue> {
+        let bytecode = bytecode::Bytecode::from_versioned_json(json)
+            .map_err(|error| js_error(error.to_string()))?;
+        self.controller.apply_command(
+            runtime::RuntimeCommand::UpdateBytecode {
+                bytecode: Some(bytecode),
+            },
+            0.0,
+        );
+        Ok(())
     }
 
     pub async fn step(&self, now_seconds: f64) -> usize {
