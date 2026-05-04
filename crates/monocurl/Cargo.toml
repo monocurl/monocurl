@@ -28,7 +28,7 @@ executor.workspace = true
 exporter.workspace = true
 geo.workspace = true
 latex.workspace = true
-stdlib.workspace = true
+stdlib = { workspace = true, features = ["native-latex", "native-tessellation"] }
 structs.workspace = true
 bytecode.workspace = true
 
@@ -47,4 +47,5 @@ futures.workspace = true
 smol.workspace = true
 notify-debouncer-full.workspace = true
 renderer.workspace = true
+runtime.workspace = true
 image.workspace = true

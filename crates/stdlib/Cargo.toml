@@ -3,6 +3,11 @@ name = "stdlib"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = ["native-latex", "native-tessellation"]
+native-latex = ["dep:latex"]
+native-tessellation = ["dep:libtess2"]
+
 [dependencies]
 executor.workspace = true
 geo.workspace = true
@@ -11,5 +16,5 @@ smallvec.workspace = true
 stdlib-macros.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-latex.workspace = true
-libtess2.workspace = true
+latex = { workspace = true, optional = true }
+libtess2 = { workspace = true, optional = true }

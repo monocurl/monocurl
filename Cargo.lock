@@ -867,6 +867,8 @@ dependencies = [
 name = "bytecode"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "structs",
 ]
 
@@ -4325,6 +4327,7 @@ dependencies = [
  "open",
  "parser",
  "renderer",
+ "runtime",
  "schemars",
  "serde",
  "serde_json",
@@ -6033,6 +6036,18 @@ name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "bytecode",
+ "executor",
+ "geo",
+ "log",
+ "smol",
+ "stdlib",
+]
 
 [[package]]
 name = "rust-embed"
@@ -8581,8 +8596,10 @@ dependencies = [
  "bytecode",
  "executor",
  "renderer",
+ "runtime",
  "stdlib",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

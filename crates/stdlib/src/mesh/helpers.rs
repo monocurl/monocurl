@@ -19,7 +19,7 @@ use geo::{
     mesh_build::{self, BoundaryEdge, IndexedLineMesh, IndexedSurface, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-tessellation"))]
 use libtess2::{TessellationOptions, WindingRule};
 
 const NORMAL_EPSILON: f32 = 1e-6;
@@ -992,7 +992,7 @@ fn tessellate_planar_loops_with_options(
     }
     let normal = resolve_planar_normal(&contours, normal);
 
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(any(target_arch = "wasm32", not(feature = "native-tessellation")))]
     {
         let _ = normalize_input;
 
@@ -1054,7 +1054,7 @@ fn tessellate_planar_loops_with_options(
         ));
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "native-tessellation"))]
     {
         let mut source_boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
         let mut source_offset = 0usize;

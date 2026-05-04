@@ -15,5 +15,5 @@ openh264.workspace = true
 parser.workspace = true
 renderer.workspace = true
 smol.workspace = true
-stdlib.workspace = true
+stdlib = { workspace = true, features = ["native-latex", "native-tessellation"] }
 structs.workspace = true

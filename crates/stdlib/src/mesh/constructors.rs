@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
@@ -101,12 +101,12 @@ fn mesh_ref(idx: usize) -> i32 {
     super::helpers::mesh_ref(idx)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 fn latex_meshes_to_value(meshes: Vec<std::sync::Arc<geo::mesh::Mesh>>) -> Value {
     list_value(meshes.into_iter().map(Value::Mesh))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 fn read_text_scale(
     executor: &Executor,
     stack_idx: usize,
@@ -123,7 +123,7 @@ fn read_text_scale(
     Ok(scale)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 fn read_optional_decimal_places(
     executor: &Executor,
     stack_idx: usize,
@@ -168,7 +168,7 @@ fn read_nonnegative_float(
     Ok(value)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 fn text_render_quality(executor: &Executor) -> latex::RenderQuality {
     match executor.text_render_quality() {
         TextRenderQuality::Normal => latex::RenderQuality::Normal,
@@ -176,7 +176,7 @@ fn text_render_quality(executor: &Executor) -> latex::RenderQuality {
     }
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "native-latex")))]
 fn text_render_unavailable(kind: &'static str) -> ExecutorError {
     ExecutorError::invalid_invocation(format!("{kind} rendering is not available in wasm stdlib"))
 }
@@ -1093,7 +1093,7 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
     Ok(Value::Mesh(std::sync::Arc::new(mesh)))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 #[stdlib_func]
 pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let text = read_string(executor, stack_idx, -2, "text").await?;
@@ -1105,13 +1105,13 @@ pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value,
     Ok(latex_meshes_to_value(meshes))
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "native-latex")))]
 #[stdlib_func]
 pub async fn mk_text(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
     Err(text_render_unavailable("text"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 #[stdlib_func]
 pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let tex = read_string(executor, stack_idx, -2, "tex").await?;
@@ -1123,13 +1123,13 @@ pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
     Ok(latex_meshes_to_value(meshes))
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "native-latex")))]
 #[stdlib_func]
 pub async fn mk_tex(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
     Err(text_render_unavailable("tex"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 #[stdlib_func]
 pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let latex = read_string(executor, stack_idx, -3, "latex").await?;
@@ -1147,7 +1147,7 @@ pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value
     Ok(latex_meshes_to_value(meshes))
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "native-latex")))]
 #[stdlib_func]
 pub async fn mk_latex(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
     Err(text_render_unavailable("latex"))
@@ -1224,7 +1224,7 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
     Ok(mesh_from_parts(vec![], lins, vec![]))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 #[stdlib_func]
 pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let target = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
@@ -1267,13 +1267,13 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
     Ok(label.into_value())
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "native-latex")))]
 #[stdlib_func]
 pub async fn mk_label(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
     Err(text_render_unavailable("label"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), feature = "native-latex"))]
 #[stdlib_func]
 pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let value = crate::read_float(executor, stack_idx, -3, "value")?;
@@ -1292,7 +1292,7 @@ pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     Ok(latex_meshes_to_value(meshes))
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", not(feature = "native-latex")))]
 #[stdlib_func]
 pub async fn mk_number(
     _executor: &mut Executor,

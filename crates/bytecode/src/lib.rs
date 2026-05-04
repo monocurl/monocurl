@@ -1,8 +1,11 @@
 use std::{path::PathBuf, sync::Arc};
 
+use serde::{Deserialize, Serialize};
 use structs::text::Span8;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+pub const MONOCURL_VERSION: &str = env!("MONOCURL_VERSION");
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LambdaPrototype {
     pub section: u16,
     pub ip: u32,
@@ -12,13 +15,13 @@ pub struct LambdaPrototype {
     pub arg_names: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnimPrototype {
     pub section: u16,
     pub ip: u32,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum CopyValueMode {
     Read,
@@ -26,7 +29,7 @@ pub enum CopyValueMode {
     Raw,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Instruction {
     /* push constants */
     PushNil,
@@ -174,12 +177,12 @@ pub enum Instruction {
 }
 const _: () = assert!(std::mem::size_of::<Instruction>() == 8);
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct InstructionAnnotation {
     pub source_loc: Span8,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SectionFlags {
     pub is_stdlib: bool,
     pub is_library: bool,
@@ -187,7 +190,7 @@ pub struct SectionFlags {
     pub is_root_module: bool,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SectionBytecode {
     pub flags: SectionFlags,
     pub name: Option<String>,
@@ -222,9 +225,63 @@ impl SectionBytecode {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Bytecode {
     pub sections: Vec<Arc<SectionBytecode>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct VersionedBytecode {
+    pub monocurl_version: String,
+    pub bytecode: Bytecode,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BytecodeVersionError {
+    pub expected: &'static str,
+    pub found: String,
+}
+
+impl std::fmt::Display for BytecodeVersionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "bytecode version mismatch: expected Monocurl {}, found {}",
+            self.expected, self.found
+        )
+    }
+}
+
+impl std::error::Error for BytecodeVersionError {}
+
+#[derive(Debug)]
+pub enum BytecodeJsonError {
+    Json(serde_json::Error),
+    Version(BytecodeVersionError),
+}
+
+impl std::fmt::Display for BytecodeJsonError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Json(error) => write!(f, "failed to decode bytecode json: {error}"),
+            Self::Version(error) => error.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for BytecodeJsonError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Json(error) => Some(error),
+            Self::Version(error) => Some(error),
+        }
+    }
+}
+
+impl From<serde_json::Error> for BytecodeJsonError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
 }
 
 impl Bytecode {
@@ -245,5 +302,100 @@ impl Bytecode {
             .iter()
             .take_while(|s| s.flags.is_library || s.flags.is_init)
             .count()
+    }
+
+    pub fn to_versioned_json(&self) -> Result<String, serde_json::Error> {
+        VersionedBytecode::new(self.clone()).to_json()
+    }
+
+    pub fn from_versioned_json(json: &str) -> Result<Self, BytecodeJsonError> {
+        VersionedBytecode::from_json(json)?
+            .into_bytecode()
+            .map_err(BytecodeJsonError::Version)
+    }
+}
+
+impl VersionedBytecode {
+    pub fn new(bytecode: Bytecode) -> Self {
+        Self {
+            monocurl_version: MONOCURL_VERSION.to_string(),
+            bytecode,
+        }
+    }
+
+    pub fn check_version(&self) -> Result<(), BytecodeVersionError> {
+        if self.monocurl_version == MONOCURL_VERSION {
+            Ok(())
+        } else {
+            Err(BytecodeVersionError {
+                expected: MONOCURL_VERSION,
+                found: self.monocurl_version.clone(),
+            })
+        }
+    }
+
+    pub fn into_bytecode(self) -> Result<Bytecode, BytecodeVersionError> {
+        self.check_version()?;
+        Ok(self.bytecode)
+    }
+
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_bytecode() -> Bytecode {
+        let mut section = SectionBytecode::new(SectionFlags {
+            is_stdlib: false,
+            is_library: false,
+            is_init: true,
+            is_root_module: true,
+        });
+        section.name = Some("init".to_string());
+        section.instructions = vec![
+            Instruction::PushInt { index: 0 },
+            Instruction::Observe,
+            Instruction::EndOfExecutionHead,
+        ];
+        section.annotations = vec![
+            InstructionAnnotation { source_loc: 0..1 },
+            InstructionAnnotation { source_loc: 1..2 },
+            InstructionAnnotation { source_loc: 2..3 },
+        ];
+        section.int_pool = vec![42];
+        Bytecode::new(vec![Arc::new(section)])
+    }
+
+    #[test]
+    fn versioned_json_roundtrips_bytecode() {
+        let bytecode = sample_bytecode();
+        let json = bytecode.to_versioned_json().unwrap();
+        let decoded = Bytecode::from_versioned_json(&json).unwrap();
+
+        assert!(decoded == bytecode);
+    }
+
+    #[test]
+    fn versioned_json_rejects_mismatched_version() {
+        let versioned = VersionedBytecode {
+            monocurl_version: "other-version".to_string(),
+            bytecode: sample_bytecode(),
+        };
+        let json = versioned.to_json().unwrap();
+        let error = Bytecode::from_versioned_json(&json).unwrap_err();
+
+        assert!(matches!(
+            error,
+            BytecodeJsonError::Version(BytecodeVersionError { found, .. })
+                if found == "other-version"
+        ));
     }
 }

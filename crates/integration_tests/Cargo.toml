@@ -9,6 +9,6 @@ executor = { path = "../executor", features = ["capture_tos", "test_heap_trackin
 geo.workspace = true
 lexer.workspace = true
 parser.workspace = true
-stdlib.workspace = true
+stdlib = { workspace = true, features = ["native-latex", "native-tessellation"] }
 structs.workspace = true
 smol.workspace = true
