@@ -1,11 +1,8 @@
 use std::collections::HashMap;
 
-use executor::{
-    error::ExecutorError,
-    executor::{Executor, TextRenderQuality},
-    heap::with_heap,
-    value::Value,
-};
+#[cfg(not(target_arch = "wasm32"))]
+use executor::executor::TextRenderQuality;
+use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
 use geo::{
     mesh::Mesh,
     mesh_build::SurfaceVertex,
@@ -90,6 +87,7 @@ fn ensure_surface_triangles(kind: &str, tris: usize) -> Result<(), ExecutorError
     ensure_limit(kind, tris, MAX_SURFACE_TRIANGLES)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn text_render_quality(executor: &Executor) -> latex::RenderQuality {
     match executor.text_render_quality() {
         TextRenderQuality::Normal => latex::RenderQuality::Normal,
@@ -640,16 +638,27 @@ fn render_axis_tex_tree(
     scale: f32,
     name: &'static str,
 ) -> Result<Option<MeshTree>, ExecutorError> {
-    let meshes = latex::render_tex_with_quality(tex, scale, text_render_quality(executor))
-        .map_err(|error| {
-            ExecutorError::invalid_invocation(format!("{name} render failed: {error:#}"))
-        })?;
-    if meshes.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(MeshTree::List(
-            meshes.into_iter().map(MeshTree::Mesh).collect(),
-        )))
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (executor, tex, scale);
+        return Err(ExecutorError::invalid_invocation(format!(
+            "{name} rendering is not available in wasm stdlib"
+        )));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let meshes = latex::render_tex_with_quality(tex, scale, text_render_quality(executor))
+            .map_err(|error| {
+                ExecutorError::invalid_invocation(format!("{name} render failed: {error:#}"))
+            })?;
+        if meshes.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(MeshTree::List(
+                meshes.into_iter().map(MeshTree::Mesh).collect(),
+            )))
+        }
     }
 }
 
