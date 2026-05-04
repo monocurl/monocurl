@@ -14,7 +14,7 @@ use stdlib_macros::stdlib_func;
 
 use super::helpers::{
     collapse_mesh, decompose_mesh_tree, fade_start_mesh, list_value, map_mesh_tree,
-    materialize_live_value, mesh_center, pack_mesh_tree, prefer_single_mesh_tree_value,
+    materialize_live_value, mesh_group_center, pack_mesh_tree, prefer_single_mesh_tree_value,
 };
 
 #[stdlib_func]
@@ -129,23 +129,6 @@ pub async fn highlight_embed(
 
 pub(super) fn embed_triplet(start: Value, destination: Value, state: Value) -> Value {
     list_value([start, destination, state])
-}
-
-fn mesh_group_center(meshes: &[Arc<Mesh>]) -> Float3 {
-    let mut min = None::<Float3>;
-    let mut max = None::<Float3>;
-    for mesh in meshes {
-        let c = mesh_center(mesh);
-        min = Some(
-            min.map(|m| Float3::new(m.x.min(c.x), m.y.min(c.y), m.z.min(c.z)))
-                .unwrap_or(c),
-        );
-        max = Some(
-            max.map(|m| Float3::new(m.x.max(c.x), m.y.max(c.y), m.z.max(c.z)))
-                .unwrap_or(c),
-        );
-    }
-    (min.unwrap_or(Float3::ZERO) + max.unwrap_or(Float3::ZERO)) / 2.0
 }
 
 pub(super) fn read_vec3_value(value: Value, name: &'static str) -> Result<Float3, ExecutorError> {

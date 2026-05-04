@@ -1786,6 +1786,20 @@ fn test_mesh_trans_helper_interpolates_without_animation_context() {
 }
 
 #[test]
+fn test_scale_operator_defaults_to_mesh_tree_center() {
+    let r = run_with_stdlib(
+        "
+        let scaled = scale{2} [Dot([0, 0, 0]), Dot([2, 0, 0])]
+        let left = mesh_center(scaled[0])
+        let right = mesh_center(scaled[1])
+        let result = [left[0], left[1], left[2], right[0], right[1], right[2]]
+    ",
+        &["mesh"],
+    );
+    r.assert_float_list_approx(&[-1.0, 0.0, 0.0, 3.0, 0.0, 0.0], 1e-5);
+}
+
+#[test]
 fn test_rotate_operator_uses_angle_axis_and_optional_pivot() {
     let r = run_with_stdlib(
         "
@@ -1794,6 +1808,20 @@ fn test_rotate_operator_uses_angle_axis_and_optional_pivot() {
         &["mesh"],
     );
     r.assert_float_list_approx(&[0.0, -1.0, 0.0], 1e-5);
+}
+
+#[test]
+fn test_rotate_operator_defaults_to_mesh_tree_center() {
+    let r = run_with_stdlib(
+        "
+        let rotated = rotate{1.5707963267948966, 1b} [Dot([0, 0, 0]), Dot([2, 0, 0])]
+        let left = mesh_center(rotated[0])
+        let right = mesh_center(rotated[1])
+        let result = [left[0], left[1], left[2], right[0], right[1], right[2]]
+    ",
+        &["mesh"],
+    );
+    r.assert_float_list_approx(&[1.0, -1.0, 0.0, 1.0, 1.0, 0.0], 1e-5);
 }
 
 #[test]

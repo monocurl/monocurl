@@ -744,7 +744,7 @@ let shift = operator |target, delta, filter = nil| {
 ## [overview]
 ## Scale a mesh uniformly or per axis.
 ## [description]
-## A scalar factor scales all coordinates. A 3-list scales x/y/z independently.
+## A scalar factor scales all coordinates. A 3-list scales x/y/z independently. Scaling is centered on the affected mesh tree's bounding-box center.
 ## [parameters]
 ## factor: scalar or vector scale
 ## filter: optional tag predicate applied to mesh leaves
@@ -766,7 +766,7 @@ let scale = operator |target, factor = 1, filter = nil| {
 ## Rotation is interpolatable because the operator supplies identity and target rotation states to `Lerp`.
 ## [parameters]
 ## axis: rotation axis, default 1b
-## pivot: optional point to rotate around; defaults to the origin
+## pivot: optional point to rotate around; defaults to the affected mesh tree's bounding-box center
 ## [example]
 ## ```
 ## mesh spun = rotate{PI / 4, 1b} Square(1)

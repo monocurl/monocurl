@@ -213,6 +213,17 @@ fn filtered_tree_view<'a>(
     })
 }
 
+async fn affected_tree_center(
+    executor: &mut Executor,
+    tree: &MeshTree,
+    filter: Option<&TagFilter>,
+) -> Result<Option<Float3>, ExecutorError> {
+    let Some(view) = filtered_tree_view(executor, tree, filter).await? else {
+        return Ok(None);
+    };
+    Ok(Some(tree_center(&view).unwrap_or(Float3::ZERO)))
+}
+
 fn blend_mesh_positions(mesh: &mut Mesh, level: f32, map: impl Fn(Float3) -> Float3) {
     for dot in &mut mesh.dots {
         let original = dot.pos;
@@ -605,10 +616,9 @@ pub async fn op_scale(executor: &mut Executor, stack_idx: usize) -> Result<Value
         return Ok(tree.into_value());
     }
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
-    let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
+    let Some(center) = affected_tree_center(executor, &tree, filter.as_ref()).await? else {
         return Ok(tree.into_value());
     };
-    let center = tree_center(&view).unwrap_or(Float3::ZERO);
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         transform_mesh_positions(mesh, |p| center + (p - center) * factor);
     })
@@ -637,14 +647,16 @@ pub async fn op_rotate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         .clone()
         .elide_lvalue_leader_rec()
     {
-        Value::Nil => None,
-        value => Some(float3_from_value(value, "pivot")?),
+        Value::Nil => {
+            let Some(center) = affected_tree_center(executor, &tree, filter.as_ref()).await? else {
+                return Ok(tree.into_value());
+            };
+            center
+        }
+        value => float3_from_value(value, "pivot")?,
     };
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        let center = pivot.unwrap_or_else(|| mesh_center(mesh).unwrap_or(Float3::ZERO));
-        transform_mesh_positions(mesh, |p| {
-            center + rotate_about_axis(p - center, axis, angle)
-        });
+        transform_mesh_positions(mesh, |p| pivot + rotate_about_axis(p - pivot, axis, angle));
         for dot in &mut mesh.dots {
             dot.norm = rotate_about_axis(dot.norm, axis, angle);
         }
@@ -1713,10 +1725,9 @@ pub async fn op_centered(
     }
     let at = read_float3(executor, stack_idx, -3, "at")?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
-    let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
+    let Some(center) = affected_tree_center(executor, &tree, filter.as_ref()).await? else {
         return Ok(tree.into_value());
     };
-    let center = tree_center(&view).unwrap_or(Float3::ZERO);
     let delta = (at - center) * level;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         transform_mesh_positions(mesh, |p| p + delta)

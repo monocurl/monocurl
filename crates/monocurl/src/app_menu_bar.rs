@@ -75,33 +75,27 @@ impl AppMenuBar {
         let theme = ThemeSettings::theme(cx);
 
         match item {
-            OwnedMenuItem::Action {
-                name,
-                action,
-                ..
-            } => {
-                div()
-                    .id((ElementId::from("menu-item"), name.clone()))
-                    .w_full()
-                    .px_3()
-                    .py_1()
-                    .text_size(px(12.0))
-                    .text_color(theme.text_primary)
-                    .cursor_pointer()
-                    .hover({
-                        let hover = theme.row_hover_overlay;
-                        move |this| this.bg(hover)
-                    })
-                    .child(name)
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_menu = None;
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        window.dispatch_action(action.boxed_clone(), cx);
-                        cx.notify();
-                    }))
-                    .into_any_element()
-            }
+            OwnedMenuItem::Action { name, action, .. } => div()
+                .id((ElementId::from("menu-item"), name.clone()))
+                .w_full()
+                .px_3()
+                .py_1()
+                .text_size(px(12.0))
+                .text_color(theme.text_primary)
+                .cursor_pointer()
+                .hover({
+                    let hover = theme.row_hover_overlay;
+                    move |this| this.bg(hover)
+                })
+                .child(name)
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.open_menu = None;
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    window.dispatch_action(action.boxed_clone(), cx);
+                    cx.notify();
+                }))
+                .into_any_element(),
             OwnedMenuItem::Submenu(submenu) => div()
                 .id((ElementId::from("menu-submenu"), submenu.name.clone()))
                 .w_full()

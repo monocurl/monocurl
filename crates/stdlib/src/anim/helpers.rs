@@ -199,6 +199,31 @@ pub(super) fn mesh_center(mesh: &Mesh) -> Float3 {
         .unwrap_or(Float3::ZERO)
 }
 
+pub(super) fn mesh_group_center(meshes: &[Arc<Mesh>]) -> Float3 {
+    let mut bounds = None::<(Float3, Float3)>;
+    for mesh in meshes {
+        let Some((mesh_min, mesh_max)) = mesh_bounds(mesh) else {
+            continue;
+        };
+        bounds = Some(
+            bounds
+                .map(|(mut min, mut max)| {
+                    min.x = min.x.min(mesh_min.x);
+                    min.y = min.y.min(mesh_min.y);
+                    min.z = min.z.min(mesh_min.z);
+                    max.x = max.x.max(mesh_max.x);
+                    max.y = max.y.max(mesh_max.y);
+                    max.z = max.z.max(mesh_max.z);
+                    (min, max)
+                })
+                .unwrap_or((mesh_min, mesh_max)),
+        );
+    }
+    bounds
+        .map(|(min, max)| (min + max) / 2.0)
+        .unwrap_or(Float3::ZERO)
+}
+
 pub(super) fn flatten_mesh_leaves(
     value: &Value,
     out: &mut Vec<Arc<Mesh>>,

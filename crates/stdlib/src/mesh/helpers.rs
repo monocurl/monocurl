@@ -1657,13 +1657,6 @@ pub(super) fn transform_mesh_positions(mesh: &mut Mesh, mut f: impl FnMut(Float3
     }
 }
 
-pub(super) fn mesh_center(mesh: &Mesh) -> Option<Float3> {
-    let first = mesh_vertices(mesh).next()?;
-    let (sum, count) =
-        mesh_vertices(mesh).fold((first, 1usize), |(sum, count), p| (sum + p, count + 1));
-    Some(sum / count as f32)
-}
-
 pub(super) fn triangle_normal(a: Float3, b: Float3, c: Float3) -> Float3 {
     let cross = (b - a).cross(c - a);
     if cross.len_sq() <= 1e-12 {
