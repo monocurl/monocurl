@@ -1,3 +1,5 @@
+mod snapshot_json;
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -98,6 +100,11 @@ impl Runtime {
             .await
             .snapshots
             .len()
+    }
+
+    pub async fn step_json(&self, now_seconds: f64) -> Result<String, JsValue> {
+        snapshot_json::runtime_iteration_to_json(self.controller.run_iteration(now_seconds).await)
+            .map_err(|error| js_error(error.to_string()))
     }
 }
 

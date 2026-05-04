@@ -8595,8 +8595,11 @@ version = "0.1.0"
 dependencies = [
  "bytecode",
  "executor",
+ "geo",
  "renderer",
  "runtime",
+ "serde",
+ "serde_json",
  "stdlib",
  "wasm-bindgen",
  "wasm-bindgen-futures",

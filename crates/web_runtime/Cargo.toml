@@ -9,8 +9,11 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 bytecode.workspace = true
 executor.workspace = true
+geo.workspace = true
 renderer.workspace = true
 runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 stdlib.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
