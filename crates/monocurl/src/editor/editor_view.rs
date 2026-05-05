@@ -202,6 +202,12 @@ impl Editor {
         });
     }
 
+    pub fn open_find(&mut self, window: &mut Window, cx: &mut App) {
+        self.editor.update(cx, |editor, cx| {
+            editor.open_find_panel(window, cx);
+        });
+    }
+
     pub fn next_undo_requires_reload_confirmation(&self, cx: &App) -> bool {
         self.editor
             .read(cx)

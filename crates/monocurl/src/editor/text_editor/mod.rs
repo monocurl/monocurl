@@ -3,6 +3,7 @@ use std::ops::Range;
 use std::time::Duration;
 use std::usize;
 
+use crate::components::text_input::{SingleLineInput, SingleLineInputEvent};
 use crate::editor::line_map::LineMap;
 use crate::editor::line_shaper::LineShaper;
 use crate::editor::text_editor::popover_element::PopoverElement;
@@ -42,6 +43,7 @@ mod mouse;
 mod popover_element;
 mod render;
 mod scroll;
+mod search;
 mod text_element;
 
 use history::HistoryGroup;
@@ -56,22 +58,38 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-secondary-backspace", BackspaceLine, None),
         KeyBinding::new("delete", Delete, None),
         KeyBinding::new("shift-delete", Delete, None),
+        KeyBinding::new("alt-delete", DeleteWord, None),
+        KeyBinding::new("secondary-delete", DeleteLine, None),
         KeyBinding::new("up", Up, None),
         KeyBinding::new("down", Down, None),
         KeyBinding::new("left", Left, None),
         KeyBinding::new("right", Right, None),
+        KeyBinding::new("alt-left", LeftWord, None),
+        KeyBinding::new("alt-right", RightWord, None),
+        KeyBinding::new("secondary-left", Home, None),
+        KeyBinding::new("secondary-right", End, None),
         KeyBinding::new("enter", Enter, None),
         KeyBinding::new("tab", Tab, None),
         KeyBinding::new("shift-tab", Untab, None),
         KeyBinding::new("secondary-/", ToggleComment, None),
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),
+        KeyBinding::new("shift-alt-left", SelectLeftWord, None),
+        KeyBinding::new("shift-alt-right", SelectRightWord, None),
+        KeyBinding::new("shift-secondary-left", SelectHome, None),
+        KeyBinding::new("shift-secondary-right", SelectEnd, None),
         KeyBinding::new("shift-up", SelectUp, None),
         KeyBinding::new("shift-down", SelectDown, None),
         KeyBinding::new("secondary-a", SelectAll, None),
         KeyBinding::new("secondary-v", Paste, None),
         KeyBinding::new("secondary-c", Copy, None),
         KeyBinding::new("secondary-x", Cut, None),
+        KeyBinding::new("secondary-f", OpenFind, None),
+        KeyBinding::new("secondary-g", FindNext, None),
+        KeyBinding::new("secondary-shift-g", FindPrevious, None),
+        KeyBinding::new("shift-enter", FindPrevious, Some("find-panel")),
+        KeyBinding::new("escape", CloseFind, Some("find-panel")),
+        KeyBinding::new("escape", CloseFind, Some("single-line-input")),
         KeyBinding::new("home", Home, None),
         KeyBinding::new("end", End, None),
         KeyBinding::new("ctrl-secondary-space", ShowCharacterPalette, None),
@@ -97,6 +115,14 @@ fn adjust_cursor_after_uncomment(
     }
 }
 
+#[derive(Default)]
+struct SearchState {
+    visible: bool,
+    matches: Vec<Span8>,
+    active_match: Option<usize>,
+    suppress_refresh: bool,
+}
+
 pub struct TextEditor {
     focus_handle: FocusHandle,
     _focus_out_subscription: Subscription,
@@ -112,6 +138,10 @@ pub struct TextEditor {
     state: Entity<TextualState>,
     dirty: Entity<bool>,
     save_dirty: Entity<bool>,
+
+    find_query_input: Entity<SingleLineInput>,
+    find_replace_input: Entity<SingleLineInput>,
+    search: SearchState,
 
     last_op_matched_character: Option<Count8>,
 
@@ -157,6 +187,9 @@ impl TextEditor {
     ) -> Self {
         let text_styles = ThemeSettings::theme(cx).text_editor_styles();
         let line_height = text_styles.line_height;
+        let focus_handle = cx.focus_handle();
+        let find_query_input = cx.new(|cx| SingleLineInput::new("Find", cx));
+        let find_replace_input = cx.new(|cx| SingleLineInput::new("Replace", cx));
 
         // re render whenever state changes
         // (mainly want the rerender when theres external changes to the state)
@@ -169,6 +202,13 @@ impl TextEditor {
             editor.apply_theme(styles, cx);
             cx.notify();
         })
+        .detach();
+        cx.subscribe(
+            &find_query_input,
+            |editor, _, event: &SingleLineInputEvent, cx| match event {
+                SingleLineInputEvent::Edited => editor.on_find_query_edited(cx),
+            },
+        )
         .detach();
 
         let window_focus_subscription = cx.observe_window_activation(window, |e, window, cx| {
@@ -183,15 +223,16 @@ impl TextEditor {
             cx.notify()
         });
 
-        let focus_out_subscription = cx.on_focus_lost(window, |editor, _window, cx| {
-            editor.reset_hover_task_if_necessary(cx);
-            editor.cursor_blink_task = None;
-            editor.cursor_blink_state = false;
-            cx.notify()
-        });
-
+        let focus_out_subscription =
+            cx.on_focus_out(&focus_handle, window, |editor, _, _window, cx| {
+                editor.close_find_panel_without_focus(cx);
+                editor.reset_hover_task_if_necessary(cx);
+                editor.cursor_blink_task = None;
+                editor.cursor_blink_state = false;
+                cx.notify()
+            });
         let mut ret = TextEditor {
-            focus_handle: cx.focus_handle(),
+            focus_handle,
             _focus_out_subscription: focus_out_subscription,
             _window_focus_subscription: window_focus_subscription,
             scroll_handle: ScrollHandle::new(),
@@ -204,6 +245,9 @@ impl TextEditor {
 
             dirty,
             save_dirty,
+            find_query_input,
+            find_replace_input,
+            search: SearchState::default(),
             last_op_matched_character: None,
 
             marked_range: None,

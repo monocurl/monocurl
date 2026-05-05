@@ -18,6 +18,7 @@ impl TextEditor {
         self.reshape_lines(del_range, ins_range, window, cx);
         self.dirty.update(cx, |dirty, _| *dirty = true);
         self.save_dirty.update(cx, |dirty, _| *dirty = true);
+        self.refresh_search_after_text_change(cx);
     }
 
     // 0. if not inserting a single parenthesis, do normal
@@ -233,6 +234,52 @@ impl TextEditor {
         self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
+    pub(super) fn delete_word(
+        &mut self,
+        _: &DeleteWord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.update(cx, |state, _| state.start_transaction());
+        let had_selection = !self.cursor(cx).is_empty();
+        if had_selection {
+            self.undo_group_boundary(cx);
+        } else {
+            let state = self.state.read(cx);
+            let offset = state.loc8_to_offset8(self.cursor(cx).head);
+            let new_offset = self.next_word_offset(state, offset);
+            self.select_to(state.offset8_to_loc8(new_offset), false, false, cx);
+        }
+        self.replace_text_in_utf16_range(None, "", false, window, cx);
+        if had_selection {
+            self.undo_group_boundary(cx);
+        }
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
+    }
+
+    pub(super) fn delete_line(
+        &mut self,
+        _: &DeleteLine,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.state.update(cx, |state, _| state.start_transaction());
+        let had_selection = !self.cursor(cx).is_empty();
+        if had_selection {
+            self.undo_group_boundary(cx);
+        } else {
+            let state = self.state.read(cx);
+            let row = self.cursor(cx).head.row;
+            let line_end = self.line_end_offset(state, row);
+            self.select_to(state.offset8_to_loc8(line_end), false, false, cx);
+        }
+        self.replace_text_in_utf16_range(None, "", false, window, cx);
+        if had_selection {
+            self.undo_group_boundary(cx);
+        }
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
+    }
+
     pub(super) fn backspace_word(
         &mut self,
         _: &BackspaceWord,
@@ -274,6 +321,15 @@ impl TextEditor {
     }
 
     pub(super) fn enter(&mut self, _: &Enter, window: &mut Window, cx: &mut Context<Self>) {
+        if self.find_query_has_focus(window, cx) {
+            self.find_next_match(cx);
+            return;
+        }
+        if self.find_replace_has_focus(window, cx) {
+            self.replace_current_match(window, cx);
+            return;
+        }
+
         self.state.update(cx, |state, _| state.start_transaction());
         if self.do_autocomplete_action(cx) {
             let ac = self.state.read(cx).autocomplete_state();

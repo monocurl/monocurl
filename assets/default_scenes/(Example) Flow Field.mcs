@@ -41,11 +41,11 @@ let flow_at = |pos, src, dst, swirl_value, pressure_value| {
     let pressure_clamped = clamp(0.15, pressure_value, 1.8)
     let swirl_clamped = clamp(-1.25, swirl_value, 1.25)
     return pressure_clamped * (0.62 * src_delta * (1 / src_d2) + 0.82 * dst_delta * (1 / dst_d2)) +
-        0.42 * swirl_clamped * tangent
+    0.42 * swirl_clamped * tangent
 }
 
 let Needle = |pos, src, dst, swirl_value, pressure_value, idx| {
-    let v = flow_at(pos, src, dst, swirl_value, pressure_value)
+    let v = flow_at(pos, src, dst, swirl_value, pressure_value) 
     let strength = clamp(0, norm(v) / 3.2, 1)
     let dir = safe_unit(v)
     let len = 0.11 + 0.22 * strength

@@ -316,6 +316,8 @@ pub struct TextEditorStyles {
 
     pub selection_color: Hsla,
     pub active_line_color: Hsla,
+    pub search_match_color: Hsla,
+    pub active_search_match_color: Hsla,
 
     pub scroll_color: Hsla,
     pub scroll_background_color: Hsla,
@@ -368,6 +370,8 @@ impl TextEditorStyles {
             gutter_active_color: hsla(0.0, 0.59, 0.54, 1.0),
             selection_color: hsla(0.05, 0.40, 0.76, 0.24),
             active_line_color: hsla(0.61, 0.13, 0.91, 1.0),
+            search_match_color: hsla(0.13, 0.91, 0.62, 0.28),
+            active_search_match_color: hsla(0.13, 0.91, 0.54, 0.48),
             scroll_color: hsla(0.61, 0.13, 0.40, 0.30),
             scroll_background_color: hsla(0.61, 0.10, 0.82, 0.34),
             popover_background_color: rgba(0xECEFF5),
@@ -427,6 +431,8 @@ impl TextEditorStyles {
             gutter_active_color: nightfox_orange.into(),
             selection_color: hsla(0.59, 0.16, 0.32, 0.60),
             active_line_color: nightfox_bg2.into(),
+            search_match_color: hsla(0.13, 0.65, 0.42, 0.34),
+            active_search_match_color: hsla(0.13, 0.78, 0.52, 0.56),
             scroll_color: hsla(0.61, 0.09, 0.54, 0.30),
             scroll_background_color: hsla(0.61, 0.08, 0.16, 0.18),
             popover_background_color: nightfox_background.into(),

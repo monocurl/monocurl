@@ -94,6 +94,61 @@ impl TextEditor {
         }
     }
 
+    pub(super) fn previous_word_offset(&self, state: &TextualState, offset: Count8) -> Count8 {
+        state.word(offset.min(state.len()), true).start
+    }
+
+    pub(super) fn next_word_offset(&self, state: &TextualState, offset: Count8) -> Count8 {
+        fn is_word(ch: char) -> bool {
+            ch.is_alphanumeric() || ch == '_'
+        }
+
+        let mut cursor = offset.min(state.len());
+        while cursor < state.len() {
+            let next = state.next_boundary(cursor);
+            if !state
+                .read(cursor..next)
+                .chars()
+                .all(|ch| ch.is_whitespace())
+            {
+                break;
+            }
+            cursor = next;
+        }
+
+        if cursor == state.len() {
+            return cursor;
+        }
+
+        let next = state.next_boundary(cursor);
+        let starts_word = state.read(cursor..next).chars().all(is_word);
+        while cursor < state.len() {
+            let next = state.next_boundary(cursor);
+            let content = state.read(cursor..next);
+            let is_same_boundary_kind = if starts_word {
+                content.chars().all(is_word)
+            } else {
+                content
+                    .chars()
+                    .all(|ch| !ch.is_whitespace() && !is_word(ch))
+            };
+            if !is_same_boundary_kind {
+                break;
+            }
+            cursor = next;
+        }
+        cursor
+    }
+
+    pub(super) fn line_end_offset(&self, state: &TextualState, row: usize) -> Count8 {
+        state
+            .loc8_to_offset8(Location8 {
+                row,
+                col: usize::MAX,
+            })
+            .min(state.len())
+    }
+
     pub(super) fn do_autocomplete_action(&mut self, cx: &mut Context<Self>) -> bool {
         let state = self.state.read(cx);
         state
@@ -152,6 +207,30 @@ impl TextEditor {
         }
     }
 
+    pub(super) fn left_word(&mut self, _: &LeftWord, _: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        if !self.cursor(cx).is_empty() {
+            let range = state.cursor_range();
+            self.move_to(state.offset8_to_loc8(range.start), false, true, cx);
+        } else {
+            let offset = state.loc8_to_offset8(self.cursor(cx).head);
+            let new_offset = self.previous_word_offset(state, offset);
+            self.move_to(state.offset8_to_loc8(new_offset), false, true, cx);
+        }
+    }
+
+    pub(super) fn right_word(&mut self, _: &RightWord, _: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        if !self.cursor(cx).is_empty() {
+            let range = state.cursor_range();
+            self.move_to(state.offset8_to_loc8(range.end), false, true, cx);
+        } else {
+            let offset = state.loc8_to_offset8(self.cursor(cx).head);
+            let new_offset = self.next_word_offset(state, offset);
+            self.move_to(state.offset8_to_loc8(new_offset), false, true, cx);
+        }
+    }
+
     pub(super) fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
         let offset = state.loc8_to_offset8(self.cursor(cx).head);
@@ -163,6 +242,30 @@ impl TextEditor {
         let state = self.state.read(cx);
         let offset = state.loc8_to_offset8(self.cursor(cx).head);
         let new_offset = state.next_boundary(offset);
+        self.select_to(state.offset8_to_loc8(new_offset), false, true, cx);
+    }
+
+    pub(super) fn select_left_word(
+        &mut self,
+        _: &SelectLeftWord,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let state = self.state.read(cx);
+        let offset = state.loc8_to_offset8(self.cursor(cx).head);
+        let new_offset = self.previous_word_offset(state, offset);
+        self.select_to(state.offset8_to_loc8(new_offset), false, true, cx);
+    }
+
+    pub(super) fn select_right_word(
+        &mut self,
+        _: &SelectRightWord,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let state = self.state.read(cx);
+        let offset = state.loc8_to_offset8(self.cursor(cx).head);
+        let new_offset = self.next_word_offset(state, offset);
         self.select_to(state.offset8_to_loc8(new_offset), false, true, cx);
     }
 
@@ -187,6 +290,21 @@ impl TextEditor {
         cx.notify();
     }
 
+    pub(super) fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
+        let new_pos = Location8 {
+            row: self.cursor(cx).head.row,
+            col: 0,
+        };
+        self.select_to(new_pos, false, true, cx);
+    }
+
+    pub(super) fn select_end(&mut self, _: &SelectEnd, _: &mut Window, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        let row = self.cursor(cx).head.row;
+        let line_end = self.line_end_offset(state, row);
+        self.select_to(state.offset8_to_loc8(line_end), false, true, cx);
+    }
+
     pub(super) fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
         let new_pos = Location8 {
             row: self.cursor(cx).head.row,
@@ -198,11 +316,7 @@ impl TextEditor {
     pub(super) fn end(&mut self, _: &End, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
         let row = self.cursor(cx).head.row;
-        let next_line = state.loc8_to_offset8(Location8 {
-            row: row + 1,
-            col: 0,
-        });
-        let line_end = next_line.saturating_sub(1).min(state.len());
+        let line_end = self.line_end_offset(state, row);
         self.move_to(state.offset8_to_loc8(line_end), false, true, cx);
     }
 }

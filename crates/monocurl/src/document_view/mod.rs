@@ -11,10 +11,10 @@ use structs::rope::{Attribute, Rope, TextAggregate};
 use crate::{
     actions::{
         CloseActiveDocument, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide,
-        PlayOrShowPauseHint, PrevSlide, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath,
-        SceneEnd, SceneStart, SyncViewportCamera, ToggleHeadlessMode, ToggleParamsPanel,
-        TogglePlaying, TogglePresentationMode, ToggleTimelineConsole, Undo, UnfocusEditor, ZoomIn,
-        ZoomOut,
+        OpenFind, PlayOrShowPauseHint, PrevSlide, Redo, SaveActiveDocument,
+        SaveActiveDocumentCustomPath, SceneEnd, SceneStart, SyncViewportCamera, ToggleHeadlessMode,
+        ToggleParamsPanel, TogglePlaying, TogglePresentationMode, ToggleTimelineConsole, Undo,
+        UnfocusEditor, ZoomIn, ZoomOut,
     },
     components::split_pane::Split,
     editor::editor_view::Editor,

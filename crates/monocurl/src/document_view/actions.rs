@@ -209,6 +209,15 @@ impl DocumentView {
         self.focus(w);
     }
 
+    pub(super) fn open_find(&mut self, _: &OpenFind, w: &mut Window, cx: &mut Context<Self>) {
+        if self.is_presenting {
+            return;
+        }
+        self.editor.update(cx, |editor, cx| {
+            editor.open_find(w, cx);
+        });
+    }
+
     pub(super) fn toggle_headless(
         &mut self,
         _: &ToggleHeadlessMode,

@@ -26,6 +26,7 @@ pub struct PrepaintState {
     lines: Vec<(usize, Pixels, WrappedLine)>,
     cursor_bounds: Option<Bounds<Pixels>>,
     selection_bounds: Vec<Bounds<Pixels>>,
+    search_bounds: Vec<(Bounds<Pixels>, bool)>,
     active_line_bounds: Option<Bounds<Pixels>>,
     scroll_wheel_state: Option<ScrollBarState>,
 }
@@ -136,6 +137,72 @@ impl TextElement {
         }
 
         selection_bounds
+    }
+
+    fn compute_search_bounds(
+        &self,
+        editor: &TextEditor,
+        bounds: Bounds<Pixels>,
+        visible_lines: Range<usize>,
+        cx: &App,
+    ) -> Vec<(Bounds<Pixels>, bool)> {
+        if !editor.search.visible || editor.search.matches.is_empty() {
+            return Vec::new();
+        }
+
+        let state = editor.state.read(cx);
+        let mut search_bounds = Vec::new();
+        for (match_ix, span) in editor.search.matches.iter().enumerate() {
+            let start_loc = state.offset8_to_loc8(span.start);
+            let end_loc = state.offset8_to_loc8(span.end);
+            let visible_match_lines =
+                visible_lines.start.max(start_loc.row)..visible_lines.end.min(end_loc.row + 1);
+            if visible_match_lines.is_empty() {
+                continue;
+            }
+
+            for multi_line in editor
+                .line_map
+                .unwrapped_lines_iter(visible_match_lines.start)
+                .take(visible_match_lines.len())
+            {
+                let line_num = multi_line.unwrapped_line_no;
+                let line_start = if line_num == start_loc.row {
+                    start_loc.col
+                } else {
+                    0
+                };
+                let line_end = if line_num == end_loc.row {
+                    end_loc.col
+                } else {
+                    editor.line_map.line_len(line_num)
+                };
+                let line_y = editor.line_map.y_range(line_num..line_num + 1).start;
+
+                for (wrapped_ix, single_line) in multi_line.line.iter().enumerate() {
+                    let Some(mut x_pixels) = single_line.x_range(line_start..line_end) else {
+                        continue;
+                    };
+                    x_pixels.end = x_pixels.end.max(x_pixels.start + px(3.0));
+                    let y = line_y + editor.line_height * wrapped_ix as f32;
+                    search_bounds.push((
+                        Bounds::from_corners(
+                            point(
+                                bounds.left() + editor.gutter_width + x_pixels.start,
+                                bounds.top() + y,
+                            ),
+                            point(
+                                bounds.left() + editor.gutter_width + x_pixels.end,
+                                bounds.top() + y + editor.line_height,
+                            ),
+                        ),
+                        editor.search.active_match == Some(match_ix),
+                    ));
+                }
+            }
+        }
+
+        search_bounds
     }
 
     fn compute_scroll_bar_state(
@@ -356,6 +423,8 @@ impl Element for TextElement {
 
             let cursor_bounds = self.compute_cursor_bounds(editor, bounds, window, cx);
             let active_line_bounds = self.compute_active_line_bounds(editor, bounds, window, cx);
+            let search_bounds =
+                self.compute_search_bounds(editor, bounds, visible_lines.clone(), cx);
             let selection_bounds =
                 self.compute_selection_bounds(editor, bounds, visible_lines, window, cx);
             let scroll_wheel_bounds = self.compute_scroll_bar_state(editor, bounds, window, cx);
@@ -364,6 +433,7 @@ impl Element for TextElement {
                 lines,
                 cursor_bounds,
                 selection_bounds,
+                search_bounds,
                 active_line_bounds,
                 scroll_wheel_state: scroll_wheel_bounds,
             }
@@ -388,6 +458,8 @@ impl Element for TextElement {
         let scroll_background_color = editor.text_styles.scroll_background_color;
         let active_line_color = editor.text_styles.active_line_color;
         let selection_color = editor.text_styles.selection_color;
+        let search_match_color = editor.text_styles.search_match_color;
+        let active_search_match_color = editor.text_styles.active_search_match_color;
         let gutter_width = editor.gutter_width;
         let line_height = editor.line_height;
 
@@ -410,6 +482,15 @@ impl Element for TextElement {
 
         if let Some(active_bounds) = prepaint.active_line_bounds {
             window.paint_quad(fill(active_bounds, active_line_color));
+        }
+
+        for (search_bounds, active) in &prepaint.search_bounds {
+            let color = if *active {
+                active_search_match_color
+            } else {
+                search_match_color
+            };
+            window.paint_quad(fill(*search_bounds, color));
         }
 
         for sel_bounds in &prepaint.selection_bounds {

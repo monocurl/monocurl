@@ -380,6 +380,7 @@ impl DocumentView {
             .on_action(cx.listener(Self::epsilon_backward))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(Self::open_find))
             .on_action(cx.listener(Self::save_document))
             .on_action(cx.listener(Self::save_document_custom_path))
             .on_action(cx.listener(Self::export_image))
