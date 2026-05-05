@@ -194,7 +194,6 @@ impl RuntimeState {
                 MessageEffect::ResetFuture
             }
             ExecutionMessage::SeekTo { target } => {
-                log::info!("seek_to {:?}", target);
                 let target = self.shared.user_to_internal_timestamp(target);
                 let reset_future = self.shared.seek_requires_reset(target);
                 self.shared.is_playing.set(false);
