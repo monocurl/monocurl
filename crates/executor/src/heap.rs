@@ -297,8 +297,6 @@ pub fn with_inhibit<R>(f: impl FnOnce() -> R) -> R {
 
 #[cfg(test)]
 mod tests {
-    use smallvec::smallvec;
-
     use super::{VRc, heap_ref_count, snapshot_heap, with_heap};
     use crate::value::{Value, container::List};
 
@@ -307,9 +305,9 @@ mod tests {
         let baseline = with_heap(|heap| heap.live_slot_count());
 
         {
-            let _value = VRc::new(Value::List(List::new_with(smallvec![
+            let _value = VRc::new(Value::List(List::new_with(vec![
                 VRc::new(Value::Integer(1)),
-                VRc::new(Value::List(List::new_with(smallvec![
+                VRc::new(Value::List(List::new_with(vec![
                     VRc::new(Value::Integer(2)),
                     VRc::new(Value::Integer(3)),
                 ]))),

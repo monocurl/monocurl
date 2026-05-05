@@ -1029,7 +1029,7 @@ impl Executor {
                     self.materialize_cached_value(inner).await
                 }
                 Value::List(list) => {
-                    let mut elements = SmallVec::with_capacity(list.len());
+                    let mut elements = Vec::with_capacity(list.len());
                     for value_ref in list.elements() {
                         let value = with_heap(|h| h.get(value_ref.key()).clone());
                         elements.push(VRc::new(self.materialize_cached_value(value).await?));

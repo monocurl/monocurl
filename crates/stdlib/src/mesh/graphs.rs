@@ -255,7 +255,7 @@ fn axis_title_from_value(
 ) -> Result<Option<String>, ExecutorError> {
     match value.elide_cached_wrappers_rec() {
         Value::Nil => Ok(None),
-        Value::String(value) => Ok(Some(value)),
+        Value::String(value) => Ok(Some(value.to_string())),
         Value::Integer(value) => Ok(Some(value.to_string())),
         Value::Float(value) => Ok(Some(value.to_string())),
         other => Err(ExecutorError::type_error_for(

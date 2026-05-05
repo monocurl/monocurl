@@ -117,28 +117,18 @@ pub async fn anim_with_rate(
     };
 
     match anim {
-        Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-            candidates,
-            time,
-            embed,
-            lerp,
-            ..
-        }) => Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-            candidates,
-            time,
-            progression: Some(rate),
-            embed,
-            lerp,
-        })),
-        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => {
-            Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-                candidates,
-                time: 0.0,
-                progression: Some(rate),
-                embed: None,
-                lerp: None,
-            }))
+        Value::PrimitiveAnim(PrimitiveAnim::Lerp(lerp_anim)) => {
+            Ok(Value::PrimitiveAnim(PrimitiveAnim::lerp(
+                lerp_anim.candidates,
+                lerp_anim.time,
+                Some(rate),
+                lerp_anim.embed,
+                lerp_anim.lerp,
+            )))
         }
+        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => Ok(Value::PrimitiveAnim(
+            PrimitiveAnim::lerp(candidates, 0.0, Some(rate), None, None),
+        )),
         Value::PrimitiveAnim(PrimitiveAnim::Wait { time }) => {
             Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait { time }))
         }

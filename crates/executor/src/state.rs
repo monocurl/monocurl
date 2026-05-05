@@ -392,7 +392,7 @@ impl ExecutionState {
         };
         let follower_key = heap_alloc(follower_init);
 
-        let leader_val = Value::Leader(Leader {
+        let leader_val = Value::Leader(Box::new(Leader {
             kind,
             last_modified_stack: if kind == LeaderKind::Mesh {
                 Some(stack_idx)
@@ -404,7 +404,7 @@ impl ExecutionState {
             leader_version: 0,
             follower_rc: VRc::from_retained(follower_key),
             follower_version: 0,
-        });
+        }));
         let cell_vrc = VRc::new(leader_val);
 
         self.leaders.push(LeaderEntry {

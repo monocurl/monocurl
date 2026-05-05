@@ -230,7 +230,7 @@ fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, Ex
 
         // string concatenation
         (Value::String(a), Value::String(b), BinOp::Add) => {
-            Ok(Value::String(format!("{}{}", a, b)))
+            Ok(Value::String(format!("{}{}", a, b).into()))
         }
 
         // in operator: resolved rhs must be a list or map
@@ -277,9 +277,7 @@ fn negate_list(list: &List) -> Result<Value, ExecutorError> {
         elements.push(crate::heap::VRc::new(negated));
     }
 
-    Ok(Value::List(List {
-        elements: elements.into(),
-    }))
+    Ok(Value::List(List::new_with(elements)))
 }
 
 fn combine_lists(lhs: &List, rhs: &List, op: BinOp) -> Result<Value, ExecutorError> {
@@ -306,9 +304,7 @@ fn combine_lists(lhs: &List, rhs: &List, op: BinOp) -> Result<Value, ExecutorErr
         elements.push(crate::heap::VRc::new(combined));
     }
 
-    Ok(Value::List(List {
-        elements: elements.into(),
-    }))
+    Ok(Value::List(List::new_with(elements)))
 }
 
 fn apply_list_scalar(
@@ -336,9 +332,7 @@ fn apply_list_scalar(
         elements.push(crate::heap::VRc::new(applied));
     }
 
-    Ok(Value::List(List {
-        elements: elements.into(),
-    }))
+    Ok(Value::List(List::new_with(elements)))
 }
 
 fn list_index_err(op: &'static str, idx: usize, err: ExecutorError) -> ExecutorError {

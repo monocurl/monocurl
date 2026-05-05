@@ -43,11 +43,13 @@ impl Executor {
             Instruction::PushChar { char: c } => {
                 self.state
                     .stack_mut(stack_idx)
-                    .push(Value::String(c.to_string()));
+                    .push(Value::String(c.to_string().into()));
             }
             Instruction::PushString { index } => {
                 let s = self.bytecode.sections[section_idx].string_pool[index as usize].clone();
-                self.state.stack_mut(stack_idx).push(Value::String(s));
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::String(s.into()));
             }
             Instruction::PushEmptyMap => {
                 self.state.stack_mut(stack_idx).push(Value::Map(Map::new()));

@@ -9,7 +9,7 @@ use executor::{
 use stdlib_macros::stdlib_func;
 
 pub(super) fn list_from<I: IntoIterator<Item = Value>>(values: I) -> Value {
-    Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
+    Value::List(List::new_with(values.into_iter().map(VRc::new)))
 }
 
 pub(super) async fn read_string(

@@ -60,7 +60,7 @@ pub async fn to_string(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             }
             other => other,
         })?;
-    Ok(Value::String(s))
+    Ok(Value::String(s.into()))
 }
 
 #[stdlib_func]
@@ -84,7 +84,7 @@ pub async fn text_tag_encode(
         executor.state.stack(stack_idx).read_at(-1).clone(),
     )
     .await?;
-    Ok(Value::String(format_text_tag(&tag, &target)))
+    Ok(Value::String(format_text_tag(&tag, &target).into()))
 }
 
 #[stdlib_func]

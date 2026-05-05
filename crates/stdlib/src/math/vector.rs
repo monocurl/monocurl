@@ -4,7 +4,6 @@ use executor::{
     heap::VRc,
     value::{Value, container::List},
 };
-use smallvec::smallvec;
 use stdlib_macros::stdlib_func;
 
 use super::helpers::read_list;
@@ -40,7 +39,7 @@ pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
         u[2] * v[0] - u[0] * v[2],
         u[0] * v[1] - u[1] * v[0],
     ];
-    Ok(Value::List(List::new_with(smallvec![
+    Ok(Value::List(List::new_with(vec![
         VRc::new(Value::Float(out[0])),
         VRc::new(Value::Float(out[1])),
         VRc::new(Value::Float(out[2])),

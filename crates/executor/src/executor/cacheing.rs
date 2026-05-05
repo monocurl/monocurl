@@ -231,7 +231,6 @@ mod tests {
         time::Timestamp,
         value::{Value, container::List},
     };
-    use smallvec::smallvec;
 
     fn bytecode_with_sections(flags: &[SectionFlags]) -> Bytecode {
         Bytecode::new(
@@ -345,9 +344,10 @@ mod tests {
         executor
             .state
             .stack_mut(ExecutionState::ROOT_STACK_IDX)
-            .push(Value::List(List {
-                elements: smallvec![VRc::new(Value::Integer(1)), VRc::new(Value::Integer(2))],
-            }));
+            .push(Value::List(List::new_with(vec![
+                VRc::new(Value::Integer(1)),
+                VRc::new(Value::Integer(2)),
+            ])));
         executor
             .state
             .promote_to_var(ExecutionState::ROOT_STACK_IDX);
@@ -361,9 +361,10 @@ mod tests {
             .unwrap();
         heap_replace(
             list_key,
-            Value::List(List {
-                elements: smallvec![VRc::new(Value::Integer(99)), VRc::new(Value::Integer(2))],
-            }),
+            Value::List(List::new_with(vec![
+                VRc::new(Value::Integer(99)),
+                VRc::new(Value::Integer(2)),
+            ])),
         );
         executor.state.timestamp = Timestamp::new(1, 1.0);
 
@@ -470,14 +471,12 @@ mod tests {
         executor
             .state
             .stack_mut(ExecutionState::ROOT_STACK_IDX)
-            .push(Value::List(List {
-                elements: smallvec![
-                    VRc::new(Value::List(List {
-                        elements: smallvec![VRc::new(Value::Integer(3))],
-                    })),
-                    VRc::new(Value::Integer(4)),
-                ],
-            }));
+            .push(Value::List(List::new_with(vec![
+                VRc::new(Value::List(List::new_with(vec![VRc::new(Value::Integer(
+                    3,
+                ))]))),
+                VRc::new(Value::Integer(4)),
+            ])));
         executor
             .state
             .promote_to_var(ExecutionState::ROOT_STACK_IDX);
@@ -491,14 +490,12 @@ mod tests {
             .unwrap();
         heap_replace(
             live_key,
-            Value::List(List {
-                elements: smallvec![
-                    VRc::new(Value::List(List {
-                        elements: smallvec![VRc::new(Value::Integer(30))],
-                    })),
-                    VRc::new(Value::Integer(4)),
-                ],
-            }),
+            Value::List(List::new_with(vec![
+                VRc::new(Value::List(List::new_with(vec![VRc::new(Value::Integer(
+                    30,
+                ))]))),
+                VRc::new(Value::Integer(4)),
+            ])),
         );
         executor.state.timestamp = Timestamp::new(1, 1.0);
 

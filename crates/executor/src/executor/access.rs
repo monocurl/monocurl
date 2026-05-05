@@ -325,7 +325,7 @@ impl Executor {
                 let ch = s.chars().nth(idx).unwrap_or('\0');
                 self.state
                     .stack_mut(stack_idx)
-                    .push(Value::String(ch.to_string()));
+                    .push(Value::String(ch.to_string().into()));
             }
             _ => {
                 return ExecSingle::Error(ExecutorError::CannotSubscript(base.type_name()));

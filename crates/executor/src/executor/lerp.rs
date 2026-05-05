@@ -304,7 +304,7 @@ impl Executor {
                         )));
                     }
 
-                    let mut elements = SmallVec::with_capacity(a_list.len());
+                    let mut elements = Vec::with_capacity(a_list.len());
                     for (index, (a_key, b_key)) in
                         a_list.elements.iter().zip(&b_list.elements).enumerate()
                     {
@@ -318,7 +318,7 @@ impl Executor {
                         })?;
                         elements.push(crate::heap::VRc::new(lerped));
                     }
-                    Ok(Some(Value::List(List { elements })))
+                    Ok(Some(Value::List(List::new_with(elements))))
                 }
                 (Value::Map(a_map), Value::Map(b_map)) => {
                     let missing_from_b: Vec<&HashableKey> = a_map

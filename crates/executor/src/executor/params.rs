@@ -159,9 +159,8 @@ fn update_live_attribute_value(
                 update_live_attribute_value(&mut argument, rest, replacement)?;
                 inv.body.arguments[*index] = argument;
             }
-            inv.body
-                .boxed_arguments
-                .resize(inv.body.arguments.len(), false);
+            let arg_len = inv.body.arguments.len();
+            inv.body.boxed_arguments.resize(arg_len, false);
             inv.body.boxed_arguments[*index] = false;
             inv.cache.0.take();
             Ok(())
@@ -179,9 +178,8 @@ fn update_live_attribute_value(
                 update_live_attribute_value(&mut argument, rest, replacement)?;
                 inv.body.arguments[*index] = argument;
             }
-            inv.body
-                .boxed_arguments
-                .resize(inv.body.arguments.len(), false);
+            let arg_len = inv.body.arguments.len();
+            inv.body.boxed_arguments.resize(arg_len, false);
             inv.body.boxed_arguments[*index] = false;
             inv.cache.cached_result.take();
             inv.cache.unmodified.take();

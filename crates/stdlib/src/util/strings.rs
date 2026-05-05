@@ -17,7 +17,7 @@ pub async fn str_replace(
     let s = read_string(executor, stack_idx, -3, "s").await?;
     let needle = read_string(executor, stack_idx, -2, "needle").await?;
     let with = read_string(executor, stack_idx, -1, "with").await?;
-    Ok(Value::String(s.replace(&needle, &with)))
+    Ok(Value::String(s.replace(&needle, &with).into()))
 }
 
 #[stdlib_func]
@@ -25,20 +25,20 @@ pub async fn str_split(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let s = read_string(executor, stack_idx, -2, "s").await?;
     let sep = read_string(executor, stack_idx, -1, "sep").await?;
     Ok(list_from(
-        s.split(&sep).map(|p| Value::String(p.to_string())),
+        s.split(&sep).map(|p| Value::String(p.to_string().into())),
     ))
 }
 
 #[stdlib_func]
 pub async fn str_upper(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let s = read_string(executor, stack_idx, -1, "s").await?;
-    Ok(Value::String(s.to_uppercase()))
+    Ok(Value::String(s.to_uppercase().into()))
 }
 
 #[stdlib_func]
 pub async fn str_lower(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let s = read_string(executor, stack_idx, -1, "s").await?;
-    Ok(Value::String(s.to_lowercase()))
+    Ok(Value::String(s.to_lowercase().into()))
 }
 
 #[stdlib_func]
@@ -49,9 +49,9 @@ pub async fn str_join(executor: &mut Executor, stack_idx: usize) -> Result<Value
         .elements()
         .iter()
         .map(|key| match with_heap(|h| h.get(key.key()).clone()) {
-            Value::String(s) => Ok(s),
+            Value::String(s) => Ok(s.to_string()),
             other => Err(ExecutorError::type_error("string", other.type_name())),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Value::String(strings.join(&sep)))
+    Ok(Value::String(strings.join(&sep).into()))
 }

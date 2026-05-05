@@ -48,13 +48,13 @@ pub async fn lerp_anim(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         }
     };
 
-    Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-        candidates: Box::new(candidates),
+    Ok(Value::PrimitiveAnim(PrimitiveAnim::lerp(
+        Box::new(candidates),
         time,
-        progression: progression_from(rate),
+        progression_from(rate),
         embed,
         lerp,
-    }))
+    )))
 }
 
 #[stdlib_func]

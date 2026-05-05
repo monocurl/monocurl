@@ -366,7 +366,9 @@ fn default_value_from_value(value: Value, name: &str) -> Result<Value, ExecutorE
                 ))
             })
         }
-        Value::InvokedOperator(inv) => default_value_from_value(*inv.body.operand, name),
+        Value::InvokedOperator(inv) => {
+            default_value_from_value(inv.body.operand.as_ref().clone(), name)
+        }
         _ => Err(ExecutorError::invalid_invocation(
             "expected live function or live operator containing a live function",
         )),
@@ -432,7 +434,8 @@ pub async fn type_of(executor: &mut Executor, stack_idx: usize) -> Result<Value,
     Ok(Value::String(
         read_elided_value(executor, stack_idx, -1)
             .type_name()
-            .to_string(),
+            .to_string()
+            .into(),
     ))
 }
 
@@ -548,7 +551,9 @@ pub async fn get_defaults(
 ) -> Result<Value, ExecutorError> {
     let target = executor.state.stack(stack_idx).read_at(-1).clone();
     let names = default_names_from_value(target)?;
-    Ok(list_from(names.into_iter().map(Value::String)))
+    Ok(list_from(
+        names.into_iter().map(|name| Value::String(name.into())),
+    ))
 }
 
 concrete_type_predicate!(is_nil, |value| matches!(value, Value::Nil));

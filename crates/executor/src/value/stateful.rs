@@ -69,29 +69,29 @@ pub fn make_stateful(
             deduped.push(key);
         }
     }
-    RcCached {
-        body: StatefulBody {
+    RcCached::new(
+        StatefulBody {
             roots: deduped,
             root,
         },
-        cache: StatefulCache {
+        StatefulCache {
             read_kind,
             cached: RefCell::new(None),
         },
-    }
+    )
 }
 
 pub fn to_follower_stateful(s: &Stateful) -> Stateful {
     if s.cache.read_kind == StatefulReadKind::Follower {
         return s.clone();
     }
-    RcCached {
-        body: s.body.clone(),
-        cache: StatefulCache {
+    RcCached::new(
+        s.body.clone(),
+        StatefulCache {
             read_kind: StatefulReadKind::Follower,
             cached: RefCell::new(None),
         },
-    }
+    )
 }
 
 pub fn stateful_cache_valid(s: &Stateful) -> Option<Value> {

@@ -268,11 +268,11 @@ async fn background_snapshot_from_value(
         return Err(ExecutorError::missing_field("background", "kind"));
     };
     let kind = kind.elide_wrappers_rec(executor).await?;
-    if !matches!(kind, Value::String(ref kind) if kind == "solid_background") {
+    if !matches!(kind, Value::String(ref kind) if kind.as_ref() == "solid_background") {
         return Err(ExecutorError::invalid_scene(format!(
             "background must resolve to a solid background, got kind {}",
             match kind {
-                Value::String(ref kind) => kind.as_str(),
+                Value::String(ref kind) => kind.as_ref(),
                 other => other.type_name(),
             }
         )));

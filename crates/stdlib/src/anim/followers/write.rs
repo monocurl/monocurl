@@ -265,7 +265,7 @@ fn write_tree_value(
                 out.push(write_tree_value(&start, &end, &state, t)?);
             }
             Ok(Value::List(executor::value::container::List::new_with(
-                out.into_iter().map(executor::heap::VRc::new).collect(),
+                out.into_iter().map(executor::heap::VRc::new),
             )))
         }
         other => Err(ExecutorError::type_error("mesh / list", other.type_name())),
@@ -344,7 +344,7 @@ fn flash_tree_value(
                 out.push(flash_tree_value(&start, &end, &state, u, v)?);
             }
             Ok(Value::List(executor::value::container::List::new_with(
-                out.into_iter().map(executor::heap::VRc::new).collect(),
+                out.into_iter().map(executor::heap::VRc::new),
             )))
         }
         other => Err(ExecutorError::type_error("mesh / list", other.type_name())),

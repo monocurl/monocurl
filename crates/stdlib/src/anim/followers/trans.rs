@@ -2548,7 +2548,7 @@ fn mesh_tree_trans_lerp(
                     mesh_tree_trans_lerp(&start, &end, &state, t, path_arc)
                         .map(executor::heap::VRc::new)
                 })
-                .collect::<Result<_, _>>()?;
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(Value::List(executor::value::container::List::new_with(
                 elements,
             )))
@@ -2596,7 +2596,7 @@ pub(super) fn mesh_tree_patharc_lerp(
                     let end = executor::heap::with_heap(|h| h.get(end.key()).clone());
                     mesh_tree_patharc_lerp(&start, &end, t, path_arc).map(executor::heap::VRc::new)
                 })
-                .collect::<Result<_, _>>()?;
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(Value::List(executor::value::container::List::new_with(
                 elements,
             )))

@@ -18,7 +18,7 @@ pub(crate) fn stringify_value<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<String, ExecutorError>> + 'a>> {
     Box::pin(async move {
         match value.elide_wrappers_rec(executor).await? {
-            Value::String(value) => Ok(value),
+            Value::String(value) => Ok(value.to_string()),
             Value::Integer(value) => Ok(value.to_string()),
             Value::Float(value) => Ok(value.to_string()),
             Value::Nil => Ok("nil".to_string()),

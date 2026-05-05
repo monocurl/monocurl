@@ -49,7 +49,7 @@ pub enum Value {
         re: f64,
         im: f64,
     },
-    String(String),
+    String(Arc<str>),
 
     Mesh(Arc<Mesh>),
     PrimitiveAnim(PrimitiveAnim),
@@ -61,7 +61,7 @@ pub enum Value {
     List(List),
 
     Stateful(Stateful),
-    Leader(Leader),
+    Leader(Box<Leader>),
 
     InvokedOperator(InvokedOperator),
     InvokedFunction(InvokedFunction),

@@ -110,35 +110,20 @@ fn prim_anim_equal(a: &PrimitiveAnim, b: &PrimitiveAnim) -> bool {
             Value::values_equal(a, b)
         }
         (PrimitiveAnim::Wait { time: ta }, PrimitiveAnim::Wait { time: tb }) => ta == tb,
-        (
-            PrimitiveAnim::Lerp {
-                candidates: ca,
-                time: ta,
-                progression: pa,
-                embed: ea,
-                lerp: la,
-            },
-            PrimitiveAnim::Lerp {
-                candidates: cb,
-                time: tb,
-                progression: pb,
-                embed: eb,
-                lerp: lb,
-            },
-        ) => {
-            ta == tb
-                && Value::values_equal(ca, cb)
-                && match (pa, pb) {
+        (PrimitiveAnim::Lerp(a), PrimitiveAnim::Lerp(b)) => {
+            a.time == b.time
+                && Value::values_equal(&a.candidates, &b.candidates)
+                && match (&a.progression, &b.progression) {
                     (None, None) => true,
                     (Some(a), Some(b)) => Value::values_equal(a, b),
                     _ => false,
                 }
-                && match (ea, eb) {
+                && match (&a.embed, &b.embed) {
                     (None, None) => true,
                     (Some(a), Some(b)) => Value::values_equal(a, b),
                     _ => false,
                 }
-                && match (la, lb) {
+                && match (&a.lerp, &b.lerp) {
                     (None, None) => true,
                     (Some(a), Some(b)) => Value::values_equal(a, b),
                     _ => false,

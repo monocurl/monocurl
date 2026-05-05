@@ -21,7 +21,7 @@ fn read_value(executor: &Executor, stack_idx: usize, index: i32, _name: &'static
 }
 
 fn value_list(values: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
+    Value::List(List::new_with(values.into_iter().map(VRc::new)))
 }
 
 fn tagged_map(
@@ -31,7 +31,7 @@ fn tagged_map(
     let mut map = Map::new();
     map.insert(
         HashableKey::String("kind".to_string()),
-        VRc::new(Value::String(kind.to_string())),
+        VRc::new(Value::String(kind.into())),
     );
     for (key, value) in fields {
         map.insert(HashableKey::String(key.to_string()), VRc::new(value));

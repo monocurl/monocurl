@@ -6,7 +6,6 @@ use executor::{
     heap::{VRc, with_heap},
     value::Value,
 };
-use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use crate::read_float;
@@ -74,7 +73,7 @@ pub async fn range(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
 
     let all_ints = start.fract() == 0.0 && stop.fract() == 0.0 && step.fract() == 0.0;
 
-    let mut elements = smallvec![];
+    let mut elements = Vec::new();
     let mut x = start;
     while (step > 0.0 && x < stop) || (step < 0.0 && x > stop) {
         executor.tick_yielder().await;
@@ -114,7 +113,7 @@ async fn sample_with_endpoint(
         });
     };
 
-    let mut elements: SmallVec<[VRc; 4]> = SmallVec::with_capacity(sample_count);
+    let mut elements = Vec::with_capacity(sample_count);
     for i in 0..sample_count {
         executor.tick_yielder().await;
 
@@ -160,17 +159,13 @@ pub async fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         .elide_cached_wrappers_rec()
     {
         Value::List(list) => {
-            let mut elements = list
-                .elements()
-                .iter()
-                .cloned()
-                .collect::<SmallVec<[VRc; 4]>>();
+            let mut elements = list.elements().iter().cloned().collect::<Vec<_>>();
             elements.reverse();
             Ok(Value::List(executor::value::container::List::new_with(
                 elements,
             )))
         }
-        Value::String(s) => Ok(Value::String(s.chars().rev().collect())),
+        Value::String(s) => Ok(Value::String(s.chars().rev().collect::<String>().into())),
         other => Err(ExecutorError::type_error(
             "list / string",
             other.type_name(),
@@ -229,10 +224,10 @@ pub async fn zip(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         .zip(v.elements().iter())
         .map(|(a_key, b_key)| {
             VRc::new(Value::List(executor::value::container::List::new_with(
-                smallvec![a_key.clone(), b_key.clone()],
+                vec![a_key.clone(), b_key.clone()],
             )))
         })
-        .collect::<SmallVec<[VRc; 4]>>();
+        .collect::<Vec<_>>();
     Ok(Value::List(executor::value::container::List::new_with(
         elements,
     )))
@@ -247,10 +242,10 @@ pub async fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         .enumerate()
         .map(|(i, elem_key)| {
             VRc::new(Value::List(executor::value::container::List::new_with(
-                smallvec![VRc::new(Value::Integer(i as i64)), elem_key.clone()],
+                vec![VRc::new(Value::Integer(i as i64)), elem_key.clone()],
             )))
         })
-        .collect::<SmallVec<[VRc; 4]>>();
+        .collect::<Vec<_>>();
     Ok(Value::List(executor::value::container::List::new_with(
         elements,
     )))
@@ -261,11 +256,7 @@ pub async fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
     Ok(Value::List(executor::value::container::List::new_with(
-        list.elements()
-            .iter()
-            .take(n)
-            .cloned()
-            .collect::<SmallVec<[VRc; 4]>>(),
+        list.elements().iter().take(n).cloned(),
     )))
 }
 
@@ -274,11 +265,7 @@ pub async fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
     Ok(Value::List(executor::value::container::List::new_with(
-        list.elements()
-            .iter()
-            .skip(n)
-            .cloned()
-            .collect::<SmallVec<[VRc; 4]>>(),
+        list.elements().iter().skip(n).cloned(),
     )))
 }
 
@@ -290,7 +277,7 @@ pub async fn list_subset(
     let src = read_rc_list(executor, stack_idx, -2, "src")?;
     let indexes = read_rc_list(executor, stack_idx, -1, "indexes")?;
 
-    let mut elements = smallvec![];
+    let mut elements = Vec::new();
     for index_key in indexes.elements() {
         let idx = match with_heap(|h| h.get(index_key.key()).clone()) {
             Value::Integer(n) => n,

@@ -14,7 +14,7 @@ use super::{ExecSingle, Executor, SeekPrimitiveResult, prepare_eager_call_args};
 impl Executor {
     fn primitive_anim_duration(prim: &PrimitiveAnim) -> f64 {
         match prim {
-            PrimitiveAnim::Lerp { time, .. } => *time,
+            PrimitiveAnim::Lerp(lerp) => lerp.time,
             PrimitiveAnim::Set { .. } => 0.0,
             PrimitiveAnim::Wait { time } => *time,
         }
@@ -330,7 +330,7 @@ impl Executor {
                 }
             }
             PrimitiveAnim::Wait { .. } => {}
-            PrimitiveAnim::Lerp { lerp, .. } => {
+            PrimitiveAnim::Lerp(lerp_anim) => {
                 let should_snap_to_destination = t >= 1.0;
                 if should_snap_to_destination && !options.validate_lerp_completion() {
                     for (target, destination) in baked.targets.iter().zip(&baked.destinations) {
@@ -345,7 +345,7 @@ impl Executor {
                         .zip(&baked.embedded_ends)
                         .zip(&baked.embedded_states)
                     {
-                        let lerped = if let Some(lerp) = lerp {
+                        let lerped = if let Some(lerp) = &lerp_anim.lerp {
                             self.eval_custom_lerp_value(
                                 lerp,
                                 baked.parent_stack_idx,
@@ -377,10 +377,10 @@ impl Executor {
         baked: &BakedPrimitiveAnim,
         linear_t: f64,
     ) -> Result<f64, ExecutorError> {
-        let PrimitiveAnim::Lerp { progression, .. } = &baked.anim else {
+        let PrimitiveAnim::Lerp(lerp_anim) = &baked.anim else {
             return Ok(linear_t);
         };
-        let Some(progression) = progression else {
+        let Some(progression) = &lerp_anim.progression else {
             return Ok(linear_t);
         };
 
@@ -640,7 +640,7 @@ impl Executor {
         let start = self.state.timestamp.time;
         let targets = self.resolve_primitive_anim_targets(parent_stack_idx, &prim, reserved)?;
         let embed = match &prim {
-            PrimitiveAnim::Lerp { embed, .. } => embed.as_deref().cloned(),
+            PrimitiveAnim::Lerp(lerp) => lerp.embed.as_deref().cloned(),
             _ => None,
         };
 
@@ -709,7 +709,30 @@ impl Executor {
         let mut implicit_targets = false;
 
         match prim {
-            PrimitiveAnim::Lerp { candidates, .. } | PrimitiveAnim::Set { candidates } => {
+            PrimitiveAnim::Lerp(lerp) => {
+                self.flatten_candidate_tree(&lerp.candidates, &mut targets)?;
+                if targets.is_empty() {
+                    implicit_targets = true;
+                    for entry in &self.state.leaders {
+                        let cell_val = with_heap(|h| h.get(entry.leader_cell.key()).clone());
+                        let Value::Leader(leader) = cell_val else {
+                            continue;
+                        };
+                        if leader
+                            .last_modified_stack
+                            .is_some_and(|last_modified_stack_idx| {
+                                self.state.is_stack_ancestor_of_stack(
+                                    last_modified_stack_idx,
+                                    spawning_stack_idx,
+                                )
+                            })
+                        {
+                            targets.push(entry.leader_cell.clone());
+                        }
+                    }
+                }
+            }
+            PrimitiveAnim::Set { candidates } => {
                 self.flatten_candidate_tree(candidates, &mut targets)?;
                 if targets.is_empty() {
                     implicit_targets = true;

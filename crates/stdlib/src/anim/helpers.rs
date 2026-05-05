@@ -59,24 +59,20 @@ pub(super) fn read_float4_value(value: Value, name: &'static str) -> Result<Floa
 }
 
 pub(super) fn list_value(values: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
+    Value::List(List::new_with(values.into_iter().map(VRc::new)))
 }
 
 pub(super) fn scale_primitive_time(anim: Value, factor: f64) -> Result<Value, ExecutorError> {
     match anim.elide_cached_wrappers_rec() {
-        Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-            candidates,
-            time,
-            progression,
-            embed,
-            lerp,
-        }) => Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-            candidates,
-            time: time * factor,
-            progression,
-            embed,
-            lerp,
-        })),
+        Value::PrimitiveAnim(PrimitiveAnim::Lerp(lerp_anim)) => {
+            Ok(Value::PrimitiveAnim(PrimitiveAnim::lerp(
+                lerp_anim.candidates,
+                lerp_anim.time * factor,
+                lerp_anim.progression,
+                lerp_anim.embed,
+                lerp_anim.lerp,
+            )))
+        }
         Value::PrimitiveAnim(PrimitiveAnim::Wait { time }) => {
             Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait {
                 time: time * factor,
@@ -95,33 +91,23 @@ pub(super) fn scale_primitive_time(anim: Value, factor: f64) -> Result<Value, Ex
 
 pub(super) fn delay_primitive(anim: Value, delay: f64) -> Result<Value, ExecutorError> {
     match anim.elide_cached_wrappers_rec() {
-        Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-            candidates,
-            time,
-            progression,
-            embed,
-            lerp,
-        }) => Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-            candidates,
-            time: time + delay,
-            progression,
-            embed,
-            lerp,
-        })),
+        Value::PrimitiveAnim(PrimitiveAnim::Lerp(lerp_anim)) => {
+            Ok(Value::PrimitiveAnim(PrimitiveAnim::lerp(
+                lerp_anim.candidates,
+                lerp_anim.time + delay,
+                lerp_anim.progression,
+                lerp_anim.embed,
+                lerp_anim.lerp,
+            )))
+        }
         Value::PrimitiveAnim(PrimitiveAnim::Wait { time }) => {
             Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait {
                 time: time + delay,
             }))
         }
-        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => {
-            Ok(Value::PrimitiveAnim(PrimitiveAnim::Lerp {
-                candidates,
-                time: delay,
-                progression: None,
-                embed: None,
-                lerp: None,
-            }))
-        }
+        Value::PrimitiveAnim(PrimitiveAnim::Set { candidates }) => Ok(Value::PrimitiveAnim(
+            PrimitiveAnim::lerp(candidates, delay, None, None, None),
+        )),
         other => Err(ExecutorError::type_error_for(
             "primitive_anim",
             other.type_name(),

@@ -39,15 +39,15 @@ pub fn make_invoked_function(
 ) -> InvokedFunction {
     let mut boxed_arguments = SmallVec::with_capacity(arguments.len());
     boxed_arguments.resize(arguments.len(), false);
-    RcCached {
-        body: InvokedFunctionBody {
+    RcCached::new(
+        InvokedFunctionBody {
             lambda: Box::new(lambda),
             arguments: arguments.into_vec(),
             boxed_arguments,
             labels,
         },
-        cache: InvFuncCache(Cell::new(cached_result.map(Box::new))),
-    }
+        InvFuncCache(Cell::new(cached_result.map(Box::new))),
+    )
 }
 
 #[inline(always)]

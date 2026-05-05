@@ -200,7 +200,12 @@ impl ExecResult {
         let value = self.elided_value();
         match &value {
             Some(Value::String(s)) => {
-                assert_eq!(s, expected, "string mismatch\n{}", self.inspection())
+                assert_eq!(
+                    s.as_ref(),
+                    expected,
+                    "string mismatch\n{}",
+                    self.inspection()
+                )
             }
             other => self.unexpected_value(&format!("String({expected:?})"), other.as_ref()),
         }
@@ -210,7 +215,7 @@ impl ExecResult {
     fn assert_string_list(&self, expected: &[&str]) -> &Self {
         self.assert_list_elements(expected, |idx, actual, expected| match actual {
             Value::String(s) => assert_eq!(
-                s,
+                s.as_ref(),
                 *expected,
                 "string mismatch at index {idx}\n{}",
                 self.inspection()

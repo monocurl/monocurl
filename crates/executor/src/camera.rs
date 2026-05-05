@@ -100,8 +100,7 @@ fn float3_value(value: Float3) -> Value {
         value
             .to_array()
             .into_iter()
-            .map(|component| crate::heap::VRc::new(Value::Float(component as f64)))
-            .collect(),
+            .map(|component| crate::heap::VRc::new(Value::Float(component as f64))),
     ))
 }
 
@@ -109,7 +108,7 @@ pub fn camera_value_from_snapshot(snapshot: &CameraSnapshot) -> Value {
     let mut map = Map::new();
     map.insert(
         HashableKey::String("kind".to_string()),
-        crate::heap::VRc::new(Value::String("camera".to_string())),
+        crate::heap::VRc::new(Value::String("camera".into())),
     );
     map.insert(
         HashableKey::String("position".to_string()),
@@ -206,11 +205,11 @@ pub async fn parse_camera_value(
         return Err(ExecutorError::missing_field("camera", "kind"));
     };
     let kind = kind.elide_wrappers_rec(executor).await?;
-    if !matches!(kind, Value::String(ref kind) if kind == "camera") {
+    if !matches!(kind, Value::String(ref kind) if kind.as_ref() == "camera") {
         return Err(ExecutorError::invalid_scene(format!(
             "camera must resolve to a camera object, got kind {}",
             match kind {
-                Value::String(ref kind) => kind.as_str(),
+                Value::String(ref kind) => kind.as_ref(),
                 other => other.type_name(),
             }
         )));

@@ -209,7 +209,7 @@ fn test_ref_mutation_of_live_function_argument_does_not_panic() {
 
 fn camera_kind(value: &Value) -> Option<String> {
     match camera_field(value, "kind") {
-        Value::String(kind) => Some(kind),
+        Value::String(kind) => Some(kind.to_string()),
         _ => None,
     }
 }

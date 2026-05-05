@@ -56,8 +56,8 @@ pub fn make_invoked_operator(
 ) -> InvokedOperator {
     let mut boxed_arguments = SmallVec::with_capacity(arguments.len());
     boxed_arguments.resize(arguments.len(), false);
-    RcCached {
-        body: InvokedOperatorBody {
+    RcCached::new(
+        InvokedOperatorBody {
             operator: Box::new(operator),
             operand: Box::new(operand),
             boxed_operand: false,
@@ -65,11 +65,11 @@ pub fn make_invoked_operator(
             boxed_arguments,
             labels,
         },
-        cache: InvOpCache {
+        InvOpCache {
             unmodified: Cell::new(Some(Box::new(initial))),
             cached_result: Cell::new(Some(Box::new(modified))),
         },
-    }
+    )
 }
 
 #[inline(always)]

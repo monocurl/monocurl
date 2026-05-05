@@ -473,14 +473,13 @@ fn test_scene_snapshot_camera_accepts_look_at_surface() {
         Err(result) => panic!("failed to build executor: {:?}", result.errors),
     };
 
-    let list_value = |values: Vec<Value>| {
-        Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
-    };
+    let list_value =
+        |values: Vec<Value>| Value::List(List::new_with(values.into_iter().map(VRc::new)));
 
     let mut map = Map::new();
     map.insert(
         HashableKey::String("kind".to_string()),
-        VRc::new(Value::String("camera".to_string())),
+        VRc::new(Value::String("camera".into())),
     );
     map.insert(
         HashableKey::String("position".to_string()),

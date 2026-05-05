@@ -12,7 +12,8 @@ import std.scene
 # on the last slide, you will be able to edit parameters by hand
 # and see the scene dynamically react!
 
-let palette = zip(sample(0, 1, 5), [LIGHT_GRAY, CYAN, BLUE, PURPLE, RED])
+let scale = 1
+let palette = [0 -> BLACK, 0.15 -> BLUE, 0.25 -> ORANGE, 0.5 -> RED]
 let scene_scale = [2.35, 1.35, 1]
 let bounds_x = [-2.75, 2.75]
 let bounds_y = [-1.55, 1.55]
@@ -78,9 +79,9 @@ let streamline_points = |seed, src, dst, swirl_value, pressure_value| {
 let Streamline = |seed, src, dst, swirl_value, pressure_value, id| {
     let pts = streamline_points(seed, src, dst, swirl_value, pressure_value)
     let col = keyframe_lerp(palette, id / 13)
-    return z_index{1}
+    return 
         tag{[100, id]}
-        stroke{soft(col, 0.55), 1.8}
+        stroke{soft(BLACK, 0.55), 1.8}
         Polyline(pts)
 }
 
@@ -113,13 +114,12 @@ let FlowScene = |src, dst, swirl_value, pressure_value| {
     return [
         stroke{soft(LIGHT_GRAY, 0.24), 0.9}
             LineGrid([bounds_x[0], bounds_x[1], 10], [bounds_y[0], bounds_y[1], 7], 1),
-        fill{CLEAR}
-            stroke{soft(LIGHT_GRAY, 0.55), 1.3}
+        fill{CLEAR} stroke{soft(LIGHT_GRAY, 0.55), 1.3}
             Rect([bounds_x[1] - bounds_x[0], bounds_y[1] - bounds_y[0]]),
             
         NeedleField(src_pos, dst_pos, swirl_value, pressure_value),
         Streamlines(src_pos, dst_pos, swirl_value, pressure_value),
-        Pole(src_pos, ORANGE, "+", 200),
+        Pole(src_pos, BLACK, "+", 200),
         Pole(dst_pos, BLUE, "-", 210)
     ]
 }

@@ -131,7 +131,7 @@ impl<'a> Iterator for MeshTreeIter<'a> {
 }
 
 pub(super) fn list_value(values: impl IntoIterator<Item = Value>) -> Value {
-    Value::List(List::new_with(values.into_iter().map(VRc::new).collect()))
+    Value::List(List::new_with(values.into_iter().map(VRc::new)))
 }
 
 pub(super) fn float_to_value(value: f64) -> Value {
