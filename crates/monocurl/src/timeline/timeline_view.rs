@@ -29,6 +29,7 @@ pub struct Timeline {
     pub(super) console_scroll: ScrollHandle,
     pub(super) zoom_idx: usize,
     pub(super) panel_mode: BottomPanelMode,
+    is_scrubbing: bool,
 }
 
 impl Timeline {
@@ -58,10 +59,12 @@ impl Timeline {
             console_scroll: ScrollHandle::new(),
             zoom_idx: DEFAULT_ZOOM_IDX,
             panel_mode: BottomPanelMode::Timeline,
+            is_scrubbing: false,
         }
     }
 
     pub fn toggle_panel_mode(&mut self, cx: &mut Context<Self>) {
+        self.is_scrubbing = false;
         self.panel_mode = match self.panel_mode {
             BottomPanelMode::Timeline => BottomPanelMode::Console,
             BottomPanelMode::Console => BottomPanelMode::Timeline,
@@ -71,6 +74,7 @@ impl Timeline {
 
     pub fn set_panel_mode(&mut self, mode: BottomPanelMode, cx: &mut Context<Self>) {
         if self.panel_mode != mode {
+            self.is_scrubbing = false;
             self.panel_mode = mode;
             cx.notify();
         }
@@ -93,7 +97,7 @@ impl Timeline {
     fn recenter_playhead_if_needed(&mut self, cx: &mut Context<Self>) {
         let exec_state = self.services.read(cx).execution_state().clone();
         let exec = exec_state.read(cx);
-        if exec.slide_count == 0 {
+        if exec.slide_count == 0 || self.is_scrubbing {
             return;
         }
 
@@ -133,6 +137,127 @@ impl Timeline {
         self.scroll
             .set_offset(point(px(-centered_left), scroll_offset.y));
     }
+
+    fn begin_scrub(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.is_scrubbing = true;
+        self.seek_to_position(position, cx);
+    }
+
+    fn update_scrub(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.is_scrubbing {
+            self.seek_to_position(position, cx);
+        }
+    }
+
+    fn end_scrub(&mut self) {
+        self.is_scrubbing = false;
+    }
+
+    fn seek_to_position(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(target) = self.target_at_position(position, cx) else {
+            return;
+        };
+        self.services
+            .update(cx, |services, cx| services.seek_to(target, cx));
+    }
+
+    fn target_at_position(
+        &self,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) -> Option<Timestamp> {
+        let (slide_count, durations, minimum_durations, current_timestamp) = {
+            let services = self.services.read(cx);
+            let exec_state = services.execution_state();
+            let exec = exec_state.read(cx);
+            (
+                exec.slide_count,
+                exec.slide_durations.clone(),
+                exec.minimum_slide_durations.clone(),
+                exec.current_timestamp,
+            )
+        };
+        if slide_count == 0 {
+            return None;
+        }
+
+        let effective_for_seek = effective_durations(
+            slide_count,
+            &durations,
+            &minimum_durations,
+            current_timestamp.slide,
+            current_timestamp.time,
+        );
+        let zoom = self.zoom_factor();
+        let slide_xs = compute_slide_xs(slide_count, &effective_for_seek, zoom);
+        let gap_ws = compute_gap_ws(slide_count, &effective_for_seek, zoom);
+        let bounds = self.scroll.bounds();
+        let scroll_offset = self.scroll.offset();
+        let local_x = f32::from(position.x - bounds.origin.x - scroll_offset.x);
+        let last = slide_count - 1;
+
+        for i in 0..slide_count {
+            let bx = slide_xs[i];
+            let gw = gap_ws[i];
+            if local_x >= bx && local_x < bx + SLIDE_W {
+                return Some(Timestamp::at_end_of_slide(i));
+            }
+            let gap_start = bx + SLIDE_W;
+            let gap_end = if i == last {
+                f32::INFINITY
+            } else {
+                gap_start + gw.max(MIN_GAP)
+            };
+            if local_x >= gap_start && local_x < gap_end {
+                let t = ((local_x - gap_start) / (PX_PER_SEC * zoom)) as f64;
+                return Some(Timestamp::new(i + 1, t));
+            }
+        }
+
+        None
+    }
+}
+
+fn render_scrub_tracker(timeline: WeakEntity<Timeline>) -> impl IntoElement {
+    canvas(
+        |bounds, _, _| bounds,
+        move |_, _, window, _cx| {
+            {
+                let timeline = timeline.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _window, cx| {
+                    if phase != DispatchPhase::Bubble {
+                        return;
+                    }
+                    timeline
+                        .update(cx, |timeline, cx| {
+                            timeline.update_scrub(event.position, cx);
+                        })
+                        .ok();
+                });
+            }
+
+            {
+                let timeline = timeline.clone();
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+                    if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                        return;
+                    }
+                    timeline.update(cx, |timeline, _| timeline.end_scrub()).ok();
+                });
+            }
+
+            window.on_mouse_event(move |_: &MouseExitEvent, phase, _window, cx| {
+                if phase != DispatchPhase::Bubble {
+                    return;
+                }
+                timeline.update(cx, |timeline, _| timeline.end_scrub()).ok();
+            });
+        },
+    )
+    .absolute()
+    .top(px(0.0))
+    .left(px(0.0))
+    .size_full()
 }
 
 impl Render for Timeline {
@@ -144,6 +269,8 @@ impl Render for Timeline {
         let exec = self.services.read(cx).execution_state().read(cx);
         let current_slide = exec.current_timestamp.slide;
         let current_time = exec.current_timestamp.time;
+        let current_timestamp = exec.current_timestamp;
+        let target_timestamp = exec.target_timestamp;
         let is_playing = exec.is_playing();
         let slide_count = exec.slide_count;
         let slide_names = exec.slide_names.clone();
@@ -158,8 +285,6 @@ impl Render for Timeline {
             current_slide,
             current_time,
         );
-        let slide_xs = compute_slide_xs(slide_count, &effective_for_seek, zoom);
-        let gap_ws = compute_gap_ws(slide_count, &effective_for_seek, zoom);
 
         let (console_entries, runtime_errors): (Vec<_>, Vec<_>) =
             if self.panel_mode == BottomPanelMode::Console {
@@ -267,8 +392,8 @@ impl Render for Timeline {
         let body: AnyElement = match self.panel_mode {
             BottomPanelMode::Timeline => {
                 let track = render_track(
-                    current_slide,
-                    current_time,
+                    current_timestamp,
+                    target_timestamp,
                     slide_count,
                     slide_names,
                     durations,
@@ -289,48 +414,20 @@ impl Render for Timeline {
                             .overflow_x_scroll()
                             .track_scroll(&self.scroll)
                             .on_mouse_down(MouseButton::Left, {
-                                let services = self.services.downgrade();
-                                let scroll = self.scroll.clone();
-                                move |event, _window, cx| {
-                                    if slide_count == 0 {
-                                        return;
-                                    }
-                                    let bounds = scroll.bounds();
-                                    let scroll_offset = scroll.offset();
-                                    let local_x = f32::from(
-                                        event.position.x - bounds.origin.x - scroll_offset.x,
-                                    );
-                                    let last = slide_count - 1;
-
-                                    for i in 0..slide_count {
-                                        let bx = slide_xs[i];
-                                        let gw = gap_ws[i];
-                                        if local_x >= bx && local_x < bx + SLIDE_W {
-                                            let target = Timestamp::at_end_of_slide(i);
-                                            services.update(cx, |s, _| s.seek_to(target)).ok();
-                                            return;
-                                        }
-                                        let gap_start = bx + SLIDE_W;
-                                        let gap_end = if i == last {
-                                            f32::INFINITY
-                                        } else {
-                                            gap_start + gw.max(MIN_GAP)
-                                        };
-                                        if local_x >= gap_start && local_x < gap_end {
-                                            let t = ((local_x - gap_start) / (PX_PER_SEC * zoom))
-                                                as f64;
-                                            services
-                                                .update(cx, |s, _| {
-                                                    s.seek_to(Timestamp::new(i + 1, t))
-                                                })
-                                                .ok();
-                                            return;
-                                        }
-                                    }
+                                let timeline = cx.weak_entity();
+                                move |event, window, cx| {
+                                    window.prevent_default();
+                                    cx.stop_propagation();
+                                    timeline
+                                        .update(cx, |timeline, cx| {
+                                            timeline.begin_scrub(event.position, cx);
+                                        })
+                                        .ok();
                                 }
                             })
                             .child(track),
                     )
+                    .child(render_scrub_tracker(cx.weak_entity()))
                     .child(zoom_controls(cx.weak_entity(), ZOOM_LEVELS[self.zoom_idx]))
                     .into_any_element()
             }

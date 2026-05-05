@@ -247,7 +247,7 @@ impl DocumentView {
 
     pub(super) fn scene_start(&mut self, _: &SceneStart, _w: &mut Window, cx: &mut Context<Self>) {
         log::info!("Scene Start");
-        self.services.update(cx, |s, _| s.scene_start());
+        self.services.update(cx, |s, cx| s.scene_start(cx));
     }
 
     pub(super) fn scene_end(&mut self, _: &SceneEnd, _w: &mut Window, cx: &mut Context<Self>) {
@@ -267,7 +267,7 @@ impl DocumentView {
                 let execution = services.execution_state().read(cx);
                 epsilon_forward_target(execution.current_timestamp, execution.slide_count)
             };
-            services.seek_to(next);
+            services.seek_to(next, cx);
         });
     }
 
@@ -288,7 +288,7 @@ impl DocumentView {
                     &execution.minimum_slide_durations,
                 )
             };
-            services.seek_to(next);
+            services.seek_to(next, cx);
         });
     }
 

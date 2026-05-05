@@ -104,6 +104,7 @@ pub struct ExecutionSnapshot {
     pub camera_version: Option<u64>,
     pub meshes: Option<Vec<Arc<Mesh>>>,
     pub current_timestamp: Timestamp,
+    pub target_timestamp: Timestamp,
     pub status: ExecutionStatus,
     pub is_loading: bool,
     pub slide_count: usize,

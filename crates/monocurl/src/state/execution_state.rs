@@ -22,6 +22,7 @@ pub struct ExecutionState {
 
     // runtime info reported by the executor thread
     pub current_timestamp: Timestamp,
+    pub target_timestamp: Timestamp,
     pub status: ExecutionStatus,
     /// cached duration of each slide; None if the slide hasn't been fully executed yet
     pub slide_names: Vec<Option<String>>,
@@ -45,6 +46,7 @@ impl Default for ExecutionState {
             meshes: Vec::new(),
             parameter_state: HashMap::new(),
             current_timestamp: Timestamp::default(),
+            target_timestamp: Timestamp::default(),
             status: ExecutionStatus::Paused,
             slide_names: Vec::new(),
             slide_durations: Vec::new(),
@@ -62,6 +64,17 @@ impl Default for ExecutionState {
 impl ExecutionState {
     pub fn is_playing(&self) -> bool {
         matches!(self.status, ExecutionStatus::Playing)
+    }
+
+    pub fn fast_apply_seek(&mut self, mut target: Timestamp, cx: &mut Context<Self>) {
+        if self.slide_count == 0 {
+            target = Timestamp::default();
+        } else {
+            target.slide = target.slide.min(self.slide_count);
+        }
+
+        self.target_timestamp = target;
+        self.apply_loading(true, cx);
     }
 
     pub fn apply_snapshot(&mut self, snapshot: ExecutionSnapshot, cx: &mut Context<Self>) {
@@ -86,6 +99,7 @@ impl ExecutionState {
         }
         if !snapshot.is_loading {
             self.current_timestamp = snapshot.current_timestamp;
+            self.target_timestamp = snapshot.target_timestamp;
         }
         self.status = snapshot.status;
         self.slide_names = snapshot.slide_names;

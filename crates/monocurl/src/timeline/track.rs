@@ -1,3 +1,4 @@
+use executor::time::Timestamp;
 use gpui::*;
 
 use crate::theme::{FontSet, Theme};
@@ -8,10 +9,14 @@ use super::metrics::{
     compute_playhead_x, compute_slide_xs, compute_track_width, effective_durations,
 };
 
+const CURRENT_PLAYHEAD_W: f32 = 2.0;
+const TARGET_PLAYHEAD_W: f32 = 1.0;
+
 struct TrackPrepaint {
     slide_xs: Vec<f32>,
     painted_gap_ws: Vec<f32>,
     playhead_x: f32,
+    target_playhead_x: f32,
     durations: Vec<Option<f64>>,
     explicit: Vec<bool>,
     vert_offset: f32,
@@ -19,8 +24,8 @@ struct TrackPrepaint {
 }
 
 pub(super) fn render_track(
-    current_slide: usize,
-    current_time: f64,
+    current_timestamp: Timestamp,
+    target_timestamp: Timestamp,
     slide_count: usize,
     slide_names: Vec<Option<String>>,
     durations: Vec<Option<f64>>,
@@ -32,8 +37,8 @@ pub(super) fn render_track(
         slide_count,
         &durations,
         &minimum_durations,
-        current_slide,
-        current_time,
+        current_timestamp.slide,
+        current_timestamp.time,
     );
     let track_w = compute_track_width(slide_count, &effective_for_width, zoom);
     let slide_xs_for_labels = compute_slide_xs(slide_count, &effective_for_width, zoom);
@@ -49,8 +54,8 @@ pub(super) fn render_track(
                     slide_count,
                     &durations,
                     &minimum_durations,
-                    current_slide,
-                    current_time,
+                    current_timestamp.slide,
+                    current_timestamp.time,
                 );
                 let explicit = (0..slide_count)
                     .map(|i| durations.get(i).is_some_and(|d| d.is_some()))
@@ -60,8 +65,16 @@ pub(super) fn render_track(
                 let gap_ws = compute_gap_ws(slide_count, &effective, zoom);
                 let painted_gap_ws = compute_painted_gap_ws(slide_count, &effective, zoom);
                 let playhead_x = compute_playhead_x(
-                    current_slide,
-                    current_time,
+                    current_timestamp.slide,
+                    current_timestamp.time,
+                    &slide_xs,
+                    &gap_ws,
+                    &effective,
+                    zoom,
+                );
+                let target_playhead_x = compute_playhead_x(
+                    target_timestamp.slide,
+                    target_timestamp.time,
                     &slide_xs,
                     &gap_ws,
                     &effective,
@@ -99,6 +112,7 @@ pub(super) fn render_track(
                     slide_xs,
                     painted_gap_ws,
                     playhead_x,
+                    target_playhead_x,
                     durations: effective,
                     explicit,
                     vert_offset,
@@ -111,6 +125,7 @@ pub(super) fn render_track(
                 slide_xs,
                 painted_gap_ws,
                 playhead_x,
+                target_playhead_x,
                 durations,
                 explicit,
                 vert_offset,
@@ -194,13 +209,17 @@ pub(super) fn render_track(
                 }
             }
 
-            window.paint_quad(fill(
-                Bounds::new(
-                    point(ox + px(playhead_x - 0.75), oy_full),
-                    size(px(1.5), bounds.size.height),
-                ),
-                theme.timeline_playhead,
-            ));
+            let mut paint_playhead = |x: f32, width: f32| {
+                window.paint_quad(fill(
+                    Bounds::new(
+                        point(ox + px(x - width / 2.0), oy_full),
+                        size(px(width), bounds.size.height),
+                    ),
+                    theme.timeline_playhead,
+                ));
+            };
+            paint_playhead(target_playhead_x, TARGET_PLAYHEAD_W);
+            paint_playhead(playhead_x, CURRENT_PLAYHEAD_W);
         },
     )
     .w(px(track_w))

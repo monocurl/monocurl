@@ -393,6 +393,7 @@ async fn sync_to_target(
     current: Timestamp,
 ) {
     emit_runtime_snapshot(executor, shared, sm_tx, root_text_rope, version, true, None).await;
+    yield_now().await;
 
     let result = if target < current {
         executor.seek_to(target).await
@@ -546,13 +547,15 @@ async fn emit_runtime_snapshot(
     is_loading: bool,
     scene_snapshot: Option<SceneSnapshot>,
 ) {
-    let current_timestamp = display_timestamp_for_target(executor, shared.target.get());
+    let current_timestamp = display_timestamp(executor, shared.current_timestamp.get());
+    let target_timestamp = display_timestamp(executor, shared.target.get());
 
     ExecutionService::emit_snapshot(
         sm_tx,
         executor,
         root_text_rope,
         current_timestamp,
+        target_timestamp,
         shared.has_compiler_error.get(),
         shared.is_playing.get(),
         is_loading,
@@ -563,8 +566,8 @@ async fn emit_runtime_snapshot(
     .await;
 }
 
-fn display_timestamp_for_target(executor: &Executor, target: Timestamp) -> Timestamp {
-    executor.internal_to_user_timestamp(target)
+fn display_timestamp(executor: &Executor, timestamp: Timestamp) -> Timestamp {
+    executor.internal_to_user_timestamp(timestamp)
 }
 
 impl ExecutionService {
@@ -586,23 +589,28 @@ impl ExecutionService {
         let mut play_future = Some(runtime.play_session(self.sm_tx.clone()));
 
         loop {
-            let Some(message) = self
-                .next_message(&runtime, play_future.as_mut().expect("play future"))
+            let Some(messages) = self
+                .next_message_batch(&runtime, play_future.as_mut().expect("play future"))
                 .await
             else {
                 break;
             };
+            let messages = compact_message_batch(messages);
 
-            let reset_future = runtime.requires_future_reset(&message);
-            if reset_future {
-                drop(play_future.take());
+            let mut reset_future = false;
+            for message in messages {
+                let message_resets_future = runtime.requires_future_reset(&message);
+                if message_resets_future && !reset_future {
+                    drop(play_future.take());
+                    reset_future = true;
+                }
+
+                let effect = runtime.apply_message(message);
+                debug_assert!(matches!(
+                    (message_resets_future, effect),
+                    (true, MessageEffect::ResetFuture) | (false, MessageEffect::KeepFuture)
+                ));
             }
-
-            let effect = runtime.apply_message(message);
-            debug_assert!(matches!(
-                (reset_future, effect),
-                (true, MessageEffect::ResetFuture) | (false, MessageEffect::KeepFuture)
-            ));
 
             if reset_future {
                 play_future = Some(runtime.play_session(self.sm_tx.clone()));
@@ -610,14 +618,25 @@ impl ExecutionService {
         }
     }
 
-    async fn next_message(
+    async fn next_message_batch(
         &mut self,
         runtime: &RuntimeState,
         play_future: &mut LocalBoxFuture<'static, ()>,
-    ) -> Option<ExecutionMessage> {
+    ) -> Option<Vec<ExecutionMessage>> {
         future::poll_fn(|cx| {
-            if let std::task::Poll::Ready(message) = self.rx.poll_next_unpin(cx) {
-                return std::task::Poll::Ready(message);
+            let mut messages = Vec::new();
+            loop {
+                match self.rx.poll_next_unpin(cx) {
+                    std::task::Poll::Ready(Some(message)) => messages.push(message),
+                    std::task::Poll::Ready(None) => {
+                        return std::task::Poll::Ready((!messages.is_empty()).then_some(messages));
+                    }
+                    std::task::Poll::Pending => break,
+                }
+            }
+
+            if !messages.is_empty() {
+                return std::task::Poll::Ready(Some(messages));
             }
 
             if runtime.shared.needs_work() {
@@ -630,6 +649,27 @@ impl ExecutionService {
     }
 }
 
+// coalesce consecutive timeline scrub seeks
+fn compact_message_batch(messages: Vec<ExecutionMessage>) -> Vec<ExecutionMessage> {
+    let mut compacted = Vec::with_capacity(messages.len());
+    for message in messages {
+        match message {
+            ExecutionMessage::SeekTo { target } => {
+                if let Some(ExecutionMessage::SeekTo {
+                    target: existing_target,
+                }) = compacted.last_mut()
+                {
+                    *existing_target = target;
+                } else {
+                    compacted.push(ExecutionMessage::SeekTo { target });
+                }
+            }
+            message => compacted.push(message),
+        }
+    }
+    compacted
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -637,7 +677,7 @@ mod tests {
     use executor::{state::ExecutionState, time::Timestamp, value::Value};
     use structs::rope::{Rope, TextAggregate};
 
-    use super::{RuntimeState, default_bytecode};
+    use super::{RuntimeState, compact_message_batch, default_bytecode};
     use crate::services::execution::{ExecutionMessage, ParameterValue, PresentationUpdateTarget};
 
     #[test]
@@ -738,6 +778,55 @@ mod tests {
         assert!(runtime.requires_future_reset(&ExecutionMessage::SeekTo {
             target: Timestamp::new(1, 2.0),
         }));
+    }
+
+    #[test]
+    fn compact_message_batch_keeps_latest_consecutive_seek() {
+        let compacted = compact_message_batch(vec![
+            ExecutionMessage::SeekTo {
+                target: Timestamp::new(1, 0.25),
+            },
+            ExecutionMessage::SeekTo {
+                target: Timestamp::new(1, 0.5),
+            },
+            ExecutionMessage::SeekTo {
+                target: Timestamp::new(1, 0.75),
+            },
+        ]);
+
+        assert_eq!(compacted.len(), 1);
+        match &compacted[0] {
+            ExecutionMessage::SeekTo { target } => {
+                assert_eq!(*target, Timestamp::new(1, 0.75));
+            }
+            _ => panic!("expected compacted seek"),
+        }
+    }
+
+    #[test]
+    fn compact_message_batch_preserves_seek_order_around_other_messages() {
+        let compacted = compact_message_batch(vec![
+            ExecutionMessage::SeekTo {
+                target: Timestamp::new(1, 0.25),
+            },
+            ExecutionMessage::TogglePlay,
+            ExecutionMessage::SeekTo {
+                target: Timestamp::new(1, 0.5),
+            },
+        ]);
+
+        assert_eq!(compacted.len(), 3);
+        match (&compacted[0], &compacted[1], &compacted[2]) {
+            (
+                ExecutionMessage::SeekTo { target: first },
+                ExecutionMessage::TogglePlay,
+                ExecutionMessage::SeekTo { target: second },
+            ) => {
+                assert_eq!(*first, Timestamp::new(1, 0.25));
+                assert_eq!(*second, Timestamp::new(1, 0.5));
+            }
+            _ => panic!("expected seek, toggle, seek"),
+        }
     }
 
     #[test]

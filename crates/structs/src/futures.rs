@@ -10,7 +10,7 @@ pub struct PeriodicYielder {
 
 impl Default for PeriodicYielder {
     fn default() -> Self {
-        Self::new(1000)
+        Self::new(16384)
     }
 }
 

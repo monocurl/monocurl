@@ -307,7 +307,12 @@ impl ServiceManager {
         })
     }
 
-    pub fn seek_to(&mut self, target: Timestamp) {
+    pub fn seek_to(&mut self, target: Timestamp, cx: &mut App) {
+        self.execution_state.update(cx, |state, cx| {
+            state.fast_apply_seek(target, cx);
+            cx.notify();
+        });
+
         smol::block_on(async {
             self.execution_tx
                 .send(ExecutionMessage::SeekTo { target })
@@ -316,29 +321,29 @@ impl ServiceManager {
         })
     }
 
-    pub fn prev_slide(&mut self, cx: &App) {
+    pub fn prev_slide(&mut self, cx: &mut App) {
         let target = {
             let execution = self.execution_state.read(cx);
             previous_slide_target(execution.current_timestamp, execution.slide_count)
         };
-        self.seek_to(target);
+        self.seek_to(target, cx);
     }
 
-    pub fn next_slide(&mut self, cx: &App) {
+    pub fn next_slide(&mut self, cx: &mut App) {
         let target = {
             let execution = self.execution_state.read(cx);
             next_slide_target(execution.current_timestamp, execution.slide_count)
         };
-        self.seek_to(target);
+        self.seek_to(target, cx);
     }
 
-    pub fn scene_start(&mut self) {
-        self.seek_to(Timestamp::default());
+    pub fn scene_start(&mut self, cx: &mut App) {
+        self.seek_to(Timestamp::default(), cx);
     }
 
-    pub fn scene_end(&mut self, cx: &App) {
+    pub fn scene_end(&mut self, cx: &mut App) {
         let slide_count = self.execution_state.read(cx).slide_count;
-        self.seek_to(scene_end_target(slide_count));
+        self.seek_to(scene_end_target(slide_count), cx);
     }
 
     pub fn toggle_play(&mut self) {
