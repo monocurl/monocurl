@@ -8,7 +8,6 @@ use crate::{
 
 use super::{
     Value, container::Map, invoked_function::InvokedFunction, invoked_operator::InvokedOperator,
-    stateful::to_follower_stateful,
 };
 
 fn elided_heap_ref_value(value_ref: &VRc) -> VRc {
@@ -129,16 +128,8 @@ impl Value {
                 Value::Leader(ref leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
                 Value::InvokedOperator(ref op) => InvokedOperator::value(op, executor).await?,
                 Value::InvokedFunction(ref func) => InvokedFunction::value(func, executor).await?,
-                Value::Stateful(ref stateful) => executor.eval_stateful(stateful).await?,
                 other => return Ok(other),
             };
-        }
-    }
-
-    pub fn to_follower_stateful(&self) -> Value {
-        match self {
-            Value::Stateful(stateful) => Value::Stateful(to_follower_stateful(stateful)),
-            other => other.clone(),
         }
     }
 
@@ -208,7 +199,6 @@ impl Value {
             Value::AnimBlock(_) => "anim_block",
             Value::Map(_) => "map",
             Value::List(_) => "list",
-            Value::Stateful(_) => "stateful",
             Value::Leader(_) => "leader",
             Value::InvokedOperator(_) => "live operator",
             Value::InvokedFunction(_) => "live function",

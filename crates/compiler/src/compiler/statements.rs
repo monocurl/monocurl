@@ -56,61 +56,28 @@ impl Compiler {
             AstVariableType::Let => VariableType::Let,
             AstVariableType::Var => VariableType::Var,
             AstVariableType::Mesh => VariableType::Mesh,
-            AstVariableType::Param => VariableType::Param,
         };
-        let is_library = self.current_section().flags.is_library;
-        match vt {
-            VariableType::Param if is_library => {
-                self.error(
-                    span.clone(),
-                    "'param' declarations are not allowed in user libraries",
-                );
-            }
-            VariableType::Param if self.frames.len() != 1 || self.frame().scopes.len() != 1 => {
-                self.error(span.clone(), "'param' must be declared at the top level of a section, not inside any nested scope");
-            }
-            _ => {}
-        }
         let name = &d.identifier.1.0;
-        let existing_param = self.frame().scopes.iter().any(|s| {
+        if self.frame().scopes.iter().any(|s| {
             s.symbols
                 .get(name)
-                .is_some_and(|sym| sym.var_type == VariableType::Param)
-        });
-        if existing_param && vt != VariableType::Param {
+                .is_some_and(|sym| sym.var_type == VariableType::Scene)
+        }) {
             self.error(
                 span.clone(),
-                &format!("cannot shadow 'param' variable '{name}'"),
+                &format!("cannot shadow scene variable '{name}'"),
             );
-        } else if vt == VariableType::Param {
-            let shadows_existing = self
-                .frame()
-                .scopes
-                .iter()
-                .any(|s| s.symbols.contains_key(name));
-            if shadows_existing {
-                self.error(
-                    span.clone(),
-                    &format!("'param' variable '{name}' cannot shadow an existing variable"),
-                );
-            }
         }
         match vt {
             VariableType::Mesh => {
                 let ni = self.intern_string(&d.identifier.1.0);
                 self.emit(Instruction::ConvertMesh { name_index: ni }, span.clone());
             }
-            VariableType::Param => {
-                let ni = self.intern_string(&d.identifier.1.0);
-                self.emit(Instruction::ConvertParam { name_index: ni }, span.clone());
-            }
-            VariableType::Let | VariableType::Var | VariableType::Reference => {
-                self.emit(
-                    Instruction::ConvertVar {
-                        allow_stateful: false,
-                    },
-                    span.clone(),
-                );
+            VariableType::Let
+            | VariableType::Var
+            | VariableType::Reference
+            | VariableType::Scene => {
+                self.emit(Instruction::ConvertVar, span.clone());
             }
         }
         self.define_declared_symbol(&d.identifier.1.0, vt, &d.value.1, false);
@@ -160,12 +127,7 @@ impl Compiler {
         self.compile_val(&f.container.1, &f.container.0);
         let iter_pos = self.stack_depth() - 1;
         // anonymous names (null byte) can't collide with user identifiers
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            container_span.clone(),
-        );
+        self.emit(Instruction::ConvertVar, container_span.clone());
         self.define_symbol(
             "\x00iter",
             VariableType::Let,
@@ -175,12 +137,7 @@ impl Compiler {
 
         self.emit_push_int(0, span.clone());
         let idx_pos = self.stack_depth() - 1;
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            span.clone(),
-        );
+        self.emit(Instruction::ConvertVar, span.clone());
         self.define_symbol(
             "\x00idx",
             VariableType::Var,
@@ -236,12 +193,7 @@ impl Compiler {
             SymbolFunctionInfo::None,
             false,
         );
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            span.clone(),
-        );
+        self.emit(Instruction::ConvertVar, span.clone());
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone()); // depth = loop_stack
@@ -288,12 +240,7 @@ impl Compiler {
 
         self.compile_val(&start.1, &start.0);
         let current_pos = self.stack_depth() - 1;
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            start.0.clone(),
-        );
+        self.emit(Instruction::ConvertVar, start.0.clone());
         self.define_symbol(
             "\x00range_current",
             VariableType::Var,
@@ -303,12 +250,7 @@ impl Compiler {
 
         self.compile_val(&stop.1, &stop.0);
         let stop_pos = self.stack_depth() - 1;
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            stop.0.clone(),
-        );
+        self.emit(Instruction::ConvertVar, stop.0.clone());
         self.define_symbol(
             "\x00range_stop",
             VariableType::Let,
@@ -345,12 +287,7 @@ impl Compiler {
             SymbolFunctionInfo::None,
             false,
         );
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            span.clone(),
-        );
+        self.emit(Instruction::ConvertVar, span.clone());
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone());
@@ -436,10 +373,6 @@ impl Compiler {
                 span.clone(),
                 "return is only valid inside a lambda or block",
             );
-        }
-
-        if is_stateful(&r.value.1) {
-            self.error(span.clone(), "cannot return a stateful value");
         }
 
         self.compile_val(&r.value.1, &r.value.0);

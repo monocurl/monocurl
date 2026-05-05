@@ -1,6 +1,6 @@
 use crate::{heap::VRc, state::LeaderKind};
 
-/// a leader-follower pair for mesh/param variables.
+/// a leader-follower pair for mesh/scene variables.
 /// the leader is the "code" value that the user modifies.
 /// the follower is the "on-screen" value that is interpolated during animations.
 #[derive(Clone)]

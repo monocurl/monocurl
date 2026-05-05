@@ -1014,11 +1014,7 @@ let center = operator |target, center, filter = nil| {
 ## Remaps mesh positions from `original_camera` to `live_camera` so the mesh keeps the same apparent screen placement during camera motion. Use this for overlays, labels, and callouts that should not drift while the camera lerps.
 ## [parameters]
 ## original_camera: camera used when the mesh was authored
-## live_camera: current or stateful camera, often `$camera`
-## [example]
-## ```
-## mesh hud = camera_transfer{camera, $camera} to_side{UP} Text("fixed")
-## ```
+## live_camera: camera value to map into
 let camera_transfer = operator |target, original_camera, live_camera, filter = nil| {
     let go = |level| __monocurl__native__ op_camera_transfer(target, original_camera, live_camera, filter, level)
     return [go(level: 0), go(level: 1)]

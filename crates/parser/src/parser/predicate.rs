@@ -202,7 +202,6 @@ impl TokenPredicate for VariableDeclarationPred {
             Token::Let => Some(VariableType::Let),
             Token::Var => Some(VariableType::Var),
             Token::Mesh => Some(VariableType::Mesh),
-            Token::Param => Some(VariableType::Param),
             _ => None,
         }
     }
@@ -215,6 +214,5 @@ impl TokenPredicate for VariableDeclarationPred {
         dump.cursor_possibilities.insert(Token::Let);
         dump.cursor_possibilities.insert(Token::Var);
         dump.cursor_possibilities.insert(Token::Mesh);
-        dump.cursor_possibilities.insert(Token::Param);
     }
 }

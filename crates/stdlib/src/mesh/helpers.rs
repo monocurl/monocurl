@@ -1247,10 +1247,6 @@ pub(super) fn read_mesh_tree<'a>(
                 }
                 Ok(MeshTree::List(children))
             }
-            Value::Stateful(ref s) => {
-                let resolved = executor.eval_stateful(s).await?;
-                read_mesh_tree(executor, resolved, name).await
-            }
             other => Err(ExecutorError::type_error_for(
                 "mesh / list of meshes",
                 other.type_name(),

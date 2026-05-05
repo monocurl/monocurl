@@ -13,7 +13,6 @@ use executor::{
     value::{
         Value,
         container::{HashableKey, List, Map},
-        stateful::stateful_cache_valid,
     },
 };
 use integration_tests::{
@@ -219,10 +218,10 @@ impl AnimResult {
             .collect()
     }
 
-    pub fn param_leaders(&self) -> Vec<&LeaderInfo> {
+    pub fn scene_leaders(&self) -> Vec<&LeaderInfo> {
         self.leaders
             .iter()
-            .filter(|l| l.kind == LeaderKind::Param)
+            .filter(|l| l.kind == LeaderKind::Scene)
             .collect()
     }
 
@@ -231,8 +230,8 @@ impl AnimResult {
     }
 
     #[allow(dead_code)]
-    pub fn param_leader(&self, index: usize) -> &LeaderInfo {
-        self.nth_leader(LeaderKind::Param, index)
+    pub fn scene_leader(&self, index: usize) -> &LeaderInfo {
+        self.nth_leader(LeaderKind::Scene, index)
     }
 
     pub fn assert_mesh_target_int(&self, index: usize, expected: i64) -> &Self {
@@ -266,7 +265,7 @@ impl AnimResult {
 fn leader_kind_name(kind: LeaderKind) -> &'static str {
     match kind {
         LeaderKind::Mesh => "mesh",
-        LeaderKind::Param => "param",
+        LeaderKind::Scene => "scene",
     }
 }
 
@@ -307,11 +306,6 @@ fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
         Value::Leader(leader) => {
             let value = with_heap(|h| h.get(leader.leader_rc.key()).clone());
             mesh_tree_leaves(&value, out);
-        }
-        Value::Stateful(stateful) => {
-            if let Some(value) = stateful_cache_valid(stateful) {
-                mesh_tree_leaves(&value, out);
-            }
         }
         _ => {}
     }

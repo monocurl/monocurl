@@ -14,8 +14,8 @@ use crate::{services::ServiceManagerMessage, state::diagnostics::Diagnostic};
 
 use super::{
     ExecutionService, ExecutionSnapshot, ExecutionStatus, MeshAttributeSnapshot, MeshEntrySnapshot,
-    ParameterEntrySnapshot, ParameterSnapshot, ParameterValue, PlaybackMode,
-    PresentationUpdateTarget, diagnostics::format_runtime_error_message,
+    ParameterSnapshot, ParameterValue, PlaybackMode, PresentationUpdateTarget,
+    diagnostics::format_runtime_error_message,
 };
 
 impl ExecutionService {
@@ -75,7 +75,6 @@ impl ExecutionService {
     }
 
     fn parameter_snapshot(executor: &Executor) -> ParameterSnapshot {
-        let mut params = Vec::new();
         let mut meshes = Vec::new();
 
         for (leader_index, entry) in executor.state.leaders.iter().enumerate() {
@@ -83,15 +82,7 @@ impl ExecutionService {
             let locked = matches!(&cell_val, Value::Leader(l) if l.locked_by_anim.is_some());
 
             match entry.kind {
-                LeaderKind::Param => {
-                    let follower_val = with_heap(|h| h.get(entry.follower_value).clone());
-                    params.push(ParameterEntrySnapshot {
-                        target: PresentationUpdateTarget::Param { leader_index },
-                        name: entry.name.clone(),
-                        value: Self::parameter_value_from_runtime(follower_val),
-                        locked,
-                    });
-                }
+                LeaderKind::Scene => {}
                 LeaderKind::Mesh => {
                     let follower_val = with_heap(|h| h.get(entry.follower_value).clone());
                     meshes.push(MeshEntrySnapshot {
@@ -108,7 +99,10 @@ impl ExecutionService {
             }
         }
 
-        ParameterSnapshot { params, meshes }
+        ParameterSnapshot {
+            params: Vec::new(),
+            meshes,
+        }
     }
 
     fn mesh_attributes_from_runtime(
@@ -177,7 +171,6 @@ impl ExecutionService {
                     })
                 })
                 .collect(),
-            Value::Stateful(_) => Vec::new(),
             _ => Vec::new(),
         }
     }

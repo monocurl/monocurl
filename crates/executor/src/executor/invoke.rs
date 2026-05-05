@@ -11,10 +11,6 @@ use crate::{
         invoked_function::{InvokedFunction, make_invoked_function},
         invoked_operator::{InvokedOperator, extract_operator_result, make_invoked_operator},
         lambda::Lambda,
-        stateful::{
-            StatefulNode, StatefulReadKind, collect_roots_from_value, make_stateful,
-            value_into_stateful_node,
-        },
     },
 };
 use smallvec::SmallVec;
@@ -89,7 +85,6 @@ impl Executor {
         &mut self,
         stack_idx: usize,
         section_idx: usize,
-        stateful: bool,
         labeled: bool,
         num_args: u32,
     ) -> ExecSingle {
@@ -123,63 +118,7 @@ impl Executor {
                 operator: false,
             });
         }
-        if !stateful
-            && let Some(error) = self.ensure_non_stateful_lambda_args(stack_idx, num_args as usize)
-        {
-            return ExecSingle::Error(error);
-        }
-
-        if stateful {
-            let labels = if labeled {
-                self.drain_labels(stack_idx, section_idx)
-            } else {
-                SmallVec::new()
-            };
-
-            let n = num_args as usize;
-            let stack = self.state.stack_mut(stack_idx);
-            let stack_len = stack.stack_len();
-            let args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
-            stack.pop_n(n);
-
-            let (func_node, mut roots) = value_into_stateful_node(Value::Lambda(lambda));
-            let arg_refs: Vec<VRc> = args
-                .into_iter()
-                .map(|a| {
-                    collect_roots_from_value(&a, &mut roots);
-                    VRc::new(a)
-                })
-                .collect();
-
-            let read_kind = arg_refs
-                .iter()
-                .find_map(|arg_ref| {
-                    let val = with_heap(|h| h.get(arg_ref.key()).clone()).elide_lvalue();
-                    if let Value::Stateful(s) = val {
-                        Some(s.cache.read_kind)
-                    } else {
-                        None
-                    }
-                })
-                .expect("No stateful argument despite marked stateful invocation");
-
-            let stateful = make_stateful(
-                roots,
-                StatefulNode::LabeledCall {
-                    func: Box::new(func_node),
-                    args: arg_refs,
-                    labels,
-                },
-                read_kind,
-            );
-            if let Err(error) = self.eval_stateful(&stateful).await {
-                return ExecSingle::Error(error);
-            }
-            self.state
-                .stack_mut(stack_idx)
-                .push(Value::Stateful(stateful));
-            return ExecSingle::Continue;
-        } else if labeled || !lambda.defaults.is_empty() {
+        if labeled || !lambda.defaults.is_empty() {
             let labels = if labeled {
                 self.drain_labels(stack_idx, section_idx)
             } else {
@@ -230,7 +169,6 @@ impl Executor {
         &mut self,
         stack_idx: usize,
         section_idx: usize,
-        stateful: bool,
         labeled: bool,
         num_args: u32,
     ) -> ExecSingle {
@@ -266,65 +204,7 @@ impl Executor {
             });
         }
 
-        if stateful {
-            let n = num_args as usize;
-            let stack = self.state.stack_mut(stack_idx);
-            let stack_len = stack.stack_len();
-            let extra_args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
-            stack.pop_n(n);
-            let operand = stack.pop().elide_lvalue();
-
-            let labels = if labeled {
-                self.drain_labels(stack_idx, section_idx)
-            } else {
-                SmallVec::new()
-            };
-
-            let (op_node, mut roots) = value_into_stateful_node(Value::Operator(operator));
-            collect_roots_from_value(&operand, &mut roots);
-
-            let operand_ref = VRc::new(operand);
-
-            let extra_arg_refs: Vec<VRc> = extra_args
-                .into_iter()
-                .map(|a| {
-                    collect_roots_from_value(&a, &mut roots);
-                    VRc::new(a)
-                })
-                .collect();
-
-            let read_kind = std::iter::once(&operand_ref)
-                .chain(extra_arg_refs.iter())
-                .find_map(|value_ref| {
-                    let val = with_heap(|h| h.get(value_ref.key()).clone()).elide_lvalue();
-                    if let Value::Stateful(s) = val {
-                        Some(s.cache.read_kind)
-                    } else {
-                        None
-                    }
-                })
-                .expect("No stateful argument despite marked stateful invocation");
-
-            let stateful = make_stateful(
-                roots,
-                StatefulNode::LabeledOperatorCall {
-                    operator: Box::new(op_node),
-                    operand: operand_ref,
-                    extra_args: extra_arg_refs,
-                    labels,
-                },
-                read_kind,
-            );
-            if let Err(error) = self.eval_stateful(&stateful).await {
-                return ExecSingle::Error(error);
-            }
-            self.state
-                .stack_mut(stack_idx)
-                .push(Value::Stateful(stateful));
-
-            self.state.stack_mut(stack_idx).ip.1 += 1;
-            return ExecSingle::Continue;
-        } else if labeled {
+        if labeled {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
@@ -444,12 +324,6 @@ impl Executor {
     #[inline]
     pub(super) fn exec_return(&mut self, stack_idx: usize, stack_delta: i32) -> ExecSingle {
         let ret_val = self.state.stack_mut(stack_idx).pop();
-
-        if matches!(ret_val, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::invalid_invocation(
-                "Cannot return a stateful value",
-            ));
-        }
 
         let to_pop = (-stack_delta) as usize;
         let stack = self.state.stack_mut(stack_idx);
@@ -785,19 +659,6 @@ impl Executor {
         }
         ExecSingle::Continue
     }
-
-    fn ensure_non_stateful_lambda_args(
-        &self,
-        stack_idx: usize,
-        num_args: usize,
-    ) -> Option<ExecutorError> {
-        let stack = self.state.stack(stack_idx);
-        let stack_len = stack.stack_len();
-        stack.var_stack[stack_len - num_args..]
-            .iter()
-            .any(|arg| matches!(arg, Value::Stateful(_)))
-            .then_some(ExecutorError::stateful_illegal_assignment())
-    }
 }
 
 fn validate_eager_arg_count(arg_count: usize, lambda: &Lambda) -> Result<(), ExecutorError> {
@@ -833,7 +694,7 @@ fn reference_argument_shape_is_allowed(arg: &Value) -> bool {
 
 fn invalid_reference_argument() -> ExecutorError {
     ExecutorError::invalid_invocation(
-        "reference arguments must be explicit &param, &mesh, &reference values, or list literals of references",
+        "reference arguments must be explicit &scene, &mesh, &reference values, or list literals of references",
     )
 }
 
@@ -861,142 +722,7 @@ fn prepare_lambda_argument(
     }
 }
 
-// ---------------------------------------------------------------------------
-// stateful evaluation
-// ---------------------------------------------------------------------------
-
 impl Executor {
-    pub(crate) fn eval_stateful_read_kind<'a>(
-        &'a mut self,
-        stateful: &'a crate::value::stateful::Stateful,
-        override_read_kind: StatefulReadKind,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
-    {
-        Box::pin(async move {
-            if let Some(cached) = crate::value::stateful::stateful_cache_valid(stateful) {
-                return Ok(cached);
-            }
-            let result = self
-                .eval_stateful_node(&stateful.body.root, override_read_kind)
-                .await?;
-            let result = self.materialize_cached_value(result).await?;
-            crate::value::stateful::stateful_update_cache(stateful, result.clone());
-            Ok(result)
-        })
-    }
-
-    pub fn eval_stateful<'a>(
-        &'a mut self,
-        stateful: &'a crate::value::stateful::Stateful,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
-    {
-        Box::pin(async move {
-            let read_kind = stateful.cache.read_kind;
-            self.eval_stateful_read_kind(stateful, read_kind).await
-        })
-    }
-
-    fn eval_stateful_node<'a>(
-        &'a mut self,
-        node: &'a StatefulNode,
-        read_kind: StatefulReadKind,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
-    {
-        Box::pin(async move {
-            match node {
-                StatefulNode::LeaderRef(key) => {
-                    let inner = with_heap(|h| h.get(*key).clone());
-                    match inner {
-                        Value::Leader(leader) => Ok(match read_kind {
-                            StatefulReadKind::Leader => {
-                                with_heap(|h| h.get(leader.leader_rc.key()).clone())
-                            }
-                            StatefulReadKind::Follower => {
-                                with_heap(|h| h.get(leader.follower_rc.key()).clone())
-                            }
-                        }),
-                        other => Ok(other),
-                    }
-                }
-                StatefulNode::Constant(val) => Ok(*val.clone()),
-                StatefulNode::LabeledCall {
-                    func,
-                    args,
-                    labels: _,
-                } => {
-                    let func_val = self.eval_stateful_node(func, read_kind).await?;
-                    let lambda = match func_val.elide_lvalue() {
-                        Value::Lambda(rc) => rc,
-                        other => {
-                            return Err(ExecutorError::type_error("lambda", other.type_name()));
-                        }
-                    };
-
-                    let mut evaled: Vec<Value> = Vec::with_capacity(args.len());
-                    for arg_key in args {
-                        let arg_val = with_heap(|h| h.get(arg_key.key()).clone()).elide_lvalue();
-                        let resolved = match arg_val {
-                            Value::Stateful(ref s) => {
-                                self.eval_stateful_read_kind(s, read_kind).await?
-                            }
-                            other => other,
-                        };
-                        evaled.push(resolved);
-                    }
-                    let full_args = prepare_eager_call_args(evaled, &lambda)?;
-                    let trace_parent_idx = Some(self.state.last_stack_idx);
-                    let result = self
-                        .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
-                        .await?;
-                    self.resolve_live_value(result).await
-                }
-                StatefulNode::LabeledOperatorCall {
-                    operator,
-                    operand,
-                    extra_args,
-                    ..
-                } => {
-                    let op_val = self.eval_stateful_node(operator, read_kind).await?;
-                    let operator_inner = match op_val.elide_lvalue() {
-                        Value::Operator(op) => op,
-                        other => {
-                            return Err(ExecutorError::type_error("operator", other.type_name()));
-                        }
-                    };
-
-                    let operand_val = {
-                        let v = with_heap(|h| h.get(operand.key()).clone()).elide_lvalue();
-                        match v {
-                            Value::Stateful(ref s) => {
-                                self.eval_stateful_read_kind(s, read_kind).await?
-                            }
-                            other => other,
-                        }
-                    };
-
-                    let mut evaled: Vec<Value> = vec![operand_val];
-                    for arg_key in extra_args {
-                        let arg_val = with_heap(|h| h.get(arg_key.key()).clone()).elide_lvalue();
-                        let resolved = match arg_val {
-                            Value::Stateful(ref s) => {
-                                self.eval_stateful_read_kind(s, read_kind).await?
-                            }
-                            other => other,
-                        };
-                        evaled.push(resolved);
-                    }
-                    let full_args = prepare_eager_call_args(evaled, &operator_inner.0)?;
-                    let trace_parent_idx = Some(self.state.last_stack_idx);
-                    let raw = self
-                        .eagerly_invoke_lambda(&operator_inner.0, &full_args, trace_parent_idx)
-                        .await?;
-                    let (_, modified) = extract_operator_result(raw)?;
-                    self.resolve_live_value(modified).await
-                }
-            }
-        })
-    }
-
     pub(crate) fn materialize_cached_value<'a>(
         &'a mut self,
         val: Value,
@@ -1024,10 +750,6 @@ impl Executor {
                     let inner = InvokedOperator::value(&inv, self).await?;
                     self.materialize_cached_value(inner).await
                 }
-                Value::Stateful(stateful) => {
-                    let inner = self.eval_stateful(&stateful).await?;
-                    self.materialize_cached_value(inner).await
-                }
                 Value::List(list) => {
                     let mut elements = Vec::with_capacity(list.len());
                     for value_ref in list.elements() {
@@ -1053,10 +775,6 @@ impl Executor {
                 other => Ok(other),
             }
         })
-    }
-
-    async fn resolve_live_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
-        self.materialize_cached_value(val).await
     }
 }
 

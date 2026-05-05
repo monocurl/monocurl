@@ -613,12 +613,9 @@ mod test {
     }
 
     #[test]
-    fn test_param_declaration_disallowed_in_user_library() {
-        let result = compile_src_as_section("param x = 1", SectionType::UserLibrary);
-        assert!(has_error(
-            &result,
-            "'param' declarations are not allowed in user libraries"
-        ));
+    fn test_param_is_plain_identifier() {
+        let result = compile_src_as_section("let param = 1", SectionType::UserLibrary);
+        no_errors(&result);
     }
 
     #[test]
@@ -673,12 +670,6 @@ mod test {
                 .any(|i| matches!(i, Instruction::ConditionalJump { .. }))
         });
         assert!(has_cj, "expected ConditionalJump in bytecode for 'or'");
-    }
-
-    #[test]
-    fn test_integration_param_allows_plain_read() {
-        let result = compile_src("param x = 1\nlet y = x");
-        no_errors(&result);
     }
 
     #[test]
@@ -757,9 +748,7 @@ mod test {
             sec.instructions,
             vec![
                 Instruction::PushInt { index: 0 },
-                Instruction::ConvertVar {
-                    allow_stateful: false
-                },
+                Instruction::ConvertVar,
                 Instruction::EndOfExecutionHead
             ],
         );
@@ -780,9 +769,7 @@ mod test {
             sec.instructions,
             vec![
                 Instruction::PushNil,
-                Instruction::ConvertVar {
-                    allow_stateful: false
-                },
+                Instruction::ConvertVar,
                 Instruction::EndOfExecutionHead
             ],
         );
@@ -813,9 +800,7 @@ mod test {
             sec.instructions,
             vec![
                 Instruction::PushInt { index: 0 }, // var x = 0
-                Instruction::ConvertVar {
-                    allow_stateful: false
-                }, // create variable slot
+                Instruction::ConvertVar,           // create variable slot
                 Instruction::PushLvalue {
                     stack_delta: -1,
                     force_ephemeral: false
@@ -889,12 +874,7 @@ mod test {
                 capture_count: 0
             },
         );
-        assert_eq!(
-            sec.instructions[4],
-            Instruction::ConvertVar {
-                allow_stateful: false
-            }
-        );
+        assert_eq!(sec.instructions[4], Instruction::ConvertVar);
         assert_eq!(sec.instructions[5], Instruction::EndOfExecutionHead);
         assert_eq!(sec.lambda_prototypes.len(), 1);
         assert_eq!(sec.lambda_prototypes[0].required_args, 1);
@@ -932,7 +912,7 @@ mod test {
         let convert_vars = sec
             .instructions
             .iter()
-            .filter(|instr| matches!(instr, Instruction::ConvertVar { .. }))
+            .filter(|instr| matches!(instr, Instruction::ConvertVar))
             .count();
         assert_eq!(
             convert_vars, 2,

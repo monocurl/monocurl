@@ -3,11 +3,8 @@ use executor::{
     executor::Executor,
     heap::{heap_replace, with_heap, with_heap_mut},
     value::{
-        Value,
-        container::HashableKey,
-        invoked_function::InvokedFunction,
+        Value, container::HashableKey, invoked_function::InvokedFunction,
         invoked_operator::invalidate_invoked_operator_cache,
-        stateful::{Stateful, StatefulNode, reset_stateful_cache},
     },
 };
 use stdlib_macros::stdlib_func;
@@ -48,18 +45,6 @@ fn has_attr_on_value(value: Value, attr_name: &str) -> bool {
             inv.body.labels.iter().any(|(_, label)| label == attr_name)
                 || has_attr_on_value(inv.body.operand.as_ref().clone(), attr_name)
         }
-        Value::Stateful(stateful) => match &stateful.body.root {
-            StatefulNode::LabeledCall { labels, .. } => {
-                labels.iter().any(|(_, label)| label == attr_name)
-            }
-            StatefulNode::LabeledOperatorCall {
-                labels, operand, ..
-            } => {
-                labels.iter().any(|(_, label)| label == attr_name)
-                    || has_attr_on_value(with_heap(|h| h.get(operand.key()).clone()), attr_name)
-            }
-            _ => false,
-        },
         _ => false,
     }
 }
@@ -87,95 +72,8 @@ fn get_attr_from_value(value: Value, attr_name: &str) -> Result<Value, ExecutorE
                 get_attr_from_value(inv.body.operand.as_ref().clone(), attr_name)
             }
         }
-        Value::Stateful(stateful) => match &stateful.body.root {
-            StatefulNode::LabeledCall { labels, args, .. } => {
-                if let Some((arg_idx, _)) = labels.iter().find(|(_, label)| label == attr_name) {
-                    Ok(with_heap(|h| h.get(args[*arg_idx].key()).clone()).elide_lvalue())
-                } else {
-                    Err(ExecutorError::missing_labeled_argument(attr_name))
-                }
-            }
-            StatefulNode::LabeledOperatorCall {
-                labels,
-                operand,
-                extra_args,
-                ..
-            } => {
-                if let Some((arg_idx, _)) = labels.iter().find(|(_, label)| label == attr_name) {
-                    Ok(with_heap(|h| h.get(extra_args[*arg_idx].key()).clone()).elide_lvalue())
-                } else {
-                    get_attr_from_value(with_heap(|h| h.get(operand.key()).clone()), attr_name)
-                }
-            }
-            _ => Err(ExecutorError::CannotAttribute("stateful expression")),
-        },
         _ => Err(ExecutorError::CannotAttribute(base.type_name())),
     }
-}
-
-fn set_attr_on_stateful(
-    stateful: &mut Stateful,
-    attr_name: &str,
-    rhs: &Value,
-    stack_id: usize,
-) -> Result<(), ExecutorError> {
-    enum Target {
-        Call(usize),
-        OperatorArg(usize),
-        OperatorOperand,
-    }
-
-    let target = match &stateful.body.root {
-        StatefulNode::LabeledCall { labels, .. } => labels
-            .iter()
-            .find_map(|(arg_idx, label)| (label == attr_name).then_some(Target::Call(*arg_idx)))
-            .ok_or_else(|| ExecutorError::missing_labeled_argument(attr_name))?,
-        StatefulNode::LabeledOperatorCall { labels, .. } => labels
-            .iter()
-            .find_map(|(arg_idx, label)| {
-                (label == attr_name).then_some(Target::OperatorArg(*arg_idx))
-            })
-            .unwrap_or(Target::OperatorOperand),
-        _ => {
-            return Err(ExecutorError::CannotAttribute("stateful expression"));
-        }
-    };
-
-    match target {
-        Target::Call(arg_idx) => {
-            let key = {
-                let body = &mut stateful.body;
-                let StatefulNode::LabeledCall { args, .. } = &mut body.root else {
-                    unreachable!();
-                };
-                args[arg_idx].make_mut()
-            };
-            heap_replace(key, rhs.clone());
-        }
-        Target::OperatorArg(arg_idx) => {
-            let key = {
-                let body = &mut stateful.body;
-                let StatefulNode::LabeledOperatorCall { extra_args, .. } = &mut body.root else {
-                    unreachable!();
-                };
-                extra_args[arg_idx].make_mut()
-            };
-            heap_replace(key, rhs.clone());
-        }
-        Target::OperatorOperand => {
-            let key = {
-                let body = &mut stateful.body;
-                let StatefulNode::LabeledOperatorCall { operand, .. } = &mut body.root else {
-                    unreachable!();
-                };
-                operand.make_mut()
-            };
-            set_attr_in_heap(key, attr_name, rhs, stack_id)?;
-        }
-    }
-
-    reset_stateful_cache(stateful);
-    Ok(())
 }
 
 fn set_attr_on_value(
@@ -237,7 +135,6 @@ fn set_attr_on_value(
             invalidate_invoked_operator_cache(inv);
             set_attr_in_heap(key, attr_name, rhs, stack_id)
         }
-        Value::Stateful(stateful) => set_attr_on_stateful(stateful, attr_name, rhs, stack_id),
         _ => Err(ExecutorError::CannotAttribute(value.type_name())),
     }
 }
@@ -593,4 +490,3 @@ type_predicate!(is_callable, |value| matches!(
     value,
     Value::Lambda(_) | Value::Operator(_) | Value::InvokedFunction(_) | Value::InvokedOperator(_)
 ));
-type_predicate!(is_stateful, |value| matches!(value, Value::Stateful(_)));

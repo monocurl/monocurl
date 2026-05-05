@@ -1,13 +1,9 @@
 use crate::{
     error::ExecutorError,
     heap::{HeapKey, VRc, VWeak, heap_replace, with_heap, with_heap_mut},
-    state::LeaderKind,
     value::{
-        Value,
-        container::HashableKey,
-        invoked_function::InvokedFunction,
+        Value, container::HashableKey, invoked_function::InvokedFunction,
         invoked_operator::InvokedOperator,
-        stateful::{StatefulNode, reset_stateful_cache},
     },
 };
 
@@ -64,9 +60,6 @@ impl Executor {
         match target {
             Value::Leader(leader) => {
                 let rhs = rhs.elide_lvalue_leader_rec();
-                if matches!(rhs, Value::Stateful(_)) && leader.kind != LeaderKind::Mesh {
-                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
-                }
                 heap_replace(leader.leader_rc.key(), rhs);
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(key) {
@@ -76,9 +69,6 @@ impl Executor {
                 });
             }
             _ => {
-                if matches!(rhs, Value::Stateful(_)) {
-                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
-                }
                 heap_replace(key, rhs.elide_lvalue_leader_rec());
             }
         }
@@ -102,10 +92,6 @@ impl Executor {
         let rhs = stack.pop();
         let lhs = stack.pop();
 
-        if matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::stateful_cannot_append());
-        }
-
         match lhs {
             Value::List(mut list) => {
                 list.elements.push(VRc::new(rhs));
@@ -127,10 +113,6 @@ impl Executor {
                 return ExecSingle::Error(ExecutorError::invalid_lvalue("append-assign"));
             }
         };
-
-        if matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::stateful_cannot_append());
-        }
 
         let (key, base_val) = follow_heap_lvalues(key);
         let appended_key = match base_val {
@@ -287,10 +269,6 @@ impl Executor {
             Err(error) => return ExecSingle::Error(error),
         };
 
-        if matches!(base, Value::Stateful(_)) || matches!(index, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::stateful_subscript());
-        }
-
         match base {
             Value::List(list) => {
                 let Value::Integer(idx) = index else {
@@ -419,70 +397,6 @@ impl Executor {
                         return self.exec_attribute(stack_idx, section_idx, true, string_index);
                     }
                 }
-                Value::Stateful(mut stateful) => match &stateful.body.root {
-                    StatefulNode::LabeledCall {
-                        labels, args: _, ..
-                    } => {
-                        let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
-                        if let Some(&(arg_idx, _)) = label_idx {
-                            let key = {
-                                let body = &mut stateful.body;
-                                let StatefulNode::LabeledCall { args, .. } = &mut body.root else {
-                                    unreachable!();
-                                };
-                                args[arg_idx].make_mut()
-                            };
-                            reset_stateful_cache(&stateful);
-                            heap_replace(base_key, Value::Stateful(stateful));
-                            self.state.stack_mut(stack_idx).push(retained_lvalue(key));
-                        } else {
-                            return ExecSingle::Error(ExecutorError::missing_labeled_argument(
-                                attr_name.clone(),
-                            ));
-                        }
-                    }
-                    StatefulNode::LabeledOperatorCall {
-                        labels,
-                        operand: _,
-                        extra_args: _,
-                        ..
-                    } => {
-                        let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
-                        if let Some(&(arg_idx, _)) = label_idx {
-                            let key = {
-                                let body = &mut stateful.body;
-                                let StatefulNode::LabeledOperatorCall { extra_args, .. } =
-                                    &mut body.root
-                                else {
-                                    unreachable!();
-                                };
-                                extra_args[arg_idx].make_mut()
-                            };
-                            reset_stateful_cache(&stateful);
-                            heap_replace(base_key, Value::Stateful(stateful));
-                            self.state.stack_mut(stack_idx).push(retained_lvalue(key));
-                        } else {
-                            let key = {
-                                let body = &mut stateful.body;
-                                let StatefulNode::LabeledOperatorCall { operand, .. } =
-                                    &mut body.root
-                                else {
-                                    unreachable!();
-                                };
-                                operand.make_mut()
-                            };
-                            reset_stateful_cache(&stateful);
-                            heap_replace(base_key, Value::Stateful(stateful));
-                            self.state.stack_mut(stack_idx).push(retained_lvalue(key));
-                            return self.exec_attribute(stack_idx, section_idx, true, string_index);
-                        }
-                    }
-                    _ => {
-                        return ExecSingle::Error(ExecutorError::CannotAttribute(
-                            "stateful expression".into(),
-                        ));
-                    }
-                },
                 _ => {
                     return ExecSingle::Error(ExecutorError::CannotAttribute(base_val.type_name()));
                 }
@@ -518,48 +432,6 @@ impl Executor {
                         return self.exec_attribute(stack_idx, section_idx, false, string_index);
                     }
                 }
-                Value::Stateful(stateful) => match &stateful.body.root {
-                    StatefulNode::LabeledCall { labels, args, .. } => {
-                        let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
-                        if let Some(&(arg_idx, _)) = label_idx {
-                            let val =
-                                with_heap(|h| h.get(args[arg_idx].key()).clone()).elide_lvalue();
-                            self.state.stack_mut(stack_idx).push(val);
-                        } else {
-                            return ExecSingle::Error(ExecutorError::missing_labeled_argument(
-                                attr_name.clone(),
-                            ));
-                        }
-                    }
-                    StatefulNode::LabeledOperatorCall {
-                        labels,
-                        operand,
-                        extra_args,
-                        ..
-                    } => {
-                        let label_idx = labels.iter().find(|(_, name)| name == &attr_name);
-                        if let Some(&(arg_idx, _)) = label_idx {
-                            let val = with_heap(|h| h.get(extra_args[arg_idx].key()).clone())
-                                .elide_lvalue();
-                            self.state.stack_mut(stack_idx).push(val);
-                        } else {
-                            let operand_val =
-                                with_heap(|h| h.get(operand.key()).clone()).elide_lvalue();
-                            self.state.stack_mut(stack_idx).push(operand_val);
-                            return self.exec_attribute(
-                                stack_idx,
-                                section_idx,
-                                false,
-                                string_index,
-                            );
-                        }
-                    }
-                    _ => {
-                        return ExecSingle::Error(ExecutorError::CannotAttribute(
-                            "stateful expression".into(),
-                        ));
-                    }
-                },
                 _ => {
                     return ExecSingle::Error(ExecutorError::CannotAttribute(base.type_name()));
                 }

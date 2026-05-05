@@ -27,7 +27,7 @@ let f = |x, y = 1| x + y
 `x .. y` appends `y` to `x`. `x .= y` is shorthand for `x = x .. y`.
 Deep-copy assignment is intentional: it keeps ordinary values simple and avoids
 reference cycles. If you need mutation to affect a visible value over time, use
-`mesh` / `param` leaders and `play`.
+`mesh` leaders, built-in scene leaders such as `camera`/`background`, and `play`.
 
 Common vector literals are `1l`, `1r`, `1u`, `1d`, `1f`, and `1b` for left,
 right, up, down, forward, and backward. These are 3D vectors. In the default
@@ -68,10 +68,10 @@ let Path = |count| {
 }
 ```
 
-Lambdas may capture immutable `let` values. Mutable construction state and scene
-leaders (`var`, `mesh`, `param`, `camera`, etc.) should not be captured. Pass
-them explicitly, or use `&` reference parameters when the helper lambda needs to mutate
-a mesh/param leader.
+Lambdas may capture immutable `let` values. Mutable construction state and
+leaders (`var`, `mesh`, `camera`, `background`, etc.) should not be captured.
+Pass them explicitly, or use `&` reference parameters when the helper lambda
+needs to mutate a mesh or scene leader.
 
 Recursive lambdas take themselves explicitly:
 
@@ -203,8 +203,9 @@ a constructor's named arguments in a way that no existing stdlib operator covers
 ## References
 
 Reference parameters are prefixed with `&`. Use them when a helper needs to
-mutate a mesh/param leader or return an animation that will animate it. Only
-mesh and parameter leaders can be passed by reference.
+mutate a mesh or scene leader, or return an animation that will animate it.
+Mesh leaders plus built-in scene leaders such as `camera` and `background` can
+be passed by reference.
 
 ```monocurl
 # highlight is a stdlib helper that mutates its input leader, so the mesh must

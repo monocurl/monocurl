@@ -2,8 +2,7 @@ use super::*;
 
 fn token_autocomplete_category(token: &Token) -> AutoCompleteCategory {
     match token {
-        Token::StatefulReference
-        | Token::Plus
+        Token::Plus
         | Token::Minus
         | Token::Multiply
         | Token::Power
@@ -51,7 +50,6 @@ fn token_autocomplete_category(token: &Token) -> AutoCompleteCategory {
         | Token::Let
         | Token::Var
         | Token::Mesh
-        | Token::Param
         | Token::Anim
         | Token::Play
         | Token::Print
@@ -72,10 +70,9 @@ fn identifier_autocomplete_category(
     match identifier_type {
         CursorIdentifierType::Lambda => AutoCompleteCategory::Function,
         CursorIdentifierType::Operator => AutoCompleteCategory::Operator,
-        CursorIdentifierType::Let
-        | CursorIdentifierType::Var
-        | CursorIdentifierType::Mesh
-        | CursorIdentifierType::Param => AutoCompleteCategory::Variable,
+        CursorIdentifierType::Let | CursorIdentifierType::Var | CursorIdentifierType::Mesh => {
+            AutoCompleteCategory::Variable
+        }
     }
 }
 
@@ -177,7 +174,7 @@ mod tests {
             AutoCompleteCategory::Function
         );
         assert_eq!(
-            identifier_autocomplete_category(&CursorIdentifierType::Param),
+            identifier_autocomplete_category(&CursorIdentifierType::Mesh),
             AutoCompleteCategory::Variable
         );
         assert_eq!(

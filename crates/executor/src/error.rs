@@ -41,7 +41,6 @@ pub enum ExecutorError {
         used: usize,
         limit: usize,
     },
-    StatefulValueError(String),
     InvalidAccess(String),
     InvalidOperation(String),
     InvalidInvocation(String),
@@ -105,10 +104,6 @@ impl ExecutorError {
         }
     }
 
-    pub fn stateful_value(message: impl Into<String>) -> Self {
-        Self::StatefulValueError(message.into())
-    }
-
     pub fn invalid_access(message: impl Into<String>) -> Self {
         Self::InvalidAccess(message.into())
     }
@@ -142,42 +137,6 @@ impl ExecutorError {
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal(message.into())
-    }
-
-    pub fn stateful_illegal_assignment() -> Self {
-        Self::stateful_value(
-            "illegal assignment of stateful value. Stateful values must only be assigned to meshes",
-        )
-    }
-
-    pub fn stateful_requires_mesh_assignment() -> Self {
-        Self::stateful_value("stateful values can only be assigned to mesh variables")
-    }
-
-    pub fn stateful_cannot_append() -> Self {
-        Self::stateful_value("stateful values cannot be appended to lists")
-    }
-
-    pub fn stateful_binary_op() -> Self {
-        Self::stateful_value("binary operators cannot be applied to stateful values")
-    }
-
-    pub fn stateful_unary_op() -> Self {
-        Self::stateful_value("unary operators cannot be applied to stateful values")
-    }
-
-    pub fn stateful_operator() -> Self {
-        Self::stateful_value("operators cannot be applied to stateful values")
-    }
-
-    pub fn stateful_subscript() -> Self {
-        Self::stateful_value("subscript cannot be applied to stateful values")
-    }
-
-    pub fn direct_stateful_copy() -> Self {
-        Self::stateful_value(
-            "attempt to copy a stateful value directly. Use $<ident> only where a reactive expression is intended",
-        )
     }
 
     pub fn missing_labeled_argument(name: impl Into<String>) -> Self {
@@ -274,8 +233,7 @@ impl fmt::Display for ExecutorError {
                     used, limit
                 )
             }
-            Self::StatefulValueError(msg)
-            | Self::InvalidAccess(msg)
+            Self::InvalidAccess(msg)
             | Self::InvalidOperation(msg)
             | Self::InvalidInvocation(msg)
             | Self::InvalidInterpolation(msg)

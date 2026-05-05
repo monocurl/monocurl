@@ -27,7 +27,7 @@ impl Compiler {
                                         VariableType::Let => CursorIdentifierType::Let,
                                         VariableType::Var => CursorIdentifierType::Var,
                                         VariableType::Mesh => CursorIdentifierType::Mesh,
-                                        VariableType::Param => CursorIdentifierType::Param,
+                                        VariableType::Scene => CursorIdentifierType::Var,
                                         VariableType::Reference => CursorIdentifierType::Var,
                                     }
                                 }

@@ -81,9 +81,7 @@ impl Transcript {
 }
 
 /// stringify a value for transcript display. fully resolves lvalues / leaders
-/// recursively (since reactive wrappers may not be evaluable here without an
-/// async executor); live function / operator / stateful values are shown as
-/// short placeholders.
+/// recursively; live function / operator values are shown as short placeholders.
 pub fn stringify_for_transcript(value: &Value) -> String {
     let mut out = String::new();
     write_value(value, &mut out, 0);
@@ -167,7 +165,6 @@ fn write_value(value: &Value, out: &mut String, depth: usize) {
             out.push(']');
         }
         Value::Map(map) => write_map(map, out, depth),
-        Value::Stateful(_) => out.push_str("<stateful>"),
         Value::Leader(leader) => {
             let inner = with_heap(|h| h.get(leader.leader_rc.key()).clone());
             write_value(&inner, out, depth + 1);

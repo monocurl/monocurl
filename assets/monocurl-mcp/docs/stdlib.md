@@ -46,8 +46,9 @@ import std.scene
   for placement, and use `in_space{origin, x_unit, y_unit, z_unit}` when a mesh
   is authored in a local coordinate system such as graph axes and must be
   embedded into the global scene.
-- `mesh` and `param` declarations create leaders whose follower values can be
-  animated. Pass references like `&title` to animations.
+- `mesh` declarations create user leaders whose follower values can be
+  animated. Built-in scene leaders such as `camera` and `background` are also
+  lerpable. Pass references like `&title` or `&camera` to animations.
 - Animation helpers eventually lower to primitive animations such as `Wait`,
   `Set`, and `Lerp`. Higher-level helpers like `Grow`, `Fade`, `Write`,
   `Trans`, `TagTrans`, `Bend`, and `CameraLerp` are the preferred public API.

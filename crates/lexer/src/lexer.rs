@@ -164,7 +164,6 @@ where
             "let" => Token::Let,
             "var" => Token::Var,
             "mesh" => Token::Mesh,
-            "param" => Token::Param,
             "anim" => Token::Anim,
             "play" => Token::Play,
             "print" => Token::Print,
@@ -244,7 +243,7 @@ where
                 }
             }
             '^' => Token::Power,
-            '$' => Token::StatefulReference,
+            '$' => Token::Illegal,
             '*' => Token::Multiply,
             '/' => {
                 if self.advance_if('/') {

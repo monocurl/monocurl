@@ -232,7 +232,7 @@ impl Render for Viewport {
                         div()
                             .text_color(PRES_MUTED)
                             .text_size(px(12.0))
-                            .child("No active parameters"),
+                            .child("No active mesh controls"),
                     )
                     .into_any_element()
             } else if controls.is_empty() {
@@ -249,7 +249,7 @@ impl Render for Viewport {
                             div()
                                 .text_color(PRES_MUTED)
                                 .text_size(px(12.0))
-                                .child("No active parameters"),
+                                .child("No active mesh controls"),
                         ),
                     )
                     .into_any_element()

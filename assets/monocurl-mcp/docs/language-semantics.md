@@ -7,7 +7,7 @@ overview first, then load the focused resource that matches the current task.
 - `monocurl://docs/language-basics`: values, assignment, control flow, lambdas, block accumulation, calls/operators, `set_default`, and references.
 - `monocurl://docs/meshes`: mesh values, tags, filters, and text tags.
 - `monocurl://docs/animations`: leader/follower semantics, `Set`, `Wait`, `Lerp`, morphs, animation blocks, parallelism, and rates.
-- `monocurl://docs/params-camera`: params, stateful values, camera, and background.
+- `monocurl://docs/params-camera`: built-in scene leaders, camera, and background.
 - `monocurl://docs/debugging-patterns`: transcript prints, authoring patterns, anti-patterns, examples to imitate, and formatting conventions.
 - `monocurl://docs/cheat-sheet`: compact imports, common mesh constructors/operators, common animations, utilities, colors, and scene constants.
 - `monocurl://examples/riemann-rectangles`: complete Monocurl scene example.

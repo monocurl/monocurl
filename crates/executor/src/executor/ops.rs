@@ -32,10 +32,6 @@ impl Executor {
         let rhs = stack.pop();
         let lhs = stack.pop();
 
-        if matches!(lhs, Value::Stateful(_)) || matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::stateful_binary_op());
-        }
-
         if matches!(op, BinOp::Eq | BinOp::Ne) {
             let result = match op {
                 BinOp::Eq => Value::values_equal(&lhs, &rhs),
@@ -79,10 +75,6 @@ impl Executor {
     }
 
     pub(super) async fn exec_negate(&mut self, val: Value) -> Result<Value, ExecutorError> {
-        if matches!(val, Value::Stateful(_)) {
-            return Err(ExecutorError::stateful_unary_op());
-        }
-
         let val = val.elide_wrappers_rec(self).await?;
 
         match &val {
@@ -95,10 +87,6 @@ impl Executor {
     }
 
     pub(super) async fn exec_not(&mut self, val: Value) -> Result<Value, ExecutorError> {
-        if matches!(val, Value::Stateful(_)) {
-            return Err(ExecutorError::stateful_operator());
-        }
-
         let val = val.elide_wrappers_rec(self).await?;
         val.check_truthy()
             .map(|truthy| Value::Integer(!truthy as i64))

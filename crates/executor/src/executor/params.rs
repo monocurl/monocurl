@@ -8,37 +8,37 @@ use crate::{
 use super::Executor;
 
 impl Executor {
-    pub fn update_parameter(&mut self, name: &str, value: Value) -> Result<(), ExecutorError> {
+    pub fn update_scene_leader(&mut self, name: &str, value: Value) -> Result<(), ExecutorError> {
         let leader_index = self
             .state
             .leaders
             .iter()
-            .position(|entry| entry.kind == LeaderKind::Param && entry.name == name)
+            .position(|entry| entry.kind == LeaderKind::Scene && entry.name == name)
             .ok_or_else(|| ExecutorError::unknown_parameter(name))?;
-        self.update_parameter_by_leader_index(leader_index, value)
+        self.update_scene_leader_by_index(leader_index, value)
     }
 
-    pub fn update_parameter_by_leader_index(
+    pub fn update_scene_leader_by_index(
         &mut self,
         leader_index: usize,
         value: Value,
     ) -> Result<(), ExecutorError> {
-        let param = self
+        let entry = self
             .state
             .leaders
             .get(leader_index)
-            .filter(|entry| entry.kind == LeaderKind::Param)
+            .filter(|entry| entry.kind == LeaderKind::Scene)
             .ok_or_else(|| ExecutorError::unknown_parameter(format!("#{leader_index}")))?;
         let value = value.elide_lvalue().elide_leader();
 
-        let leader_cell_key = param.leader_cell.key();
+        let leader_cell_key = entry.leader_cell.key();
         let cell_val = with_heap(|h| h.get(leader_cell_key).clone());
         if matches!(&cell_val, Value::Leader(leader) if leader.locked_by_anim.is_some()) {
             return Ok(());
         }
 
-        let leader_value_key = param.leader_value;
-        let follower_value_key = param.follower_value;
+        let leader_value_key = entry.leader_value;
+        let follower_value_key = entry.follower_value;
 
         heap_replace(leader_value_key, value.clone());
         heap_replace(follower_value_key, value);
@@ -105,12 +105,6 @@ fn update_live_attribute_value(
     path: &[MeshAttributePathSegment],
     replacement: Value,
 ) -> Result<(), ExecutorError> {
-    if matches!(value, Value::Stateful(_)) {
-        return Err(ExecutorError::stateful_value(
-            "cannot update attributes on stateful meshes",
-        ));
-    }
-
     match value {
         Value::Lvalue(vrc) => {
             let mut inner = with_heap(|h| h.get(vrc.key()).clone());
@@ -199,9 +193,6 @@ fn update_live_attribute_value(
             inv.cache.unmodified.take();
             Ok(())
         }
-        (Value::Stateful(_), _) => Err(ExecutorError::stateful_value(
-            "cannot update attributes on stateful meshes",
-        )),
         (other, _) => Err(ExecutorError::CannotAttribute(other.type_name())),
     }
 }
@@ -248,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn update_parameter_syncs_leader_and_follower() {
+    fn update_scene_leader_syncs_leader_and_follower() {
         let mut executor = empty_executor();
         executor
             .state
@@ -256,21 +247,21 @@ mod tests {
             .push(Value::Integer(5));
         executor.state.promote_to_leader(
             crate::state::ExecutionState::ROOT_STACK_IDX,
-            LeaderKind::Param,
-            "speed".into(),
+            LeaderKind::Scene,
+            "camera".into(),
         );
 
         executor
-            .update_parameter("speed", Value::Float(2.5))
+            .update_scene_leader("camera", Value::Float(2.5))
             .unwrap();
 
-        let param = &executor.state.active_params[0];
-        let leader_val = with_heap(|h| h.get(param.leader_value).clone());
+        let entry = &executor.state.leaders[0];
+        let leader_val = with_heap(|h| h.get(entry.leader_value).clone());
         match leader_val {
             Value::Float(value) => assert_eq!(value, 2.5),
             other => panic!("expected float leader value, got {}", other.type_name()),
         }
-        let follower_val = with_heap(|h| h.get(param.follower_value).clone());
+        let follower_val = with_heap(|h| h.get(entry.follower_value).clone());
         match follower_val {
             Value::Float(value) => assert_eq!(value, 2.5),
             other => panic!("expected float follower value, got {}", other.type_name()),
@@ -278,14 +269,14 @@ mod tests {
     }
 
     #[test]
-    fn update_parameter_errors_for_missing_name() {
+    fn update_scene_leader_errors_for_missing_name() {
         let mut executor = empty_executor();
-        let error = executor.update_parameter("missing", Value::Integer(1));
+        let error = executor.update_scene_leader("missing", Value::Integer(1));
         assert!(matches!(error, Err(ExecutorError::UnknownParameter(_))));
     }
 
     #[test]
-    fn update_parameter_elides_top_level_lvalue_value() {
+    fn update_scene_leader_elides_top_level_lvalue_value() {
         let mut executor = empty_executor();
         executor
             .state
@@ -293,30 +284,30 @@ mod tests {
             .push(Value::Integer(5));
         executor.state.promote_to_leader(
             crate::state::ExecutionState::ROOT_STACK_IDX,
-            LeaderKind::Param,
-            "speed".into(),
+            LeaderKind::Scene,
+            "camera".into(),
         );
 
         executor
-            .update_parameter(
-                "speed",
+            .update_scene_leader(
+                "camera",
                 Value::Lvalue(crate::heap::VRc::new(Value::Float(2.5))),
             )
             .unwrap();
 
-        let param = &executor.state.active_params[0];
-        match with_heap(|h| h.get(param.leader_value).clone()) {
+        let entry = &executor.state.leaders[0];
+        match with_heap(|h| h.get(entry.leader_value).clone()) {
             Value::Float(value) => assert_eq!(value, 2.5),
             other => panic!("expected float leader value, got {}", other.type_name()),
         }
-        match with_heap(|h| h.get(param.follower_value).clone()) {
+        match with_heap(|h| h.get(entry.follower_value).clone()) {
             Value::Float(value) => assert_eq!(value, 2.5),
             other => panic!("expected float follower value, got {}", other.type_name()),
         }
     }
 
     #[test]
-    fn update_parameter_no_ops_when_locked_by_animation() {
+    fn update_scene_leader_no_ops_when_locked_by_animation() {
         let mut executor = empty_executor();
         executor
             .state
@@ -324,26 +315,26 @@ mod tests {
             .push(Value::Integer(5));
         executor.state.promote_to_leader(
             crate::state::ExecutionState::ROOT_STACK_IDX,
-            LeaderKind::Param,
-            "speed".into(),
+            LeaderKind::Scene,
+            "camera".into(),
         );
-        let param = executor.state.active_params[0].clone();
+        let entry = executor.state.leaders[0].clone();
         with_heap_mut(|h| {
-            if let Value::Leader(leader) = &mut *h.get_mut(param.leader_cell.key()) {
+            if let Value::Leader(leader) = &mut *h.get_mut(entry.leader_cell.key()) {
                 leader.locked_by_anim = Some(0);
             }
         });
 
         executor
-            .update_parameter("speed", Value::Float(2.5))
+            .update_scene_leader("camera", Value::Float(2.5))
             .unwrap();
 
         assert!(matches!(
-            with_heap(|h| h.get(param.leader_value).clone()),
+            with_heap(|h| h.get(entry.leader_value).clone()),
             Value::Integer(5)
         ));
         assert!(matches!(
-            with_heap(|h| h.get(param.follower_value).clone()),
+            with_heap(|h| h.get(entry.follower_value).clone()),
             Value::Integer(5)
         ));
     }

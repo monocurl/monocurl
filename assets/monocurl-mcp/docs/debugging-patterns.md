@@ -50,12 +50,8 @@ updates or loops can flood the transcript.
 - Do not leave first-slide statements unindented.
 - Do not capture mutable values or scene leaders in lambdas; pass them
   explicitly.
-- Do not use params as a substitute for ordinary labeled arguments. Use params
-  when interactive presentation controls are genuinely part of the scene.
 - Do not pass centers/normals to constructors that do not expose them; use
   `shift`, `center`, `in_space`, or other operators.
-- Do not store `$param` reactive expressions in `let`, `var`, or `param`; keep
-  stateful values in mesh leaders.
 - Do not mutate the same mesh leader from two parallel animation branches.
 - Do not rely on unlabeled positional arguments for complex calls when labels
   make later animation clearer.

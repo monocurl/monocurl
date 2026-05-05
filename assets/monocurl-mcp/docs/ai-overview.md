@@ -49,8 +49,8 @@ commands can be written directly, for example `Tex("\frac{x}{2}")`. Use `%"`,
 explicit escaped backslash.
 
 The code before the first `slide` is the init section. Use init for imports,
-helpers, custom operators, top-level `param` declarations, initial `mesh`
-leaders, `background`, and `camera`. Do not put `play` statements in init.
+helpers, custom operators, initial `mesh` leaders, `background`, and `camera`.
+Do not put `play` statements in init.
 Animation belongs in slide bodies.
 
 Indent every slide body, including the first slide. Keep the `slide` line at
@@ -71,5 +71,5 @@ The desktop UI shows the editor, viewport, and timeline together. Timeline
 shortcuts used by the tutorial scenes are `,` for previous slide, `.` for next
 slide, `<` for scene start, `>` for scene end, `;` for a small step backward,
 and `'` for a small step forward. Presentation mode shows the current scene as
-slides and exposes top-level params as controls. Command/Ctrl-T toggles
+slides and exposes mesh controls when available. Command/Ctrl-T toggles
 presentation mode. Scenes can also be exported as still images or videos.

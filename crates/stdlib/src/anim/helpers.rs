@@ -448,10 +448,6 @@ pub(super) fn materialize_live_value<'a>(
                 }
                 Ok(list_value(out))
             }
-            Value::Stateful(ref s) => {
-                let inner = executor.eval_stateful(s).await?;
-                materialize_live_value(executor, &inner).await
-            }
             other => materialize_current_value(&other),
         }
     })

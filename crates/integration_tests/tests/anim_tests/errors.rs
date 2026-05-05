@@ -416,54 +416,6 @@ fn test_scene_snapshot_accepts_mid_write_text_mesh() {
 }
 
 #[test]
-fn test_scene_snapshot_materializes_stateful_live_mesh_values() {
-    let src = "
-        camera = Camera(16b, [0, 0, 0], 1u)
-
-        param radius = 1.1
-        param spread = 2.5
-        param spin = 0.25
-
-        let mul = |x| x * 1r
-        mesh reactive = shift{delta: mul($spread)}
-            rotate{radians: $spin, axis: 1f}
-            Circle(radius: $radius)
-
-        play Set([&reactive])
-
-        radius = 1.75
-        spread = 5.0
-        spin = 1.8
-        play Lerp(1.3, [&reactive])
-    ";
-
-    let (mut executor, _user_slide_count) = match build_anim_executor(
-        &[(src, SectionType::Slide)],
-        &stdlib_bundles(["anim", "math", "mesh", "scene"]),
-    ) {
-        Ok(data) => data,
-        Err(result) => panic!("failed to build executor: {:?}", result.errors),
-    };
-
-    smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(user_slide_end(0));
-        match executor.seek_to(target).await {
-            SeekToResult::SeekedTo(_) => {}
-            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
-        }
-
-        let snapshot = executor
-            .capture_stable_scene_snapshot()
-            .await
-            .expect("scene snapshot should succeed");
-        assert!(
-            !snapshot.meshes.is_empty(),
-            "scene snapshot should include the reactive mesh"
-        );
-    });
-}
-
-#[test]
 fn test_scene_snapshot_camera_accepts_look_at_surface() {
     let (mut executor, _user_slide_count) = match build_anim_executor(
         &[("play Set()", SectionType::Slide)],
@@ -524,74 +476,6 @@ fn test_scene_snapshot_camera_accepts_look_at_surface() {
         assert_eq!(camera.up.to_array(), [0.0, 1.0, 0.0]);
         assert!((camera.near - 0.2).abs() < 1e-6);
         assert!((camera.far - 50.0).abs() < 1e-6);
-    });
-}
-
-#[test]
-fn test_fade_accepts_stateful_live_mesh_targets() {
-    let src = "
-        param radius = 1.1
-        param spread = 2.5
-
-        let mul = |x| x * 1r
-        mesh reactive = shift{delta: mul($spread)}
-            Circle(radius: $radius)
-
-        play Set([&reactive])
-
-        radius = 1.75
-        spread = 5.0
-        play Fade(1.0, [&reactive], [-1, 0, 0], smooth)
-    ";
-
-    let (mut executor, _user_slide_count) = match build_anim_executor(
-        &[(src, SectionType::Slide)],
-        &stdlib_bundles(["anim", "math", "mesh"]),
-    ) {
-        Ok(data) => data,
-        Err(result) => panic!("failed to build executor: {:?}", result.errors),
-    };
-
-    smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(user_slide_end(0));
-        match executor.seek_to(target).await {
-            SeekToResult::SeekedTo(_) => {}
-            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
-        }
-    });
-}
-
-#[test]
-fn test_custom_lerp_accepts_stateful_live_mesh_targets() {
-    let src = "
-        param radius = 1.1
-        param spread = 2.5
-
-        let mul = |x| x * 1r
-        mesh reactive = shift{delta: mul($spread)}
-            Circle(radius: $radius)
-
-        play Set([&reactive])
-
-        radius = 1.75
-        spread = 5.0
-        play PrimitiveAnim(1.0, [&reactive], nil, |a, b, state, t| b, smooth)
-    ";
-
-    let (mut executor, _user_slide_count) = match build_anim_executor(
-        &[(src, SectionType::Slide)],
-        &stdlib_bundles(["anim", "math", "mesh"]),
-    ) {
-        Ok(data) => data,
-        Err(result) => panic!("failed to build executor: {:?}", result.errors),
-    };
-
-    smol::block_on(async {
-        let target = executor.user_to_internal_timestamp(user_slide_end(0));
-        match executor.seek_to(target).await {
-            SeekToResult::SeekedTo(_) => {}
-            SeekToResult::Error(e) => panic!("unexpected seek error: {e}"),
-        }
     });
 }
 

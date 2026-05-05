@@ -193,7 +193,6 @@ fn value_summary_at(value: &Value, depth: usize) -> String {
             let suffix = if list.len() > 8 { ", ..." } else { "" };
             format!("list(len={}, [{entries}{suffix}])", list.len())
         }
-        Value::Stateful(_) => "stateful".to_string(),
         Value::Leader(leader) => {
             let leader_value = with_heap(|heap| heap.get(leader.leader_rc.key()).clone());
             let follower_value = with_heap(|heap| heap.get(leader.follower_rc.key()).clone());

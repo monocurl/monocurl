@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::heap::with_heap;
 
-use super::{Value, primitive_anim::PrimitiveAnim, stateful::StatefulNode};
+use super::{Value, primitive_anim::PrimitiveAnim};
 
 impl Value {
     /// structural equality for all value types.
@@ -68,10 +68,6 @@ impl Value {
                     })
             }
 
-            (Value::Stateful(a), Value::Stateful(b)) => {
-                a.cache.read_kind == b.cache.read_kind && stateful_equal(&a.body.root, &b.body.root)
-            }
-
             (Value::Leader(a), Value::Leader(b)) => Value::values_equal(
                 &with_heap(|h| h.get(a.leader_rc.key()).clone()),
                 &with_heap(|h| h.get(b.leader_rc.key()).clone()),
@@ -128,66 +124,6 @@ fn prim_anim_equal(a: &PrimitiveAnim, b: &PrimitiveAnim) -> bool {
                     (Some(a), Some(b)) => Value::values_equal(a, b),
                     _ => false,
                 }
-        }
-        _ => false,
-    }
-}
-
-fn stateful_equal(a: &StatefulNode, b: &StatefulNode) -> bool {
-    match (a, b) {
-        (StatefulNode::LeaderRef(a), StatefulNode::LeaderRef(b)) => a == b,
-        (StatefulNode::Constant(a), StatefulNode::Constant(b)) => Value::values_equal(a, b),
-        (
-            StatefulNode::LabeledCall {
-                func: af,
-                args: aa,
-                labels: al,
-            },
-            StatefulNode::LabeledCall {
-                func: bf,
-                args: ba,
-                labels: bl,
-            },
-        ) => {
-            al == bl
-                && stateful_equal(af, bf)
-                && aa.len() == ba.len()
-                && aa.iter().zip(ba.iter()).all(|(ak, bk)| {
-                    ak == bk
-                        || Value::values_equal(
-                            &with_heap(|h| h.get(ak.key()).clone()),
-                            &with_heap(|h| h.get(bk.key()).clone()),
-                        )
-                })
-        }
-        (
-            StatefulNode::LabeledOperatorCall {
-                operator: ao,
-                operand: aop,
-                extra_args: aa,
-                labels: al,
-            },
-            StatefulNode::LabeledOperatorCall {
-                operator: bo,
-                operand: bop,
-                extra_args: ba,
-                labels: bl,
-            },
-        ) => {
-            al == bl
-                && stateful_equal(ao, bo)
-                && Value::values_equal(
-                    &with_heap(|h| h.get(aop.key()).clone()),
-                    &with_heap(|h| h.get(bop.key()).clone()),
-                )
-                && aa.len() == ba.len()
-                && aa.iter().zip(ba.iter()).all(|(ak, bk)| {
-                    ak == bk
-                        || Value::values_equal(
-                            &with_heap(|h| h.get(ak.key()).clone()),
-                            &with_heap(|h| h.get(bk.key()).clone()),
-                        )
-                })
         }
         _ => false,
     }

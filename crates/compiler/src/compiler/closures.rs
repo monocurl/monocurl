@@ -56,13 +56,6 @@ impl Compiler {
 
         match &l.body.1 {
             LambdaBody::Inline(expr) => {
-                if is_stateful(expr) {
-                    self.error(
-                        span.clone(),
-                        "cannot return a stateful value from an inline lambda",
-                    );
-                }
-
                 self.compile_val(expr, &l.body.0);
                 let below = self.stack_depth() as i32 - 1;
                 self.emit(
@@ -173,7 +166,6 @@ impl Compiler {
 
         self.emit(
             Instruction::LambdaInvoke {
-                stateful: false,
                 labeled: false,
                 num_args: 0,
             },
@@ -258,12 +250,7 @@ impl Compiler {
             } else if !immediately_invoked && cap.var_type == VariableType::Reference {
                 let stack_delta = self.stack_delta(cap.stack_position);
                 self.emit_copy_ref(stack_delta, span.clone());
-                self.emit(
-                    Instruction::ConvertVar {
-                        allow_stateful: false,
-                    },
-                    span.clone(),
-                );
+                self.emit(Instruction::ConvertVar, span.clone());
             } else if immediately_invoked {
                 let stack_delta = self.stack_delta(cap.stack_position);
                 self.emit_lvalue(stack_delta, span.clone());
@@ -277,12 +264,7 @@ impl Compiler {
     // compile a block body: init `_ = []`, compile stmts, implicit `return _`
     pub(super) fn compile_block_body(&mut self, stmts: &[SpanTagged<Statement>], span: &Span8) {
         self.emit_push(Instruction::PushEmptyList, span.clone());
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            span.clone(),
-        );
+        self.emit(Instruction::ConvertVar, span.clone());
         self.define_symbol("_", VariableType::Var, SymbolFunctionInfo::None, false);
         self.compile_statements(stmts);
         let underscore_pos = self.lookup("_", None, None).unwrap().stack_position;

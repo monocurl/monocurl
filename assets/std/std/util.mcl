@@ -420,6 +420,3 @@ let is_live_operator = |x| __monocurl__native__ is_live_operator(x)
 ## [overview]
 ## Test whether a value can be called.
 let is_callable = |x| __monocurl__native__ is_callable(x)
-## [overview]
-## Test whether a value is stateful.
-let is_stateful = |x| __monocurl__native__ is_stateful(x)

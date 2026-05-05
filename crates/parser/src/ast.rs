@@ -277,7 +277,6 @@ pub struct IdentifierDeclaration(pub String);
 pub enum IdentifierReference {
     Value(String),
     Reference(String),
-    StatefulReference(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -285,7 +284,6 @@ pub enum VariableType {
     Let,
     Var,
     Mesh,
-    Param,
 }
 
 #[derive(Debug, Clone, PartialEq)]

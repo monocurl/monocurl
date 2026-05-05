@@ -95,9 +95,9 @@ const RESOURCE_DEFINITIONS: readonly ResourceDefinition[] = [
   {
     uri: "monocurl://docs/params-camera",
     name: "params-camera",
-    title: "Monocurl Params, Camera, And Background",
+    title: "Monocurl Camera And Background",
     description:
-      "Params, stateful values, presentation controls, camera, and background.",
+      "Built-in scene leaders, camera, and background.",
     mimeType: "text/markdown",
     text: paramsCameraBackground,
   },

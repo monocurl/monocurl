@@ -2,13 +2,12 @@ use bytecode::{CopyValueMode, Instruction};
 
 use crate::{
     error::ExecutorError,
-    heap::{with_heap, with_heap_mut},
+    heap::with_heap_mut,
     state::LeaderKind,
     value::{
         Value,
         container::{List, Map},
         lambda::Operator,
-        stateful::{StatefulNode, StatefulReadKind, make_stateful},
     },
 };
 
@@ -64,12 +63,7 @@ impl Executor {
                 self.state.sync_all_leaders();
             }
 
-            Instruction::ConvertVar { allow_stateful } => {
-                if !allow_stateful
-                    && matches!(self.state.stack(stack_idx).peek(), Value::Stateful(_))
-                {
-                    return ExecSingle::Error(ExecutorError::stateful_illegal_assignment());
-                }
+            Instruction::ConvertVar => {
                 self.state.promote_to_var(stack_idx);
             }
             Instruction::ConvertMesh { name_index } => {
@@ -78,17 +72,11 @@ impl Executor {
                 self.state
                     .promote_to_leader(stack_idx, LeaderKind::Mesh, name);
             }
-            Instruction::ConvertParam { name_index } => {
-                if matches!(
-                    self.state.stack(stack_idx).peek().clone().elide_lvalue(),
-                    Value::Stateful(_)
-                ) {
-                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
-                }
+            Instruction::ConvertScene { name_index } => {
                 let name =
                     self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
                 self.state
-                    .promote_to_leader(stack_idx, LeaderKind::Param, name);
+                    .promote_to_leader(stack_idx, LeaderKind::Scene, name);
             }
 
             Instruction::PushDeepCopy { stack_delta } => {
@@ -115,10 +103,6 @@ impl Executor {
                     CopyValueMode::Raw => val,
                 };
 
-                if let Value::Stateful(_) = copied {
-                    return ExecSingle::Error(ExecutorError::direct_stateful_copy());
-                }
-
                 if pop_tos {
                     self.state.stack_mut(stack_idx).pop();
                 }
@@ -141,55 +125,6 @@ impl Executor {
                     .stack_mut(stack_idx)
                     .push(Value::WeakLvalue(vrc.downgrade()));
             }
-            Instruction::PushStateful { stack_delta } => {
-                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-
-                let leader_cell_key = match val.as_lvalue_key() {
-                    Some(k) => k,
-                    None => {
-                        return ExecSingle::Error(ExecutorError::type_error(
-                            "param variable",
-                            val.type_name(),
-                        ));
-                    }
-                };
-
-                let cell_val = with_heap(|h| h.get(leader_cell_key).clone());
-                match cell_val {
-                    Value::Leader(ref leader) => {
-                        if leader.kind != LeaderKind::Param {
-                            // if wrapping a stateful, allow it
-                            let inner = with_heap(|h| h.get(leader.leader_rc.key()).clone());
-                            if let Value::Stateful(stateful) = inner {
-                                self.state
-                                    .stack_mut(stack_idx)
-                                    .push(Value::Stateful(stateful));
-                                return ExecSingle::Continue;
-                            }
-
-                            return ExecSingle::Error(ExecutorError::invalid_access(
-                                "$ can only be used with 'param' variables, not 'mesh' (unless the mesh contains a stateful value)",
-                            ));
-                        }
-                    }
-                    _ => {
-                        return ExecSingle::Error(ExecutorError::type_error(
-                            "param leader",
-                            cell_val.type_name(),
-                        ));
-                    }
-                }
-
-                let stateful = make_stateful(
-                    vec![leader_cell_key],
-                    StatefulNode::LeaderRef(leader_cell_key),
-                    StatefulReadKind::Leader,
-                );
-                self.state
-                    .stack_mut(stack_idx)
-                    .push(Value::Stateful(stateful));
-            }
-
             Instruction::BufferLabelOrAttribute { string_index } => {
                 self.state
                     .stack_mut(stack_idx)
@@ -223,22 +158,14 @@ impl Executor {
                 }
             }
 
-            Instruction::LambdaInvoke {
-                stateful,
-                labeled,
-                num_args,
-            } => {
+            Instruction::LambdaInvoke { labeled, num_args } => {
                 return self
-                    .exec_lambda_invoke(stack_idx, section_idx, stateful, labeled, num_args)
+                    .exec_lambda_invoke(stack_idx, section_idx, labeled, num_args)
                     .await;
             }
-            Instruction::OperatorInvoke {
-                stateful,
-                labeled,
-                num_args,
-            } => {
+            Instruction::OperatorInvoke { labeled, num_args } => {
                 return self
-                    .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args)
+                    .exec_operator_invoke(stack_idx, section_idx, labeled, num_args)
                     .await;
             }
             Instruction::ConvertToLiveOperator => {
@@ -373,9 +300,6 @@ impl Executor {
     }
 
     async fn read_current_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
-        match val.elide_lvalue_leader_rec() {
-            Value::Stateful(stateful) => self.eval_stateful(&stateful).await,
-            other => Ok(other),
-        }
+        Ok(val.elide_lvalue_leader_rec())
     }
 }

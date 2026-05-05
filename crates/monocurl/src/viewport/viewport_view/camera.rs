@@ -166,7 +166,7 @@ impl Viewport {
             reset_camera: state.reset_camera.clone(),
             pending_updates: VecDeque::from([state.reset_camera.clone()]),
         });
-        self.update_scene_camera_parameter(state.reset_camera, cx);
+        self.update_scene_camera(state.reset_camera, cx);
         cx.notify();
     }
 
@@ -219,7 +219,7 @@ impl Viewport {
                 state.pending_updates.push_back(next_camera.clone());
             }
             self.presentation_camera = Some(state);
-            self.update_scene_camera_parameter(next_camera, cx);
+            self.update_scene_camera(next_camera, cx);
         } else if cameras_close(&next_camera, &scene_camera) {
             self.preview_camera = None;
             self.copied_preview_camera = None;
@@ -252,7 +252,7 @@ impl Viewport {
         }
     }
 
-    fn update_scene_camera_parameter(&mut self, camera: CameraSnapshot, cx: &mut Context<Self>) {
+    fn update_scene_camera(&mut self, camera: CameraSnapshot, cx: &mut Context<Self>) {
         let target = self
             .execution_state
             .read(cx)
@@ -262,10 +262,10 @@ impl Viewport {
                 params
                     .params
                     .iter()
-                    .find(|param| param.name == "camera")
-                    .map(|param| param.target.clone())
+                    .find(|entry| entry.name == "camera")
+                    .map(|entry| entry.target.clone())
             })
-            .unwrap_or(PresentationUpdateTarget::Param { leader_index: 0 });
+            .unwrap_or(PresentationUpdateTarget::Scene { leader_index: 0 });
         self.services.update(cx, |services, _| {
             services.update_parameters(HashMap::from([(target, ParameterValue::Camera(camera))]))
         });

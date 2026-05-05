@@ -178,7 +178,7 @@ impl Executor {
         debug_assert!(dt >= 0.0);
         self.state.pending_playback_time += dt;
 
-        while self.state.pending_playback_time > 0.0 {
+        while self.state.pending_playback_time > 0.0 || !self.state.execution_heads.is_empty() {
             match self.seek_primitive_anim_skip(max_slide).await {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim { advanced_section } => {
                     if advanced_section {
@@ -203,8 +203,11 @@ impl Executor {
                 .map(|b| b.end_time)
                 .fold(f64::INFINITY, f64::min);
 
-            let step_dt =
-                (next_end - self.state.timestamp.time).min(self.state.pending_playback_time);
+            let step_dt = if self.state.pending_playback_time > 0.0 {
+                (next_end - self.state.timestamp.time).min(self.state.pending_playback_time)
+            } else {
+                0.0
+            };
             debug_assert!(
                 step_dt >= 0.0,
                 "playback step must be non-negative: current={:?}, next_end={next_end}",
@@ -656,8 +659,7 @@ impl Executor {
             };
 
             let follower = with_heap(|h| h.get(leader.follower_rc.key()).clone());
-            let destination =
-                with_heap(|h| h.get(leader.leader_rc.key()).clone()).to_follower_stateful();
+            let destination = with_heap(|h| h.get(leader.leader_rc.key()).clone());
             let (embedded_start, embedded_end, embedded_state) = if let Some(embed) = &embed {
                 self.eval_embed_value(embed, parent_stack_idx, follower, destination.clone())
                     .await?
@@ -906,7 +908,7 @@ fn sync_leader_to_follower(leader_cell: &VRc) {
     let Value::Leader(leader) = cell_val else {
         return;
     };
-    let value = with_heap(|h| h.get(leader.leader_rc.key()).clone()).to_follower_stateful();
+    let value = with_heap(|h| h.get(leader.leader_rc.key()).clone());
     heap_replace(leader.follower_rc.key(), value);
     with_heap_mut(|h| {
         if let Value::Leader(l) = &mut *h.get_mut(cell_key) {

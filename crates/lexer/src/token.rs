@@ -9,7 +9,6 @@ pub enum Token {
 
     Comment,
 
-    StatefulReference,
     Plus,
     Minus,
     Multiply,
@@ -55,7 +54,6 @@ pub enum Token {
     Let,
     Var,
     Mesh,
-    Param,
     Anim,
     Play,
     Print,
@@ -80,15 +78,15 @@ impl Token {
         match self {
             Illegal => TokenCategory::Unknown,
             Newline | Whitespace => TokenCategory::Whitespace,
-            StatefulReference | Plus | Minus | Multiply | Power | Divide | IntegerDivide
-            | Assign | KeyValueMap | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In | Pipe
-            | Comma | Dot | DotAssign | Append | Reference | Semicolon => TokenCategory::Operator,
+            Plus | Minus | Multiply | Power | Divide | IntegerDivide | Assign | KeyValueMap
+            | Eq | Ne | Lt | Le | Gt | Ge | And | Not | Or | In | Pipe | Comma | Dot
+            | DotAssign | Append | Reference | Semicolon => TokenCategory::Operator,
             LParen | RParen | LBracket | RBracket | LFlower | RFlower => {
                 TokenCategory::Punctutation
             }
             Block | Operator | Anim | Play | Print | Break | Continue | Return | If | Else
             | For | While => TokenCategory::ControlFlow,
-            Import | Let | Var | Mesh | Param | Slide | Nil | Native => {
+            Import | Let | Var | Mesh | Slide | Nil | Native => {
                 TokenCategory::NonControlFlowKeyword
             }
             IntegerLiteral | FloatLiteral => TokenCategory::NumericLiteral,
@@ -105,7 +103,6 @@ impl Token {
             Token::Newline => "<end of line>",
             Token::Whitespace => "<whitespace>",
             Token::Comment => "<comment>",
-            Token::StatefulReference => "'$'",
             Token::Plus => "'+'",
             Token::Minus => "'-'",
             Token::Multiply => "'*'",
@@ -150,7 +147,6 @@ impl Token {
             Token::Let => "'let'",
             Token::Var => "'var'",
             Token::Mesh => "'mesh'",
-            Token::Param => "'param'",
             Token::Anim => "'anim'",
             Token::Play => "'play'",
             Token::Print => "'print'",
@@ -171,7 +167,6 @@ impl Token {
             Token::Newline => None,
             Token::Whitespace => None,
             Token::Comment => None,
-            Token::StatefulReference => Some("$"),
             Token::Plus => Some("+"),
             Token::Minus => Some("-"),
             Token::Multiply => Some("*"),
@@ -216,7 +211,6 @@ impl Token {
             Token::Let => Some("let"),
             Token::Var => Some("var"),
             Token::Mesh => Some("mesh"),
-            Token::Param => Some("param"),
             Token::Anim => Some("anim"),
             Token::Play => Some("play"),
             Token::Print => Some("print"),

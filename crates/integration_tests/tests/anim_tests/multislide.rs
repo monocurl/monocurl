@@ -24,11 +24,11 @@ fn test_multi_slide_seek_second_slide() {
 
 #[test]
 fn test_multi_slide_state_persists_across_slides() {
-    // param variables declared in slide 0 remain visible in slide 1
-    let r = run_multi_anim(&["param counter = 99", "let check = 1"], 1, f64::INFINITY);
+    // mesh variables declared in slide 0 remain visible in slide 1
+    let r = run_multi_anim(&["mesh counter = 99", "let check = 1"], 1, f64::INFINITY);
     r.assert_ok();
-    let params = r.param_leaders();
-    params[2].assert_target_int(99);
+    let meshes = r.mesh_leaders();
+    meshes[0].assert_target_int(99);
 }
 
 // -- error cases --
