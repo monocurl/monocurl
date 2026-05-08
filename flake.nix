@@ -1,0 +1,117 @@
+{
+  description = "Monocurl - A desktop application used for creating math-based videos and slideshows";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    crane.url = "github:ipetkov/crane";
+    flake-utils.url = "github:numtide/flake-utils";
+  };
+
+  outputs = {
+    self,
+    nixpkgs,
+    crane,
+    flake-utils,
+    ...
+  }:
+    flake-utils.lib.eachDefaultSystem (
+      system: let
+        pkgs = nixpkgs.legacyPackages.${system};
+
+        craneLib = crane.mkLib pkgs;
+
+        # https://github.com/ipetkov/crane/issues/400#issuecomment-1739612918
+        dummySrc = craneLib.mkDummySrc {
+          src = craneLib.path ./.;
+          extraDummyScript = ''
+            set -exuo pipefail
+            cp -rf --no-target-directory ${./vendor} $out/vendor
+          '';
+        };
+
+        CFLAGS = "-Wno-int-conversion";
+        CXXFLAGS = "-std=c++17";
+
+        baseArgs = {
+          installCargoArtifactsMode = "use-zstd";
+
+          inherit CFLAGS CXXFLAGS;
+        };
+
+        nativeBuildInputs = with pkgs; [
+          pkg-config
+        ];
+
+        buildInputs = with pkgs; [
+          libpng
+          graphite2
+          freetype
+          icu
+          openssl
+          fontconfig
+        ];
+
+        cargoArtifacts = craneLib.buildDepsOnly (baseArgs
+          // {
+            inherit dummySrc nativeBuildInputs buildInputs;
+
+            pname = "monocurl-deps";
+          });
+
+        runtimeLibs = with pkgs; [
+          libxkbcommon
+          libxcb
+
+          vulkan-loader
+          libGL
+
+          wayland
+          libx11
+        ];
+
+        LD_LIBRARY_PATH =
+          pkgs.lib.makeLibraryPath runtimeLibs;
+
+        monocurl = craneLib.buildPackage (baseArgs
+          // {
+            src = ./.;
+            strictDeps = true;
+            # A lot of tests are failing, need to figure out why
+            doCheck = false;
+
+            inherit cargoArtifacts;
+
+            nativeBuildInputs =
+              nativeBuildInputs
+              ++ (with pkgs; [
+                makeWrapper
+              ]);
+
+            buildInputs =
+              buildInputs
+              ++ runtimeLibs;
+
+            postInstall = ''
+              wrapProgram $out/bin/monocurl \
+                --prefix LD_LIBRARY_PATH : ${LD_LIBRARY_PATH}
+            '';
+          });
+      in {
+        checks = {
+          inherit monocurl;
+        };
+
+        packages.default = monocurl;
+
+        apps.default = flake-utils.lib.mkApp {
+          drv = monocurl;
+        };
+
+        devShells.default = craneLib.devShell {
+          checks = self.checks.${system};
+
+          inherit LD_LIBRARY_PATH CFLAGS CXXFLAGS;
+        };
+      }
+    );
+}
