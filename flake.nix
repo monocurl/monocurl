@@ -57,6 +57,7 @@
             inherit dummySrc nativeBuildInputs buildInputs;
 
             pname = "monocurl-deps";
+            doCheck = false;
           });
 
         runtimeLibs = with pkgs; [
@@ -89,6 +90,8 @@
             buildInputs =
               buildInputs
               ++ runtimeLibs;
+            # The default --locked breaks tests
+            cargoExtraArgs = "";
 
             cargoTestCommand = let
               # Skipping these tests due to nixs sandboxed builds with no write
@@ -112,6 +115,7 @@
                 "live_values::test_axis3d_draws_axis_arrows_after_grid"
                 "live_values::test_axis3d_label_up_controls_title_orientation"
                 "live_values::test_axis_large_ticks_have_larger_stroke_radius"
+
                 "live_values::test_axis_style_arrow_extrusion_controls_bounds"
                 "live_values::test_axis_style_nil_label_map_suppresses_tick_labels"
                 "live_values::test_axis_style_updates_axis_defaults"
@@ -120,6 +124,7 @@
                 "live_values::test_label_places_latex_to_requested_side"
                 "live_values::test_label_preserves_cross_axis_alignment"
                 "live_values::test_number_constructor_accepts_decimal_and_sign_options"
+
                 "live_values::test_tex_and_latex_accept_list_string_inputs"
                 "live_values::test_text_tag_operator_tags_text_backends"
 
