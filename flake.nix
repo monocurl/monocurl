@@ -104,15 +104,41 @@
                 ...
               }: "install -Dm444 ${./assets/AppIcon.appiconset}/${filename} $out/share/monocurl/icons/hicolor/${size}/apps/monocurl.png")
               iconSet.images;
+              # https://github.com/ipetkov/crane/blob/master/lib/buildPackage.nix
             in ''
-              mkdir -p $out
+                if [ -n "$postBuildInstallFromCargoBuildLogOut" -a -d "$postBuildInstallFromCargoBuildLogOut" ]; then
+                  echo "actually installing contents of $postBuildInstallFromCargoBuildLogOut to $out"
+                  mkdir -p $out
+                  find "$postBuildInstallFromCargoBuildLogOut" -mindepth 1 -maxdepth 1 | xargs -r mv -t $out
+                else
+                  echo ${pkgs.lib.strings.escapeShellArg ''
+                !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                $postBuildInstallFromCargoBuildLogOut is either undefined or does not point to a
+                valid location! By default `buildPackage` will expect that cargo's output was
+                captured and the resulting binaries preinstalled in a temporary location to avoid
+                interference by the check phase.
 
+                If you are defining your own custom build step, you have two options:
+                1. override `installPhaseCommand` with the appropriate installation steps
+                2. ensure that cargo's build log is captured in a file and point
+                  $postBuildInstallFromCargoBuildLogOut at it
+
+                At a minimum, the latter option can be achieved with a build phase that runs:
+                    cargoBuildLog=$(mktemp cargoBuildLogXXXX.json)
+                    cargo build --release --message-format json-render-diagnostics >"$cargoBuildLog"
+                    postBuildInstallFromCargoBuildLogOut=$(mktemp -d cargoBuildTempOutXXXX)
+                    installFromCargoBuildLog "$postBuildInstallFromCargoBuildLogOut" "$cargoBuildLog"
+                !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+              ''}
+
+                  false
+                fi
               ${builtins.concatStringsSep "\n" installIcons}
             '';
 
             postInstall = ''
               wrapProgram $out/bin/monocurl \
-                --prefix LD_LIBRARY_PATH : ${LD_LIBRARY_PATH}
+                --prefix LD_LIBRARY_PATH : ${LD_LIBRARY_PATH} \
                 --set MONOCURL_ASSETS_DIR ${./assets}
             '';
           });
