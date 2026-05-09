@@ -106,6 +106,13 @@ impl DocumentView {
         window.focus(&self.focus_handle);
     }
 
+    pub(super) fn focus_document_shell(&mut self, w: &mut Window, cx: &mut Context<Self>) {
+        self.editor.update(cx, |editor, cx| {
+            editor.save_if_dirty(cx);
+        });
+        self.focus(w);
+    }
+
     pub(super) fn toggle_presentation(
         &mut self,
         _: &TogglePresentationMode,
@@ -203,10 +210,7 @@ impl DocumentView {
         w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.editor.update(cx, |editor, cx| {
-            editor.save_if_dirty(cx);
-        });
-        self.focus(w);
+        self.focus_document_shell(w, cx);
     }
 
     pub(super) fn open_find(&mut self, _: &OpenFind, w: &mut Window, cx: &mut Context<Self>) {

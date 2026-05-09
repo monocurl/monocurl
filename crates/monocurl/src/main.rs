@@ -129,7 +129,7 @@ impl MonocurlLauncher {
         cx.on_action(|_: &OpenSettings, cx| SettingsWindow::open(cx));
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
-            KeyBinding::new("secondary-,", OpenSettings, None),
+            KeyBinding::new("secondary-,", OpenSettings, Some("!document")),
         ]);
     }
 
