@@ -49,7 +49,7 @@ in
 
           inherit mimeType;
         };
-        mimeApps = builtins.listToAttrs (builtins.map (mt: {
+        mimeApps.associations.added = builtins.listToAttrs (builtins.map (mt: {
             name = mt;
             value = "monocurl.desktop";
           })
