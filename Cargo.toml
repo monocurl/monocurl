@@ -2,27 +2,28 @@
 resolver = "2"
 
 members = [
-    "crates/bytecode",
-    "crates/cli",
-    "crates/compiler",
-    "crates/integration_tests",
-    "crates/latex",
-    "crates/ui_cli_shared",
-    "crates/executor",
-    "crates/exporter",
-    "crates/geo",
-    "crates/libtess2",
-    "crates/lexer",
-    "crates/parser",
-    "crates/renderer",
-    "crates/stdlib",
-    "crates/stdlib-macros",
-    "crates/structs",
-    "crates/monocurl",
+  "crates/bytecode",
+  "crates/cli",
+  "crates/compiler",
+  "crates/integration_tests",
+  "crates/latex",
+  "crates/ui_cli_shared",
+  "crates/executor",
+  "crates/exporter",
+  "crates/geo",
+  "crates/libtess2",
+  "crates/lexer",
+  "crates/parser",
+  "crates/renderer",
+  "crates/stdlib",
+  "crates/stdlib-macros",
+  "crates/structs",
+  "crates/monocurl",
 ]
 
 [workspace.package]
 edition = "2024"
+version = "0.1.0"
 
 [workspace.dependencies]
 anyhow = "1.0.86"
@@ -52,7 +53,9 @@ openh264 = "0.9.3"
 hayro-interpret = "0.4.0"
 hayro-svg = "0.2.0"
 roxmltree = "0.20.0"
-tectonic = { version = "0.16.9", default-features = false, features = ["geturl-reqwest"] }
+tectonic = { version = "0.16.9", default-features = false, features = [
+  "geturl-reqwest",
+] }
 tectonic_bundles = { version = "0.4.1", default-features = false }
 # keep xetex on the last engine that works with tectonic_xetex_layout 0.2.x;
 # layout 0.3.x conflicts with gpui's fontconfig stack.
@@ -78,6 +81,9 @@ stdlib = { path = "crates/stdlib" }
 structs = { path = "crates/structs" }
 monocurl = { path = "crates/monocurl" }
 ui_cli_shared = { path = "crates/ui_cli_shared" }
+
+[workspace.metadata.crane]
+name = "monocurl"
 
 # TODO I'd rather vendor gpui than this
 [patch.crates-io]
