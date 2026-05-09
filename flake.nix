@@ -140,38 +140,40 @@
     )
     // {
       homeModules = {
-        config,
-        pkgs,
-        ...
-      }:
-        with pkgs.lib; {
-          options = {
-            programs.monocurl = {
-              enable = mkEnableOption "monocurl";
-              package = mkOpion {
-                description = "Package for monocurl";
-                default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
-                type = types.package;
+        monocurl = {
+          config,
+          pkgs,
+          ...
+        }:
+          with pkgs.lib; {
+            options = {
+              programs.monocurl = {
+                enable = mkEnableOption "monocurl";
+                package = mkOpion {
+                  description = "Package for monocurl";
+                  default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+                  type = types.package;
+                };
+              };
+            };
+
+            config = mkIf config.programs.monocurl.enable {
+              home = {
+                xdg.desktopEntries.monocurl = {
+                  type = "Application";
+                  name = "Monocurl";
+                  comment = "Mathematical animation editor";
+                  exec = "${config.programs.monocurl.package}/bin/monocurl %F";
+                  icon = "monocurl";
+                  terminal = false;
+                  categories = ["Education"];
+                  mimeType = ["text/x-monocurl-scene" "text/x-monocurl-library"];
+                };
+
+                packages = [config.programs.monocurl.package];
               };
             };
           };
-
-          config = mkIf config.programs.monocurl.enable {
-            home = {
-              xdg.desktopEntries.monocurl = {
-                type = "Application";
-                name = "Monocurl";
-                comment = "Mathematical animation editor";
-                exec = "${config.programs.monocurl.package}/bin/monocurl %F";
-                icon = "monocurl";
-                terminal = false;
-                categories = ["Education"];
-                mimeType = ["text/x-monocurl-scene" "text/x-monocurl-library"];
-              };
-
-              packages = [config.programs.monocurl.package];
-            };
-          };
-        };
+      };
     };
 }
