@@ -76,8 +76,6 @@
           // {
             src = ./.;
             strictDeps = true;
-            # A lot of tests are failing, need to figure out why
-            doCheck = false;
 
             inherit cargoArtifacts;
 
