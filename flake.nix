@@ -141,7 +141,7 @@
     // {
       homeModules = {
         default = self.homeModules.monocurl;
-        monocurl = ./nix/hm-module.nix self.packages;
+        monocurl = import ./nix/hm-module.nix self.packages;
       };
     };
 }
