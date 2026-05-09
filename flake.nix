@@ -102,16 +102,16 @@
                 size,
                 filename,
                 ...
-              }: "install -Dm444 ${./assets/AppIcon.appiconset}/${filename} $out/share/monocurl/icons/hicolor/${size}/apps/monocurl.png")
+              }: "install -Dm444 ${./assets/AppIcon.appiconset}/${filename} $out/share/icons/hicolor/${size}/apps/monocurl.png")
               iconSet.images;
               # https://github.com/ipetkov/crane/blob/master/lib/buildPackage.nix
             in ''
-                if [ -n "$postBuildInstallFromCargoBuildLogOut" -a -d "$postBuildInstallFromCargoBuildLogOut" ]; then
-                  echo "actually installing contents of $postBuildInstallFromCargoBuildLogOut to $out"
-                  mkdir -p $out
-                  find "$postBuildInstallFromCargoBuildLogOut" -mindepth 1 -maxdepth 1 | xargs -r mv -t $out
-                else
-                  echo ${pkgs.lib.strings.escapeShellArg ''
+              if [ -n "$postBuildInstallFromCargoBuildLogOut" -a -d "$postBuildInstallFromCargoBuildLogOut" ]; then
+                echo "actually installing contents of $postBuildInstallFromCargoBuildLogOut to $out"
+                mkdir -p $out
+                find "$postBuildInstallFromCargoBuildLogOut" -mindepth 1 -maxdepth 1 | xargs -r mv -t $out
+              else
+                echo ${pkgs.lib.strings.escapeShellArg ''
                 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
                 $postBuildInstallFromCargoBuildLogOut is either undefined or does not point to a
                 valid location! By default `buildPackage` will expect that cargo's output was
@@ -130,9 +130,9 @@
                     installFromCargoBuildLog "$postBuildInstallFromCargoBuildLogOut" "$cargoBuildLog"
                 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               ''}
+                false
+              fi
 
-                  false
-                fi
               ${builtins.concatStringsSep "\n" installIcons}
             '';
 
