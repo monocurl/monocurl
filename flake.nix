@@ -40,7 +40,7 @@
         LD_LIBRARY_PATH =
           pkgs.lib.makeLibraryPath runtimeLibs;
 
-        monocurl = pkgs.callPackage ./nix/package.nix {inherit craneLib;};
+        monocurl = pkgs.callPackage ./bundling/linux/nix/package.nix {inherit craneLib;};
       in {
         formatter = pkgs.alejandra;
         checks = {inherit monocurl;};
@@ -69,7 +69,7 @@
     // {
       homeModules = {
         default = self.homeModules.monocurl;
-        monocurl = import ./nix/hm-module.nix self.packages;
+        monocurl = import ./bundling/linux/nix/hm-module.nix self.packages;
       };
     };
 }
