@@ -4,6 +4,7 @@ packages: {
   pkgs,
   ...
 }: let
+  root = ../../..;
   cfg = config.programs.monocurl;
 in
   with lib; {
@@ -23,7 +24,7 @@ in
         # Also copying icons to ~/.local/share/icons in case some application launchers dont look for system paths
         # or dont use XDG_DATA_DIRS
         file = let
-          iconSet = builtins.fromJSON (builtins.readFile ../assets/AppIcon.appiconset/Contents.json);
+          iconSet = builtins.fromJSON (builtins.readFile "${root}/assets/AppIcon.appiconset/Contents.json");
         in
           builtins.listToAttrs (builtins.map ({
               size,
@@ -32,7 +33,7 @@ in
             }: {
               name = ".local/share/icons/hicolor/${size}/apps/monocurl.png";
               value = {
-                source = ../assets/AppIcon.appiconset + "/${filename}";
+                source = root + "/assets/AppIcon.appiconset/${filename}";
               };
             })
             iconSet.images);

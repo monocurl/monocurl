@@ -20,12 +20,14 @@
   libx11,
   ...
 }: let
+  root = ../../..;
+
   # https://github.com/ipetkov/crane/issues/400#issuecomment-1739612918
   dummySrc = craneLib.mkDummySrc {
-    src = craneLib.path ../.;
+    src = craneLib.path root;
     extraDummyScript = ''
       set -exuo pipefail
-      cp -rf --no-target-directory ${../vendor} $out/vendor
+      cp -rf --no-target-directory ${root}/vendor $out/vendor
     '';
   };
 
@@ -76,7 +78,7 @@
 in
   craneLib.buildPackage (baseArgs
     // {
-      src = ../.;
+      src = root;
       strictDeps = true;
 
       inherit cargoArtifacts;
@@ -134,17 +136,17 @@ in
           "render::tests::text_monocurl_has_consistent_topology"
         ];
         skippedTestsStr = lib.concatStringsSep " " (lib.map (testId: "--skip=${testId}") skippedTests);
-      in "MONOCURL_ASSETS_DIR=${../assets} cargo test --profile release -j $NIX_BUILD_CORES --offline -- --test-threads=$NIX_BUILD_CORES ${skippedTestsStr}";
+      in "MONOCURL_ASSETS_DIR=${root}/assets cargo test --profile release -j $NIX_BUILD_CORES --offline -- --test-threads=$NIX_BUILD_CORES ${skippedTestsStr}";
 
       installPhaseCommand = let
-        iconSet = builtins.fromJSON (builtins.readFile ../assets/AppIcon.appiconset/Contents.json);
+        iconSet = builtins.fromJSON (builtins.readFile "${root}/assets/AppIcon.appiconset/Contents.json");
 
         # Native "by the book" installation of icons
         installIcons = builtins.map ({
           size,
           filename,
           ...
-        }: "install -Dm444 ${../assets/AppIcon.appiconset}/${filename} $out/share/icons/hicolor/${size}/apps/monocurl.png")
+        }: "install -Dm444 ${root}/assets/AppIcon.appiconset/${filename} $out/share/icons/hicolor/${size}/apps/monocurl.png")
         iconSet.images;
         # Copied the default from https://github.com/ipetkov/crane/blob/master/lib/buildPackage.nix
       in ''
@@ -182,7 +184,7 @@ in
       postInstall = ''
         wrapProgram $out/bin/monocurl \
           --prefix LD_LIBRARY_PATH : ${LD_LIBRARY_PATH} \
-          --set MONOCURL_ASSETS_DIR ${../assets}
+          --set MONOCURL_ASSETS_DIR ${root}/assets
       '';
 
       passthru = {
