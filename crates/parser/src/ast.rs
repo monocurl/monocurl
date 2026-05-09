@@ -274,6 +274,21 @@ pub struct NativeInvocation {
 pub struct IdentifierDeclaration(pub String);
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum BindingPattern {
+    Identifier(IdentifierDeclaration),
+    List(Vec<SpanTagged<IdentifierDeclaration>>),
+}
+
+impl BindingPattern {
+    pub fn as_identifier(&self) -> Option<&IdentifierDeclaration> {
+        match self {
+            BindingPattern::Identifier(identifier) => Some(identifier),
+            BindingPattern::List(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum IdentifierReference {
     Value(String),
     Reference(String),
@@ -291,7 +306,7 @@ pub enum VariableType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     pub var_type: VariableType,
-    pub identifier: SpanTagged<IdentifierDeclaration>,
+    pub pattern: SpanTagged<BindingPattern>,
     pub value: SpanTagged<Expression>,
 }
 
@@ -308,7 +323,7 @@ pub struct While {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct For {
-    pub var_name: SpanTagged<IdentifierDeclaration>,
+    pub pattern: SpanTagged<BindingPattern>,
     pub container: SpanTagged<Expression>,
     pub body: SpanTagged<Vec<SpanTagged<Statement>>>,
 }

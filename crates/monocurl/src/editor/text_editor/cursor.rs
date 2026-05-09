@@ -157,6 +157,41 @@ impl TextEditor {
             .recheck_should_display(state.cursor())
     }
 
+    pub(super) fn apply_selected_autocomplete(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let selected_index = self
+            .state
+            .read(cx)
+            .autocomplete_state()
+            .borrow()
+            .selected_index;
+        self.apply_autocomplete_index(selected_index, window, cx);
+    }
+
+    pub(super) fn apply_autocomplete_index(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ac = self.state.read(cx).autocomplete_state();
+        let can_apply = {
+            let cursor = self.state.read(cx).cursor();
+            let mut ac = ac.borrow_mut();
+            ac.recheck_should_display(cursor) && index < ac.items.len()
+        };
+        if !can_apply {
+            return;
+        }
+
+        self.state.update(cx, |state, _| state.start_transaction());
+        AutoCompleteState::apply_index(&ac, index, self, self.state.clone(), window, cx);
+        self.state.update(cx, |state, cx| state.end_transaction(cx));
+    }
+
     pub(super) fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) {
         if self.do_autocomplete_action(cx) {
             self.state

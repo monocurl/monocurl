@@ -18,12 +18,12 @@ use bytecode::{
 };
 use free_vars::{free_lvalue_refs_expr, free_vars_expr, free_vars_stmts};
 use parser::ast::{
-    Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral, Expression,
-    For, IdentifierDeclaration, IdentifierReference, If, InvocationArguments, LambdaArg,
-    LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition,
-    OperatorInvocation, Play, Print, Property, Return, Section, SectionBundle, SectionType,
-    SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator,
-    VariableType as AstVariableType, While,
+    Anim, BinaryOperator, BinaryOperatorType, BindingPattern, Block, Declaration,
+    DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If,
+    InvocationArguments, LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal,
+    NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Print, Property, Return,
+    Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType,
+    UnaryPreOperator, VariableType as AstVariableType, While,
 };
 use stateful::is_stateful;
 use stdlib::registry::registry;

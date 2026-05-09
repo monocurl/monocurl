@@ -22,6 +22,7 @@ impl DocumentView {
         let editor = cx.new(|cx| {
             Editor::new(
                 state.textual_state.clone(),
+                services.clone(),
                 path.clone(),
                 dirty.clone(),
                 window,
@@ -29,7 +30,7 @@ impl DocumentView {
             )
         });
         let viewport = cx.new(|cx| Viewport::new(services.clone(), cx));
-        let timeline = cx.new(|cx| Timeline::new(services.clone(), cx));
+        let timeline = cx.new(|cx| Timeline::new(services.clone(), editor.downgrade(), cx));
 
         let document_path = path.clone();
         let window_state_up = window_state.upgrade().unwrap();

@@ -15,6 +15,12 @@ use crate::{
     state::diagnostics::{Diagnostic, DiagnosticContainer},
 };
 
+mod cursor;
+mod slide;
+
+pub use cursor::{Cursor, TransactionSummary};
+pub use slide::SlideInfo;
+
 pub type LexData = Token;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -209,17 +215,6 @@ impl AutoCompleteState {
         }
     }
 
-    pub fn apply_selected(
-        this: &Rc<RefCell<Self>>,
-        editor: &mut TextEditor,
-        state: Entity<TextualState>,
-        window: &mut Window,
-        cx: &mut Context<TextEditor>,
-    ) {
-        let index = this.borrow().selected_index;
-        Self::apply_index(this, index, editor, state, window, cx);
-    }
-
     pub fn apply_index(
         this: &Rc<RefCell<Self>>,
         index: usize,
@@ -350,42 +345,6 @@ impl TranscriptIndex {
     }
 }
 
-#[derive(Default, Clone, Copy, Debug, PartialEq)]
-pub struct Cursor {
-    pub anchor: Location8,
-    pub head: Location8,
-}
-
-impl Cursor {
-    pub fn collapsed(pos: Location8) -> Self {
-        Self {
-            anchor: pos,
-            head: pos,
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.anchor == self.head
-    }
-
-    pub fn line_range(&self) -> Range<usize> {
-        let start_row = self.anchor.min(self.head).row as usize;
-        let end_row = self.anchor.max(self.head).row as usize;
-        start_row..end_row + 1
-    }
-
-    pub fn reversed(&self) -> bool {
-        self.head < self.anchor
-    }
-}
-
-#[derive(Default)]
-pub struct TransactionSummary {
-    pub text_changes: Vec<(Span8, String, Rope<TextAggregate>, usize)>,
-    pub new_cursor: Cursor,
-    pub final_version: usize,
-}
-
 /// State that's relevant to the text editor + modified by compilation / lexing services
 #[derive(Default)]
 pub struct TextualState {
@@ -410,6 +369,8 @@ pub struct TextualState {
     dirty_diagnostic_lines: Rope<RLEAggregate<bool>>,
 
     transcript: TranscriptIndex,
+
+    slides: Vec<SlideInfo>,
 
     version: usize,
 
@@ -483,6 +444,7 @@ impl TextualState {
             }),
         );
         self.apply_transcript_replacement(span.clone(), new_text.len(), transcript_dirty_rows);
+        self.slides.clear();
 
         // update lex_rope and static analysis rope with best effort of extending the previous runs
         // background threads will do the proper update asynchronously
@@ -700,6 +662,18 @@ impl TextualState {
             return false;
         }
         self.lex_rope = rope;
+        true
+    }
+
+    pub fn slides(&self) -> &[SlideInfo] {
+        &self.slides
+    }
+
+    pub fn set_slides(&mut self, slides: Vec<SlideInfo>, for_version: usize) -> bool {
+        if for_version != self.version || self.slides == slides {
+            return false;
+        }
+        self.slides = slides;
         true
     }
 
@@ -1388,6 +1362,26 @@ mod tests {
         state.set_items(vec![autocomplete_item("AB"), autocomplete_item("axb")]);
 
         assert_eq!(filtered_autocomplete_heads(&state), vec!["AB", "axb"]);
+    }
+
+    #[test]
+    fn slide_info_updates_are_version_checked() {
+        let src = "mesh c = circle()\nslide first:\n  show c\n";
+        let mut state = TextualState {
+            text_rope: Rope::from_str(src),
+            ..Default::default()
+        };
+        let slides = vec![SlideInfo {
+            start_offset: 18,
+            source_range: 18..src.len(),
+            line: 1,
+            header_end: Location8 { row: 1, col: 12 },
+        }];
+
+        assert!(!state.set_slides(slides.clone(), 1));
+        assert!(state.slides().is_empty());
+        assert!(state.set_slides(slides, 0));
+        assert_eq!(state.slides()[0].line, 1);
     }
 
     #[test]

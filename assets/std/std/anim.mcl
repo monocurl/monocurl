@@ -400,10 +400,7 @@ let CameraLerp = |&camera, time = 1, rate = smooth| {
 ## play Highlight(&equation, YELLOW)
 ## ```
 let Highlight = |&value, color, time = 1, rate = smooth| anim {
-    var highlighted = 0
-    var original = 0
-    var state = 0
-    [highlighted, original, state] = __monocurl__native__ highlight_embed(value, value, color)
+    let [highlighted, original, state] = __monocurl__native__ highlight_embed(value, value, color)
 
     play Set(&value)
 

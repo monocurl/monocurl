@@ -9,6 +9,7 @@ use crate::editor::line_shaper::LineShaper;
 use crate::editor::text_editor::popover_element::PopoverElement;
 use crate::editor::text_editor::text_element::TextElement;
 use crate::editor::wrapped_line::WrappedLine;
+use crate::services::ServiceManager;
 use crate::state::diagnostics::Diagnostic;
 use crate::state::textual_state::{AutoCompleteState, Cursor, TextualState};
 use crate::theme::{TextEditorStyles, ThemeSettings};
@@ -136,6 +137,7 @@ pub struct TextEditor {
     redo_stack: VecDeque<HistoryGroup>,
 
     state: Entity<TextualState>,
+    services: Entity<ServiceManager>,
     dirty: Entity<bool>,
     save_dirty: Entity<bool>,
 
@@ -179,6 +181,7 @@ pub struct TextEditor {
 impl TextEditor {
     pub fn new(
         state: Entity<TextualState>,
+        services: Entity<ServiceManager>,
         window: &mut Window,
         cx: &mut Context<Self>,
         content: String,
@@ -242,6 +245,7 @@ impl TextEditor {
             undo_stack: VecDeque::default(),
             redo_stack: VecDeque::default(),
             state,
+            services,
 
             dirty,
             save_dirty,
@@ -292,6 +296,23 @@ impl TextEditor {
 
     pub fn editor_focus_handle(&self) -> FocusHandle {
         self.focus_handle.clone()
+    }
+
+    pub fn jump_to_location(
+        &mut self,
+        location: Location8,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let line_count = self.line_map.line_count();
+        if line_count == 0 {
+            return;
+        }
+        let row = location.row.min(line_count.saturating_sub(1));
+        let col = location.col.min(self.line_map.line_len(row));
+        self.move_to(Location8 { row, col }, false, false, cx);
+        self.focus_handle.focus(window);
+        cx.notify();
     }
 
     fn apply_theme(&mut self, styles: TextEditorStyles, cx: &mut Context<Self>) {

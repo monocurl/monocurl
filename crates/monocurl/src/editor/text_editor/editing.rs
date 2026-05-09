@@ -330,11 +330,10 @@ impl TextEditor {
             return;
         }
 
-        self.state.update(cx, |state, _| state.start_transaction());
         if self.do_autocomplete_action(cx) {
-            let ac = self.state.read(cx).autocomplete_state();
-            AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
+            self.apply_selected_autocomplete(window, cx);
         } else {
+            self.state.update(cx, |state, _| state.start_transaction());
             if self.cursor(cx).is_empty() {
                 // try to preserve indentation if possible
                 let state = self.state.read(cx);
@@ -388,8 +387,8 @@ impl TextEditor {
             } else {
                 self.replace_text_in_utf16_range(None, "\n", true, window, cx);
             }
+            self.state.update(cx, |state, cx| state.end_transaction(cx));
         }
-        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
     fn selected_row_range(&self, cx: &App) -> Range<usize> {
@@ -489,11 +488,10 @@ impl TextEditor {
     }
 
     pub(super) fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) {
-        self.state.update(cx, |state, _| state.start_transaction());
         if self.do_autocomplete_action(cx) {
-            let ac = self.state.read(cx).autocomplete_state();
-            AutoCompleteState::apply_selected(&ac, self, self.state.clone(), window, cx);
+            self.apply_selected_autocomplete(window, cx);
         } else {
+            self.state.update(cx, |state, _| state.start_transaction());
             self.undo_group_boundary(cx);
             if self.cursor(cx).is_empty() {
                 self.replace_text_in_utf16_range(None, &" ".repeat(TAB_SIZE), false, window, cx);
@@ -525,8 +523,8 @@ impl TextEditor {
                 self.reset_cursor_blink(cx);
             }
             self.undo_group_boundary(cx);
+            self.state.update(cx, |state, cx| state.end_transaction(cx));
         }
-        self.state.update(cx, |state, cx| state.end_transaction(cx));
     }
 
     pub(super) fn untab(&mut self, _: &Untab, window: &mut Window, cx: &mut Context<Self>) {

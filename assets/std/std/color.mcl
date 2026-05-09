@@ -125,10 +125,6 @@ let gray_shade = |v, a = 1| [v, v, v, a]
 ## mesh disk = fill{alpha{0.16} BLUE} Circle(1)
 ## ```
 let alpha = operator |target, a| {
-    var r = 0
-    var g = 0
-    var b = 0
-    var old_alpha = 0
-    [r, g, b, old_alpha] = __monocurl__native__ expect_list("color", target, 4)
+    let [r, g, b, old_alpha] = __monocurl__native__ expect_list("color", target, 4)
     return [target, [r, g, b, a]]
 }

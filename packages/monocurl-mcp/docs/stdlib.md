@@ -49,6 +49,9 @@ import std.scene
   trees that should keep their center while facing the camera.
 - `mesh` and `param` declarations create leaders whose follower values can be
   animated. Pass references like `&title` to animations.
+- `enumerate(list)` and `map_items(map)` return `[key, value]` pairs. Use
+  destructuring in loops, for example
+  `for ([i, value] in enumerate(values)) { ... }`.
 - Animation helpers eventually lower to primitive animations such as `Wait`,
   `Set`, and `Lerp`. Higher-level helpers like `Grow`, `Fade`, `Write`,
   `Trans`, `TagTrans`, `Bend`, and `CameraLerp` are the preferred public API.

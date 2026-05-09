@@ -64,9 +64,7 @@ let Square = |width|
 ## mesh card = fill{alpha{0.12} BLUE} stroke{BLUE} Rect([2.0, 0.8])
 ## ```
 let Rect = |size| {
-    var width = 0
-    var height = 0
-    [width, height] = __monocurl__native__ expect_list("size", size, 2)
+    let [width, height] = __monocurl__native__ expect_list("size", size, 2)
     return __monocurl__native__ mk_rect(width, height)
 }
 
@@ -145,9 +143,7 @@ let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0|
 ## mesh arc = stroke{CYAN} Arc(1, [0, PI])
 ## ```
 let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
-    var theta_start = 0
-    var theta_end = 0
-    [theta_start, theta_end] = __monocurl__native__ expect_list("theta", theta, 2)
+    let [theta_start, theta_end] = __monocurl__native__ expect_list("theta", theta, 2)
     return __monocurl__native__ mk_arc(radius, theta_start, theta_end)
 }
 
@@ -231,12 +227,8 @@ let Cone = |apex = [0, 1, 0], base = [0, 0, 0], radius = 1, sample_count = 32|
 ## radii: `[major_radius, minor_radius]`
 ## samples: `[major_samples, minor_samples]`, each clamped to at least 3
 let Torus = |radii = [1, 0.3], samples = [48, 24]| {
-    var major_radius = 0
-    var minor_radius = 0
-    var major_samples = 0
-    var minor_samples = 0
-    [major_radius, minor_radius] = __monocurl__native__ expect_list("radii", radii, 2)
-    [major_samples, minor_samples] = __monocurl__native__ expect_list("samples", samples, 2)
+    let [major_radius, minor_radius] = __monocurl__native__ expect_list("radii", radii, 2)
+    let [major_samples, minor_samples] = __monocurl__native__ expect_list("samples", samples, 2)
     return __monocurl__native__ mk_torus(major_radius, minor_radius, major_samples, minor_samples)
 }
 
@@ -245,9 +237,7 @@ let Torus = |radii = [1, 0.3], samples = [48, 24]| {
 ## [parameters]
 ## size: `[width, height]`
 let Plane = |dist = 0, size = [4, 4]| {
-    var width = 0
-    var height = 0
-    [width, height] = __monocurl__native__ expect_list("size", size, 2)
+    let [width, height] = __monocurl__native__ expect_list("size", size, 2)
     return __monocurl__native__ mk_plane(dist, width, height)
 }
 
@@ -295,9 +285,7 @@ let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1b|
 ## mesh logo = Image("monocurl.png", ORIGIN, [1.2, 1.2])
 ## ```
 let Image = |name, center = [0, 0, 0], size = [1, 1]| {
-    var width = 0
-    var height = 0
-    [width, height] = __monocurl__native__ expect_list("size", size, 2)
+    let [width, height] = __monocurl__native__ expect_list("size", size, 2)
     return __monocurl__native__ mk_image(name, center, width, height)
 }
 
@@ -324,14 +312,8 @@ let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = 
         actual_mask = smooth
         actual_smooth = 0
     }
-    var x_min = 0
-    var x_max = 0
-    var x_samples = 0
-    var y_min = 0
-    var y_max = 0
-    var y_samples = 0
-    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
-    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    let [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    let [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
     return __monocurl__native__ mk_color_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, actual_smooth, actual_mask, color_at)
 }
 
@@ -350,14 +332,8 @@ let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = 
 ## [options]
 ## important: true
 let LineGrid = |x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], subdivision = 16| {
-    var x_min = 0
-    var x_max = 0
-    var x_samples = 0
-    var y_min = 0
-    var y_max = 0
-    var y_samples = 0
-    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
-    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    let [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    let [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
     return __monocurl__native__ mk_line_grid(x_min, x_max, y_min, y_max, x_samples, y_samples, subdivision)
 }
 
@@ -377,14 +353,8 @@ let LineGrid = |x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21]
 ## [options]
 ## important: true
 let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], mask = |pos| 1| {
-    var x_min = 0
-    var x_max = 0
-    var x_samples = 0
-    var y_min = 0
-    var y_max = 0
-    var y_samples = 0
-    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
-    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    let [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    let [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
     return __monocurl__native__ mk_field(x_min, x_max, y_min, y_max, x_samples, y_samples, mask, mesh_at)
 }
 
@@ -560,16 +530,8 @@ let Axis3d = |basis = [1r, 1u, 1b], color = [0, 0, 0, 1], grid_color = nil, labe
 ## [description]
 ## `theta` and `radius` are `[min, max, unit, tick_step]`; radius values are clamped to non-negative.
 let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1]| {
-    var theta_min = 0
-    var theta_max = 0
-    var theta_unit = 0
-    var theta_tick_step = 0
-    var radius_min = 0
-    var radius_max = 0
-    var radius_unit = 0
-    var radius_tick_step = 0
-    [theta_min, theta_max, theta_unit, theta_tick_step] = __monocurl__native__ expect_list("theta", theta, 4)
-    [radius_min, radius_max, radius_unit, radius_tick_step] = __monocurl__native__ expect_list("radius", radius, 4)
+    let [theta_min, theta_max, theta_unit, theta_tick_step] = __monocurl__native__ expect_list("theta", theta, 4)
+    let [radius_min, radius_max, radius_unit, radius_tick_step] = __monocurl__native__ expect_list("radius", radius, 4)
     return __monocurl__native__ mk_polar_axis(center, theta_min, theta_max, theta_unit, theta_tick_step, radius_min, radius_max, radius_unit, radius_tick_step)
 }
 
@@ -584,10 +546,7 @@ let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1
 ## mesh spiral = stroke{CYAN} ParametricFunc(|t| [cos(t), sin(t), t / TAU], [0, TAU * 3, 180])
 ## ```
 let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
-    var min = 0
-    var max = 0
-    var samples = 0
-    [min, max, samples] = __monocurl__native__ expect_list("t_min_max_samples", t_min_max_samples, 3)
+    let [min, max, samples] = __monocurl__native__ expect_list("t_min_max_samples", t_min_max_samples, 3)
     return __monocurl__native__ mk_parametric(f, min, max, samples)
 }
 
@@ -602,10 +561,7 @@ let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
 ## mesh graph = stroke{CYAN} ExplicitFunc(|x| sin(x), [-PI, PI, 160])
 ## ```
 let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128]| {
-    var min = 0
-    var max = 0
-    var samples = 0
-    [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    let [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
     return __monocurl__native__ mk_explicit(f, min, max, samples)
 }
 
@@ -618,34 +574,22 @@ let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128]| {
 ## mesh surface = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 31], [-1, 1, 31])
 ## ```
 let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21]| {
-    var x_min = 0
-    var x_max = 0
-    var x_samples = 0
-    var y_min = 0
-    var y_max = 0
-    var y_samples = 0
-    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
-    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+    let [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    let [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
     return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
 }
 
 ## [overview]
-## Sample an implicit 2-D contour f(x, y) = 0.
+## Sample an implicit 2-D contour around f(x, y) <= 0.
 ## [description]
-## Uses a rectangular sampling grid and extracts zero contours as strokes; increase sample counts for sharper features.
+## Uses a padded rectangular sign grid and extracts the boundary of the non-positive region as linked stroke loops; increase sample counts for sharper features.
 ## [example]
 ## ```
 ## mesh level = stroke{CYAN} ImplicitFunc2d(|x, y| x * x + y * y - 1)
 ## ```
-let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 41], y_min_max_samples = [-1, 1, 41]| {
-    var x_min = 0
-    var x_max = 0
-    var x_samples = 0
-    var y_min = 0
-    var y_max = 0
-    var y_samples = 0
-    [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
-    [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
+let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 65], y_min_max_samples = [-1, 1, 65]| {
+    let [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    let [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
     return __monocurl__native__ mk_implicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
 }
 
@@ -662,16 +606,9 @@ let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 41], y_min_max_samples = [-
 ## mesh diff = ExplicitFuncDiff(|x| sin(x), |x| 0, [-PI, PI, 160])
 ## ```
 let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]], tags = [[], []]| {
-    var min = 0
-    var max = 0
-    var samples = 0
-    var lower_fill = 0
-    var upper_fill = 0
-    var tag0 = 0
-    var tag1 = 0
-    [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
-    [lower_fill, upper_fill] = __monocurl__native__ expect_list("fills", fills, 2)
-    [tag0, tag1] = __monocurl__native__ expect_list("tags", tags, 2)
+    let [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
+    let [lower_fill, upper_fill] = __monocurl__native__ expect_list("fills", fills, 2)
+    let [tag0, tag1] = __monocurl__native__ expect_list("tags", tags, 2)
     return __monocurl__native__ mk_explicit_diff(f, g, min, max, samples, lower_fill, upper_fill, tag0, tag1)
 }
 
@@ -1160,10 +1097,7 @@ let contour_separate = operator |target| [target, __monocurl__native__ mesh_cont
 ## let halfway = trans(Square(1), Circle(0.7), 0.5, 0.6b)
 ## ```
 let trans = |start, end, t, path_arc = 0, similar_topo_hint = 0| {
-    var aligned_start = 0
-    var aligned_end = 0
-    var state = 0
-    [aligned_start, aligned_end, state] = __monocurl__native__ trans_embed_with_options(start, end, similar_topo_hint)
+    let [aligned_start, aligned_end, state] = __monocurl__native__ trans_embed_with_options(start, end, similar_topo_hint)
     return __monocurl__native__ trans_lerp_value(aligned_start, aligned_end, state, t, path_arc)
 }
 
@@ -1172,10 +1106,7 @@ let trans = |start, end, t, path_arc = 0, similar_topo_hint = 0| {
 ## [description]
 ## Pure value form behind `Bend`; best for line/path geometry where local tangent rotation matters.
 let bend = |start, end, t| {
-    var aligned_start = 0
-    var aligned_end = 0
-    var state = 0
-    [aligned_start, aligned_end, state] = __monocurl__native__ bend_embed(start, end)
+    let [aligned_start, aligned_end, state] = __monocurl__native__ bend_embed(start, end)
     return __monocurl__native__ bend_lerp_value(aligned_start, aligned_end, t)
 }
 

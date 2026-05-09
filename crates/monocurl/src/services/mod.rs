@@ -10,8 +10,8 @@ use crate::{
         diagnostics::Diagnostic,
         execution_state::ExecutionState,
         textual_state::{
-            AutoCompleteItem, Cursor, LexData, ParameterPositionHint, StaticAnalysisData,
-            TextualState, TransactionSummary,
+            AutoCompleteItem, Cursor, LexData, ParameterPositionHint, SlideInfo,
+            StaticAnalysisData, TextualState, TransactionSummary,
         },
     },
 };
@@ -101,6 +101,10 @@ pub enum ServiceManagerMessage {
     UpdateParameterHintPosition {
         hint: Option<ParameterPositionHint>,
         cursor: Cursor,
+        version: usize,
+    },
+    UpdateSlideInfo {
+        slides: Vec<SlideInfo>,
         version: usize,
     },
     ExecutionStateUpdated {
@@ -268,6 +272,13 @@ impl ServiceManager {
             } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_parameter_position_state(hint, version, cursor) {
+                        cx.notify();
+                    }
+                });
+            }
+            ServiceManagerMessage::UpdateSlideInfo { slides, version } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_slides(slides, version) {
                         cx.notify();
                     }
                 });

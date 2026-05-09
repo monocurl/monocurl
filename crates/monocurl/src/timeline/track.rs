@@ -1,13 +1,21 @@
 use executor::time::Timestamp;
 use gpui::*;
+use structs::assets::Assets;
 
 use crate::theme::{FontSet, Theme};
 
-use super::metrics::{
-    CONTENT_H, DUR_FONT_SIZE, LABEL_FONT_SIZE, LABEL_GAP, LABEL_LINE_H, LABEL_MAX_LINES,
-    LABEL_TEXT_H, PADDING_V, PX_PER_SEC, SLIDE_H, SLIDE_W, compute_gap_ws, compute_painted_gap_ws,
-    compute_playhead_x, compute_slide_xs, compute_track_width, effective_durations,
+use super::{
+    metrics::{
+        CONTENT_H, DUR_FONT_SIZE, LABEL_FONT_SIZE, LABEL_GAP, LABEL_LINE_H, LABEL_MAX_LINES,
+        LABEL_TEXT_H, PADDING_V, PX_PER_SEC, SLIDE_H, SLIDE_W, compute_gap_ws,
+        compute_painted_gap_ws, compute_playhead_x, compute_slide_xs, compute_track_width,
+        effective_durations,
+    },
+    timeline_view::Timeline,
 };
+
+const SLIDE_GOTO_ICON_SIZE: f32 = 12.0;
+const SLIDE_GOTO_ICON_INSET: f32 = 4.0;
 
 const CURRENT_PLAYHEAD_W: f32 = 2.0;
 const TARGET_PLAYHEAD_W: f32 = 1.0;
@@ -24,6 +32,7 @@ struct TrackPrepaint {
 }
 
 pub(super) fn render_track(
+    timeline: WeakEntity<Timeline>,
     current_timestamp: Timestamp,
     target_timestamp: Timestamp,
     slide_count: usize,
@@ -247,6 +256,52 @@ pub(super) fn render_track(
             .child(label)
     });
 
+    let slide_hitboxes = (0..slide_count).map(|i| {
+        let timeline = timeline.clone();
+        let group_name: SharedString = format!("tl-slide-hitbox-{i}").into();
+        let icon_x = SLIDE_W - SLIDE_GOTO_ICON_SIZE - SLIDE_GOTO_ICON_INSET;
+        let icon_y = SLIDE_GOTO_ICON_INSET;
+        div()
+            .id(("tl-slide-hitbox", i))
+            .absolute()
+            .left(px(slide_xs_for_labels[i]))
+            .top(px(PADDING_V))
+            .w(px(SLIDE_W))
+            .h(px(SLIDE_H))
+            .group(group_name.clone())
+            .child(
+                div()
+                    .id(("tl-slide-goto", i))
+                    .absolute()
+                    .left(px(icon_x))
+                    .top(px(icon_y))
+                    .w(px(SLIDE_GOTO_ICON_SIZE))
+                    .h(px(SLIDE_GOTO_ICON_SIZE))
+                    .cursor_pointer()
+                    .text_color(theme.timeline_subtext)
+                    .opacity(0.0)
+                    .group_hover(group_name, |s| s.opacity(1.0))
+                    .hover(|s| s.text_color(theme.timeline_transport_color))
+                    .child(
+                        svg()
+                            .path(Assets::image_resource("timeline/jump-to-code.svg"))
+                            .text_color(theme.timeline_subtext)
+                            .size_full(),
+                    )
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    })
+                    .on_click(move |_, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        timeline
+                            .update(cx, |tl, cx| tl.jump_editor_to_slide(i, window, cx))
+                            .ok();
+                    }),
+            )
+    });
+
     div()
         .flex_none()
         .relative()
@@ -266,7 +321,8 @@ pub(super) fn render_track(
                         .relative()
                         .w(px(track_w))
                         .h(px(CONTENT_H))
-                        .children(labels),
+                        .children(labels)
+                        .children(slide_hitboxes),
                 ),
         )
 }

@@ -3,6 +3,7 @@ use super::*;
 struct RootSectionTokens {
     tokens: Vec<(Token, Span8)>,
     name: Option<String>,
+    slide_keyword_span: Option<Span8>,
 }
 
 impl Parser {
@@ -149,12 +150,14 @@ impl Parser {
         let mut sections = vec![RootSectionTokens {
             tokens: Vec::new(),
             name: None,
+            slide_keyword_span: None,
         }];
         let mut artifacts = ParseArtifacts::default();
         let mut token_index = 0;
 
         while token_index < tokens.len() {
-            if tokens[token_index].0 != Token::Slide {
+            let (token, span) = &tokens[token_index];
+            if *token != Token::Slide {
                 sections
                     .last_mut()
                     .unwrap()
@@ -167,6 +170,7 @@ impl Parser {
             sections.push(RootSectionTokens {
                 tokens: Vec::new(),
                 name: None,
+                slide_keyword_span: Some(span.clone()),
             });
             token_index += 1;
 
@@ -182,6 +186,21 @@ impl Parser {
                 }
                 token_index += 1;
             }
+        }
+
+        for i in 1..sections.len() {
+            let Some(keyword_span) = sections[i].slide_keyword_span.clone() else {
+                continue;
+            };
+            let end = sections
+                .get(i + 1)
+                .and_then(|section| section.slide_keyword_span.as_ref())
+                .map(|span| span.start)
+                .unwrap_or_else(|| text_rope.codeunits());
+            artifacts.root_slides.push(RootSlideInfo {
+                source_range: keyword_span.start..end,
+                keyword_span,
+            });
         }
 
         (sections, artifacts)
@@ -310,6 +329,7 @@ impl Parser {
                 ParseArtifacts {
                     error_diagnostics: p.errors,
                     cursor_possibilities: HashSet::default(),
+                    root_slides: Vec::new(),
                 },
             );
         };

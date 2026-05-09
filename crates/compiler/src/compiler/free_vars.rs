@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use parser::ast::{Expression, IdentifierReference, LambdaBody, Literal, SpanTagged, Statement};
+use parser::ast::{
+    BindingPattern, Expression, IdentifierReference, LambdaBody, Literal, SpanTagged, Statement,
+};
 
 pub(super) struct FreeVarCollector {
     defined: HashSet<String>,
@@ -19,6 +21,17 @@ impl FreeVarCollector {
 
     fn define(&mut self, name: &str) {
         self.defined.insert(name.to_string());
+    }
+
+    fn define_pattern(&mut self, pattern: &BindingPattern) {
+        match pattern {
+            BindingPattern::Identifier(identifier) => self.define(&identifier.0),
+            BindingPattern::List(elements) => {
+                for (_, identifier) in elements {
+                    self.define(&identifier.0);
+                }
+            }
+        }
     }
 
     fn reference(&mut self, name: &str) {
@@ -42,7 +55,7 @@ impl FreeVarCollector {
             Statement::Expression(e) => self.visit_expr(e),
             Statement::Declaration(d) => {
                 self.visit_expr(&d.value.1);
-                self.define(&d.identifier.1.0);
+                self.define_pattern(&d.pattern.1);
             }
             Statement::Return(r) => self.visit_expr(&r.value.1),
             Statement::While(w) => {
@@ -51,7 +64,7 @@ impl FreeVarCollector {
             }
             Statement::For(f) => {
                 self.visit_expr(&f.container.1);
-                self.define(&f.var_name.1.0);
+                self.define_pattern(&f.pattern.1);
                 self.visit_stmts(&f.body.1);
             }
             Statement::If(i) => {
@@ -188,6 +201,17 @@ impl LvalueRefCollector {
         self.defined.insert(name.to_string());
     }
 
+    fn define_pattern(&mut self, pattern: &BindingPattern) {
+        match pattern {
+            BindingPattern::Identifier(identifier) => self.define(&identifier.0),
+            BindingPattern::List(elements) => {
+                for (_, identifier) in elements {
+                    self.define(&identifier.0);
+                }
+            }
+        }
+    }
+
     fn add(&mut self, name: &str) {
         if !self.defined.contains(name) && self.seen.insert(name.to_string()) {
             self.lvalue_refs.push(name.to_string());
@@ -205,7 +229,7 @@ impl LvalueRefCollector {
             Statement::Expression(e) => self.visit_expr(e),
             Statement::Declaration(d) => {
                 self.visit_expr(&d.value.1);
-                self.define(&d.identifier.1.0);
+                self.define_pattern(&d.pattern.1);
             }
             Statement::Return(r) => self.visit_expr(&r.value.1),
             Statement::While(w) => {
@@ -214,7 +238,7 @@ impl LvalueRefCollector {
             }
             Statement::For(f) => {
                 self.visit_expr(&f.container.1);
-                self.define(&f.var_name.1.0);
+                self.define_pattern(&f.pattern.1);
                 self.visit_stmts(&f.body.1);
             }
             Statement::If(i) => {

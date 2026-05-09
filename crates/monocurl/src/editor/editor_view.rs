@@ -14,8 +14,11 @@ use notify_debouncer_full::{
     DebounceEventResult, Debouncer, RecommendedCache, new_debouncer,
     notify::{RecommendedWatcher, RecursiveMode},
 };
+use structs::text::Location8;
 
-use crate::{editor::text_editor::TextEditor, state::textual_state::TextualState};
+use crate::{
+    editor::text_editor::TextEditor, services::ServiceManager, state::textual_state::TextualState,
+};
 
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
 const WATCH_DEBOUNCE: Duration = Duration::from_millis(200);
@@ -38,6 +41,7 @@ pub struct Editor {
 impl Editor {
     pub fn new(
         state: Entity<TextualState>,
+        services: Entity<ServiceManager>,
         path: PathBuf,
         dirty: Entity<bool>,
         window: &mut Window,
@@ -49,6 +53,7 @@ impl Editor {
         let editor = cx.new(|cx| {
             TextEditor::new(
                 state.clone(),
+                services.clone(),
                 window,
                 cx,
                 content.clone(),
@@ -205,6 +210,12 @@ impl Editor {
     pub fn open_find(&mut self, window: &mut Window, cx: &mut App) {
         self.editor.update(cx, |editor, cx| {
             editor.open_find_panel(window, cx);
+        });
+    }
+
+    pub fn jump_to_location(&self, location: Location8, window: &mut Window, cx: &mut App) {
+        self.editor.update(cx, |editor, cx| {
+            editor.jump_to_location(location, window, cx);
         });
     }
 

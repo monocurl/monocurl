@@ -24,6 +24,21 @@ let colors = ["left" -> BLUE, "right" -> ORANGE]
 let f = |x, y = 1| x + y
 ```
 
+`let`, `var`, and `for` loop binders can destructure one-level list-shaped values:
+
+```monocurl
+let [left, right] = [-1, 1]
+var [x, y, z] = [0, 0, 0]
+
+for ([i, value] in enumerate(values)) {
+    print [i, value]
+}
+```
+
+Destructuring must match the value's list length exactly; nested binding
+patterns are not supported. `mesh` and `param`
+declarations cannot be destructured because they create named scene leaders.
+
 `x .. y` appends `y` to `x`. `x .= y` is shorthand for `x = x .. y`.
 Deep-copy assignment is intentional: it keeps ordinary values simple and avoids
 reference cycles. If you need mutation to affect a visible value over time, use

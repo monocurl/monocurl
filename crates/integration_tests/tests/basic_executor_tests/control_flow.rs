@@ -34,6 +34,36 @@ fn test_exec_destructure() {
     r.assert_int(1373);
 }
 
+#[test]
+fn test_exec_destructuring_let_declaration() {
+    let r = run("
+        let [a, b, c] = [2, 3, 4]
+        let result = a * 100 + b * 10 + c
+    ");
+    r.assert_int(234);
+}
+
+#[test]
+fn test_exec_destructuring_initializer_uses_outer_scope() {
+    let r = run("
+        let x = 5
+        let [x] = [x + 1]
+        let result = x
+    ");
+    r.assert_int(6);
+}
+
+#[test]
+fn test_exec_destructuring_var_declaration() {
+    let r = run("
+        var [a, b] = [1, 2]
+        a = a + 10
+        b = b + 20
+        let result = a * 100 + b
+    ");
+    r.assert_int(1122);
+}
+
 // -- if / else --
 
 #[test]
@@ -171,6 +201,21 @@ fn test_exec_for_loop_sum() {
         }
     ");
     r.assert_int(15);
+}
+
+#[test]
+fn test_exec_for_loop_destructuring_with_enumerate() {
+    let r = run_with_stdlib(
+        "
+        var total = 0
+        for ([i, value] in enumerate([4, 5, 6])) {
+            total = total + i * 10 + value
+        }
+        let result = total
+    ",
+        &["util"],
+    );
+    r.assert_int(45);
 }
 
 #[test]

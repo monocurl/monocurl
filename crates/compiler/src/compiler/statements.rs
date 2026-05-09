@@ -51,13 +51,34 @@ impl Compiler {
     }
 
     pub(super) fn compile_declaration(&mut self, d: &Declaration, span: &Span8) {
-        self.compile_val(&d.value.1, &d.value.0);
         let vt = match d.var_type {
             AstVariableType::Let => VariableType::Let,
             AstVariableType::Var => VariableType::Var,
             AstVariableType::Mesh => VariableType::Mesh,
             AstVariableType::Param => VariableType::Param,
         };
+
+        if d.pattern.1.as_identifier().is_none() {
+            if matches!(vt, VariableType::Mesh | VariableType::Param) {
+                self.error(
+                    d.pattern.0.clone(),
+                    "cannot destructure initialize a mesh or parameter",
+                );
+                self.compile_val(&d.value.1, &d.value.0);
+                self.emit_pops(1, span.clone());
+                return;
+            }
+
+            let BindingPattern::List(elements) = &d.pattern.1 else {
+                unreachable!("destructuring binding must be a list pattern");
+            };
+            self.compile_list_binding(elements, vt, true, &d.pattern.0, span, |compiler| {
+                compiler.compile_val(&d.value.1, &d.value.0);
+            });
+            return;
+        }
+
+        self.compile_val(&d.value.1, &d.value.0);
         let is_library = self.current_section().flags.is_library;
         match vt {
             VariableType::Param if is_library => {
@@ -71,7 +92,30 @@ impl Compiler {
             }
             _ => {}
         }
-        let name = &d.identifier.1.0;
+        let name = &d.pattern.1.as_identifier().unwrap().0;
+        self.validate_declared_name(name, vt, span);
+        match vt {
+            VariableType::Mesh => {
+                let ni = self.intern_string(name);
+                self.emit(Instruction::ConvertMesh { name_index: ni }, span.clone());
+            }
+            VariableType::Param => {
+                let ni = self.intern_string(name);
+                self.emit(Instruction::ConvertParam { name_index: ni }, span.clone());
+            }
+            VariableType::Let | VariableType::Var | VariableType::Reference => {
+                self.emit(
+                    Instruction::ConvertVar {
+                        allow_stateful: false,
+                    },
+                    span.clone(),
+                );
+            }
+        }
+        self.define_declared_symbol(name, vt, &d.value.1, false);
+    }
+
+    fn validate_declared_name(&mut self, name: &str, vt: VariableType, span: &Span8) {
         let existing_param = self.frame().scopes.iter().any(|s| {
             s.symbols
                 .get(name)
@@ -95,25 +139,62 @@ impl Compiler {
                 );
             }
         }
-        match vt {
-            VariableType::Mesh => {
-                let ni = self.intern_string(&d.identifier.1.0);
-                self.emit(Instruction::ConvertMesh { name_index: ni }, span.clone());
-            }
-            VariableType::Param => {
-                let ni = self.intern_string(&d.identifier.1.0);
-                self.emit(Instruction::ConvertParam { name_index: ni }, span.clone());
-            }
-            VariableType::Let | VariableType::Var | VariableType::Reference => {
-                self.emit(
-                    Instruction::ConvertVar {
-                        allow_stateful: false,
-                    },
+    }
+
+    fn compile_list_binding(
+        &mut self,
+        elements: &[SpanTagged<IdentifierDeclaration>],
+        vt: VariableType,
+        validate_names: bool,
+        pattern_span: &Span8,
+        assignment_span: &Span8,
+        compile_value: impl FnOnce(&mut Compiler),
+    ) {
+        let mut seen = HashSet::new();
+        let mut bindings = Vec::new();
+
+        // lower as nil slots plus `[a, b] = value`
+        // register symbols after the rhs, so initializers see outer bindings
+        for (span, identifier) in elements {
+            if !seen.insert(identifier.0.clone()) {
+                self.error(
                     span.clone(),
+                    &format!("duplicate binding pattern identifier '{}'", identifier.0),
                 );
             }
+            if validate_names {
+                self.validate_declared_name(&identifier.0, vt, span);
+            }
+
+            self.emit_push(Instruction::PushNil, span.clone());
+            bindings.push((span.clone(), identifier.0.clone(), self.stack_depth() - 1));
+            self.emit(
+                Instruction::ConvertVar {
+                    allow_stateful: false,
+                },
+                span.clone(),
+            );
         }
-        self.define_declared_symbol(&d.identifier.1.0, vt, &d.value.1, false);
+
+        compile_value(self);
+        let value_pos = self.stack_depth() - 1;
+
+        self.emit_push(Instruction::PushEmptyList, pattern_span.clone());
+        for (binding_span, _, position) in &bindings {
+            let delta = self.stack_delta(*position);
+            self.emit_lvalue(delta, binding_span.clone());
+            self.emit(Instruction::Append, pattern_span.clone());
+            self.dec_stack(1);
+        }
+        let delta = self.stack_delta(value_pos);
+        self.emit_copy(delta, assignment_span.clone());
+        self.emit(Instruction::Assign, assignment_span.clone());
+        self.dec_stack(1);
+        self.emit_pops(2, assignment_span.clone());
+
+        for (_, name, position) in bindings {
+            self.register_symbol(&name, vt, SymbolFunctionInfo::None, position, false);
+        }
     }
 
     pub(super) fn compile_while(&mut self, w: &While, span: &Span8) {
@@ -221,27 +302,17 @@ impl Compiler {
 
         // body scope with the for variable
         self.push_scope();
-        let d = self.stack_delta(iter_pos);
-        self.emit_copy(d, container_span.clone());
-        let d = self.stack_delta(idx_pos);
-        self.emit_copy(d, span.clone());
-        self.emit(
-            Instruction::Subscript { mutable: false },
-            container_span.clone(),
-        );
-        self.dec_stack(1);
-        self.define_symbol(
-            &f.var_name.1.0,
-            VariableType::Let,
-            SymbolFunctionInfo::None,
-            false,
-        );
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            span.clone(),
-        );
+        self.compile_for_binding(&f.pattern, span, |compiler| {
+            let d = compiler.stack_delta(iter_pos);
+            compiler.emit_copy(d, container_span.clone());
+            let d = compiler.stack_delta(idx_pos);
+            compiler.emit_copy(d, span.clone());
+            compiler.emit(
+                Instruction::Subscript { mutable: false },
+                container_span.clone(),
+            );
+            compiler.dec_stack(1);
+        });
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone()); // depth = loop_stack
@@ -337,20 +408,10 @@ impl Compiler {
         });
 
         self.push_scope();
-        let d = self.stack_delta(current_pos);
-        self.emit_copy(d, start.0.clone());
-        self.define_symbol(
-            &f.var_name.1.0,
-            VariableType::Let,
-            SymbolFunctionInfo::None,
-            false,
-        );
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            span.clone(),
-        );
+        self.compile_for_binding(&f.pattern, span, |compiler| {
+            let d = compiler.stack_delta(current_pos);
+            compiler.emit_copy(d, start.0.clone());
+        });
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone());
@@ -381,6 +442,42 @@ impl Compiler {
         }
 
         self.pop_scope(span.clone());
+    }
+
+    fn compile_for_binding(
+        &mut self,
+        pattern: &SpanTagged<BindingPattern>,
+        span: &Span8,
+        compile_value: impl FnOnce(&mut Compiler),
+    ) {
+        if let BindingPattern::Identifier(identifier) = &pattern.1 {
+            compile_value(self);
+            self.define_symbol(
+                &identifier.0,
+                VariableType::Let,
+                SymbolFunctionInfo::None,
+                false,
+            );
+            self.emit(
+                Instruction::ConvertVar {
+                    allow_stateful: false,
+                },
+                span.clone(),
+            );
+            return;
+        }
+
+        let BindingPattern::List(elements) = &pattern.1 else {
+            unreachable!("destructuring binding must be a list pattern");
+        };
+        self.compile_list_binding(
+            elements,
+            VariableType::Let,
+            false,
+            &pattern.0,
+            span,
+            compile_value,
+        );
     }
 
     fn stdlib_range_bounds(

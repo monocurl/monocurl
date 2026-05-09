@@ -110,7 +110,6 @@ impl PopoverElement {
                         let category = item1.category;
                         let is_selected = *index == ac.selected_index;
 
-                        let ac_copy = autocomplete_state.clone();
                         let editor_copy = self.editor.clone();
 
                         div().child(
@@ -132,14 +131,7 @@ impl PopoverElement {
                                     window.prevent_default();
                                     cx.stop_propagation();
                                     editor_copy.update(cx, |editor, cx| {
-                                        AutoCompleteState::apply_index(
-                                            &ac_copy,
-                                            index_copy,
-                                            editor,
-                                            editor.state.clone(),
-                                            window,
-                                            cx,
-                                        );
+                                        editor.apply_autocomplete_index(index_copy, window, cx);
                                     });
                                 })
                                 .child(

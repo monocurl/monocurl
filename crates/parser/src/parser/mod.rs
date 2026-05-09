@@ -15,11 +15,12 @@ use structs::{
 
 use crate::{
     ast::{
-        Anim, BinaryOperator, BinaryOperatorType, Block, Declaration, DirectionalLiteral,
-        Expression, For, IdentifierDeclaration, IdentifierReference, If, LambdaArg, LambdaBody,
-        LambdaDefinition, LambdaInvocation, Literal, NativeInvocation, OperatorDefinition,
-        OperatorInvocation, Play, Print, Property, Return, Section, SectionBundle, SectionType,
-        SpanTagged, Statement, Subscript, UnaryOperatorType, UnaryPreOperator, VariableType, While,
+        Anim, BinaryOperator, BinaryOperatorType, BindingPattern, Block, Declaration,
+        DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If,
+        LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation,
+        OperatorDefinition, OperatorInvocation, Play, Print, Property, Return, Section,
+        SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType,
+        UnaryPreOperator, VariableType, While,
     },
     flatten_rope,
     import_context::{FileResult, ParseImportContext},
@@ -325,6 +326,12 @@ pub struct Diagnostic {
     pub message: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootSlideInfo {
+    pub keyword_span: Span8,
+    pub source_range: Span8,
+}
+
 pub struct SectionParser {
     precomputation: Precomputation,
     state: ShortTermState,
@@ -345,12 +352,14 @@ pub struct SectionParser {
 pub struct ParseArtifacts {
     pub error_diagnostics: Vec<Diagnostic>,
     pub cursor_possibilities: HashSet<Token>,
+    pub root_slides: Vec<RootSlideInfo>,
 }
 
 impl ParseArtifacts {
     fn extend(&mut self, other: ParseArtifacts) {
         self.error_diagnostics.extend(other.error_diagnostics);
         self.cursor_possibilities.extend(other.cursor_possibilities);
+        self.root_slides.extend(other.root_slides);
     }
 }
 

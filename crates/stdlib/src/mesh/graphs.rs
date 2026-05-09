@@ -17,6 +17,7 @@ use stdlib_macros::stdlib_func;
 use super::{
     constructors::{VectorLikeStyle, vector_like_mesh_with_style},
     helpers::*,
+    implicit2d,
 };
 
 const MAX_CURVE_SAMPLES: usize = 1 << 14;
@@ -1887,11 +1888,12 @@ pub async fn mk_implicit2d(
     let nx = x_samples - 1;
     let ny = y_samples - 1;
     ensure_grid_cells("implicit surface cells", nx, ny)?;
-    let mut vals = vec![vec![0.0f32; y_samples]; x_samples];
+    let sign_stride = x_samples + 2;
+    let mut sign = vec![false; (y_samples + 2) * sign_stride];
     let mut coords = Vec::with_capacity(x_samples * y_samples);
     let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
-    for ix in 0..x_samples {
-        for iy in 0..y_samples {
+    for iy in 0..y_samples {
+        for ix in 0..x_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             coords.push((ix, iy));
@@ -1900,7 +1902,7 @@ pub async fn mk_implicit2d(
     }
     let values = invoke_callable_many(executor, &f, &args, "f").await?;
     for ((ix, iy), value) in coords.into_iter().zip(values) {
-        vals[ix][iy] = match value {
+        let value = match value {
             Value::Float(v) => v as f32,
             Value::Integer(v) => v as f32,
             other => {
@@ -1911,39 +1913,18 @@ pub async fn mk_implicit2d(
                 ));
             }
         };
+        sign[(iy + 1) * sign_stride + ix + 1] = value <= 0.0;
     }
 
-    let mut lins = Vec::new();
-    for ix in 0..nx {
-        for iy in 0..ny {
-            let xa = x0 + (x1 - x0) * ix as f32 / nx as f32;
-            let xb = x0 + (x1 - x0) * (ix + 1) as f32 / nx as f32;
-            let ya = y0 + (y1 - y0) * iy as f32 / ny as f32;
-            let yb = y0 + (y1 - y0) * (iy + 1) as f32 / ny as f32;
-            let corners = [
-                (Float3::new(xa, ya, 0.0), vals[ix][iy]),
-                (Float3::new(xb, ya, 0.0), vals[ix + 1][iy]),
-                (Float3::new(xb, yb, 0.0), vals[ix + 1][iy + 1]),
-                (Float3::new(xa, yb, 0.0), vals[ix][iy + 1]),
-            ];
-            let mut hits = Vec::new();
-            for edge in [(0usize, 1usize), (1, 2), (2, 3), (3, 0)] {
-                let (pa, va) = corners[edge.0];
-                let (pb, vb) = corners[edge.1];
-                if (va <= 0.0 && vb >= 0.0) || (va >= 0.0 && vb <= 0.0) {
-                    let denom = (vb - va).abs().max(1e-6);
-                    let t = (-va / denom).clamp(0.0, 1.0);
-                    hits.push(pa.lerp(pb, t));
-                }
-            }
-            if hits.len() >= 2 {
-                lins.push(default_lin(hits[0], hits[1], Float3::Z));
-            }
-            if hits.len() >= 4 {
-                lins.push(default_lin(hits[2], hits[3], Float3::Z));
-            }
-        }
-    }
+    let lins = implicit2d::contour_lins(
+        &sign,
+        y_samples,
+        x_samples,
+        x0,
+        y0,
+        (x1 - x0) / nx as f32,
+        (y1 - y0) / ny as f32,
+    );
     Ok(mesh_from_parts(vec![], lins, vec![]))
 }
 

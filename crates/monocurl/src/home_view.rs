@@ -17,6 +17,10 @@ const HOME_LOGO_WIDE_FRACTION: f32 = 0.58;
 const HOME_LOGO_MIN_EXPANDED_WIDTH: f32 = 520.0;
 const HOME_LOGO_MAX_WIDTH: f32 = 960.0;
 const HOME_LOGO_CARD_MAX_WIDTH: f32 = 430.0;
+const APP_VERSION: &str = match option_env!("MONOCURL_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
 
 #[derive(Clone, Copy)]
 struct LogoMetrics {
@@ -151,6 +155,7 @@ impl HomeView {
 
     fn render_logo(&self, metrics: LogoMetrics, cx: &mut Context<Self>) -> AnyElement {
         let theme = ThemeSettings::theme(cx);
+        let version = format!("v{APP_VERSION}");
 
         div()
             .flex()
@@ -158,6 +163,7 @@ impl HomeView {
             .flex_col()
             .justify_center()
             .items_center()
+            .relative()
             .overflow_hidden()
             .child(
                 div().child(
@@ -215,6 +221,17 @@ impl HomeView {
                         .max_w(px(metrics.card_width))
                         .overflow_hidden(),
                 ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .right(px(18.0))
+                    .bottom(px(14.0))
+                    .text_size(px(11.0))
+                    .line_height(px(14.0))
+                    .text_color(theme.text_muted)
+                    .opacity(metrics.links_opacity)
+                    .child(version),
             )
             .bg(theme.home_sidebar_background)
             .min_w(px(0.0))

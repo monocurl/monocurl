@@ -3,6 +3,7 @@ use gpui::*;
 
 use crate::{
     actions::{ZoomIn, ZoomOut},
+    editor::editor_view::Editor,
     services::ServiceManager,
     theme::ThemeSettings,
 };
@@ -25,6 +26,7 @@ pub enum BottomPanelMode {
 
 pub struct Timeline {
     pub(super) services: Entity<ServiceManager>,
+    pub(super) editor: WeakEntity<Editor>,
     pub(super) scroll: ScrollHandle,
     pub(super) console_scroll: ScrollHandle,
     pub(super) zoom_idx: usize,
@@ -33,7 +35,11 @@ pub struct Timeline {
 }
 
 impl Timeline {
-    pub fn new(services: Entity<ServiceManager>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        services: Entity<ServiceManager>,
+        editor: WeakEntity<Editor>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let execution_state = services.read(cx).execution_state().clone();
         cx.observe(&execution_state, |this, es, cx| {
             let exec = es.read(cx);
@@ -55,11 +61,34 @@ impl Timeline {
 
         Self {
             services,
+            editor,
             scroll: ScrollHandle::new(),
             console_scroll: ScrollHandle::new(),
             zoom_idx: DEFAULT_ZOOM_IDX,
             panel_mode: BottomPanelMode::Timeline,
             is_scrubbing: false,
+        }
+    }
+
+    pub(super) fn jump_editor_to_slide(
+        &self,
+        slide_index: usize,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) {
+        let location = self
+            .services
+            .read(cx)
+            .textual_state()
+            .read(cx)
+            .slides()
+            .get(slide_index)
+            .map(|s| s.header_end);
+        let Some(location) = location else { return };
+        if let Some(editor) = self.editor.upgrade() {
+            editor.update(cx, |editor, cx| {
+                editor.jump_to_location(location, window, cx)
+            });
         }
     }
 
@@ -392,6 +421,7 @@ impl Render for Timeline {
         let body: AnyElement = match self.panel_mode {
             BottomPanelMode::Timeline => {
                 let track = render_track(
+                    cx.weak_entity(),
                     current_timestamp,
                     target_timestamp,
                     slide_count,

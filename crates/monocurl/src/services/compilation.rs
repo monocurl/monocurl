@@ -16,6 +16,7 @@ use structs::text::{Count8, Location8, Span8};
 use crate::state::diagnostics::{Diagnostic, DiagnosticType};
 use crate::state::textual_state::{
     AutoCompleteCategory, AutoCompleteItem, Cursor, ParameterHintArg, ParameterPositionHint,
+    SlideInfo,
 };
 use crate::{
     services::{ServiceManagerMessage, execution::ExecutionMessage},
@@ -122,6 +123,38 @@ impl CompilationService {
             .unwrap();
     }
 
+    fn slide_info_from_parse(
+        parse_artifacts: &ParseArtifacts,
+        text_rope: &Rope<TextAggregate>,
+    ) -> Vec<SlideInfo> {
+        fn line_end_location(text_rope: &Rope<TextAggregate>, line: usize) -> Location8 {
+            let offset = text_rope
+                .utf8_line_pos_prefix(line, usize::MAX)
+                .bytes_utf8
+                .min(text_rope.codeunits());
+            let summary = text_rope.utf8_prefix_summary(offset);
+            Location8 {
+                row: summary.newlines,
+                col: summary.bytes_utf8_since_newline,
+            }
+        }
+
+        parse_artifacts
+            .root_slides
+            .iter()
+            .map(|slide| {
+                let start = slide.keyword_span.start;
+                let line = text_rope.utf8_prefix_summary(start).newlines;
+                SlideInfo {
+                    start_offset: start,
+                    source_range: slide.source_range.clone(),
+                    line,
+                    header_end: line_end_location(text_rope, line),
+                }
+            })
+            .collect()
+    }
+
     #[must_use]
     async fn recompile(
         &mut self,
@@ -136,8 +169,14 @@ impl CompilationService {
 
         let (parsed_bundles, parse_artifacts) =
             Parser::parse(parse_state, lex_rope.clone(), text_rope.clone(), cursor_pos);
+        let slides = Self::slide_info_from_parse(&parse_artifacts, &text_rope);
         let compile_result = compile(compile_state, cursor_pos, &parsed_bundles);
         let analysis_rope = static_analysis_rope(&compile_result, text_rope.codeunits());
+
+        self.sm_tx
+            .send(ServiceManagerMessage::UpdateSlideInfo { slides, version })
+            .await
+            .unwrap();
 
         self.sm_tx
             .send(ServiceManagerMessage::UpdateStaticAnalysisRope {
@@ -253,5 +292,45 @@ impl CompilationService {
                 .await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lexer::lexer::Lexer;
+    use structs::rope::RLEData;
+
+    fn lex_rope(src: &str) -> Rope<Attribute<LexData>> {
+        Rope::default().replace_range(
+            0..0,
+            Lexer::new(src.chars()).map(|(attribute, codeunits)| RLEData {
+                codeunits,
+                attribute,
+            }),
+        )
+    }
+
+    #[test]
+    fn slide_info_from_parse_tracks_header_end_and_section_ranges() {
+        let src = "mesh c = circle()\nslide \"Intro\"\n  show c\nslide second\n  hide c\n";
+        let text_rope = Rope::from_str(src);
+        let mut parse_state = ParseImportContext {
+            root_file_path: PathBuf::from("scene.mcs"),
+            open_tab_ropes: Default::default(),
+            cached_parses: Default::default(),
+        };
+        let (_, parse_artifacts) =
+            Parser::parse(&mut parse_state, lex_rope(src), text_rope.clone(), None);
+        let slides = CompilationService::slide_info_from_parse(&parse_artifacts, &text_rope);
+
+        assert_eq!(slides.len(), 2);
+        assert_eq!(slides[0].line, 1);
+        assert_eq!(slides[0].header_end, Location8 { row: 1, col: 13 });
+        assert_eq!(slides[0].source_range.start, slides[0].start_offset);
+        assert_eq!(slides[0].source_range.end, slides[1].start_offset);
+        assert_eq!(slides[1].line, 3);
+        assert_eq!(slides[1].header_end, Location8 { row: 3, col: 12 });
+        assert_eq!(slides[1].source_range.end, src.len());
     }
 }

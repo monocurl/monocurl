@@ -170,7 +170,7 @@ impl SectionParser {
         let base_span = self.advance_token();
 
         self.read_token_best_effort(Token::LParen);
-        let identifier = self.parse_identifier_declaration();
+        let pattern = self.parse_binding_pattern();
         self.read_token_best_effort(Token::In);
 
         let container = self.parse_expr_best_effort();
@@ -183,7 +183,7 @@ impl SectionParser {
         (
             base_span.start..terminal.end,
             For {
-                var_name: identifier,
+                pattern,
                 body: (terminal, body),
                 container,
             },
@@ -249,7 +249,16 @@ impl SectionParser {
 
     pub(super) fn parse_declaration(&mut self, var_type: VariableType) -> SpanTagged<Declaration> {
         let base_span = self.advance_token();
-        let identifier = self.parse_identifier_declaration();
+        if matches!(var_type, VariableType::Mesh | VariableType::Param)
+            && matches!(self.peek_token(), Some((Token::LBracket, _)))
+        {
+            self.emit_error(
+                "Invalid Destructuring Declaration".into(),
+                "cannot destructure initialize a mesh or parameter".into(),
+                self.peek_token().unwrap().1.clone(),
+            );
+        }
+        let pattern = self.parse_binding_pattern();
         self.read_token(Token::Assign).ok();
         let value = self.parse_expr_best_effort();
 
@@ -257,7 +266,7 @@ impl SectionParser {
             base_span.start..value.0.end,
             Declaration {
                 var_type,
-                identifier,
+                pattern,
                 value,
             },
         )
@@ -285,6 +294,82 @@ impl SectionParser {
         }
 
         (span, IdentifierDeclaration(identifier))
+    }
+
+    pub(super) fn parse_binding_pattern(&mut self) -> SpanTagged<BindingPattern> {
+        if matches!(self.peek_token(), Some((Token::LBracket, _))) {
+            self.parse_list_binding_pattern()
+        } else {
+            let (span, identifier) = self.parse_identifier_declaration();
+            (span, BindingPattern::Identifier(identifier))
+        }
+    }
+
+    fn parse_list_binding_pattern(&mut self) -> SpanTagged<BindingPattern> {
+        self.debug_assert_token_eq(Token::LBracket);
+        let inner_range = self.precomputation.bracket_internal_range(self.token_index);
+        let base_span = self.advance_token();
+
+        self.state.push_frame(|frame| {
+            frame.operating_range = inner_range;
+        });
+
+        let mut elements = Vec::new();
+        loop {
+            self.advance_newlines();
+            if self.peek_token().is_none() {
+                break;
+            }
+
+            let before = self.token_index;
+            if !elements.is_empty() {
+                self.read_token_best_effort(Token::Comma);
+                self.advance_newlines();
+                if self.peek_token().is_none() {
+                    break;
+                }
+            }
+
+            match self.peek_token() {
+                Some((Token::LBracket, span)) => {
+                    self.emit_error(
+                        "Invalid Destructuring Pattern".into(),
+                        "nested destructuring patterns are not supported".into(),
+                        span.clone(),
+                    );
+                    self.skip_nested_binding_pattern();
+                }
+                _ => elements.push(self.parse_identifier_declaration()),
+            }
+            if self.token_index == before {
+                break;
+            }
+        }
+
+        self.state.pop_frame();
+
+        self.advance_newlines();
+        let end_span = self.read_token_best_effort(Token::RBracket);
+        (
+            base_span.start..end_span.end,
+            BindingPattern::List(elements),
+        )
+    }
+
+    fn skip_nested_binding_pattern(&mut self) {
+        self.debug_assert_token_eq(Token::LBracket);
+        let inner_range = self.precomputation.bracket_internal_range(self.token_index);
+        self.advance_token();
+
+        self.state.push_frame(|frame| {
+            frame.operating_range = inner_range;
+        });
+        while self.peek_token().is_some() {
+            self.advance_token();
+        }
+        self.state.pop_frame();
+
+        self.read_token_best_effort(Token::RBracket);
     }
 
     pub(super) fn parse_body(
