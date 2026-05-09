@@ -19,17 +19,41 @@ in
     config = mkIf cfg.enable {
       home = {
         packages = [cfg.package];
-      };
 
-      xdg.desktopEntries.monocurl = {
-        type = "Application";
-        name = "Monocurl";
-        comment = "Mathematical animation editor";
-        exec = "${cfg.package}/bin/monocurl %F";
-        icon = "monocurl";
-        terminal = false;
-        categories = ["Education"];
+        file = let
+          iconSet = builtins.fromJSON (builtins.readFile ../assets/AppIcon.appiconset/Contents.json);
+        in
+          builtins.listToAttrs (builtins.map ({
+              size,
+              filename,
+              ...
+            }: {
+              name = ".local/share/icons/hicolor/${size}/apps/monocurl.png";
+              value = {
+                src = ../assets/AppIcon.appiconset ++ "/${filename}";
+              };
+            })
+            iconSet.images);
+      };
+      xdg = let
         mimeType = ["text/x-monocurl-scene" "text/x-monocurl-library"];
+      in {
+        desktopEntries.monocurl = {
+          type = "Application";
+          name = "Monocurl";
+          comment = "Mathematical animation editor";
+          exec = "${cfg.package}/bin/monocurl %F";
+          icon = "monocurl";
+          terminal = false;
+          categories = ["Education"];
+
+          inherit mimeType;
+        };
+        mimeApps = builtins.listToAttrs (builtins.map (mt: {
+            name = mt;
+            value = "monocurl.desktop";
+          })
+          mimeType);
       };
     };
   }
