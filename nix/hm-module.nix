@@ -9,7 +9,7 @@ in
   with lib; {
     options.programs.monocurl = {
       enable = mkEnableOption "monocurl";
-      package = mkOpion {
+      package = mkOption {
         description = "Package for monocurl";
         default = packages.${pkgs.stdenv.hostPlatform.system}.default;
         type = types.package;
