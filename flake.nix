@@ -90,10 +90,7 @@
               buildInputs
               ++ runtimeLibs;
 
-            cargoTestCommand = ''
-              MONOCURL_ASSETS_DIR=${./assets} cargo test --profile release
-            '';
-            cargoTextExtraArgs = let
+            cargoTestCommand = let
               # Skipping these tests due to nixs sandboxed builds with no write
               # priviledges
               skippedTests = [
@@ -107,9 +104,32 @@
                 "sync::test_text_trans_between_hole_heavy_strings_stays_stable"
                 "sync::test_text_trans_between_strings_stays_stable"
                 "sync::test_text_trans_h_to_b_preserves_hole_winding_at_end"
+
+                "live_values::test_axis2d_grid_spans_plot_area"
+                "live_values::test_axis2d_infers_scale_from_basis_vectors"
+                "live_values::test_axis2d_separates_axis_and_grid_color"
+                "live_values::test_axis2d_uses_leading_optional_axis_labels"
+                "live_values::test_axis3d_draws_axis_arrows_after_grid"
+                "live_values::test_axis3d_label_up_controls_title_orientation"
+                "live_values::test_axis_large_ticks_have_larger_stroke_radius"
+                "live_values::test_axis_style_arrow_extrusion_controls_bounds"
+                "live_values::test_axis_style_nil_label_map_suppresses_tick_labels"
+                "live_values::test_axis_style_updates_axis_defaults"
+                "live_values::test_label_buffer_controls_offset_distance"
+                "live_values::test_label_matches_latex_next_to_geometry"
+                "live_values::test_label_places_latex_to_requested_side"
+                "live_values::test_label_preserves_cross_axis_alignment"
+                "live_values::test_number_constructor_accepts_decimal_and_sign_options"
+                "live_values::test_tex_and_latex_accept_list_string_inputs"
+                "live_values::test_text_tag_operator_tags_text_backends"
+
+                "number::tests::number_renderer_lays_out_cached_glyphs"
+                "render::tests::tex_and_text_have_similar_scale"
+                "render::tests::tex_digits_and_letters_keep_expected_bounds"
+                "render::tests::text_monocurl_has_consistent_topology"
               ];
               skippedTestsStr = pkgs.lib.concatStringsSep " " (pkgs.lib.map (testId: "--skip=${testId}") skippedTests);
-            in "-- ${skippedTestsStr} ";
+            in "MONOCURL_ASSETS_DIR=${./assets} cargo test --profile release -j $NIX_BUILD_CORES --offline -- --test-threads=$NIX_BUILD_CORES ${skippedTestsStr}";
 
             installPhaseCommand = let
               iconSet = builtins.fromJSON (builtins.readFile ./assets/AppIcon.appiconset/Contents.json);
