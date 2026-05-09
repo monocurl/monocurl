@@ -91,9 +91,29 @@
               buildInputs
               ++ runtimeLibs;
 
+            cargoTestCommand = ''
+              MONOCURL_ASSETS_DIR=${./assets} cargo test --profile release
+            '';
+
+            installPhaseCommand = let
+              iconSet = builtins.fromJSON (builtins.readFile ./assets/AppIcon.appiconset/Contents.json);
+
+              installIcons = builtins.map ({
+                size,
+                filename,
+                ...
+              }: "install -Dm444 ${./assets/AppIcon.appiconset}/${filename} $out/share/monocurl/icons/hicolor/${size}/apps/monocurl.png")
+              iconSet.images;
+            in ''
+              mkdir -p $out
+
+              ${builtins.concatStringsSep "\n" installIcons}
+            '';
+
             postInstall = ''
               wrapProgram $out/bin/monocurl \
                 --prefix LD_LIBRARY_PATH : ${LD_LIBRARY_PATH}
+                --set MONOCURL_ASSETS_DIR ${./assets}
             '';
           });
       in {
@@ -111,7 +131,47 @@
           checks = self.checks.${system};
 
           inherit LD_LIBRARY_PATH CFLAGS CXXFLAGS;
+
+          packages = with pkgs; [
+            rust-analyzer
+          ];
         };
       }
-    );
+    )
+    // {
+      homeModules = {
+        config,
+        pkgs,
+        ...
+      }:
+        with pkgs.lib; {
+          options = {
+            programs.monocurl = {
+              enable = mkEnableOption "monocurl";
+              package = mkOpion {
+                description = "Package for monocurl";
+                default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+                type = types.package;
+              };
+            };
+          };
+
+          config = mkIf config.programs.monocurl.enable {
+            home = {
+              xdg.desktopEntries.monocurl = {
+                type = "Application";
+                name = "Monocurl";
+                comment = "Mathematical animation editor";
+                exec = "${config.programs.monocurl.package}/bin/monocurl %F";
+                icon = "monocurl";
+                terminal = false;
+                categories = ["Education"];
+                mimeType = ["text/x-monocurl-scene" "text/x-monocurl-library"];
+              };
+
+              packages = [config.programs.monocurl.package];
+            };
+          };
+        };
+    };
 }
