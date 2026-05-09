@@ -2,9 +2,9 @@
 
 ![Monocurl Editor](.github/assets/monocurl-editor.webp)
 
-Monocurl is a desktop application and programming language for creating mathematical animations. It is built for the workflow where code, preview, timeline, presentation controls, and rendered output all live in one place.
+Monocurl is a programming language and desktop application for creating mathematical animations interactively. It is capable of generating slideshows, videos, and images.
 
-[Website and Download](https://monocurl.com)
+[Website and Download](https://monocurl.com) [Discord](https://discord.gg/7g94JR3SAD)
 
 ## What It Does
 
@@ -37,7 +37,6 @@ See [BUILDING.md](BUILDING.md) for macOS, Linux, and Windows dependencies,
 `pkg-config` setup, and the recommended `.cargo/config.toml` environment.
 
 ```sh
-cargo build --package monocurl
 cargo run --package monocurl
 ```
 
@@ -50,4 +49,4 @@ monocurl transcript scene.mcs
 ```
 
 ## Discord
-Talk with us on the [Monocurl Discord](https://discord.gg/7g94JR3SAD) for support, feedback, and discussion.
+Talk with us on the [Monocurl Discord](https://discord.gg/7g94JR3SAD) for showcasing your work, help, and discussion.
