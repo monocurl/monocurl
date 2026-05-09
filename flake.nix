@@ -140,6 +140,7 @@
     )
     // {
       homeModules = {
+        default = self.homeModules.monocurl;
         monocurl = {
           config,
           pkgs,
@@ -172,7 +173,7 @@
                   mimeType = ["text/x-monocurl-scene" "text/x-monocurl-library"];
                 };
 
-                packages = [config.package];
+                packages = [cfg.package];
               };
             };
           };
