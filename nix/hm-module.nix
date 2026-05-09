@@ -11,7 +11,7 @@ in
       enable = mkEnableOption "monocurl";
       package = mkOpion {
         description = "Package for monocurl";
-        default = self.packages.${pkgs.stdenv.hostPlatform.system}.default;
+        default = packages.${pkgs.stdenv.hostPlatform.system}.default;
         type = types.package;
       };
     };
