@@ -335,6 +335,19 @@ impl DocumentView {
         .divider_color(divider_color)
     }
 
+    fn render_editor(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        div()
+            .id("main-editor-panel")
+            .size_full()
+            .on_mouse_down_out(cx.listener(|this, _, window, cx| {
+                let editor_contains_focus = this.editor.read(cx).contains_focused(window, cx);
+                if editor_contains_focus {
+                    this.focus_document_shell(window, cx);
+                }
+            }))
+            .child(self.editor.clone())
+    }
+
     fn render_editing(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
         let should_hide_editor =
@@ -345,7 +358,7 @@ impl DocumentView {
         } else {
             Split::new(
                 Axis::Horizontal,
-                self.editor.clone().into_any_element(),
+                self.render_editor(cx).into_any_element(),
                 self.viewport_timeline(theme.split_divider)
                     .into_any_element(),
             )

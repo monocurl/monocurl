@@ -219,6 +219,13 @@ impl Editor {
         });
     }
 
+    pub fn contains_focused(&self, window: &Window, cx: &App) -> bool {
+        self.editor
+            .read(cx)
+            .editor_focus_handle()
+            .contains_focused(window, cx)
+    }
+
     pub fn next_undo_requires_reload_confirmation(&self, cx: &App) -> bool {
         self.editor
             .read(cx)
