@@ -30,7 +30,7 @@ in
             }: {
               name = ".local/share/icons/hicolor/${size}/apps/monocurl.png";
               value = {
-                src = ../assets/AppIcon.appiconset ++ "/${filename}";
+                src = ../assets/AppIcon.appiconset + "/${filename}";
               };
             })
             iconSet.images);
