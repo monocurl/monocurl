@@ -12,7 +12,10 @@ pub use ui_cli_shared::static_analysis::StaticAnalysisData;
 
 use crate::{
     editor::text_editor::TextEditor,
-    state::diagnostics::{Diagnostic, DiagnosticContainer},
+    state::{
+        diagnostics::{Diagnostic, DiagnosticContainer},
+        text_replacement::TextReplacement,
+    },
 };
 
 mod cursor;
@@ -434,8 +437,8 @@ impl TextualState {
             .borrow_mut()
             .transition(span.clone(), new_text, self);
 
-        self.diagnostics
-            .apply_replacement(span.clone(), new_text.len());
+        let replacement = TextReplacement::new(span.clone(), new_text.len());
+        self.diagnostics.apply_replacement(&replacement);
         self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
             span.clone(),
             std::iter::once(RLEData {
@@ -443,8 +446,8 @@ impl TextualState {
                 attribute: false,
             }),
         );
-        self.apply_transcript_replacement(span.clone(), new_text.len(), transcript_dirty_rows);
-        self.slides.clear();
+        self.apply_transcript_replacement(&replacement, transcript_dirty_rows);
+        self.apply_slide_replacement(&replacement);
 
         // update lex_rope and static analysis rope with best effort of extending the previous runs
         // background threads will do the proper update asynchronously
@@ -511,6 +514,40 @@ impl TextualState {
 
     pub fn len(&self) -> Count8 {
         self.text_rope.codeunits()
+    }
+}
+
+impl TextualState {
+    fn line_end_location(text_rope: &Rope<TextAggregate>, line: usize) -> Location8 {
+        let offset = text_rope
+            .utf8_line_pos_prefix(line, usize::MAX)
+            .bytes_utf8
+            .min(text_rope.codeunits());
+        let summary = text_rope.utf8_prefix_summary(offset);
+        Location8 {
+            row: summary.newlines,
+            col: summary.bytes_utf8_since_newline,
+        }
+    }
+
+    fn apply_slide_replacement(&mut self, replacement: &TextReplacement) {
+        if self.slides.is_empty() {
+            return;
+        }
+
+        let len = self.len();
+        let text_rope = &self.text_rope;
+        for slide in &mut self.slides {
+            slide.start_offset = replacement.map_offset(slide.start_offset).min(len);
+
+            let source_range = replacement.map_span(&slide.source_range);
+            let start = source_range.start.min(len);
+            let end = source_range.end.min(len);
+            slide.source_range = start..end.max(start);
+
+            slide.line = text_rope.utf8_prefix_summary(slide.start_offset).newlines;
+            slide.header_end = Self::line_end_location(text_rope, slide.line);
+        }
     }
 }
 
@@ -814,21 +851,12 @@ impl TextualState {
 
     fn apply_transcript_replacement(
         &mut self,
-        old: Span8,
-        new: Count8,
+        replacement: &TextReplacement,
         mut changed_rows: std::collections::BTreeSet<usize>,
     ) {
         if self.transcript.sections.is_empty() {
             return;
         }
-
-        let modify_pos = |pos: &mut Count8| {
-            if *pos >= old.end {
-                *pos = (*pos - old.len()) + new;
-            } else if *pos > old.start {
-                *pos = old.start;
-            }
-        };
 
         let sections = self
             .transcript
@@ -837,8 +865,7 @@ impl TextualState {
             .map(|section| {
                 let mut section = (**section).clone();
                 for entry in &mut section.entries {
-                    modify_pos(&mut entry.span.start);
-                    modify_pos(&mut entry.span.end);
+                    entry.span = replacement.map_span(&entry.span);
                 }
                 Arc::new(section)
             })

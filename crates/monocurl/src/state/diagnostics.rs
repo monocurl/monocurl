@@ -2,6 +2,7 @@ use gpui::Hsla;
 use smallvec::SmallVec;
 use structs::text::{Count8, Span8};
 
+use crate::state::text_replacement::TextReplacement;
 use crate::theme::TextEditorStyles;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,20 +114,9 @@ impl DiagnosticContainer {
         self.range_map_dirty = false;
     }
 
-    pub fn apply_replacement(&mut self, old: Span8, new: Count8) {
-        let modify_pos = |pos: &mut Count8| {
-            if *pos >= old.end {
-                *pos = (*pos - old.len()) + new;
-            } else if *pos <= old.start {
-                // no change
-            } else {
-                *pos = old.start;
-            }
-        };
-
+    pub(crate) fn apply_replacement(&mut self, replacement: &TextReplacement) {
         self.diagnostics.iter_mut().for_each(|d| {
-            modify_pos(&mut d.span.start);
-            modify_pos(&mut d.span.end);
+            d.span = replacement.map_span(&d.span);
         });
 
         self.range_map_dirty = true;
