@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::text_replacement::TextReplacement;
 
 impl TextEditor {
     pub fn replace(
@@ -9,13 +10,17 @@ impl TextEditor {
         cx: &mut App,
     ) {
         self.report_undo_candidate(utf8_range.clone(), new_text, cx);
+        self.unfold_folds_touched_by_span(utf8_range.clone(), cx);
+        let replacement = TextReplacement::new(utf8_range.clone(), new_text.len());
 
         let (del_range, ins_range) = self.state.update(cx, |state, subcx| {
             let ret = state.replace(utf8_range.clone(), new_text, subcx);
             subcx.notify();
             ret
         });
+        self.remap_folded_slide_starts(&replacement);
         self.reshape_lines(del_range, ins_range, window, cx);
+        self.reapply_folds_after_text_change(cx);
         self.dirty.update(cx, |dirty, _| *dirty = true);
         self.save_dirty.update(cx, |dirty, _| *dirty = true);
         self.refresh_search_after_text_change(cx);

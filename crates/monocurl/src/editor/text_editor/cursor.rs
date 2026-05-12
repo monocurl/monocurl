@@ -5,12 +5,18 @@ impl TextEditor {
         self.state.read(cx).cursor()
     }
 
-    pub(super) fn set_cursor(&self, cursor: Cursor, cx: &mut Context<Self>) {
+    pub(super) fn set_cursor_without_unfolding(&self, cursor: Cursor, cx: &mut App) {
         self.state.update(cx, |state, cx| {
             state.start_transaction();
             state.set_cursor(cursor, cx);
             state.end_transaction(cx);
         });
+        self.debug_assert_cursor_not_in_fold(cx);
+    }
+
+    pub(super) fn set_cursor(&mut self, cursor: Cursor, cx: &mut App) {
+        let cursor = self.unfold_folds_containing_cursor(cursor, cx);
+        self.set_cursor_without_unfolding(cursor, cx);
     }
 
     pub fn reset_cursor_blink(&mut self, cx: &mut Context<Self>) {
@@ -67,11 +73,13 @@ impl TextEditor {
         key_origin: bool,
         cx: &mut Context<Self>,
     ) {
-        self.state.update(cx, |state, cx| {
-            state.start_transaction();
-            state.set_cursor_head(pos, cx);
-            state.end_transaction(cx);
-        });
+        self.set_cursor(
+            Cursor {
+                anchor: self.cursor(cx).anchor,
+                head: pos,
+            },
+            cx,
+        );
         self.reset_cursor_blink(cx);
         if !mouse_origin {
             self.discretely_scroll_to_cursor(cx);
@@ -224,7 +232,12 @@ impl TextEditor {
             let range = state.cursor_range();
             self.move_to(state.offset8_to_loc8(range.start), false, true, cx);
         } else {
-            let offset = state.loc8_to_offset8(self.cursor(cx).head);
+            let loc = self.cursor(cx).head;
+            if loc.col == 0 {
+                return;
+            }
+
+            let offset = state.loc8_to_offset8(loc);
             let new_offset = state.prev_boundary(offset);
             self.move_to(state.offset8_to_loc8(new_offset), false, true, cx);
         }
@@ -236,8 +249,14 @@ impl TextEditor {
             let range = state.cursor_range();
             self.move_to(state.offset8_to_loc8(range.end), false, true, cx);
         } else {
-            let offset = state.loc8_to_offset8(self.cursor(cx).head);
-            let new_offset = state.next_boundary(offset);
+            let loc = self.cursor(cx).head;
+            let offset = state.loc8_to_offset8(loc);
+            let line_end = self.line_end_offset(state, loc.row);
+            if offset >= line_end {
+                return;
+            }
+
+            let new_offset = state.next_boundary(offset).min(line_end);
             self.move_to(state.offset8_to_loc8(new_offset), false, true, cx);
         }
     }
@@ -268,15 +287,26 @@ impl TextEditor {
 
     pub(super) fn select_left(&mut self, _: &SelectLeft, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
-        let offset = state.loc8_to_offset8(self.cursor(cx).head);
+        let loc = self.cursor(cx).head;
+        if loc.col == 0 {
+            return;
+        }
+
+        let offset = state.loc8_to_offset8(loc);
         let new_offset = state.prev_boundary(offset);
         self.select_to(state.offset8_to_loc8(new_offset), false, true, cx);
     }
 
     pub(super) fn select_right(&mut self, _: &SelectRight, _: &mut Window, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
-        let offset = state.loc8_to_offset8(self.cursor(cx).head);
-        let new_offset = state.next_boundary(offset);
+        let loc = self.cursor(cx).head;
+        let offset = state.loc8_to_offset8(loc);
+        let line_end = self.line_end_offset(state, loc.row);
+        if offset >= line_end {
+            return;
+        }
+
+        let new_offset = state.next_boundary(offset).min(line_end);
         self.select_to(state.offset8_to_loc8(new_offset), false, true, cx);
     }
 

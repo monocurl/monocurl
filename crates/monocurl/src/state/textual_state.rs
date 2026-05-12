@@ -595,17 +595,6 @@ impl TextualState {
         start..end
     }
 
-    pub fn set_cursor_head(&mut self, head: Location8, cx: &mut App) {
-        debug_assert!(self.nested_transaction_count > 0);
-        self.set_cursor(
-            Cursor {
-                anchor: self.cursor.anchor,
-                head,
-            },
-            cx,
-        );
-    }
-
     pub fn set_cursor(&mut self, cursor: Cursor, _cx: &mut App) {
         debug_assert!(self.nested_transaction_count > 0);
         self.cursor = cursor;

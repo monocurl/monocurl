@@ -243,6 +243,39 @@ mod test {
     }
 
     #[test]
+    fn test_root_slide_rejects_body_on_header_line() {
+        let (_sections, errors) = parse_root_test("slide foo()\n");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].title, "Parse Error");
+        assert_eq!(
+            errors[0].message,
+            "expected newline after slide declaration"
+        );
+    }
+
+    #[test]
+    fn test_root_slide_rejects_semicolon_body_on_header_line() {
+        let (_sections, errors) = parse_root_test("slide; foo()\n");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].title, "Parse Error");
+        assert_eq!(
+            errors[0].message,
+            "expected newline after slide declaration"
+        );
+    }
+
+    #[test]
+    fn test_root_slide_rejects_missing_separator_before_declaration() {
+        let (_sections, errors) = parse_root_test("let x = 0 slide\n");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].title, "Parse Error");
+        assert_eq!(
+            errors[0].message,
+            "expected newline or semicolon before slide declaration"
+        );
+    }
+
+    #[test]
     fn test_root_slide_title_reports_malformed_string() {
         let (sections, errors) = parse_root_test("slide \"unterminated\nlet x = 1\n");
         assert_eq!(sections.len(), 2);

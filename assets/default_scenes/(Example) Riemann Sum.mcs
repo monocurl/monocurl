@@ -69,7 +69,6 @@ slide "Area"
 
     mesh graph = Curve()
     play Write(1.0)
-
 slide "Left Rectangles"
     # height_scale lerps from 0 to 1 to grow the rectangles up from the axis
     mesh rects = Rectangles(height_scale: 0, selected: -1)
