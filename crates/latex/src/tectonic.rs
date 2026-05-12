@@ -236,10 +236,11 @@ fn expand_glyph_uses(svg: &str) -> String {
         }
         defs_range = Some(node.range());
         for child in node.children() {
-            if child.is_element() && child.tag_name().name() == "path" {
-                if let (Some(id), Some(d)) = (child.attribute("id"), child.attribute("d")) {
-                    glyph_defs.insert(id, d);
-                }
+            if child.is_element()
+                && child.tag_name().name() == "path"
+                && let (Some(id), Some(d)) = (child.attribute("id"), child.attribute("d"))
+            {
+                glyph_defs.insert(id, d);
             }
         }
     }

@@ -77,44 +77,41 @@ fn collect_path(
         return Ok(());
     }
 
-    if let Some(fill) = path.fill() {
-        if let Paint::Color(color) = fill.paint() {
-            let (tag, color) =
-                decode_tag_and_color(*color, fill.opacity().get() * inherited_opacity);
-            let even_odd = matches!(fill.rule(), FillRule::EvenOdd);
-            let contours = extract_contours(
-                path.data(),
-                path.abs_transform(),
-                unit_scale,
-                options,
-                options.flip_y,
-            );
-            if !contours.is_empty() {
-                rendered
-                    .meshes
-                    .push(filled_contours(&contours, color, tag, even_odd)?);
-            }
+    if let Some(fill) = path.fill()
+        && let Paint::Color(color) = fill.paint()
+    {
+        let (tag, color) = decode_tag_and_color(*color, fill.opacity().get() * inherited_opacity);
+        let even_odd = matches!(fill.rule(), FillRule::EvenOdd);
+        let contours = extract_contours(
+            path.data(),
+            path.abs_transform(),
+            unit_scale,
+            options,
+            options.flip_y,
+        );
+        if !contours.is_empty() {
+            rendered
+                .meshes
+                .push(filled_contours(&contours, color, tag, even_odd)?);
         }
     }
 
-    if let Some(stroke) = path.stroke() {
-        if let Paint::Color(color) = stroke.paint() {
-            if let Some(stroked_path) = path.data().stroke(&stroke.to_tiny_skia(), 1.0) {
-                let (tag, color) =
-                    decode_tag_and_color(*color, stroke.opacity().get() * inherited_opacity);
-                let contours = extract_contours(
-                    &stroked_path,
-                    path.abs_transform(),
-                    unit_scale,
-                    options,
-                    options.flip_y,
-                );
-                if !contours.is_empty() {
-                    rendered
-                        .meshes
-                        .push(filled_contours(&contours, color, tag, false)?);
-                }
-            }
+    if let Some(stroke) = path.stroke()
+        && let Paint::Color(color) = stroke.paint()
+        && let Some(stroked_path) = path.data().stroke(&stroke.to_tiny_skia(), 1.0)
+    {
+        let (tag, color) = decode_tag_and_color(*color, stroke.opacity().get() * inherited_opacity);
+        let contours = extract_contours(
+            &stroked_path,
+            path.abs_transform(),
+            unit_scale,
+            options,
+            options.flip_y,
+        );
+        if !contours.is_empty() {
+            rendered
+                .meshes
+                .push(filled_contours(&contours, color, tag, false)?);
         }
     }
 

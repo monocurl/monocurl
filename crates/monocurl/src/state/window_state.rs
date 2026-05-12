@@ -65,7 +65,7 @@ impl WindowState {
             return;
         };
 
-        let _ = document.view.update(cx, |view, _| {
+        document.view.update(cx, |view, _| {
             view.focus(window);
         });
     }
@@ -317,7 +317,7 @@ impl WindowState {
 
         let path = path.clone();
         let document_view = document.view.clone();
-        let _ = document_view.update(cx, |view, cx| {
+        document_view.update(cx, |view, cx| {
             view.save_before_close(cx);
         });
         self.close_project(&path);

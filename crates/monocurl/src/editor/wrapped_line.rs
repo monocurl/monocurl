@@ -2,7 +2,7 @@ use std::{ops::Range, sync::Arc};
 
 use gpui::{
     App, Bounds, DecorationRun, Half, Hsla, LineLayout, Pixels, Point, StrikethroughStyle, TextRun,
-    UnderlineStyle, Window, WrapBoundary, fill, point, px, size,
+    UnderlineStyle, Window, WrapBoundary, point, px, size,
 };
 use smallvec::SmallVec;
 use structs::text::{Count8, Span8};
@@ -187,8 +187,8 @@ impl WrappedLine {
                 len: run.len as u32,
                 color: run.color,
                 background_color: run.background_color,
-                underline: run.underline.clone(),
-                strikethrough: run.strikethrough.clone(),
+                underline: run.underline,
+                strikethrough: run.strikethrough,
             })
             .collect();
 
@@ -377,7 +377,7 @@ impl WrappedLine {
                         first_glyph_x = glyph_origin.x;
                     }
 
-                    if wraps.peek().map(|w| &w.0) == Some(&&WrapBoundary { run_ix, glyph_ix }) {
+                    if wraps.peek().map(|w| &w.0) == Some(&WrapBoundary { run_ix, glyph_ix }) {
                         let indent = wraps.peek().unwrap().1;
                         wraps.next();
                         if let Some((underline_origin, underline_style)) =
@@ -573,137 +573,6 @@ impl WrappedLine {
         }
 
         Ok(())
-    }
-
-    #[allow(unused)]
-    pub fn paint_background(
-        &self,
-        origin: Point<Pixels>,
-        line_height: Pixels,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Result<(), anyhow::Error> {
-        let layout = &self.unwrapped_layout;
-        let wrap_boundaries = &self.wrap_boundaries;
-        let decoration_runs = &self.decoration_runs;
-
-        let line_bounds = Bounds::new(
-            origin,
-            size(
-                layout.width,
-                line_height * (wrap_boundaries.len() as f32 + 1.),
-            ),
-        );
-        window.paint_layer(line_bounds, |window| {
-            let mut decoration_runs = decoration_runs.iter();
-            let mut wraps = wrap_boundaries.iter().peekable();
-            let mut run_end = 0;
-            let mut current_background: Option<(Point<Pixels>, Hsla)> = None;
-            let text_system = cx.text_system().clone();
-            let mut glyph_origin = origin;
-            let mut prev_glyph_position = Point::default();
-            let mut max_glyph_size = size(px(0.), px(0.));
-            for (run_ix, run) in layout.runs.iter().enumerate() {
-                max_glyph_size = text_system.bounding_box(run.font_id, layout.font_size).size;
-
-                for (glyph_ix, glyph) in run.glyphs.iter().enumerate() {
-                    glyph_origin.x += glyph.position.x - prev_glyph_position.x;
-
-                    if wraps.peek().map(|w| &w.0) == Some(&&WrapBoundary { run_ix, glyph_ix }) {
-                        let indent = wraps.peek().unwrap().1;
-                        wraps.next();
-                        if let Some((background_origin, background_color)) =
-                            current_background.as_mut()
-                        {
-                            if glyph_origin.x == background_origin.x {
-                                background_origin.x -= max_glyph_size.width.half()
-                            }
-                            window.paint_quad(fill(
-                                Bounds {
-                                    origin: *background_origin,
-                                    size: size(glyph_origin.x - background_origin.x, line_height),
-                                },
-                                *background_color,
-                            ));
-                            background_origin.x = origin.x;
-                            background_origin.y += line_height;
-                        }
-
-                        glyph_origin.x = origin.x + indent;
-                        glyph_origin.y += line_height;
-                    }
-                    prev_glyph_position = glyph.position;
-
-                    let mut finished_background: Option<(Point<Pixels>, Hsla)> = None;
-                    if glyph.index >= run_end {
-                        let mut style_run = decoration_runs.next();
-
-                        // ignore style runs that apply to a partial glyph
-                        while let Some(run) = style_run {
-                            if glyph.index < run_end + (run.len as usize) {
-                                break;
-                            }
-                            run_end += run.len as usize;
-                            style_run = decoration_runs.next();
-                        }
-
-                        if let Some(style_run) = style_run {
-                            if let Some((_, background_color)) = &mut current_background
-                                && style_run.background_color.as_ref() != Some(background_color)
-                            {
-                                finished_background = current_background.take();
-                            }
-                            if let Some(run_background) = style_run.background_color {
-                                current_background.get_or_insert((
-                                    point(glyph_origin.x, glyph_origin.y),
-                                    run_background,
-                                ));
-                            }
-                            run_end += style_run.len as usize;
-                        } else {
-                            run_end = layout.len;
-                            finished_background = current_background.take();
-                        }
-                    }
-
-                    if let Some((mut background_origin, background_color)) = finished_background {
-                        let width = glyph_origin.x - background_origin.x;
-                        if background_origin.x == glyph_origin.x {
-                            background_origin.x -= max_glyph_size.width.half();
-                        };
-                        window.paint_quad(fill(
-                            Bounds {
-                                origin: background_origin,
-                                size: size(width, line_height),
-                            },
-                            background_color,
-                        ));
-                    }
-                }
-            }
-
-            let mut last_line_end_x = origin.x + layout.width;
-            if let Some((boundary, indent)) = wrap_boundaries.last() {
-                let run = &layout.runs[boundary.run_ix];
-                let glyph = &run.glyphs[boundary.glyph_ix];
-                last_line_end_x -= glyph.position.x - *indent;
-            }
-
-            if let Some((mut background_origin, background_color)) = current_background.take() {
-                if last_line_end_x == background_origin.x {
-                    background_origin.x -= max_glyph_size.width.half()
-                };
-                window.paint_quad(fill(
-                    Bounds {
-                        origin: background_origin,
-                        size: size(last_line_end_x - background_origin.x, line_height),
-                    },
-                    background_color,
-                ));
-            }
-
-            Ok(())
-        })
     }
 }
 

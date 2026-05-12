@@ -210,7 +210,7 @@ impl CompilationService {
             .await
             .unwrap();
 
-        return compile_result;
+        compile_result
     }
 
     pub async fn run(mut self) {
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn slide_info_from_parse_tracks_header_end_and_section_ranges() {
         let src = "mesh c = circle()\nslide \"Intro\"\n  show c\nslide second\n  hide c\n";
-        let text_rope = Rope::from_str(src);
+        let text_rope = Rope::from_text(src);
         let mut parse_state = ParseImportContext {
             root_file_path: PathBuf::from("scene.mcs"),
             open_tab_ropes: Default::default(),

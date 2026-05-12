@@ -162,7 +162,7 @@ pub(super) fn read_vec3_value(value: Value, name: &'static str) -> Result<Float3
 pub(super) fn read_path_arc_value(value: Value) -> Result<Float3, ExecutorError> {
     match value.elide_lvalue_leader_rec() {
         Value::Integer(0) => Ok(Float3::ZERO),
-        Value::Float(f) if f == 0.0 => Ok(Float3::ZERO),
+        Value::Float(0.0) => Ok(Float3::ZERO),
         other => read_vec3_value(other, "path_arc"),
     }
 }

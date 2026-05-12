@@ -89,9 +89,7 @@ impl DocumentView {
         }
 
         let theme = ThemeSettings::theme(cx);
-        let Some(kind) = self.export_overlay.kind else {
-            return None;
-        };
+        let kind = self.export_overlay.kind?;
         let progress = self.export_overlay.progress_ratio();
         let is_error = self.export_overlay.error.is_some();
         let is_success = self.export_overlay.succeeded();

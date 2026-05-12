@@ -402,14 +402,14 @@ impl DocumentView {
             let Some(this) = this.upgrade() else {
                 return;
             };
-            let Some(path) = path.await.ok().map(|s| s.ok()).flatten().flatten() else {
+            let Some(path) = path.await.ok().and_then(|s| s.ok()).flatten() else {
                 return;
             };
 
             log::info!("Saving document to new path {:?}", &path);
 
             let _ = app.update(move |app| {
-                let _ = this.update(app, |this, cx| {
+                this.update(app, |this, cx| {
                     this.really_save(path, cx);
                 });
             });
@@ -467,6 +467,41 @@ impl DocumentView {
     }
 }
 
+impl DocumentView {
+    pub fn save_before_close(&mut self, cx: &mut App) {
+        self.editor.update(cx, |editor, cx| {
+            editor.save(cx);
+        });
+    }
+
+    fn get_live_ropes(
+        &self,
+        window_state: &WindowState,
+        cx: &App,
+    ) -> HashMap<PathBuf, (Rope<Attribute<LexData>>, Rope<TextAggregate>)> {
+        let mut ret = HashMap::new();
+        for doc in window_state.open_documents() {
+            if doc.path != self.path {
+                let state = doc.view.read(cx).state.textual_state.read(cx);
+                let text_rope = state.text_rope().clone();
+                let lex_rope = state.lex_rope().clone();
+                ret.insert(doc.path.clone(), (lex_rope, text_rope));
+            }
+        }
+        ret
+    }
+}
+
+impl DocumentView {
+    pub fn on_imports_may_have_changed(&self, window_state: &WindowState, cx: &mut App) {
+        let live_ropes = self.get_live_ropes(window_state, cx);
+
+        self.services.update(cx, |services, _| {
+            services.invalidate_dependencies(self.path.clone(), live_ropes);
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{EPSILON_STEP, epsilon_backward_target, epsilon_forward_target};
@@ -504,40 +539,5 @@ mod tests {
         let target = epsilon_forward_target(Timestamp::new(3, 1.25), 5);
 
         assert_eq!(target, Timestamp::new(3, 1.25 + EPSILON_STEP));
-    }
-}
-
-impl DocumentView {
-    pub fn save_before_close(&mut self, cx: &mut App) {
-        self.editor.update(cx, |editor, cx| {
-            editor.save(cx);
-        });
-    }
-
-    fn get_live_ropes(
-        &self,
-        window_state: &WindowState,
-        cx: &App,
-    ) -> HashMap<PathBuf, (Rope<Attribute<LexData>>, Rope<TextAggregate>)> {
-        let mut ret = HashMap::new();
-        for doc in window_state.open_documents() {
-            if doc.path != self.path {
-                let state = doc.view.read(cx).state.textual_state.read(cx);
-                let text_rope = state.text_rope().clone();
-                let lex_rope = state.lex_rope().clone();
-                ret.insert(doc.path.clone(), (lex_rope, text_rope));
-            }
-        }
-        ret
-    }
-}
-
-impl DocumentView {
-    pub fn on_imports_may_have_changed(&self, window_state: &WindowState, cx: &mut App) {
-        let live_ropes = self.get_live_ropes(window_state, cx);
-
-        self.services.update(cx, |services, _| {
-            services.invalidate_dependencies(self.path.clone(), live_ropes);
-        });
     }
 }

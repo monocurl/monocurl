@@ -80,7 +80,6 @@ pub enum ServiceManagerMessage {
         lex_rope: Rope<Attribute<LexData>>,
         version: usize,
     },
-    #[allow(unused)]
     UpdateStaticAnalysisRope {
         analysis_rope: Rope<Attribute<StaticAnalysisData>>,
         version: usize,
@@ -108,7 +107,7 @@ pub enum ServiceManagerMessage {
         version: usize,
     },
     ExecutionStateUpdated {
-        snapshot: ExecutionSnapshot,
+        snapshot: Box<ExecutionSnapshot>,
     },
     UpdateTranscript {
         transcript: Vec<Arc<SectionTranscript>>,
@@ -285,7 +284,7 @@ impl ServiceManager {
             }
             ServiceManagerMessage::ExecutionStateUpdated { snapshot } => {
                 self.execution_state.update(cx, |state, cx| {
-                    state.apply_snapshot(snapshot, cx);
+                    state.apply_snapshot(*snapshot, cx);
                     cx.notify();
                 });
             }

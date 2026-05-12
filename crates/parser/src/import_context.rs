@@ -77,12 +77,12 @@ impl ParseImportContext {
                 let Ok(content) = std::fs::read_to_string(&p) else {
                     continue;
                 };
-                let text_rope = Rope::from_str(&content);
+                let text_rope = Rope::from_text(&content);
                 let filtered = Lexer::new(content.chars());
                 return Some(FileResult {
                     path: p.clone(),
                     tokens: flatten_lex_stream(filtered).collect(),
-                    text_rope: text_rope,
+                    text_rope,
                     is_stdlib,
                 });
             }

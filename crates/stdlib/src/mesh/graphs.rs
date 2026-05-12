@@ -893,7 +893,7 @@ async fn push_axis_tick_labels(
         }
         let mut anchor = center + basis * value;
         if value.abs() <= 1e-4 {
-            anchor = anchor - dir * zero_offset;
+            anchor -= dir * zero_offset;
         }
         let Some(text) = axis_tick_label_text(executor, &style.label_map, value).await? else {
             continue;

@@ -13,6 +13,7 @@ struct LeafData {
     line: WrappedLine,
     // indicates 0 lines
     is_degenerate: bool,
+    is_hidden: bool,
 }
 
 impl Default for LeafData {
@@ -20,6 +21,7 @@ impl Default for LeafData {
         Self {
             line: WrappedLine::default(),
             is_degenerate: true,
+            is_hidden: false,
         }
     }
 }
@@ -35,11 +37,13 @@ impl rope::LeafData for LeafData {
         if range.is_empty() {
             Self {
                 is_degenerate: true,
+                is_hidden: false,
                 line: WrappedLine::default(),
             }
         } else {
             Self {
                 is_degenerate: false,
+                is_hidden: self.is_hidden,
                 line: self.line.clone(),
             }
         }
@@ -86,6 +90,12 @@ impl rope::AggregateData for AggregateData {
         if data.is_degenerate {
             Self {
                 prewrapped_line_count: 0,
+                wrapped_line_count: 0,
+                rope_height: 0,
+            }
+        } else if data.is_hidden {
+            Self {
+                prewrapped_line_count: 1,
                 wrapped_line_count: 0,
                 rope_height: 0,
             }
@@ -153,7 +163,11 @@ impl LineMap {
                 y_end <= y
             },
             |agg, leaf| {
-                let my_wrapped_lines = leaf.line.line_count();
+                let my_wrapped_lines = if leaf.is_hidden {
+                    0
+                } else {
+                    leaf.line.line_count()
+                };
                 let total_wrapped_lines = agg.wrapped_line_count + my_wrapped_lines;
                 if !leaf.is_degenerate && total_wrapped_lines as f32 * self.line_height <= y {
                     agg.prewrapped_line_count += 1;
@@ -169,11 +183,47 @@ impl LineMap {
         old_range: Range<usize>,
         new_lines: impl Iterator<Item = WrappedLine>,
     ) {
-        let new_data = new_lines.map(|line| LeafData {
+        let old_hidden: Vec<bool> = (old_range.start..old_range.end)
+            .map(|line| self.is_line_hidden(line))
+            .collect();
+        let new_data = new_lines.enumerate().map(|(index, line)| LeafData {
             line,
             is_degenerate: false,
+            is_hidden: old_hidden.get(index).copied().unwrap_or(false),
         });
         self.rope = self.rope.replace_range(old_range, new_data);
+    }
+
+    pub fn set_hidden_range(&mut self, range: Range<usize>, hidden: bool) {
+        let line_count = self.line_count();
+        let range = range.start.min(line_count)..range.end.min(line_count);
+        if range.is_empty() {
+            return;
+        }
+
+        let lines: Vec<WrappedLine> = self
+            .unwrapped_lines_iter(range.start)
+            .take(range.len())
+            .map(|line| line.line.clone())
+            .collect();
+
+        let new_data = lines.into_iter().map(|line| LeafData {
+            line,
+            is_degenerate: false,
+            is_hidden: hidden,
+        });
+        self.rope = self.rope.replace_range(range, new_data);
+    }
+
+    pub fn is_line_hidden(&self, line_no: usize) -> bool {
+        if line_no >= self.line_count() {
+            return false;
+        }
+
+        let leaf = self
+            .rope
+            .find_leaf(|agg| agg.prewrapped_line_count <= line_no);
+        leaf.is_hidden
     }
 
     pub fn prewrapped_visible_lines(&self, viewport_pixels: Range<Pixels>) -> Range<usize> {
@@ -187,13 +237,17 @@ impl LineMap {
     // in error case, it gives the closest one
     pub fn location_for_point(&self, point: Point<Pixels>) -> Result<Location8, Location8> {
         if point.y >= self.total_height() {
+            let line_count = self.line_count();
+            if line_count == 0 {
+                return Err(Location8 { row: 0, col: 0 });
+            }
+
             let last_line_no = self
-                .rope
-                .subrange_aggregate(0..usize::MAX)
-                .prewrapped_line_count;
-            let last_line_len = self.line_len(last_line_no.saturating_sub(1));
+                .last_visible_line()
+                .unwrap_or_else(|| line_count.saturating_sub(1));
+            let last_line_len = self.line_len(last_line_no);
             return Err(Location8 {
-                row: last_line_no.saturating_sub(1),
+                row: last_line_no,
                 col: last_line_len,
             });
         } else if point.y < gpui::px(0.0) {
@@ -238,6 +292,12 @@ impl LineMap {
         leaf.line.len()
     }
 
+    fn last_visible_line(&self) -> Option<usize> {
+        (0..self.line_count())
+            .rev()
+            .find(|&line| !self.is_line_hidden(line))
+    }
+
     pub fn point_for_location(&self, location: Location8) -> Point<Pixels> {
         let prefix = self.rope.subrange_aggregate(0..location.row);
         let leaf = self
@@ -262,7 +322,7 @@ impl LineMap {
             .iterator(unwrapped_line_start_no)
             .map(move |line| {
                 let ret = ContextifiedLine {
-                    line: line,
+                    line,
                     unwrapped_line_no: line_no,
                 };
                 line_no += 1;

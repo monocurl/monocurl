@@ -425,7 +425,7 @@ fn build_anim_executor_with_file_path(
     let mut all_errors: Vec<String> = Vec::new();
     let mut sections: Vec<Section> = Vec::new();
     for (src, section_type) in slides {
-        let (section, errors) = parse_section(src, section_type.clone());
+        let (section, errors) = parse_section(src, *section_type);
         all_errors.extend(errors);
         sections.push(section);
     }

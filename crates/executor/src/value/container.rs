@@ -47,6 +47,12 @@ impl List {
     }
 }
 
+impl Default for List {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Deref for List {
     type Target = ListBody;
 
@@ -96,7 +102,6 @@ impl HashableKey {
                     .iter()
                     .map(|key| {
                         HashableKey::try_from_value(&with_heap(|h| h.get(key.key()).clone()))
-                            .map_err(|e| e)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(HashableKey::List(keys))
@@ -157,6 +162,12 @@ impl Map {
         self.insertion_order
             .iter()
             .filter_map(|k| self.entries.get(k).map(|v| (k, v)))
+    }
+}
+
+impl Default for Map {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

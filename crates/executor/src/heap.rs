@@ -11,7 +11,7 @@ thread_local! {
     static VHEAP: RefCell<VirtualHeap> = RefCell::new(VirtualHeap::new());
     /// when set, VRc::clone and VRc::drop skip refcount changes.
     /// also checked by heap_release to prevent snapshot drops from corrupting live heap.
-    static HEAP_INHIBIT_REFCOUNT: Cell<bool> = Cell::new(false);
+    static HEAP_INHIBIT_REFCOUNT: Cell<bool> = const { Cell::new(false) };
 }
 
 fn refcount_inhibited() -> bool {
@@ -26,8 +26,8 @@ pub struct VirtualHeap {
 
 pub struct RawHeapSnapshot<T>(ManuallyDrop<T>);
 
-impl<T> RawHeapSnapshot<T> {
-    pub fn as_ref(&self) -> &T {
+impl<T> AsRef<T> for RawHeapSnapshot<T> {
+    fn as_ref(&self) -> &T {
         &self.0
     }
 }
@@ -38,7 +38,7 @@ impl<T: Clone> RawHeapSnapshot<T> {
     }
 
     pub fn raw_clone(&self) -> T {
-        with_inhibit(|| (&*self.0).clone())
+        with_inhibit(|| (*self.0).clone())
     }
 }
 

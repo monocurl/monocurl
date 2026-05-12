@@ -434,13 +434,12 @@ fn push_dashed_segment(
     segment.a.col = color_at(template.a.col, template.b.col, t0);
     segment.b.col = color_at(template.a.col, template.b.col, t1);
 
-    if let Some(prev) = *current_piece_last {
-        if float3_key(out[prev].b.pos) == float3_key(segment.a.pos)
-            && float3_key(out[prev].norm) == float3_key(segment.norm)
-        {
-            segment.prev = prev as i32;
-            out[prev].next = out.len() as i32;
-        }
+    if let Some(prev) = *current_piece_last
+        && float3_key(out[prev].b.pos) == float3_key(segment.a.pos)
+        && float3_key(out[prev].norm) == float3_key(segment.norm)
+    {
+        segment.prev = prev as i32;
+        out[prev].next = out.len() as i32;
     }
 
     *current_piece_last = Some(out.len());

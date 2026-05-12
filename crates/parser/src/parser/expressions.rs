@@ -54,7 +54,7 @@ impl SectionParser {
     pub(super) fn read_pure_identifier(&mut self) -> SpanTagged<String> {
         let span = self.read_token_best_effort(Token::Identifier);
         let str: String = self.text_rope.iterator_range(span.clone()).collect();
-        return (span, str);
+        (span, str)
     }
 
     pub(super) fn parse_unary(&mut self) -> SpanTagged<Expression> {
@@ -176,7 +176,7 @@ impl SectionParser {
                     let old = boxify(take_expr());
                     (old.0.start..arguments.0.end, Expression::LambdaInvocation(LambdaInvocation {
                         lambda: old,
-                        arguments: arguments
+                        arguments
                     }))
                 },
                 ExactPredDesc(Token::LFlower, "<operator invocation>") => {
@@ -238,12 +238,7 @@ impl SectionParser {
         start: Token,
         end: Token,
         allow_newlines: bool,
-    ) -> SpanTagged<
-        Vec<(
-            Option<SpanTagged<IdentifierDeclaration>>,
-            SpanTagged<Expression>,
-        )>,
-    > {
+    ) -> InvocationArguments {
         self.debug_assert_token_eq(start);
         let range = self.precomputation.bracket_internal_range(self.token_index);
         let base_span = self.advance_token();
@@ -264,7 +259,7 @@ impl SectionParser {
 
             let pre_token_index = self.token_index;
             let mut read = || {
-                if arguments.len() > 0 {
+                if !arguments.is_empty() {
                     self.read_token_best_effort(Token::Comma);
                 }
 

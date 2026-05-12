@@ -130,9 +130,7 @@ impl TextEditor {
     }
 
     pub(super) fn index_for_mouse_position(&self, position: Point<Pixels>) -> Option<Location8> {
-        let Some(bounds) = self.last_bounds else {
-            return None;
-        };
+        let bounds = self.last_bounds?;
 
         self.line_map
             .location_for_point(position - point(self.gutter_width, bounds.top()))

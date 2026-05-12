@@ -37,24 +37,26 @@ mod test {
         content: &str,
     ) -> (Vec<std::sync::Arc<SectionBundle>>, Vec<Diagnostic>) {
         let (bundles, artifacts) =
-            Parser::parse(context, lex_rope(content), Rope::from_str(content), None);
+            Parser::parse(context, lex_rope(content), Rope::from_text(content), None);
         (bundles, artifacts.error_diagnostics)
     }
 
     fn parse_expr_test(content: &str) -> SpanTagged<Expression> {
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let ret = parser.parse_expr_best_effort();
-        if !parser.artifacts.error_diagnostics.is_empty() {
-            dbg!(&parser.artifacts.error_diagnostics);
-        }
+        assert!(
+            parser.artifacts.error_diagnostics.is_empty(),
+            "unexpected parse errors: {:?}",
+            parser.artifacts.error_diagnostics
+        );
         ret
     }
 
     fn error_expr_test(content: &str) {
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         parser.parse_expr_best_effort();
         assert!(!parser.artifacts.error_diagnostics.is_empty())
@@ -62,13 +64,10 @@ mod test {
 
     fn parse_stmt_test(content: &str) -> Result<SpanTagged<Statement>, ()> {
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
-        let ret = parser.parse_statement();
-        if ret.is_err() {
-            dbg!(&parser.artifacts.error_diagnostics);
-        }
-        ret
+
+        parser.parse_statement()
     }
 
     fn id_pattern(span: Span8, name: &str) -> SpanTagged<BindingPattern> {
@@ -96,7 +95,7 @@ mod test {
             PreparsedFile {
                 imports: vec![],
                 path: PathBuf::from("scene.mcs"),
-                text_rope: Rope::from_str(content),
+                text_rope: Rope::from_text(content),
                 root_import_span: None,
                 tokens: lex(content),
                 is_stdlib: false,
@@ -164,9 +163,9 @@ mod test {
 
     #[test]
     fn test_float_literal() {
-        let result = parse_expr_test("3.14");
+        let result = parse_expr_test("3.125");
         if let Expression::Literal(Literal::Float(val)) = result.1 {
-            assert!((val - 3.14).abs() < 0.0001);
+            assert!((val - 3.125).abs() < 0.0001);
         } else {
             panic!("Expected float literal");
         }
@@ -204,7 +203,7 @@ mod test {
             PreparsedFile {
                 imports: vec![],
                 path: PathBuf::from("scene.mcs"),
-                text_rope: Rope::from_str(content),
+                text_rope: Rope::from_text(content),
                 root_import_span: None,
                 tokens: lex(content),
                 is_stdlib: false,
@@ -239,6 +238,39 @@ mod test {
                 6..13,
                 Statement::Expression(Expression::Literal(Literal::String("Intro".to_string())))
             )]
+        );
+    }
+
+    #[test]
+    fn test_root_slide_rejects_body_on_header_line() {
+        let (_sections, errors) = parse_root_test("slide foo()\n");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].title, "Parse Error");
+        assert_eq!(
+            errors[0].message,
+            "expected newline after slide declaration"
+        );
+    }
+
+    #[test]
+    fn test_root_slide_rejects_semicolon_body_on_header_line() {
+        let (_sections, errors) = parse_root_test("slide; foo()\n");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].title, "Parse Error");
+        assert_eq!(
+            errors[0].message,
+            "expected newline after slide declaration"
+        );
+    }
+
+    #[test]
+    fn test_root_slide_rejects_missing_separator_before_declaration() {
+        let (_sections, errors) = parse_root_test("let x = 0 slide\n");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].title, "Parse Error");
+        assert_eq!(
+            errors[0].message,
+            "expected newline or semicolon before slide declaration"
         );
     }
 
@@ -1059,7 +1091,7 @@ mod test {
     #[test]
     fn test_nested_binding_pattern_emits_specific_error() {
         let lexed = lex("let [a, [b, c]] = value");
-        let text_rope = Rope::from_str("let [a, [b, c]] = value");
+        let text_rope = Rope::from_text("let [a, [b, c]] = value");
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let _ = parser.parse_statement();
         assert!(
@@ -1092,7 +1124,7 @@ mod test {
     fn test_mesh_and_param_destructuring_emit_specific_error() {
         for src in ["mesh [a, b] = []", "param [a, b] = []"] {
             let lexed = lex(src);
-            let text_rope = Rope::from_str(src);
+            let text_rope = Rope::from_text(src);
             let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
             let _ = parser.parse_statement();
             assert!(
@@ -1212,7 +1244,7 @@ mod test {
     fn test_print_statement_does_not_consume_newline_before_expression() {
         let content = "print\nx";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_statement_list();
 
@@ -1611,7 +1643,7 @@ mod test {
     fn test_play_statement_does_not_consume_newline_before_expression() {
         let content = "anim { play\ncircle }";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_expr_best_effort();
 
@@ -1639,7 +1671,7 @@ mod test {
     fn test_multiline_statement_list() {
         let content = "let x = 1\nlet y = 2\nlet z = 3";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_statement_list();
         assert_eq!(result.len(), 3);
@@ -1649,7 +1681,7 @@ mod test {
     fn test_semicolon_separated_statements() {
         let content = "let x = 1; let y = 2; let z = 3";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_statement_list();
         assert_eq!(result.len(), 3);
@@ -1672,7 +1704,7 @@ mod test {
     fn test_newline_before_dot_starts_new_statement() {
         let content = "block {\n    let x = 1\n    . x\n}";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_expr_best_effort();
 
@@ -1695,7 +1727,7 @@ mod test {
     fn test_newline_before_dot_after_operator_chain_in_if_starts_new_statement() {
         let content = "block {\n    if (labels) {\n        . w{} center{} Tex(\"A\", 1)\n        . w{} center{} Tex(\"B\", 1)\n    }\n}";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_expr_best_effort();
 
@@ -1771,7 +1803,7 @@ mod test {
     fn test_nested_list_destructure_assignment() {
         let content = "[c, [d, a]] = [a, [b, d]]";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_statement().unwrap();
         assert!(
@@ -1798,7 +1830,7 @@ mod test {
     fn test_multiline_destructure_starts_new_statement() {
         let content = "var d = 1\n[a, b] = [b, a]";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Slide, None, None);
         let result = parser.parse_statement_list();
 
@@ -2149,7 +2181,7 @@ mod test {
     fn test_error_break_outside_loop() {
         let content = "break";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None, None);
         let _ = parser.parse_statement();
         assert!(!parser.artifacts.error_diagnostics.is_empty());
@@ -2159,7 +2191,7 @@ mod test {
     fn test_error_return_outside_function() {
         let content = "return 5";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None, None);
         let _ = parser.parse_statement();
         assert!(!parser.artifacts.error_diagnostics.is_empty());
@@ -2169,7 +2201,7 @@ mod test {
     fn test_error_play_outside_anim() {
         let content = "play animation";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None, None);
         let _ = parser.parse_statement();
         assert!(!parser.artifacts.error_diagnostics.is_empty());
@@ -2179,7 +2211,7 @@ mod test {
     fn test_root_statement_autocomplete_includes_slide() {
         let content = "foo";
         let lexed = lex(content);
-        let text_rope = Rope::from_str(content);
+        let text_rope = Rope::from_text(content);
         let mut parser = SectionParser::new(lexed, text_rope, SectionType::Init, None, Some(1));
         let _ = parser.parse_statement();
         assert!(parser.autocomplete_possibilities().contains(&Token::Slide));

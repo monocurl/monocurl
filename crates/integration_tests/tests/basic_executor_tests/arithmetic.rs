@@ -66,8 +66,8 @@ fn test_eager_lambda_too_few_arguments_is_runtime_error() {
 
 #[test]
 fn test_exec_literal_float() {
-    let r = run("let x = 3.14");
-    r.assert_float(3.14);
+    let r = run("let x = 3.125");
+    r.assert_float(3.125);
 }
 
 #[test]

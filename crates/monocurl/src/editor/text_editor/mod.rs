@@ -1,7 +1,6 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::ops::Range;
 use std::time::Duration;
-use std::usize;
 
 use crate::components::text_input::{SingleLineInput, SingleLineInputEvent};
 use crate::editor::line_map::LineMap;
@@ -11,7 +10,7 @@ use crate::editor::text_editor::text_element::TextElement;
 use crate::editor::wrapped_line::WrappedLine;
 use crate::services::ServiceManager;
 use crate::state::diagnostics::Diagnostic;
-use crate::state::textual_state::{AutoCompleteState, Cursor, TextualState};
+use crate::state::textual_state::{AutoCompleteState, Cursor, SlideInfo, TextualState};
 use crate::theme::{TextEditorStyles, ThemeSettings};
 use gpui::*;
 use smallvec::SmallVec;
@@ -32,10 +31,14 @@ const AUTO_SCROLL_MAX_THRESHOLD: f32 = 70.0;
 const BOTTOM_SCROLL_PADDING: f32 = 400.0;
 const MAX_UNDO_GROUPS: usize = 4096;
 const LINE_COMMENT_PREFIX: &str = "# ";
+const FOLD_ICON_SIZE: f32 = 14.0;
+const FOLD_ICON_RIGHT: f32 = 5.0;
+const GUTTER_NUMBER_FOLD_GAP: f32 = 5.0;
 
 mod clipboard;
 mod cursor;
 mod editing;
+mod folds;
 mod history;
 mod hover;
 mod input_handler;
@@ -71,6 +74,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("tab", Tab, None),
         KeyBinding::new("shift-tab", Untab, None),
         KeyBinding::new("secondary-/", ToggleComment, None),
+        KeyBinding::new("secondary-.", ToggleSlideFold, Some("editor")),
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-alt-left", SelectLeftWord, None),
@@ -168,6 +172,9 @@ pub struct TextEditor {
 
     text_styles: TextEditorStyles,
     line_map: LineMap,
+    folded_slide_starts: BTreeSet<Count8>,
+    has_hidden_lines: bool,
+    observed_slides: Vec<SlideInfo>,
     line_height: Pixels,
     gutter_width: Pixels,
     right_gutter_width: Pixels,
@@ -274,8 +281,11 @@ impl TextEditor {
             click_count: 0,
             text_styles: text_styles.clone(),
             line_map: LineMap::new(line_height),
+            folded_slide_starts: BTreeSet::new(),
+            has_hidden_lines: false,
+            observed_slides: Vec::new(),
             line_height,
-            gutter_width: px(50.0),
+            gutter_width: px(72.0),
             right_gutter_width: px(10.0),
             last_bounds: None,
             resize_anchor_line: None,

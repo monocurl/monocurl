@@ -24,8 +24,8 @@ impl Cursor {
     }
 
     pub fn line_range(&self) -> Range<usize> {
-        let start_row = self.anchor.min(self.head).row as usize;
-        let end_row = self.anchor.max(self.head).row as usize;
+        let start_row = self.anchor.min(self.head).row;
+        let end_row = self.anchor.max(self.head).row;
         start_row..end_row + 1
     }
 

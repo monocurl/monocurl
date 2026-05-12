@@ -134,7 +134,7 @@ fn contour_point(
     x_step: f32,
     y_step: f32,
 ) -> Float3 {
-    let is_up = index % 2 == 0;
+    let is_up = index.is_multiple_of(2);
     let row = (index / 2) / (cols + 2);
     let col = (index / 2) % (cols + 2);
 

@@ -294,9 +294,9 @@ impl ExecutionState {
         ip: InstructionPointer,
         parent_idx: Option<usize>,
         trace_parent_idx: Option<usize>,
-    ) -> Result<usize, ()> {
+    ) -> Option<usize> {
         if self.alive_stack_count >= MAX_EXECUTION_HEADS {
-            return Err(());
+            return None;
         }
 
         self.alive_stack_count += 1;
@@ -304,7 +304,7 @@ impl ExecutionState {
         let idx = self.execution_stacks.len();
         self.execution_stacks.push(ExecutionStackSlot::Alive(stack));
 
-        Ok(idx)
+        Some(idx)
     }
 
     pub fn alloc_primitive_anim_id(&mut self) -> usize {
@@ -459,6 +459,12 @@ impl ExecutionState {
 
     pub fn follower_value(leader: &Leader) -> Value {
         with_heap(|h| h.get(leader.follower_rc.key()).clone())
+    }
+}
+
+impl Default for ExecutionState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

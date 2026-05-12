@@ -479,7 +479,7 @@ impl Executor {
                     }
                     _ => {
                         return ExecSingle::Error(ExecutorError::CannotAttribute(
-                            "stateful expression".into(),
+                            "stateful expression",
                         ));
                     }
                 },
@@ -556,7 +556,7 @@ impl Executor {
                     }
                     _ => {
                         return ExecSingle::Error(ExecutorError::CannotAttribute(
-                            "stateful expression".into(),
+                            "stateful expression",
                         ));
                     }
                 },

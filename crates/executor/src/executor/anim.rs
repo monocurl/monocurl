@@ -605,7 +605,7 @@ impl Executor {
                 Some(parent_stack_idx),
                 Some(parent_stack_idx),
             )
-            .map_err(|_| ExecutorError::TooManyActiveAnimations)?;
+            .ok_or(ExecutorError::TooManyActiveAnimations)?;
         let child = self.state.stack_mut(child_idx);
         for cap in &anim_block.captures {
             child.push(cap.clone());
@@ -855,10 +855,10 @@ impl Executor {
     fn release_primitive_anim_locks(&self, baked: &BakedPrimitiveAnim) {
         for target in &baked.targets {
             with_heap_mut(|h| {
-                if let Value::Leader(leader) = &mut *h.get_mut(target.key()) {
-                    if leader.locked_by_anim == Some(baked.anim_id) {
-                        leader.locked_by_anim = None;
-                    }
+                if let Value::Leader(leader) = &mut *h.get_mut(target.key())
+                    && leader.locked_by_anim == Some(baked.anim_id)
+                {
+                    leader.locked_by_anim = None;
                 }
             });
         }

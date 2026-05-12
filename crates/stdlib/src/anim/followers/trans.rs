@@ -861,10 +861,10 @@ fn extract_component_mesh(
                 for edge in [tri.ab, tri.bc, tri.ca] {
                     if edge >= 0 {
                         stack.push(MeshNode::Tri(edge as usize));
-                    } else if let Some(line_idx) = decode_mesh_ref(edge) {
-                        if line_idx < mesh.lins.len() {
-                            stack.push(MeshNode::Lin(line_idx));
-                        }
+                    } else if let Some(line_idx) = decode_mesh_ref(edge)
+                        && line_idx < mesh.lins.len()
+                    {
+                        stack.push(MeshNode::Lin(line_idx));
                     }
                 }
             }
@@ -878,19 +878,19 @@ fn extract_component_mesh(
                 let line = mesh.lins[idx];
                 if line.inv >= 0 {
                     stack.push(MeshNode::Lin(line.inv as usize));
-                } else if let Some(tri_idx) = decode_mesh_ref(line.inv) {
-                    if tri_idx < mesh.tris.len() {
-                        stack.push(MeshNode::Tri(tri_idx));
-                    }
+                } else if let Some(tri_idx) = decode_mesh_ref(line.inv)
+                    && tri_idx < mesh.tris.len()
+                {
+                    stack.push(MeshNode::Tri(tri_idx));
                 }
 
                 for endpoint in [line.prev, line.next] {
                     if endpoint >= 0 {
                         stack.push(MeshNode::Lin(endpoint as usize));
-                    } else if let Some(dot_idx) = decode_mesh_ref(endpoint) {
-                        if dot_idx < mesh.dots.len() {
-                            stack.push(MeshNode::Dot(dot_idx));
-                        }
+                    } else if let Some(dot_idx) = decode_mesh_ref(endpoint)
+                        && dot_idx < mesh.dots.len()
+                    {
+                        stack.push(MeshNode::Dot(dot_idx));
                     }
                 }
             }
@@ -904,10 +904,10 @@ fn extract_component_mesh(
                 let dot = mesh.dots[idx];
                 if dot.inv >= 0 {
                     stack.push(MeshNode::Dot(dot.inv as usize));
-                } else if let Some(line_idx) = decode_mesh_ref(dot.inv) {
-                    if line_idx < mesh.lins.len() {
-                        stack.push(MeshNode::Lin(line_idx));
-                    }
+                } else if let Some(line_idx) = decode_mesh_ref(dot.inv)
+                    && line_idx < mesh.lins.len()
+                {
+                    stack.push(MeshNode::Lin(line_idx));
                 }
             }
         }
@@ -1178,7 +1178,7 @@ fn prepare_planar_trans_mesh_pair(
 
 fn extract_closed_contours(mesh: &Mesh) -> Option<Vec<ClosedContour>> {
     if mesh.lins.is_empty()
-        || mesh.dots.len() != 0
+        || !mesh.dots.is_empty()
         || mesh.lins.iter().any(|lin| lin.prev < 0 || lin.next < 0)
     {
         return None;
@@ -1423,7 +1423,7 @@ fn closed_contour_normal(lines: &[Lin], line_indices: &[usize], points: &[Float3
 fn raw_contour_area_normal(points: &[Float3]) -> Float3 {
     let mut normal = Float3::ZERO;
     for i in 0..points.len() {
-        normal = normal + points[i].cross(points[(i + 1) % points.len()]);
+        normal += points[i].cross(points[(i + 1) % points.len()]);
     }
     normal
 }
@@ -1565,12 +1565,12 @@ fn match_tri_tri(source: &Mesh, target: &Mesh) -> (Mesh, Mesh) {
 }
 
 fn match_tri_lin(surface: &Mesh, line: &Mesh) -> Result<(Mesh, Mesh), ExecutorError> {
-    if let Some(upranked) = uprank_mesh(line)? {
-        if !upranked.tris.is_empty() {
-            let (surface, mut line) = match_tri_tri(surface, &upranked);
-            copy_tri_rgb_with_alpha(&mut line, &surface, 0.0);
-            return Ok((surface, line));
-        }
+    if let Some(upranked) = uprank_mesh(line)?
+        && !upranked.tris.is_empty()
+    {
+        let (surface, mut line) = match_tri_tri(surface, &upranked);
+        copy_tri_rgb_with_alpha(&mut line, &surface, 0.0);
+        return Ok((surface, line));
     }
     Ok((
         surface.clone(),
@@ -1989,14 +1989,12 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
     }
 
     let mut dots = template.dots.clone();
-    let mut slot = 0usize;
-    for dot in &mut dots {
+    for (slot, dot) in dots.iter_mut().enumerate() {
         let group = groups[slot];
         if group_hits[group] > 0 {
             dot.pos = group_pos[group];
             dot.col = group_col[group];
         }
-        slot += 1;
     }
 
     let mut surface = mesh_to_indexed_surface(template);
@@ -2328,10 +2326,10 @@ fn mesh_from_ordered_path(path: &OrderedPath, uniform: &Uniforms, tag: &[isize])
     let mut lins = Vec::new();
     if path.closed {
         push_closed_polyline(&mut lins, &path.points, path.normal);
-        for idx in 0..path.points.len() {
-            lins[idx].a.col = path.colors[idx];
-            lins[idx].b.col = path.colors[(idx + 1) % path.colors.len()];
-            lins[idx].norm = path.normal;
+        for (idx, line) in lins.iter_mut().enumerate().take(path.points.len()) {
+            line.a.col = path.colors[idx];
+            line.b.col = path.colors[(idx + 1) % path.colors.len()];
+            line.norm = path.normal;
         }
     } else if path.points.len() >= 2 {
         for idx in 0..path.points.len() - 1 {

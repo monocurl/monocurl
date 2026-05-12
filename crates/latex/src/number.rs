@@ -206,16 +206,16 @@ fn translate_meshes(meshes: &mut [Arc<Mesh>], delta: Float3) {
 
 fn translate_mesh(mesh: &mut Mesh, delta: Float3) {
     for dot in &mut mesh.dots {
-        dot.pos = dot.pos + delta;
+        dot.pos += delta;
     }
     for lin in &mut mesh.lins {
-        lin.a.pos = lin.a.pos + delta;
-        lin.b.pos = lin.b.pos + delta;
+        lin.a.pos += delta;
+        lin.b.pos += delta;
     }
     for tri in &mut mesh.tris {
-        tri.a.pos = tri.a.pos + delta;
-        tri.b.pos = tri.b.pos + delta;
-        tri.c.pos = tri.c.pos + delta;
+        tri.a.pos += delta;
+        tri.b.pos += delta;
+        tri.c.pos += delta;
     }
 }
 

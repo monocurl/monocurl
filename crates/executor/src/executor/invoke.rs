@@ -178,7 +178,7 @@ impl Executor {
             self.state
                 .stack_mut(stack_idx)
                 .push(Value::Stateful(stateful));
-            return ExecSingle::Continue;
+            ExecSingle::Continue
         } else if labeled || !lambda.defaults.is_empty() {
             let labels = if labeled {
                 self.drain_labels(stack_idx, section_idx)
@@ -323,7 +323,7 @@ impl Executor {
                 .push(Value::Stateful(stateful));
 
             self.state.stack_mut(stack_idx).ip.1 += 1;
-            return ExecSingle::Continue;
+            ExecSingle::Continue
         } else if labeled {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
@@ -536,7 +536,7 @@ impl Executor {
             let temp_idx = self
                 .state
                 .alloc_stack(lambda.ip, None, trace_parent_idx)
-                .map_err(|_| {
+                .ok_or_else(|| {
                     self.state.last_stack_idx =
                         trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
                     ExecutorError::TooManyActiveAnimations
@@ -607,7 +607,7 @@ impl Executor {
             let temp_idx = self
                 .state
                 .alloc_stack(lambda.ip, None, trace_parent_idx)
-                .map_err(|_| {
+                .ok_or_else(|| {
                     self.state.last_stack_idx =
                         trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
                     ExecutorError::TooManyActiveAnimations

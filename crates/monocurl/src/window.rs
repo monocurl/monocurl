@@ -32,8 +32,8 @@ impl MonocurlWindow {
         .detach();
 
         Self {
-            state: state,
-            home: home,
+            state,
+            home,
             #[cfg(not(target_os = "macos"))]
             app_menu_bar,
         }

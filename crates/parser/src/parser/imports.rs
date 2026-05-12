@@ -147,6 +147,10 @@ impl Parser {
         tokens: Vec<(Token, Span8)>,
         text_rope: &Rope<TextAggregate>,
     ) -> (Vec<RootSectionTokens>, ParseArtifacts) {
+        fn line_of(text_rope: &Rope<TextAggregate>, offset: Count8) -> usize {
+            text_rope.utf8_prefix_summary(offset).newlines
+        }
+
         let mut sections = vec![RootSectionTokens {
             tokens: Vec::new(),
             name: None,
@@ -167,6 +171,19 @@ impl Parser {
                 continue;
             }
 
+            let slide_line = line_of(text_rope, span.start);
+            if let Some((prev_token, prev_span)) =
+                token_index.checked_sub(1).and_then(|idx| tokens.get(idx))
+                && !matches!(prev_token, Token::Newline | Token::Semicolon)
+                && line_of(text_rope, prev_span.start) == slide_line
+            {
+                artifacts.error_diagnostics.push(Diagnostic {
+                    span: span.clone(),
+                    title: "Parse Error".into(),
+                    message: "expected newline or semicolon before slide declaration".into(),
+                });
+            }
+
             sections.push(RootSectionTokens {
                 tokens: Vec::new(),
                 name: None,
@@ -185,6 +202,24 @@ impl Parser {
                     }),
                 }
                 token_index += 1;
+            }
+
+            let mut lookahead = token_index;
+            while let Some((Token::Semicolon, span)) = tokens.get(lookahead)
+                && line_of(text_rope, span.start) == slide_line
+            {
+                lookahead += 1;
+            }
+
+            if let Some((token, span)) = tokens.get(lookahead)
+                && *token != Token::Newline
+                && line_of(text_rope, span.start) == slide_line
+            {
+                artifacts.error_diagnostics.push(Diagnostic {
+                    span: span.clone(),
+                    title: "Parse Error".into(),
+                    message: "expected newline after slide declaration".into(),
+                });
             }
         }
 
@@ -229,7 +264,7 @@ impl Parser {
                     section.tokens,
                     f.text_rope.clone(),
                     stype,
-                    cursor.clone(),
+                    cursor,
                     f.root_import_span.clone(),
                 );
                 parsed_section.name = section.name;
@@ -320,7 +355,7 @@ impl Parser {
             FileResult {
                 path: external_context.root_file_path.clone(),
                 tokens: flatten_rope(&lex_rope),
-                text_rope: Rope::from(text_rope),
+                text_rope,
                 is_stdlib: false,
             },
         ) else {
@@ -350,7 +385,7 @@ impl Parser {
 
             let key = file.path.clone();
             let is_root = file.root_import_span.is_none();
-            let (bundle, sub_artifacts) = Self::parse_file(&bundles, file, cursor.clone());
+            let (bundle, sub_artifacts) = Self::parse_file(&bundles, file, cursor);
             if !is_root {
                 external_context.set_cache(key.clone(), &bundle, sub_artifacts.clone());
             }

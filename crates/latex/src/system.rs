@@ -67,10 +67,7 @@ pub(crate) fn render_svg_document(document: &str, config: &SystemBackendConfig) 
 }
 
 fn command_available(command: &Path) -> bool {
-    match Command::new(command).arg("--version").output() {
-        Ok(_) => true,
-        Err(_) => false,
-    }
+    Command::new(command).arg("--version").output().is_ok()
 }
 
 fn run_command(command: &Path, args: Vec<String>) -> Result<()> {

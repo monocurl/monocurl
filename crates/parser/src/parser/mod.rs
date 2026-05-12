@@ -3,7 +3,6 @@ use std::{
     ops::Range,
     path::PathBuf,
     sync::Arc,
-    usize,
 };
 
 use lexer::token::Token;
@@ -17,9 +16,9 @@ use crate::{
     ast::{
         Anim, BinaryOperator, BinaryOperatorType, BindingPattern, Block, Declaration,
         DirectionalLiteral, Expression, For, IdentifierDeclaration, IdentifierReference, If,
-        LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal, NativeInvocation,
-        OperatorDefinition, OperatorInvocation, Play, Print, Property, Return, Section,
-        SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType,
+        InvocationArguments, LambdaArg, LambdaBody, LambdaDefinition, LambdaInvocation, Literal,
+        NativeInvocation, OperatorDefinition, OperatorInvocation, Play, Print, Property, Return,
+        Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType,
         UnaryPreOperator, VariableType, While,
     },
     flatten_rope,
@@ -287,12 +286,12 @@ impl Precomputation {
                 }
                 Token::RFlower | Token::RParen | Token::RBracket => {
                     while let Some((open_token, open_index)) = stack.pop() {
-                        let is_match = match (open_token, token) {
-                            (Token::LFlower, Token::RFlower) => true,
-                            (Token::LParen, Token::RParen) => true,
-                            (Token::LBracket, Token::RBracket) => true,
-                            _ => false,
-                        };
+                        let is_match = matches!(
+                            (open_token, token),
+                            (Token::LFlower, Token::RFlower)
+                                | (Token::LParen, Token::RParen)
+                                | (Token::LBracket, Token::RBracket)
+                        );
                         bracket_partners.insert(open_index, i);
                         if is_match {
                             break;

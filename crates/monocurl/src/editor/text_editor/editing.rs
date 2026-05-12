@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::text_replacement::TextReplacement;
 
 impl TextEditor {
     pub fn replace(
@@ -9,13 +10,17 @@ impl TextEditor {
         cx: &mut App,
     ) {
         self.report_undo_candidate(utf8_range.clone(), new_text, cx);
+        self.unfold_folds_touched_by_span(utf8_range.clone(), cx);
+        let replacement = TextReplacement::new(utf8_range.clone(), new_text.len());
 
         let (del_range, ins_range) = self.state.update(cx, |state, subcx| {
             let ret = state.replace(utf8_range.clone(), new_text, subcx);
             subcx.notify();
             ret
         });
+        self.remap_folded_slide_starts(&replacement);
         self.reshape_lines(del_range, ins_range, window, cx);
+        self.reapply_folds_after_text_change(cx);
         self.dirty.update(cx, |dirty, _| *dirty = true);
         self.save_dirty.update(cx, |dirty, _| *dirty = true);
         self.refresh_search_after_text_change(cx);
@@ -63,9 +68,9 @@ impl TextEditor {
                 let next = state.read(del.start..del.start + 1);
                 if next.chars().next().unwrap() == ch {
                     // already exists
-                    return Some((del.clone(), String::new()));
+                    Some((del.clone(), String::new()))
                 } else {
-                    return None;
+                    None
                 }
             };
 
@@ -107,7 +112,7 @@ impl TextEditor {
                 }
                 _ => return None,
             }
-        } else if del.len() == 1 && new_text.len() == 0 {
+        } else if del.len() == 1 && new_text.is_empty() {
             // does this undo the last matched insertion?
             if Some(del.end) == self.last_op_matched_character {
                 let state = self.state.read(cx);
@@ -122,7 +127,7 @@ impl TextEditor {
                         Some('|') => '|',
                         _ => return None,
                     };
-                    if next.chars().next() == Some(matching) {
+                    if next.starts_with(matching) {
                         return Some((
                             Span8 {
                                 start: del.start,
@@ -196,7 +201,7 @@ impl TextEditor {
             let text_before = state.read(line_start..offset);
 
             if text_before.chars().all(|c| c == ' ') && text_before.len() >= TAB_SIZE {
-                let spaces_to_delete = if text_before.len() % TAB_SIZE == 0 {
+                let spaces_to_delete = if text_before.len().is_multiple_of(TAB_SIZE) {
                     TAB_SIZE
                 } else {
                     text_before.len() % TAB_SIZE

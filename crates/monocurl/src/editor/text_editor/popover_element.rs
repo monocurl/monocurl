@@ -73,13 +73,16 @@ impl PopoverElement {
         editor.hover_item.as_ref().map(|(_, d)| {
             let state = editor.state.read(cx);
             let location8 = state.offset8_to_loc8(d.span.start);
-            let pos_in_container = self.pos_of_loc(&editor, location8);
+            if editor.line_map.is_line_hidden(location8.row) {
+                return None;
+            }
+            let pos_in_container = self.pos_of_loc(editor, location8);
 
-            DiagnosticPopoverState {
+            Some(DiagnosticPopoverState {
                 diagnostic: d.clone(),
                 pos_in_container,
-            }
-        })
+            })
+        })?
     }
 
     fn autocomplete_state(
@@ -95,7 +98,11 @@ impl PopoverElement {
         {
             return None;
         }
-        let pos = self.pos_of_loc(editor, ac_state.borrow().word_start());
+        let word_start = ac_state.borrow().word_start();
+        if editor.line_map.is_line_hidden(word_start.row) {
+            return None;
+        }
+        let pos = self.pos_of_loc(editor, word_start);
         Some(AutoCompletePopoverState {
             autocomplete_state: state.autocomplete_state(),
             pos_in_container: pos,
@@ -131,6 +138,9 @@ impl PopoverElement {
             self.suppress_parameter_hint(PARAMETER_SUPRESSION_DUE_TO_CURSOR, cx);
             return None;
         }
+        if editor.line_map.is_line_hidden(hint.function_start.row) {
+            return None;
+        }
         let pos = self.pos_of_loc(editor, hint.function_start);
         Some(ParameterHintPopoverState {
             parameter_hint_state: state.parameter_position_state(),
@@ -145,7 +155,7 @@ impl PopoverElement {
         popover_size: Size<Pixels>,
         target_position: Point<Pixels>,
         container_bounds: Bounds<Pixels>,
-        other_popovers: &Vec<Bounds<Pixels>>,
+        other_popovers: &[Bounds<Pixels>],
         prefer_up: bool,
     ) -> Option<PopoverPlacement> {
         let below_y = target_position.y + line_height;
@@ -178,21 +188,13 @@ impl PopoverElement {
             });
 
         let y = if prefer_up && above_fits {
-            if above_fits {
-                above_y
-            } else if below_fits {
-                below_y
-            } else {
-                return None;
-            }
+            above_y
+        } else if below_fits {
+            below_y
+        } else if above_fits {
+            above_y
         } else {
-            if below_fits {
-                below_y
-            } else if above_fits {
-                above_y
-            } else {
-                return None;
-            }
+            return None;
         };
 
         Some(PopoverPlacement {
@@ -370,8 +372,6 @@ impl Element for PopoverElement {
                 }
             },
         );
-
-        ()
     }
 
     fn paint(

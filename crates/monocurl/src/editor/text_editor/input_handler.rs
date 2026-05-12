@@ -129,7 +129,7 @@ impl EntityInputHandler for TextEditor {
         let state = self.state.read(cx);
         let loc8 = self.closest_index_for_mouse_position(point);
         let offset8 = state.loc8_to_offset8(loc8);
-        Some(state.offset8_to_offset16(offset8) as usize)
+        Some(state.offset8_to_offset16(offset8))
     }
 }
 

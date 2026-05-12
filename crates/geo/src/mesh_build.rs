@@ -5,6 +5,8 @@ use crate::{
     simd::{Float2, Float3, Float4},
 };
 
+type BoundaryEdgeMap = HashMap<(usize, usize), Vec<(usize, usize)>>;
+
 #[derive(Clone, Copy, Debug)]
 pub struct SurfaceVertex {
     pub pos: Float3,
@@ -195,7 +197,7 @@ pub fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]], color: Floa
 fn build_surface_tris(
     vertices: &[SurfaceVertex],
     faces: &[[usize; 3]],
-) -> (Vec<Tri>, HashMap<(usize, usize), Vec<(usize, usize)>>) {
+) -> (Vec<Tri>, BoundaryEdgeMap) {
     let mut tris: Vec<_> = faces
         .iter()
         .map(|face| Tri {
@@ -227,15 +229,15 @@ fn build_surface_tris(
             .into_iter()
             .enumerate()
         {
-            if let Some(other_edges) = edge_map.get_mut(&(b, a)) {
-                if let Some((other_tri, other_edge)) = other_edges.pop() {
-                    if other_edges.is_empty() {
-                        edge_map.remove(&(b, a));
-                    }
-                    set_tri_edge(&mut tris[tri_idx], edge_idx, other_tri as i32);
-                    set_tri_edge(&mut tris[other_tri], other_edge, tri_idx as i32);
-                    continue;
+            if let Some(other_edges) = edge_map.get_mut(&(b, a))
+                && let Some((other_tri, other_edge)) = other_edges.pop()
+            {
+                if other_edges.is_empty() {
+                    edge_map.remove(&(b, a));
                 }
+                set_tri_edge(&mut tris[tri_idx], edge_idx, other_tri as i32);
+                set_tri_edge(&mut tris[other_tri], other_edge, tri_idx as i32);
+                continue;
             }
 
             edge_map

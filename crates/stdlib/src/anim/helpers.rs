@@ -398,16 +398,16 @@ pub(super) fn collapse_mesh(mesh: &Mesh, center: Float3) -> Mesh {
 pub(super) fn fade_start_mesh(mesh: &Mesh, delta: Float3) -> Mesh {
     let mut out = mesh.clone();
     for dot in &mut out.dots {
-        dot.pos = dot.pos - delta;
+        dot.pos -= delta;
     }
     for lin in &mut out.lins {
-        lin.a.pos = lin.a.pos - delta;
-        lin.b.pos = lin.b.pos - delta;
+        lin.a.pos -= delta;
+        lin.b.pos -= delta;
     }
     for tri in &mut out.tris {
-        tri.a.pos = tri.a.pos - delta;
-        tri.b.pos = tri.b.pos - delta;
-        tri.c.pos = tri.c.pos - delta;
+        tri.a.pos -= delta;
+        tri.b.pos -= delta;
+        tri.c.pos -= delta;
     }
     out.uniform.alpha = 0.0;
     out.debug_assert_consistent_topology();

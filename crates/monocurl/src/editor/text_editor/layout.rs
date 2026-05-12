@@ -119,6 +119,10 @@ impl TextEditor {
     ) {
         let wrap_width = self.wrap_width();
         for line in self.visible_lines() {
+            if self.line_map.is_line_hidden(line) {
+                continue;
+            }
+
             let needs_reshaping = self.state.read(cx).line_has_new_attributes(line);
             if needs_reshaping {
                 let new_line = self.reshape_line(wrap_width, line, window, cx);

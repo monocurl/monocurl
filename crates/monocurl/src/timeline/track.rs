@@ -185,8 +185,7 @@ pub(super) fn render_track(
                 }
             }
 
-            for i in 0..slide_count {
-                let bx = slide_xs[i];
+            for (i, bx) in slide_xs.iter().copied().enumerate().take(slide_count) {
                 let border_color: Hsla = if explicit.get(i).copied().unwrap_or(false) {
                     theme.timeline_active_border
                 } else {

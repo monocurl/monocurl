@@ -60,9 +60,7 @@ impl SettingsWindow {
             focus: true,
             ..Default::default()
         };
-        if let Ok(handle) =
-            cx.open_window(options, |_window, cx| cx.new(|cx| SettingsWindow::new(cx)))
-        {
+        if let Ok(handle) = cx.open_window(options, |_window, cx| cx.new(SettingsWindow::new)) {
             cx.update_global::<SettingsWindowHandle, _>(|settings, _cx| {
                 settings.window = Some(handle.into());
             });

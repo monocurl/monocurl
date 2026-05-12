@@ -166,15 +166,15 @@ impl BladeRenderer {
             .as_ref()
             .is_none_or(|target| target.size != size);
         if !needs_resize {
-            if let Some(target) = &mut self.target {
-                if target.needs_init {
-                    self.command_encoder.init_texture(target.color);
-                    if let Some(color_msaa) = target.color_msaa {
-                        self.command_encoder.init_texture(color_msaa);
-                    }
-                    self.command_encoder.init_texture(target.depth);
-                    target.needs_init = false;
+            if let Some(target) = &mut self.target
+                && target.needs_init
+            {
+                self.command_encoder.init_texture(target.color);
+                if let Some(color_msaa) = target.color_msaa {
+                    self.command_encoder.init_texture(color_msaa);
                 }
+                self.command_encoder.init_texture(target.depth);
+                target.needs_init = false;
             }
             return;
         }
@@ -573,35 +573,35 @@ impl BladeRenderer {
                 let dot_radius =
                     mesh_dot_radius_px(item.mesh.as_ref(), self.style, view.raster_scale);
                 let dot_vertex_count = item.mesh.uniform.dot_vertex_count.max(3);
-                if dot_radius > f32::EPSILON {
-                    if let Some(index_buffer) = self.dot_index_buffers.get(&dot_vertex_count) {
-                        let mut encoder = pass.with(&self.pipelines.dots);
-                        encoder.bind(
-                            0,
-                            &DotsData {
-                                dot_camera: camera,
-                                dot_params: DotShaderParams {
-                                    viewport_and_radius: [
-                                        size.width as f32,
-                                        size.height as f32,
-                                        dot_radius,
-                                        item.mesh.uniform.alpha as f32,
-                                    ],
-                                    depth_bias: [z_offset, dot_vertex_count as f32, 0.0, 0.0],
-                                },
-                                dot_instances: dots.buffer.into(),
+                if dot_radius > f32::EPSILON
+                    && let Some(index_buffer) = self.dot_index_buffers.get(&dot_vertex_count)
+                {
+                    let mut encoder = pass.with(&self.pipelines.dots);
+                    encoder.bind(
+                        0,
+                        &DotsData {
+                            dot_camera: camera,
+                            dot_params: DotShaderParams {
+                                viewport_and_radius: [
+                                    size.width as f32,
+                                    size.height as f32,
+                                    dot_radius,
+                                    item.mesh.uniform.alpha as f32,
+                                ],
+                                depth_bias: [z_offset, dot_vertex_count as f32, 0.0, 0.0],
                             },
-                        );
-                        encoder.draw_indexed(
-                            index_buffer.buffer.into(),
-                            gpu::IndexType::U16,
-                            index_buffer.count,
-                            0,
-                            0,
-                            dots.count,
-                        );
-                        z_offset += DEPTH_STEP;
-                    }
+                            dot_instances: dots.buffer.into(),
+                        },
+                    );
+                    encoder.draw_indexed(
+                        index_buffer.buffer.into(),
+                        gpu::IndexType::U16,
+                        index_buffer.count,
+                        0,
+                        0,
+                        dots.count,
+                    );
+                    z_offset += DEPTH_STEP;
                 }
             }
         }
@@ -649,10 +649,10 @@ impl BladeRenderer {
             })
             .collect::<Vec<_>>();
         for path in stale_textures {
-            if let Some(entry) = self.texture_cache.remove(&path) {
-                if let Some(texture) = entry.texture {
-                    destroy_texture(&self.gpu, texture);
-                }
+            if let Some(entry) = self.texture_cache.remove(&path)
+                && let Some(texture) = entry.texture
+            {
+                destroy_texture(&self.gpu, texture);
             }
         }
     }

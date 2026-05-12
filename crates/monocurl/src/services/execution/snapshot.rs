@@ -259,7 +259,9 @@ impl ExecutionService {
         };
 
         sm_tx
-            .unbounded_send(ServiceManagerMessage::ExecutionStateUpdated { snapshot })
+            .unbounded_send(ServiceManagerMessage::ExecutionStateUpdated {
+                snapshot: Box::new(snapshot),
+            })
             .ok();
 
         if let Some(transcript) = transcript {

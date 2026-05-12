@@ -178,7 +178,7 @@ pub(super) async fn read_string(
     })
 }
 
-fn image_source_path<'a>(executor: &'a Executor, stack_idx: usize) -> Option<&'a Path> {
+fn image_source_path(executor: &Executor, stack_idx: usize) -> Option<&Path> {
     let mut fallback = None;
     let mut cursor = Some(stack_idx);
 
@@ -746,12 +746,12 @@ pub(crate) fn mesh_position_groups(mesh: &Mesh) -> Vec<usize> {
             let (lhs, rhs) = tri_edge_slots(mesh, tri_idx, edge_idx);
             if value >= 0 {
                 let neighbor = value as usize;
-                if neighbor < mesh.tris.len() {
-                    if let Some(other_edge) = tri_edge_for(&mesh.tris[neighbor], tri_idx as i32) {
-                        let (na, nb) = tri_edge_slots(mesh, neighbor, other_edge);
-                        dsu.union(lhs, nb);
-                        dsu.union(rhs, na);
-                    }
+                if neighbor < mesh.tris.len()
+                    && let Some(other_edge) = tri_edge_for(&mesh.tris[neighbor], tri_idx as i32)
+                {
+                    let (na, nb) = tri_edge_slots(mesh, neighbor, other_edge);
+                    dsu.union(lhs, nb);
+                    dsu.union(rhs, na);
                 }
             } else if let Some(line_idx) = decode_mesh_ref(value).filter(|&i| i < mesh.lins.len()) {
                 dsu.union(lhs, line_a_slot(mesh, line_idx));
@@ -1187,8 +1187,10 @@ pub(super) fn mesh_from_parts_with_dot_radius(
     tris: Vec<Tri>,
     dot_radius: f32,
 ) -> Value {
-    let mut uniform = Uniforms::default();
-    uniform.dot_radius = dot_radius;
+    let uniform = Uniforms {
+        dot_radius,
+        ..Uniforms::default()
+    };
     let mut mesh = Mesh {
         dots,
         lins,
@@ -1422,7 +1424,7 @@ pub(super) fn require_point(
 ) -> Result<Value, ExecutorError> {
     point
         .map(point_value)
-        .ok_or_else(|| ExecutorError::InvalidArgument {
+        .ok_or(ExecutorError::InvalidArgument {
             arg: name,
             message: "mesh tree must contain at least one vertex",
         })

@@ -99,7 +99,7 @@ where
             font: self.style.text_font.clone(),
             color,
             background_color: None,
-            underline: underline,
+            underline,
             strikethrough: None,
         }
     }

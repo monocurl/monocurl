@@ -7,7 +7,9 @@ use gpui::{
 };
 
 use crate::editor::{
-    text_editor::{BOTTOM_SCROLL_PADDING, TextEditor},
+    text_editor::{
+        BOTTOM_SCROLL_PADDING, FOLD_ICON_RIGHT, FOLD_ICON_SIZE, GUTTER_NUMBER_FOLD_GAP, TextEditor,
+    },
     wrapped_line::WrappedLine,
 };
 
@@ -71,7 +73,11 @@ impl TextElement {
             return None;
         }
 
-        let line_num = editor.cursor(cx).head.row as usize;
+        let line_num = editor.cursor(cx).head.row;
+        if editor.line_map.is_line_hidden(line_num) {
+            return None;
+        }
+
         let y_range = editor.line_map.y_range(line_num..line_num + 1);
         Some(Bounds::new(
             point(bounds.left(), bounds.top() + y_range.start),
@@ -105,6 +111,10 @@ impl TextElement {
             .take(visible_selection.len())
         {
             let line_num = multi_line.unwrapped_line_no;
+            if editor.line_map.is_line_hidden(line_num) {
+                continue;
+            }
+
             let line_start = if line_num == start_loc.row {
                 start_loc.col
             } else {
@@ -167,6 +177,10 @@ impl TextElement {
                 .take(visible_match_lines.len())
             {
                 let line_num = multi_line.unwrapped_line_no;
+                if editor.line_map.is_line_hidden(line_num) {
+                    continue;
+                }
+
                 let line_start = if line_num == start_loc.row {
                     start_loc.col
                 } else {
@@ -244,7 +258,7 @@ impl TextElement {
             .map(|d| {
                 let color = d.color(&editor.text_styles);
                 let start = d.span.start;
-                let line = state.offset8_to_loc8(start).row as usize;
+                let line = state.offset8_to_loc8(start).row;
                 let y_start = editor.line_map.y_range(line..line + 1).start;
                 let width = editor.right_gutter_width;
                 let bounds = Bounds::new(
@@ -301,7 +315,9 @@ impl TextElement {
             &[gutter_run],
             None,
         );
-        let gutter_x = editor.gutter_width - gutter_shaped.width - px(10.0);
+        let gutter_x = editor.gutter_width
+            - px(FOLD_ICON_SIZE + FOLD_ICON_RIGHT + GUTTER_NUMBER_FOLD_GAP)
+            - gutter_shaped.width;
         gutter_shaped
             .paint(
                 point(bounds.left() + gutter_x, bounds.top() + y),
@@ -419,6 +435,7 @@ impl Element for TextElement {
                     let y = editor.line_map.y_range(line_no..line_no + 1).start;
                     (line_no, y, line.line.clone())
                 })
+                .filter(|(line_no, _, _)| !editor.line_map.is_line_hidden(*line_no))
                 .collect();
 
             let cursor_bounds = self.compute_cursor_bounds(editor, bounds, window, cx);

@@ -77,7 +77,7 @@ mod test {
         use parser::parser::SectionParser;
 
         let tokens = lex(src);
-        let text_rope = Rope::from_str(src);
+        let text_rope = Rope::from_text(src);
         let mut parser = SectionParser::new(tokens, text_rope, section_type, None, None);
         parser.parse_statement_list()
     }

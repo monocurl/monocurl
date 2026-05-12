@@ -26,6 +26,7 @@ actions!(
         Tab,
         Untab,
         ToggleComment,
+        ToggleSlideFold,
         Up,
         Left,
         Right,

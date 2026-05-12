@@ -124,7 +124,7 @@ impl Mesh {
     pub fn normalize_line_dot_topology(&mut self) {
         let original_line_count = self.lins.len();
         let mut created_inverses = vec![None; original_line_count];
-        for line_idx in 0..original_line_count {
+        for (line_idx, created_inverse) in created_inverses.iter_mut().enumerate() {
             if self.lins[line_idx].inv != -1 {
                 continue;
             }
@@ -142,11 +142,11 @@ impl Mesh {
                 inv: line_idx as i32,
                 is_dom_sib: false,
             });
-            created_inverses[line_idx] = Some(inverse_idx);
+            *created_inverse = Some(inverse_idx);
         }
 
-        for line_idx in 0..original_line_count {
-            let Some(inverse_idx) = created_inverses[line_idx] else {
+        for (line_idx, inverse_idx) in created_inverses.into_iter().enumerate() {
+            let Some(inverse_idx) = inverse_idx else {
                 continue;
             };
             let source = self.lins[line_idx];
@@ -618,9 +618,7 @@ fn line_inverse_mismatch(mesh: &Mesh, line_idx: usize) -> Option<String> {
 
 fn line_triangle_boundary_mismatch(mesh: &Mesh, line_idx: usize) -> Option<String> {
     let line = mesh.lins[line_idx];
-    let Some(tri_idx) = decode_ref(line.inv) else {
-        return None;
-    };
+    let tri_idx = decode_ref(line.inv)?;
     if tri_idx >= mesh.tris.len() {
         return None;
     }
