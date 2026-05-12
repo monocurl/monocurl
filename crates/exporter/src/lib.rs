@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io::BufWriter,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -357,7 +357,7 @@ async fn inspect_scene_async(
 
 fn prepare_scene(
     root_text: &str,
-    root_path: &PathBuf,
+    root_path: &Path,
     open_documents: &HashMap<PathBuf, String>,
     cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
@@ -366,17 +366,17 @@ fn prepare_scene(
 ) -> Result<PreparedScene> {
     emit_progress_checked(cancel_flag, on_progress, "Parsing scene", completed, total)?;
 
-    let root_text_rope = Rope::from_str(root_text);
+    let root_text_rope = Rope::from_text(root_text);
     let root_lex_rope = lex_rope_from_str(root_text);
 
     let mut import_context = ParseImportContext {
-        root_file_path: root_path.clone(),
+        root_file_path: root_path.to_path_buf(),
         open_tab_ropes: open_documents
             .iter()
             .map(|(path, text)| {
                 (
                     path.clone(),
-                    (lex_rope_from_str(text), Rope::from_str(text.as_str())),
+                    (lex_rope_from_str(text), Rope::from_text(text.as_str())),
                 )
             })
             .collect(),
@@ -506,7 +506,8 @@ async fn export_video(
     emit_progress_checked(cancel_flag, on_progress, "Evaluating timeline", 0, 0)?;
 
     ensure!(
-        settings.render_size.width % 2 == 0 && settings.render_size.height % 2 == 0,
+        settings.render_size.width.is_multiple_of(2)
+            && settings.render_size.height.is_multiple_of(2),
         "video render size must use even dimensions for H.264 export"
     );
 

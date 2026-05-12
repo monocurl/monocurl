@@ -128,12 +128,12 @@ impl HomeView {
 
         window
             .spawn(cx, async move |window_cx| {
-                let Some(path) = path.await.ok().map(|s| s.ok()).flatten().flatten() else {
+                let Some(path) = path.await.ok().and_then(|s| s.ok()).flatten() else {
                     return;
                 };
 
                 let _ = window_cx.update(move |window, cx| {
-                    let _ = state.update(cx, |state, cx| {
+                    state.update(cx, |state, cx| {
                         if let Err(err) = state.create_new_document(dtype, path.clone()) {
                             log::error!("{err}");
                             return;
@@ -359,7 +359,7 @@ impl HomeView {
 
                                         if confirm.await == Ok(1) {
                                             let _ = app.update(move |cx| {
-                                                let _ = this.update(cx, move |this, cx| {
+                                                this.update(cx, move |this, cx| {
                                                     this.forget(path_copy, cx);
                                                 });
                                             });
@@ -434,8 +434,7 @@ impl HomeView {
                                 let Some(this) = this.upgrade() else {
                                     return;
                                 };
-                                let Some(paths) =
-                                    path.await.ok().map(|s| s.ok()).flatten().flatten()
+                                let Some(paths) = path.await.ok().and_then(|s| s.ok()).flatten()
                                 else {
                                     return;
                                 };
@@ -445,7 +444,7 @@ impl HomeView {
                                 }
 
                                 let _ = app.update(move |app| {
-                                    let _ = this.update(app, |this, cx| {
+                                    this.update(app, |this, cx| {
                                         if let Err(err) = this.import_many(paths, cx) {
                                             log::error!("{err}");
                                         }

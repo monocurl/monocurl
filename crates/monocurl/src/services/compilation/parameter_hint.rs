@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn parameter_hint_prefers_up_after_function_start_line() {
         let src = "ParametricFunc(\n    |t| t,\n    [0, 1, 64]\n)";
-        let rope = Rope::<TextAggregate>::from_str(src);
+        let rope = Rope::<TextAggregate>::from_text(src);
         let function_start = Location8 { row: 0, col: 0 };
         let same_line_cursor = src.find("(").unwrap();
         let later_line_cursor = src.find("[0").unwrap();

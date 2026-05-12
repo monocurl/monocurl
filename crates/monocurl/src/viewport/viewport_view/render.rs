@@ -370,7 +370,6 @@ fn render_scene_stage(
         .child(
             canvas(move |bounds, _, _| bounds, {
                 let scene = scene.clone();
-                let scene_revision = scene_revision;
                 let weak_vp = weak_vp.clone();
                 move |_, bounds: Bounds<Pixels>, window, _cx| {
                     let layout = scene_stage_layout(bounds, mode);
@@ -686,16 +685,18 @@ fn render_preview_camera_chrome(
     weak_vp: WeakEntity<Viewport>,
     cx: &mut Context<Viewport>,
 ) -> AnyElement {
-    let reset_button = show_preview_reset
-        .then(|| {
+    let reset_button = if show_preview_reset {
+        {
             render_small_toolbar_button(
                 "viewport-camera-reset",
                 "Reset Camera",
                 cx.listener(|viewport, _, _, cx| viewport.sync_viewport_camera(cx)),
             )
             .into_any_element()
-        })
-        .unwrap_or_else(|| div().w(px(78.0)).into_any_element());
+        }
+    } else {
+        div().w(px(78.0)).into_any_element()
+    };
     let camera_summary = preview_camera_summary.as_ref().map(|summary| {
         div()
             .text_color(PRES_MUTED)

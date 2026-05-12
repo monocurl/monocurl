@@ -322,7 +322,7 @@ impl LineMap {
             .iterator(unwrapped_line_start_no)
             .map(move |line| {
                 let ret = ContextifiedLine {
-                    line: line,
+                    line,
                     unwrapped_line_no: line_no,
                 };
                 line_no += 1;

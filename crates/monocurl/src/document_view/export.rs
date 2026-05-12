@@ -84,13 +84,13 @@ impl DocumentView {
             let Some(this) = this.upgrade() else {
                 return;
             };
-            let Some(path) = path.await.ok().map(|path| path.ok()).flatten().flatten() else {
+            let Some(path) = path.await.ok().and_then(|path| path.ok()).flatten() else {
                 return;
             };
             let path = Self::normalize_export_path(path, kind);
 
             let _ = app.update(move |app| {
-                let _ = this.update(app, |this, cx| {
+                this.update(app, |this, cx| {
                     this.start_export(kind, path, cx);
                 });
             });
@@ -251,7 +251,7 @@ impl DocumentView {
 
             if confirm.await == Ok(1) {
                 let _ = app.update(move |app| {
-                    let _ = this.update(app, |this, cx| {
+                    this.update(app, |this, cx| {
                         this.confirm_cancel_export(cx);
                     });
                 });

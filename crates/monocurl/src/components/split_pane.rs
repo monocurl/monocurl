@@ -185,11 +185,7 @@ fn paint_split_handle(layout: &mut SplitLayout, window: &mut Window, _cx: &mut A
         Axis::Vertical => CursorStyle::ResizeRow,
     };
 
-    if layout.drag_handle.get() {
-        window.set_cursor_style(cursor_style, &layout.handle_hitbox);
-    } else {
-        window.set_cursor_style(cursor_style, &layout.handle_hitbox);
-    }
+    window.set_cursor_style(cursor_style, &layout.handle_hitbox);
 
     window.on_mouse_event({
         let hitbox = layout.handle_hitbox.clone();

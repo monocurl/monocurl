@@ -264,7 +264,7 @@ impl Parser {
                     section.tokens,
                     f.text_rope.clone(),
                     stype,
-                    cursor.clone(),
+                    cursor,
                     f.root_import_span.clone(),
                 );
                 parsed_section.name = section.name;
@@ -355,7 +355,7 @@ impl Parser {
             FileResult {
                 path: external_context.root_file_path.clone(),
                 tokens: flatten_rope(&lex_rope),
-                text_rope: Rope::from(text_rope),
+                text_rope,
                 is_stdlib: false,
             },
         ) else {
@@ -385,7 +385,7 @@ impl Parser {
 
             let key = file.path.clone();
             let is_root = file.root_import_span.is_none();
-            let (bundle, sub_artifacts) = Self::parse_file(&bundles, file, cursor.clone());
+            let (bundle, sub_artifacts) = Self::parse_file(&bundles, file, cursor);
             if !is_root {
                 external_context.set_cache(key.clone(), &bundle, sub_artifacts.clone());
             }

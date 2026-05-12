@@ -46,7 +46,7 @@ impl Navbar {
                     + &doc
                         .path
                         .extension()
-                        .map(|e| ".".to_string() + &e.to_string_lossy().to_string())
+                        .map(|e| ".".to_string() + e.to_string_lossy().as_ref())
                         .unwrap_or_default(),
             );
 

@@ -525,7 +525,7 @@ impl Compiler {
         for arg in &n.arguments {
             self.compile_val(&arg.1, &arg.0);
         }
-        let index = registry().index_of(&name) as u16;
+        let index = registry().index_of(name) as u16;
         let arg_count = n.arguments.len() as u16;
         self.emit(Instruction::NativeInvoke { index, arg_count }, span.clone());
         self.dec_stack(n.arguments.len());

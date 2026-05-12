@@ -41,30 +41,29 @@ impl Executor {
             let a_operator_count = operator_count(&a);
             let b_operator_count = operator_count(&b);
 
-            if a_operator_count > b_operator_count {
-                if let Value::InvokedOperator(ref a_inv) = a {
-                    return self.lerp_popped_operator_lhs(a_inv, b.clone(), t).await;
-                }
+            if a_operator_count > b_operator_count
+                && let Value::InvokedOperator(ref a_inv) = a
+            {
+                return self.lerp_popped_operator_lhs(a_inv, b.clone(), t).await;
             }
 
-            if b_operator_count > a_operator_count {
-                if let Value::InvokedOperator(ref b_inv) = b {
-                    return self.lerp_popped_operator_rhs(a.clone(), b_inv, t).await;
-                }
+            if b_operator_count > a_operator_count
+                && let Value::InvokedOperator(ref b_inv) = b
+            {
+                return self.lerp_popped_operator_rhs(a.clone(), b_inv, t).await;
             }
 
-            if a_operator_count > 0 {
-                if let (Value::InvokedOperator(a_inv), Value::InvokedOperator(b_inv)) = (&a, &b) {
-                    return self.lerp_invoked_operators(a_inv, b_inv, t).await;
-                }
+            if a_operator_count > 0
+                && let (Value::InvokedOperator(a_inv), Value::InvokedOperator(b_inv)) = (&a, &b)
+            {
+                return self.lerp_invoked_operators(a_inv, b_inv, t).await;
             }
 
-            if let (Value::InvokedFunction(a_inv), Value::InvokedFunction(b_inv)) = (&a, &b) {
-                if same_lambda_ip(&a_inv.body.lambda, &b_inv.body.lambda) {
-                    if a_inv.body.arguments.len() == b_inv.body.arguments.len() {
-                        return self.lerp_invoked_functions(a_inv, b_inv, t).await;
-                    }
-                }
+            if let (Value::InvokedFunction(a_inv), Value::InvokedFunction(b_inv)) = (&a, &b)
+                && same_lambda_ip(&a_inv.body.lambda, &b_inv.body.lambda)
+                && a_inv.body.arguments.len() == b_inv.body.arguments.len()
+            {
+                return self.lerp_invoked_functions(a_inv, b_inv, t).await;
             }
 
             let a = a.elide_wrappers_rec(self).await?;
@@ -455,7 +454,7 @@ fn format_hashable_key(key: &HashableKey) -> String {
     }
 }
 
-fn label_name_at<'a>(labels: &'a SmallVec<[(usize, String); 4]>, index: usize) -> Option<&'a str> {
+fn label_name_at(labels: &SmallVec<[(usize, String); 4]>, index: usize) -> Option<&str> {
     labels
         .iter()
         .find_map(|(label_index, name)| (*label_index == index).then_some(name.as_str()))

@@ -35,7 +35,7 @@ pub(crate) fn run_command() -> Result<()> {
 }
 
 fn style_trusted_html(source: &str, root_path: PathBuf) -> String {
-    let text_rope = Rope::from_str(source);
+    let text_rope = Rope::from_text(source);
     let lex_rope = lex_rope_from_str(source);
     let mut import_context = ParseImportContext {
         root_file_path: root_path,

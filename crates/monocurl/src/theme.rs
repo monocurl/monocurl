@@ -35,17 +35,9 @@ impl ThemeMode {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct ThemeSettings {
     pub mode: ThemeMode,
-}
-
-impl Default for ThemeSettings {
-    fn default() -> Self {
-        Self {
-            mode: ThemeMode::default(),
-        }
-    }
 }
 
 impl Global for ThemeSettings {}
@@ -435,16 +427,16 @@ impl TextEditorStyles {
             active_search_match_color: hsla(0.13, 0.78, 0.52, 0.56),
             scroll_color: hsla(0.61, 0.09, 0.54, 0.30),
             scroll_background_color: hsla(0.61, 0.08, 0.16, 0.18),
-            popover_background_color: nightfox_background.into(),
-            popover_border_color: nightfox_fg.into(),
+            popover_background_color: nightfox_background,
+            popover_border_color: nightfox_fg,
             popover_shadow_color: hsla(0.0, 0.0, 0.0, 0.42),
-            popover_title_color: nightfox_fg.into(),
-            popover_text_color: nightfox_fg.into(),
-            popover_highlight_color: nightfox_purple.into(),
-            popover_selected_background_color: nightfox_bg2.into(),
-            popover_hover_background_color: nightfox_bg2.into(),
+            popover_title_color: nightfox_fg,
+            popover_text_color: nightfox_fg,
+            popover_highlight_color: nightfox_purple,
+            popover_selected_background_color: nightfox_bg2,
+            popover_hover_background_color: nightfox_bg2,
             popover_active_argument_color: nightfox_pink,
-            popover_inactive_argument_color: nightfox_subtle.into(),
+            popover_inactive_argument_color: nightfox_subtle,
         }
     }
 }

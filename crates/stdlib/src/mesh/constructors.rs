@@ -242,7 +242,7 @@ fn path_arc_point(start: Float3, t: f32, end: Float3, path_arc: Float3) -> Float
 fn orient_contour_to_normal(contour: &mut [Float3], normal: Float3) {
     let mut area_normal = Float3::ZERO;
     for i in 0..contour.len() {
-        area_normal = area_normal + contour[i].cross(contour[(i + 1) % contour.len()]);
+        area_normal += contour[i].cross(contour[(i + 1) % contour.len()]);
     }
     if area_normal.dot(normal) < 0.0 {
         contour.reverse();
@@ -357,8 +357,13 @@ fn fan_tris(points: &[Float3], boundary_lins: &mut [geo::mesh::Lin]) -> Vec<geo:
 
         if !boundary_lins.is_empty() {
             boundary_lins[0].inv = mesh_ref(0);
-            for i in 1..points.len() - 1 {
-                boundary_lins[i].inv = mesh_ref(i - 1);
+            for (i, line) in boundary_lins
+                .iter_mut()
+                .enumerate()
+                .take(points.len() - 1)
+                .skip(1)
+            {
+                line.inv = mesh_ref(i - 1);
             }
             boundary_lins[points.len() - 1].inv = mesh_ref(points.len() - 3);
         }

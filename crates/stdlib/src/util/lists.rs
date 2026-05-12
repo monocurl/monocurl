@@ -159,7 +159,7 @@ pub async fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         .elide_cached_wrappers_rec()
     {
         Value::List(list) => {
-            let mut elements = list.elements().iter().cloned().collect::<Vec<_>>();
+            let mut elements = list.elements().to_vec();
             elements.reverse();
             Ok(Value::List(executor::value::container::List::new_with(
                 elements,

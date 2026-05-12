@@ -98,17 +98,9 @@ impl Default for RenderStyle {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct RenderOptions {
     pub style: RenderStyle,
-}
-
-impl Default for RenderOptions {
-    fn default() -> Self {
-        Self {
-            style: RenderStyle::default(),
-        }
-    }
 }
 
 pub struct Renderer {
@@ -372,10 +364,8 @@ mod tests {
                 let dx = *x as i32 - joint.0;
                 let dy = *y as i32 - joint.1;
                 let [b, g, r, a] = pixel.0;
-                dx <= -8
-                    && dx >= -14
-                    && dy >= 8
-                    && dy <= 14
+                (-14..=-8).contains(&dx)
+                    && (8..=14).contains(&dy)
                     && a > 0
                     && r > 48
                     && r > b.saturating_add(24)

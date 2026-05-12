@@ -101,10 +101,10 @@ where
     F: FnOnce(&str) -> Result<String>,
 {
     let cache_path = latex_svg_cache_path(backend_config, source);
-    if let Ok(svg_source) = fs::read_to_string(&cache_path) {
-        if let Ok(rendered) = import_latex_svg(&svg_source, scale, quality) {
-            return Ok(rendered);
-        }
+    if let Ok(svg_source) = fs::read_to_string(&cache_path)
+        && let Ok(rendered) = import_latex_svg(&svg_source, scale, quality)
+    {
+        return Ok(rendered);
     }
 
     let svg_source = render_svg(source)?;

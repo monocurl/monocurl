@@ -97,7 +97,7 @@ impl CompilationService {
             let rlen = replacement.len();
             AutoCompleteItem {
                 head: s.into(),
-                replacement: replacement,
+                replacement,
                 cursor_anchor_delta: Location8 {
                     row: 0,
                     col: rlen - cursor_delta,

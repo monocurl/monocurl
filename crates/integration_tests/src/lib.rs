@@ -29,8 +29,8 @@ pub fn lex_source(src: &str) -> Vec<(Token, Span8)> {
 
 pub fn parse_section(src: &str, section_type: SectionType) -> (Section, Vec<String>) {
     let tokens = lex_source(src);
-    let rope: Rope<TextAggregate> = Rope::from_str(src);
-    let mut parser = SectionParser::new(tokens, rope, section_type.clone(), None, None);
+    let rope: Rope<TextAggregate> = Rope::from_text(src);
+    let mut parser = SectionParser::new(tokens, rope, section_type, None, None);
     let stmts = parser.parse_statement_list();
     let errors = parser
         .artifacts()

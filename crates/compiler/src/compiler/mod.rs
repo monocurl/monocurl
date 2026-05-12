@@ -463,7 +463,7 @@ impl Compiler {
                     Arc::new(Symbol {
                         // make it constant for future sections (unless from prelude)
                         var_type: if p == 0 {
-                            sym.var_type.clone()
+                            sym.var_type
                         } else {
                             VariableType::Let
                         },
@@ -848,7 +848,7 @@ impl Compiler {
         let declared_in_stdlib = self.current_section().flags.is_stdlib;
         let special_function =
             self.special_function_for_expr(value)
-                .or_else(|| match (declared_in_stdlib, name) {
+                .or(match (declared_in_stdlib, name) {
                     (true, "random" | "randint") => Some(SpecialFunction::RootFrameRandom),
                     _ => None,
                 });

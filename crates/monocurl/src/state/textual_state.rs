@@ -1,4 +1,4 @@
-use std::{cell::RefCell, isize, ops::Range, rc::Rc, sync::Arc};
+use std::{cell::RefCell, ops::Range, rc::Rc, sync::Arc};
 
 use executor::transcript::SectionTranscript;
 use gpui::{App, Context, Entity, ScrollHandle, Window};
@@ -53,6 +53,8 @@ pub struct AutoCompleteItem {
     pub cursor_head_delta: Location8,
     pub category: AutoCompleteCategory,
 }
+
+type TransactionListener = Box<dyn FnMut(&TransactionSummary, &mut App) + Send>;
 
 impl AutoCompleteItem {
     pub fn apply(
@@ -139,14 +141,14 @@ impl AutoCompleteState {
             .filter_map(|i| {
                 let item = &self.items[i];
                 // only allow if cursor_token is a subsequence of item.head
-                let mut ct_iter = self.cursor_token.chars();
+                let ct_iter = self.cursor_token.chars();
                 let mut hd_iter = item.head.chars().enumerate();
                 let mut subsequence = true;
                 let mut indices = SmallVec::new();
-                while let Some(ct_ch) = ct_iter.next() {
+                for ct_ch in ct_iter {
                     let mut found = false;
-                    while let Some((idx, hd_ch)) = hd_iter.next() {
-                        if ct_ch.to_ascii_lowercase() == hd_ch.to_ascii_lowercase() {
+                    for (idx, hd_ch) in hd_iter.by_ref() {
+                        if ct_ch.eq_ignore_ascii_case(&hd_ch) {
                             found = true;
                             indices.push(idx);
                             break;
@@ -174,7 +176,7 @@ impl AutoCompleteState {
         });
 
         self.scroll_handle.scroll_to_item(0);
-        self.selected_index = self.filtered_items.get(0).map(|(i, _)| *i).unwrap_or(0);
+        self.selected_index = self.filtered_items.first().map(|(i, _)| *i).unwrap_or(0);
     }
 
     pub fn word_start(&self) -> Location8 {
@@ -379,7 +381,7 @@ pub struct TextualState {
 
     nested_transaction_count: usize,
     current_transaction: TransactionSummary,
-    transaction_listeners: Vec<Box<dyn FnMut(&TransactionSummary, &mut App) + Send>>,
+    transaction_listeners: Vec<TransactionListener>,
 }
 
 impl TextualState {
@@ -456,13 +458,13 @@ impl TextualState {
         let lex_replacement = if span.start == 0 {
             LexData::default()
         } else {
-            self.lex_rope.attribute_at(span.start - 1).clone()
+            *self.lex_rope.attribute_at(span.start - 1)
         };
         self.lex_rope = self.lex_rope.replace_range(
             span.clone(),
             std::iter::once(RLEData {
                 codeunits: new_text.len(),
-                attribute: lex_replacement.clone(),
+                attribute: lex_replacement,
             }),
         );
         self.rendered_lex_rope = self.rendered_lex_rope.replace_range(
@@ -482,7 +484,7 @@ impl TextualState {
             span.clone(),
             std::iter::once(RLEData {
                 codeunits: new_text.len(),
-                attribute: sa_replacement.clone(),
+                attribute: sa_replacement,
             }),
         );
         self.rendered_static_analysis_rope = self.rendered_static_analysis_rope.replace_range(
@@ -774,7 +776,7 @@ impl TextualState {
             return true;
         }
 
-        let sa_diff = {
+        {
             let sa_content = self
                 .static_analysis_rope
                 .iterator_range(line_start..line_end);
@@ -783,9 +785,7 @@ impl TextualState {
                 .iterator_range(line_start..line_end);
 
             std::iter::zip(sa_content, rendered_sa_content).any(|(a, b)| a != b)
-        };
-
-        return sa_diff;
+        }
     }
 
     // line that have modified attributes
@@ -882,7 +882,7 @@ impl TextualState {
 
     fn set_dirty_flags_on_diagnostics_change(
         &mut self,
-        new_diags: &Vec<Diagnostic>,
+        new_diags: &[Diagnostic],
         filter: impl Fn(&Diagnostic) -> bool + Copy,
     ) -> bool {
         debug_assert!(new_diags.iter().all(filter));
@@ -1107,7 +1107,6 @@ fn grapheme_boundary<const N: usize>(
     /// assert_eq!(indices[0].0, 0);
     /// assert_eq!(indices[1].0, 20); // 16 != 20
     /// ```
-
     const CHUNK: usize = 24;
 
     let mut cursor = GraphemeCursor::new(offset, len, true);
@@ -1217,7 +1216,7 @@ mod tests {
     fn assert_grapheme_boundaries(s: &str) {
         let naive = NaiveBackend(s.to_string());
         let rope = TextualState {
-            text_rope: Rope::from_str(s),
+            text_rope: Rope::from_text(s),
             ..Default::default()
         };
 
@@ -1384,7 +1383,7 @@ mod tests {
     fn slide_info_updates_are_version_checked() {
         let src = "mesh c = circle()\nslide first:\n  show c\n";
         let mut state = TextualState {
-            text_rope: Rope::from_str(src),
+            text_rope: Rope::from_text(src),
             ..Default::default()
         };
         let slides = vec![SlideInfo {
@@ -1404,7 +1403,7 @@ mod tests {
     fn transcript_entry_for_multiline_span_indexes_tail_row_only() {
         let src = "print [\n    1\n]\n";
         let mut state = TextualState {
-            text_rope: Rope::from_str(src),
+            text_rope: Rope::from_text(src),
             ..Default::default()
         };
         let section = SectionTranscript {

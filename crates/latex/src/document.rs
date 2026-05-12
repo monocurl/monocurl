@@ -141,10 +141,10 @@ fn validate_nested_ranges(
         while stack.last().is_some_and(|&end| range.start >= end) {
             stack.pop();
         }
-        if let Some(&parent_end) = stack.last() {
-            if range.end > parent_end {
-                bail!("{crossing_message}");
-            }
+        if let Some(&parent_end) = stack.last()
+            && range.end > parent_end
+        {
+            bail!("{crossing_message}");
         }
         stack.push(range.end);
     }

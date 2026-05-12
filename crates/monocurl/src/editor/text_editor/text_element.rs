@@ -73,7 +73,7 @@ impl TextElement {
             return None;
         }
 
-        let line_num = editor.cursor(cx).head.row as usize;
+        let line_num = editor.cursor(cx).head.row;
         if editor.line_map.is_line_hidden(line_num) {
             return None;
         }
@@ -258,7 +258,7 @@ impl TextElement {
             .map(|d| {
                 let color = d.color(&editor.text_styles);
                 let start = d.span.start;
-                let line = state.offset8_to_loc8(start).row as usize;
+                let line = state.offset8_to_loc8(start).row;
                 let y_start = editor.line_map.y_range(line..line + 1).start;
                 let width = editor.right_gutter_width;
                 let bounds = Bounds::new(

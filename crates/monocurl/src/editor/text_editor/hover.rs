@@ -49,16 +49,16 @@ impl TextEditor {
                 .is_none_or(|pos| !hover.span.contains(&pos));
             let version_changed = version != self.state.read(cx).version();
             if position_changed || version_changed {
-                return spawn_task(self, cx);
+                spawn_task(self, cx)
             } else {
-                return false;
+                false
             }
         } else {
             let version = self.state.read(cx).version();
             if self.last_hover_start.is_none()
                 || (mouse, version, scroll) != self.last_hover_start.unwrap()
             {
-                return spawn_task(self, cx);
+                spawn_task(self, cx)
             } else {
                 false
             }

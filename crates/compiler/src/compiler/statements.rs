@@ -124,7 +124,7 @@ impl Compiler {
         if existing_param && vt != VariableType::Param {
             self.error(
                 span.clone(),
-                &format!("cannot shadow 'param' variable '{name}'"),
+                format!("cannot shadow 'param' variable '{name}'"),
             );
         } else if vt == VariableType::Param {
             let shadows_existing = self
@@ -135,7 +135,7 @@ impl Compiler {
             if shadows_existing {
                 self.error(
                     span.clone(),
-                    &format!("'param' variable '{name}' cannot shadow an existing variable"),
+                    format!("'param' variable '{name}' cannot shadow an existing variable"),
                 );
             }
         }
@@ -159,7 +159,7 @@ impl Compiler {
             if !seen.insert(identifier.0.clone()) {
                 self.error(
                     span.clone(),
-                    &format!("duplicate binding pattern identifier '{}'", identifier.0),
+                    format!("duplicate binding pattern identifier '{}'", identifier.0),
                 );
             }
             if validate_names {

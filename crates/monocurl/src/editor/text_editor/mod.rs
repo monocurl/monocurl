@@ -1,7 +1,6 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::ops::Range;
 use std::time::Duration;
-use std::usize;
 
 use crate::components::text_input::{SingleLineInput, SingleLineInputEvent};
 use crate::editor::line_map::LineMap;

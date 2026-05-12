@@ -53,10 +53,10 @@ where
     }
 
     fn advance_if_not_nl(&mut self) -> Option<char> {
-        if let Some(ch) = self.peek() {
-            if ch != '\n' {
-                return self.advance();
-            }
+        if let Some(ch) = self.peek()
+            && ch != '\n'
+        {
+            return self.advance();
         }
         None
     }

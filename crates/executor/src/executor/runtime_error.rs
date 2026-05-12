@@ -193,7 +193,6 @@ impl Executor {
 
 #[derive(Clone, Copy)]
 struct RecoveredFrame {
-    #[allow(dead_code)]
     stack_idx: usize,
     next_ip: InstructionPointer,
 }

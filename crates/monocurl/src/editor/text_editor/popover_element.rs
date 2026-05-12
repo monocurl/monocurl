@@ -76,7 +76,7 @@ impl PopoverElement {
             if editor.line_map.is_line_hidden(location8.row) {
                 return None;
             }
-            let pos_in_container = self.pos_of_loc(&editor, location8);
+            let pos_in_container = self.pos_of_loc(editor, location8);
 
             Some(DiagnosticPopoverState {
                 diagnostic: d.clone(),
@@ -155,7 +155,7 @@ impl PopoverElement {
         popover_size: Size<Pixels>,
         target_position: Point<Pixels>,
         container_bounds: Bounds<Pixels>,
-        other_popovers: &Vec<Bounds<Pixels>>,
+        other_popovers: &[Bounds<Pixels>],
         prefer_up: bool,
     ) -> Option<PopoverPlacement> {
         let below_y = target_position.y + line_height;
@@ -188,21 +188,13 @@ impl PopoverElement {
             });
 
         let y = if prefer_up && above_fits {
-            if above_fits {
-                above_y
-            } else if below_fits {
-                below_y
-            } else {
-                return None;
-            }
+            above_y
+        } else if below_fits {
+            below_y
+        } else if above_fits {
+            above_y
         } else {
-            if below_fits {
-                below_y
-            } else if above_fits {
-                above_y
-            } else {
-                return None;
-            }
+            return None;
         };
 
         Some(PopoverPlacement {
@@ -380,8 +372,6 @@ impl Element for PopoverElement {
                 }
             },
         );
-
-        ()
     }
 
     fn paint(
