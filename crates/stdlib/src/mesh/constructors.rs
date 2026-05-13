@@ -1110,12 +1110,18 @@ pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 
 #[stdlib_func]
 pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let latex = read_string(executor, stack_idx, -2, "latex").await?;
-    let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
-    let meshes = latex::render_latex_with_quality(&latex, scale, text_render_quality(executor))
-        .map_err(|error| {
-            ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
-        })?;
+    let latex = read_string(executor, stack_idx, -3, "latex").await?;
+    let scale = read_text_scale(executor, stack_idx, -2, "scale")?;
+    let additional_preamble = read_string(executor, stack_idx, -1, "additional_preamble").await?;
+    let meshes = latex::render_latex_with_preamble_and_quality(
+        &latex,
+        &additional_preamble,
+        scale,
+        text_render_quality(executor),
+    )
+    .map_err(|error| {
+        ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
+    })?;
     Ok(latex_meshes_to_value(meshes))
 }
 

@@ -6,7 +6,7 @@ use geo::mesh::{Mesh, make_mesh_mut};
 use crate::{
     cache,
     config::backend_config,
-    document::{self, SpanMarker},
+    document::{self, LatexDocumentStyle, SpanMarker},
     system, tectonic,
     types::{BackendKind, LatexBackendConfig, RenderQuality, RenderedOutput},
 };
@@ -25,13 +25,7 @@ pub fn render_text_with_quality(
         return Ok(Vec::new());
     }
 
-    render_tagged_backend(
-        BackendKind::Text,
-        &tagged,
-        scale,
-        quality,
-        document::build_text_document,
-    )
+    render_tagged_backend(BackendKind::Text, &tagged, "", scale, quality)
 }
 
 pub fn render_tex(tex: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
@@ -48,13 +42,7 @@ pub fn render_tex_with_quality(
         return Ok(Vec::new());
     }
 
-    render_tagged_backend(
-        BackendKind::Tex,
-        &tagged,
-        scale,
-        quality,
-        document::build_tex_document,
-    )
+    render_tagged_backend(BackendKind::Tex, &tagged, "", scale, quality)
 }
 
 pub fn render_tex_marked(tex: &str, scale: f32, markers: &[SpanMarker]) -> Result<RenderedOutput> {
@@ -82,8 +70,25 @@ pub fn render_latex(body: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
     render_latex_with_quality(body, scale, RenderQuality::Normal)
 }
 
+pub fn render_latex_with_preamble(
+    body: &str,
+    additional_preamble: &str,
+    scale: f32,
+) -> Result<Vec<Arc<Mesh>>> {
+    render_latex_with_preamble_and_quality(body, additional_preamble, scale, RenderQuality::Normal)
+}
+
 pub fn render_latex_with_quality(
     body: &str,
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    render_latex_with_preamble_and_quality(body, "", scale, quality)
+}
+
+pub fn render_latex_with_preamble_and_quality(
+    body: &str,
+    additional_preamble: &str,
     scale: f32,
     quality: RenderQuality,
 ) -> Result<Vec<Arc<Mesh>>> {
@@ -95,20 +100,20 @@ pub fn render_latex_with_quality(
     render_tagged_backend(
         BackendKind::Latex,
         &tagged,
+        additional_preamble,
         scale,
         quality,
-        document::build_latex_document,
     )
 }
 
 fn render_document(
     backend: BackendKind,
+    backend_config: LatexBackendConfig,
     source: String,
     scale: f32,
     quality: RenderQuality,
 ) -> Result<RenderedOutput> {
     validate_scale(scale)?;
-    let backend_config = backend_config();
     cache::render_cached(
         backend,
         backend_config.clone(),
@@ -128,16 +133,13 @@ fn render_document(
     )
 }
 
-fn render_tagged_backend<F>(
+fn render_tagged_backend(
     backend: BackendKind,
     tagged: &document::TaggedSource,
+    additional_preamble: &str,
     scale: f32,
     quality: RenderQuality,
-    build_document: F,
-) -> Result<Vec<Arc<Mesh>>>
-where
-    F: FnOnce(&str) -> String,
-{
+) -> Result<Vec<Arc<Mesh>>> {
     let marker_spans = tagged
         .spans
         .iter()
@@ -147,8 +149,11 @@ where
             range: span.range.clone(),
         })
         .collect::<Vec<_>>();
-    let source = document::apply_legacy_text_tags(&tagged.source, &marker_spans)?;
-    let output = render_document(backend, build_document(&source), scale, quality)?;
+    let backend_config = backend_config();
+    let source = document::apply_text_tag_markers(&tagged.source, &marker_spans)?;
+    let document_style = document_style(&backend_config, &source, additional_preamble);
+    let source = build_document(backend, &source, additional_preamble, document_style);
+    let output = render_document(backend, backend_config, source, scale, quality)?;
     Ok(apply_backend_text_tags(output, &tagged.spans))
 }
 
@@ -166,10 +171,13 @@ fn render_tex_marked_backend(
             range: marker.range.clone(),
         })
         .collect::<Vec<_>>();
-    let source = document::apply_legacy_text_tags(tex, &tagged_markers)?;
+    let source = document::apply_text_tag_markers(tex, &tagged_markers)?;
+    let backend_config = backend_config();
+    let document_style = document_style(&backend_config, &source, "");
     let mut output = render_document(
         BackendKind::Tex,
-        document::build_tex_document(&source),
+        backend_config,
+        document::build_tex_document(&source, document_style),
         scale,
         quality,
     )?;
@@ -195,6 +203,54 @@ fn render_tex_marked_backend(
 
     output.span_mesh_indices = span_mesh_indices;
     Ok(output)
+}
+
+fn document_style(
+    backend_config: &LatexBackendConfig,
+    source: &str,
+    additional_preamble: &str,
+) -> LatexDocumentStyle {
+    match backend_config {
+        LatexBackendConfig::Bundled => {
+            if needs_unicode_preamble(source, additional_preamble) {
+                LatexDocumentStyle::BundledUnicode
+            } else {
+                LatexDocumentStyle::BundledBasic
+            }
+        }
+        LatexBackendConfig::System(_) => LatexDocumentStyle::SystemLatex,
+    }
+}
+
+fn needs_unicode_preamble(source: &str, additional_preamble: &str) -> bool {
+    !source.is_ascii() || latex_font_preamble_hint(additional_preamble)
+}
+
+fn latex_font_preamble_hint(additional_preamble: &str) -> bool {
+    [
+        "fontspec",
+        "xeCJK",
+        "setmainfont",
+        "setsansfont",
+        "setmonofont",
+        "setCJK",
+        "newfontfamily",
+    ]
+    .iter()
+    .any(|hint| additional_preamble.contains(hint))
+}
+
+fn build_document(
+    backend: BackendKind,
+    source: &str,
+    additional_preamble: &str,
+    style: LatexDocumentStyle,
+) -> String {
+    match backend {
+        BackendKind::Text => document::build_text_document(source, style),
+        BackendKind::Tex => document::build_tex_document(source, style),
+        BackendKind::Latex => document::build_latex_document(source, additional_preamble, style),
+    }
 }
 
 pub(crate) fn validate_scale(scale: f32) -> Result<()> {
@@ -333,5 +389,29 @@ mod tests {
         assert!(render_tex("   ", 1.0).unwrap().is_empty());
         assert!(render_latex("", 1.0).unwrap().is_empty());
         assert!(render_latex("   ", 1.0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn bundled_backend_uses_basic_preamble_for_ascii_sources() {
+        assert_eq!(
+            document_style(&LatexBackendConfig::Bundled, "x^2 + y^2", ""),
+            LatexDocumentStyle::BundledBasic,
+        );
+    }
+
+    #[test]
+    fn bundled_backend_uses_unicode_preamble_when_needed() {
+        assert_eq!(
+            document_style(&LatexBackendConfig::Bundled, "文", ""),
+            LatexDocumentStyle::BundledUnicode,
+        );
+        assert_eq!(
+            document_style(
+                &LatexBackendConfig::Bundled,
+                "hello",
+                r"\usepackage{fontspec}"
+            ),
+            LatexDocumentStyle::BundledUnicode,
+        );
     }
 }
