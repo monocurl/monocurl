@@ -276,6 +276,21 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read release notes from tag
+        run: |
+          tag_ref="refs/tags/${GITHUB_REF_NAME}"
+
+          if [[ "$(git cat-file -t "$tag_ref")" != "tag" ]]; then
+            echo "::error::${GITHUB_REF_NAME} is a lightweight tag. Use an annotated tag so the release has notes."
+            exit 1
+          fi
+
+          git for-each-ref "$tag_ref" --format='%(contents:subject)%0a%0a%(contents:body)' > release-notes.md
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -290,5 +305,6 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
+          body_path: release-notes.md
           fail_on_unmatched_files: true
           files: dist/*
