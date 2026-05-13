@@ -24,10 +24,10 @@ import std.anim
 
 slide "hello"
     mesh title = center{0u} Text("Monocurl", 2.4)
-    play Write(1.2, &title)
+    play Write(1.2)
     play Wait(0.4)
     title = []
-    play Fade(0.8, &title)
+    play Fade(0.8)
 ```
 
 ## Building
