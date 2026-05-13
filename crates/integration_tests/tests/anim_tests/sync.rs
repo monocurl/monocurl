@@ -594,7 +594,7 @@ fn test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_pani
         mesh ab_transfer = []
 
         let theorem =
-            center{[0, 1, 0]} w{} Tex("\\pin1{C^2} = \\pin2{A^2} + \\pin3{B^2}", 1)
+            center{[0, 1, 0]} w{} Tex("\text_tag{1}{C^2} = \text_tag{2}{A^2} + \text_tag{3}{B^2}", 1)
     "#;
 
     let slide0 = r#"

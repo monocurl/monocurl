@@ -393,9 +393,13 @@ let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 
 ## [overview]
 ## Full LaTeX fragment converted into mesh geometry.
+## [parameters]
+## latex: LaTeX body content, string/list text fragments, or `text_tag{...}` fragments
+## scale: text scale in scene units
+## additional_preamble: extra LaTeX declarations inserted before `\begin{document}`
 ## [description]
-## Use this when the input already contains document-level LaTeX structure; use `Tex` for ordinary displayed math. `Latex` supports the same text tagging markers as `Tex`, so `\text_tag{...}{...}`, `\tag2{...}`, and `text_tag{...}` fragments all become ordinary mesh tags after rendering.
-let Latex = |latex, scale = 1| __monocurl__native__ mk_latex(latex, scale)
+## Use this when the input needs ordinary LaTeX body structure beyond display math; use `Tex` for ordinary displayed math. `additional_preamble` is inserted before `\begin{document}`, which is useful with the system backend for packages and font setup such as `\usepackage{fontspec}`. `Latex` supports the same text tagging markers as `Tex`, so `\text_tag{...}{...}`, `\tag2{...}`, and `text_tag{...}` fragments all become ordinary mesh tags after rendering.
+let Latex = |latex, scale = 1, additional_preamble = ""| __monocurl__native__ mk_latex(latex, scale, additional_preamble)
 
 ## [overview]
 ## Attach tags to text fragments before they become mesh contours.

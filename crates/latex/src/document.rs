@@ -2,22 +2,49 @@ use std::{collections::HashMap, ops::Range};
 
 use anyhow::{Result, bail};
 
-const SHARED_MACROS: &str = "\\newcommand{\\pin}[2]{{\\color[RGB]{#1,255,255} #2}}\n\
-\\renewcommand{\\P}[2]{{\\color[RGB]{#1,255,255} #2}}\n\
-\\newcommand{\\rowpin}[3]{{\\color[RGB]{255,#1,#2} #3}}\n\
-\\newcommand{\\RP}[3]{{\\color[RGB]{255,#2,#1} #3}}\n";
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum LatexDocumentStyle {
+    BundledBasic,
+    BundledUnicode,
+    SystemLatex,
+}
 
-const LATEX_PREAMBLE: &str = "\\documentclass[preview]{standalone}\n\
-\\usepackage{amsmath}\n\
-\\usepackage{amssymb}\n\
-\\usepackage{amsfonts}\n\
-\\usepackage{xcolor}\n\
-\\usepackage{graphicx}\n\
+const SYSTEM_LATEX_PREAMBLE: &str = r"\documentclass[preview]{standalone}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{xcolor}
+\usepackage{graphicx}
 ";
 
-const LATEX_POSTAMBLE: &str = "\n\\end{document}\n";
-const TEXT_TAG_MACRO: &str = "\\text_tag";
-const TEXT_TAG_SHORTCUT_PREFIX: &str = "\\tag";
+const BUNDLED_UNICODE_LATEX_PREAMBLE: &str = r"\documentclass[preview]{standalone}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{fontspec}
+\defaultfontfeatures{Ligatures=TeX,Renderer=HarfBuzz}
+\setmainfont{FreeSerif.otf}
+\setmonofont{NotoSansMono-Regular.ttf}
+\usepackage{xeCJK}
+\xeCJKsetup{AutoFallBack=true,CJKmath=true}
+\setCJKmainfont{UnBatang.ttf}
+\setCJKfallbackfamilyfont{\CJKrmdefault}{FandolSong-Regular.otf}
+\setCJKmonofont{UnDotum.ttf}
+\newfontfamily\monocurlArabicFont{Amiri-Regular.ttf}[Script=Arabic]
+\newfontfamily\monocurlDevanagariFont{Mukta-Regular.ttf}[
+  Script=Devanagari
+]
+";
+
+const LATEX_BEGIN_DOCUMENT: &str = r"\begin{document}
+";
+const LATEX_POSTAMBLE: &str = r"
+\end{document}
+";
+const TEXT_TAG_MACRO: &str = r"\text_tag";
+const TEXT_TAG_SHORTCUT_PREFIX: &str = r"\tag";
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SpanMarker {
@@ -37,23 +64,70 @@ pub(crate) struct TaggedSource {
     pub spans: Vec<TaggedSpan>,
 }
 
-pub(crate) fn build_text_document(text: &str) -> String {
-    format!("{LATEX_PREAMBLE}{SHARED_MACROS}\\begin{{document}}\n{text}{LATEX_POSTAMBLE}")
+pub(crate) fn build_text_document(text: &str, style: LatexDocumentStyle) -> String {
+    build_document(text, "", style)
 }
 
-pub(crate) fn build_tex_document(tex: &str) -> String {
-    format!("{LATEX_PREAMBLE}{SHARED_MACROS}\\begin{{document}}\n\\[\n{tex}\n\\]{LATEX_POSTAMBLE}")
+pub(crate) fn build_tex_document(tex: &str, style: LatexDocumentStyle) -> String {
+    build_document(
+        &format!(
+            r"\[
+{tex}
+\]"
+        ),
+        "",
+        style,
+    )
 }
 
-pub(crate) fn build_latex_document(body: &str) -> String {
-    format!("{LATEX_PREAMBLE}{SHARED_MACROS}\\begin{{document}}\n{body}{LATEX_POSTAMBLE}")
+pub(crate) fn build_latex_document(
+    body: &str,
+    additional_preamble: &str,
+    style: LatexDocumentStyle,
+) -> String {
+    build_document(body, additional_preamble, style)
+}
+
+fn build_document(body: &str, additional_preamble: &str, style: LatexDocumentStyle) -> String {
+    let mut document = String::with_capacity(
+        latex_preamble(style).len()
+            + additional_preamble.len()
+            + usize::from(!additional_preamble.is_empty())
+            + LATEX_BEGIN_DOCUMENT.len()
+            + body.len()
+            + LATEX_POSTAMBLE.len(),
+    );
+    document.push_str(latex_preamble(style));
+    push_additional_preamble(&mut document, additional_preamble);
+    document.push_str(LATEX_BEGIN_DOCUMENT);
+    document.push_str(body);
+    document.push_str(LATEX_POSTAMBLE);
+    document
+}
+
+fn latex_preamble(style: LatexDocumentStyle) -> &'static str {
+    match style {
+        LatexDocumentStyle::BundledBasic | LatexDocumentStyle::SystemLatex => SYSTEM_LATEX_PREAMBLE,
+        LatexDocumentStyle::BundledUnicode => BUNDLED_UNICODE_LATEX_PREAMBLE,
+    }
+}
+
+fn push_additional_preamble(document: &mut String, additional_preamble: &str) {
+    if additional_preamble.is_empty() {
+        return;
+    }
+
+    document.push_str(additional_preamble);
+    if !additional_preamble.ends_with('\n') {
+        document.push('\n');
+    }
 }
 
 pub(crate) fn parse_text_tags(source: &str) -> Result<TaggedSource> {
     parse_text_tags_impl(source)
 }
 
-pub(crate) fn apply_legacy_text_tags(source: &str, spans: &[TaggedSpan]) -> Result<String> {
+pub(crate) fn apply_text_tag_markers(source: &str, spans: &[TaggedSpan]) -> Result<String> {
     if spans.is_empty() {
         return Ok(source.to_owned());
     }
@@ -65,8 +139,8 @@ pub(crate) fn apply_legacy_text_tags(source: &str, spans: &[TaggedSpan]) -> Resu
         if !source.is_char_boundary(span.range.start) || !source.is_char_boundary(span.range.end) {
             bail!("text tag span is not aligned to UTF-8 boundaries");
         }
-        if !(1..=2).contains(&span.tag.len()) {
-            bail!("text tags support one or two tag components");
+        if span.tag.len() != 1 {
+            bail!("text tag markers must have exactly one tag component");
         }
     }
     validate_nested_ranges(
@@ -78,7 +152,7 @@ pub(crate) fn apply_legacy_text_tags(source: &str, spans: &[TaggedSpan]) -> Resu
         source,
         spans.iter().map(|span| Wrapper {
             range: span.range.clone(),
-            open: legacy_text_tag_open(&span.tag),
+            open: text_tag_marker_open(span.tag[0]),
             close: "}".into(),
         }),
     ))
@@ -329,31 +403,37 @@ fn skip_ascii_whitespace(source: &str, mut cursor: usize) -> usize {
     cursor
 }
 
-fn legacy_text_tag_open(tag: &[isize]) -> String {
-    match tag {
-        [tag] => format!("\\pin{{{tag}}}{{"),
-        [row, col] => format!("\\rowpin{{{row}}}{{{col}}}{{"),
-        _ => unreachable!("validated by apply_legacy_text_tags"),
-    }
+fn text_tag_marker_open(tag: isize) -> String {
+    format!(r"{{\color[RGB]{{{tag},255,255}} ")
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        TaggedSource, TaggedSpan, apply_legacy_text_tags, build_tex_document, build_text_document,
-        parse_text_tags,
+        LatexDocumentStyle, TaggedSource, TaggedSpan, apply_text_tag_markers, build_latex_document,
+        build_tex_document, build_text_document, parse_text_tags,
     };
 
     #[test]
     fn text_document_keeps_raw_input() {
-        let doc = build_text_document("hello");
+        let doc = build_text_document("hello", LatexDocumentStyle::SystemLatex);
         assert!(doc.contains("\nhello\n"));
     }
 
     #[test]
     fn tex_document_wraps_input_in_display_math() {
-        let doc = build_tex_document("x^2");
+        let doc = build_tex_document("x^2", LatexDocumentStyle::SystemLatex);
         assert!(doc.contains("\n\\[\nx^2\n\\]\n"));
+    }
+
+    #[test]
+    fn latex_document_inserts_additional_preamble_before_body() {
+        let doc = build_latex_document(
+            "hello",
+            r"\usepackage{fontspec}",
+            LatexDocumentStyle::SystemLatex,
+        );
+        assert!(doc.contains("\\usepackage{fontspec}\n\\begin{document}\nhello"));
     }
 
     #[test]
@@ -429,8 +509,8 @@ mod tests {
     }
 
     #[test]
-    fn legacy_text_tags_rewrite_to_pin_macros() {
-        let tagged = apply_legacy_text_tags(
+    fn text_tag_markers_rewrite_to_color_groups() {
+        let tagged = apply_text_tag_markers(
             "lhs + rhs",
             &[
                 TaggedSpan {
@@ -438,18 +518,21 @@ mod tests {
                     range: 0..3,
                 },
                 TaggedSpan {
-                    tag: vec![2, 3],
+                    tag: vec![2],
                     range: 6..9,
                 },
             ],
         )
         .unwrap();
-        assert_eq!(tagged, r"\pin{1}{lhs} + \rowpin{2}{3}{rhs}");
+        assert_eq!(
+            tagged,
+            r"{\color[RGB]{1,255,255} lhs} + {\color[RGB]{2,255,255} rhs}"
+        );
     }
 
     #[test]
-    fn legacy_text_tags_preserve_nested_tex_groups() {
-        let tagged = apply_legacy_text_tags(
+    fn text_tag_markers_preserve_nested_tex_groups() {
+        let tagged = apply_text_tag_markers(
             r"\frac{a}{b}",
             &[
                 TaggedSpan {
@@ -463,6 +546,9 @@ mod tests {
             ],
         )
         .unwrap();
-        assert_eq!(tagged, r"\pin{1}{\frac{a}{\pin{2}{b}}}");
+        assert_eq!(
+            tagged,
+            r"{\color[RGB]{1,255,255} \frac{a}{{\color[RGB]{2,255,255} b}}}"
+        );
     }
 }

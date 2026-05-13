@@ -15,7 +15,7 @@ static TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn discover_backend() -> SystemToolPaths {
     SystemToolPaths {
-        latex: find_command("latex"),
+        latex: find_command("xelatex").or_else(|| find_command("latex")),
         dvisvgm: find_command("dvisvgm"),
     }
 }
@@ -28,9 +28,12 @@ pub(crate) fn backend_status(config: &SystemBackendConfig) -> SystemBackendStatu
 }
 
 pub(crate) fn render_svg_document(document: &str, config: &SystemBackendConfig) -> Result<String> {
+    let engine = LatexEngine::for_command(&config.latex);
     let temp_dir = TempDir::new()?;
     let tex_path = temp_dir.path().join(format!("{TEX_BASENAME}.tex"));
-    let dvi_path = temp_dir.path().join(format!("{TEX_BASENAME}.dvi"));
+    let output_path = temp_dir
+        .path()
+        .join(format!("{TEX_BASENAME}.{}", engine.output_extension()));
     let svg_path = temp_dir.path().join(format!("{TEX_BASENAME}.svg"));
 
     fs::write(&tex_path, document).with_context(|| {
@@ -40,20 +43,12 @@ pub(crate) fn render_svg_document(document: &str, config: &SystemBackendConfig) 
         )
     })?;
 
-    run_command(
-        &config.latex,
-        vec![
-            "-interaction=nonstopmode".into(),
-            "-halt-on-error".into(),
-            format!("-output-directory={}", temp_dir.path().display()),
-            tex_path.display().to_string(),
-        ],
-    )?;
+    run_command(&config.latex, engine.args(temp_dir.path(), &tex_path))?;
 
     run_command(
         &config.dvisvgm,
         vec![
-            dvi_path.display().to_string(),
+            output_path.display().to_string(),
             "-v".into(),
             "0".into(),
             "-n".into(),
@@ -64,6 +59,47 @@ pub(crate) fn render_svg_document(document: &str, config: &SystemBackendConfig) 
 
     fs::read_to_string(&svg_path)
         .with_context(|| format!("failed to read generated SVG `{}`", svg_path.display()))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LatexEngine {
+    Latex,
+    XeLatex,
+}
+
+impl LatexEngine {
+    fn for_command(command: &Path) -> Self {
+        let name = command
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if name.contains("xelatex") {
+            Self::XeLatex
+        } else {
+            Self::Latex
+        }
+    }
+
+    fn args(self, output_dir: &Path, tex_path: &Path) -> Vec<String> {
+        let mut args = vec![
+            "-interaction=nonstopmode".into(),
+            "-halt-on-error".into(),
+            format!("-output-directory={}", output_dir.display()),
+        ];
+        if self == Self::XeLatex {
+            args.push("-no-pdf".into());
+        }
+        args.push(tex_path.display().to_string());
+        args
+    }
+
+    fn output_extension(self) -> &'static str {
+        match self {
+            Self::Latex => "dvi",
+            Self::XeLatex => "xdv",
+        }
+    }
 }
 
 fn command_available(command: &Path) -> bool {

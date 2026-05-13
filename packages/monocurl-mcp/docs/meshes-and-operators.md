@@ -58,9 +58,9 @@ Internally, `text_tag{2} "2x"` simply aliases to
 `\text_tag{2}{2x}`; `\tag2{2x}` is a custom latex shortcut as well. Use tagged fragments for
 equation transforms and selective formula styling. They're also used for animations. You can add multiple tags via `text_tag{1, 2, 3} "x^2"`.
 
-Use `Text` for plain text, `Tex` for math fragments, and `Latex` for full
-LaTeX fragments. Text is still mesh geometry, so it can be styled, tagged, and
-animated.
+Use `Text` for plain text, `Tex` for math fragments, and `Latex` for LaTeX body
+fragments that need extra structure or an `additional_preamble`. Text is still
+mesh geometry, so it can be styled, tagged, and animated.
 
 String escapes use `%`, not `\`, which keeps LaTeX readable. Write TeX
 commands directly, such as `Tex("\frac{a}{b}")`; use `%%` for a literal percent
