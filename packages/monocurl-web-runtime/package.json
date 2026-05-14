@@ -11,12 +11,12 @@
   },
   "types": "./dist/index.d.ts",
   "files": [
-    "dist/index.js",
-    "dist/index.d.ts",
+    "dist/**",
     "README.md"
   ],
   "scripts": {
-    "build": "npm run check && tsc -p tsconfig.json",
+    "build": "npm run check && tsc -p tsconfig.json && npm run build:wasm",
+    "build:wasm": "node scripts/build-wasm.mjs",
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [

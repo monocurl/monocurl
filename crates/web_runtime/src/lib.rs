@@ -171,6 +171,23 @@ impl Runtime {
         );
 
         let ok = parse_artifacts.error_diagnostics.is_empty() && compile_result.errors.is_empty();
+        let slides = if ok {
+            let library_sections = compile_result.bytecode.library_sections();
+            compile_result
+                .bytecode
+                .sections
+                .iter()
+                .enumerate()
+                .skip(compile_result.bytecode.non_slide_sections())
+                .map(|(section_index, section)| SlideMetadata {
+                    index: section_index.saturating_sub(library_sections),
+                    name: section.name.clone(),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
         self.controller.apply_command(
             runtime::RuntimeCommand::UpdateBytecode {
                 bytecode: ok.then_some(compile_result.bytecode),
@@ -178,7 +195,11 @@ impl Runtime {
             0.0,
         );
 
-        CompilationReport { ok, diagnostics }
+        CompilationReport {
+            ok,
+            diagnostics,
+            slides,
+        }
     }
 }
 
@@ -187,6 +208,14 @@ impl Runtime {
 struct CompilationReport {
     ok: bool,
     diagnostics: Vec<CompilationDiagnostic>,
+    slides: Vec<SlideMetadata>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SlideMetadata {
+    index: usize,
+    name: Option<String>,
 }
 
 #[derive(Serialize)]

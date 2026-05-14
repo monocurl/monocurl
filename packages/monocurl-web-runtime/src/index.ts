@@ -1,3 +1,7 @@
+import initPackagedWasm, * as packagedWasm from "./wasm/web_runtime.js";
+import { installMonocurlMathJaxRenderer } from "./mathjax-renderer.js";
+import type { MonocurlMathJax } from "./mathjax-renderer.js";
+
 export type PlaybackMode = "preview" | "presentation";
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
@@ -38,9 +42,19 @@ export interface RuntimeStepResult extends RuntimeIteration {
   needsWork: boolean;
 }
 
+export interface PlayOptions {
+  until?: Timestamp;
+}
+
 export interface CompilationReport {
   ok: boolean;
   diagnostics: CompilationDiagnostic[];
+  slides: SlideMetadata[];
+}
+
+export interface SlideMetadata {
+  index: number;
+  name: string | null;
 }
 
 export interface CompilationDiagnostic {
@@ -280,6 +294,8 @@ export type MonocurlWasmSource =
   | Promise<MonocurlWasmModule>
   | (() => MonocurlWasmModule | Promise<MonocurlWasmModule>);
 
+export type MonocurlWasmInitInput = unknown;
+
 export interface RuntimeClock {
   nowSeconds(): number;
 }
@@ -290,20 +306,29 @@ export interface FrameScheduler {
 }
 
 export interface CreateMonocurlLoopOptions {
+  /**
+   * Optional override for tests or custom bundlers. By default the packaged
+   * Monocurl wasm runtime is initialized and used automatically.
+   */
   wasm?: MonocurlWasmSource;
+  /**
+   * Optional input passed to wasm-bindgen initialization. Leave unset to fetch
+   * the packaged `web_runtime_bg.wasm` next to this package's wasm JS glue.
+   */
+  wasmInit?: MonocurlWasmInitInput;
   runtime?: MonocurlWasmRuntimeHandle;
+  /**
+   * MathJax instance to install for Text/Tex rendering. By default, an existing
+   * global `MathJax` is installed automatically when available. Pass `false` to
+   * opt out.
+   */
+  mathJax?: MonocurlMathJax | false;
+  mathJaxDisplay?: boolean;
   clock?: RuntimeClock;
   scheduler?: FrameScheduler;
   onStep?: (result: RuntimeStepResult) => void;
   onIdle?: (result: RuntimeStepResult) => void;
   onError?: (error: unknown) => void;
-}
-
-export class MissingWasmRuntimeError extends Error {
-  constructor() {
-    super("createMonocurlLoop requires either a wasm module or a runtime handle");
-    this.name = "MissingWasmRuntimeError";
-  }
 }
 
 export class UnsupportedWasmMethodError extends Error {
@@ -441,7 +466,21 @@ export function parseCompilationReport(json: string): CompilationReport {
   return {
     ok: parsed.ok === true,
     diagnostics: parsed.diagnostics ?? [],
+    slides: parsed.slides ?? [],
   };
+}
+
+function timestampCompare(a: Timestamp, b: Timestamp): number {
+  return a.slide === b.slide ? a.time - b.time : a.slide - b.slide;
+}
+
+function validateTimestamp(timestamp: Timestamp, label: string): void {
+  if (!Number.isInteger(timestamp.slide) || timestamp.slide < 0) {
+    throw new TypeError(`${label}.slide must be a non-negative integer`);
+  }
+  if (Number.isNaN(timestamp.time)) {
+    throw new TypeError(`${label}.time must not be NaN`);
+  }
 }
 
 export const performanceClock: RuntimeClock = {
@@ -470,25 +509,62 @@ export const animationFrameScheduler: FrameScheduler = {
 };
 
 export async function createMonocurlLoop(
-  options: CreateMonocurlLoopOptions,
+  options: CreateMonocurlLoopOptions = {},
 ): Promise<MonocurlLoop> {
-  const runtime = options.runtime ?? new (await resolveWasmModule(options.wasm)).Runtime();
-  return new MonocurlLoop(runtime, options);
+  const uninstallMathJax = await installMathJaxIfAvailable(options);
+  try {
+    const runtime = options.runtime ?? new (await resolveWasmModule(options)).Runtime();
+    const loop = new MonocurlLoop(runtime, options);
+    if (uninstallMathJax !== undefined) {
+      loopCleanup.set(loop, uninstallMathJax);
+    }
+    return loop;
+  } catch (error) {
+    uninstallMathJax?.();
+    throw error;
+  }
 }
 
 async function resolveWasmModule(
-  wasm: MonocurlWasmSource | undefined,
+  options: Pick<CreateMonocurlLoopOptions, "wasm" | "wasmInit">,
 ): Promise<MonocurlWasmModule> {
-  if (wasm === undefined) {
-    throw new MissingWasmRuntimeError();
+  if (options.wasm === undefined) {
+    await initPackagedWasm(options.wasmInit);
+    return packagedWasm;
   }
 
-  if (typeof wasm === "function") {
-    return await wasm();
+  if (typeof options.wasm === "function") {
+    return await options.wasm();
   }
 
-  return await wasm;
+  return await options.wasm;
 }
+
+async function installMathJaxIfAvailable(
+  options: Pick<CreateMonocurlLoopOptions, "mathJax" | "mathJaxDisplay">,
+): Promise<(() => void) | undefined> {
+  if (options.mathJax === false) {
+    return undefined;
+  }
+
+  const mathJax = options.mathJax ?? globalThis.MathJax;
+  if (mathJax === undefined) {
+    return undefined;
+  }
+
+  await mathJax.startup?.promise;
+  return installMonocurlMathJaxRenderer({
+    mathJax,
+    display: options.mathJaxDisplay,
+  });
+}
+
+type MonocurlLoopOptions = Omit<
+  CreateMonocurlLoopOptions,
+  "wasm" | "wasmInit" | "runtime" | "mathJax" | "mathJaxDisplay"
+>;
+
+const loopCleanup = new WeakMap<MonocurlLoop, () => void>();
 
 export class MonocurlLoop {
   private readonly clock: RuntimeClock;
@@ -498,11 +574,12 @@ export class MonocurlLoop {
   private readonly onError?: (error: unknown) => void;
   private scheduledFrame: number | undefined;
   private pendingStep: Promise<RuntimeStepResult> | undefined;
+  private playUntil: Timestamp | undefined;
   private disposed = false;
 
   constructor(
     readonly runtime: MonocurlWasmRuntimeHandle,
-    options: Omit<CreateMonocurlLoopOptions, "wasm" | "runtime"> = {},
+    options: MonocurlLoopOptions = {},
   ) {
     this.clock = options.clock ?? performanceClock;
     this.scheduler = options.scheduler ?? animationFrameScheduler;
@@ -543,11 +620,13 @@ export class MonocurlLoop {
     }
 
     const report = parseCompilationReport(reportJson);
+    this.playUntil = undefined;
     this.requestStep();
     return report;
   }
 
   setPlaybackMode(mode: PlaybackMode): void {
+    this.playUntil = undefined;
     if (mode === "presentation") {
       this.runtime.set_presentation_mode();
     } else {
@@ -557,6 +636,8 @@ export class MonocurlLoop {
   }
 
   seekTo(timestamp: Timestamp): void {
+    validateTimestamp(timestamp, "timestamp");
+    this.playUntil = undefined;
     this.runtime.seek_to(timestamp.slide, timestamp.time);
     this.requestStep();
   }
@@ -581,20 +662,29 @@ export class MonocurlLoop {
     this.requestStep();
   }
 
-  togglePlay(nowSeconds = this.clock.nowSeconds()): void {
-    this.runtime.toggle_play(nowSeconds);
+  togglePlay(): void {
+    this.playUntil = undefined;
+    this.runtime.toggle_play(this.clock.nowSeconds());
     this.requestStep();
   }
 
-  play(nowSeconds = this.clock.nowSeconds()): void {
-    if (!this.runtime.is_playing()) {
-      this.togglePlay(nowSeconds);
+  play(options: PlayOptions = {}): void {
+    this.playUntil = options.until;
+    if (this.playUntil !== undefined) {
+      validateTimestamp(this.playUntil, "options.until");
     }
+
+    if (!this.runtime.is_playing()) {
+      this.runtime.toggle_play(this.clock.nowSeconds());
+    }
+    this.requestStep();
   }
 
-  pause(nowSeconds = this.clock.nowSeconds()): void {
+  pause(): void {
+    this.playUntil = undefined;
     if (this.runtime.is_playing()) {
-      this.togglePlay(nowSeconds);
+      this.runtime.toggle_play(this.clock.nowSeconds());
+      this.requestStep();
     }
   }
 
@@ -640,6 +730,8 @@ export class MonocurlLoop {
 
     this.stop();
     this.runtime.free?.();
+    loopCleanup.get(this)?.();
+    loopCleanup.delete(this);
     this.disposed = true;
   }
 
@@ -649,6 +741,7 @@ export class MonocurlLoop {
 
     if (this.runtime.step_json !== undefined) {
       iteration = parseRuntimeIterationJson(await this.runtime.step_json(nowSeconds));
+      iteration = await this.applyPlayUntil(iteration, nowSeconds);
       snapshotCount = iteration.snapshots.length;
     } else {
       snapshotCount = await this.runtime.step(nowSeconds);
@@ -672,6 +765,37 @@ export class MonocurlLoop {
     }
 
     return result;
+  }
+
+  private async applyPlayUntil(
+    iteration: RuntimeIteration,
+    nowSeconds: number,
+  ): Promise<RuntimeIteration> {
+    if (this.playUntil === undefined) {
+      return iteration;
+    }
+
+    const until = this.playUntil;
+    const reachedIndex = iteration.snapshots.findIndex(
+      (snapshot) => timestampCompare(snapshot.currentTimestamp, until) >= 0,
+    );
+    if (reachedIndex === -1) {
+      return iteration;
+    }
+
+    this.playUntil = undefined;
+    const beforeLimit = iteration.snapshots.slice(0, reachedIndex);
+    this.runtime.seek_to(until.slide, until.time);
+    const stepJson = this.runtime.step_json;
+    if (stepJson === undefined) {
+      return { snapshots: beforeLimit };
+    }
+
+    const stopped = parseRuntimeIterationJson(await stepJson.call(this.runtime, nowSeconds));
+    return {
+      snapshots: beforeLimit.concat(stopped.snapshots),
+      nextFrameInterval: stopped.nextFrameInterval,
+    };
   }
 
   private assertLive(): void {
