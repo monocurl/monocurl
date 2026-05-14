@@ -4,6 +4,23 @@ export type Vec3 = [number, number, number];
 export type Vec4 = [number, number, number, number];
 export type ExecutionStatus = "playing" | "paused" | "runtimeError" | "compileError";
 
+export {
+  MonocurlWebGlRenderer,
+  UnsupportedWebGlRendererError,
+  createMonocurlWebGlRenderer,
+} from "./webgl-renderer.js";
+export type { MonocurlWebGlRendererOptions } from "./webgl-renderer.js";
+export {
+  MissingMathJaxError,
+  installMonocurlMathJaxRenderer,
+  renderMathJaxSvg,
+} from "./mathjax-renderer.js";
+export type {
+  MonocurlLatexSvgRenderer,
+  MonocurlMathJax,
+  MonocurlMathJaxRendererOptions,
+} from "./mathjax-renderer.js";
+
 export interface Timestamp {
   slide: number;
   time: number;
@@ -19,6 +36,18 @@ export interface RuntimeStepResult extends RuntimeIteration {
   nowSeconds: number;
   isPlaying: boolean;
   needsWork: boolean;
+}
+
+export interface CompilationReport {
+  ok: boolean;
+  diagnostics: CompilationDiagnostic[];
+}
+
+export interface CompilationDiagnostic {
+  kind: "parseError" | "compileError" | "compileWarning";
+  title: string;
+  message: string;
+  span: SourceSpan;
 }
 
 export interface ExecutionSnapshot {
@@ -213,10 +242,7 @@ export interface PackedTriangleBuffer {
 }
 
 export interface MonocurlWasmRuntimeHandle {
-  monocurl_version(): string;
-  supports_monocurl_version(version: string): boolean;
   native_function_count(): number;
-  bytecode_instruction_size(): number;
   needs_work(): boolean;
   is_playing(): boolean;
   seek_to(slide: number, time: number): void;
@@ -225,13 +251,17 @@ export interface MonocurlWasmRuntimeHandle {
   set_preview_mode(): void;
   step(nowSeconds: number): Promise<number>;
   step_json?(nowSeconds: number): Promise<string>;
-  load_bytecode_json?(json: string): void;
+  load_source?(source: string, importsJson: string): string;
+  load_source_with_root_path?(
+    rootPath: string,
+    source: string,
+    importsJson: string,
+  ): string;
   free?(): void;
 }
 
 export interface MonocurlWasmModule {
   Runtime: new () => MonocurlWasmRuntimeHandle;
-  monocurl_version?: () => string;
 }
 
 export type MonocurlWasmSource =
@@ -251,22 +281,11 @@ export interface FrameScheduler {
 export interface CreateMonocurlLoopOptions {
   wasm?: MonocurlWasmSource;
   runtime?: MonocurlWasmRuntimeHandle;
-  expectedVersion?: string;
   clock?: RuntimeClock;
   scheduler?: FrameScheduler;
   onStep?: (result: RuntimeStepResult) => void;
   onIdle?: (result: RuntimeStepResult) => void;
   onError?: (error: unknown) => void;
-}
-
-export class MonocurlVersionError extends Error {
-  constructor(
-    readonly expected: string,
-    readonly actual: string,
-  ) {
-    super(`Monocurl version mismatch: expected ${expected}, got ${actual}`);
-    this.name = "MonocurlVersionError";
-  }
 }
 
 export class MissingWasmRuntimeError extends Error {
@@ -282,40 +301,6 @@ export class UnsupportedWasmMethodError extends Error {
     this.name = "UnsupportedWasmMethodError";
   }
 }
-
-type VersionEnvironment = Record<string, string | undefined>;
-
-type VersionGlobal = typeof globalThis & {
-  MONOCURL_VERSION?: string;
-  process?: { env?: VersionEnvironment };
-};
-
-type VersionImportMeta = ImportMeta & {
-  env?: VersionEnvironment;
-};
-
-function firstNonEmptyVersion(
-  ...candidates: Array<string | undefined>
-): string | undefined {
-  return candidates.find(
-    (candidate): candidate is string =>
-      candidate !== undefined && candidate.length > 0,
-  );
-}
-
-export function environmentMonocurlVersion(): string | undefined {
-  const versionGlobal = globalThis as VersionGlobal;
-  const importMetaEnv = (import.meta as VersionImportMeta).env;
-
-  return firstNonEmptyVersion(
-    versionGlobal.MONOCURL_VERSION,
-    importMetaEnv?.MONOCURL_VERSION,
-    importMetaEnv?.VITE_MONOCURL_VERSION,
-    versionGlobal.process?.env?.MONOCURL_VERSION,
-  );
-}
-
-export const DEFAULT_EXPECTED_VERSION = environmentMonocurlVersion();
 
 function writeVec2(out: Float32Array, offset: number, value: Vec2): void {
   out[offset] = value[0];
@@ -439,6 +424,15 @@ export function parseRuntimeIterationJson(json: string): RuntimeIteration {
   };
 }
 
+export function parseCompilationReport(json: string): CompilationReport {
+  const parsed = JSON.parse(json) as Partial<CompilationReport>;
+
+  return {
+    ok: parsed.ok === true,
+    diagnostics: parsed.diagnostics ?? [],
+  };
+}
+
 export const performanceClock: RuntimeClock = {
   nowSeconds(): number {
     return globalThis.performance.now() / 1000;
@@ -468,14 +462,7 @@ export async function createMonocurlLoop(
   options: CreateMonocurlLoopOptions,
 ): Promise<MonocurlLoop> {
   const runtime = options.runtime ?? new (await resolveWasmModule(options.wasm)).Runtime();
-  const loop = new MonocurlLoop(runtime, options);
-  const expectedVersion = options.expectedVersion ?? environmentMonocurlVersion();
-
-  if (expectedVersion !== undefined && !loop.supportsVersion(expectedVersion)) {
-    throw new MonocurlVersionError(expectedVersion, loop.monocurlVersion);
-  }
-
-  return loop;
+  return new MonocurlLoop(runtime, options);
 }
 
 async function resolveWasmModule(
@@ -513,16 +500,8 @@ export class MonocurlLoop {
     this.onError = options.onError;
   }
 
-  get monocurlVersion(): string {
-    return this.runtime.monocurl_version();
-  }
-
   get nativeFunctionCount(): number {
     return this.runtime.native_function_count();
-  }
-
-  get bytecodeInstructionSize(): number {
-    return this.runtime.bytecode_instruction_size();
   }
 
   get isPlaying(): boolean {
@@ -533,17 +512,32 @@ export class MonocurlLoop {
     return this.runtime.needs_work();
   }
 
-  supportsVersion(version: string): boolean {
-    return this.runtime.supports_monocurl_version(version);
-  }
-
-  loadBytecodeJson(json: string): void {
-    if (this.runtime.load_bytecode_json === undefined) {
-      throw new UnsupportedWasmMethodError("load_bytecode_json");
+  loadSource(
+    source: string,
+    imports: Record<string, string> = {},
+    rootPath?: string,
+  ): CompilationReport {
+    const importsJson = JSON.stringify(imports);
+    let reportJson: string;
+    if (rootPath === undefined) {
+      if (this.runtime.load_source === undefined) {
+        throw new UnsupportedWasmMethodError("load_source");
+      }
+      reportJson = this.runtime.load_source(source, importsJson);
+    } else {
+      if (this.runtime.load_source_with_root_path === undefined) {
+        throw new UnsupportedWasmMethodError("load_source_with_root_path");
+      }
+      reportJson = this.runtime.load_source_with_root_path(
+        rootPath,
+        source,
+        importsJson,
+      );
     }
 
-    this.runtime.load_bytecode_json(json);
+    const report = parseCompilationReport(reportJson);
     this.requestStep();
+    return report;
   }
 
   setPlaybackMode(mode: PlaybackMode): void {

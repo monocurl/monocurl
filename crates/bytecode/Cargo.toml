@@ -4,6 +4,4 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-serde = { workspace = true, features = ["rc"] }
-serde_json.workspace = true
 structs.workspace = true

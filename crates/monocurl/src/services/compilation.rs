@@ -219,11 +219,7 @@ impl CompilationService {
         let mut latest_lex_rope = Rope::default();
         let mut latest_version = 0;
 
-        let mut parse_state = ParseImportContext {
-            root_file_path: self.root_path.clone(),
-            open_tab_ropes: Default::default(),
-            cached_parses: Default::default(),
-        };
+        let mut parse_state = ParseImportContext::new(self.root_path.clone());
         let mut compiler_state = CompilerCache::default();
 
         let mut last_compile_result = CompileResult::default();
@@ -257,11 +253,8 @@ impl CompilationService {
                         physical_path,
                         open_documents,
                     } => {
-                        parse_state = ParseImportContext {
-                            root_file_path: physical_path,
-                            open_tab_ropes: open_documents,
-                            cached_parses: Default::default(),
-                        };
+                        parse_state =
+                            ParseImportContext::with_open_documents(physical_path, open_documents);
                         compile_action = BatchCompileAction::Recompile;
                     }
                 }
@@ -315,11 +308,7 @@ mod tests {
     fn slide_info_from_parse_tracks_header_end_and_section_ranges() {
         let src = "mesh c = circle()\nslide \"Intro\"\n  show c\nslide second\n  hide c\n";
         let text_rope = Rope::from_text(src);
-        let mut parse_state = ParseImportContext {
-            root_file_path: PathBuf::from("scene.mcs"),
-            open_tab_ropes: Default::default(),
-            cached_parses: Default::default(),
-        };
+        let mut parse_state = ParseImportContext::new(PathBuf::from("scene.mcs"));
         let (_, parse_artifacts) =
             Parser::parse(&mut parse_state, lex_rope(src), text_rope.clone(), None);
         let slides = CompilationService::slide_info_from_parse(&parse_artifacts, &text_rope);

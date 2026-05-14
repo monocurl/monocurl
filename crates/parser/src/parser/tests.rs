@@ -115,11 +115,7 @@ mod test {
         fs::write(dir.join("dep2.mcl"), "let dep2 = 2\n").unwrap();
         fs::write(dir.join("lib.mcl"), "import dep1\nlet lib = dep1\n").unwrap();
 
-        let mut context = ParseImportContext {
-            root_file_path: dir.join("scene.mcs"),
-            open_tab_ropes: HashMap::new(),
-            cached_parses: HashMap::new(),
-        };
+        let mut context = ParseImportContext::new(dir.join("scene.mcs"));
 
         let (first, errors) = parse_with_context(
             &mut context,

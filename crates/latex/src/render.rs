@@ -4,10 +4,9 @@ use anyhow::{Result, bail};
 use geo::mesh::{Mesh, make_mesh_mut};
 
 use crate::{
-    cache,
+    backend, cache,
     config::backend_config,
-    document::{self, LatexDocumentStyle, SpanMarker},
-    system, tectonic,
+    document::{self, SpanMarker},
     types::{BackendKind, LatexBackendConfig, RenderQuality, RenderedOutput},
 };
 
@@ -106,33 +105,6 @@ pub fn render_latex_with_preamble_and_quality(
     )
 }
 
-fn render_document(
-    backend: BackendKind,
-    backend_config: LatexBackendConfig,
-    source: String,
-    scale: f32,
-    quality: RenderQuality,
-) -> Result<RenderedOutput> {
-    validate_scale(scale)?;
-    cache::render_cached(
-        backend,
-        backend_config.clone(),
-        source,
-        scale,
-        quality,
-        |source| {
-            cache::render_svg_with_file_cache(&backend_config, &source, scale, quality, |source| {
-                match &backend_config {
-                    LatexBackendConfig::Bundled => tectonic::render_svg_document(source),
-                    LatexBackendConfig::System(config) => {
-                        system::render_svg_document(source, config)
-                    }
-                }
-            })
-        },
-    )
-}
-
 fn render_tagged_backend(
     backend: BackendKind,
     tagged: &document::TaggedSource,
@@ -151,9 +123,14 @@ fn render_tagged_backend(
         .collect::<Vec<_>>();
     let backend_config = backend_config();
     let source = document::apply_text_tag_markers(&tagged.source, &marker_spans)?;
-    let document_style = document_style(&backend_config, &source, additional_preamble);
-    let source = build_document(backend, &source, additional_preamble, document_style);
-    let output = render_document(backend, backend_config, source, scale, quality)?;
+    let output = render_tagged_document(
+        backend,
+        backend_config,
+        &source,
+        additional_preamble,
+        scale,
+        quality,
+    )?;
     Ok(apply_backend_text_tags(output, &tagged.spans))
 }
 
@@ -173,11 +150,11 @@ fn render_tex_marked_backend(
         .collect::<Vec<_>>();
     let source = document::apply_text_tag_markers(tex, &tagged_markers)?;
     let backend_config = backend_config();
-    let document_style = document_style(&backend_config, &source, "");
-    let mut output = render_document(
+    let mut output = render_tagged_document(
         BackendKind::Tex,
         backend_config,
-        document::build_tex_document(&source, document_style),
+        &source,
+        "",
         scale,
         quality,
     )?;
@@ -205,51 +182,63 @@ fn render_tex_marked_backend(
     Ok(output)
 }
 
-fn document_style(
-    backend_config: &LatexBackendConfig,
+fn render_tagged_document(
+    backend: BackendKind,
+    backend_config: LatexBackendConfig,
     source: &str,
     additional_preamble: &str,
-) -> LatexDocumentStyle {
-    match backend_config {
-        LatexBackendConfig::Bundled => {
-            if needs_unicode_preamble(source, additional_preamble) {
-                LatexDocumentStyle::BundledUnicode
-            } else {
-                LatexDocumentStyle::BundledBasic
-            }
-        }
-        LatexBackendConfig::System(_) => LatexDocumentStyle::SystemLatex,
-    }
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<RenderedOutput> {
+    validate_scale(scale)?;
+    let prepared = backend::prepare_render(backend, backend_config, source, additional_preamble)?;
+    let source = prepared.source.clone();
+    cache::render_cached(
+        backend,
+        prepared.config.clone(),
+        source,
+        scale,
+        quality,
+        |source| {
+            render_prepared_svg(
+                &prepared.config,
+                backend,
+                &source,
+                scale,
+                quality,
+                &prepared,
+            )
+        },
+    )
 }
 
-fn needs_unicode_preamble(source: &str, additional_preamble: &str) -> bool {
-    !source.is_ascii() || latex_font_preamble_hint(additional_preamble)
-}
-
-fn latex_font_preamble_hint(additional_preamble: &str) -> bool {
-    [
-        "fontspec",
-        "xeCJK",
-        "setmainfont",
-        "setsansfont",
-        "setmonofont",
-        "setCJK",
-        "newfontfamily",
-    ]
-    .iter()
-    .any(|hint| additional_preamble.contains(hint))
-}
-
-fn build_document(
+fn render_prepared_svg(
+    config: &LatexBackendConfig,
     backend: BackendKind,
     source: &str,
-    additional_preamble: &str,
-    style: LatexDocumentStyle,
-) -> String {
-    match backend {
-        BackendKind::Text => document::build_text_document(source, style),
-        BackendKind::Tex => document::build_tex_document(source, style),
-        BackendKind::Latex => document::build_latex_document(source, additional_preamble, style),
+    scale: f32,
+    quality: RenderQuality,
+    prepared: &backend::PreparedRender,
+) -> Result<crate::svg::RenderedSvg> {
+    if prepared.file_cache {
+        cache::render_svg_with_file_cache(
+            config,
+            source,
+            scale,
+            quality,
+            prepared.svg_units_at_scale_1,
+            prepared.flip_y,
+            |source| backend::render_svg(backend, config, source),
+        )
+    } else {
+        let svg = backend::render_svg(backend, config, source)?;
+        cache::import_svg(
+            &svg,
+            scale,
+            quality,
+            prepared.svg_units_at_scale_1,
+            prepared.flip_y,
+        )
     }
 }
 
@@ -286,7 +275,7 @@ mod tests {
     use geo::simd::Float3;
 
     use super::*;
-    use crate::{LatexBackendConfig, set_backend_config};
+    use crate::{LatexBackendConfig, document::LatexDocumentStyle, set_backend_config};
 
     fn configure_test_backend() -> bool {
         set_backend_config(LatexBackendConfig::Bundled);
@@ -394,7 +383,7 @@ mod tests {
     #[test]
     fn bundled_backend_uses_basic_preamble_for_ascii_sources() {
         assert_eq!(
-            document_style(&LatexBackendConfig::Bundled, "x^2 + y^2", ""),
+            backend::document_style(&LatexBackendConfig::Bundled, "x^2 + y^2", ""),
             LatexDocumentStyle::BundledBasic,
         );
     }
@@ -402,11 +391,11 @@ mod tests {
     #[test]
     fn bundled_backend_uses_unicode_preamble_when_needed() {
         assert_eq!(
-            document_style(&LatexBackendConfig::Bundled, "文", ""),
+            backend::document_style(&LatexBackendConfig::Bundled, "文", ""),
             LatexDocumentStyle::BundledUnicode,
         );
         assert_eq!(
-            document_style(
+            backend::document_style(
                 &LatexBackendConfig::Bundled,
                 "hello",
                 r"\usepackage{fontspec}"

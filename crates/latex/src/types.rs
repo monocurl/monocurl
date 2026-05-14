@@ -59,3 +59,14 @@ pub(crate) enum BackendKind {
     Tex,
     Latex,
 }
+
+impl BackendKind {
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Text => "text",
+            Self::Tex => "tex",
+            Self::Latex => "latex",
+        }
+    }
+}

@@ -867,8 +867,6 @@ dependencies = [
 name = "bytecode"
 version = "0.1.0"
 dependencies = [
- "serde",
- "serde_json",
  "structs",
 ]
 
@@ -3928,6 +3926,7 @@ dependencies = [
  "tectonic_engine_xetex",
  "tiny-skia-path",
  "usvg",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -8593,14 +8592,17 @@ dependencies = [
 name = "web_runtime"
 version = "0.1.0"
 dependencies = [
- "bytecode",
+ "compiler",
  "executor",
  "geo",
+ "lexer",
+ "parser",
  "renderer",
  "runtime",
  "serde",
  "serde_json",
  "stdlib",
+ "structs",
  "wasm-bindgen",
  "wasm-bindgen-futures",
 ]

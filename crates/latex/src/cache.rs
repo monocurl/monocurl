@@ -16,7 +16,6 @@ use crate::{
     types::{BackendKind, LatexBackendConfig, RenderQuality, RenderedOutput},
 };
 
-const SYSTEM_SVG_UNITS_AT_SCALE_1: f32 = 36.0;
 const LATEX_SVG_CACHE_VERSION: &[u8] = b"monocurl-latex-svg-cache-v1";
 const LATEX_SVG_FILE_CACHE_MAX_AGE_DAYS: u64 = 30;
 const LATEX_SVG_FILE_CACHE_MAX_AGE: Duration =
@@ -95,6 +94,8 @@ pub(crate) fn render_svg_with_file_cache<F>(
     source: &str,
     scale: f32,
     quality: RenderQuality,
+    svg_units_at_scale_1: f32,
+    flip_y: bool,
     render_svg: F,
 ) -> Result<svg::RenderedSvg>
 where
@@ -102,26 +103,28 @@ where
 {
     let cache_path = latex_svg_cache_path(backend_config, source);
     if let Ok(svg_source) = fs::read_to_string(&cache_path)
-        && let Ok(rendered) = import_latex_svg(&svg_source, scale, quality)
+        && let Ok(rendered) = import_svg(&svg_source, scale, quality, svg_units_at_scale_1, flip_y)
     {
         return Ok(rendered);
     }
 
     let svg_source = render_svg(source)?;
-    let rendered = import_latex_svg(&svg_source, scale, quality)?;
+    let rendered = import_svg(&svg_source, scale, quality, svg_units_at_scale_1, flip_y)?;
     write_latex_svg_file_cache(&cache_path, &svg_source);
     Ok(rendered)
 }
 
-fn import_latex_svg(
+pub(crate) fn import_svg(
     svg_source: &str,
     scale: f32,
     quality: RenderQuality,
+    svg_units_at_scale_1: f32,
+    flip_y: bool,
 ) -> Result<svg::RenderedSvg> {
     svg::import(
         svg_source,
-        scale / SYSTEM_SVG_UNITS_AT_SCALE_1,
-        svg_import_options(quality, true),
+        scale / svg_units_at_scale_1,
+        svg_import_options(quality, flip_y),
     )
 }
 

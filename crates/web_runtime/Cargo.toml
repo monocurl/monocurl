@@ -7,14 +7,17 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-bytecode.workspace = true
+compiler.workspace = true
 executor.workspace = true
 geo.workspace = true
+lexer.workspace = true
+parser.workspace = true
 renderer.workspace = true
 runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-stdlib.workspace = true
+stdlib = { workspace = true, default-features = false, features = ["wasm-latex"] }
+structs.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen.workspace = true

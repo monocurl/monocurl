@@ -1,5 +1,19 @@
 mod snapshot_json;
 
+use std::{collections::HashMap, path::PathBuf};
+
+use compiler::{
+    cache::CompilerCache,
+    compiler::{CompileError, CompileWarning, compile},
+};
+use lexer::{lexer::Lexer, token::Token};
+use parser::{
+    import_context::{MemoryImportBackend, ParseImportContext},
+    parser::{Diagnostic as ParseDiagnostic, Parser},
+};
+use serde::{Deserialize, Serialize};
+use structs::rope::{Attribute, RLEData, Rope};
+
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
 
@@ -30,20 +44,8 @@ impl Runtime {
         }
     }
 
-    pub fn monocurl_version(&self) -> String {
-        bytecode::MONOCURL_VERSION.to_string()
-    }
-
-    pub fn supports_monocurl_version(&self, version: &str) -> bool {
-        version == bytecode::MONOCURL_VERSION
-    }
-
     pub fn native_function_count(&self) -> usize {
         stdlib::registry::registry().len()
-    }
-
-    pub fn bytecode_instruction_size(&self) -> usize {
-        std::mem::size_of::<bytecode::Instruction>()
     }
 
     pub fn needs_work(&self) -> bool {
@@ -82,16 +84,20 @@ impl Runtime {
         );
     }
 
-    pub fn load_bytecode_json(&self, json: &str) -> Result<(), JsValue> {
-        let bytecode = bytecode::Bytecode::from_versioned_json(json)
-            .map_err(|error| js_error(error.to_string()))?;
-        self.controller.apply_command(
-            runtime::RuntimeCommand::UpdateBytecode {
-                bytecode: Some(bytecode),
-            },
-            0.0,
-        );
-        Ok(())
+    pub fn load_source(&self, source: &str, imports_json: &str) -> Result<String, JsValue> {
+        self.load_source_with_root_path("main.mcs", source, imports_json)
+    }
+
+    pub fn load_source_with_root_path(
+        &self,
+        root_path: &str,
+        source: &str,
+        imports_json: &str,
+    ) -> Result<String, JsValue> {
+        let imported_files = parse_import_map(imports_json)
+            .map_err(|error| js_error(format!("failed to decode import map: {error}")))?;
+        let report = self.compile_source(root_path, source, imported_files);
+        serde_json::to_string(&report).map_err(|error| js_error(error.to_string()))
     }
 
     pub async fn step(&self, now_seconds: f64) -> usize {
@@ -115,16 +121,196 @@ impl Default for Runtime {
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub fn engine_version() -> String {
-    monocurl_version()
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub fn monocurl_version() -> String {
-    bytecode::MONOCURL_VERSION.to_string()
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
 pub fn renderer_size_probe() -> u32 {
     renderer::RenderSize::new(1, 1).width
+}
+
+impl Runtime {
+    fn compile_source(
+        &self,
+        root_path: &str,
+        source: &str,
+        imported_files: HashMap<String, String>,
+    ) -> CompilationReport {
+        let text_rope = Rope::from_text(source);
+        let lex_rope = lex_rope_from_str(source);
+        let mut import_backend = MemoryImportBackend::new();
+        insert_embedded_stdlib(&mut import_backend);
+        for (path, source) in imported_files {
+            insert_import_source(&mut import_backend, &path, source);
+        }
+
+        let mut parse_context =
+            ParseImportContext::with_backend(PathBuf::from(root_path), import_backend);
+        let (bundles, parse_artifacts) =
+            Parser::parse(&mut parse_context, lex_rope, text_rope, None);
+        let mut compiler_cache = CompilerCache::default();
+        let compile_result = compile(&mut compiler_cache, None, &bundles);
+
+        let mut diagnostics = Vec::new();
+        diagnostics.extend(
+            parse_artifacts
+                .error_diagnostics
+                .iter()
+                .map(CompilationDiagnostic::parse_error),
+        );
+        diagnostics.extend(
+            compile_result
+                .errors
+                .iter()
+                .map(CompilationDiagnostic::compile_error),
+        );
+        diagnostics.extend(
+            compile_result
+                .warnings
+                .iter()
+                .map(CompilationDiagnostic::compile_warning),
+        );
+
+        let ok = parse_artifacts.error_diagnostics.is_empty() && compile_result.errors.is_empty();
+        self.controller.apply_command(
+            runtime::RuntimeCommand::UpdateBytecode {
+                bytecode: ok.then_some(compile_result.bytecode),
+            },
+            0.0,
+        );
+
+        CompilationReport { ok, diagnostics }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompilationReport {
+    ok: bool,
+    diagnostics: Vec<CompilationDiagnostic>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompilationDiagnostic {
+    kind: &'static str,
+    title: String,
+    message: String,
+    span: SerializableSpan,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SerializableSpan {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ImportMap {
+    Files(HashMap<String, String>),
+    FileEntries(Vec<ImportMapEntry>),
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportMapEntry {
+    path: String,
+    source: String,
+    #[serde(default)]
+    is_stdlib: bool,
+}
+
+impl CompilationDiagnostic {
+    fn parse_error(diagnostic: &ParseDiagnostic) -> Self {
+        Self {
+            kind: "parseError",
+            title: diagnostic.title.clone(),
+            message: diagnostic.message.clone(),
+            span: SerializableSpan::from(&diagnostic.span),
+        }
+    }
+
+    fn compile_error(error: &CompileError) -> Self {
+        Self {
+            kind: "compileError",
+            title: "Compile Error".to_string(),
+            message: error.message.clone(),
+            span: SerializableSpan::from(&error.span),
+        }
+    }
+
+    fn compile_warning(warning: &CompileWarning) -> Self {
+        Self {
+            kind: "compileWarning",
+            title: "Compile Warning".to_string(),
+            message: warning.message.clone(),
+            span: SerializableSpan::from(&warning.span),
+        }
+    }
+}
+
+impl From<&std::ops::Range<usize>> for SerializableSpan {
+    fn from(span: &std::ops::Range<usize>) -> Self {
+        Self {
+            start: span.start,
+            end: span.end,
+        }
+    }
+}
+
+fn parse_import_map(json: &str) -> Result<HashMap<String, String>, serde_json::Error> {
+    if json.trim().is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    match serde_json::from_str(json)? {
+        ImportMap::Files(files) => Ok(files),
+        ImportMap::FileEntries(entries) => Ok(entries
+            .into_iter()
+            .map(|entry| {
+                let path = if entry.is_stdlib && !entry.path.starts_with("std.") {
+                    format!("std.{}", entry.path)
+                } else {
+                    entry.path
+                };
+                (path, entry.source)
+            })
+            .collect()),
+    }
+}
+
+fn insert_import_source(import_backend: &mut MemoryImportBackend, path: &str, source: String) {
+    let is_stdlib = path.starts_with("std.") || path.starts_with("std/");
+    if path.contains('/') || path.ends_with(".mcl") {
+        import_backend.insert_path(path, source, is_stdlib);
+    } else {
+        import_backend.insert_module(path, source, is_stdlib);
+    }
+}
+
+fn insert_embedded_stdlib(import_backend: &mut MemoryImportBackend) {
+    for (module, source) in [
+        ("std.math", include_str!("../../../assets/std/std/math.mcl")),
+        ("std.anim", include_str!("../../../assets/std/std/anim.mcl")),
+        (
+            "std.color",
+            include_str!("../../../assets/std/std/color.mcl"),
+        ),
+        ("std.util", include_str!("../../../assets/std/std/util.mcl")),
+        ("std.mesh", include_str!("../../../assets/std/std/mesh.mcl")),
+        (
+            "std.scene",
+            include_str!("../../../assets/std/std/scene.mcl"),
+        ),
+    ] {
+        import_backend.insert_module(module, source, true);
+    }
+}
+
+fn lex_rope_from_str(source: &str) -> Rope<Attribute<Token>> {
+    Rope::default().replace_range(
+        0..0,
+        Lexer::new(source.chars()).map(|(attribute, codeunits)| RLEData {
+            codeunits,
+            attribute,
+        }),
+    )
 }
