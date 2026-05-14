@@ -491,43 +491,16 @@ fn render_attribute_snapshot(
     services: WeakEntity<ServiceManager>,
     weak_vp: WeakEntity<Viewport>,
 ) -> AnyElement {
-    let mut rows = Vec::new();
-    if let Some(target) = &attribute.target {
-        if attribute.value.is_supported_control() {
-            rows.push(render_control_for_target(
-                viewport,
-                target,
-                &attribute.name,
-                &attribute.value,
-                is_locked,
-                depth,
-                services.clone(),
-                weak_vp.clone(),
-            ));
-        } else {
-            rows.push(render_attribute_row(
-                &attribute.name,
-                "(unsupported type)",
-                depth,
-                is_locked,
-            ));
-        }
-    } else {
-        rows.push(render_attribute_row(&attribute.name, "", depth, is_locked));
-    }
-
-    rows.extend(attribute.children.iter().map(|child| {
-        render_attribute_snapshot(
-            viewport,
-            child,
-            depth + 1,
-            is_locked,
-            services.clone(),
-            weak_vp.clone(),
-        )
-    }));
-
-    div().flex().flex_col().children(rows).into_any_element()
+    render_control_for_target(
+        viewport,
+        &attribute.target,
+        &attribute.name,
+        &attribute.value,
+        is_locked,
+        depth,
+        services,
+        weak_vp,
+    )
 }
 
 fn render_attribute_row(name: &str, detail: &str, depth: usize, is_locked: bool) -> AnyElement {

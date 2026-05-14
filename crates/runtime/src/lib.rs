@@ -15,7 +15,7 @@ use executor::{
     state::LeaderKind,
     time::Timestamp,
     transcript::SectionTranscript,
-    value::{MeshAttributePathSegment, Value, container::List},
+    value::{Value, container::List},
 };
 use geo::mesh::Mesh;
 use stdlib::registry::registry;
@@ -44,13 +44,8 @@ impl ParameterValue {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum PresentationUpdateTarget {
-    Param {
-        leader_index: usize,
-    },
-    MeshAttribute {
-        leader_index: usize,
-        path: Vec<MeshAttributePathSegment>,
-    },
+    Param { leader_index: usize },
+    MeshAttribute { leader_index: usize, name: String },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -63,19 +58,14 @@ pub struct ParameterEntrySnapshot {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MeshAttributeSnapshot {
-    pub target: Option<PresentationUpdateTarget>,
+    pub target: PresentationUpdateTarget,
     pub name: String,
     pub value: ParameterValue,
-    pub children: Vec<MeshAttributeSnapshot>,
 }
 
 impl MeshAttributeSnapshot {
     pub fn has_supported_control(&self) -> bool {
         self.value.is_supported_control()
-            || self
-                .children
-                .iter()
-                .any(MeshAttributeSnapshot::has_supported_control)
     }
 }
 
@@ -470,8 +460,8 @@ fn apply_pending_parameter_updates(executor: &mut Executor, shared: &SharedRunti
             PresentationUpdateTarget::Param { leader_index } => {
                 executor.update_parameter_by_leader_index(*leader_index, value)
             }
-            PresentationUpdateTarget::MeshAttribute { leader_index, path } => {
-                executor.update_mesh_attribute(*leader_index, path, value)
+            PresentationUpdateTarget::MeshAttribute { leader_index, name } => {
+                executor.update_mesh_attribute(*leader_index, name, value)
             }
         };
         if let Err(error) = result {
@@ -747,7 +737,7 @@ fn parameter_snapshot(executor: &Executor) -> ParameterSnapshot {
                     leader_index,
                     name: entry.name.clone(),
                     locked,
-                    attributes: mesh_attributes_from_runtime(leader_index, follower_val, &[]),
+                    attributes: mesh_attributes_from_runtime(leader_index, follower_val),
                 });
             }
         }
@@ -756,11 +746,7 @@ fn parameter_snapshot(executor: &Executor) -> ParameterSnapshot {
     ParameterSnapshot { params, meshes }
 }
 
-fn mesh_attributes_from_runtime(
-    leader_index: usize,
-    value: Value,
-    parent_path: &[MeshAttributePathSegment],
-) -> Vec<MeshAttributeSnapshot> {
+fn mesh_attributes_from_runtime(leader_index: usize, value: Value) -> Vec<MeshAttributeSnapshot> {
     match value.elide_lvalue() {
         Value::InvokedFunction(inv) => inv
             .body
@@ -768,13 +754,7 @@ fn mesh_attributes_from_runtime(
             .iter()
             .filter_map(|(arg_idx, name)| {
                 let value = inv.body.arguments.get(*arg_idx)?.clone();
-                Some(mesh_labeled_attribute_snapshot(
-                    leader_index,
-                    parent_path,
-                    MeshAttributePathSegment::FunctionArgument(*arg_idx),
-                    name.clone(),
-                    value,
-                ))
+                mesh_labeled_attribute_snapshot(leader_index, name.clone(), value)
             })
             .collect(),
         Value::InvokedOperator(inv) => {
@@ -783,45 +763,19 @@ fn mesh_attributes_from_runtime(
                 let Some(value) = inv.body.arguments.get(*arg_idx).cloned() else {
                     continue;
                 };
-                attributes.push(mesh_labeled_attribute_snapshot(
-                    leader_index,
-                    parent_path,
-                    MeshAttributePathSegment::OperatorArgument(*arg_idx),
-                    name.clone(),
-                    value,
-                ));
+                if let Some(attribute) =
+                    mesh_labeled_attribute_snapshot(leader_index, name.clone(), value)
+                {
+                    attributes.push(attribute);
+                }
             }
 
-            let mut operand_path = parent_path.to_vec();
-            operand_path.push(MeshAttributePathSegment::OperatorOperand);
-            let operand_attributes = mesh_attributes_from_runtime(
-                leader_index,
-                inv.body.operand.as_ref().clone(),
-                &operand_path,
-            );
+            let operand_attributes =
+                mesh_attributes_from_runtime(leader_index, inv.body.operand.as_ref().clone());
             attributes.extend(operand_attributes);
             attributes
         }
-        Value::List(list) => list
-            .elements()
-            .iter()
-            .enumerate()
-            .filter_map(|(index, element)| {
-                let mut item_path = parent_path.to_vec();
-                item_path.push(MeshAttributePathSegment::ListIndex(index));
-                let attributes = mesh_attributes_from_runtime(
-                    leader_index,
-                    with_heap(|h| h.get(element.key()).clone()),
-                    &item_path,
-                );
-                (!attributes.is_empty()).then(|| MeshAttributeSnapshot {
-                    target: None,
-                    name: format!("item {}", index + 1),
-                    value: ParameterValue::Other,
-                    children: attributes,
-                })
-            })
-            .collect(),
+        Value::List(_) => Vec::new(),
         Value::Stateful(_) => Vec::new(),
         _ => Vec::new(),
     }
@@ -829,33 +783,33 @@ fn mesh_attributes_from_runtime(
 
 fn mesh_labeled_attribute_snapshot(
     leader_index: usize,
-    parent_path: &[MeshAttributePathSegment],
-    segment: MeshAttributePathSegment,
     name: String,
     value: Value,
-) -> MeshAttributeSnapshot {
-    let mut path = parent_path.to_vec();
-    path.push(segment);
-    MeshAttributeSnapshot {
-        target: Some(PresentationUpdateTarget::MeshAttribute {
+) -> Option<MeshAttributeSnapshot> {
+    let value = parameter_value_from_runtime(value.elide_cached_wrappers_rec());
+    value.is_supported_control().then(|| MeshAttributeSnapshot {
+        target: PresentationUpdateTarget::MeshAttribute {
             leader_index,
-            path: path.clone(),
-        }),
+            name: name.clone(),
+        },
         name,
-        value: parameter_value_from_runtime(value.clone().elide_cached_wrappers_rec()),
-        children: mesh_attributes_from_runtime(leader_index, value, &path),
-    }
+        value,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use executor::{state::ExecutionState, time::Timestamp, value::Value};
+    use executor::{
+        state::ExecutionState,
+        time::Timestamp,
+        value::{Value, invoked_function::make_invoked_function},
+    };
 
     use super::{
         ParameterValue, PresentationUpdateTarget, RuntimeCommand, RuntimeController,
-        default_bytecode,
+        default_bytecode, mesh_attributes_from_runtime,
     };
 
     #[test]
@@ -977,6 +931,29 @@ mod tests {
         });
 
         assert!(runtime.shared.needs_work());
+    }
+
+    #[test]
+    fn mesh_attribute_snapshot_is_flat_and_filters_unsupported_values() {
+        let value = Value::InvokedFunction(make_invoked_function(
+            Value::Nil,
+            smallvec::smallvec![Value::Float(1.5), Value::String("not a control".into())],
+            smallvec::smallvec![(0, "radius".into()), (1, "label".into())],
+            Some(Value::Nil),
+        ));
+
+        let attributes = mesh_attributes_from_runtime(7, value);
+
+        assert_eq!(attributes.len(), 1);
+        assert_eq!(attributes[0].name, "radius");
+        assert_eq!(attributes[0].value, ParameterValue::Float(1.5));
+        assert_eq!(
+            attributes[0].target,
+            PresentationUpdateTarget::MeshAttribute {
+                leader_index: 7,
+                name: "radius".into()
+            }
+        );
     }
 
     #[test]

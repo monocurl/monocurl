@@ -2,7 +2,6 @@ use executor::{
     error::{RuntimeCallFrame, RuntimeError},
     scene_snapshot::{BackgroundSnapshot, CameraSnapshot},
     transcript::{SectionTranscript, TranscriptEntry},
-    value::MeshAttributePathSegment,
 };
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
@@ -465,27 +464,17 @@ impl From<&runtime::MeshEntrySnapshot> for SerializableMeshEntrySnapshot {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SerializableMeshAttributeSnapshot {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    target: Option<SerializablePresentationUpdateTarget>,
+    target: SerializablePresentationUpdateTarget,
     name: String,
     value: SerializableParameterValue,
-    children: Vec<SerializableMeshAttributeSnapshot>,
 }
 
 impl From<&runtime::MeshAttributeSnapshot> for SerializableMeshAttributeSnapshot {
     fn from(snapshot: &runtime::MeshAttributeSnapshot) -> Self {
         Self {
-            target: snapshot
-                .target
-                .as_ref()
-                .map(SerializablePresentationUpdateTarget::from),
+            target: SerializablePresentationUpdateTarget::from(&snapshot.target),
             name: snapshot.name.clone(),
             value: SerializableParameterValue::from(&snapshot.value),
-            children: snapshot
-                .children
-                .iter()
-                .map(SerializableMeshAttributeSnapshot::from)
-                .collect(),
         }
     }
 }
@@ -497,13 +486,8 @@ impl From<&runtime::MeshAttributeSnapshot> for SerializableMeshAttributeSnapshot
     rename_all_fields = "camelCase"
 )]
 enum SerializablePresentationUpdateTarget {
-    Param {
-        leader_index: usize,
-    },
-    MeshAttribute {
-        leader_index: usize,
-        path: Vec<SerializableMeshAttributePathSegment>,
-    },
+    Param { leader_index: usize },
+    MeshAttribute { leader_index: usize, name: String },
 }
 
 impl From<&runtime::PresentationUpdateTarget> for SerializablePresentationUpdateTarget {
@@ -512,42 +496,11 @@ impl From<&runtime::PresentationUpdateTarget> for SerializablePresentationUpdate
             runtime::PresentationUpdateTarget::Param { leader_index } => Self::Param {
                 leader_index: *leader_index,
             },
-            runtime::PresentationUpdateTarget::MeshAttribute { leader_index, path } => {
+            runtime::PresentationUpdateTarget::MeshAttribute { leader_index, name } => {
                 Self::MeshAttribute {
                     leader_index: *leader_index,
-                    path: path
-                        .iter()
-                        .map(SerializableMeshAttributePathSegment::from)
-                        .collect(),
+                    name: name.clone(),
                 }
-            }
-        }
-    }
-}
-
-#[derive(Serialize)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-enum SerializableMeshAttributePathSegment {
-    ListIndex { index: usize },
-    FunctionArgument { index: usize },
-    OperatorOperand,
-    OperatorArgument { index: usize },
-}
-
-impl From<&MeshAttributePathSegment> for SerializableMeshAttributePathSegment {
-    fn from(segment: &MeshAttributePathSegment) -> Self {
-        match segment {
-            MeshAttributePathSegment::ListIndex(index) => Self::ListIndex { index: *index },
-            MeshAttributePathSegment::FunctionArgument(index) => {
-                Self::FunctionArgument { index: *index }
-            }
-            MeshAttributePathSegment::OperatorOperand => Self::OperatorOperand,
-            MeshAttributePathSegment::OperatorArgument(index) => {
-                Self::OperatorArgument { index: *index }
             }
         }
     }

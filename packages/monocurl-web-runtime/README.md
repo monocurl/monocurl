@@ -53,6 +53,11 @@ string map whose keys can be module names such as `std.scene` or paths such as
 `lib/helpers.mcl`. The wasm runtime embeds the default `std.*` modules;
 caller-supplied imports can override or extend that set.
 
+Presentation controls are surfaced through the `parameters` field on execution
+snapshots. Pass those existing `target` and updated `value` objects back to
+`loop.updateParameter(target, value)` or `loop.updateParameters([...])` to drive
+the same runtime path used by native presentation mode.
+
 Text/Tex rendering in wasm does not bundle a TeX distribution. Load a MathJax
 runtime with synchronous `tex2svg` and call
 `installMonocurlMathJaxRenderer()`, or define

@@ -6,6 +6,8 @@ use compiler::{
     cache::CompilerCache,
     compiler::{CompileError, CompileWarning, compile},
 };
+use executor::scene_snapshot::CameraSnapshot;
+use geo::simd::Float3;
 use lexer::{lexer::Lexer, token::Token};
 use parser::{
     import_context::{MemoryImportBackend, ParseImportContext},
@@ -44,10 +46,6 @@ impl Runtime {
         }
     }
 
-    pub fn native_function_count(&self) -> usize {
-        stdlib::registry::registry().len()
-    }
-
     pub fn needs_work(&self) -> bool {
         self.controller.needs_work()
     }
@@ -84,6 +82,16 @@ impl Runtime {
         );
     }
 
+    pub fn update_parameters(&self, updates_json: &str, now_seconds: f64) -> Result<(), JsValue> {
+        let updates = parse_parameter_updates(updates_json)
+            .map_err(|error| js_error(format!("failed to decode parameter updates: {error}")))?;
+        self.controller.apply_command(
+            runtime::RuntimeCommand::UpdateParameters { updates },
+            now_seconds,
+        );
+        Ok(())
+    }
+
     pub fn load_source(&self, source: &str, imports_json: &str) -> Result<String, JsValue> {
         self.load_source_with_root_path("main.mcs", source, imports_json)
     }
@@ -118,11 +126,6 @@ impl Default for Runtime {
     fn default() -> Self {
         Self::new()
     }
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
-pub fn renderer_size_probe() -> u32 {
-    renderer::RenderSize::new(1, 1).width
 }
 
 impl Runtime {
@@ -218,6 +221,50 @@ struct ImportMapEntry {
     is_stdlib: bool,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ParameterUpdateEntry {
+    target: WebPresentationUpdateTarget,
+    value: WebParameterValue,
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum WebPresentationUpdateTarget {
+    Param { leader_index: usize },
+    MeshAttribute { leader_index: usize, name: String },
+}
+
+#[derive(Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+enum WebParameterValue {
+    Int { value: i64 },
+    VectorInt { value: Vec<i64> },
+    Float { value: f64 },
+    VectorFloat { value: Vec<f64> },
+    Complex { re: f64, im: f64 },
+    Camera { value: WebCameraSnapshot },
+    Other,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WebCameraSnapshot {
+    position: [f32; 3],
+    look_at: [f32; 3],
+    up: [f32; 3],
+    near: f32,
+    far: f32,
+}
+
 impl CompilationDiagnostic {
     fn parse_error(diagnostic: &ParseDiagnostic) -> Self {
         Self {
@@ -252,6 +299,62 @@ impl From<&std::ops::Range<usize>> for SerializableSpan {
         Self {
             start: span.start,
             end: span.end,
+        }
+    }
+}
+
+fn parse_parameter_updates(
+    json: &str,
+) -> Result<HashMap<runtime::PresentationUpdateTarget, runtime::ParameterValue>, serde_json::Error>
+{
+    let entries: Vec<ParameterUpdateEntry> = serde_json::from_str(json)?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| (entry.target.into(), entry.value.into()))
+        .collect())
+}
+
+impl From<WebPresentationUpdateTarget> for runtime::PresentationUpdateTarget {
+    fn from(target: WebPresentationUpdateTarget) -> Self {
+        match target {
+            WebPresentationUpdateTarget::Param { leader_index } => Self::Param { leader_index },
+            WebPresentationUpdateTarget::MeshAttribute { leader_index, name } => {
+                Self::MeshAttribute { leader_index, name }
+            }
+        }
+    }
+}
+
+impl From<WebParameterValue> for runtime::ParameterValue {
+    fn from(value: WebParameterValue) -> Self {
+        match value {
+            WebParameterValue::Int { value } => Self::Int(value),
+            WebParameterValue::VectorInt { value } => Self::VectorInt(value),
+            WebParameterValue::Float { value } => Self::Float(value),
+            WebParameterValue::VectorFloat { value } => Self::VectorFloat(value),
+            WebParameterValue::Complex { re, im } => Self::Complex { re, im },
+            WebParameterValue::Camera { value } => Self::Camera(value.into()),
+            WebParameterValue::Other => Self::Other,
+        }
+    }
+}
+
+impl From<WebCameraSnapshot> for CameraSnapshot {
+    fn from(snapshot: WebCameraSnapshot) -> Self {
+        Self {
+            position: Float3::new(
+                snapshot.position[0],
+                snapshot.position[1],
+                snapshot.position[2],
+            ),
+            look_at: Float3::new(
+                snapshot.look_at[0],
+                snapshot.look_at[1],
+                snapshot.look_at[2],
+            ),
+            up: Float3::new(snapshot.up[0], snapshot.up[1], snapshot.up[2]),
+            near: snapshot.near,
+            far: snapshot.far,
         }
     }
 }

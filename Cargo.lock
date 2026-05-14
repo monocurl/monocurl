@@ -6044,6 +6044,7 @@ dependencies = [
  "executor",
  "geo",
  "log",
+ "smallvec",
  "smol",
  "stdlib",
 ]

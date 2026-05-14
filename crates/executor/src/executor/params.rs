@@ -2,7 +2,7 @@ use crate::{
     error::ExecutorError,
     heap::{heap_replace, with_heap, with_heap_mut},
     state::LeaderKind,
-    value::{MeshAttributePathSegment, Value},
+    value::Value,
 };
 
 use super::Executor;
@@ -54,7 +54,7 @@ impl Executor {
     pub fn update_mesh_attribute(
         &mut self,
         leader_index: usize,
-        path: &[MeshAttributePathSegment],
+        name: &str,
         value: Value,
     ) -> Result<(), ExecutorError> {
         let entry = self
@@ -65,9 +65,9 @@ impl Executor {
             .ok_or_else(|| {
                 ExecutorError::invalid_access(format!("unknown mesh #{leader_index}"))
             })?;
-        if path.is_empty() {
+        if name.is_empty() {
             return Err(ExecutorError::invalid_access(
-                "mesh attribute update requires an attribute path",
+                "mesh attribute update requires an attribute name",
             ));
         }
 
@@ -84,8 +84,8 @@ impl Executor {
         let mut follower_value = with_heap(|h| h.get(leader.follower_rc.key()).clone());
         let value = value.elide_lvalue().elide_leader();
 
-        update_live_attribute_value(&mut leader_value, path, value.clone())?;
-        update_live_attribute_value(&mut follower_value, path, value)?;
+        leader_value.set_attr_by_name(name, value.clone())?;
+        follower_value.set_attr_by_name(name, value)?;
 
         heap_replace(leader.leader_rc.key(), leader_value);
         heap_replace(leader.follower_rc.key(), follower_value);
@@ -97,112 +97,6 @@ impl Executor {
         });
 
         Ok(())
-    }
-}
-
-fn update_live_attribute_value(
-    value: &mut Value,
-    path: &[MeshAttributePathSegment],
-    replacement: Value,
-) -> Result<(), ExecutorError> {
-    if matches!(value, Value::Stateful(_)) {
-        return Err(ExecutorError::stateful_value(
-            "cannot update attributes on stateful meshes",
-        ));
-    }
-
-    match value {
-        Value::Lvalue(vrc) => {
-            let mut inner = with_heap(|h| h.get(vrc.key()).clone());
-            update_live_attribute_value(&mut inner, path, replacement)?;
-            *value = inner;
-            return Ok(());
-        }
-        Value::WeakLvalue(vweak) => {
-            let mut inner = with_heap(|h| h.get(vweak.key()).clone());
-            update_live_attribute_value(&mut inner, path, replacement)?;
-            *value = inner;
-            return Ok(());
-        }
-        _ => {}
-    }
-
-    let Some((segment, rest)) = path.split_first() else {
-        return Err(ExecutorError::invalid_access(
-            "mesh attribute update requires an attribute path",
-        ));
-    };
-
-    match (value, segment) {
-        (Value::List(list), MeshAttributePathSegment::ListIndex(index)) => {
-            let Some(element) = list.elements.get(*index) else {
-                return Err(ExecutorError::IndexOutOfBounds {
-                    index: *index,
-                    len: list.len(),
-                });
-            };
-            let mut element_value = with_heap(|h| h.get(element.key()).clone());
-            update_live_attribute_value(&mut element_value, rest, replacement)?;
-            list.elements[*index] = crate::heap::VRc::new(element_value);
-            Ok(())
-        }
-        (Value::InvokedFunction(inv), MeshAttributePathSegment::FunctionArgument(index)) => {
-            if *index >= inv.body.arguments.len() {
-                return Err(ExecutorError::invalid_access(format!(
-                    "live function has no argument #{index}",
-                )));
-            }
-            if rest.is_empty() {
-                inv.body.arguments[*index] = replacement;
-            } else {
-                let mut argument = inv.body.arguments[*index].clone().elide_lvalue();
-                update_live_attribute_value(&mut argument, rest, replacement)?;
-                inv.body.arguments[*index] = argument;
-            }
-            let arg_len = inv.body.arguments.len();
-            inv.body.boxed_arguments.resize(arg_len, false);
-            inv.body.boxed_arguments[*index] = false;
-            inv.cache.0.take();
-            Ok(())
-        }
-        (Value::InvokedOperator(inv), MeshAttributePathSegment::OperatorArgument(index)) => {
-            if *index >= inv.body.arguments.len() {
-                return Err(ExecutorError::invalid_access(format!(
-                    "live operator has no argument #{index}",
-                )));
-            }
-            if rest.is_empty() {
-                inv.body.arguments[*index] = replacement;
-            } else {
-                let mut argument = inv.body.arguments[*index].clone().elide_lvalue();
-                update_live_attribute_value(&mut argument, rest, replacement)?;
-                inv.body.arguments[*index] = argument;
-            }
-            let arg_len = inv.body.arguments.len();
-            inv.body.boxed_arguments.resize(arg_len, false);
-            inv.body.boxed_arguments[*index] = false;
-            inv.cache.cached_result.take();
-            inv.cache.unmodified.take();
-            Ok(())
-        }
-        (Value::InvokedOperator(inv), MeshAttributePathSegment::OperatorOperand) => {
-            if rest.is_empty() {
-                return Err(ExecutorError::invalid_access(
-                    "cannot directly update a live operator operand",
-                ));
-            }
-            let mut operand = inv.body.operand.as_ref().clone().elide_lvalue();
-            update_live_attribute_value(&mut operand, rest, replacement)?;
-            *inv.body.operand = operand;
-            inv.body.boxed_operand = false;
-            inv.cache.cached_result.take();
-            inv.cache.unmodified.take();
-            Ok(())
-        }
-        (Value::Stateful(_), _) => Err(ExecutorError::stateful_value(
-            "cannot update attributes on stateful meshes",
-        )),
-        (other, _) => Err(ExecutorError::CannotAttribute(other.type_name())),
     }
 }
 
@@ -219,8 +113,7 @@ mod tests {
         heap::{heap_replace, with_heap, with_heap_mut},
         state::LeaderKind,
         value::{
-            MeshAttributePathSegment, Value, invoked_function::make_invoked_function,
-            invoked_operator::make_invoked_operator,
+            Value, invoked_function::make_invoked_function, invoked_operator::make_invoked_operator,
         },
     };
 
@@ -378,14 +271,7 @@ mod tests {
         heap_replace(entry.follower_value, live);
 
         executor
-            .update_mesh_attribute(
-                0,
-                &[
-                    MeshAttributePathSegment::OperatorOperand,
-                    MeshAttributePathSegment::FunctionArgument(0),
-                ],
-                Value::Float(3.0),
-            )
+            .update_mesh_attribute(0, "radius", Value::Float(3.0))
             .unwrap();
 
         for key in [entry.leader_value, entry.follower_value] {
@@ -428,12 +314,47 @@ mod tests {
             }
         });
 
-        let error = executor.update_mesh_attribute(
-            0,
-            &[MeshAttributePathSegment::FunctionArgument(0)],
-            Value::Float(3.0),
-        );
+        let error = executor.update_mesh_attribute(0, "radius", Value::Float(3.0));
 
         assert!(matches!(error, Err(ExecutorError::ConcurrentAnimation)));
+    }
+
+    #[test]
+    fn update_mesh_attribute_uses_outermost_duplicate_name() {
+        let mut executor = empty_executor();
+        let live = Value::InvokedFunction(make_invoked_function(
+            Value::Nil,
+            smallvec![Value::Float(1.0), Value::Float(2.0)],
+            smallvec![(0, "radius".into()), (1, "radius".into())],
+            Some(Value::Nil),
+        ));
+        executor
+            .state
+            .stack_mut(crate::state::ExecutionState::ROOT_STACK_IDX)
+            .push(live.clone());
+        executor.state.promote_to_leader(
+            crate::state::ExecutionState::ROOT_STACK_IDX,
+            LeaderKind::Mesh,
+            "shape".into(),
+        );
+        let entry = executor.state.leaders[0].clone();
+        heap_replace(entry.follower_value, live);
+
+        executor
+            .update_mesh_attribute(0, "radius", Value::Float(3.0))
+            .unwrap();
+
+        for key in [entry.leader_value, entry.follower_value] {
+            let Value::InvokedFunction(func) = with_heap(|h| h.get(key).clone()) else {
+                panic!("expected live function");
+            };
+            match &func.body.arguments[..] {
+                [Value::Float(first), Value::Float(second)] => {
+                    assert_eq!(*first, 3.0);
+                    assert_eq!(*second, 2.0);
+                }
+                other => panic!("expected two float arguments, got {}", other.len()),
+            }
+        }
     }
 }

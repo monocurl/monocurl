@@ -32,14 +32,6 @@ use self::{
 /// (section_index, instruction_offset)
 pub type InstructionPointer = (u16, u32);
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum MeshAttributePathSegment {
-    ListIndex(usize),
-    FunctionArgument(usize),
-    OperatorOperand,
-    OperatorArgument(usize),
-}
-
 #[derive(Clone)]
 pub enum Value {
     Nil,

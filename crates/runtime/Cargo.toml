@@ -11,4 +11,5 @@ log.workspace = true
 stdlib.workspace = true
 
 [dev-dependencies]
+smallvec.workspace = true
 smol.workspace = true

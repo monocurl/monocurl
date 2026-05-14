@@ -171,10 +171,9 @@ export interface MeshEntrySnapshot {
 }
 
 export interface MeshAttributeSnapshot {
-  target?: PresentationUpdateTarget;
+  target: PresentationUpdateTarget;
   name: string;
   value: ParameterValue;
-  children: MeshAttributeSnapshot[];
 }
 
 export type PresentationUpdateTarget =
@@ -182,14 +181,8 @@ export type PresentationUpdateTarget =
   | {
       kind: "meshAttribute";
       leaderIndex: number;
-      path: MeshAttributePathSegment[];
+      name: string;
     };
-
-export type MeshAttributePathSegment =
-  | { kind: "listIndex"; index: number }
-  | { kind: "functionArgument"; index: number }
-  | { kind: "operatorOperand" }
-  | { kind: "operatorArgument"; index: number };
 
 export type ParameterValue =
   | { kind: "int"; value: number }
@@ -199,6 +192,11 @@ export type ParameterValue =
   | { kind: "complex"; re: number; im: number }
   | { kind: "camera"; value: CameraSnapshot }
   | { kind: "other" };
+
+export interface ParameterUpdate {
+  target: PresentationUpdateTarget;
+  value: ParameterValue;
+}
 
 export interface TranscriptSection {
   entries: TranscriptEntry[];
@@ -255,13 +253,13 @@ export interface PackedTriangleBuffer {
 }
 
 export interface MonocurlWasmRuntimeHandle {
-  native_function_count(): number;
   needs_work(): boolean;
   is_playing(): boolean;
   seek_to(slide: number, time: number): void;
   toggle_play(nowSeconds: number): void;
   set_presentation_mode(): void;
   set_preview_mode(): void;
+  update_parameters?(updatesJson: string, nowSeconds: number): void;
   step(nowSeconds: number): Promise<number>;
   step_json?(nowSeconds: number): Promise<string>;
   load_source?(source: string, importsJson: string): string;
@@ -513,10 +511,6 @@ export class MonocurlLoop {
     this.onError = options.onError;
   }
 
-  get nativeFunctionCount(): number {
-    return this.runtime.native_function_count();
-  }
-
   get isPlaying(): boolean {
     return this.runtime.is_playing();
   }
@@ -567,6 +561,26 @@ export class MonocurlLoop {
     this.requestStep();
   }
 
+  updateParameter(
+    target: PresentationUpdateTarget,
+    value: ParameterValue,
+    nowSeconds = this.clock.nowSeconds(),
+  ): void {
+    this.updateParameters([{ target, value }], nowSeconds);
+  }
+
+  updateParameters(
+    updates: ParameterUpdate[],
+    nowSeconds = this.clock.nowSeconds(),
+  ): void {
+    if (this.runtime.update_parameters === undefined) {
+      throw new UnsupportedWasmMethodError("update_parameters");
+    }
+
+    this.runtime.update_parameters(JSON.stringify(updates), nowSeconds);
+    this.requestStep();
+  }
+
   togglePlay(nowSeconds = this.clock.nowSeconds()): void {
     this.runtime.toggle_play(nowSeconds);
     this.requestStep();
@@ -584,7 +598,7 @@ export class MonocurlLoop {
     }
   }
 
-  requestStep(): void {
+  private requestStep(): void {
     this.assertLive();
     if (this.scheduledFrame !== undefined || this.pendingStep !== undefined) {
       return;
@@ -612,7 +626,7 @@ export class MonocurlLoop {
     }
   }
 
-  stop(): void {
+  private stop(): void {
     if (this.scheduledFrame !== undefined) {
       this.scheduler.cancel(this.scheduledFrame);
       this.scheduledFrame = undefined;
