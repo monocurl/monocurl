@@ -2,6 +2,7 @@ use std::{collections::HashMap, ops::Range};
 
 use anyhow::{Result, bail};
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LatexDocumentStyle {
     BundledBasic,
@@ -9,6 +10,7 @@ pub(crate) enum LatexDocumentStyle {
     SystemLatex,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const SYSTEM_LATEX_PREAMBLE: &str = r"\documentclass[preview]{standalone}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -17,6 +19,7 @@ const SYSTEM_LATEX_PREAMBLE: &str = r"\documentclass[preview]{standalone}
 \usepackage{graphicx}
 ";
 
+#[cfg(not(target_arch = "wasm32"))]
 const BUNDLED_UNICODE_LATEX_PREAMBLE: &str = r"\documentclass[preview]{standalone}
 \usepackage{amsmath}
 \usepackage{amssymb}
@@ -38,8 +41,10 @@ const BUNDLED_UNICODE_LATEX_PREAMBLE: &str = r"\documentclass[preview]{standalon
 ]
 ";
 
+#[cfg(not(target_arch = "wasm32"))]
 const LATEX_BEGIN_DOCUMENT: &str = r"\begin{document}
 ";
+#[cfg(not(target_arch = "wasm32"))]
 const LATEX_POSTAMBLE: &str = r"
 \end{document}
 ";
@@ -64,10 +69,12 @@ pub(crate) struct TaggedSource {
     pub spans: Vec<TaggedSpan>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn build_text_document(text: &str, style: LatexDocumentStyle) -> String {
     build_document(text, "", style)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn build_tex_document(tex: &str, style: LatexDocumentStyle) -> String {
     build_document(
         &format!(
@@ -80,6 +87,7 @@ pub(crate) fn build_tex_document(tex: &str, style: LatexDocumentStyle) -> String
     )
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn build_latex_document(
     body: &str,
     additional_preamble: &str,
@@ -88,6 +96,7 @@ pub(crate) fn build_latex_document(
     build_document(body, additional_preamble, style)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn build_document(body: &str, additional_preamble: &str, style: LatexDocumentStyle) -> String {
     let mut document = String::with_capacity(
         latex_preamble(style).len()
@@ -105,6 +114,7 @@ fn build_document(body: &str, additional_preamble: &str, style: LatexDocumentSty
     document
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn latex_preamble(style: LatexDocumentStyle) -> &'static str {
     match style {
         LatexDocumentStyle::BundledBasic | LatexDocumentStyle::SystemLatex => SYSTEM_LATEX_PREAMBLE,
@@ -112,6 +122,7 @@ fn latex_preamble(style: LatexDocumentStyle) -> &'static str {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn push_additional_preamble(document: &mut String, additional_preamble: &str) {
     if additional_preamble.is_empty() {
         return;

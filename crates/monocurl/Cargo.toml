@@ -47,4 +47,5 @@ futures.workspace = true
 smol.workspace = true
 notify-debouncer-full.workspace = true
 renderer.workspace = true
+runtime.workspace = true
 image.workspace = true

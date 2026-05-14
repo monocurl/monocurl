@@ -1,11 +1,7 @@
 use std::collections::HashMap;
 
-use executor::{
-    error::ExecutorError,
-    executor::{Executor, TextRenderQuality},
-    heap::with_heap,
-    value::Value,
-};
+use executor::executor::TextRenderQuality;
+use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
 use geo::{
     mesh::Mesh,
     mesh_build::SurfaceVertex,

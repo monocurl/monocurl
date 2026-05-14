@@ -66,7 +66,11 @@ import std.scene
   when fragments need stable tags for later transforms. Monocurl string escapes
   use `%`, not `\`, so ordinary LaTeX commands can be written directly; use
   `%%` only when the string needs an actual percent character. `Latex` also
-  accepts `additional_preamble` for package and font declarations.
+  accepts `additional_preamble` for package and font declarations. In web
+  runtimes, `Text` and `Tex` use browser MathJax, but full `Latex` body
+  fragments are not available yet.
+- `Image(...)` and the `textured{...}` image-texturing operator are not
+  available in web runtimes yet.
 - Scene-level `background` and `camera` are ordinary top-level names with
   special meaning to the renderer.
 

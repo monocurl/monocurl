@@ -276,6 +276,7 @@ let HalfVector = |tail = [0, 0, 0], delta = 1r, normal = 1b|
 ## Place a bundled or project image into the scene.
 ## [description]
 ## The image is rendered as a textured upright rectangle in the XY plane. `name` may be a bundled asset name or a project-relative path resolved by the runtime.
+## Not available in web runtimes yet.
 ## [parameters]
 ## name: image asset name or path, relative to the currently invoked scene or library
 ## center: image center
@@ -399,6 +400,7 @@ let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 ## additional_preamble: extra LaTeX declarations inserted before `\begin{document}`
 ## [description]
 ## Use this when the input needs ordinary LaTeX body structure beyond display math; use `Tex` for ordinary displayed math. `additional_preamble` is inserted before `\begin{document}`, which is useful with the system backend for packages and font setup such as `\usepackage{fontspec}`. `Latex` supports the same text tagging markers as `Tex`, so `\text_tag{...}{...}`, `\tag2{...}`, and `text_tag{...}` fragments all become ordinary mesh tags after rendering.
+## Not available in web runtimes yet; use `Text` or `Tex` for browser-compatible MathJax rendering.
 let Latex = |latex, scale = 1, additional_preamble = ""| __monocurl__native__ mk_latex(latex, scale, additional_preamble)
 
 ## [overview]
@@ -446,7 +448,7 @@ let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(
 ## [overview]
 ## Text label placed relative to a target mesh.
 ## [description]
-## The label is rendered as LaTeX, then placed outside the target in `dir` while staying centered on the target's orthogonal direction.
+## The label is rendered as text, then placed outside the target in `dir` while staying centered on the target's orthogonal direction.
 ## [parameters]
 ## buffer: distance from target
 ## [example]
@@ -810,6 +812,7 @@ let tag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_
 ## Apply an image texture to a mesh.
 ## [description]
 ## Usually used by `Image`; applying it manually expects the mesh to have meaningful UV coordinates.
+## Not available in web runtimes yet.
 let textured = operator |target, image, filter = nil| [target, __monocurl__native__ op_retextured(target, image, filter)]
 ## [overview]
 ## Assign a draw ordering hint to a mesh.

@@ -1,0 +1,15 @@
+[package]
+name = "runtime"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+bytecode.workspace = true
+executor.workspace = true
+geo.workspace = true
+log.workspace = true
+stdlib.workspace = true
+
+[dev-dependencies]
+smallvec.workspace = true
+smol.workspace = true

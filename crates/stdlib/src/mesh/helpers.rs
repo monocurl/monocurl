@@ -2,11 +2,13 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     ops::Range,
-    path::{Path, PathBuf},
     pin::Pin,
     rc::Rc,
     sync::Arc,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
 
 use executor::{
     error::ExecutorError,
@@ -178,6 +180,7 @@ pub(super) async fn read_string(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn image_source_path(executor: &Executor, stack_idx: usize) -> Option<&Path> {
     let mut fallback = None;
     let mut cursor = Some(stack_idx);
@@ -210,6 +213,7 @@ fn image_source_path(executor: &Executor, stack_idx: usize) -> Option<&Path> {
     fallback
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn resolve_image_path(
     executor: &Executor,
     stack_idx: usize,
@@ -1707,6 +1711,7 @@ pub(super) fn ray_triangle_intersection(
     (t >= 0.0).then_some(t)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn set_triangle_uv_rect(
     mesh: &mut Mesh,
     min: Float3,

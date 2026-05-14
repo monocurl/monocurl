@@ -1,10 +1,13 @@
+mod backend;
 mod cache;
 mod config;
 mod document;
 mod number;
 mod render;
 mod svg;
+#[cfg(not(target_arch = "wasm32"))]
 mod system;
+#[cfg(not(target_arch = "wasm32"))]
 mod tectonic;
 mod types;
 

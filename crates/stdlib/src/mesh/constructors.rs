@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
-use executor::{
-    error::ExecutorError,
-    executor::{Executor, TextRenderQuality},
-    value::Value,
-};
+use executor::executor::TextRenderQuality;
+use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
     mesh::DEFAULT_DOT_RADIUS,
     mesh_build::SurfaceVertex,
@@ -1053,6 +1050,15 @@ pub async fn mk_half_vector(
     ))
 }
 
+#[cfg(target_arch = "wasm32")]
+#[stdlib_func]
+pub async fn mk_image(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
+    Err(ExecutorError::invalid_invocation(
+        "Image(...) is not supported in the WebAssembly runtime yet",
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[stdlib_func]
 pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let image = read_string(executor, stack_idx, -4, "name").await?;
@@ -1210,9 +1216,9 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
         });
     }
 
-    let meshes = latex::render_latex_with_quality(&str, scale, text_render_quality(executor))
+    let meshes = latex::render_text_with_quality(&str, scale, text_render_quality(executor))
         .map_err(|error| {
-            ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
+            ExecutorError::invalid_invocation(format!("label render failed: {error:#}"))
         })?;
     let mut label = MeshTree::List(meshes.into_iter().map(MeshTree::Mesh).collect());
     if label.iter().next().is_none() {

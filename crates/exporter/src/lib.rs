@@ -369,9 +369,9 @@ fn prepare_scene(
     let root_text_rope = Rope::from_text(root_text);
     let root_lex_rope = lex_rope_from_str(root_text);
 
-    let mut import_context = ParseImportContext {
-        root_file_path: root_path.to_path_buf(),
-        open_tab_ropes: open_documents
+    let mut import_context = ParseImportContext::with_open_documents(
+        root_path.to_path_buf(),
+        open_documents
             .iter()
             .map(|(path, text)| {
                 (
@@ -380,8 +380,7 @@ fn prepare_scene(
                 )
             })
             .collect(),
-        cached_parses: HashMap::new(),
-    };
+    );
 
     let (bundles, parse_artifacts) = Parser::parse(
         &mut import_context,

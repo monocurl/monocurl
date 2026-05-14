@@ -31,7 +31,11 @@
 
 //#include "tesos.h"
 #include <stddef.h>
+#if defined(__has_include) && __has_include(<assert.h>)
 #include <assert.h>
+#else
+#define assert(expr) ((void)0)
+#endif
 #include "../Include/tesselator.h"
 #include "priorityq.h"
 

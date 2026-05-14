@@ -174,12 +174,12 @@ pub enum Instruction {
 }
 const _: () = assert!(std::mem::size_of::<Instruction>() == 8);
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct InstructionAnnotation {
     pub source_loc: Span8,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SectionFlags {
     pub is_stdlib: bool,
     pub is_library: bool,
@@ -187,7 +187,7 @@ pub struct SectionFlags {
     pub is_root_module: bool,
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SectionBytecode {
     pub flags: SectionFlags,
     pub name: Option<String>,
@@ -222,7 +222,7 @@ impl SectionBytecode {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, PartialEq)]
 pub struct Bytecode {
     pub sections: Vec<Arc<SectionBytecode>>,
 }

@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     io::{self, Read, Write},
     path::PathBuf,
 };
@@ -37,11 +36,7 @@ pub(crate) fn run_command() -> Result<()> {
 fn style_trusted_html(source: &str, root_path: PathBuf) -> String {
     let text_rope = Rope::from_text(source);
     let lex_rope = lex_rope_from_str(source);
-    let mut import_context = ParseImportContext {
-        root_file_path: root_path,
-        open_tab_ropes: HashMap::new(),
-        cached_parses: HashMap::new(),
-    };
+    let mut import_context = ParseImportContext::new(root_path);
 
     let (bundles, _parse_artifacts) = Parser::parse(
         &mut import_context,

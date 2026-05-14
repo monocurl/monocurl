@@ -30,17 +30,17 @@
 */
 
 #include <stddef.h>
+#if defined(__has_include) && __has_include(<assert.h>)
 #include <assert.h>
-#include <setjmp.h>
+#else
+#define assert(expr) ((void)0)
+#endif
 #include "bucketalloc.h"
 #include "tess.h"
 #include "tesselator.h"
 #include "mesh.h"
 #include "sweep.h"
 #include "geom.h"
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #define TRUE 1
 #define FALSE 0
@@ -186,12 +186,6 @@ static void CheckOrientation( TESStesselator *tess )
 	}
 }
 
-#ifdef FOR_TRITE_TEST_PROGRAM
-#include <stdlib.h>
-extern int RandomSweep;
-#define S_UNIT_X	(RandomSweep ? (2*drand48()-1) : 1.0)
-#define S_UNIT_Y	(RandomSweep ? (2*drand48()-1) : 0.0)
-#else
 #if defined(SLANTED_SWEEP)
 /* The "feature merging" is not intended to be complete.  There are
 * special cases where edges are nearly parallel to the sweep line
@@ -207,7 +201,6 @@ extern int RandomSweep;
 #else
 #define S_UNIT_X	(TESSreal)1.0
 #define S_UNIT_Y	(TESSreal)0.0
-#endif
 #endif
 
 /* Determine the polygon normal and project vertices onto the plane
@@ -566,44 +559,12 @@ int tessMeshSetWindingNumber( TESSmesh *mesh, int value,
 	return 1;
 }
 
-void* heapAlloc( void* userData, unsigned int size )
-{
-	TESS_NOTUSED( userData );
-	return malloc( size );
-}
-
-void* heapRealloc( void *userData, void* ptr, unsigned int size )
-{
-	TESS_NOTUSED( userData );
-	return realloc( ptr, size );
-}
-
-void heapFree( void* userData, void* ptr )
-{
-	TESS_NOTUSED( userData );
-	free( ptr );
-}
-
-static TESSalloc defaulAlloc =
-{
-	heapAlloc,
-	heapRealloc,
-	heapFree,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-	0,
-};
-
 TESStesselator* tessNewTess( TESSalloc* alloc )
 {
 	TESStesselator* tess;
 
 	if (alloc == NULL)
-		alloc = &defaulAlloc;
+		return 0;
 
 	/* Only initialize fields which can be changed by the api.  Other fields
 	* are initialized where they are used.
@@ -1045,11 +1006,6 @@ int tessTesselate( TESStesselator *tess, int windingRule, int elementType,
 	if (vertexSize > 3)
 		vertexSize = 3;
 
-	if (setjmp(tess->env) != 0) {
-		/* come back here if out of memory */
-		return 0;
-	}
-
 	if (tess->status != TESS_STATUS_OK || !tess->mesh)
 	{
 		return 0;
@@ -1067,7 +1023,7 @@ int tessTesselate( TESStesselator *tess, int windingRule, int elementType,
 	* Each interior region is guaranteed be monotone.
 	*/
 	if ( !tessComputeInterior( tess ) ) {
-		longjmp(tess->env,1);  /* could've used a label */
+		return 0;
 	}
 
 	mesh = tess->mesh;
@@ -1083,7 +1039,7 @@ int tessTesselate( TESStesselator *tess, int windingRule, int elementType,
 		if (rc != 0 && tess->processCDT != 0)
 			tessMeshRefineDelaunay( mesh, &tess->alloc );
 	}
-	if (rc == 0) longjmp(tess->env,1);  /* could've used a label */
+	if (rc == 0) return 0;
 
 	tessMeshCheckMesh( mesh );
 
@@ -1130,4 +1086,3 @@ TESSstatus tessGetStatus( TESStesselator *tess )
 {
 	return tess->status;
 }
-

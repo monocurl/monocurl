@@ -1927,7 +1927,6 @@ dependencies = [
  "bytecode",
  "geo",
  "smallvec",
- "smol",
  "structs",
 ]
 
@@ -3927,6 +3926,7 @@ dependencies = [
  "tectonic_engine_xetex",
  "tiny-skia-path",
  "usvg",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -4326,6 +4326,7 @@ dependencies = [
  "open",
  "parser",
  "renderer",
+ "runtime",
  "schemars",
  "serde",
  "serde_json",
@@ -6034,6 +6035,19 @@ name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "runtime"
+version = "0.1.0"
+dependencies = [
+ "bytecode",
+ "executor",
+ "geo",
+ "log",
+ "smallvec",
+ "smol",
+ "stdlib",
+]
 
 [[package]]
 name = "rust-embed"
@@ -8573,6 +8587,25 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "web_runtime"
+version = "0.1.0"
+dependencies = [
+ "compiler",
+ "executor",
+ "geo",
+ "lexer",
+ "parser",
+ "renderer",
+ "runtime",
+ "serde",
+ "serde_json",
+ "stdlib",
+ "structs",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]

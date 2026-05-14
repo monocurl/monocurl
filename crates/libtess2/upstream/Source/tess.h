@@ -32,7 +32,6 @@
 #ifndef TESS_H
 #define TESS_H
 
-#include <setjmp.h>
 #include "bucketalloc.h"
 #include "mesh.h"
 #include "dict.h"
@@ -81,7 +80,6 @@ struct TESStesselator {
 
 	TESSalloc alloc;
 
-	jmp_buf env;			/* place to jump to when memAllocs fail */
 };
 
 #ifdef __cplusplus

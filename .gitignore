@@ -12,7 +12,6 @@ __pycache__/
 tmp
 .zed
 .cargo/config.toml
-
 CLAUDE.md
 AGENTS.md
 FILE STRUCTURE.md

@@ -13,4 +13,3 @@ bytecode.workspace = true
 geo.workspace = true
 smallvec.workspace = true
 structs.workspace = true
-smol.workspace = true
