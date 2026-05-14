@@ -53,11 +53,15 @@ string map whose keys can be module names such as `std.scene` or paths such as
 `lib/helpers.mcl`. The wasm runtime embeds the default `std.*` modules;
 caller-supplied imports can override or extend that set.
 
-Text/Tex/Latex rendering in wasm does not bundle a TeX distribution. Load a
-MathJax runtime with synchronous `tex2svg` and call
+Text/Tex rendering in wasm does not bundle a TeX distribution. Load a MathJax
+runtime with synchronous `tex2svg` and call
 `installMonocurlMathJaxRenderer()`, or define
 `globalThis.__monocurlRenderLatexSvg(kind, source)` and return an SVG string.
-The hook receives `kind` as `"text"`, `"tex"`, or `"latex"`.
+The hook receives `kind` as `"text"` or `"tex"`. Full `Latex(...)` body
+fragments, `Image(...)`, and image texturing through `retextured{...}` are not
+supported by the wasm runtime yet; failures are surfaced on runtime snapshots
+through `snapshot.errors`. `Label(...)` uses the same browser-compatible text
+path as `Text(...)`.
 
 `MonocurlWebGlRenderer` is a browser-side WebGL2 renderer that ports the same
 camera projection, triangle lighting, pixel-space line extrusion, dot rendering,

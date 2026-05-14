@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-#[cfg(feature = "latex-render")]
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
 use geo::{
@@ -87,7 +86,6 @@ fn ensure_surface_triangles(kind: &str, tris: usize) -> Result<(), ExecutorError
     ensure_limit(kind, tris, MAX_SURFACE_TRIANGLES)
 }
 
-#[cfg(feature = "latex-render")]
 fn text_render_quality(executor: &Executor) -> latex::RenderQuality {
     match executor.text_render_quality() {
         TextRenderQuality::Normal => latex::RenderQuality::Normal,
@@ -638,27 +636,16 @@ fn render_axis_tex_tree(
     scale: f32,
     name: &'static str,
 ) -> Result<Option<MeshTree>, ExecutorError> {
-    #[cfg(not(feature = "latex-render"))]
-    {
-        let _ = (executor, tex, scale);
-        return Err(ExecutorError::invalid_invocation(format!(
-            "{name} rendering is not available in wasm stdlib"
-        )));
-    }
-
-    #[cfg(feature = "latex-render")]
-    {
-        let meshes = latex::render_tex_with_quality(tex, scale, text_render_quality(executor))
-            .map_err(|error| {
-                ExecutorError::invalid_invocation(format!("{name} render failed: {error:#}"))
-            })?;
-        if meshes.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(MeshTree::List(
-                meshes.into_iter().map(MeshTree::Mesh).collect(),
-            )))
-        }
+    let meshes = latex::render_tex_with_quality(tex, scale, text_render_quality(executor))
+        .map_err(|error| {
+            ExecutorError::invalid_invocation(format!("{name} render failed: {error:#}"))
+        })?;
+    if meshes.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(MeshTree::List(
+            meshes.into_iter().map(MeshTree::Mesh).collect(),
+        )))
     }
 }
 

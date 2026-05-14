@@ -446,7 +446,7 @@ let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(
 ## [overview]
 ## Text label placed relative to a target mesh.
 ## [description]
-## The label is rendered as LaTeX, then placed outside the target in `dir` while staying centered on the target's orthogonal direction.
+## The label is rendered as text, then placed outside the target in `dir` while staying centered on the target's orthogonal direction.
 ## [parameters]
 ## buffer: distance from target
 ## [example]

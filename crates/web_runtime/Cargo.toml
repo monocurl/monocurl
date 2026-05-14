@@ -16,7 +16,7 @@ renderer.workspace = true
 runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-stdlib = { workspace = true, default-features = false, features = ["wasm-latex"] }
+stdlib.workspace = true
 structs.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

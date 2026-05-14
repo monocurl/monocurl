@@ -55,6 +55,7 @@ export interface ExecutionSnapshot {
   camera?: CameraSnapshot;
   cameraVersion?: number;
   meshes?: MeshSnapshot[];
+  errors?: RuntimeErrorSnapshot[];
   currentTimestamp: Timestamp;
   status: ExecutionStatus;
   isLoading: boolean;
@@ -64,6 +65,18 @@ export interface ExecutionSnapshot {
   minimumSlideDurations: Array<number | null>;
   parameters?: ParameterSnapshot;
   transcript?: TranscriptSection[];
+}
+
+export interface RuntimeErrorSnapshot {
+  message: string;
+  span: SourceSpan;
+  hint?: string;
+  callstack?: RuntimeCallFrameSnapshot[];
+}
+
+export interface RuntimeCallFrameSnapshot {
+  section: number;
+  span: SourceSpan;
 }
 
 export interface BackgroundSnapshot {

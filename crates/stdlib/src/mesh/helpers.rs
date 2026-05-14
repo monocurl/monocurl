@@ -2,11 +2,13 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     ops::Range,
-    path::{Path, PathBuf},
     pin::Pin,
     rc::Rc,
     sync::Arc,
 };
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::{Path, PathBuf};
 
 use executor::{
     error::ExecutorError,
@@ -19,7 +21,6 @@ use geo::{
     mesh_build::{self, BoundaryEdge, IndexedLineMesh, IndexedSurface, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
-#[cfg(all(not(target_arch = "wasm32"), feature = "native-tessellation"))]
 use libtess2::{TessellationOptions, WindingRule};
 
 const NORMAL_EPSILON: f32 = 1e-6;
@@ -179,6 +180,7 @@ pub(super) async fn read_string(
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn image_source_path(executor: &Executor, stack_idx: usize) -> Option<&Path> {
     let mut fallback = None;
     let mut cursor = Some(stack_idx);
@@ -211,6 +213,7 @@ fn image_source_path(executor: &Executor, stack_idx: usize) -> Option<&Path> {
     fallback
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn resolve_image_path(
     executor: &Executor,
     stack_idx: usize,
@@ -992,52 +995,19 @@ fn tessellate_planar_loops_with_options(
     }
     let normal = resolve_planar_normal(&contours, normal);
 
-    #[cfg(any(target_arch = "wasm32", not(feature = "native-tessellation")))]
-    {
-        let _ = normalize_input;
-
-        let [contour] = contours.as_slice() else {
-            return Err(ExecutorError::invalid_operation(
-                "wasm stdlib currently supports tessellating a single polygon contour without holes",
-            ));
-        };
-
-        if contour.len() < 3 {
-            return Ok((Vec::new(), Vec::new()));
-        }
-
-        let surface_vertices: Vec<_> = contour
-            .iter()
-            .copied()
-            .map(|pos| SurfaceVertex {
-                pos,
-                col: default_ink(),
-                uv: Float2::ZERO,
-            })
-            .collect();
-
-        let mut triangles = Vec::with_capacity(contour.len().saturating_sub(2));
-        let contour_normal = contour_area_normal(&contours).unwrap_or(normal);
-        let preserve_order = contour_normal.dot(normal) >= 0.0;
-        for i in 1..contour.len() - 1 {
-            triangles.push(if preserve_order {
-                [0, i, i + 1]
-            } else {
-                [0, i + 1, i]
-            });
-        }
-
-        let mut boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
+    let mut source_boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
+    let mut source_offset = 0usize;
+    for contour in &contours {
         for i in 0..contour.len() {
-            let a = i;
-            let b = (i + 1) % contour.len();
+            let a = source_offset + i;
+            let b = source_offset + (i + 1) % contour.len();
             let edge = BoundaryEdge {
                 a_col: default_ink(),
                 b_col: default_ink(),
                 norm: normal,
             };
-            boundary_edges.insert((a, b), edge);
-            boundary_edges.insert(
+            source_boundary_edges.insert((a, b), edge);
+            source_boundary_edges.insert(
                 (b, a),
                 BoundaryEdge {
                     a_col: edge.b_col,
@@ -1046,93 +1016,61 @@ fn tessellate_planar_loops_with_options(
                 },
             );
         }
-
-        return Ok(build_indexed_surface(
-            &surface_vertices,
-            &triangles,
-            &boundary_edges,
-        ));
+        source_offset += contour.len();
     }
 
-    #[cfg(all(not(target_arch = "wasm32"), feature = "native-tessellation"))]
-    {
-        let mut source_boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
-        let mut source_offset = 0usize;
-        for contour in &contours {
-            for i in 0..contour.len() {
-                let a = source_offset + i;
-                let b = source_offset + (i + 1) % contour.len();
-                let edge = BoundaryEdge {
-                    a_col: default_ink(),
-                    b_col: default_ink(),
-                    norm: normal,
-                };
-                source_boundary_edges.insert((a, b), edge);
-                source_boundary_edges.insert(
-                    (b, a),
-                    BoundaryEdge {
-                        a_col: edge.b_col,
-                        b_col: edge.a_col,
-                        norm: edge.norm,
-                    },
-                );
-            }
-            source_offset += contour.len();
-        }
+    let tess = libtess2::triangulate(
+        contours.iter().map(Vec::as_slice),
+        TessellationOptions {
+            winding_rule: WindingRule::NonZero,
+            normal: Some(normal),
+            constrained_delaunay: true,
+            reverse_contours: false,
+            normalize_input,
+        },
+    )
+    .map_err(|error| {
+        ExecutorError::invalid_operation(format!("failed to tessellate polygon: {error}"))
+    })?;
 
-        let tess = libtess2::triangulate(
-            contours.iter().map(Vec::as_slice),
-            TessellationOptions {
-                winding_rule: WindingRule::NonZero,
-                normal: Some(normal),
-                constrained_delaunay: true,
-                reverse_contours: false,
-                normalize_input,
-            },
-        )
-        .map_err(|error| {
-            ExecutorError::invalid_operation(format!("failed to tessellate polygon: {error}"))
-        })?;
+    let surface_vertices: Vec<_> = tess
+        .vertices
+        .iter()
+        .copied()
+        .map(|pos| SurfaceVertex {
+            pos,
+            col: default_ink(),
+            uv: Float2::ZERO,
+        })
+        .collect();
 
-        let surface_vertices: Vec<_> = tess
-            .vertices
-            .iter()
-            .copied()
-            .map(|pos| SurfaceVertex {
-                pos,
-                col: default_ink(),
-                uv: Float2::ZERO,
-            })
-            .collect();
-
-        let mut boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
-        for face in &tess.triangles {
-            for (a, b) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])].into_iter() {
-                let edge = match (tess.source_vertex_indices[a], tess.source_vertex_indices[b]) {
-                    (Some(source_a), Some(source_b)) => source_boundary_edges
-                        .get(&(source_a, source_b))
-                        .copied()
-                        .unwrap_or(BoundaryEdge {
-                            a_col: default_ink(),
-                            b_col: default_ink(),
-                            norm: normal,
-                        }),
-                    _ => BoundaryEdge {
+    let mut boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
+    for face in &tess.triangles {
+        for (a, b) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])].into_iter() {
+            let edge = match (tess.source_vertex_indices[a], tess.source_vertex_indices[b]) {
+                (Some(source_a), Some(source_b)) => source_boundary_edges
+                    .get(&(source_a, source_b))
+                    .copied()
+                    .unwrap_or(BoundaryEdge {
                         a_col: default_ink(),
                         b_col: default_ink(),
                         norm: normal,
-                    },
-                };
-                boundary_edges.insert((a, b), edge);
-            }
+                    }),
+                _ => BoundaryEdge {
+                    a_col: default_ink(),
+                    b_col: default_ink(),
+                    norm: normal,
+                },
+            };
+            boundary_edges.insert((a, b), edge);
         }
-
-        Ok(build_indexed_surface(
-            &surface_vertices,
-            &tess.triangles,
-            &boundary_edges,
-        ))
     }
+
+    Ok(build_indexed_surface(
+        &surface_vertices,
+        &tess.triangles,
+        &boundary_edges,
+    ))
 }
 
 fn resolve_planar_normal(contours: &[Vec<Float3>], requested: Float3) -> Float3 {
@@ -1773,6 +1711,7 @@ pub(super) fn ray_triangle_intersection(
     (t >= 0.0).then_some(t)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn set_triangle_uv_rect(
     mesh: &mut Mesh,
     min: Float3,

@@ -1,6 +1,7 @@
 export interface MonocurlMathJax {
   tex2svg(source: string, options?: { display?: boolean }): unknown;
   startup?: {
+    promise?: Promise<unknown>;
     adaptor?: {
       outerHTML(node: unknown): string;
       tags?: (node: unknown, name: string) => unknown[];

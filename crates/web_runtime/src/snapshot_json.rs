@@ -1,4 +1,5 @@
 use executor::{
+    error::{RuntimeCallFrame, RuntimeError},
     scene_snapshot::{BackgroundSnapshot, CameraSnapshot},
     transcript::{SectionTranscript, TranscriptEntry},
     value::MeshAttributePathSegment,
@@ -65,6 +66,8 @@ struct SerializableExecutionSnapshot {
     camera_version: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     meshes: Option<Vec<SerializableMesh>>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    errors: Vec<SerializableRuntimeError>,
     current_timestamp: SerializableTimestamp,
     status: &'static str,
     is_loading: bool,
@@ -96,6 +99,11 @@ impl From<runtime::ExecutionSnapshot> for SerializableExecutionSnapshot {
                     .map(|mesh| SerializableMesh::from(mesh.as_ref()))
                     .collect()
             }),
+            errors: snapshot
+                .errors
+                .iter()
+                .map(SerializableRuntimeError::from)
+                .collect(),
             current_timestamp: SerializableTimestamp {
                 slide: snapshot.current_timestamp.slide,
                 time: snapshot.current_timestamp.time,
@@ -126,6 +134,54 @@ fn execution_status(status: runtime::ExecutionStatus) -> &'static str {
         runtime::ExecutionStatus::Paused => "paused",
         runtime::ExecutionStatus::RuntimeError => "runtimeError",
         runtime::ExecutionStatus::CompileError => "compileError",
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SerializableRuntimeError {
+    message: String,
+    span: SerializableSpan,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hint: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    callstack: Vec<SerializableRuntimeCallFrame>,
+}
+
+impl From<&RuntimeError> for SerializableRuntimeError {
+    fn from(error: &RuntimeError) -> Self {
+        Self {
+            message: error.error.to_string(),
+            span: SerializableSpan {
+                start: error.span.start,
+                end: error.span.end,
+            },
+            hint: error.hint.clone(),
+            callstack: error
+                .callstack
+                .iter()
+                .map(SerializableRuntimeCallFrame::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SerializableRuntimeCallFrame {
+    section: u16,
+    span: SerializableSpan,
+}
+
+impl From<&RuntimeCallFrame> for SerializableRuntimeCallFrame {
+    fn from(frame: &RuntimeCallFrame) -> Self {
+        Self {
+            section: frame.section,
+            span: SerializableSpan {
+                start: frame.span.start,
+                end: frame.span.end,
+            },
+        }
     }
 }
 

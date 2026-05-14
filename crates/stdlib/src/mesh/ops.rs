@@ -881,6 +881,18 @@ pub async fn op_normal_hint(
     Ok(tree.into_value())
 }
 
+#[cfg(target_arch = "wasm32")]
+#[stdlib_func]
+pub async fn op_retextured(
+    _executor: &mut Executor,
+    _stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    Err(ExecutorError::invalid_invocation(
+        "retextured{...} is not supported in the WebAssembly runtime yet",
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[stdlib_func]
 pub async fn op_retextured(
     executor: &mut Executor,

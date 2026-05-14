@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-#[cfg(feature = "latex-render")]
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
@@ -101,12 +100,10 @@ fn mesh_ref(idx: usize) -> i32 {
     super::helpers::mesh_ref(idx)
 }
 
-#[cfg(feature = "latex-render")]
 fn latex_meshes_to_value(meshes: Vec<std::sync::Arc<geo::mesh::Mesh>>) -> Value {
     list_value(meshes.into_iter().map(Value::Mesh))
 }
 
-#[cfg(feature = "latex-render")]
 fn read_text_scale(
     executor: &Executor,
     stack_idx: usize,
@@ -123,7 +120,6 @@ fn read_text_scale(
     Ok(scale)
 }
 
-#[cfg(feature = "latex-render")]
 fn read_optional_decimal_places(
     executor: &Executor,
     stack_idx: usize,
@@ -168,17 +164,11 @@ fn read_nonnegative_float(
     Ok(value)
 }
 
-#[cfg(feature = "latex-render")]
 fn text_render_quality(executor: &Executor) -> latex::RenderQuality {
     match executor.text_render_quality() {
         TextRenderQuality::Normal => latex::RenderQuality::Normal,
         TextRenderQuality::High => latex::RenderQuality::High,
     }
-}
-
-#[cfg(not(feature = "latex-render"))]
-fn text_render_unavailable(kind: &'static str) -> ExecutorError {
-    ExecutorError::invalid_invocation(format!("{kind} rendering is not available in wasm stdlib"))
 }
 
 fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
@@ -1060,6 +1050,15 @@ pub async fn mk_half_vector(
     ))
 }
 
+#[cfg(target_arch = "wasm32")]
+#[stdlib_func]
+pub async fn mk_image(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
+    Err(ExecutorError::invalid_invocation(
+        "Image(...) is not supported in the WebAssembly runtime yet",
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[stdlib_func]
 pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let image = read_string(executor, stack_idx, -4, "name").await?;
@@ -1093,7 +1092,6 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
     Ok(Value::Mesh(std::sync::Arc::new(mesh)))
 }
 
-#[cfg(feature = "latex-render")]
 #[stdlib_func]
 pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let text = read_string(executor, stack_idx, -2, "text").await?;
@@ -1105,13 +1103,6 @@ pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value,
     Ok(latex_meshes_to_value(meshes))
 }
 
-#[cfg(not(feature = "latex-render"))]
-#[stdlib_func]
-pub async fn mk_text(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
-    Err(text_render_unavailable("text"))
-}
-
-#[cfg(feature = "latex-render")]
 #[stdlib_func]
 pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let tex = read_string(executor, stack_idx, -2, "tex").await?;
@@ -1123,13 +1114,6 @@ pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
     Ok(latex_meshes_to_value(meshes))
 }
 
-#[cfg(not(feature = "latex-render"))]
-#[stdlib_func]
-pub async fn mk_tex(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
-    Err(text_render_unavailable("tex"))
-}
-
-#[cfg(feature = "latex-render")]
 #[stdlib_func]
 pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let latex = read_string(executor, stack_idx, -3, "latex").await?;
@@ -1145,12 +1129,6 @@ pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value
         ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
     })?;
     Ok(latex_meshes_to_value(meshes))
-}
-
-#[cfg(not(feature = "latex-render"))]
-#[stdlib_func]
-pub async fn mk_latex(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
-    Err(text_render_unavailable("latex"))
 }
 
 #[stdlib_func]
@@ -1224,7 +1202,6 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
     Ok(mesh_from_parts(vec![], lins, vec![]))
 }
 
-#[cfg(feature = "latex-render")]
 #[stdlib_func]
 pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let target = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
@@ -1239,9 +1216,9 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
         });
     }
 
-    let meshes = latex::render_latex_with_quality(&str, scale, text_render_quality(executor))
+    let meshes = latex::render_text_with_quality(&str, scale, text_render_quality(executor))
         .map_err(|error| {
-            ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
+            ExecutorError::invalid_invocation(format!("label render failed: {error:#}"))
         })?;
     let mut label = MeshTree::List(meshes.into_iter().map(MeshTree::Mesh).collect());
     if label.iter().next().is_none() {
@@ -1267,13 +1244,6 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
     Ok(label.into_value())
 }
 
-#[cfg(not(feature = "latex-render"))]
-#[stdlib_func]
-pub async fn mk_label(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
-    Err(text_render_unavailable("label"))
-}
-
-#[cfg(feature = "latex-render")]
 #[stdlib_func]
 pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let value = crate::read_float(executor, stack_idx, -3, "value")?;
@@ -1290,15 +1260,6 @@ pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         ExecutorError::invalid_invocation(format!("number render failed: {error:#}"))
     })?;
     Ok(latex_meshes_to_value(meshes))
-}
-
-#[cfg(not(feature = "latex-render"))]
-#[stdlib_func]
-pub async fn mk_number(
-    _executor: &mut Executor,
-    _stack_idx: usize,
-) -> Result<Value, ExecutorError> {
-    Err(text_render_unavailable("number"))
 }
 
 #[stdlib_func]

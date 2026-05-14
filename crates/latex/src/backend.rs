@@ -27,6 +27,11 @@ pub(crate) fn prepare_render(
     #[cfg(target_arch = "wasm32")]
     {
         let _ = config;
+        if kind == BackendKind::Latex {
+            anyhow::bail!(
+                "Latex(...) is not supported by the browser text backend; use Tex(...) or Text(...)for MathJax-compatible formulas"
+            );
+        }
         if !additional_preamble.trim().is_empty() {
             anyhow::bail!("additional LaTeX preamble is not supported by the browser text backend");
         }
@@ -197,10 +202,27 @@ export function monocurlRenderLatexSvg(kind, source) {
 
   throw new Error("Monocurl wasm text rendering requires globalThis.__monocurlRenderLatexSvg(kind, source) or a loaded MathJax tex2svg runtime");
 }
+
+export function monocurlJsErrorMessage(value) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value && typeof value.message === "string") {
+    return value.message;
+  }
+  try {
+    return String(value);
+  } catch {
+    return "browser text backend failed";
+  }
+}
 "#)]
     extern "C" {
         #[wasm_bindgen(catch)]
         fn monocurlRenderLatexSvg(kind: &str, source: &str) -> Result<JsValue, JsValue>;
+
+        #[wasm_bindgen(js_name = monocurlJsErrorMessage)]
+        fn monocurl_js_error_message(value: JsValue) -> String;
     }
 
     pub(super) fn render_svg(kind: BackendKind, source: &str) -> Result<String> {
@@ -212,8 +234,6 @@ export function monocurlRenderLatexSvg(kind, source) {
     }
 
     fn js_error_message(value: JsValue) -> String {
-        value
-            .as_string()
-            .unwrap_or_else(|| "browser text backend failed".to_string())
+        monocurl_js_error_message(value)
     }
 }
