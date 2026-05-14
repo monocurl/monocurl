@@ -7,6 +7,18 @@ This package includes the `wasm-bindgen` output produced from
 runtime automatically; the wasm glue fetches `web_runtime_bg.wasm` from the
 package's `dist/wasm` directory unless you pass a custom `wasmInit` input.
 
+```sh
+npm install monocurl
+```
+
+**Minimal Browser Example**
+
+```html
+<canvas id="viewport" style="width: 900px; height: 520px"></canvas>
+<div id="slides"></div>
+<button id="play">Play/Pause</button>
+```
+
 ```ts
 import {
   MonocurlWebGlRenderer,
@@ -18,6 +30,8 @@ if (!(canvas instanceof HTMLCanvasElement)) {
   throw new Error("missing canvas");
 }
 const renderer = new MonocurlWebGlRenderer(canvas);
+const slides = document.querySelector("#slides");
+const play = document.querySelector("#play");
 
 const loop = await createMonocurlLoop({
   onStep(result) {
@@ -27,18 +41,46 @@ const loop = await createMonocurlLoop({
   },
 });
 
-const compile = loop.loadSource(`
+const report = loop.loadSource(`
+import std.color
+import std.mesh
+import std.anim
 import std.scene
 
-slide
-`);
-if (!compile.ok) {
-  console.error(compile.diagnostics);
-}
-console.log(compile.slides);
 
-loop.seekTo({ slide: 1, time: 0 });
-loop.play();
+mesh marker =
+    center{0r}
+    fill{alpha{0.28} BLUE}
+    stroke{BLUE, 2}
+    Circle(0.55)
+
+slide "Intro"
+    play Wait(0.5)
+
+slide "Move"
+    marker =
+        center{1.4r}
+        fill{alpha{0.28} ORANGE}
+        stroke{ORANGE, 2}
+        Circle(0.55)
+    play Trans(1)
+`);
+if (!report.ok) {
+  console.error(report.diagnostics);
+  throw new Error("Monocurl compile failed");
+}
+
+for (const slide of report.slides) {
+  const button = document.createElement("button");
+  button.textContent = slide.name ?? `Slide ${slide.index}`;
+  button.onclick = () => loop.seekTo({ slide: slide.index, time: 0 });
+  slides?.append(button);
+}
+
+
+play?.addEventListener("click", () => {
+  loop.togglePlay();
+});
 ```
 
 The Rust wasm object is treated as a low-level handle. This package owns the
