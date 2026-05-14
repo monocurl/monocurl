@@ -1,6 +1,6 @@
 {
-  "name": "@enigmurl/monocurl-web-runtime",
-  "version": "0.1.0",
+  "name": "monocurl",
+  "version": "0.2.8",
   "description": "Browser-side TypeScript controller for the Monocurl WebAssembly runtime.",
   "type": "module",
   "exports": {

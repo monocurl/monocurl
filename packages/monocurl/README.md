@@ -1,4 +1,4 @@
-# `@enigmurl/monocurl-web-runtime`
+# `monocurl`
 
 Browser-side controller for the Monocurl WebAssembly runtime.
 
@@ -11,7 +11,7 @@ package's `dist/wasm` directory unless you pass a custom `wasmInit` input.
 import {
   MonocurlWebGlRenderer,
   createMonocurlLoop,
-} from "@enigmurl/monocurl-web-runtime";
+} from "monocurl";
 
 const canvas = document.querySelector("canvas");
 if (!(canvas instanceof HTMLCanvasElement)) {
