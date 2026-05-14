@@ -30,11 +30,11 @@
     "email": "43832426+enigmurl@users.noreply.github.com",
     "url": "https://monocurl.com"
   },
-  "license": "GPL-3.0-only",
+  "license": "MIT",
   "homepage": "https://monocurl.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/monocurl/monocurl.git"
+    "url": "git+https://github.com/monocurl/monocurl.git"
   },
   "bugs": {
     "url": "https://github.com/monocurl/monocurl/issues"
