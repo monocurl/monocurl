@@ -297,12 +297,14 @@ impl RuntimeController {
                 self.shared.has_runtime_error.set(false);
 
                 let mut executor = self.executor.borrow_mut();
+                let old_user_timestamp =
+                    executor.internal_to_user_timestamp(self.shared.target.get());
                 executor.set_text_render_quality(match playback_mode {
                     PlaybackMode::Presentation => TextRenderQuality::High,
                     PlaybackMode::Preview => TextRenderQuality::Normal,
                 });
                 executor.clear_cache();
-                let target = executor.user_to_internal_timestamp(Timestamp::default());
+                let target = executor.user_to_internal_timestamp(old_user_timestamp);
                 self.shared.target.set(target);
                 executor.restore_live_state_to_cache_point(target);
                 self.shared.current_timestamp.set(executor.state.timestamp);
@@ -808,8 +810,8 @@ mod tests {
     };
 
     use super::{
-        ParameterValue, PresentationUpdateTarget, RuntimeCommand, RuntimeController,
-        default_bytecode, mesh_attributes_from_runtime,
+        CommandEffect, ParameterValue, PlaybackMode, PresentationUpdateTarget, RuntimeCommand,
+        RuntimeController, default_bytecode, mesh_attributes_from_runtime,
     };
 
     #[test]
@@ -901,6 +903,50 @@ mod tests {
         };
 
         assert!(!runtime.requires_future_reset(&message));
+    }
+
+    #[test]
+    fn playback_mode_switch_preserves_target_timestamp() {
+        let runtime = RuntimeController::with_native_funcs(
+            bytecode::Bytecode::new(vec![
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: true,
+                    is_library: true,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: false,
+                    is_library: false,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: false,
+                    is_library: false,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+            ]),
+            Vec::new(),
+        );
+        let target = Timestamp::new(1, 0.5);
+        let internal_target = runtime.shared.user_to_internal_timestamp(target);
+        runtime.shared.current_timestamp.set(internal_target);
+        runtime.shared.target.set(internal_target);
+
+        let effect = runtime.apply_command(
+            RuntimeCommand::SetPlaybackMode(PlaybackMode::Presentation),
+            0.0,
+        );
+
+        assert_eq!(effect, CommandEffect::ResetFuture);
+        runtime.with_executor(|executor| {
+            assert_eq!(
+                executor.internal_to_user_timestamp(runtime.shared.target.get()),
+                target
+            );
+        });
     }
 
     #[test]
