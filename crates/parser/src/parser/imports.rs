@@ -118,13 +118,24 @@ impl Parser {
             }
         }
 
+        let mut tokens = file
+            .tokens
+            .into_iter()
+            .skip(token_index)
+            .collect::<Vec<_>>();
+        if root_span.is_some()
+            && let Some(first_slide) = tokens.iter().position(|(token, _)| *token == Token::Slide)
+        {
+            tokens.truncate(first_slide);
+        }
+
         self.import_stack.pop();
         self.preparsed_files.push(PreparsedFile {
             imports,
             path: file.path,
             text_rope: file.text_rope,
             root_import_span: root_span,
-            tokens: file.tokens.into_iter().skip(token_index).collect(),
+            tokens,
             is_stdlib: file.is_stdlib,
         });
         Ok(())
