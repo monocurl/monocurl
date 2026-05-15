@@ -10,7 +10,7 @@ mod test {
 
     use crate::{
         ast::*,
-        import_context::ParseImportContext,
+        import_context::{MemoryImportBackend, ParseImportContext},
         parser::{Diagnostic, Parser, PreparsedFile, RootSlideInfo, SectionParser},
     };
 
@@ -140,6 +140,48 @@ mod test {
         assert_eq!(second_lib.imported_files, vec![0]);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_imported_file_parses_only_before_first_slide() {
+        let mut backend = MemoryImportBackend::new();
+        backend.insert_module(
+            "lib",
+            "let exported = 1\nslide \"Demo\"\nlet hidden = 2\nplay hidden\n",
+            false,
+        );
+        let mut context = ParseImportContext::with_backend(PathBuf::from("scene.mcs"), backend);
+
+        let (bundles, errors) = parse_with_context(&mut context, "import lib\nlet x = exported\n");
+
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
+        let lib = bundles
+            .iter()
+            .find(|bundle| bundle.file_path.file_name().unwrap() == "lib.mcl")
+            .unwrap();
+        assert_eq!(lib.sections.len(), 1);
+        assert_eq!(lib.sections[0].section_type, SectionType::UserLibrary);
+        match &lib.sections[0].body[..] {
+            [(_, Statement::Declaration(decl))] => {
+                assert_eq!(pattern_identifier_name(&decl.pattern), "exported");
+            }
+            body => panic!("expected only exported declaration, got {body:?}"),
+        }
+    }
+
+    #[test]
+    fn test_imported_file_ignores_imports_after_first_slide() {
+        let mut backend = MemoryImportBackend::new();
+        backend.insert_module(
+            "lib",
+            "let exported = 1\nslide\nimport missing\nplay Missing()\n",
+            false,
+        );
+        let mut context = ParseImportContext::with_backend(PathBuf::from("scene.mcs"), backend);
+
+        let (_bundles, errors) = parse_with_context(&mut context, "import lib\nlet x = exported\n");
+
+        assert!(errors.is_empty(), "unexpected parse errors: {errors:?}");
     }
 
     // Literal tests

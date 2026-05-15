@@ -53,6 +53,11 @@ helpers, custom operators, top-level `param` declarations, initial `mesh`
 leaders, `background`, and `camera`. Do not put `play` statements in init.
 Animation belongs in slide bodies.
 
+When a file is imported, only its code before the first `slide` keyword is
+loaded as the imported library section. Any slides and code after that first
+`slide` are ignored for import purposes, including additional `import`
+statements.
+
 Indent every slide body, including the first slide. Keep the `slide` line at
 top level, then indent all statements in that slide by four spaces. Do not write
 unindented `mesh`, assignment, or `play` statements after a `slide`.
