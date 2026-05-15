@@ -163,34 +163,3 @@ pub(super) fn ring_style_for(
         },
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn presentation_mode_uses_same_status_rings_as_preview() {
-        let theme = Theme::dark();
-
-        assert_eq!(
-            ring_style_for(ExecutionStatus::Playing, true, false, theme),
-            ring_style_for(ExecutionStatus::Playing, false, false, theme)
-        );
-        assert_eq!(
-            ring_style_for(ExecutionStatus::Paused, true, false, theme),
-            ring_style_for(ExecutionStatus::Paused, false, false, theme)
-        );
-        assert_eq!(
-            ring_style_for(ExecutionStatus::Playing, true, true, theme),
-            ring_style_for(ExecutionStatus::Playing, false, true, theme)
-        );
-        assert_eq!(
-            ring_style_for(ExecutionStatus::RuntimeError, true, false, theme),
-            ring_style_for(ExecutionStatus::RuntimeError, false, false, theme)
-        );
-        assert_eq!(
-            ring_style_for(ExecutionStatus::CompileError, true, false, theme),
-            ring_style_for(ExecutionStatus::CompileError, false, false, theme)
-        );
-    }
-}

@@ -82,6 +82,13 @@ impl Runtime {
         );
     }
 
+    pub fn set_web_mode(&self) {
+        self.controller.apply_command(
+            runtime::RuntimeCommand::SetPlaybackMode(runtime::PlaybackMode::Web),
+            0.0,
+        );
+    }
+
     pub fn update_parameters(&self, updates_json: &str, now_seconds: f64) -> Result<(), JsValue> {
         let updates = parse_parameter_updates(updates_json)
             .map_err(|error| js_error(format!("failed to decode parameter updates: {error}")))?;

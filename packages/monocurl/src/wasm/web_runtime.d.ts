@@ -9,6 +9,7 @@ export class Runtime implements MonocurlWasmRuntimeHandle {
   seek_to(slide: number, time: number): void;
   set_presentation_mode(): void;
   set_preview_mode(): void;
+  set_web_mode(): void;
   step(nowSeconds: number): Promise<number>;
   step_json(nowSeconds: number): Promise<string>;
   toggle_play(nowSeconds: number): void;

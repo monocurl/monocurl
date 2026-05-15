@@ -66,6 +66,7 @@ impl RuntimeState {
                     match playback_mode {
                         PlaybackMode::Presentation => "presentation",
                         PlaybackMode::Preview => "preview",
+                        PlaybackMode::Web => "web",
                     }
                 );
                 self.controller

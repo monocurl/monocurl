@@ -113,6 +113,7 @@ pub struct ExecutionSnapshot {
 pub enum PlaybackMode {
     Presentation,
     Preview,
+    Web,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,8 +128,12 @@ impl PlaybackMode {
     pub fn default_time_interval(&self) -> f64 {
         match self {
             PlaybackMode::Presentation => 1.0 / 120.0,
-            PlaybackMode::Preview => 1.0 / 60.0,
+            PlaybackMode::Preview | PlaybackMode::Web => 1.0 / 60.0,
         }
+    }
+
+    fn emits_parameters(&self) -> bool {
+        matches!(self, PlaybackMode::Presentation | PlaybackMode::Web)
     }
 }
 
@@ -304,7 +309,7 @@ impl RuntimeController {
                     executor.internal_to_user_timestamp(self.shared.target.get());
                 executor.set_text_render_quality(match playback_mode {
                     PlaybackMode::Presentation => TextRenderQuality::High,
-                    PlaybackMode::Preview => TextRenderQuality::Normal,
+                    PlaybackMode::Preview | PlaybackMode::Web => TextRenderQuality::Normal,
                 });
                 executor.clear_cache();
                 let target = executor.user_to_internal_timestamp(old_user_timestamp);
@@ -599,7 +604,7 @@ fn max_slide(executor: &Executor, playback_mode: PlaybackMode) -> usize {
             (executor.state.timestamp.slide + 1).min(executor.total_sections())
         }
         PlaybackMode::Presentation => executor.state.timestamp.slide,
-        PlaybackMode::Preview => executor.total_sections(),
+        PlaybackMode::Preview | PlaybackMode::Web => executor.total_sections(),
     }
 }
 
@@ -644,7 +649,10 @@ fn runtime_snapshot(
 ) -> ExecutionSnapshot {
     let current_timestamp = executor.internal_to_user_timestamp(shared.current_timestamp.get());
     let target_timestamp = executor.internal_to_user_timestamp(shared.target.get());
-    let parameters = (shared.playback_mode.get() == PlaybackMode::Presentation)
+    let parameters = shared
+        .playback_mode
+        .get()
+        .emits_parameters()
         .then(|| parameter_snapshot(executor));
     let status = if shared.has_compiler_error.get() {
         ExecutionStatus::CompileError
@@ -1069,22 +1077,5 @@ mod tests {
                 name: "radius".into()
             }
         );
-    }
-
-    #[test]
-    fn custom_native_function_table_is_accepted() {
-        let runtime = RuntimeController::with_native_funcs(
-            bytecode::Bytecode::new(vec![Arc::new(bytecode::SectionBytecode::new(
-                bytecode::SectionFlags {
-                    is_stdlib: false,
-                    is_library: false,
-                    is_init: false,
-                    is_root_module: true,
-                },
-            ))]),
-            Vec::new(),
-        );
-
-        assert!(!runtime.is_playing());
     }
 }

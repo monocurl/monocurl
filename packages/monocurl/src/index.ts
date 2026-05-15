@@ -2,7 +2,7 @@ import initPackagedWasm, * as packagedWasm from "./wasm/web_runtime.js";
 import { installMonocurlMathJaxRenderer } from "./mathjax-renderer.js";
 import type { MonocurlMathJax } from "./mathjax-renderer.js";
 
-export type PlaybackMode = "preview" | "presentation";
+export type PlaybackMode = "preview" | "presentation" | "web";
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 export type Vec4 = [number, number, number, number];
@@ -273,6 +273,7 @@ export interface MonocurlWasmRuntimeHandle {
   toggle_play(nowSeconds: number): void;
   set_presentation_mode(): void;
   set_preview_mode(): void;
+  set_web_mode(): void;
   update_parameters?(updatesJson: string, nowSeconds: number): void;
   step(nowSeconds: number): Promise<number>;
   step_json?(nowSeconds: number): Promise<string>;
@@ -305,6 +306,11 @@ export interface FrameScheduler {
   cancel(handle: number): void;
 }
 
+export type MonocurlMathJaxSource =
+  | MonocurlMathJax
+  | PromiseLike<MonocurlMathJax | undefined>
+  | false;
+
 export interface CreateMonocurlLoopOptions {
   /**
    * Optional override for tests or custom bundlers. By default the packaged
@@ -318,11 +324,11 @@ export interface CreateMonocurlLoopOptions {
   wasmInit?: MonocurlWasmInitInput;
   runtime?: MonocurlWasmRuntimeHandle;
   /**
-   * MathJax instance to install for Text/Tex rendering. By default, an existing
-   * global `MathJax` is installed automatically when available. Pass `false` to
-   * opt out.
+   * MathJax instance, or readiness promise, to install for Text/Tex rendering.
+   * By default, an already-ready global `MathJax` is installed when available.
+   * Pass `false` to opt out.
    */
-  mathJax?: MonocurlMathJax | false;
+  mathJax?: MonocurlMathJaxSource;
   mathJaxDisplay?: boolean;
   clock?: RuntimeClock;
   scheduler?: FrameScheduler;
@@ -547,7 +553,10 @@ async function installMathJaxIfAvailable(
     return undefined;
   }
 
-  const mathJax = options.mathJax ?? globalThis.MathJax;
+  const mathJax =
+    options.mathJax !== undefined
+      ? await options.mathJax
+      : readyGlobalMathJax();
   if (mathJax === undefined) {
     return undefined;
   }
@@ -557,6 +566,11 @@ async function installMathJaxIfAvailable(
     mathJax,
     display: options.mathJaxDisplay,
   });
+}
+
+function readyGlobalMathJax(): MonocurlMathJax | undefined {
+  const mathJax = globalThis.MathJax;
+  return typeof mathJax?.tex2svg === "function" ? mathJax : undefined;
 }
 
 type MonocurlLoopOptions = Omit<
@@ -574,6 +588,7 @@ export class MonocurlLoop {
   private readonly onError?: (error: unknown) => void;
   private scheduledFrame: number | undefined;
   private pendingStep: Promise<RuntimeStepResult> | undefined;
+  private needsNextFrame = false;
   private playUntil: Timestamp | undefined;
   private disposed = false;
 
@@ -629,6 +644,8 @@ export class MonocurlLoop {
     this.playUntil = undefined;
     if (mode === "presentation") {
       this.runtime.set_presentation_mode();
+    } else if (mode === "web") {
+      this.runtime.set_web_mode();
     } else {
       this.runtime.set_preview_mode();
     }
@@ -713,6 +730,10 @@ export class MonocurlLoop {
       return await this.pendingStep;
     } finally {
       this.pendingStep = undefined;
+      if (this.needsNextFrame) {
+        this.needsNextFrame = false;
+        this.requestStep();
+      }
     }
   }
 
@@ -759,8 +780,9 @@ export class MonocurlLoop {
     this.onStep?.(result);
 
     if (result.isPlaying || result.needsWork) {
-      this.requestStep();
+      this.needsNextFrame = true;
     } else {
+      this.needsNextFrame = false;
       this.onIdle?.(result);
     }
 
