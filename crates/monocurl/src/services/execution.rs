@@ -22,6 +22,7 @@ pub enum ExecutionMessage {
         version: usize,
     },
     SetPlaybackMode(PlaybackMode),
+    UpdateAspectRatio(f32),
     UpdateParameters {
         updates: HashMap<PresentationUpdateTarget, ParameterValue>,
     },

@@ -39,7 +39,9 @@ impl RuntimeState {
 
     fn requires_future_reset(&self, message: &ExecutionMessage) -> bool {
         match message {
-            ExecutionMessage::UpdateBytecode { .. } | ExecutionMessage::SetPlaybackMode(_) => true,
+            ExecutionMessage::UpdateBytecode { .. }
+            | ExecutionMessage::SetPlaybackMode(_)
+            | ExecutionMessage::UpdateAspectRatio(_) => true,
             ExecutionMessage::SeekTo { target } => self.controller.seek_to_requires_reset(*target),
             ExecutionMessage::UpdateParameters { .. } | ExecutionMessage::TogglePlay => false,
         }
@@ -68,6 +70,11 @@ impl RuntimeState {
                 );
                 self.controller
                     .apply_command(RuntimeCommand::SetPlaybackMode(playback_mode), now_seconds)
+            }
+            ExecutionMessage::UpdateAspectRatio(aspect_ratio) => {
+                log::info!("aspect ratio -> {aspect_ratio:.4}");
+                self.controller
+                    .apply_command(RuntimeCommand::UpdateAspectRatio(aspect_ratio), now_seconds)
             }
             ExecutionMessage::SeekTo { target } => {
                 log::info!("seek_to {:?}", target);
@@ -286,6 +293,26 @@ mod tests {
                 assert_eq!(*second, Timestamp::new(1, 0.5));
             }
             _ => panic!("expected seek, toggle, seek"),
+        }
+    }
+
+    #[test]
+    fn compact_message_batch_preserves_aspect_ratio_updates() {
+        let compacted = compact_message_batch(vec![
+            ExecutionMessage::UpdateAspectRatio(1.0),
+            ExecutionMessage::UpdateAspectRatio(16.0 / 9.0),
+        ]);
+
+        assert_eq!(compacted.len(), 2);
+        match (&compacted[0], &compacted[1]) {
+            (
+                ExecutionMessage::UpdateAspectRatio(first),
+                ExecutionMessage::UpdateAspectRatio(second),
+            ) => {
+                assert_eq!(*first, 1.0);
+                assert_eq!(*second, 16.0 / 9.0);
+            }
+            _ => panic!("expected aspect ratio updates"),
         }
     }
 }

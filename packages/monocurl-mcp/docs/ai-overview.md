@@ -65,9 +65,12 @@ unindented `mesh`, assignment, or `play` statements after a `slide`.
 Scenes with zero slides are valid for still-image export. They should build
 their final frame in init and should not rely on playback.
 
-The default scene camera is positioned at `4b` with a `16 / 9` aspect ratio.
-For ordinary 2D scenes on the default `z = 0` plane, this means the comfortable
-visible coordinate range is approximately `x = -4..4` and `y = -2.25..2.25`.
+The default scene camera is positioned at `4b`, and the default active frame
+aspect ratio is `16 / 9`. Preview presets and export settings can change the
+active frame aspect; scene code can read it with `aspect_ratio()` from
+`std.scene`. For ordinary 2D scenes on the default `z = 0` plane at the default
+aspect, the comfortable visible coordinate range is approximately `x = -4..4`
+and `y = -2.25..2.25`.
 
 Later snippets in this document are often fragments. In complete scenes, keep
 `play` statements inside indented slide bodies.

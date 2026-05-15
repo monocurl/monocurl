@@ -137,6 +137,7 @@ pub enum RuntimeCommand {
         bytecode: Option<Bytecode>,
     },
     SetPlaybackMode(PlaybackMode),
+    UpdateAspectRatio(f32),
     UpdateParameters {
         updates: HashMap<PresentationUpdateTarget, ParameterValue>,
     },
@@ -256,7 +257,9 @@ impl RuntimeController {
 
     pub fn requires_future_reset(&self, command: &RuntimeCommand) -> bool {
         match command {
-            RuntimeCommand::UpdateBytecode { .. } | RuntimeCommand::SetPlaybackMode(_) => true,
+            RuntimeCommand::UpdateBytecode { .. }
+            | RuntimeCommand::SetPlaybackMode(_)
+            | RuntimeCommand::UpdateAspectRatio(_) => true,
             RuntimeCommand::SeekTo { target } => self.seek_to_requires_reset(*target),
             RuntimeCommand::UpdateParameters { .. } | RuntimeCommand::TogglePlay => false,
         }
@@ -303,6 +306,28 @@ impl RuntimeController {
                     PlaybackMode::Presentation => TextRenderQuality::High,
                     PlaybackMode::Preview => TextRenderQuality::Normal,
                 });
+                executor.clear_cache();
+                let target = executor.user_to_internal_timestamp(old_user_timestamp);
+                self.shared.target.set(target);
+                executor.restore_live_state_to_cache_point(target);
+                self.shared.current_timestamp.set(executor.state.timestamp);
+                self.shared.library_sections.set(
+                    executor
+                        .user_to_internal_timestamp(Timestamp::default())
+                        .slide,
+                );
+                self.shared.snapshot_requested.set(true);
+
+                CommandEffect::ResetFuture
+            }
+            RuntimeCommand::UpdateAspectRatio(aspect_ratio) => {
+                self.shared.is_playing.set(false);
+                self.shared.has_runtime_error.set(false);
+
+                let mut executor = self.executor.borrow_mut();
+                let old_user_timestamp =
+                    executor.internal_to_user_timestamp(self.shared.target.get());
+                executor.update_aspect_ratio(aspect_ratio);
                 executor.clear_cache();
                 let target = executor.user_to_internal_timestamp(old_user_timestamp);
                 self.shared.target.set(target);
@@ -942,6 +967,50 @@ mod tests {
 
         assert_eq!(effect, CommandEffect::ResetFuture);
         runtime.with_executor(|executor| {
+            assert_eq!(
+                executor.internal_to_user_timestamp(runtime.shared.target.get()),
+                target
+            );
+        });
+    }
+
+    #[test]
+    fn aspect_ratio_update_preserves_target_timestamp() {
+        let runtime = RuntimeController::with_native_funcs(
+            bytecode::Bytecode::new(vec![
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: true,
+                    is_library: true,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: false,
+                    is_library: false,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: false,
+                    is_library: false,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+            ]),
+            Vec::new(),
+        );
+        let target = Timestamp::new(1, 0.5);
+        let internal_target = runtime.shared.user_to_internal_timestamp(target);
+        runtime.shared.current_timestamp.set(internal_target);
+        runtime.shared.target.set(internal_target);
+
+        let command = RuntimeCommand::UpdateAspectRatio(1.0);
+        assert!(runtime.requires_future_reset(&command));
+        let effect = runtime.apply_command(command, 0.0);
+
+        assert_eq!(effect, CommandEffect::ResetFuture);
+        runtime.with_executor(|executor| {
+            assert_eq!(executor.aspect_ratio(), 1.0);
             assert_eq!(
                 executor.internal_to_user_timestamp(runtime.shared.target.get()),
                 target

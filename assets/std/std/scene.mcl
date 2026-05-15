@@ -45,3 +45,16 @@ let DEFAULT_CAMERA = __monocurl__native__ initial_camera()
 ## background = DEFAULT_BACKGROUND
 ## ```
 let DEFAULT_BACKGROUND = __monocurl__native__ initial_background()
+
+
+# render context
+
+## [overview]
+## Current viewport aspect ratio.
+## [description]
+## Returns the active execution aspect ratio as `width / height`. Preview presets, presentation, and export settings update this value before the scene is evaluated.
+## [example]
+## ```
+## let frame_w = 4 * aspect_ratio()
+## ```
+let aspect_ratio = || __monocurl__native__ aspect_ratio()

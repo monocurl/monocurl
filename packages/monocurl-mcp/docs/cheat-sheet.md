@@ -43,6 +43,8 @@ import std.scene
   `tag_map`, `subset_map`, `contour_separate`.
 - Geometry transforms: `point_map`, `color_map`, `uv_map`, `uprank`,
   `downrank`, `wireframe`, `subdivide`, `tesselated`, `extrude`, `revolve`.
+- Scene context: `aspect_ratio` from `std.scene`; `to_side` and `to_corner`
+  use this active frame aspect for edge/corner placement.
 
 ## Common Animations
 

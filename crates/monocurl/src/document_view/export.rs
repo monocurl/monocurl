@@ -8,7 +8,7 @@ use std::{
 };
 
 use exporter::{
-    ExportKind as SceneExportKind, ExportOutcome, ExportProgress, ExportRequest, ExportSettings,
+    ExportKind as SceneExportKind, ExportOutcome, ExportProgress, ExportRequest,
     ImageExportTimestamp,
 };
 
@@ -91,17 +91,66 @@ impl DocumentView {
 
             let _ = app.update(move |app| {
                 this.update(app, |this, cx| {
-                    this.start_export(kind, path, cx);
+                    this.open_export_settings(kind, path, cx);
                 });
             });
         })
         .detach();
     }
 
+    fn open_export_settings(
+        &mut self,
+        kind: RequestedExport,
+        output_path: PathBuf,
+        cx: &mut Context<Self>,
+    ) {
+        let aspect_ratio = self.viewport.read(cx).aspect_ratio();
+        self.export_settings_modal = Some(ExportSettingsModalState {
+            kind,
+            output_path,
+            aspect_ratio,
+            resolution: ExportResolutionPreset::Medium,
+            fps: DEFAULT_VIDEO_FPS,
+        });
+        cx.notify();
+    }
+
+    pub(super) fn set_export_resolution(
+        &mut self,
+        resolution: ExportResolutionPreset,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(modal) = &mut self.export_settings_modal {
+            modal.resolution = resolution;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn set_export_fps(&mut self, fps: u32, cx: &mut Context<Self>) {
+        if let Some(modal) = &mut self.export_settings_modal {
+            modal.fps = fps;
+            cx.notify();
+        }
+    }
+
+    pub(super) fn dismiss_export_settings(&mut self, cx: &mut Context<Self>) {
+        self.export_settings_modal = None;
+        cx.notify();
+    }
+
+    pub(super) fn confirm_export_settings(&mut self, cx: &mut Context<Self>) {
+        let Some(modal) = self.export_settings_modal.take() else {
+            return;
+        };
+        let settings = modal.settings();
+        self.start_export(modal.kind, modal.output_path, settings, cx);
+    }
+
     fn start_export(
         &mut self,
         kind: RequestedExport,
         output_path: PathBuf,
+        settings: ExportSettings,
         cx: &mut Context<Self>,
     ) {
         if self.export_overlay.running {
@@ -120,7 +169,7 @@ impl DocumentView {
                 },
                 RequestedExport::Video => SceneExportKind::Video,
             },
-            settings: ExportSettings::default(),
+            settings,
         };
 
         let (tx, rx) = mpsc::channel();
@@ -298,6 +347,7 @@ impl DocumentView {
     pub(super) fn clear_export_state(&mut self, cx: &mut Context<Self>) {
         self.export_cancel_flag = None;
         self.export_overlay = ExportOverlayState::default();
+        self.export_settings_modal = None;
         self.export_poll_task = None;
         cx.notify();
     }

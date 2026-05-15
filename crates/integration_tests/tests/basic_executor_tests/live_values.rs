@@ -977,6 +977,30 @@ fn test_to_side_omitted_camera_matches_initial_camera() {
 }
 
 #[test]
+fn test_to_side_uses_executor_aspect_ratio() {
+    let r = run_with_stdlib_and_aspect(
+        "
+        let result = [mesh_center(to_side{[1, 0, 0], 0} Square(2))[0]]
+    ",
+        &["mesh"],
+        1.0,
+    );
+    r.assert_float_list_approx(&[1.25], 1e-5);
+}
+
+#[test]
+fn test_scene_aspect_ratio_reads_executor_context() {
+    let r = run_with_stdlib_and_aspect(
+        "
+        let result = aspect_ratio()
+    ",
+        &["scene"],
+        1.0,
+    );
+    r.assert_float(1.0);
+}
+
+#[test]
 fn test_label_places_latex_to_requested_side() {
     let r = run_with_stdlib(
         "

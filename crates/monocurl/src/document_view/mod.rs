@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, atomic::AtomicBool},
 };
 
-use exporter::EXPORT_CANCELLED_MESSAGE;
+use exporter::{DEFAULT_VIDEO_FPS, EXPORT_CANCELLED_MESSAGE, ExportSettings};
 use gpui::*;
 use structs::rope::{Attribute, Rope, TextAggregate};
 
@@ -139,6 +139,71 @@ impl RequestedExport {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExportResolutionPreset {
+    Small,
+    Medium,
+    Large,
+}
+
+impl ExportResolutionPreset {
+    const ALL: [Self; 3] = [Self::Small, Self::Medium, Self::Large];
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Small => "Small",
+            Self::Medium => "Medium",
+            Self::Large => "Large",
+        }
+    }
+
+    const fn short_edge(self) -> u32 {
+        match self {
+            Self::Small => 720,
+            Self::Medium => 1080,
+            Self::Large => 2160,
+        }
+    }
+
+    fn render_size(self, aspect_ratio: f32) -> renderer::RenderSize {
+        let short_edge = self.short_edge();
+        let aspect_ratio = if aspect_ratio.is_finite() {
+            aspect_ratio.max(0.1)
+        } else {
+            16.0 / 9.0
+        };
+
+        if aspect_ratio >= 1.0 {
+            renderer::RenderSize::new(even_dimension(short_edge as f32 * aspect_ratio), short_edge)
+        } else {
+            renderer::RenderSize::new(short_edge, even_dimension(short_edge as f32 / aspect_ratio))
+        }
+    }
+}
+
+fn even_dimension(value: f32) -> u32 {
+    let rounded = value.round().max(2.0) as u32;
+    rounded + (rounded % 2)
+}
+
+#[derive(Clone, Debug)]
+struct ExportSettingsModalState {
+    kind: RequestedExport,
+    output_path: PathBuf,
+    aspect_ratio: f32,
+    resolution: ExportResolutionPreset,
+    fps: u32,
+}
+
+impl ExportSettingsModalState {
+    fn settings(&self) -> ExportSettings {
+        ExportSettings {
+            render_size: self.resolution.render_size(self.aspect_ratio),
+            fps: self.fps,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 struct ExportOverlayState {
     kind: Option<RequestedExport>,
@@ -203,6 +268,7 @@ pub struct DocumentView {
     timeline: Entity<Timeline>,
 
     export_overlay: ExportOverlayState,
+    export_settings_modal: Option<ExportSettingsModalState>,
     export_cancel_flag: Option<Arc<AtomicBool>>,
     export_poll_task: Option<Task<()>>,
 

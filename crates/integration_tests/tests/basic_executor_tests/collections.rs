@@ -312,14 +312,14 @@ fn test_keyframe_lerp_accepts_map() {
 }
 
 #[test]
-fn test_keyframe_lerp_still_accepts_pair_list() {
+fn test_keyframe_lerp_rejects_pair_list() {
     let r = run_with_stdlib(
         "
         let result = keyframe_lerp([[0, 0], [0.5, 10], [1, 20]], 0.25)
     ",
         &["math"],
     );
-    r.assert_float(5.0);
+    r.assert_error("expected map");
 }
 
 #[test]

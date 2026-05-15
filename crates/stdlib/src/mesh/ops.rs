@@ -1,10 +1,7 @@
 use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
 
 use executor::{
-    camera::{
-        CameraBasis, DEFAULT_CAMERA_ASPECT, DEFAULT_CAMERA_FOV, initial_camera_snapshot,
-        parse_camera_arg,
-    },
+    camera::{CameraBasis, DEFAULT_CAMERA_FOV, initial_camera_snapshot, parse_camera_arg},
     error::ExecutorError,
     executor::Executor,
     heap::with_heap,
@@ -81,18 +78,16 @@ fn decode_mesh_ref(value: i32) -> Option<usize> {
     (value < -1).then_some((-value - 2) as usize)
 }
 
-fn viewport_half_extents(depth: f32) -> (f32, f32) {
+fn viewport_half_extents(depth: f32, aspect_ratio: f32) -> (f32, f32) {
     let depth = depth.max(executor::camera::MIN_CAMERA_NEAR);
     let tan_half_fov = (DEFAULT_CAMERA_FOV * 0.5).tan().max(0.05);
-    (
-        depth * tan_half_fov * DEFAULT_CAMERA_ASPECT,
-        depth * tan_half_fov,
-    )
+    (depth * tan_half_fov * aspect_ratio, depth * tan_half_fov)
 }
 
 fn camera_space_placement_delta(
     tree: &MeshTree,
     camera: CameraBasis,
+    aspect_ratio: f32,
     side: Float3,
     buffer: f32,
 ) -> Option<Float3> {
@@ -113,7 +108,7 @@ fn camera_space_placement_delta(
             let x = relative.dot(camera.right);
             let y = relative.dot(camera.up);
             let z = relative.dot(camera.forward).max(camera.near);
-            let (half_width, half_height) = viewport_half_extents(z);
+            let (half_width, half_height) = viewport_half_extents(z, aspect_ratio);
             let x_limit = (half_width - buffer).max(0.0);
             let y_limit = (half_height - buffer).max(0.0);
 
@@ -1811,8 +1806,9 @@ pub async fn op_to_side(executor: &mut Executor, stack_idx: usize) -> Result<Val
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
         return Ok(tree.into_value());
     };
-    let delta =
-        camera_space_placement_delta(&view, camera, side, buffer).unwrap_or(Float3::ZERO) * level;
+    let delta = camera_space_placement_delta(&view, camera, executor.aspect_ratio(), side, buffer)
+        .unwrap_or(Float3::ZERO)
+        * level;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         transform_mesh_positions(mesh, |p| p + delta)
     })
@@ -1843,8 +1839,9 @@ pub async fn op_to_corner(
     let Some(view) = filtered_tree_view(executor, &tree, filter.as_ref()).await? else {
         return Ok(tree.into_value());
     };
-    let delta =
-        camera_space_placement_delta(&view, camera, side, buffer).unwrap_or(Float3::ZERO) * level;
+    let delta = camera_space_placement_delta(&view, camera, executor.aspect_ratio(), side, buffer)
+        .unwrap_or(Float3::ZERO)
+        * level;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
         transform_mesh_positions(mesh, |p| p + delta)
     })
