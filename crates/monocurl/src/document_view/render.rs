@@ -77,6 +77,7 @@ impl DocumentView {
             viewport: viewport.clone(),
             timeline,
             export_overlay: ExportOverlayState::default(),
+            export_settings_modal: None,
             export_cancel_flag: None,
             export_poll_task: None,
             focus_handle: cx.focus_handle(),
@@ -297,6 +298,251 @@ impl DocumentView {
         )
     }
 
+    fn render_export_settings_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let modal = self.export_settings_modal.as_ref()?;
+        let theme = ThemeSettings::theme(cx);
+        let settings = modal.settings();
+        let size_label = format!(
+            "{}x{}",
+            settings.render_size.width, settings.render_size.height
+        );
+        let aspect_label = format!("{:.3}", modal.aspect_ratio);
+        let title = format!("{} Export Settings", modal.kind.action_label());
+
+        let resolution_buttons = ExportResolutionPreset::ALL
+            .into_iter()
+            .map(|preset| {
+                let selected = preset == modal.resolution;
+                div()
+                    .id(match preset {
+                        ExportResolutionPreset::Small => "export-resolution-small",
+                        ExportResolutionPreset::Medium => "export-resolution-medium",
+                        ExportResolutionPreset::Large => "export-resolution-large",
+                    })
+                    .px(px(10.0))
+                    .py(px(5.0))
+                    .rounded(px(4.0))
+                    .border_1()
+                    .border_color(if selected {
+                        theme.accent
+                    } else {
+                        theme.navbar_border
+                    })
+                    .bg(if selected {
+                        theme.accent
+                    } else {
+                        theme.tab_active_background
+                    })
+                    .text_sm()
+                    .text_color(if selected {
+                        theme.viewport_stage_background
+                    } else {
+                        theme.text_primary
+                    })
+                    .hover({
+                        let hover = theme.row_hover_overlay;
+                        move |style| {
+                            if selected { style } else { style.bg(hover) }
+                        }
+                    })
+                    .cursor_pointer()
+                    .child(preset.label())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.set_export_resolution(preset, cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+
+        let fps_controls = (modal.kind == RequestedExport::Video).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.0))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.text_muted)
+                        .child("Frame Rate"),
+                )
+                .child(div().flex().flex_row().gap(px(6.0)).children(
+                    [30_u32, 60_u32].into_iter().map(|fps| {
+                        let selected = fps == modal.fps;
+                        div()
+                            .id(if fps == 30 {
+                                "export-fps-30"
+                            } else {
+                                "export-fps-60"
+                            })
+                            .px(px(10.0))
+                            .py(px(5.0))
+                            .rounded(px(4.0))
+                            .border_1()
+                            .border_color(if selected {
+                                theme.accent
+                            } else {
+                                theme.navbar_border
+                            })
+                            .bg(if selected {
+                                theme.accent
+                            } else {
+                                theme.tab_active_background
+                            })
+                            .text_sm()
+                            .text_color(if selected {
+                                theme.viewport_stage_background
+                            } else {
+                                theme.text_primary
+                            })
+                            .hover({
+                                let hover = theme.row_hover_overlay;
+                                move |style| {
+                                    if selected { style } else { style.bg(hover) }
+                                }
+                            })
+                            .cursor_pointer()
+                            .child(format!("{fps} fps"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                this.set_export_fps(fps, cx);
+                            }))
+                            .into_any_element()
+                    }),
+                ))
+                .into_any_element()
+        });
+
+        Some(
+            div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .bg(Rgba {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.35,
+                })
+                .on_mouse_down(MouseButton::Left, |_event, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                })
+                .child(
+                    div()
+                        .w(px(420.0))
+                        .max_w(px(520.0))
+                        .p_3()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(theme.navbar_border)
+                        .bg(theme.tab_active_background)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(4.0))
+                                .child(div().text_sm().text_color(theme.text_primary).child(title))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme.text_muted)
+                                        .child(modal.output_path.display().to_string()),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.0))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(theme.text_muted)
+                                        .child("Resolution"),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .gap(px(6.0))
+                                        .children(resolution_buttons),
+                                ),
+                        )
+                        .children(fps_controls)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_row()
+                                .justify_between()
+                                .gap(px(10.0))
+                                .child(
+                                    div().text_xs().text_color(theme.text_muted).child(format!(
+                                        "{} px, aspect {}",
+                                        size_label, aspect_label
+                                    )),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_row()
+                                        .gap(px(8.0))
+                                        .child(
+                                            div()
+                                                .id("export-settings-cancel")
+                                                .px(px(10.0))
+                                                .py(px(5.0))
+                                                .rounded(px(4.0))
+                                                .border_1()
+                                                .border_color(theme.navbar_border)
+                                                .text_sm()
+                                                .text_color(theme.text_primary)
+                                                .hover({
+                                                    let hover = theme.row_hover_overlay;
+                                                    move |style| style.bg(hover)
+                                                })
+                                                .cursor_pointer()
+                                                .child("Cancel")
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    window.prevent_default();
+                                                    cx.stop_propagation();
+                                                    this.dismiss_export_settings(cx);
+                                                })),
+                                        )
+                                        .child(
+                                            div()
+                                                .id("export-settings-confirm")
+                                                .px(px(10.0))
+                                                .py(px(5.0))
+                                                .rounded(px(4.0))
+                                                .border_1()
+                                                .border_color(theme.accent)
+                                                .bg(theme.accent)
+                                                .text_sm()
+                                                .text_color(theme.viewport_stage_background)
+                                                .hover(|style| style.opacity(0.9))
+                                                .cursor_pointer()
+                                                .child("Export")
+                                                .on_click(cx.listener(|this, _, window, cx| {
+                                                    window.prevent_default();
+                                                    cx.stop_propagation();
+                                                    this.confirm_export_settings(cx);
+                                                })),
+                                        ),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn render_presentation(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .relative()
@@ -322,6 +568,7 @@ impl DocumentView {
                     .child(self.viewport.clone()),
             )
             .children(self.render_export_overlay(cx))
+            .children(self.render_export_settings_modal(cx))
     }
 
     fn viewport_timeline(&self, divider_color: impl Into<Hsla>) -> Split {
@@ -401,6 +648,7 @@ impl DocumentView {
             .on_action(cx.listener(Self::zoom_in))
             .on_action(cx.listener(Self::zoom_out))
             .children(self.render_export_overlay(cx))
+            .children(self.render_export_settings_modal(cx))
     }
 }
 

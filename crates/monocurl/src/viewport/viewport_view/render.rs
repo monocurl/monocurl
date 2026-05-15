@@ -9,17 +9,21 @@ use crate::{
 };
 
 use super::{
-    Viewport,
+    AspectRatioPreset, Viewport,
     camera::CameraDragMode,
     params::parameter_controls,
     style::{
         PARAM_PANEL_W, PRES_BG, PRES_BORDER, PRES_MUTED, PRES_PANEL_BG, PRES_TEXT, PRES_TOOLBAR_BG,
-        PRES_TOOLBAR_H, RING_TRANSITION, RingStyle, lerp_f32, lerp_rgba, ring_style_for,
+        PRES_TOOLBAR_H, RING_TRANSITION, RingStyle, TRANSPARENT, lerp_f32, lerp_rgba,
+        ring_style_for,
     },
 };
 
-const VIEWPORT_FRAME_ASPECT: f32 = 16.0 / 9.0;
 const VIEWPORT_FRAME_PADDING: f32 = 35.0;
+const ASPECT_CONTROL_PANEL_PAD: f32 = 2.0;
+const ASPECT_CONTROL_PANEL_GAP: f32 = 2.0;
+const ASPECT_CONTROL_BUTTON_W: f32 = 18.0;
+const ASPECT_CONTROL_BUTTON_H: f32 = 16.0;
 const VIEWPORT_PREVIEW_CHROME_INSET_X: f32 = 8.0;
 const VIEWPORT_PREVIEW_CHROME_INSET_Y: f32 = 6.0;
 const PAUSE_HINT_TEXT: &str = "press shift + space to pause";
@@ -32,8 +36,13 @@ const VIEWPORT_OVERSCAN_SCRIM: Rgba = Rgba {
 
 #[derive(Clone, Copy)]
 enum SceneStageMode {
-    Preview { ring_style: RingStyle },
-    Presentation,
+    Preview {
+        ring_style: RingStyle,
+        aspect_ratio: f32,
+    },
+    Presentation {
+        aspect_ratio: f32,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -59,6 +68,7 @@ impl Render for Viewport {
             scene_camera,
             meshes,
             scene_version,
+            aspect_preset,
         ) = {
             let execution = self.execution_state.read(cx);
             (
@@ -73,8 +83,10 @@ impl Render for Viewport {
                 execution.camera.clone(),
                 execution.meshes.clone(),
                 execution.scene_version,
+                self.aspect_preset,
             )
         };
+        let aspect_ratio = aspect_preset.aspect_ratio();
 
         let display_camera = self.display_camera(&scene_camera);
         let scene_revision = SceneImageRevision::new(scene_version, self.viewport_camera_version);
@@ -128,9 +140,13 @@ impl Render for Viewport {
                     scene,
                     scene_revision,
                     theme.viewport_stage_background,
-                    SceneStageMode::Preview { ring_style },
+                    SceneStageMode::Preview {
+                        ring_style,
+                        aspect_ratio,
+                    },
                     weak_vp.clone(),
                 ))
+                .child(render_preview_aspect_controls(aspect_preset, weak_vp, cx))
                 .child(
                     div()
                         .absolute()
@@ -153,7 +169,7 @@ impl Render for Viewport {
                 scene,
                 scene_revision,
                 presentation_stage_background,
-                SceneStageMode::Presentation,
+                SceneStageMode::Presentation { aspect_ratio },
                 weak_vp.clone(),
             ))
             .child(render_presentation_ring(
@@ -375,7 +391,7 @@ fn render_scene_stage(
                     let layout = scene_stage_layout(bounds, mode);
                     let retired_image_limit = retired_image_limit_for_presentation(matches!(
                         mode,
-                        SceneStageMode::Presentation
+                        SceneStageMode::Presentation { .. }
                     ));
                     let scene_image = weak_vp
                         .update(_cx, |viewport, _cx| {
@@ -484,8 +500,11 @@ fn render_scene_stage(
 
 fn scene_stage_layout(bounds: Bounds<Pixels>, mode: SceneStageMode) -> SceneStageLayout {
     match mode {
-        SceneStageMode::Preview { ring_style } => {
-            let frame_bounds = aspect_frame_bounds(bounds, VIEWPORT_FRAME_PADDING);
+        SceneStageMode::Preview {
+            ring_style,
+            aspect_ratio,
+        } => {
+            let frame_bounds = aspect_frame_bounds(bounds, VIEWPORT_FRAME_PADDING, aspect_ratio);
             SceneStageLayout {
                 image_bounds: bounds,
                 interaction_bounds: frame_bounds,
@@ -493,8 +512,8 @@ fn scene_stage_layout(bounds: Bounds<Pixels>, mode: SceneStageMode) -> SceneStag
                 preview_ring: Some(ring_style),
             }
         }
-        SceneStageMode::Presentation => {
-            let frame_bounds = aspect_frame_bounds(bounds, 0.0);
+        SceneStageMode::Presentation { aspect_ratio } => {
+            let frame_bounds = aspect_frame_bounds(bounds, 0.0, aspect_ratio);
             SceneStageLayout {
                 image_bounds: frame_bounds,
                 interaction_bounds: frame_bounds,
@@ -505,14 +524,15 @@ fn scene_stage_layout(bounds: Bounds<Pixels>, mode: SceneStageMode) -> SceneStag
     }
 }
 
-fn aspect_frame_bounds(bounds: Bounds<Pixels>, padding: f32) -> Bounds<Pixels> {
+fn aspect_frame_bounds(bounds: Bounds<Pixels>, padding: f32, aspect_ratio: f32) -> Bounds<Pixels> {
     let width = f32::from(bounds.size.width).max(1.0);
     let height = f32::from(bounds.size.height).max(1.0);
     let available_width = (width - padding * 2.0).max(1.0);
     let available_height = (height - padding * 2.0).max(1.0);
 
-    let frame_width = available_width.min(available_height * VIEWPORT_FRAME_ASPECT);
-    let frame_height = frame_width / VIEWPORT_FRAME_ASPECT;
+    let aspect_ratio = aspect_ratio.max(0.1);
+    let frame_width = available_width.min(available_height * aspect_ratio);
+    let frame_height = frame_width / aspect_ratio;
     let offset_x = (width - frame_width) * 0.5;
     let offset_y = (height - frame_height) * 0.5;
     Bounds::new(
@@ -634,6 +654,159 @@ fn render_pause_hint() -> impl IntoElement {
         .text_color(PRES_MUTED)
         .text_size(px(11.0))
         .child(PAUSE_HINT_TEXT)
+}
+
+fn render_preview_aspect_controls(
+    active: AspectRatioPreset,
+    weak_vp: WeakEntity<Viewport>,
+    cx: &mut Context<Viewport>,
+) -> impl IntoElement {
+    let theme = ThemeSettings::theme(cx);
+    canvas(move |bounds, _, _| bounds, {
+        let weak_vp = weak_vp.clone();
+        move |_, bounds: Bounds<Pixels>, window, _cx| {
+            let panel_bounds = aspect_control_panel_bounds(bounds);
+
+            window.paint_quad(quad(
+                panel_bounds,
+                px(4.0),
+                with_alpha(theme.tab_active_background, 0.62),
+                px(1.0),
+                with_alpha(theme.navbar_border, 0.6),
+                BorderStyle::Solid,
+            ));
+
+            for preset in AspectRatioPreset::ALL {
+                let selected = preset == active;
+                let button_bounds = aspect_control_button_bounds(panel_bounds, preset);
+                let icon_bounds = aspect_control_icon_bounds(button_bounds, preset);
+
+                if selected {
+                    window.paint_quad(quad(
+                        button_bounds,
+                        px(2.0),
+                        with_alpha(theme.accent, 0.16),
+                        px(0.0),
+                        TRANSPARENT,
+                        BorderStyle::Solid,
+                    ));
+                }
+
+                window.paint_quad(quad(
+                    icon_bounds,
+                    px(1.0),
+                    with_alpha(theme.viewport_stage_background, 0.52),
+                    px(1.0),
+                    if selected {
+                        with_alpha(theme.accent, 0.92)
+                    } else {
+                        with_alpha(theme.text_muted, 0.72)
+                    },
+                    BorderStyle::Solid,
+                ));
+            }
+
+            {
+                let weak_vp = weak_vp.clone();
+                window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
+                    if phase != DispatchPhase::Bubble || event.button != MouseButton::Left {
+                        return;
+                    }
+
+                    for preset in AspectRatioPreset::ALL {
+                        if aspect_control_button_bounds(panel_bounds, preset)
+                            .contains(&event.position)
+                        {
+                            weak_vp
+                                .update(cx, |viewport, cx| viewport.set_aspect_preset(preset, cx))
+                                .ok();
+                            cx.stop_propagation();
+                            return;
+                        }
+                    }
+                });
+            }
+        }
+    })
+    .absolute()
+    .top(px(0.0))
+    .bottom(px(0.0))
+    .left(px(0.0))
+    .right(px(0.0))
+}
+
+fn aspect_control_panel_bounds(bounds: Bounds<Pixels>) -> Bounds<Pixels> {
+    let bounds_w = f32::from(bounds.size.width);
+    let bounds_h = f32::from(bounds.size.height);
+    let panel_w = ASPECT_CONTROL_BUTTON_W + 2.0 * ASPECT_CONTROL_PANEL_PAD;
+    let panel_h = ASPECT_CONTROL_BUTTON_H * AspectRatioPreset::ALL.len() as f32
+        + ASPECT_CONTROL_PANEL_GAP * (AspectRatioPreset::ALL.len().saturating_sub(1)) as f32
+        + 2.0 * ASPECT_CONTROL_PANEL_PAD;
+
+    let right_offset = ((VIEWPORT_FRAME_PADDING - panel_w) * 0.5).max(0.0);
+    let panel_x = (bounds_w - right_offset - panel_w).clamp(0.0, (bounds_w - panel_w).max(0.0));
+    let panel_y = ((bounds_h - panel_h) * 0.5).clamp(0.0, (bounds_h - panel_h).max(0.0));
+
+    Bounds::new(
+        point(bounds.origin.x + px(panel_x), bounds.origin.y + px(panel_y)),
+        size(px(panel_w), px(panel_h)),
+    )
+}
+
+fn aspect_control_button_bounds(
+    panel_bounds: Bounds<Pixels>,
+    preset: AspectRatioPreset,
+) -> Bounds<Pixels> {
+    let index = aspect_preset_index(preset) as f32;
+    Bounds::new(
+        point(
+            panel_bounds.origin.x + px(ASPECT_CONTROL_PANEL_PAD),
+            panel_bounds.origin.y
+                + px(ASPECT_CONTROL_PANEL_PAD
+                    + index * (ASPECT_CONTROL_BUTTON_H + ASPECT_CONTROL_PANEL_GAP)),
+        ),
+        size(px(ASPECT_CONTROL_BUTTON_W), px(ASPECT_CONTROL_BUTTON_H)),
+    )
+}
+
+fn aspect_control_icon_bounds(
+    button_bounds: Bounds<Pixels>,
+    preset: AspectRatioPreset,
+) -> Bounds<Pixels> {
+    let (icon_w, icon_h) = aspect_preset_icon_size(preset);
+    Bounds::new(
+        point(
+            button_bounds.origin.x + px((ASPECT_CONTROL_BUTTON_W - icon_w) * 0.5),
+            button_bounds.origin.y + px((ASPECT_CONTROL_BUTTON_H - icon_h) * 0.5),
+        ),
+        size(px(icon_w), px(icon_h)),
+    )
+}
+
+fn aspect_preset_index(preset: AspectRatioPreset) -> usize {
+    match preset {
+        AspectRatioPreset::Wide => 0,
+        AspectRatioPreset::Standard => 1,
+        AspectRatioPreset::Square => 2,
+        AspectRatioPreset::FeedPortrait => 3,
+        AspectRatioPreset::Portrait => 4,
+        AspectRatioPreset::Ultrawide => 5,
+    }
+}
+
+fn aspect_preset_icon_size(preset: AspectRatioPreset) -> (f32, f32) {
+    match preset {
+        AspectRatioPreset::Wide => (14.0, 8.0),
+        AspectRatioPreset::Standard => (13.0, 10.0),
+        AspectRatioPreset::Square => (10.0, 10.0),
+        AspectRatioPreset::FeedPortrait => (9.0, 12.0),
+        AspectRatioPreset::Portrait => (7.0, 12.0),
+        AspectRatioPreset::Ultrawide => (15.0, 6.0),
+    }
+}
+
+fn with_alpha(color: Rgba, a: f32) -> Rgba {
+    Rgba { a, ..color }
 }
 
 fn render_toolbar_button(

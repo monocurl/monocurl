@@ -23,10 +23,43 @@ use self::{
 
 const PAUSE_HINT_DURATION: Duration = Duration::from_millis(500);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AspectRatioPreset {
+    Wide,
+    Standard,
+    Square,
+    FeedPortrait,
+    Portrait,
+    Ultrawide,
+}
+
+impl AspectRatioPreset {
+    pub const ALL: [Self; 6] = [
+        Self::Wide,
+        Self::Standard,
+        Self::Square,
+        Self::FeedPortrait,
+        Self::Portrait,
+        Self::Ultrawide,
+    ];
+
+    pub const fn aspect_ratio(self) -> f32 {
+        match self {
+            Self::Wide => 16.0 / 9.0,
+            Self::Standard => 4.0 / 3.0,
+            Self::Square => 1.0,
+            Self::FeedPortrait => 4.0 / 5.0,
+            Self::Portrait => 9.0 / 16.0,
+            Self::Ultrawide => 21.0 / 9.0,
+        }
+    }
+}
+
 pub struct Viewport {
     services: Entity<ServiceManager>,
     execution_state: Entity<ExecutionState>,
     is_presenting: bool,
+    aspect_preset: AspectRatioPreset,
     show_params: bool,
     drag_state: Option<DragState>,
     camera_drag: Option<CameraDragState>,
@@ -65,6 +98,7 @@ impl Viewport {
             services,
             execution_state,
             is_presenting: false,
+            aspect_preset: AspectRatioPreset::Wide,
             show_params: false,
             drag_state: None,
             camera_drag: None,
@@ -127,6 +161,20 @@ impl Viewport {
             self.drag_state = None;
             self.slider_bounds.clear();
         }
+        cx.notify();
+    }
+
+    pub fn aspect_ratio(&self) -> f32 {
+        self.aspect_preset.aspect_ratio()
+    }
+
+    pub fn set_aspect_preset(&mut self, preset: AspectRatioPreset, cx: &mut Context<Self>) {
+        self.aspect_preset = preset;
+        self.bump_viewport_camera_version();
+        let aspect_ratio = self.aspect_ratio();
+        self.services.update(cx, |services, _| {
+            services.update_aspect_ratio(aspect_ratio);
+        });
         cx.notify();
     }
 

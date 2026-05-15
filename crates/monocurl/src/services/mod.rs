@@ -374,6 +374,15 @@ impl ServiceManager {
         })
     }
 
+    pub fn update_aspect_ratio(&mut self, aspect_ratio: f32) {
+        smol::block_on(async {
+            self.execution_tx
+                .send(ExecutionMessage::UpdateAspectRatio(aspect_ratio))
+                .await
+                .unwrap();
+        })
+    }
+
     pub fn update_parameters(
         &mut self,
         updates: HashMap<PresentationUpdateTarget, ParameterValue>,

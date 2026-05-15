@@ -62,6 +62,12 @@ impl Default for ExportSettings {
     }
 }
 
+impl ExportSettings {
+    pub fn aspect_ratio(&self) -> f32 {
+        self.render_size.width.max(1) as f32 / self.render_size.height.max(1) as f32
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ImageExportTimestamp {
     Exact(Timestamp),
@@ -432,6 +438,9 @@ async fn export_image(
     on_progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
     emit_progress_checked(cancel_flag, on_progress, "Rendering frame", 2, 4)?;
+    prepared
+        .executor
+        .update_aspect_ratio(settings.aspect_ratio());
 
     let timestamp = match timestamp {
         ImageExportTimestamp::Exact(timestamp) => timestamp,
@@ -509,6 +518,9 @@ async fn export_video(
             && settings.render_size.height.is_multiple_of(2),
         "video render size must use even dimensions for H.264 export"
     );
+    prepared
+        .executor
+        .update_aspect_ratio(settings.aspect_ratio());
 
     let video_size = settings.render_size;
     let slide_durations =

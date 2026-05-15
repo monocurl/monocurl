@@ -96,8 +96,17 @@ pub struct Executor {
     pub(crate) native_funcs: Vec<StdlibFunc>,
     pub(crate) cache: ExecutionCache,
     pub(crate) yielder: PeriodicYielder,
+    aspect_ratio: f32,
     text_render_quality: TextRenderQuality,
     memory_checker: PeriodicMemoryChecker,
+}
+
+fn normalize_aspect_ratio(aspect_ratio: f32) -> f32 {
+    if aspect_ratio.is_finite() {
+        aspect_ratio.max(0.1)
+    } else {
+        16.0 / 9.0
+    }
 }
 
 impl Executor {
@@ -109,6 +118,7 @@ impl Executor {
             native_funcs,
             cache,
             yielder: PeriodicYielder::default(),
+            aspect_ratio: 16.0 / 9.0,
             text_render_quality: TextRenderQuality::Normal,
             memory_checker: PeriodicMemoryChecker::new(
                 EXECUTOR_HEAP_SLOT_LIMIT,
@@ -155,6 +165,14 @@ impl Executor {
 
     pub fn text_render_quality(&self) -> TextRenderQuality {
         self.text_render_quality
+    }
+
+    pub fn update_aspect_ratio(&mut self, aspect_ratio: f32) {
+        self.aspect_ratio = normalize_aspect_ratio(aspect_ratio);
+    }
+
+    pub fn aspect_ratio(&self) -> f32 {
+        self.aspect_ratio
     }
 
     #[inline(always)]

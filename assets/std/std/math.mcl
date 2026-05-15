@@ -281,15 +281,15 @@ let angle_between = |u, v| arccos(dot(u, v) / (norm(u) * norm(v)))
 let lerp = |a, b, t| __monocurl__native__ lerp(a, b, t)
 
 # keyframes = [t0 -> v0, t1 -> v1, ...]; piecewise lerp across t.
-# maps are sorted by numeric key; the old [[t0, v0], ...] form is still accepted.
+# maps are sorted by numeric key.
 ## [options]
 ## important: true
 ## [overview]
 ## Piecewise interpolation through keyed values.
 ## [description]
-## Map keyframes are sorted by numeric key; the older `[[time, value], ...]` list form is still accepted. Values outside the first/last keyframe clamp to the endpoint value.
+## Keyframes must be a map from numeric times to values. Entries are sorted by numeric key, and values outside the first/last keyframe clamp to the endpoint value.
 ## [parameters]
-## keyframes: map or list of t -> value pairs
+## keyframes: map of t -> value pairs
 ## t: normalized lookup point
 ## [example]
 ## ```

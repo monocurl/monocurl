@@ -288,7 +288,11 @@ fn run(src: &str) -> ExecResult {
 }
 
 fn run_with_stdlib(src: &str, stdlib_names: &[&str]) -> ExecResult {
-    run_section_with_stdlib(src, SectionType::Slide, stdlib_names)
+    run_section_with_stdlib_and_aspect(src, SectionType::Slide, stdlib_names, 16.0 / 9.0)
+}
+
+fn run_with_stdlib_and_aspect(src: &str, stdlib_names: &[&str], aspect_ratio: f32) -> ExecResult {
+    run_section_with_stdlib_and_aspect(src, SectionType::Slide, stdlib_names, aspect_ratio)
 }
 
 fn run_section(src: &str, section_type: SectionType) -> ExecResult {
@@ -299,6 +303,15 @@ fn run_section_with_stdlib(
     src: &str,
     section_type: SectionType,
     stdlib_names: &[&str],
+) -> ExecResult {
+    run_section_with_stdlib_and_aspect(src, section_type, stdlib_names, 16.0 / 9.0)
+}
+
+fn run_section_with_stdlib_and_aspect(
+    src: &str,
+    section_type: SectionType,
+    stdlib_names: &[&str],
+    aspect_ratio: f32,
 ) -> ExecResult {
     let (section, parse_errors) = parse_section(src, section_type);
     if !parse_errors.is_empty() {
@@ -342,6 +355,7 @@ fn run_section_with_stdlib(
 
     // -- execute --
     let mut executor = Executor::new(result.bytecode, registry().func_table());
+    executor.update_aspect_ratio(aspect_ratio);
 
     let mut runtime_errors: Vec<String> = Vec::new();
 

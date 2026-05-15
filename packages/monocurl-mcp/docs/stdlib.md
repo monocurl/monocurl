@@ -35,13 +35,17 @@ import std.scene
 - `std.anim`: rate functions, primitive animations, follower animations,
   indication animations, transfer animations, and animation composition/time
   operators.
-- `std.scene`: scene-level camera and background helpers.
+- `std.scene`: scene-level camera/background helpers and the active
+  execution-frame `aspect_ratio()`.
 
 ## Authoring Notes
 
 - Construct geometry first, then place/style/tag it with operators such as
   `center`, `shift`, `fill`, `stroke`, `tag`, `scale`, `rotate`, `to_side`,
   and `to_corner`.
+- `to_side` and `to_corner` use the active execution aspect ratio. In the
+  desktop app this comes from the preview aspect preset or export settings; in
+  code, query it with `aspect_ratio()` from `std.scene`.
 - Most primitive meshes are canonical and origin-based. Use `shift`/`center`
   for placement, and use `in_space{origin, x_unit, y_unit, z_unit}` when a mesh
   is authored in a local coordinate system such as graph axes and must be

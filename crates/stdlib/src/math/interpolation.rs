@@ -4,7 +4,7 @@ use executor::{
     heap::with_heap,
     value::{
         Value,
-        container::{HashableKey, List, Map},
+        container::{HashableKey, Map},
     },
 };
 use stdlib_macros::stdlib_func;
@@ -32,11 +32,10 @@ pub async fn keyframe_lerp(
     let t = crate::read_float(executor, stack_idx, -1, "t")?;
 
     let parsed = match keyframes {
-        Value::List(keyframes) => parse_keyframe_list(&keyframes)?,
         Value::Map(keyframes) => parse_keyframe_map(&keyframes)?,
         other => {
             return Err(ExecutorError::type_error_for(
-                "map or list",
+                "map",
                 other.type_name(),
                 "keyframes",
             ));
@@ -44,49 +43,6 @@ pub async fn keyframe_lerp(
     };
 
     lerp_keyframes(executor, parsed, t).await
-}
-
-fn parse_keyframe_list(keyframes: &List) -> Result<Vec<(f64, Value)>, ExecutorError> {
-    if keyframes.is_empty() {
-        return Err(ExecutorError::InvalidArgument {
-            arg: "keyframes",
-            message: "cannot interpolate empty keyframe list",
-        });
-    }
-
-    let mut parsed = Vec::with_capacity(keyframes.len());
-    for keyframe in keyframes.elements() {
-        let pair = with_heap(|h| h.get(keyframe.key()).clone()).elide_lvalue_leader_rec();
-        let Value::List(pair) = pair else {
-            return Err(ExecutorError::type_error_for(
-                "list",
-                pair.type_name(),
-                "keyframe",
-            ));
-        };
-        if pair.len() != 2 {
-            return Err(ExecutorError::InvalidArgument {
-                arg: "keyframe",
-                message: "each keyframe must be [time, value]",
-            });
-        }
-
-        let time = match with_heap(|h| h.get(pair.elements()[0].key()).clone()) {
-            Value::Float(f) => f,
-            Value::Integer(n) => n as f64,
-            other => {
-                return Err(ExecutorError::type_error_for(
-                    "number",
-                    other.type_name(),
-                    "time",
-                ));
-            }
-        };
-        let value = with_heap(|h| h.get(pair.elements()[1].key()).clone());
-        parsed.push((time, value));
-    }
-
-    Ok(parsed)
 }
 
 fn parse_keyframe_map(keyframes: &Map) -> Result<Vec<(f64, Value)>, ExecutorError> {
