@@ -1,8 +1,6 @@
 import initPackagedWasm, * as packagedWasm from "./wasm/web_runtime.js";
 import { installMonocurlMathJaxRenderer } from "./mathjax-renderer.js";
 import type { MonocurlMathJax } from "./mathjax-renderer.js";
-
-export type PlaybackMode = "preview" | "presentation" | "web";
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 export type Vec4 = [number, number, number, number];
@@ -271,8 +269,6 @@ export interface MonocurlWasmRuntimeHandle {
   is_playing(): boolean;
   seek_to(slide: number, time: number): void;
   toggle_play(nowSeconds: number): void;
-  set_presentation_mode(): void;
-  set_preview_mode(): void;
   set_web_mode(): void;
   update_parameters?(updatesJson: string, nowSeconds: number): void;
   step(nowSeconds: number): Promise<number>;
@@ -535,8 +531,7 @@ async function resolveWasmModule(
   options: Pick<CreateMonocurlLoopOptions, "wasm" | "wasmInit">,
 ): Promise<MonocurlWasmModule> {
   if (options.wasm === undefined) {
-    await initPackagedWasm(options.wasmInit);
-    return packagedWasm;
+    return initPackagedWasmOnce(options.wasmInit);
   }
 
   if (typeof options.wasm === "function") {
@@ -544,6 +539,21 @@ async function resolveWasmModule(
   }
 
   return await options.wasm;
+}
+
+let packagedWasmInit: Promise<MonocurlWasmModule> | undefined;
+
+function initPackagedWasmOnce(
+  wasmInit: MonocurlWasmInitInput | undefined,
+): Promise<MonocurlWasmModule> {
+  packagedWasmInit ??= initPackagedWasm(wasmInit)
+    .then(() => packagedWasm)
+    .catch((error: unknown) => {
+      packagedWasmInit = undefined;
+      throw error;
+    });
+
+  return packagedWasmInit;
 }
 
 async function installMathJaxIfAvailable(
@@ -601,6 +611,7 @@ export class MonocurlLoop {
     this.onStep = options.onStep;
     this.onIdle = options.onIdle;
     this.onError = options.onError;
+    this.runtime.set_web_mode();
   }
 
   get isPlaying(): boolean {
@@ -638,18 +649,6 @@ export class MonocurlLoop {
     this.playUntil = undefined;
     this.requestStep();
     return report;
-  }
-
-  setPlaybackMode(mode: PlaybackMode): void {
-    this.playUntil = undefined;
-    if (mode === "presentation") {
-      this.runtime.set_presentation_mode();
-    } else if (mode === "web") {
-      this.runtime.set_web_mode();
-    } else {
-      this.runtime.set_preview_mode();
-    }
-    this.requestStep();
   }
 
   seekTo(timestamp: Timestamp): void {
