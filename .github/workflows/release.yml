@@ -284,7 +284,7 @@ jobs:
         run: |
           tag_ref="refs/tags/${GITHUB_REF_NAME}"
 
-          if [[ "$(git cat-file -t "$tag_ref")" != "tag" ]]; then
+          if [[ "$(git for-each-ref --format='%(objecttype)' "$tag_ref")" != "tag" ]]; then
             echo "::error::${GITHUB_REF_NAME} is a lightweight tag. Use an annotated tag so the release has notes."
             exit 1
           fi
