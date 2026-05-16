@@ -919,6 +919,14 @@ impl Executor {
                     }
                 }
                 StatefulNode::Constant(val) => Ok(*val.clone()),
+                StatefulNode::List(children) => {
+                    let mut elements = Vec::with_capacity(children.len());
+                    for child in children {
+                        let val = self.eval_stateful_node(child, read_kind).await?;
+                        elements.push(VRc::new(val));
+                    }
+                    Ok(Value::List(List::new_with(elements)))
+                }
                 StatefulNode::LabeledCall {
                     func,
                     args,

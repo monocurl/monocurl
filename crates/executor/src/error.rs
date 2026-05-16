@@ -154,10 +154,6 @@ impl ExecutorError {
         Self::stateful_value("stateful values can only be assigned to mesh variables")
     }
 
-    pub fn stateful_cannot_append() -> Self {
-        Self::stateful_value("stateful values cannot be appended to lists")
-    }
-
     pub fn stateful_binary_op() -> Self {
         Self::stateful_value("binary operators cannot be applied to stateful values")
     }

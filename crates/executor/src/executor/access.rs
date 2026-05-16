@@ -4,7 +4,7 @@ use crate::{
     state::LeaderKind,
     value::{
         Value, container::HashableKey, invoked_function::InvokedFunction,
-        invoked_operator::InvokedOperator,
+        invoked_operator::InvokedOperator, stateful::lift_append_to_stateful,
     },
 };
 
@@ -99,8 +99,14 @@ impl Executor {
         let rhs = stack.pop();
         let lhs = stack.pop();
 
-        if matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::stateful_cannot_append());
+        if matches!(rhs, Value::Stateful(_)) || matches!(lhs, Value::Stateful(_)) {
+            return match lift_append_to_stateful(lhs, rhs) {
+                Ok(stateful) => {
+                    self.state.stack_mut(stack_idx).push(stateful);
+                    ExecSingle::Continue
+                }
+                Err(e) => ExecSingle::Error(e),
+            };
         }
 
         match lhs {
@@ -120,33 +126,40 @@ impl Executor {
 
         let key = match lhs.as_lvalue_key() {
             Some(k) => k,
-            None => {
-                return ExecSingle::Error(ExecutorError::invalid_lvalue("append-assign"));
-            }
+            None => return ExecSingle::Error(ExecutorError::invalid_lvalue("append-assign")),
         };
 
-        if matches!(rhs, Value::Stateful(_)) {
-            return ExecSingle::Error(ExecutorError::stateful_cannot_append());
-        }
-
+        let rhs = rhs.elide_lvalue_leader_rec();
         let (key, base_val) = follow_heap_lvalues(key);
+
         let appended_key = match base_val {
             Value::List(mut list) => {
-                list.elements.push(VRc::new(rhs.elide_lvalue_leader_rec()));
+                if matches!(rhs, Value::Stateful(_)) {
+                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
+                }
+                list.elements.push(VRc::new(rhs));
                 heap_replace(key, Value::List(list));
                 key
             }
             Value::Leader(leader) => {
                 let (inner_key, inner_val) = follow_heap_lvalues(leader.leader_rc.key());
-                let Value::List(mut list) = inner_val else {
-                    return ExecSingle::Error(ExecutorError::type_error(
-                        "list",
-                        inner_val.type_name(),
-                    ));
-                };
 
-                list.elements.push(VRc::new(rhs.elide_lvalue_leader_rec()));
-                heap_replace(inner_key, Value::List(list));
+                if matches!(rhs, Value::Stateful(_)) || matches!(inner_val, Value::Stateful(_)) {
+                    let new_stateful = match lift_append_to_stateful(inner_val, rhs) {
+                        Ok(v) => v,
+                        Err(e) => return ExecSingle::Error(e),
+                    };
+                    heap_replace(inner_key, new_stateful);
+                } else {
+                    let Value::List(mut list) = inner_val else {
+                        return ExecSingle::Error(ExecutorError::type_error(
+                            "list",
+                            inner_val.type_name(),
+                        ));
+                    };
+                    list.elements.push(VRc::new(rhs));
+                    heap_replace(inner_key, Value::List(list));
+                }
 
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(key) {
@@ -157,10 +170,9 @@ impl Executor {
 
                 inner_key
             }
-            _ => {
-                return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name()));
-            }
+            _ => return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name())),
         };
+
         self.state
             .stack_mut(stack_idx)
             .push(Value::WeakLvalue(VWeak::from(appended_key)));

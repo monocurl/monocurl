@@ -499,10 +499,145 @@ fn test_higher_order_stateful_arg_stored_in_mesh() {
     r.assert_ok();
 }
 
-// ── lists cannot store stateful (rule 4) ──────────────────────────────
+// ── stateful lists ────────────────────────────────────────────────────────────
 
 #[test]
-fn test_list_literal_with_stateful_is_error() {
+fn test_stateful_list_literal_stored_in_mesh() {
+    // list literal with a stateful element becomes a reactive StatefulNode::List
+    let r = run_anim(
+        "
+        param p = 3
+        mesh m = [$p, 1, 2]
+    ",
+    );
+    r.assert_ok();
+}
+
+#[test]
+fn test_stateful_list_evaluates_on_read() {
+    // reading a mesh with a stateful list evaluates each element
+    let r = run_anim(
+        "
+        param p = 10
+        mesh m = [$p, 20, 30]
+        let result = m
+        print result[0]
+        print result[1]
+        print result[2]
+    ",
+    );
+    r.assert_transcript(&["10", "20", "30"]);
+}
+
+#[test]
+fn test_stateful_list_reflects_param_change() {
+    // after changing the param, evaluating the stateful list gives the updated value
+    let r = run_anim(
+        "
+        param p = 5
+        mesh m = [$p, 100]
+        p = 42
+        let result = m
+        print result[0]
+    ",
+    );
+    r.assert_transcript(&["42"]);
+}
+
+#[test]
+fn test_stateful_list_two_params() {
+    let r = run_anim(
+        "
+        param a = 1
+        param b = 2
+        mesh m = [$a, $b, 99]
+        let result = m
+        print result[0]
+        print result[1]
+        print result[2]
+    ",
+    );
+    r.assert_transcript(&["1", "2", "99"]);
+}
+
+#[test]
+fn test_stateful_list_append_to_mesh_via_dot_assign() {
+    // mesh holds a plain list; appending a stateful lifts it to a stateful list
+    let r = run_anim(
+        "
+        param p = 7
+        mesh m = [1, 2]
+        m .= $p
+        let result = m
+        print result[2]
+    ",
+    );
+    r.assert_transcript(&["7"]);
+}
+
+#[test]
+fn test_stateful_list_append_constant_to_stateful() {
+    // appending a constant to an already-stateful list produces a longer stateful list
+    let r = run_anim(
+        "
+        param p = 3
+        mesh m = [$p]
+        m .= 99
+        let result = m
+        print result[0]
+        print result[1]
+    ",
+    );
+    r.assert_transcript(&["3", "99"]);
+}
+
+#[test]
+fn test_stateful_list_append_two_statefuls() {
+    let r = run_anim(
+        "
+        param a = 1
+        param b = 2
+        mesh m = [$a]
+        m .= $b
+        let result = m
+        print result[0]
+        print result[1]
+    ",
+    );
+    r.assert_transcript(&["1", "2"]);
+}
+
+#[test]
+fn test_stateful_list_via_dot_assign_updates_on_param_change() {
+    let r = run_anim(
+        "
+        param p = 0
+        mesh m = [1]
+        m .= $p
+        p = 5
+        let result = m
+        print result[1]
+    ",
+    );
+    r.assert_transcript(&["5"]);
+}
+
+// .= on a non-mesh (var) with a stateful rhs is a runtime error
+#[test]
+fn test_stateful_list_append_to_var_is_error() {
+    let r = run_anim(
+        "
+        param p = 10
+        var v = []
+        v .= $p
+    ",
+    );
+    r.assert_error("stateful values can only be assigned to mesh variables");
+}
+
+// let cannot hold a stateful list (same rule as scalar stateful)
+#[test]
+fn test_stateful_list_literal_in_let_is_error() {
     let r = run_anim(
         "
         param p = 1
@@ -512,28 +647,29 @@ fn test_list_literal_with_stateful_is_error() {
     r.assert_error("stateful");
 }
 
+// indexing a stateful expression is still an error
 #[test]
-fn test_list_append_stateful_is_error() {
+fn test_stateful_list_subscript_is_error() {
     let r = run_anim(
         "
-        param p = 10
-        var v = []
-        v .= $p
+        param xs = [10, 20, 30]
+        mesh m = $xs[1]
     ",
     );
-    r.assert_error("stateful");
+    r.assert_error("subscript cannot be applied to stateful values");
 }
 
+// appending to a non-list stateful (scalar param in mesh) should error
 #[test]
-fn test_list_of_stateful_assigned_to_mesh_is_error() {
-    // even if the target is a mesh, a list containing stateful is still illegal (rule 4)
+fn test_stateful_scalar_dot_assign_is_error() {
     let r = run_anim(
         "
-        param p = 3
-        mesh m = [$p, 1, 2]
+        param p = 5
+        mesh m = $p
+        m .= 1
     ",
     );
-    r.assert_error("stateful");
+    r.assert_error("expected list");
 }
 
 // ── stateful in operator invocations ─────────────────────────────────────────
