@@ -33,12 +33,9 @@ const renderer = new MonocurlWebGlRenderer(canvas);
 const slides = document.querySelector("#slides");
 const play = document.querySelector("#play");
 
-const loop = await createMonocurlLoop({
-  onStep(result) {
-    for (const snapshot of result.snapshots) {
-      renderer.render(snapshot);
-    }
-  },
+const loop = await createMonocurlLoop();
+loop.addSnapshotListener((snapshot) => {
+  renderer.render(snapshot);
 });
 
 const report = loop.loadSource(`
@@ -81,6 +78,20 @@ for (const slide of report.slides) {
 play?.addEventListener("click", () => {
   loop.togglePlay();
 });
+```
+
+For an interactive 3D viewport with camera panning, let the package own the
+canvas renderer and camera override state:
+
+```ts
+import {
+  createMonocurlLoop,
+  installMonocurlCameraController,
+} from "monocurl";
+
+const loop = await createMonocurlLoop();
+installMonocurlCameraController(canvas, loop);
+loop.loadSource(source);
 ```
 
 The Rust wasm object is treated as a low-level handle. This package owns the

@@ -6,11 +6,18 @@ export type Vec4 = [number, number, number, number];
 export type ExecutionStatus = "playing" | "paused" | "runtimeError" | "compileError";
 
 export {
+  MonocurlCameraController,
   MonocurlWebGlRenderer,
   UnsupportedWebGlRendererError,
   createMonocurlWebGlRenderer,
+  installMonocurlCameraController,
 } from "./webgl-renderer.js";
-export type { MonocurlWebGlRendererOptions } from "./webgl-renderer.js";
+export type {
+  MonocurlCameraControllerOptions,
+  MonocurlSnapshotSource,
+  MonocurlWebGlRenderOptions,
+  MonocurlWebGlRendererOptions,
+} from "./webgl-renderer.js";
 export {
   MissingMathJaxError,
   installMonocurlMathJaxRenderer,
@@ -38,6 +45,14 @@ export interface RuntimeStepResult extends RuntimeIteration {
   isPlaying: boolean;
   needsWork: boolean;
 }
+
+export type MonocurlSnapshotListener = (
+  snapshot: ExecutionSnapshot,
+  result: RuntimeStepResult,
+) => void;
+export type MonocurlStepListener = (result: RuntimeStepResult) => void;
+export type MonocurlIdleListener = (result: RuntimeStepResult) => void;
+export type MonocurlErrorListener = (error: unknown) => void;
 
 export interface PlayOptions {
   until?: Timestamp;
@@ -327,9 +342,10 @@ export interface CreateMonocurlLoopOptions {
   mathJaxDisplay?: boolean;
   clock?: RuntimeClock;
   scheduler?: FrameScheduler;
-  onStep?: (result: RuntimeStepResult) => void;
-  onIdle?: (result: RuntimeStepResult) => void;
-  onError?: (error: unknown) => void;
+  onSnapshot?: MonocurlSnapshotListener;
+  onStep?: MonocurlStepListener;
+  onIdle?: MonocurlIdleListener;
+  onError?: MonocurlErrorListener;
 }
 
 export class UnsupportedWasmMethodError extends Error {
@@ -594,9 +610,10 @@ const loopCleanup = new WeakMap<MonocurlLoop, () => void>();
 export class MonocurlLoop {
   private readonly clock: RuntimeClock;
   private readonly scheduler: FrameScheduler;
-  private readonly onStep?: (result: RuntimeStepResult) => void;
-  private readonly onIdle?: (result: RuntimeStepResult) => void;
-  private readonly onError?: (error: unknown) => void;
+  private readonly snapshotListeners = new Set<MonocurlSnapshotListener>();
+  private readonly stepListeners = new Set<MonocurlStepListener>();
+  private readonly idleListeners = new Set<MonocurlIdleListener>();
+  private readonly errorListeners = new Set<MonocurlErrorListener>();
   private scheduledFrame: number | undefined;
   private pendingStep: Promise<RuntimeStepResult> | undefined;
   private needsNextFrame = false;
@@ -609,9 +626,18 @@ export class MonocurlLoop {
   ) {
     this.clock = options.clock ?? performanceClock;
     this.scheduler = options.scheduler ?? animationFrameScheduler;
-    this.onStep = options.onStep;
-    this.onIdle = options.onIdle;
-    this.onError = options.onError;
+    if (options.onSnapshot !== undefined) {
+      this.addSnapshotListener(options.onSnapshot);
+    }
+    if (options.onStep !== undefined) {
+      this.addStepListener(options.onStep);
+    }
+    if (options.onIdle !== undefined) {
+      this.addIdleListener(options.onIdle);
+    }
+    if (options.onError !== undefined) {
+      this.addErrorListener(options.onError);
+    }
     this.runtime.set_web_mode();
   }
 
@@ -621,6 +647,38 @@ export class MonocurlLoop {
 
   get needsWork(): boolean {
     return this.runtime.needs_work();
+  }
+
+  addSnapshotListener(listener: MonocurlSnapshotListener): () => void {
+    this.assertLive();
+    this.snapshotListeners.add(listener);
+    return () => {
+      this.snapshotListeners.delete(listener);
+    };
+  }
+
+  addStepListener(listener: MonocurlStepListener): () => void {
+    this.assertLive();
+    this.stepListeners.add(listener);
+    return () => {
+      this.stepListeners.delete(listener);
+    };
+  }
+
+  addIdleListener(listener: MonocurlIdleListener): () => void {
+    this.assertLive();
+    this.idleListeners.add(listener);
+    return () => {
+      this.idleListeners.delete(listener);
+    };
+  }
+
+  addErrorListener(listener: MonocurlErrorListener): () => void {
+    this.assertLive();
+    this.errorListeners.add(listener);
+    return () => {
+      this.errorListeners.delete(listener);
+    };
   }
 
   loadSource(
@@ -714,7 +772,7 @@ export class MonocurlLoop {
     this.scheduledFrame = this.scheduler.request(() => {
       this.scheduledFrame = undefined;
       void this.step().catch((error: unknown) => {
-        this.onError?.(error);
+        this.emitError(error);
       });
     });
   }
@@ -750,6 +808,10 @@ export class MonocurlLoop {
     }
 
     this.stop();
+    this.snapshotListeners.clear();
+    this.stepListeners.clear();
+    this.idleListeners.clear();
+    this.errorListeners.clear();
     this.runtime.free?.();
     loopCleanup.get(this)?.();
     loopCleanup.delete(this);
@@ -777,16 +839,39 @@ export class MonocurlLoop {
       needsWork: this.runtime.needs_work(),
     };
 
-    this.onStep?.(result);
+    this.emitStep(result);
 
     if (result.isPlaying || result.needsWork) {
       this.needsNextFrame = true;
     } else {
       this.needsNextFrame = false;
-      this.onIdle?.(result);
+      this.emitIdle(result);
     }
 
     return result;
+  }
+
+  private emitStep(result: RuntimeStepResult): void {
+    for (const snapshot of result.snapshots) {
+      for (const listener of [...this.snapshotListeners]) {
+        listener(snapshot, result);
+      }
+    }
+    for (const listener of [...this.stepListeners]) {
+      listener(result);
+    }
+  }
+
+  private emitIdle(result: RuntimeStepResult): void {
+    for (const listener of [...this.idleListeners]) {
+      listener(result);
+    }
+  }
+
+  private emitError(error: unknown): void {
+    for (const listener of [...this.errorListeners]) {
+      listener(error);
+    }
   }
 
   private async applyPlayUntil(
