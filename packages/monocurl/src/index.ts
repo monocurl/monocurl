@@ -1,19 +1,23 @@
-import initPackagedWasm, * as packagedWasm from "./wasm/web_runtime.js";
 import { installMonocurlMathJaxRenderer } from "./mathjax-renderer.js";
 import type { MonocurlMathJax } from "./mathjax-renderer.js";
-
-export type PlaybackMode = "preview" | "presentation";
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 export type Vec4 = [number, number, number, number];
 export type ExecutionStatus = "playing" | "paused" | "runtimeError" | "compileError";
 
 export {
+  MonocurlCameraController,
   MonocurlWebGlRenderer,
   UnsupportedWebGlRendererError,
   createMonocurlWebGlRenderer,
+  installMonocurlCameraController,
 } from "./webgl-renderer.js";
-export type { MonocurlWebGlRendererOptions } from "./webgl-renderer.js";
+export type {
+  MonocurlCameraControllerOptions,
+  MonocurlSnapshotSource,
+  MonocurlWebGlRenderOptions,
+  MonocurlWebGlRendererOptions,
+} from "./webgl-renderer.js";
 export {
   MissingMathJaxError,
   installMonocurlMathJaxRenderer,
@@ -41,6 +45,14 @@ export interface RuntimeStepResult extends RuntimeIteration {
   isPlaying: boolean;
   needsWork: boolean;
 }
+
+export type MonocurlSnapshotListener = (
+  snapshot: ExecutionSnapshot,
+  result: RuntimeStepResult,
+) => void;
+export type MonocurlStepListener = (result: RuntimeStepResult) => void;
+export type MonocurlIdleListener = (result: RuntimeStepResult) => void;
+export type MonocurlErrorListener = (error: unknown) => void;
 
 export interface PlayOptions {
   until?: Timestamp;
@@ -271,8 +283,7 @@ export interface MonocurlWasmRuntimeHandle {
   is_playing(): boolean;
   seek_to(slide: number, time: number): void;
   toggle_play(nowSeconds: number): void;
-  set_presentation_mode(): void;
-  set_preview_mode(): void;
+  set_web_mode(): void;
   update_parameters?(updatesJson: string, nowSeconds: number): void;
   step(nowSeconds: number): Promise<number>;
   step_json?(nowSeconds: number): Promise<string>;
@@ -305,6 +316,11 @@ export interface FrameScheduler {
   cancel(handle: number): void;
 }
 
+export type MonocurlMathJaxSource =
+  | MonocurlMathJax
+  | PromiseLike<MonocurlMathJax | undefined>
+  | false;
+
 export interface CreateMonocurlLoopOptions {
   /**
    * Optional override for tests or custom bundlers. By default the packaged
@@ -318,17 +334,18 @@ export interface CreateMonocurlLoopOptions {
   wasmInit?: MonocurlWasmInitInput;
   runtime?: MonocurlWasmRuntimeHandle;
   /**
-   * MathJax instance to install for Text/Tex rendering. By default, an existing
-   * global `MathJax` is installed automatically when available. Pass `false` to
-   * opt out.
+   * MathJax instance, or readiness promise, to install for Text/Tex rendering.
+   * By default, an already-ready global `MathJax` is installed when available.
+   * Pass `false` to opt out.
    */
-  mathJax?: MonocurlMathJax | false;
+  mathJax?: MonocurlMathJaxSource;
   mathJaxDisplay?: boolean;
   clock?: RuntimeClock;
   scheduler?: FrameScheduler;
-  onStep?: (result: RuntimeStepResult) => void;
-  onIdle?: (result: RuntimeStepResult) => void;
-  onError?: (error: unknown) => void;
+  onSnapshot?: MonocurlSnapshotListener;
+  onStep?: MonocurlStepListener;
+  onIdle?: MonocurlIdleListener;
+  onError?: MonocurlErrorListener;
 }
 
 export class UnsupportedWasmMethodError extends Error {
@@ -529,8 +546,7 @@ async function resolveWasmModule(
   options: Pick<CreateMonocurlLoopOptions, "wasm" | "wasmInit">,
 ): Promise<MonocurlWasmModule> {
   if (options.wasm === undefined) {
-    await initPackagedWasm(options.wasmInit);
-    return packagedWasm;
+    return initPackagedWasmInstance(options.wasmInit);
   }
 
   if (typeof options.wasm === "function") {
@@ -540,6 +556,23 @@ async function resolveWasmModule(
   return await options.wasm;
 }
 
+type PackagedWasmModule = MonocurlWasmModule & {
+  default: (input?: MonocurlWasmInitInput) => Promise<unknown>;
+};
+
+let packagedWasmInstanceId = 0;
+
+async function initPackagedWasmInstance(
+  wasmInit: MonocurlWasmInitInput | undefined,
+): Promise<PackagedWasmModule> {
+  const glueUrl = new URL("./wasm/web_runtime.js", import.meta.url);
+  glueUrl.searchParams.set("monocurlInstance", String(packagedWasmInstanceId++));
+
+  const wasmModule = (await import(glueUrl.href)) as PackagedWasmModule;
+  await wasmModule.default(wasmInit);
+  return wasmModule;
+}
+
 async function installMathJaxIfAvailable(
   options: Pick<CreateMonocurlLoopOptions, "mathJax" | "mathJaxDisplay">,
 ): Promise<(() => void) | undefined> {
@@ -547,7 +580,10 @@ async function installMathJaxIfAvailable(
     return undefined;
   }
 
-  const mathJax = options.mathJax ?? globalThis.MathJax;
+  const mathJax =
+    options.mathJax !== undefined
+      ? await options.mathJax
+      : readyGlobalMathJax();
   if (mathJax === undefined) {
     return undefined;
   }
@@ -557,6 +593,11 @@ async function installMathJaxIfAvailable(
     mathJax,
     display: options.mathJaxDisplay,
   });
+}
+
+function readyGlobalMathJax(): MonocurlMathJax | undefined {
+  const mathJax = globalThis.MathJax;
+  return typeof mathJax?.tex2svg === "function" ? mathJax : undefined;
 }
 
 type MonocurlLoopOptions = Omit<
@@ -569,11 +610,13 @@ const loopCleanup = new WeakMap<MonocurlLoop, () => void>();
 export class MonocurlLoop {
   private readonly clock: RuntimeClock;
   private readonly scheduler: FrameScheduler;
-  private readonly onStep?: (result: RuntimeStepResult) => void;
-  private readonly onIdle?: (result: RuntimeStepResult) => void;
-  private readonly onError?: (error: unknown) => void;
+  private readonly snapshotListeners = new Set<MonocurlSnapshotListener>();
+  private readonly stepListeners = new Set<MonocurlStepListener>();
+  private readonly idleListeners = new Set<MonocurlIdleListener>();
+  private readonly errorListeners = new Set<MonocurlErrorListener>();
   private scheduledFrame: number | undefined;
   private pendingStep: Promise<RuntimeStepResult> | undefined;
+  private needsNextFrame = false;
   private playUntil: Timestamp | undefined;
   private disposed = false;
 
@@ -583,9 +626,19 @@ export class MonocurlLoop {
   ) {
     this.clock = options.clock ?? performanceClock;
     this.scheduler = options.scheduler ?? animationFrameScheduler;
-    this.onStep = options.onStep;
-    this.onIdle = options.onIdle;
-    this.onError = options.onError;
+    if (options.onSnapshot !== undefined) {
+      this.addSnapshotListener(options.onSnapshot);
+    }
+    if (options.onStep !== undefined) {
+      this.addStepListener(options.onStep);
+    }
+    if (options.onIdle !== undefined) {
+      this.addIdleListener(options.onIdle);
+    }
+    if (options.onError !== undefined) {
+      this.addErrorListener(options.onError);
+    }
+    this.runtime.set_web_mode();
   }
 
   get isPlaying(): boolean {
@@ -594,6 +647,38 @@ export class MonocurlLoop {
 
   get needsWork(): boolean {
     return this.runtime.needs_work();
+  }
+
+  addSnapshotListener(listener: MonocurlSnapshotListener): () => void {
+    this.assertLive();
+    this.snapshotListeners.add(listener);
+    return () => {
+      this.snapshotListeners.delete(listener);
+    };
+  }
+
+  addStepListener(listener: MonocurlStepListener): () => void {
+    this.assertLive();
+    this.stepListeners.add(listener);
+    return () => {
+      this.stepListeners.delete(listener);
+    };
+  }
+
+  addIdleListener(listener: MonocurlIdleListener): () => void {
+    this.assertLive();
+    this.idleListeners.add(listener);
+    return () => {
+      this.idleListeners.delete(listener);
+    };
+  }
+
+  addErrorListener(listener: MonocurlErrorListener): () => void {
+    this.assertLive();
+    this.errorListeners.add(listener);
+    return () => {
+      this.errorListeners.delete(listener);
+    };
   }
 
   loadSource(
@@ -623,16 +708,6 @@ export class MonocurlLoop {
     this.playUntil = undefined;
     this.requestStep();
     return report;
-  }
-
-  setPlaybackMode(mode: PlaybackMode): void {
-    this.playUntil = undefined;
-    if (mode === "presentation") {
-      this.runtime.set_presentation_mode();
-    } else {
-      this.runtime.set_preview_mode();
-    }
-    this.requestStep();
   }
 
   seekTo(timestamp: Timestamp): void {
@@ -697,7 +772,7 @@ export class MonocurlLoop {
     this.scheduledFrame = this.scheduler.request(() => {
       this.scheduledFrame = undefined;
       void this.step().catch((error: unknown) => {
-        this.onError?.(error);
+        this.emitError(error);
       });
     });
   }
@@ -713,6 +788,10 @@ export class MonocurlLoop {
       return await this.pendingStep;
     } finally {
       this.pendingStep = undefined;
+      if (this.needsNextFrame) {
+        this.needsNextFrame = false;
+        this.requestStep();
+      }
     }
   }
 
@@ -729,6 +808,10 @@ export class MonocurlLoop {
     }
 
     this.stop();
+    this.snapshotListeners.clear();
+    this.stepListeners.clear();
+    this.idleListeners.clear();
+    this.errorListeners.clear();
     this.runtime.free?.();
     loopCleanup.get(this)?.();
     loopCleanup.delete(this);
@@ -756,15 +839,39 @@ export class MonocurlLoop {
       needsWork: this.runtime.needs_work(),
     };
 
-    this.onStep?.(result);
+    this.emitStep(result);
 
     if (result.isPlaying || result.needsWork) {
-      this.requestStep();
+      this.needsNextFrame = true;
     } else {
-      this.onIdle?.(result);
+      this.needsNextFrame = false;
+      this.emitIdle(result);
     }
 
     return result;
+  }
+
+  private emitStep(result: RuntimeStepResult): void {
+    for (const snapshot of result.snapshots) {
+      for (const listener of [...this.snapshotListeners]) {
+        listener(snapshot, result);
+      }
+    }
+    for (const listener of [...this.stepListeners]) {
+      listener(result);
+    }
+  }
+
+  private emitIdle(result: RuntimeStepResult): void {
+    for (const listener of [...this.idleListeners]) {
+      listener(result);
+    }
+  }
+
+  private emitError(error: unknown): void {
+    for (const listener of [...this.errorListeners]) {
+      listener(error);
+    }
   }
 
   private async applyPlayUntil(

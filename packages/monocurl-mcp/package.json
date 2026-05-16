@@ -1,11 +1,11 @@
 {
   "name": "@enigmurl/monocurl-mcp",
-  "version": "0.2.3",
+  "version": "0.2.9",
   "mcpName": "io.github.enigmurl/monocurl-mcp",
   "description": "Docs for the Monocurl animation language, standard library, examples, and CLI usage.",
   "type": "module",
   "bin": {
-    "monocurl-mcp": "./dist/index.js"
+    "monocurl-mcp": "dist/index.js"
   },
   "files": [
     "dist/index.js",
@@ -35,7 +35,7 @@
   "homepage": "https://monocurl.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/monocurl/monocurl.git"
+    "url": "git+https://github.com/monocurl/monocurl.git"
   },
   "bugs": {
     "url": "https://github.com/monocurl/monocurl/issues"

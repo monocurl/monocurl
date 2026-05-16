@@ -3,6 +3,7 @@ import type {
   DotSnapshot,
   ExecutionSnapshot,
   LineSnapshot,
+  MonocurlSnapshotListener,
   MeshSnapshot,
   TriangleSnapshot,
   Vec3,
@@ -21,6 +22,20 @@ export interface MonocurlWebGlRendererOptions {
   pixelRatio?: number | (() => number);
   lineWidthPx?: number;
   dotRadiusPx?: number;
+}
+
+export interface MonocurlWebGlRenderOptions {
+  camera?: CameraSnapshot;
+}
+
+export interface MonocurlCameraControllerOptions {
+  renderer?: MonocurlWebGlRenderer;
+  rendererOptions?: MonocurlWebGlRendererOptions;
+  enabled?: boolean;
+}
+
+export interface MonocurlSnapshotSource {
+  addSnapshotListener(listener: MonocurlSnapshotListener): () => void;
 }
 
 export class UnsupportedWebGlRendererError extends Error {
@@ -145,7 +160,7 @@ export class MonocurlWebGlRenderer {
     this.dotVao = createDotVao(gl, this.dotBuffer);
   }
 
-  render(snapshot: ExecutionSnapshot): void {
+  render(snapshot: ExecutionSnapshot, options: MonocurlWebGlRenderOptions = {}): void {
     this.assertLive();
     this.resizeToDisplaySize();
 
@@ -163,7 +178,7 @@ export class MonocurlWebGlRenderer {
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     const meshes = sortedVisibleMeshes(snapshot.meshes ?? []);
-    const camera = cameraBasis(snapshot.camera);
+    const camera = cameraBasis(options.camera ?? snapshot.camera);
     const viewportScale: [number, number] = [1, 1];
     let depthBias = 0;
 
@@ -316,6 +331,212 @@ export function createMonocurlWebGlRenderer(
   options?: MonocurlWebGlRendererOptions,
 ): MonocurlWebGlRenderer {
   return new MonocurlWebGlRenderer(canvas, options);
+}
+
+type CameraDragState = {
+  mode: CameraDragMode;
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startCamera: CameraSnapshot;
+  sceneWidth: number;
+  sceneHeight: number;
+};
+
+type CameraDragMode = "orbit" | "pan";
+
+const CAMERA_ORBIT_RADIANS_PER_VIEW = Math.PI;
+const CAMERA_MAX_PITCH = Math.PI / 2 - 0.05;
+const CAMERA_COMPARE_EPS = 1e-4;
+
+export class MonocurlCameraController {
+  readonly canvas: HTMLCanvasElement;
+  readonly renderer: MonocurlWebGlRenderer;
+
+  private readonly unsubscribeSnapshot: () => void;
+  private readonly ownsRenderer: boolean;
+  private readonly abortController = new AbortController();
+  private readonly previousCursor: string;
+  private readonly previousTouchAction: string;
+  private resizeObserver: ResizeObserver | undefined;
+  private latestSnapshot: ExecutionSnapshot | undefined;
+  private cameraOverride: CameraSnapshot | undefined;
+  private resetCamera: CameraSnapshot | undefined;
+  private dragState: CameraDragState | undefined;
+  private disposed = false;
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    loop: MonocurlSnapshotSource,
+    options: MonocurlCameraControllerOptions = {},
+  ) {
+    this.canvas = canvas;
+    this.renderer =
+      options.renderer ?? new MonocurlWebGlRenderer(canvas, options.rendererOptions);
+    this.ownsRenderer = options.renderer === undefined;
+    this.previousCursor = canvas.style.cursor;
+    this.previousTouchAction = canvas.style.touchAction;
+    this.unsubscribeSnapshot = loop.addSnapshotListener((snapshot) => {
+      this.latestSnapshot = snapshot;
+      this.syncSceneCamera(snapshot);
+      this.renderLatest();
+    });
+
+    if (options.enabled !== false) {
+      this.installPointerListeners();
+    }
+    this.installResizeObserver();
+  }
+
+  reset(): void {
+    this.cameraOverride = undefined;
+    this.resetCamera = undefined;
+    this.renderLatest();
+  }
+
+  dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+
+    this.abortController.abort();
+    this.resizeObserver?.disconnect();
+    this.unsubscribeSnapshot();
+    this.canvas.style.cursor = this.previousCursor;
+    this.canvas.style.touchAction = this.previousTouchAction;
+    if (this.ownsRenderer) {
+      this.renderer.dispose();
+    }
+    this.disposed = true;
+  }
+
+  private installPointerListeners(): void {
+    this.canvas.style.cursor = "grab";
+    this.canvas.style.touchAction = "none";
+    const signal = this.abortController.signal;
+    this.canvas.addEventListener("pointerdown", (event) => this.beginDrag(event), {
+      signal,
+    });
+    this.canvas.addEventListener("pointermove", (event) => this.updateDrag(event), {
+      signal,
+    });
+    this.canvas.addEventListener("pointerup", (event) => this.endDrag(event), {
+      signal,
+    });
+    this.canvas.addEventListener("pointercancel", (event) => this.endDrag(event), {
+      signal,
+    });
+  }
+
+  private installResizeObserver(): void {
+    if (!("ResizeObserver" in globalThis)) {
+      return;
+    }
+
+    this.resizeObserver = new ResizeObserver(() => {
+      this.renderLatest();
+    });
+    this.resizeObserver.observe(this.canvas);
+  }
+
+  private beginDrag(event: PointerEvent): void {
+    if (event.button !== 0 || this.latestSnapshot === undefined) {
+      return;
+    }
+
+    const rect = this.canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+
+    const sceneCamera = resolvedCamera(this.latestSnapshot);
+    if (this.cameraOverride === undefined) {
+      this.resetCamera = sceneCamera;
+    } else {
+      this.resetCamera ??= sceneCamera;
+    }
+    this.dragState = {
+      mode: event.shiftKey ? "pan" : "orbit",
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startCamera: this.displayCamera(this.latestSnapshot),
+      sceneWidth: rect.width,
+      sceneHeight: rect.height,
+    };
+    this.canvas.setPointerCapture(event.pointerId);
+    this.canvas.style.cursor = "grabbing";
+    event.preventDefault();
+  }
+
+  private updateDrag(event: PointerEvent): void {
+    const drag = this.dragState;
+    if (drag === undefined || event.pointerId !== drag.pointerId) {
+      return;
+    }
+
+    const dx = drag.startClientX - event.clientX;
+    const dy = event.clientY - drag.startClientY;
+    const nextCamera =
+      drag.mode === "pan"
+        ? panCamera(drag.startCamera, dx, dy, drag.sceneWidth, drag.sceneHeight)
+        : orbitCamera(drag.startCamera, dx, dy, drag.sceneWidth, drag.sceneHeight);
+    if (this.resetCamera !== undefined && camerasClose(nextCamera, this.resetCamera)) {
+      this.cameraOverride = undefined;
+      this.resetCamera = undefined;
+    } else {
+      this.cameraOverride = nextCamera;
+    }
+    this.renderLatest();
+    event.preventDefault();
+  }
+
+  private endDrag(event: PointerEvent): void {
+    const drag = this.dragState;
+    if (drag === undefined || event.pointerId !== drag.pointerId) {
+      return;
+    }
+
+    this.dragState = undefined;
+    if (this.canvas.hasPointerCapture(event.pointerId)) {
+      this.canvas.releasePointerCapture(event.pointerId);
+    }
+    this.canvas.style.cursor = "grab";
+    event.preventDefault();
+  }
+
+  private renderLatest(): void {
+    if (this.latestSnapshot === undefined) {
+      return;
+    }
+
+    this.renderer.render(this.latestSnapshot, { camera: this.displayCamera(this.latestSnapshot) });
+  }
+
+  private displayCamera(snapshot: ExecutionSnapshot): CameraSnapshot {
+    return this.cameraOverride ?? resolvedCamera(snapshot);
+  }
+
+  private syncSceneCamera(snapshot: ExecutionSnapshot): void {
+    if (this.cameraOverride === undefined || this.resetCamera === undefined) {
+      return;
+    }
+
+    const sceneCamera = resolvedCamera(snapshot);
+    if (!camerasClose(sceneCamera, this.resetCamera)) {
+      this.cameraOverride = undefined;
+      this.resetCamera = undefined;
+      this.dragState = undefined;
+    }
+  }
+}
+
+export function installMonocurlCameraController(
+  canvas: HTMLCanvasElement,
+  loop: MonocurlSnapshotSource,
+  options?: MonocurlCameraControllerOptions,
+): MonocurlCameraController {
+  return new MonocurlCameraController(canvas, loop, options);
 }
 
 function createProgramInfo(
@@ -487,13 +708,7 @@ function setCameraUniforms(
 }
 
 function cameraBasis(camera?: CameraSnapshot): CameraBasis {
-  const snapshot = camera ?? {
-    position: [0, 0, 4] as Vec3,
-    lookAt: [0, 0, 0] as Vec3,
-    up: [0, 1, 0] as Vec3,
-    near: 0.1,
-    far: 100,
-  };
+  const snapshot = camera ?? defaultCamera();
   const forward = normalizedOr(sub(snapshot.lookAt, snapshot.position), [0, 0, -1]);
   const upHint = normalizedOr(snapshot.up, [0, 1, 0]);
   let right = cross(forward, upHint);
@@ -513,6 +728,115 @@ function cameraBasis(camera?: CameraSnapshot): CameraBasis {
     far: Math.max(near, snapshot.far),
     tanHalfFov: Math.max(0.05, Math.tan(DEFAULT_CAMERA_FOV * 0.5)),
   };
+}
+
+function defaultCamera(): CameraSnapshot {
+  return {
+    position: [0, 0, 4],
+    lookAt: [0, 0, 0],
+    up: [0, 1, 0],
+    near: 0.1,
+    far: 100,
+  };
+}
+
+function resolvedCamera(snapshot: ExecutionSnapshot): CameraSnapshot {
+  return snapshot.camera ?? defaultCamera();
+}
+
+function camerasClose(a: CameraSnapshot, b: CameraSnapshot): boolean {
+  return (
+    lengthSquared(sub(a.position, b.position)) <= CAMERA_COMPARE_EPS * CAMERA_COMPARE_EPS &&
+    lengthSquared(sub(a.lookAt, b.lookAt)) <= CAMERA_COMPARE_EPS * CAMERA_COMPARE_EPS &&
+    lengthSquared(sub(a.up, b.up)) <= CAMERA_COMPARE_EPS * CAMERA_COMPARE_EPS &&
+    Math.abs(a.near - b.near) <= CAMERA_COMPARE_EPS &&
+    Math.abs(a.far - b.far) <= CAMERA_COMPARE_EPS
+  );
+}
+
+function orbitCamera(
+  camera: CameraSnapshot,
+  dx: number,
+  dy: number,
+  sceneWidth: number,
+  sceneHeight: number,
+): CameraSnapshot {
+  const width = Math.max(1, sceneWidth);
+  const height = Math.max(1, sceneHeight);
+  const yaw = (dx / width) * CAMERA_ORBIT_RADIANS_PER_VIEW;
+  const pitchDelta = (dy / height) * CAMERA_ORBIT_RADIANS_PER_VIEW;
+  const worldUp = normalizedOr(camera.up, [0, 1, 0]);
+  const offset = sub(camera.position, camera.lookAt);
+  const radius = Math.max(MIN_CAMERA_NEAR, length(offset));
+  const horizontal = sub(offset, scale(worldUp, dot(offset, worldUp)));
+  let horizontalDir: Vec3;
+  if (lengthSquared(horizontal) <= 1e-6) {
+    horizontalDir = normalizedOr(cross(cameraBasis(camera).right, worldUp), [0, 0, 1]);
+  } else {
+    horizontalDir = normalize(horizontal);
+  }
+
+  const currentPitch = Math.atan2(dot(offset, worldUp), Math.max(1e-6, length(horizontal)));
+  const pitch = clamp(
+    currentPitch + pitchDelta,
+    -CAMERA_MAX_PITCH,
+    CAMERA_MAX_PITCH,
+  );
+  horizontalDir = rotateAroundAxis(horizontalDir, worldUp, yaw);
+  const nextOffset = add(
+    scale(horizontalDir, radius * Math.cos(pitch)),
+    scale(worldUp, radius * Math.sin(pitch)),
+  );
+
+  return {
+    position: add(camera.lookAt, nextOffset),
+    lookAt: camera.lookAt,
+    up: worldUp,
+    near: camera.near,
+    far: camera.far,
+  };
+}
+
+function panCamera(
+  camera: CameraSnapshot,
+  dx: number,
+  dy: number,
+  sceneWidth: number,
+  sceneHeight: number,
+): CameraSnapshot {
+  const width = Math.max(1, sceneWidth);
+  const height = Math.max(1, sceneHeight);
+  const basis = cameraBasis(camera);
+  const depth = Math.max(MIN_CAMERA_NEAR, dot(sub(camera.lookAt, camera.position), basis.forward));
+  const aspect = Math.max(0.1, width / height);
+  const halfHeight = depth * basis.tanHalfFov;
+  const halfWidth = halfHeight * aspect;
+  const translation = add(
+    scale(basis.right, (2 * halfWidth * dx) / width),
+    scale(basis.up, (2 * halfHeight * dy) / height),
+  );
+
+  return {
+    position: add(camera.position, translation),
+    lookAt: add(camera.lookAt, translation),
+    up: camera.up,
+    near: camera.near,
+    far: camera.far,
+  };
+}
+
+function rotateAroundAxis(vector: Vec3, axis: Vec3, angle: number): Vec3 {
+  const unitAxis = normalizedOr(axis, [0, 1, 0]);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return add(
+    add(scale(vector, cos), scale(cross(unitAxis, vector), sin)),
+    scale(unitAxis, dot(unitAxis, vector) * (1 - cos)),
+  );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function buildTriangleData(mesh: MeshSnapshot): Float32Array {
@@ -740,6 +1064,10 @@ function add(a: Vec3, b: Vec3): Vec3 {
   return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 }
 
+function scale(value: Vec3, factor: number): Vec3 {
+  return [value[0] * factor, value[1] * factor, value[2] * factor];
+}
+
 function sub(a: Vec3, b: Vec3): Vec3 {
   return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 }
@@ -758,6 +1086,14 @@ function cross(a: Vec3, b: Vec3): Vec3 {
 
 function lengthSquared(value: Vec3): number {
   return value[0] * value[0] + value[1] * value[1] + value[2] * value[2];
+}
+
+function length(value: Vec3): number {
+  return Math.sqrt(lengthSquared(value));
+}
+
+function dot(a: Vec3, b: Vec3): number {
+  return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
 function normalize(value: Vec3): Vec3 {

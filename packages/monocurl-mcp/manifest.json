@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "monocurl-mcp",
   "display_name": "monocurl-mcp",
-  "version": "0.2.2",
+  "version": "0.2.9",
   "description": "Docs for the Monocurl animation language, standard library, examples, and CLI usage.",
   "author": {
     "name": "monocurl",

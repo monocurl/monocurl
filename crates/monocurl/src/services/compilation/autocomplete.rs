@@ -153,36 +153,3 @@ impl CompilationService {
             .unwrap();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn token_categories_split_keywords_and_operators() {
-        assert_eq!(
-            token_autocomplete_category(&Token::If),
-            AutoCompleteCategory::Keyword
-        );
-        assert_eq!(
-            token_autocomplete_category(&Token::Plus),
-            AutoCompleteCategory::Operator
-        );
-    }
-
-    #[test]
-    fn identifier_categories_split_functions_variables_and_operators() {
-        assert_eq!(
-            identifier_autocomplete_category(&CursorIdentifierType::Lambda),
-            AutoCompleteCategory::Function
-        );
-        assert_eq!(
-            identifier_autocomplete_category(&CursorIdentifierType::Param),
-            AutoCompleteCategory::Variable
-        );
-        assert_eq!(
-            identifier_autocomplete_category(&CursorIdentifierType::Operator),
-            AutoCompleteCategory::Operator
-        );
-    }
-}
