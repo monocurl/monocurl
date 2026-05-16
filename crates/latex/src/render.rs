@@ -112,6 +112,14 @@ fn render_tagged_backend(
     scale: f32,
     quality: RenderQuality,
 ) -> Result<Vec<Arc<Mesh>>> {
+    let tagged_source;
+    let tagged = if backend == BackendKind::Text {
+        tagged_source = document::escape_text_source(tagged)?;
+        &tagged_source
+    } else {
+        tagged
+    };
+
     let marker_spans = tagged
         .spans
         .iter()

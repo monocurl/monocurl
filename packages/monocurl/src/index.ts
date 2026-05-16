@@ -1,5 +1,4 @@
 import { installMonocurlMathJaxRenderer } from "./mathjax-renderer.js";
-import type { MonocurlMathJax } from "./mathjax-renderer.js";
 export type Vec2 = [number, number];
 export type Vec3 = [number, number, number];
 export type Vec4 = [number, number, number, number];
@@ -18,17 +17,6 @@ export type {
   MonocurlWebGlRenderOptions,
   MonocurlWebGlRendererOptions,
 } from "./webgl-renderer.js";
-export {
-  MissingMathJaxError,
-  installMonocurlMathJaxRenderer,
-  renderMathJaxSvg,
-} from "./mathjax-renderer.js";
-export type {
-  MonocurlLatexSvgRenderer,
-  MonocurlMathJax,
-  MonocurlMathJaxRendererOptions,
-} from "./mathjax-renderer.js";
-
 export interface Timestamp {
   slide: number;
   time: number;
@@ -300,13 +288,6 @@ export interface MonocurlWasmModule {
   Runtime: new () => MonocurlWasmRuntimeHandle;
 }
 
-export type MonocurlWasmSource =
-  | MonocurlWasmModule
-  | Promise<MonocurlWasmModule>
-  | (() => MonocurlWasmModule | Promise<MonocurlWasmModule>);
-
-export type MonocurlWasmInitInput = unknown;
-
 export interface RuntimeClock {
   nowSeconds(): number;
 }
@@ -316,30 +297,7 @@ export interface FrameScheduler {
   cancel(handle: number): void;
 }
 
-export type MonocurlMathJaxSource =
-  | MonocurlMathJax
-  | PromiseLike<MonocurlMathJax | undefined>
-  | false;
-
 export interface CreateMonocurlLoopOptions {
-  /**
-   * Optional override for tests or custom bundlers. By default the packaged
-   * Monocurl wasm runtime is initialized and used automatically.
-   */
-  wasm?: MonocurlWasmSource;
-  /**
-   * Optional input passed to wasm-bindgen initialization. Leave unset to fetch
-   * the packaged `web_runtime_bg.wasm` next to this package's wasm JS glue.
-   */
-  wasmInit?: MonocurlWasmInitInput;
-  runtime?: MonocurlWasmRuntimeHandle;
-  /**
-   * MathJax instance, or readiness promise, to install for Text/Tex rendering.
-   * By default, an already-ready global `MathJax` is installed when available.
-   * Pass `false` to opt out.
-   */
-  mathJax?: MonocurlMathJaxSource;
-  mathJaxDisplay?: boolean;
   clock?: RuntimeClock;
   scheduler?: FrameScheduler;
   onSnapshot?: MonocurlSnapshotListener;
@@ -528,86 +486,41 @@ export const animationFrameScheduler: FrameScheduler = {
 export async function createMonocurlLoop(
   options: CreateMonocurlLoopOptions = {},
 ): Promise<MonocurlLoop> {
-  const uninstallMathJax = await installMathJaxIfAvailable(options);
+  const uninstallMathJax = installMonocurlMathJaxRenderer();
   try {
-    const runtime = options.runtime ?? new (await resolveWasmModule(options)).Runtime();
-    const loop = new MonocurlLoop(runtime, options);
-    if (uninstallMathJax !== undefined) {
-      loopCleanup.set(loop, uninstallMathJax);
-    }
+    const runtime = new (await initPackagedWasmInstance()).Runtime();
+    const loop = new MonocurlLoop(runtime, loopConstructorToken, options);
+    loopCleanup.set(loop, uninstallMathJax);
     return loop;
   } catch (error) {
-    uninstallMathJax?.();
+    uninstallMathJax();
     throw error;
   }
 }
 
-async function resolveWasmModule(
-  options: Pick<CreateMonocurlLoopOptions, "wasm" | "wasmInit">,
-): Promise<MonocurlWasmModule> {
-  if (options.wasm === undefined) {
-    return initPackagedWasmInstance(options.wasmInit);
-  }
-
-  if (typeof options.wasm === "function") {
-    return await options.wasm();
-  }
-
-  return await options.wasm;
-}
-
 type PackagedWasmModule = MonocurlWasmModule & {
-  default: (input?: MonocurlWasmInitInput) => Promise<unknown>;
+  default: () => Promise<unknown>;
 };
 
 let packagedWasmInstanceId = 0;
 
-async function initPackagedWasmInstance(
-  wasmInit: MonocurlWasmInitInput | undefined,
-): Promise<PackagedWasmModule> {
+async function initPackagedWasmInstance(): Promise<PackagedWasmModule> {
   const glueUrl = new URL("./wasm/web_runtime.js", import.meta.url);
   glueUrl.searchParams.set("monocurlInstance", String(packagedWasmInstanceId++));
 
   const wasmModule = (await import(glueUrl.href)) as PackagedWasmModule;
-  await wasmModule.default(wasmInit);
+  await wasmModule.default();
   return wasmModule;
 }
 
-async function installMathJaxIfAvailable(
-  options: Pick<CreateMonocurlLoopOptions, "mathJax" | "mathJaxDisplay">,
-): Promise<(() => void) | undefined> {
-  if (options.mathJax === false) {
-    return undefined;
-  }
-
-  const mathJax =
-    options.mathJax !== undefined
-      ? await options.mathJax
-      : readyGlobalMathJax();
-  if (mathJax === undefined) {
-    return undefined;
-  }
-
-  await mathJax.startup?.promise;
-  return installMonocurlMathJaxRenderer({
-    mathJax,
-    display: options.mathJaxDisplay,
-  });
-}
-
-function readyGlobalMathJax(): MonocurlMathJax | undefined {
-  const mathJax = globalThis.MathJax;
-  return typeof mathJax?.tex2svg === "function" ? mathJax : undefined;
-}
-
-type MonocurlLoopOptions = Omit<
-  CreateMonocurlLoopOptions,
-  "wasm" | "wasmInit" | "runtime" | "mathJax" | "mathJaxDisplay"
->;
+type MonocurlLoopOptions = CreateMonocurlLoopOptions;
 
 const loopCleanup = new WeakMap<MonocurlLoop, () => void>();
+const loopConstructorToken = Symbol("MonocurlLoop");
+type LoopConstructorToken = typeof loopConstructorToken;
 
 export class MonocurlLoop {
+  private readonly runtime: MonocurlWasmRuntimeHandle;
   private readonly clock: RuntimeClock;
   private readonly scheduler: FrameScheduler;
   private readonly snapshotListeners = new Set<MonocurlSnapshotListener>();
@@ -621,9 +534,14 @@ export class MonocurlLoop {
   private disposed = false;
 
   constructor(
-    readonly runtime: MonocurlWasmRuntimeHandle,
+    runtime: MonocurlWasmRuntimeHandle,
+    token: LoopConstructorToken,
     options: MonocurlLoopOptions = {},
   ) {
+    if (token !== loopConstructorToken) {
+      throw new TypeError("Use createMonocurlLoop() to create a MonocurlLoop");
+    }
+    this.runtime = runtime;
     this.clock = options.clock ?? performanceClock;
     this.scheduler = options.scheduler ?? animationFrameScheduler;
     if (options.onSnapshot !== undefined) {

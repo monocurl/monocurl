@@ -1,20 +1,11 @@
-export interface MonocurlMathJax {
-  tex2svg(source: string, options?: { display?: boolean }): unknown;
-  startup?: {
-    promise?: Promise<unknown>;
-    adaptor?: {
-      outerHTML(node: unknown): string;
-      tags?: (node: unknown, name: string) => unknown[];
-    };
-  };
-}
+import { liteAdaptor } from "mathjax-full/js/adaptors/liteAdaptor.js";
+import { RegisterHTMLHandler } from "mathjax-full/js/handlers/html.js";
+import { AllPackages } from "mathjax-full/js/input/tex/AllPackages.js";
+import { TeX } from "mathjax-full/js/input/tex.js";
+import { mathjax } from "mathjax-full/js/mathjax.js";
+import { SVG } from "mathjax-full/js/output/svg.js";
 
-export interface MonocurlMathJaxRendererOptions {
-  mathJax?: MonocurlMathJax;
-  display?: boolean;
-}
-
-export type MonocurlLatexSvgRenderer = (kind: string, source: string) => string;
+type MonocurlLatexSvgRenderer = (kind: string, source: string) => string;
 
 interface InstalledRenderer {
   renderer: MonocurlLatexSvgRenderer;
@@ -22,38 +13,34 @@ interface InstalledRenderer {
 
 declare global {
   // eslint-disable-next-line no-var
-  var MathJax: MonocurlMathJax | undefined;
-  // eslint-disable-next-line no-var
   var __monocurlRenderLatexSvg: MonocurlLatexSvgRenderer | undefined;
-}
-
-export class MissingMathJaxError extends Error {
-  constructor() {
-    super(
-      "MathJax tex2svg is not available; load MathJax before installing the Monocurl renderer",
-    );
-    this.name = "MissingMathJaxError";
-  }
 }
 
 const installedRenderers: InstalledRenderer[] = [];
 let baseRenderer: MonocurlLatexSvgRenderer | undefined;
 const MATHJAX_SVG_UNITS_PER_TEX_POINT = 100;
 
-export function installMonocurlMathJaxRenderer(
-  options: MonocurlMathJaxRendererOptions = {},
-): () => void {
-  const mathJax = options.mathJax ?? globalThis.MathJax;
-  if (mathJax === undefined || typeof mathJax.tex2svg !== "function") {
-    throw new MissingMathJaxError();
-  }
+const adaptor = liteAdaptor();
+RegisterHTMLHandler(adaptor);
 
+const texInput = new TeX({ packages: AllPackages });
+const svgOutput = new SVG({ fontCache: "none" });
+const mathDocument = mathjax.document("", {
+  InputJax: texInput,
+  OutputJax: svgOutput,
+});
+
+type MathJaxElement = Parameters<typeof adaptor.outerHTML>[0];
+type MathJaxNode = ReturnType<typeof adaptor.childNodes>[number];
+type ViewBox = [number, number, number, number];
+
+export function installMonocurlMathJaxRenderer(): () => void {
   if (installedRenderers.length === 0) {
     baseRenderer = globalThis.__monocurlRenderLatexSvg;
   }
 
   const entry: InstalledRenderer = {
-    renderer: (_kind, source) => renderMathJaxSvg(mathJax, source, options.display ?? false),
+    renderer: (kind, source) => renderMathJaxSvg(kind, source),
   };
 
   installedRenderers.push(entry);
@@ -77,57 +64,61 @@ export function installMonocurlMathJaxRenderer(
   };
 }
 
-export function renderMathJaxSvg(
-  mathJax: MonocurlMathJax,
-  source: string,
-  display = false,
-): string {
-  const node = mathJax.tex2svg(source, { display });
-  const svgNode = findSvgNode(mathJax, node);
-  const html = outerHtml(mathJax, svgNode ?? node);
-  const svg = extractSvgMarkup(html);
+function renderMathJaxSvg(kind: string, source: string): string {
+  const container = mathDocument.convert(mathJaxSource(kind, source), {
+    display: false,
+  }) as MathJaxElement;
+  const svg = adaptor.tags(container, "svg")[0];
   if (svg === undefined) {
-    throw new Error("MathJax tex2svg did not return SVG markup");
+    throw new Error("MathJax did not produce SVG markup");
   }
-  return normalizeMathJaxSvg(svg);
+
+  return serializeNormalizedSvg(svg);
 }
 
-export function normalizeMathJaxSvg(svg: string): string {
-  const match = svg.match(/<svg\b([^>]*)>([\s\S]*)<\/svg>/i);
-  if (match === null) {
-    return svg;
-  }
+function mathJaxSource(kind: string, source: string): string {
+  return kind === "text" ? `\\text{${source}}` : source;
+}
 
-  const [, rawAttributes, body] = match;
-  const viewBox = readViewBox(rawAttributes);
+function serializeNormalizedSvg(svg: MathJaxElement): string {
+  const rawViewBox = adaptor.getAttribute(svg, "viewBox");
+  const viewBox = parseViewBox(typeof rawViewBox === "string" ? rawViewBox : "");
   if (viewBox === undefined) {
-    return svg;
+    return adaptor.outerHTML(svg);
   }
 
   const unitScale = 1 / MATHJAX_SVG_UNITS_PER_TEX_POINT;
   const scaledViewBox = viewBox.map((value) => value * unitScale) as ViewBox;
-  const attributes = writeSvgAttribute(
-    writeSvgAttribute(
-      writeSvgAttribute(rawAttributes, "viewBox", formatViewBox(scaledViewBox)),
-      "width",
-      formatNumber(scaledViewBox[2]),
-    ),
-    "height",
-    formatNumber(scaledViewBox[3]),
-  );
+  adaptor.setAttribute(svg, "viewBox", formatViewBox(scaledViewBox));
+  adaptor.setAttribute(svg, "width", formatNumber(scaledViewBox[2]));
+  adaptor.setAttribute(svg, "height", formatNumber(scaledViewBox[3]));
+  wrapRenderableChildren(svg, unitScale);
 
-  return `<svg${attributes}><g transform="scale(${formatNumber(unitScale)})">${body}</g></svg>`;
+  return adaptor.outerHTML(svg);
 }
 
-type ViewBox = [number, number, number, number];
+function wrapRenderableChildren(svg: MathJaxElement, scale: number): void {
+  const group = adaptor.node("g", {
+    transform: `scale(${formatNumber(scale)})`,
+  }) as MathJaxElement;
 
-function readViewBox(attributes: string): ViewBox | undefined {
-  const match = attributes.match(/\bviewBox\s*=\s*(['"])(.*?)\1/i);
-  if (match === null) {
-    return undefined;
+  for (const child of adaptor.childNodes(svg)) {
+    if (!isDefsNode(child)) {
+      adaptor.append(group, child);
+    }
   }
 
-  const values = match[2].trim().split(/[\s,]+/).map(Number);
+  if (adaptor.childNodes(group).length > 0) {
+    adaptor.append(svg, group);
+  }
+}
+
+function isDefsNode(node: MathJaxNode): boolean {
+  return adaptor.kind(node) === "defs";
+}
+
+function parseViewBox(source: string): ViewBox | undefined {
+  const values = parseNumberList(source);
   if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) {
     return undefined;
   }
@@ -135,14 +126,27 @@ function readViewBox(attributes: string): ViewBox | undefined {
   return values as ViewBox;
 }
 
-function writeSvgAttribute(attributes: string, name: string, value: string): string {
-  const pattern = new RegExp(`\\s${name}\\s*=\\s*(['"]).*?\\1`, "i");
-  const replacement = ` ${name}="${value}"`;
-  if (pattern.test(attributes)) {
-    return attributes.replace(pattern, replacement);
-  }
+function parseNumberList(source: string): number[] {
+  const values: number[] = [];
+  let token = "";
 
-  return `${attributes}${replacement}`;
+  const flush = () => {
+    if (token !== "") {
+      values.push(Number(token));
+      token = "";
+    }
+  };
+
+  for (const char of source.trim()) {
+    if (char === "," || char.trim() === "") {
+      flush();
+    } else {
+      token += char;
+    }
+  }
+  flush();
+
+  return values;
 }
 
 function formatViewBox(viewBox: ViewBox): string {
@@ -151,48 +155,4 @@ function formatViewBox(viewBox: ViewBox): string {
 
 function formatNumber(value: number): string {
   return Number.parseFloat(value.toFixed(6)).toString();
-}
-
-function findSvgNode(mathJax: MonocurlMathJax, node: unknown): unknown | undefined {
-  if (typeof SVGSVGElement !== "undefined" && node instanceof SVGSVGElement) {
-    return node;
-  }
-  if (typeof Element !== "undefined" && node instanceof Element) {
-    return node.matches("svg") ? node : node.querySelector("svg") ?? undefined;
-  }
-
-  const adaptor = mathJax.startup?.adaptor;
-  const tagged = adaptor?.tags?.(node, "svg");
-  return tagged?.[0];
-}
-
-function outerHtml(mathJax: MonocurlMathJax, node: unknown): string {
-  const adaptor = mathJax.startup?.adaptor;
-  if (adaptor !== undefined) {
-    return adaptor.outerHTML(node);
-  }
-  if (typeof Element !== "undefined" && node instanceof Element) {
-    return node.outerHTML;
-  }
-  if (typeof node === "string") {
-    return node;
-  }
-  throw new Error("MathJax returned a node that cannot be serialized to SVG");
-}
-
-function extractSvgMarkup(html: string): string | undefined {
-  const trimmed = html.trim();
-  if (trimmed.startsWith("<svg")) {
-    return trimmed;
-  }
-
-  if (typeof DOMParser !== "undefined") {
-    const document = new DOMParser().parseFromString(trimmed, "text/html");
-    const svg = document.querySelector("svg");
-    if (svg !== null) {
-      return svg.outerHTML;
-    }
-  }
-
-  return trimmed.match(/<svg\b[\s\S]*<\/svg>/i)?.[0];
 }
