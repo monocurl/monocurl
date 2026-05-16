@@ -334,6 +334,7 @@ export function createMonocurlWebGlRenderer(
 }
 
 type CameraDragState = {
+  mode: CameraDragMode;
   pointerId: number;
   startClientX: number;
   startClientY: number;
@@ -342,6 +343,10 @@ type CameraDragState = {
   sceneHeight: number;
 };
 
+type CameraDragMode = "orbit" | "pan";
+
+const CAMERA_ORBIT_RADIANS_PER_VIEW = Math.PI;
+const CAMERA_MAX_PITCH = Math.PI / 2 - 0.05;
 const CAMERA_COMPARE_EPS = 1e-4;
 
 export class MonocurlCameraController {
@@ -409,16 +414,16 @@ export class MonocurlCameraController {
     this.canvas.style.cursor = "grab";
     this.canvas.style.touchAction = "none";
     const signal = this.abortController.signal;
-    this.canvas.addEventListener("pointerdown", (event) => this.beginPan(event), {
+    this.canvas.addEventListener("pointerdown", (event) => this.beginDrag(event), {
       signal,
     });
-    this.canvas.addEventListener("pointermove", (event) => this.updatePan(event), {
+    this.canvas.addEventListener("pointermove", (event) => this.updateDrag(event), {
       signal,
     });
-    this.canvas.addEventListener("pointerup", (event) => this.endPan(event), {
+    this.canvas.addEventListener("pointerup", (event) => this.endDrag(event), {
       signal,
     });
-    this.canvas.addEventListener("pointercancel", (event) => this.endPan(event), {
+    this.canvas.addEventListener("pointercancel", (event) => this.endDrag(event), {
       signal,
     });
   }
@@ -434,7 +439,7 @@ export class MonocurlCameraController {
     this.resizeObserver.observe(this.canvas);
   }
 
-  private beginPan(event: PointerEvent): void {
+  private beginDrag(event: PointerEvent): void {
     if (event.button !== 0 || this.latestSnapshot === undefined) {
       return;
     }
@@ -451,6 +456,7 @@ export class MonocurlCameraController {
       this.resetCamera ??= sceneCamera;
     }
     this.dragState = {
+      mode: event.shiftKey ? "pan" : "orbit",
       pointerId: event.pointerId,
       startClientX: event.clientX,
       startClientY: event.clientY,
@@ -463,7 +469,7 @@ export class MonocurlCameraController {
     event.preventDefault();
   }
 
-  private updatePan(event: PointerEvent): void {
+  private updateDrag(event: PointerEvent): void {
     const drag = this.dragState;
     if (drag === undefined || event.pointerId !== drag.pointerId) {
       return;
@@ -471,7 +477,10 @@ export class MonocurlCameraController {
 
     const dx = drag.startClientX - event.clientX;
     const dy = event.clientY - drag.startClientY;
-    const nextCamera = panCamera(drag.startCamera, dx, dy, drag.sceneWidth, drag.sceneHeight);
+    const nextCamera =
+      drag.mode === "pan"
+        ? panCamera(drag.startCamera, dx, dy, drag.sceneWidth, drag.sceneHeight)
+        : orbitCamera(drag.startCamera, dx, dy, drag.sceneWidth, drag.sceneHeight);
     if (this.resetCamera !== undefined && camerasClose(nextCamera, this.resetCamera)) {
       this.cameraOverride = undefined;
       this.resetCamera = undefined;
@@ -482,7 +491,7 @@ export class MonocurlCameraController {
     event.preventDefault();
   }
 
-  private endPan(event: PointerEvent): void {
+  private endDrag(event: PointerEvent): void {
     const drag = this.dragState;
     if (drag === undefined || event.pointerId !== drag.pointerId) {
       return;
@@ -745,6 +754,49 @@ function camerasClose(a: CameraSnapshot, b: CameraSnapshot): boolean {
   );
 }
 
+function orbitCamera(
+  camera: CameraSnapshot,
+  dx: number,
+  dy: number,
+  sceneWidth: number,
+  sceneHeight: number,
+): CameraSnapshot {
+  const width = Math.max(1, sceneWidth);
+  const height = Math.max(1, sceneHeight);
+  const yaw = (dx / width) * CAMERA_ORBIT_RADIANS_PER_VIEW;
+  const pitchDelta = (dy / height) * CAMERA_ORBIT_RADIANS_PER_VIEW;
+  const worldUp = normalizedOr(camera.up, [0, 1, 0]);
+  const offset = sub(camera.position, camera.lookAt);
+  const radius = Math.max(MIN_CAMERA_NEAR, length(offset));
+  const horizontal = sub(offset, scale(worldUp, dot(offset, worldUp)));
+  let horizontalDir: Vec3;
+  if (lengthSquared(horizontal) <= 1e-6) {
+    horizontalDir = normalizedOr(cross(cameraBasis(camera).right, worldUp), [0, 0, 1]);
+  } else {
+    horizontalDir = normalize(horizontal);
+  }
+
+  const currentPitch = Math.atan2(dot(offset, worldUp), Math.max(1e-6, length(horizontal)));
+  const pitch = clamp(
+    currentPitch + pitchDelta,
+    -CAMERA_MAX_PITCH,
+    CAMERA_MAX_PITCH,
+  );
+  horizontalDir = rotateAroundAxis(horizontalDir, worldUp, yaw);
+  const nextOffset = add(
+    scale(horizontalDir, radius * Math.cos(pitch)),
+    scale(worldUp, radius * Math.sin(pitch)),
+  );
+
+  return {
+    position: add(camera.lookAt, nextOffset),
+    lookAt: camera.lookAt,
+    up: worldUp,
+    near: camera.near,
+    far: camera.far,
+  };
+}
+
 function panCamera(
   camera: CameraSnapshot,
   dx: number,
@@ -771,6 +823,20 @@ function panCamera(
     near: camera.near,
     far: camera.far,
   };
+}
+
+function rotateAroundAxis(vector: Vec3, axis: Vec3, angle: number): Vec3 {
+  const unitAxis = normalizedOr(axis, [0, 1, 0]);
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return add(
+    add(scale(vector, cos), scale(cross(unitAxis, vector), sin)),
+    scale(unitAxis, dot(unitAxis, vector) * (1 - cos)),
+  );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
 function buildTriangleData(mesh: MeshSnapshot): Float32Array {
@@ -1020,6 +1086,10 @@ function cross(a: Vec3, b: Vec3): Vec3 {
 
 function lengthSquared(value: Vec3): number {
   return value[0] * value[0] + value[1] * value[1] + value[2] * value[2];
+}
+
+function length(value: Vec3): number {
+  return Math.sqrt(lengthSquared(value));
 }
 
 function dot(a: Vec3, b: Vec3): number {
