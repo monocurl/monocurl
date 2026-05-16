@@ -32,6 +32,15 @@
 #ifndef MEMALLOC_H
 #define MEMALLOC_H
 
+#if !defined(TESS_TRAP)
+#if defined(_MSC_VER)
+#include <stdlib.h>
+#define TESS_TRAP() abort()
+#else
+#define TESS_TRAP() __builtin_trap()
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

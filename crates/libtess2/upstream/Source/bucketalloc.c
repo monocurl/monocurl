@@ -31,6 +31,7 @@
 
 #include <stddef.h>
 #include "../Include/tesselator.h"
+#include "bucketalloc.h"
 
 //#define CHECK_BOUNDS
 
@@ -164,7 +165,7 @@ void bucketFree( struct BucketAlloc *ba, void *ptr )
 	}
 	else
 	{
-		__builtin_trap();
+		TESS_TRAP();
 	}
 #else
 	// Add the node in front of the free list.
