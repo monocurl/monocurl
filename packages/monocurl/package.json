@@ -17,7 +17,7 @@
   "scripts": {
     "build": "npm run check && tsc -p tsconfig.json && npm run bundle && npm run build:wasm",
     "build:wasm": "node scripts/build-wasm.mjs",
-    "bundle": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=dist/index.js",
+    "bundle": "esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2022 --external:mathjax-full/* --outfile=dist/index.js",
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [
@@ -40,9 +40,11 @@
   "bugs": {
     "url": "https://github.com/monocurl/monocurl/issues"
   },
+  "dependencies": {
+    "mathjax-full": "^3.2.2"
+  },
   "devDependencies": {
     "esbuild": "^0.28.0",
-    "mathjax-full": "^3.2.2",
     "typescript": "^5.7.0"
   }
 }

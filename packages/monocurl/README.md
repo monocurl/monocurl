@@ -122,10 +122,10 @@ loop.play({ until: { slide: report.slides[1].index, time: 0 } });
 When the loop reaches or crosses that timestamp, it seeks to the exact limit,
 emits a final paused snapshot there, and stops scheduling playback frames.
 
-Text/Tex rendering in wasm uses the MathJax runtime bundled into this package.
+Text/Tex rendering in wasm uses the package's `mathjax-full` dependency.
 `createMonocurlLoop()` installs that renderer automatically; callers do not
-provide, load, or configure MathJax. The bundled renderer emits standalone SVG
-markup before Monocurl imports it. Full `Latex(...)` body fragments,
+provide, load, or configure MathJax. The renderer emits standalone SVG markup
+before Monocurl imports it. Full `Latex(...)` body fragments,
 `Image(...)`, and image texturing through `textured{...}` are not supported by
 the wasm runtime yet; failures are surfaced on runtime snapshots through
 `snapshot.errors`. `Label(...)` uses the same browser-compatible text path as
