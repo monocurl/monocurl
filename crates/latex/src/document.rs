@@ -169,6 +169,53 @@ pub(crate) fn apply_text_tag_markers(source: &str, spans: &[TaggedSpan]) -> Resu
     ))
 }
 
+pub(crate) fn escape_text_source(tagged: &TaggedSource) -> Result<TaggedSource> {
+    let mut escaped = String::with_capacity(tagged.source.len());
+    let mut boundaries = HashMap::with_capacity(tagged.source.len() + 1);
+
+    boundaries.insert(0, 0);
+    for (index, ch) in tagged.source.char_indices() {
+        boundaries.insert(index, escaped.len());
+        push_escaped_text_char(&mut escaped, ch);
+        boundaries.insert(index + ch.len_utf8(), escaped.len());
+    }
+
+    let mut spans = Vec::with_capacity(tagged.spans.len());
+    for span in &tagged.spans {
+        let start = *boundaries
+            .get(&span.range.start)
+            .ok_or_else(|| anyhow::anyhow!("text tag span is not aligned to UTF-8 boundaries"))?;
+        let end = *boundaries
+            .get(&span.range.end)
+            .ok_or_else(|| anyhow::anyhow!("text tag span is not aligned to UTF-8 boundaries"))?;
+        spans.push(TaggedSpan {
+            tag: span.tag.clone(),
+            range: start..end,
+        });
+    }
+
+    Ok(TaggedSource {
+        source: escaped,
+        spans,
+    })
+}
+
+fn push_escaped_text_char(out: &mut String, ch: char) {
+    match ch {
+        '\\' => out.push_str(r"\textbackslash{}"),
+        '{' => out.push_str(r"\{"),
+        '}' => out.push_str(r"\}"),
+        '$' => out.push_str(r"\$"),
+        '&' => out.push_str(r"\&"),
+        '%' => out.push_str(r"\%"),
+        '#' => out.push_str(r"\#"),
+        '_' => out.push_str(r"\_"),
+        '^' => out.push_str(r"\^{}"),
+        '~' => out.push_str(r"\~{}"),
+        _ => out.push(ch),
+    }
+}
+
 fn parse_text_tags_impl(source: &str) -> Result<TaggedSource> {
     let mut out = String::new();
     let mut spans = Vec::new();
@@ -422,13 +469,33 @@ fn text_tag_marker_open(tag: isize) -> String {
 mod tests {
     use super::{
         LatexDocumentStyle, TaggedSource, TaggedSpan, apply_text_tag_markers, build_latex_document,
-        build_tex_document, build_text_document, parse_text_tags,
+        build_tex_document, build_text_document, escape_text_source, parse_text_tags,
     };
 
     #[test]
     fn text_document_keeps_raw_input() {
         let doc = build_text_document("hello", LatexDocumentStyle::SystemLatex);
         assert!(doc.contains("\nhello\n"));
+    }
+
+    #[test]
+    fn text_source_escapes_tex_specials() {
+        let tagged = parse_text_tags("1/r^2 & x_y % ok").unwrap();
+        let escaped = escape_text_source(&tagged).unwrap();
+
+        assert_eq!(escaped.source, r"1/r\^{}2 \& x\_y \% ok");
+    }
+
+    #[test]
+    fn text_source_preserves_tag_ranges_after_escape() {
+        let tagged = parse_text_tags(r"\tag1{a_b} ^").unwrap();
+        let escaped = escape_text_source(&tagged).unwrap();
+        let marked = apply_text_tag_markers(&escaped.source, &escaped.spans).unwrap();
+
+        assert_eq!(escaped.source, r"a\_b \^{}");
+        assert_eq!(escaped.spans[0].range, 0..4);
+        assert!(marked.contains(r"{\color[RGB]{1,255,255} a\_b}"));
+        assert!(marked.contains(r"\^{}"));
     }
 
     #[test]
