@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use smallvec::SmallVec;
 
-use crate::heap::{HeapKey, VRc, with_heap};
+use crate::{error::ExecutorError, heap::{HeapKey, VRc, with_heap}};
 
 use super::{Value, rc_cached::RcCached};
 
@@ -20,6 +20,8 @@ pub enum StatefulNode {
     /// reads a leader cell (HeapKey → Value::Leader)
     LeaderRef(HeapKey),
     Constant(Box<Value>),
+    /// reactive list — each child is independently evaluated
+    List(Vec<StatefulNode>),
     LabeledCall {
         func: Box<StatefulNode>,
         /// owning refs to slots holding the arg values
@@ -154,6 +156,39 @@ pub fn value_into_stateful_node(val: Value) -> (StatefulNode, Vec<HeapKey>) {
         Value::Stateful(s) => (s.body.root.clone(), s.body.roots.clone()),
         other => (StatefulNode::Constant(Box::new(other)), vec![]),
     }
+}
+
+/// lift a list-append operation to a `StatefulNode::List`.
+/// lhs must be a `Value::List` or a `Value::Stateful` with a `List` root.
+/// rhs may be any value (stateful or concrete).
+pub fn lift_append_to_stateful(lhs: Value, rhs: Value) -> Result<Value, ExecutorError> {
+    let (mut children, mut roots) = match lhs {
+        Value::List(list) => {
+            let children = list
+                .elements()
+                .iter()
+                .map(|vrc| {
+                    StatefulNode::Constant(Box::new(with_heap(|h| h.get(vrc.key()).clone())))
+                })
+                .collect::<Vec<_>>();
+            (children, vec![])
+        }
+        Value::Stateful(ref s) => match &s.body.root {
+            StatefulNode::List(children) => (children.clone(), s.body.roots.clone()),
+            _ => return Err(ExecutorError::type_error("list", "stateful (non-list) expression")),
+        },
+        other => return Err(ExecutorError::type_error("list", other.type_name())),
+    };
+
+    let (rhs_node, rhs_roots) = value_into_stateful_node(rhs);
+    children.push(rhs_node);
+    roots.extend(rhs_roots);
+
+    Ok(Value::Stateful(make_stateful(
+        roots,
+        StatefulNode::List(children),
+        StatefulReadKind::Leader,
+    )))
 }
 
 /// collect stateful roots from a value
