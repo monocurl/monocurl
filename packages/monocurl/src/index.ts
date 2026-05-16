@@ -1,4 +1,3 @@
-import initPackagedWasm, * as packagedWasm from "./wasm/web_runtime.js";
 import { installMonocurlMathJaxRenderer } from "./mathjax-renderer.js";
 import type { MonocurlMathJax } from "./mathjax-renderer.js";
 export type Vec2 = [number, number];
@@ -531,7 +530,7 @@ async function resolveWasmModule(
   options: Pick<CreateMonocurlLoopOptions, "wasm" | "wasmInit">,
 ): Promise<MonocurlWasmModule> {
   if (options.wasm === undefined) {
-    return initPackagedWasmOnce(options.wasmInit);
+    return initPackagedWasmInstance(options.wasmInit);
   }
 
   if (typeof options.wasm === "function") {
@@ -541,19 +540,21 @@ async function resolveWasmModule(
   return await options.wasm;
 }
 
-let packagedWasmInit: Promise<MonocurlWasmModule> | undefined;
+type PackagedWasmModule = MonocurlWasmModule & {
+  default: (input?: MonocurlWasmInitInput) => Promise<unknown>;
+};
 
-function initPackagedWasmOnce(
+let packagedWasmInstanceId = 0;
+
+async function initPackagedWasmInstance(
   wasmInit: MonocurlWasmInitInput | undefined,
-): Promise<MonocurlWasmModule> {
-  packagedWasmInit ??= initPackagedWasm(wasmInit)
-    .then(() => packagedWasm)
-    .catch((error: unknown) => {
-      packagedWasmInit = undefined;
-      throw error;
-    });
+): Promise<PackagedWasmModule> {
+  const glueUrl = new URL("./wasm/web_runtime.js", import.meta.url);
+  glueUrl.searchParams.set("monocurlInstance", String(packagedWasmInstanceId++));
 
-  return packagedWasmInit;
+  const wasmModule = (await import(glueUrl.href)) as PackagedWasmModule;
+  await wasmModule.default(wasmInit);
+  return wasmModule;
 }
 
 async function installMathJaxIfAvailable(
