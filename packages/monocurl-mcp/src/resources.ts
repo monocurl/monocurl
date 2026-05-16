@@ -18,7 +18,7 @@ import stdScene from "../docs/std/scene.mcl";
 
 export const SERVER_NAME = "monocurl-mcp";
 export const SERVER_TITLE = "Monocurl Documentation";
-export const SERVER_VERSION = "0.2.2";
+export const SERVER_VERSION = "0.2.9";
 export const SERVER_INSTRUCTIONS =
   "Use resources/list and resources/read to load split Monocurl authoring context, stdlib documentation, CLI invocation guidance, and raw stdlib wrapper sources. Validation and execution should be handled outside this documentation server with the monocurl binary.";
 
