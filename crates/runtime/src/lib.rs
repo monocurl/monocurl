@@ -164,6 +164,20 @@ pub struct RuntimeIteration {
     pub next_frame_interval: Option<Duration>,
 }
 
+enum LoadingSnapshotSink<'a> {
+    Deferred,
+    Immediate(&'a mut dyn FnMut(ExecutionSnapshot)),
+}
+
+impl LoadingSnapshotSink<'_> {
+    fn emit_or_defer(&mut self, iteration: &mut RuntimeIteration, snapshot: ExecutionSnapshot) {
+        match self {
+            Self::Deferred => iteration.snapshots.push(snapshot),
+            Self::Immediate(emit) => emit(snapshot),
+        }
+    }
+}
+
 struct SharedRuntimeState {
     target: Cell<Timestamp>,
     current_timestamp: Cell<Timestamp>,
@@ -386,7 +400,30 @@ impl RuntimeController {
 
     pub async fn run_iteration(&self, now_seconds: f64) -> RuntimeIteration {
         let mut executor = self.executor.borrow_mut();
-        run_play_session_iteration(&mut executor, &self.shared, now_seconds).await
+        let mut loading_snapshot_sink = LoadingSnapshotSink::Deferred;
+        run_play_session_iteration(
+            &mut executor,
+            &self.shared,
+            now_seconds,
+            &mut loading_snapshot_sink,
+        )
+        .await
+    }
+
+    pub async fn run_iteration_with_loading_snapshot_sink(
+        &self,
+        now_seconds: f64,
+        mut emit_loading_snapshot: impl FnMut(ExecutionSnapshot),
+    ) -> RuntimeIteration {
+        let mut executor = self.executor.borrow_mut();
+        let mut loading_snapshot_sink = LoadingSnapshotSink::Immediate(&mut emit_loading_snapshot);
+        run_play_session_iteration(
+            &mut executor,
+            &self.shared,
+            now_seconds,
+            &mut loading_snapshot_sink,
+        )
+        .await
     }
 
     pub fn with_executor<R>(&self, f: impl FnOnce(&Executor) -> R) -> R {
@@ -416,6 +453,7 @@ async fn run_play_session_iteration(
     executor: &mut Executor,
     shared: &SharedRuntimeState,
     now_seconds: f64,
+    loading_snapshot_sink: &mut LoadingSnapshotSink<'_>,
 ) -> RuntimeIteration {
     let mut iteration = RuntimeIteration::default();
 
@@ -452,7 +490,15 @@ async fn run_play_session_iteration(
     let target = shared.target.get();
 
     if target != current {
-        sync_to_target(executor, shared, target, current, &mut iteration).await;
+        sync_to_target(
+            executor,
+            shared,
+            target,
+            current,
+            &mut iteration,
+            loading_snapshot_sink,
+        )
+        .await;
         shared.snapshot_requested.set(false);
         return iteration;
     }
@@ -470,7 +516,14 @@ async fn run_play_session_iteration(
     }
 
     if shared.is_playing.get() {
-        playback_iteration(executor, shared, now_seconds, &mut iteration).await;
+        playback_iteration(
+            executor,
+            shared,
+            now_seconds,
+            &mut iteration,
+            loading_snapshot_sink,
+        )
+        .await;
     }
 
     iteration
@@ -510,10 +563,9 @@ async fn sync_to_target(
     target: Timestamp,
     current: Timestamp,
     iteration: &mut RuntimeIteration,
+    loading_snapshot_sink: &mut LoadingSnapshotSink<'_>,
 ) {
-    iteration
-        .snapshots
-        .push(runtime_snapshot(executor, shared, true, None));
+    loading_snapshot_sink.emit_or_defer(iteration, runtime_snapshot(executor, shared, true, None));
 
     let result = if target < current {
         executor.seek_to(target).await
@@ -556,6 +608,7 @@ async fn playback_iteration(
     shared: &SharedRuntimeState,
     now_seconds: f64,
     iteration: &mut RuntimeIteration,
+    loading_snapshot_sink: &mut LoadingSnapshotSink<'_>,
 ) {
     let elapsed = (now_seconds - shared.last_update_at.get()).max(0.0);
     let frame_interval =
@@ -564,9 +617,7 @@ async fn playback_iteration(
 
     shared.last_update_at.set(now_seconds);
 
-    iteration
-        .snapshots
-        .push(runtime_snapshot(executor, shared, true, None));
+    loading_snapshot_sink.emit_or_defer(iteration, runtime_snapshot(executor, shared, true, None));
 
     match executor.advance_playback(max_slide, elapsed).await {
         Ok(PlaybackAdvance::Advanced) => {}

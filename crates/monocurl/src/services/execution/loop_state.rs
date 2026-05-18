@@ -115,7 +115,15 @@ impl RuntimeState {
             loop {
                 let iteration_started_at = Instant::now();
                 let now_seconds = started_at.elapsed().as_secs_f64();
-                let iteration = controller.run_iteration(now_seconds).await;
+                let iteration = controller
+                    .run_iteration_with_loading_snapshot_sink(now_seconds, |snapshot| {
+                        sm_tx
+                            .unbounded_send(ServiceManagerMessage::ExecutionStateUpdated {
+                                snapshot: Box::new(snapshot),
+                            })
+                            .ok();
+                    })
+                    .await;
                 let next_frame_interval = iteration.next_frame_interval;
 
                 for snapshot in iteration.snapshots {
