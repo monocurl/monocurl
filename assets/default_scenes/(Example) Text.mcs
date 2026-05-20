@@ -10,7 +10,7 @@ import std.scene
 # This highlights text, latex
 # and common strategies for text tagging
 
-let Subtext = |text| center{-0.5u} Text(text, 0.6)
+let Subtext = |text| center{-0.5u} Text(text, 0.6, "Arial")
 
 # this sets the styling that we'll use throughout the scene
 # with this, we only have to set tags properly

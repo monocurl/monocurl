@@ -1,7 +1,18 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::path::Path;
+
+#[cfg(not(target_arch = "wasm32"))]
+use anyhow::Context;
 use anyhow::{Result, bail};
 use geo::mesh::{Mesh, make_mesh_mut};
+use usvg::fontdb::Database as FontDatabase;
+#[cfg(not(target_arch = "wasm32"))]
+use usvg::fontdb::Source as FontSource;
 
 use crate::{
     backend, cache,
@@ -9,6 +20,10 @@ use crate::{
     document::{self, SpanMarker},
     types::{BackendKind, LatexBackendConfig, RenderQuality, RenderedOutput},
 };
+
+const SVG_TEXT_FONT_SIZE: f32 = 1000.0;
+const SVG_TEXT_UNITS_AT_SCALE_1: f32 = SVG_TEXT_FONT_SIZE * 4.0;
+const SVG_TEXT_CANVAS_SIZE: f32 = 100_000.0;
 
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
     render_text_with_quality(text, scale, RenderQuality::Normal)
@@ -25,6 +40,24 @@ pub fn render_text_with_quality(
     }
 
     render_tagged_backend(BackendKind::Text, &tagged, "", scale, quality)
+}
+
+pub fn render_text_with_font(text: &str, scale: f32, font: &str) -> Result<Vec<Arc<Mesh>>> {
+    render_text_with_font_and_quality(text, scale, font, RenderQuality::Normal)
+}
+
+pub fn render_text_with_font_and_quality(
+    text: &str,
+    scale: f32,
+    font: &str,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    let tagged = document::parse_text_tags(text)?;
+    if tagged.source.trim().is_empty() && tagged.spans.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    render_system_font_text(&tagged, scale, font, quality)
 }
 
 pub fn render_tex(tex: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
@@ -112,15 +145,7 @@ fn render_tagged_backend(
     scale: f32,
     quality: RenderQuality,
 ) -> Result<Vec<Arc<Mesh>>> {
-    let marker_spans = tagged
-        .spans
-        .iter()
-        .enumerate()
-        .map(|(index, span)| document::TaggedSpan {
-            tag: vec![index as isize + 1],
-            range: span.range.clone(),
-        })
-        .collect::<Vec<_>>();
+    let marker_spans = indexed_marker_spans(&tagged.spans);
     let backend_config = backend_config();
     let source = document::apply_text_tag_markers(&tagged.source, &marker_spans)?;
     let output = render_tagged_document(
@@ -180,6 +205,209 @@ fn render_tex_marked_backend(
 
     output.span_mesh_indices = span_mesh_indices;
     Ok(output)
+}
+
+fn render_system_font_text(
+    tagged: &document::TaggedSource,
+    scale: f32,
+    font: &str,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    validate_scale(scale)?;
+    let marker_spans = indexed_marker_spans(&tagged.spans);
+    let (usvg_options, font_family) = font_svg_options(font)?;
+    let svg = build_svg_text_document(&tagged.source, &marker_spans, &font_family, font);
+    let output = cache::render_cached(
+        BackendKind::Text,
+        LatexBackendConfig::Bundled,
+        svg,
+        scale,
+        quality,
+        |svg| {
+            cache::import_svg_with_options(
+                &svg,
+                scale,
+                quality,
+                SVG_TEXT_UNITS_AT_SCALE_1,
+                true,
+                &usvg_options,
+            )
+        },
+    )?;
+    Ok(apply_backend_text_tags(output, &tagged.spans))
+}
+
+fn indexed_marker_spans(spans: &[document::TaggedSpan]) -> Vec<document::TaggedSpan> {
+    spans
+        .iter()
+        .enumerate()
+        .map(|(index, span)| document::TaggedSpan {
+            tag: vec![index as isize + 1],
+            range: span.range.clone(),
+        })
+        .collect()
+}
+
+fn build_svg_text_document(
+    source: &str,
+    marker_spans: &[document::TaggedSpan],
+    font_family: &str,
+    font_source: &str,
+) -> String {
+    let runs = svg_text_runs(source, marker_spans);
+    let mut body = String::new();
+    for run in runs {
+        let escaped = escape_xml_text(&source[run.range]);
+        match run.tag {
+            Some(tag) => {
+                body.push_str("<tspan fill=\"");
+                body.push_str(&text_tag_color(tag));
+                body.push_str("\">");
+                body.push_str(&escaped);
+                body.push_str("</tspan>");
+            }
+            None => body.push_str(&escaped),
+        }
+    }
+
+    format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{SVG_TEXT_CANVAS_SIZE}\" height=\"{SVG_TEXT_CANVAS_SIZE}\" overflow=\"visible\" data-monocurl-font-source=\"{}\"><text x=\"0\" y=\"0\" xml:space=\"preserve\" font-family=\"{}\" font-size=\"{SVG_TEXT_FONT_SIZE}\" fill=\"black\">{body}</text></svg>",
+        escape_xml_attr(font_source),
+        escape_xml_attr(font_family)
+    )
+}
+
+struct SvgTextRun {
+    range: std::ops::Range<usize>,
+    tag: Option<isize>,
+}
+
+fn svg_text_runs(source: &str, marker_spans: &[document::TaggedSpan]) -> Vec<SvgTextRun> {
+    let mut boundaries = vec![0, source.len()];
+    for span in marker_spans {
+        boundaries.push(span.range.start);
+        boundaries.push(span.range.end);
+    }
+    boundaries.sort_unstable();
+    boundaries.dedup();
+
+    let mut runs: Vec<SvgTextRun> = Vec::new();
+    for window in boundaries.windows(2) {
+        let [start, end] = [window[0], window[1]];
+        if start == end {
+            continue;
+        }
+        let tag = innermost_marker_tag(start, end, marker_spans);
+        if let Some(last) = runs.last_mut()
+            && last.tag == tag
+            && last.range.end == start
+        {
+            last.range.end = end;
+            continue;
+        }
+        runs.push(SvgTextRun {
+            range: start..end,
+            tag,
+        });
+    }
+    runs
+}
+
+fn innermost_marker_tag(
+    start: usize,
+    end: usize,
+    marker_spans: &[document::TaggedSpan],
+) -> Option<isize> {
+    marker_spans
+        .iter()
+        .filter(|span| span.range.start <= start && end <= span.range.end)
+        .min_by_key(|span| span.range.end - span.range.start)
+        .and_then(|span| span.tag.first().copied())
+}
+
+fn text_tag_color(tag: isize) -> String {
+    let tag = tag.clamp(0, u8::MAX as isize);
+    format!("rgb({tag},255,255)")
+}
+
+fn escape_xml_text(source: &str) -> String {
+    let mut out = String::new();
+    for ch in source.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn escape_xml_attr(source: &str) -> String {
+    let mut out = String::new();
+    for ch in source.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn font_svg_options(font: &str) -> Result<(usvg::Options<'static>, String)> {
+    let mut options = usvg::Options::default();
+    let mut db = system_font_db().as_ref().clone();
+    let font_family = resolve_font_family(font, &mut db)?;
+    options.font_family = font_family.clone();
+    options.fontdb = Arc::new(db);
+    Ok((options, font_family))
+}
+
+fn system_font_db() -> &'static Arc<FontDatabase> {
+    static DB: OnceLock<Arc<FontDatabase>> = OnceLock::new();
+    DB.get_or_init(|| {
+        let mut db = FontDatabase::new();
+        db.load_system_fonts();
+        Arc::new(db)
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn resolve_font_family(font: &str, db: &mut FontDatabase) -> Result<String> {
+    let path = Path::new(font);
+    if path.exists() {
+        db.load_font_file(path)
+            .with_context(|| format!("failed to load font file `{}`", path.display()))?;
+        if let Some(family) = loaded_font_family(path, db) {
+            return Ok(family);
+        }
+        bail!(
+            "font file `{}` does not contain a usable font family",
+            path.display()
+        );
+    }
+
+    Ok(font.to_owned())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn resolve_font_family(font: &str, _db: &mut FontDatabase) -> Result<String> {
+    Ok(font.to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn loaded_font_family(path: &Path, db: &FontDatabase) -> Option<String> {
+    db.faces()
+        .find(|face| match &face.source {
+            FontSource::File(source_path) => source_path == path,
+            FontSource::SharedFile(source_path, _) => source_path == path,
+            FontSource::Binary(_) => false,
+        })
+        .and_then(|face| face.families.first().map(|(family, _)| family.clone()))
 }
 
 fn render_tagged_document(
@@ -272,6 +500,9 @@ fn apply_backend_text_tags(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::path::PathBuf;
+
     use geo::simd::Float3;
 
     use super::*;
@@ -306,6 +537,14 @@ mod tests {
             }
         }
         bounds
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn bundled_font_path() -> String {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/font/IBMPlexMono-Regular.ttf")
+            .display()
+            .to_string()
     }
 
     #[test]
@@ -360,6 +599,38 @@ mod tests {
             return;
         }
         let meshes = render_text("Monocurl", 1.5).unwrap();
+        for mesh in meshes {
+            assert!(
+                mesh.has_consistent_topology(),
+                "{}",
+                mesh.topology_mismatch_report()
+                    .unwrap_or_else(|| "no mismatch report".into())
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn font_text_from_file_keeps_text_tags() {
+        let meshes = render_text_with_font(r"\tag1{Hi}", 1.0, &bundled_font_path()).unwrap();
+        let latex = render_text("Hi", 1.0).unwrap();
+        let (font_min, font_max) = mesh_bounds(&meshes).unwrap();
+        let (latex_min, latex_max) = mesh_bounds(&latex).unwrap();
+        let font_size = font_max - font_min;
+        let latex_size = latex_max - latex_min;
+        let width_ratio = font_size.x / latex_size.x;
+        let height_ratio = font_size.y.abs() / latex_size.y.abs();
+
+        assert!(
+            (0.8..=1.25).contains(&width_ratio),
+            "font text width ratio {width_ratio}"
+        );
+        assert!(
+            (0.8..=1.25).contains(&height_ratio),
+            "font text height ratio {height_ratio}"
+        );
+        assert!(!meshes.is_empty());
+        assert!(meshes.iter().any(|mesh| mesh.tag == vec![1]));
         for mesh in meshes {
             assert!(
                 mesh.has_consistent_topology(),

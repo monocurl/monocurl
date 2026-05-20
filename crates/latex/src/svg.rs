@@ -36,8 +36,13 @@ pub(crate) struct RenderedSvg {
     pub span_mesh_indices: HashMap<String, Vec<usize>>,
 }
 
-pub(crate) fn import(svg: &str, unit_scale: f32, options: ImportOptions) -> Result<RenderedSvg> {
-    let tree = Tree::from_str(svg, &usvg::Options::default())?;
+pub(crate) fn import(
+    svg: &str,
+    unit_scale: f32,
+    options: ImportOptions,
+    usvg_options: &usvg::Options,
+) -> Result<RenderedSvg> {
+    let tree = Tree::from_str(svg, usvg_options)?;
     let mut rendered = RenderedSvg {
         meshes: Vec::new(),
         span_mesh_indices: HashMap::new(),
@@ -59,6 +64,9 @@ fn collect_group(
         match child {
             Node::Group(group) => collect_group(group, opacity, unit_scale, options, rendered)?,
             Node::Path(path) => collect_path(path, opacity, unit_scale, options, rendered)?,
+            Node::Text(text) => {
+                collect_group(text.flattened(), opacity, unit_scale, options, rendered)?
+            }
             _ => {}
         }
     }

@@ -148,6 +148,29 @@ fn read_optional_decimal_places(
     }
 }
 
+fn read_optional_string(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+    name: &'static str,
+) -> Result<Option<String>, ExecutorError> {
+    match executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_cached_wrappers_rec()
+    {
+        Value::Nil => Ok(None),
+        Value::String(value) => Ok(Some(value.to_string())),
+        other => Err(ExecutorError::type_error_for(
+            "nil / string",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
 fn read_nonnegative_float(
     executor: &Executor,
     stack_idx: usize,
@@ -169,6 +192,39 @@ fn text_render_quality(executor: &Executor) -> latex::RenderQuality {
         TextRenderQuality::Normal => latex::RenderQuality::Normal,
         TextRenderQuality::High => latex::RenderQuality::High,
     }
+}
+
+fn font_source_string(
+    executor: &Executor,
+    stack_idx: usize,
+    font: &str,
+) -> Result<String, ExecutorError> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if font_looks_like_path(font) {
+            return resolve_file_path(executor, stack_idx, font)
+                .map(|path| path.display().to_string());
+        }
+    }
+
+    Ok(font.to_owned())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn font_looks_like_path(font: &str) -> bool {
+    let path = std::path::Path::new(font);
+    path.is_absolute()
+        || font.contains('/')
+        || font.contains('\\')
+        || path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext.to_ascii_lowercase().as_str(),
+                    "ttf" | "otf" | "ttc" | "otc"
+                )
+            })
 }
 
 fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
@@ -1062,7 +1118,7 @@ pub async fn mk_image(_executor: &mut Executor, _stack_idx: usize) -> Result<Val
 #[stdlib_func]
 pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let image = read_string(executor, stack_idx, -4, "name").await?;
-    let image = resolve_image_path(executor, stack_idx, &image)?;
+    let image = resolve_file_path(executor, stack_idx, &image)?;
     let center = read_float3(executor, stack_idx, -3, "center")?;
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
@@ -1094,12 +1150,18 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let text = read_string(executor, stack_idx, -2, "text").await?;
-    let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
-    let meshes = latex::render_text_with_quality(&text, scale, text_render_quality(executor))
-        .map_err(|error| {
-            ExecutorError::invalid_invocation(format!("text render failed: {error:#}"))
-        })?;
+    let text = read_string(executor, stack_idx, -3, "text").await?;
+    let scale = read_text_scale(executor, stack_idx, -2, "scale")?;
+    let font = read_optional_string(executor, stack_idx, -1, "font")?;
+    let quality = text_render_quality(executor);
+    let meshes = match font {
+        Some(font) => {
+            let font = font_source_string(executor, stack_idx, &font)?;
+            latex::render_text_with_font_and_quality(&text, scale, &font, quality)
+        }
+        None => latex::render_text_with_quality(&text, scale, quality),
+    }
+    .map_err(|error| ExecutorError::invalid_invocation(format!("text render failed: {error:#}")))?;
     Ok(latex_meshes_to_value(meshes))
 }
 

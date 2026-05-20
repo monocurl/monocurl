@@ -214,7 +214,7 @@ fn image_source_path(executor: &Executor, stack_idx: usize) -> Option<&Path> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub(super) fn resolve_image_path(
+pub(super) fn resolve_file_path(
     executor: &Executor,
     stack_idx: usize,
     raw_path: &str,

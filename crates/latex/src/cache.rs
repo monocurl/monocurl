@@ -121,10 +121,29 @@ pub(crate) fn import_svg(
     svg_units_at_scale_1: f32,
     flip_y: bool,
 ) -> Result<svg::RenderedSvg> {
+    import_svg_with_options(
+        svg_source,
+        scale,
+        quality,
+        svg_units_at_scale_1,
+        flip_y,
+        &usvg::Options::default(),
+    )
+}
+
+pub(crate) fn import_svg_with_options(
+    svg_source: &str,
+    scale: f32,
+    quality: RenderQuality,
+    svg_units_at_scale_1: f32,
+    flip_y: bool,
+    usvg_options: &usvg::Options,
+) -> Result<svg::RenderedSvg> {
     svg::import(
         svg_source,
         scale / svg_units_at_scale_1,
         svg_import_options(quality, flip_y),
+        usvg_options,
     )
 }
 
