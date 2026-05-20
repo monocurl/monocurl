@@ -464,14 +464,16 @@ let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(
 ## Text label placed relative to a target mesh.
 ## [description]
 ## The label is rendered as text, then placed outside the target in `dir` while staying centered on the target's orthogonal direction.
+## Pass `font` as a system font name or font filename to use direct font outlines instead of the default LaTeX renderer.
 ## [parameters]
 ## buffer: distance from target
+## font: optional system font name or font filename; custom fonts are native-only and are not available on web
 ## [example]
 ## ```
 ## mesh labeled = [seg, Label(seg, "length", UP)]
 ## ```
-let Label = |target, str, dir = 1u, scale = 1, buffer = 0.1|
-    __monocurl__native__ mk_label(target, str, scale, dir, buffer)
+let Label = |target, str, dir = 1u, scale = 1, buffer = 0.1, font = nil|
+    __monocurl__native__ mk_label(target, str, scale, dir, buffer, font)
 
 ## [overview]
 ## Number rendered as text with optional formatting.

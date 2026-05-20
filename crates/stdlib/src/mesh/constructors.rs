@@ -1313,11 +1313,12 @@ pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Val
 
 #[stdlib_func]
 pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let target = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
-    let str = read_string(executor, stack_idx, -4, "str").await?;
-    let scale = read_text_scale(executor, stack_idx, -3, "scale")?;
-    let dir = read_float3(executor, stack_idx, -2, "dir")?;
-    let buffer = read_nonnegative_float(executor, stack_idx, -1, "buffer")?;
+    let target = read_mesh_tree_arg(executor, stack_idx, -6, "target").await?;
+    let str = read_string(executor, stack_idx, -5, "str").await?;
+    let scale = read_text_scale(executor, stack_idx, -4, "scale")?;
+    let dir = read_float3(executor, stack_idx, -3, "dir")?;
+    let buffer = read_nonnegative_float(executor, stack_idx, -2, "buffer")?;
+    let font = read_optional_string(executor, stack_idx, -1, "font")?;
     if dir.len_sq() <= 1e-12 {
         return Err(ExecutorError::InvalidArgument {
             arg: "dir",
@@ -1325,10 +1326,17 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
         });
     }
 
-    let meshes = text::render_text_with_quality(&str, scale, text_render_quality(executor))
-        .map_err(|error| {
-            ExecutorError::invalid_invocation(format!("label render failed: {error:#}"))
-        })?;
+    let quality = text_render_quality(executor);
+    let meshes = match font {
+        Some(font) => {
+            let font = font_source_string(executor, stack_idx, &font)?;
+            text::render_text_with_font_and_quality(&str, scale, &font, quality)
+        }
+        None => text::render_text_with_quality(&str, scale, quality),
+    }
+    .map_err(|error| {
+        ExecutorError::invalid_invocation(format!("label render failed: {error:#}"))
+    })?;
     let mut label = MeshTree::List(meshes.into_iter().map(MeshTree::Mesh).collect());
     if label.iter().next().is_none() {
         return Ok(label.into_value());

@@ -1043,6 +1043,26 @@ fn test_label_preserves_cross_axis_alignment() {
 }
 
 #[test]
+fn test_label_accepts_font_parameter() {
+    let font = monocurl_string_escape(
+        &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../assets/font/IBMPlexMono-Regular.ttf")
+            .display()
+            .to_string(),
+    );
+    let source = format!(
+        "
+        let target = Circle(1)
+        let label = Label(target, \"A\", 1r, 1, 0.1, \"{font}\")
+        let result = (mesh_width(label) > 0) + (mesh_center(label)[0] > mesh_right(target)[0])
+    "
+    );
+
+    let r = run_with_stdlib(&source, &["mesh"]);
+    r.assert_int(2);
+}
+
+#[test]
 fn test_axis2d_uses_leading_optional_axis_labels() {
     let r = run_with_stdlib(
         "
