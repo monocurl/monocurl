@@ -547,9 +547,9 @@ impl DocumentView {
 
     fn render_presentation(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let controls_open = self.controls_window_is_open(cx);
-        let audience = self
-            .viewport
-            .update(cx, |viewport, cx| viewport.render_presentation_audience(cx));
+        let audience = self.viewport.update(cx, |viewport, cx| {
+            viewport.render_presentation_audience(!controls_open, cx)
+        });
         let audience_status = if controls_open {
             None
         } else {
@@ -706,6 +706,9 @@ fn render_presentation_controls_button(
         .opacity(0.86)
         .hover(|style| style.opacity(1.0))
         .child("Controls")
+        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+            cx.stop_propagation();
+        })
         .on_click(on_click)
 }
 
