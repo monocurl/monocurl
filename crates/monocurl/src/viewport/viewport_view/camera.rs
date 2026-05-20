@@ -126,6 +126,10 @@ impl Viewport {
         self.is_presenting && self.presentation_camera.is_some()
     }
 
+    pub(crate) fn has_presentation_camera_override(&self) -> bool {
+        self.presentation_camera.is_some()
+    }
+
     pub(super) fn reset_presentation_camera(&mut self, cx: &mut Context<Self>) {
         if self.presentation_camera.is_none() {
             return;

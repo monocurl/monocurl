@@ -22,6 +22,7 @@ use crate::{
 };
 
 const SVG_TEXT_FONT_SIZE: f32 = 1000.0;
+const SVG_TEXT_LINE_HEIGHT_EM: f32 = 1.2;
 const SVG_TEXT_UNITS_AT_SCALE_1: f32 = SVG_TEXT_FONT_SIZE * 4.0;
 const SVG_TEXT_CANVAS_SIZE: f32 = 100_000.0;
 
@@ -254,27 +255,73 @@ fn build_svg_text_document(
     font_family: &str,
     font_source: &str,
 ) -> String {
-    let runs = svg_text_runs(source, marker_spans);
-    let mut body = String::new();
-    for run in runs {
-        let escaped = escape_xml_text(&source[run.range]);
-        match run.tag {
-            Some(tag) => {
-                body.push_str("<tspan fill=\"");
-                body.push_str(&text_tag_color(tag));
-                body.push_str("\">");
-                body.push_str(&escaped);
-                body.push_str("</tspan>");
-            }
-            None => body.push_str(&escaped),
-        }
-    }
+    let body = build_svg_text_body(source, marker_spans);
 
     format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{SVG_TEXT_CANVAS_SIZE}\" height=\"{SVG_TEXT_CANVAS_SIZE}\" overflow=\"visible\" data-monocurl-font-source=\"{}\"><text x=\"0\" y=\"0\" xml:space=\"preserve\" font-family=\"{}\" font-size=\"{SVG_TEXT_FONT_SIZE}\" fill=\"black\">{body}</text></svg>",
         escape_xml_attr(font_source),
         escape_xml_attr(font_family)
     )
+}
+
+fn build_svg_text_body(source: &str, marker_spans: &[document::TaggedSpan]) -> String {
+    let runs = svg_text_runs(source, marker_spans);
+    let mut body = String::new();
+    let mut pending_line_breaks = 0usize;
+    for run in runs {
+        for chunk in source[run.range].split_inclusive('\n') {
+            let has_line_break = chunk.ends_with('\n');
+            let text = if has_line_break {
+                &chunk[..chunk.len() - '\n'.len_utf8()]
+            } else {
+                chunk
+            };
+
+            if !text.is_empty() {
+                push_svg_text_segment(&mut body, text, run.tag, &mut pending_line_breaks);
+            }
+            if has_line_break {
+                pending_line_breaks += 1;
+            }
+        }
+    }
+    body
+}
+
+fn push_svg_text_segment(
+    body: &mut String,
+    source: &str,
+    tag: Option<isize>,
+    pending_line_breaks: &mut usize,
+) {
+    let escaped = escape_xml_text(source);
+    let needs_position = body.is_empty() || *pending_line_breaks > 0;
+    if needs_position {
+        body.push_str("<tspan x=\"0\"");
+        if *pending_line_breaks > 0 {
+            body.push_str(&format!(
+                " dy=\"{}em\"",
+                *pending_line_breaks as f32 * SVG_TEXT_LINE_HEIGHT_EM
+            ));
+        }
+        if let Some(tag) = tag {
+            body.push_str(" fill=\"");
+            body.push_str(&text_tag_color(tag));
+            body.push('"');
+        }
+        body.push('>');
+        body.push_str(&escaped);
+        body.push_str("</tspan>");
+    } else if let Some(tag) = tag {
+        body.push_str("<tspan fill=\"");
+        body.push_str(&text_tag_color(tag));
+        body.push_str("\">");
+        body.push_str(&escaped);
+        body.push_str("</tspan>");
+    } else {
+        body.push_str(&escaped);
+    }
+    *pending_line_breaks = 0;
 }
 
 struct SvgTextRun {
@@ -632,6 +679,34 @@ mod tests {
         assert!(!meshes.is_empty());
         assert!(meshes.iter().any(|mesh| mesh.tag == vec![1]));
         for mesh in meshes {
+            assert!(
+                mesh.has_consistent_topology(),
+                "{}",
+                mesh.topology_mismatch_report()
+                    .unwrap_or_else(|| "no mismatch report".into())
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn font_text_newlines_create_line_breaks() {
+        let single_line = render_text_with_font("Hi", 1.0, &bundled_font_path()).unwrap();
+        let multi_line =
+            render_text_with_font("\\tag1{Hi\n\nHi}", 1.0, &bundled_font_path()).unwrap();
+        let (single_min, single_max) = mesh_bounds(&single_line).unwrap();
+        let (multi_min, multi_max) = mesh_bounds(&multi_line).unwrap();
+        let single_size = single_max - single_min;
+        let multi_size = multi_max - multi_min;
+
+        assert!(
+            multi_size.y.abs() > single_size.y.abs() * 2.0,
+            "multi-line height {} should exceed single-line height {}",
+            multi_size.y.abs(),
+            single_size.y.abs()
+        );
+        assert!(multi_line.iter().any(|mesh| mesh.tag == vec![1]));
+        for mesh in multi_line {
             assert!(
                 mesh.has_consistent_topology(),
                 "{}",

@@ -223,6 +223,16 @@ impl DocumentView {
         self.open_controls_window(w, cx);
     }
 
+    pub(super) fn reset_presentation_camera_action(
+        &mut self,
+        _: &ClickEvent,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.viewport
+            .update(cx, |viewport, cx| viewport.sync_viewport_camera(cx));
+    }
+
     pub fn focus(&self, window: &mut Window) {
         window.focus(&self.focus_handle);
     }
