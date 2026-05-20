@@ -22,7 +22,7 @@ fn latex_install_url() -> &'static str {
     }
 }
 
-fn missing_latex_tools(status: latex::SystemBackendStatus) -> &'static str {
+fn missing_latex_tools(status: text::SystemBackendStatus) -> &'static str {
     match (status.latex, status.dvisvgm) {
         (true, true) => "",
         (false, true) => "latex",
@@ -89,7 +89,7 @@ pub fn render_latex_warning(settings: &UserSettings, theme: Theme) -> Option<Any
             theme,
         ));
     };
-    let status = latex::system_backend_status(&config);
+    let status = text::system_backend_status(&config);
     if status.is_available() {
         return None;
     }

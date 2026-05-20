@@ -68,6 +68,7 @@ impl DocumentView {
             path,
             was_fullscreen_before_presenting: false,
             is_presenting: false,
+            presentation_window: None,
             is_headless: false,
             controls_window: None,
             window_state: window_state.clone(),
@@ -546,16 +547,18 @@ impl DocumentView {
 
     fn render_presentation(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let controls_open = self.controls_window_is_open(cx);
-        let audience = self
-            .viewport
-            .update(cx, |viewport, cx| viewport.render_presentation_audience(cx));
+        let audience = self.viewport.update(cx, |viewport, cx| {
+            viewport.render_presentation_audience(!controls_open, cx)
+        });
         let audience_status = if controls_open {
             None
         } else {
-            Some(
-                self.viewport
-                    .update(cx, |viewport, cx| viewport.presentation_status_labels(cx)),
-            )
+            Some(self.viewport.update(cx, |viewport, cx| {
+                (
+                    viewport.presentation_status_labels(cx),
+                    viewport.has_presentation_camera_override(),
+                )
+            }))
         };
 
         div()
@@ -582,10 +585,12 @@ impl DocumentView {
                     .on_action(cx.listener(Self::export_video))
                     .child(audience),
             )
-            .children(audience_status.map(|status| {
+            .children(audience_status.map(|(status, show_reset)| {
                 render_presentation_audience_toolbar(
                     status,
                     cx.listener(Self::open_controls_window_action),
+                    cx.listener(Self::reset_presentation_camera_action),
+                    show_reset,
                 )
             }))
             .children(self.render_export_overlay(cx))
@@ -705,12 +710,17 @@ fn render_presentation_controls_button(
         .opacity(0.86)
         .hover(|style| style.opacity(1.0))
         .child("Controls")
+        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+            cx.stop_propagation();
+        })
         .on_click(on_click)
 }
 
 fn render_presentation_audience_toolbar(
     status: (String, String, Option<String>, bool),
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_controls_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    on_reset_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    show_reset: bool,
 ) -> impl IntoElement {
     let (slide_label, time_label, title_label, show_pause_hint) = status;
 
@@ -724,7 +734,8 @@ fn render_presentation_audience_toolbar(
         .items_center()
         .gap(px(10.0))
         .font_family(FontSet::UI)
-        .child(render_presentation_controls_button(on_click))
+        .child(render_presentation_controls_button(on_controls_click))
+        .children(show_reset.then(|| render_presentation_reset_button(on_reset_click)))
         .child(
             div()
                 .text_color(Rgba {
@@ -772,6 +783,44 @@ fn render_presentation_audience_toolbar(
         }))
 }
 
+fn render_presentation_reset_button(
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id("presentation-reset-camera-button")
+        .px(px(8.0))
+        .py(px(3.0))
+        .rounded(px(2.0))
+        .bg(Rgba {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.42,
+        })
+        .border(px(1.0))
+        .border_color(Rgba {
+            r: 0.55,
+            g: 0.55,
+            b: 0.55,
+            a: 0.38,
+        })
+        .text_color(Rgba {
+            r: 0.86,
+            g: 0.86,
+            b: 0.86,
+            a: 0.72,
+        })
+        .text_size(px(11.0))
+        .cursor_pointer()
+        .opacity(0.86)
+        .hover(|style| style.opacity(1.0))
+        .child("Reset Camera")
+        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+            cx.stop_propagation();
+        })
+        .on_click(on_click)
+}
+
 impl Render for DocumentView {
     fn render(
         &mut self,
@@ -785,6 +834,7 @@ impl Render for DocumentView {
         if self.is_presenting {
             self.render_presentation(cx).into_any_element()
         } else {
+            self.close_controls_window(window, cx);
             self.render_editing(window, cx).into_any_element()
         }
     }

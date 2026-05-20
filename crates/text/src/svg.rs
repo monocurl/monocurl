@@ -12,8 +12,9 @@ use usvg::{FillRule, Node, Paint, Path as SvgPath, Tree};
 
 pub(crate) const DEFAULT_TEXT_STROKE_RADIUS: f32 = 0.55;
 const NORMAL_CURVE_SAMPLE_SPACING: f32 = 24.0;
-const HIGH_QUALITY_CURVE_SAMPLE_SPACING: f32 = 4.7;
-const MIN_CURVE_SAMPLES: usize = 4;
+const HIGH_QUALITY_CURVE_SAMPLE_SPACING: f32 = 12.0;
+pub(crate) const MIN_CURVE_SAMPLES: usize = 4;
+pub(crate) const HIGH_QUALITY_TEXT_MIN_CURVE_SAMPLES: usize = 6;
 const NORMAL_MAX_CURVE_SAMPLES: usize = 96;
 const HIGH_QUALITY_MAX_CURVE_SAMPLES: usize = 480;
 
@@ -24,8 +25,17 @@ pub(crate) enum CurveSampling {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CurveLengthBasis {
+    Scene,
+    Svg,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct ImportOptions {
     pub curve_sampling: CurveSampling,
+    pub curve_length_basis: CurveLengthBasis,
+    pub min_curve_samples: usize,
+    pub decode_text_tags: bool,
     // dvisvgm outputs y-down SVG coordinates, so we negate y to get Monocurl y-up.
     // hayro-svg (PDF→SVG) leaves path data in y-up space, so no negation needed.
     pub flip_y: bool,
@@ -36,8 +46,13 @@ pub(crate) struct RenderedSvg {
     pub span_mesh_indices: HashMap<String, Vec<usize>>,
 }
 
-pub(crate) fn import(svg: &str, unit_scale: f32, options: ImportOptions) -> Result<RenderedSvg> {
-    let tree = Tree::from_str(svg, &usvg::Options::default())?;
+pub(crate) fn import(
+    svg: &str,
+    unit_scale: f32,
+    options: ImportOptions,
+    usvg_options: &usvg::Options,
+) -> Result<RenderedSvg> {
+    let tree = Tree::from_str(svg, usvg_options)?;
     let mut rendered = RenderedSvg {
         meshes: Vec::new(),
         span_mesh_indices: HashMap::new(),
@@ -59,6 +74,9 @@ fn collect_group(
         match child {
             Node::Group(group) => collect_group(group, opacity, unit_scale, options, rendered)?,
             Node::Path(path) => collect_path(path, opacity, unit_scale, options, rendered)?,
+            Node::Text(text) => {
+                collect_group(text.flattened(), opacity, unit_scale, options, rendered)?
+            }
             _ => {}
         }
     }
@@ -80,7 +98,11 @@ fn collect_path(
     if let Some(fill) = path.fill()
         && let Paint::Color(color) = fill.paint()
     {
-        let (tag, color) = decode_tag_and_color(*color, fill.opacity().get() * inherited_opacity);
+        let (tag, color) = tag_and_color(
+            *color,
+            fill.opacity().get() * inherited_opacity,
+            options.decode_text_tags,
+        );
         let even_odd = matches!(fill.rule(), FillRule::EvenOdd);
         let contours = extract_contours(
             path.data(),
@@ -100,7 +122,11 @@ fn collect_path(
         && let Paint::Color(color) = stroke.paint()
         && let Some(stroked_path) = path.data().stroke(&stroke.to_tiny_skia(), 1.0)
     {
-        let (tag, color) = decode_tag_and_color(*color, stroke.opacity().get() * inherited_opacity);
+        let (tag, color) = tag_and_color(
+            *color,
+            stroke.opacity().get() * inherited_opacity,
+            options.decode_text_tags,
+        );
         let contours = extract_contours(
             &stroked_path,
             path.abs_transform(),
@@ -155,7 +181,15 @@ fn extract_contours(
                 }
                 let control = map_point(ctrl, transform, unit_scale, flip_y);
                 let end = map_point(point, transform, unit_scale, flip_y);
-                let approx_length = (control - cursor).len() + (end - control).len();
+                let approx_length = match options.curve_length_basis {
+                    CurveLengthBasis::Scene => (control - cursor).len() + (end - control).len(),
+                    CurveLengthBasis::Svg => {
+                        let cursor_svg = unscale_point(cursor, unit_scale, flip_y);
+                        let control_svg = map_svg_point(ctrl, transform, flip_y);
+                        let end_svg = map_svg_point(point, transform, flip_y);
+                        (control_svg - cursor_svg).len() + (end_svg - control_svg).len()
+                    }
+                };
                 let samples = curve_samples(approx_length, options);
                 for i in 1..=samples {
                     let t = i as f32 / samples as f32;
@@ -172,9 +206,22 @@ fn extract_contours(
                 let control_a = map_point(ctrl_a, transform, unit_scale, flip_y);
                 let control_b = map_point(ctrl_b, transform, unit_scale, flip_y);
                 let end = map_point(point, transform, unit_scale, flip_y);
-                let approx_length = (control_a - cursor).len()
-                    + (control_b - control_a).len()
-                    + (end - control_b).len();
+                let approx_length = match options.curve_length_basis {
+                    CurveLengthBasis::Scene => {
+                        (control_a - cursor).len()
+                            + (control_b - control_a).len()
+                            + (end - control_b).len()
+                    }
+                    CurveLengthBasis::Svg => {
+                        let cursor_svg = unscale_point(cursor, unit_scale, flip_y);
+                        let control_a_svg = map_svg_point(ctrl_a, transform, flip_y);
+                        let control_b_svg = map_svg_point(ctrl_b, transform, flip_y);
+                        let end_svg = map_svg_point(point, transform, flip_y);
+                        (control_a_svg - cursor_svg).len()
+                            + (control_b_svg - control_a_svg).len()
+                            + (end_svg - control_b_svg).len()
+                    }
+                };
                 let samples = curve_samples(approx_length, options);
                 for i in 1..=samples {
                     let t = i as f32 / samples as f32;
@@ -196,6 +243,18 @@ fn extract_contours(
 
     flush_current_contour(&mut contours, &mut current, start);
     contours
+}
+
+fn unscale_point(point: Float3, unit_scale: f32, flip_y: bool) -> Float2 {
+    let y = if flip_y { -point.y } else { point.y };
+    Float2::new(point.x / unit_scale, y / unit_scale)
+}
+
+fn map_svg_point(point: Point, transform: tiny_skia_path::Transform, flip_y: bool) -> Float2 {
+    let mut point = point;
+    transform.map_point(&mut point);
+    let y = if flip_y { -point.y } else { point.y };
+    Float2::new(point.x, y)
 }
 
 fn map_point(
@@ -221,7 +280,7 @@ fn curve_samples(approx_length: f32, options: ImportOptions) -> usize {
 
     (approx_length / spacing)
         .ceil()
-        .clamp(MIN_CURVE_SAMPLES as f32, max_samples as f32) as usize
+        .clamp(options.min_curve_samples as f32, max_samples as f32) as usize
 }
 
 fn push_unique_point(points: &mut Vec<Float3>, point: Float3) {
@@ -245,6 +304,14 @@ fn flush_current_contour(
     }
 }
 
+fn tag_and_color(color: usvg::Color, alpha: f32, decode_text_tags: bool) -> (Vec<isize>, Float4) {
+    if decode_text_tags {
+        return decode_tag_and_color(color, alpha);
+    }
+
+    (Vec::new(), svg_color(color, alpha))
+}
+
 fn decode_tag_and_color(color: usvg::Color, alpha: f32) -> (Vec<isize>, Float4) {
     if color.green == u8::MAX && color.blue == u8::MAX {
         return (vec![color.red as isize], Float4::new(0.0, 0.0, 0.0, alpha));
@@ -256,14 +323,15 @@ fn decode_tag_and_color(color: usvg::Color, alpha: f32) -> (Vec<isize>, Float4) 
         );
     }
 
-    (
-        Vec::new(),
-        Float4::new(
-            color.red as f32 / 255.0,
-            color.green as f32 / 255.0,
-            color.blue as f32 / 255.0,
-            alpha,
-        ),
+    (Vec::new(), svg_color(color, alpha))
+}
+
+fn svg_color(color: usvg::Color, alpha: f32) -> Float4 {
+    Float4::new(
+        color.red as f32 / 255.0,
+        color.green as f32 / 255.0,
+        color.blue as f32 / 255.0,
+        alpha,
     )
 }
 

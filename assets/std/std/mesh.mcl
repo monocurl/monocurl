@@ -291,6 +291,20 @@ let Image = |name, center = [0, 0, 0], size = [1, 1]| {
 }
 
 ## [overview]
+## Import an SVG file into mesh geometry.
+## [description]
+## `filename` should be a project-relative `.svg` file path, passed as a string such as `"icons/play.svg"` rather than pasted raw SVG markup. File imports resolve supported relative SVG references from the SVG file's folder. The importer handles ordinary solid-color fills and strokes best; unsupported SVG features such as gradients, filters, masks, and raster images may be ignored. SVG coordinates are y-down, so imported geometry is flipped into Monocurl's y-up scene space. At `scale = 1`, 100 SVG units map to 1 scene unit.
+## Not available in web runtimes yet.
+## [parameters]
+## filename: project-relative `.svg` file path
+## scale: scene scale where 100 SVG units equal `scale` scene units
+## [example]
+## ```
+## mesh icon = Svg("icons/play.svg", 1.2)
+## ```
+let Svg = |filename, scale = 1| __monocurl__native__ mk_svg(filename, scale)
+
+## [overview]
 ## Sample a color function over a rectangular grid.
 ## [description]
 ## By default each visible cell gets one flat color sampled at the cell corner. Pass `smooth = 1` to color vertices for smooth interpolation, or pass a callable as the fourth argument to use it as the mask while keeping flat colors. `color_at` receives `(pos, [ix, iy])`; `mask` receives `pos`.
@@ -367,13 +381,14 @@ let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 
 ## Plain text converted to mesh geometry.
 ## [parameters]
 ## text: string/list text fragments; use `text_tag{...}` on fragments that need stable mesh tags after rendering
+## font: nil for the existing LaTeX-backed renderer, or a system font family / font file path for direct SVG font outlines
 ## [description]
-## Use `Text` for literal text. It still returns mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply. Apply `text_tag{...}` inside the text argument when only part of the rendered text should be addressable; apply `tag{...}` outside `Text` when the whole rendered label should share one identity. String escapes use `%`, not `\`: write `%"` for a quote, `%%` for a literal percent sign, and LaTeX-style backslashes directly.
+## Use `Text` for literal text. It still returns mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply. With the default `font = nil`, text is rendered through the existing LaTeX backend. Passing a string such as `"Arial"` uses system-font SVG outlines instead; a `.ttf`, `.otf`, `.ttc`, or `.otc` path is resolved relative to the scene file. Custom/system/font-file text fonts are not available in web runtimes yet; keep `font = nil` there. Apply `text_tag{...}` inside the text argument when only part of the rendered text should be addressable; apply `tag{...}` outside `Text` when the whole rendered label should share one identity. String escapes use `%`, not `\`: write `%"` for a quote, `%%` for a literal percent sign, and LaTeX-style backslashes directly.
 ## [example]
 ## ```mcl image
 ## mesh title = center{UP} Text("Monocurl", 0.8)
 ## ```
-let Text = |text, scale = 1| __monocurl__native__ mk_text(text, scale)
+let Text = |text, scale = 1, font = nil| __monocurl__native__ mk_text(text, scale, font)
 
 ## [options]
 ## important: true
@@ -449,14 +464,16 @@ let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(
 ## Text label placed relative to a target mesh.
 ## [description]
 ## The label is rendered as text, then placed outside the target in `dir` while staying centered on the target's orthogonal direction.
+## Pass `font` as a system font name or font filename to use direct font outlines instead of the default LaTeX renderer.
 ## [parameters]
 ## buffer: distance from target
+## font: optional system font name or font filename; custom fonts are native-only and are not available on web
 ## [example]
 ## ```
 ## mesh labeled = [seg, Label(seg, "length", UP)]
 ## ```
-let Label = |target, str, dir = 1u, scale = 1, buffer = 0.1|
-    __monocurl__native__ mk_label(target, str, scale, dir, buffer)
+let Label = |target, str, dir = 1u, scale = 1, buffer = 0.1, font = nil|
+    __monocurl__native__ mk_label(target, str, scale, dir, buffer, font)
 
 ## [overview]
 ## Number rendered as text with optional formatting.

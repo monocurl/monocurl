@@ -79,7 +79,7 @@ impl UserSettings {
     }
 
     pub fn populate_missing_system_paths(&mut self) {
-        let discovered = latex::discover_system_backend();
+        let discovered = text::discover_system_backend();
         if self.system_latex_path.is_none() {
             self.system_latex_path = discovered.latex;
         }
@@ -88,8 +88,8 @@ impl UserSettings {
         }
     }
 
-    pub fn system_backend_config(&self) -> Option<latex::SystemBackendConfig> {
-        Some(latex::SystemBackendConfig {
+    pub fn system_backend_config(&self) -> Option<text::SystemBackendConfig> {
+        Some(text::SystemBackendConfig {
             latex: self.system_latex_path.clone()?,
             dvisvgm: self.system_dvisvgm_path.clone()?,
         })
@@ -98,13 +98,13 @@ impl UserSettings {
     pub fn apply_latex_backend(&self) {
         match self.latex_backend {
             LatexBackendPreference::Bundled => {
-                latex::set_backend_config(latex::LatexBackendConfig::Bundled);
+                text::set_backend_config(text::LatexBackendConfig::Bundled);
             }
             LatexBackendPreference::System => {
                 if let Some(config) = self.system_backend_config() {
-                    latex::set_backend_config(latex::LatexBackendConfig::System(config));
+                    text::set_backend_config(text::LatexBackendConfig::System(config));
                 } else {
-                    latex::set_backend_config(latex::LatexBackendConfig::Bundled);
+                    text::set_backend_config(text::LatexBackendConfig::Bundled);
                 }
             }
         }

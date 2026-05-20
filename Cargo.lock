@@ -1126,12 +1126,12 @@ dependencies = [
  "compiler",
  "executor",
  "exporter",
- "latex",
  "lexer",
  "log",
  "parser",
  "renderer",
  "structs",
+ "text",
  "ui_cli_shared",
 ]
 
@@ -3910,26 +3910,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "latex"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "geo",
- "hayro-interpret",
- "hayro-svg",
- "libtess2",
- "roxmltree",
- "sha2",
- "structs",
- "tectonic",
- "tectonic_bundles",
- "tectonic_engine_xetex",
- "tiny-skia-path",
- "usvg",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4319,7 +4299,6 @@ dependencies = [
  "geo",
  "gpui-ce",
  "image",
- "latex",
  "lexer",
  "log",
  "notify-debouncer-full",
@@ -4334,6 +4313,7 @@ dependencies = [
  "smol",
  "stdlib",
  "structs",
+ "text",
  "ui_cli_shared",
  "unicode-segmentation",
 ]
@@ -6771,10 +6751,10 @@ dependencies = [
  "executor",
  "geo",
  "inventory",
- "latex",
  "libtess2",
  "smallvec",
  "stdlib-macros",
+ "text",
 ]
 
 [[package]]
@@ -7479,6 +7459,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "text"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "geo",
+ "hayro-interpret",
+ "hayro-svg",
+ "libtess2",
+ "roxmltree",
+ "sha2",
+ "structs",
+ "tectonic",
+ "tectonic_bundles",
+ "tectonic_engine_xetex",
+ "tiny-skia-path",
+ "usvg",
+ "wasm-bindgen",
 ]
 
 [[package]]

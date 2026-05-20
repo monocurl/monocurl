@@ -6,7 +6,7 @@ members = [
   "crates/cli",
   "crates/compiler",
   "crates/integration_tests",
-  "crates/latex",
+  "crates/text",
   "crates/ui_cli_shared",
   "crates/executor",
   "crates/exporter",
@@ -74,7 +74,7 @@ compiler = { path = "crates/compiler" }
 executor = { path = "crates/executor" }
 exporter = { path = "crates/exporter" }
 geo = { path = "crates/geo" }
-latex = { path = "crates/latex" }
+text = { path = "crates/text" }
 lexer = { path = "crates/lexer" }
 libtess2 = { path = "crates/libtess2" }
 parser = { path = "crates/parser" }

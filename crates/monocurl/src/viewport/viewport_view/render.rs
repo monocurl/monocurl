@@ -111,7 +111,11 @@ impl Viewport {
         (slide_label, time_label, title_label, self.show_pause_hint)
     }
 
-    pub(crate) fn render_presentation_audience(&mut self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_presentation_audience(
+        &mut self,
+        interactive: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let (background, scene_camera, meshes, scene_version) = {
             let execution = self.execution_state.read(cx);
             (
@@ -138,7 +142,7 @@ impl Viewport {
                 AUDIENCE_LETTERBOX_BG,
                 SceneStageMode::Presentation {
                     aspect_ratio: AUDIENCE_ASPECT_RATIO,
-                    interactive: false,
+                    interactive,
                 },
                 SceneStageCache::Audience,
                 cx.weak_entity(),

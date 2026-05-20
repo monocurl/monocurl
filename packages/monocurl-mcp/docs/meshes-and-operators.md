@@ -60,7 +60,16 @@ equation transforms and selective formula styling. They're also used for animati
 
 Use `Text` for plain text, `Tex` for math fragments, and `Latex` for LaTeX body
 fragments that need extra structure or an `additional_preamble`. Text is still
-mesh geometry, so it can be styled, tagged, and animated.
+mesh geometry, so it can be styled, tagged, and animated. `Text(..., font =
+"...")` supports system fonts and project font files on native runtimes; custom
+text fonts are not available in web runtimes yet.
+
+Use `Svg(filename, scale = 1)` on native runtimes to import an SVG file as mesh
+geometry. Pass a project-relative filename string such as `"icons/play.svg"`,
+not pasted raw SVG markup. File imports resolve supported relative SVG references
+from the SVG file's folder. It supports ordinary solid fills and strokes best;
+gradients, filters, masks, and raster images may be ignored.
+`Svg` is not available in web runtimes yet.
 
 String escapes use `%`, not `\`, which keeps LaTeX readable. Write TeX
 commands directly, such as `Tex("\frac{a}{b}")`; use `%%` for a literal percent
