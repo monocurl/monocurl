@@ -48,6 +48,11 @@ commands can be written directly, for example `Tex("\frac{x}{2}")`. Use `%"`,
 `%n`, `%%`, and `%\` when a string needs a quote, newline, literal percent, or
 explicit escaped backslash.
 
+`Text(text, scale = 1, font = nil)` uses the LaTeX-backed text renderer by
+default. Native desktop/CLI builds may pass a system font family or project
+font-file path as `font`; custom/system/font-file text fonts are not available
+in web runtimes yet, so keep `font = nil` for web scenes.
+
 The code before the first `slide` is the init section. Use init for imports,
 helpers, custom operators, top-level `param` declarations, initial `mesh`
 leaders, `background`, and `camera`. Do not put `play` statements in init.

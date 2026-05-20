@@ -124,15 +124,15 @@ fn run_transcript_command(command: TranscriptCommand) -> Result<()> {
 
 fn configure_latex_backend(use_system_latex: bool) -> Result<()> {
     if !use_system_latex {
-        latex::set_backend_config(latex::LatexBackendConfig::Bundled);
+        text::set_backend_config(text::LatexBackendConfig::Bundled);
         return Ok(());
     }
 
-    let tools = latex::discover_system_backend();
+    let tools = text::discover_system_backend();
     let config = tools.into_config().ok_or_else(|| {
         anyhow!("--system-latex requires both `latex` and `dvisvgm` to be available on PATH")
     })?;
-    latex::set_backend_config(latex::LatexBackendConfig::System(config));
+    text::set_backend_config(text::LatexBackendConfig::System(config));
     Ok(())
 }
 

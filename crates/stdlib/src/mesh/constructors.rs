@@ -187,26 +187,32 @@ fn read_nonnegative_float(
     Ok(value)
 }
 
-fn text_render_quality(executor: &Executor) -> latex::RenderQuality {
+fn text_render_quality(executor: &Executor) -> text::RenderQuality {
     match executor.text_render_quality() {
-        TextRenderQuality::Normal => latex::RenderQuality::Normal,
-        TextRenderQuality::High => latex::RenderQuality::High,
+        TextRenderQuality::Normal => text::RenderQuality::Normal,
+        TextRenderQuality::High => text::RenderQuality::High,
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn font_source_string(
     executor: &Executor,
     stack_idx: usize,
     font: &str,
 ) -> Result<String, ExecutorError> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        if font_looks_like_path(font) {
-            return resolve_file_path(executor, stack_idx, font)
-                .map(|path| path.display().to_string());
-        }
+    if font_looks_like_path(font) {
+        return resolve_file_path(executor, stack_idx, font).map(|path| path.display().to_string());
     }
 
+    Ok(font.to_owned())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn font_source_string(
+    _executor: &Executor,
+    _stack_idx: usize,
+    font: &str,
+) -> Result<String, ExecutorError> {
     Ok(font.to_owned())
 }
 
@@ -1157,9 +1163,9 @@ pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value,
     let meshes = match font {
         Some(font) => {
             let font = font_source_string(executor, stack_idx, &font)?;
-            latex::render_text_with_font_and_quality(&text, scale, &font, quality)
+            text::render_text_with_font_and_quality(&text, scale, &font, quality)
         }
-        None => latex::render_text_with_quality(&text, scale, quality),
+        None => text::render_text_with_quality(&text, scale, quality),
     }
     .map_err(|error| ExecutorError::invalid_invocation(format!("text render failed: {error:#}")))?;
     Ok(latex_meshes_to_value(meshes))
@@ -1169,7 +1175,7 @@ pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let tex = read_string(executor, stack_idx, -2, "tex").await?;
     let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
-    let meshes = latex::render_tex_with_quality(&tex, scale, text_render_quality(executor))
+    let meshes = text::render_tex_with_quality(&tex, scale, text_render_quality(executor))
         .map_err(|error| {
             ExecutorError::invalid_invocation(format!("tex render failed: {error:#}"))
         })?;
@@ -1181,7 +1187,7 @@ pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let latex = read_string(executor, stack_idx, -3, "latex").await?;
     let scale = read_text_scale(executor, stack_idx, -2, "scale")?;
     let additional_preamble = read_string(executor, stack_idx, -1, "additional_preamble").await?;
-    let meshes = latex::render_latex_with_preamble_and_quality(
+    let meshes = text::render_latex_with_preamble_and_quality(
         &latex,
         &additional_preamble,
         scale,
@@ -1278,7 +1284,7 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
         });
     }
 
-    let meshes = latex::render_text_with_quality(&str, scale, text_render_quality(executor))
+    let meshes = text::render_text_with_quality(&str, scale, text_render_quality(executor))
         .map_err(|error| {
             ExecutorError::invalid_invocation(format!("label render failed: {error:#}"))
         })?;
@@ -1311,7 +1317,7 @@ pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let value = crate::read_float(executor, stack_idx, -3, "value")?;
     let decimal_places = read_optional_decimal_places(executor, stack_idx, -2, "decimal_places")?;
     let include_sign = read_flag(executor, stack_idx, -1, "include_sign")?;
-    let meshes = latex::render_number_with_quality(
+    let meshes = text::render_number_with_quality(
         value,
         decimal_places,
         include_sign,

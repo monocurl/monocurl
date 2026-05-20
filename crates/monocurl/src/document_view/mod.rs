@@ -259,6 +259,7 @@ pub struct DocumentView {
 
     was_fullscreen_before_presenting: bool,
     is_presenting: bool,
+    presentation_window: Option<AnyWindowHandle>,
     is_headless: bool,
     controls_window: Option<WindowHandle<ControlsWindow>>,
 

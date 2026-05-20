@@ -104,7 +104,7 @@ impl AssetSource for MonocurlAssetSource {
 
 impl MonocurlLauncher {
     fn clean_latex_file_cache() {
-        if let Err(error) = latex::clean_stale_file_cache() {
+        if let Err(error) = text::clean_stale_file_cache() {
             log::warn!("unable to clean stale LaTeX SVG cache: {error:#}");
         }
     }

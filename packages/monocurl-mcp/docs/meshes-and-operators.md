@@ -60,7 +60,9 @@ equation transforms and selective formula styling. They're also used for animati
 
 Use `Text` for plain text, `Tex` for math fragments, and `Latex` for LaTeX body
 fragments that need extra structure or an `additional_preamble`. Text is still
-mesh geometry, so it can be styled, tagged, and animated.
+mesh geometry, so it can be styled, tagged, and animated. `Text(..., font =
+"...")` supports system fonts and project font files on native runtimes; custom
+text fonts are not available in web runtimes yet.
 
 String escapes use `%`, not `\`, which keeps LaTeX readable. Write TeX
 commands directly, such as `Tex("\frac{a}{b}")`; use `%%` for a literal percent

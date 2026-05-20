@@ -68,6 +68,7 @@ impl DocumentView {
             path,
             was_fullscreen_before_presenting: false,
             is_presenting: false,
+            presentation_window: None,
             is_headless: false,
             controls_window: None,
             window_state: window_state.clone(),
@@ -785,6 +786,7 @@ impl Render for DocumentView {
         if self.is_presenting {
             self.render_presentation(cx).into_any_element()
         } else {
+            self.close_controls_window(window, cx);
             self.render_editing(window, cx).into_any_element()
         }
     }

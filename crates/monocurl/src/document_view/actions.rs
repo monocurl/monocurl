@@ -102,10 +102,41 @@ fn epsilon_backward_target(
 }
 
 impl DocumentView {
-    fn close_controls_window(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn close_controls_window(&mut self, w: &mut Window, cx: &mut Context<Self>) {
         if let Some(handle) = self.controls_window.take() {
+            if Into::<AnyWindowHandle>::into(handle).window_id() == w.window_handle().window_id() {
+                w.remove_window();
+            } else {
+                let _ = handle.update(cx, |_, window, _| {
+                    window.remove_window();
+                });
+            }
+        }
+    }
+
+    fn restore_presentation_window_fullscreen(&mut self, fallback: &mut Window, cx: &mut App) {
+        if self.was_fullscreen_before_presenting {
+            self.presentation_window = None;
+            return;
+        }
+
+        let fallback_handle = fallback.window_handle();
+        let Some(handle) = self.presentation_window.take() else {
+            if fallback.is_fullscreen() {
+                fallback.toggle_fullscreen();
+            }
+            return;
+        };
+
+        if handle.window_id() == fallback_handle.window_id() {
+            if fallback.is_fullscreen() {
+                fallback.toggle_fullscreen();
+            }
+        } else {
             let _ = handle.update(cx, |_, window, _| {
-                window.remove_window();
+                if window.is_fullscreen() {
+                    window.toggle_fullscreen();
+                }
             });
         }
     }
@@ -212,10 +243,8 @@ impl DocumentView {
         self.focus(w);
 
         if self.is_presenting {
-            self.close_controls_window(cx);
-            if w.is_fullscreen() && !self.was_fullscreen_before_presenting {
-                w.toggle_fullscreen();
-            }
+            self.close_controls_window(w, cx);
+            self.restore_presentation_window_fullscreen(w, cx);
             self.is_presenting = false;
             self.viewport
                 .update(cx, |vp, cx| vp.set_presenting(false, cx));
@@ -225,6 +254,7 @@ impl DocumentView {
         } else {
             self.is_presenting = true;
             self.was_fullscreen_before_presenting = w.is_fullscreen();
+            self.presentation_window = Some(w.window_handle());
             self.viewport
                 .update(cx, |vp, cx| vp.set_presenting(true, cx));
             self.services.update(cx, |services, _| {
