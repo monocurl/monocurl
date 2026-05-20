@@ -868,11 +868,11 @@ fn video_bitrate(size: RenderSize, fps: u32) -> u32 {
 fn video_qp_range(size: RenderSize) -> QpRange {
     let pixels = u64::from(size.width) * u64::from(size.height);
     if pixels <= 1280_u64 * 720 {
-        QpRange::new(10, 20)
+        QpRange::new(4, 14)
     } else if pixels <= 1920_u64 * 1080 {
-        QpRange::new(10, 22)
+        QpRange::new(4, 16)
     } else {
-        QpRange::new(10, 24)
+        QpRange::new(6, 18)
     }
 }
 
