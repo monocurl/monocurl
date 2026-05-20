@@ -13,6 +13,21 @@ fn flatten_mesh_leaves(value: &Value, out: &mut Vec<std::sync::Arc<geo::mesh::Me
     }
 }
 
+fn monocurl_string_escape(value: &str) -> String {
+    let mut escaped = String::new();
+    for ch in value.chars() {
+        match ch {
+            '%' => escaped.push_str("%%"),
+            '"' => escaped.push_str("%\""),
+            '\n' => escaped.push_str("%n"),
+            '\t' => escaped.push_str("%t"),
+            '\r' => escaped.push_str("%r"),
+            _ => escaped.push(ch),
+        }
+    }
+    escaped
+}
+
 fn mesh_signature(mesh: &geo::mesh::Mesh) -> String {
     let dots = mesh
         .dots
@@ -1431,6 +1446,47 @@ fn test_text_tag_operator_tags_text_backends() {
         &["mesh", "util"],
     );
     r.assert_int(8);
+}
+
+#[test]
+fn test_svg_imports_file_as_mesh() {
+    let svg_path = std::env::temp_dir().join(format!(
+        "monocurl-svg-import-{}-{}.svg",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::write(
+        &svg_path,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="red"/></svg>"#,
+    )
+    .unwrap();
+    let filename = monocurl_string_escape(&svg_path.to_string_lossy());
+    let source = format!(
+        "
+        let icon = Svg(\"{filename}\", 1)
+        let result =
+            (len(mesh_triangle_set(icon)) > 0) +
+            (mesh_width(icon) > 0.9) +
+            (mesh_width(icon) < 1.1) +
+            (mesh_height(icon) > 0.9) +
+            (mesh_height(icon) < 1.1)
+    "
+    );
+    let r = run_with_stdlib(&source, &["mesh", "util"]);
+    std::fs::remove_file(&svg_path).unwrap();
+    r.assert_int(5);
+}
+
+#[test]
+fn test_svg_treats_inline_document_as_filename() {
+    let r = run_with_stdlib(
+        "let result = Svg(\"<svg xmlns=%\"http://www.w3.org/2000/svg%\"></svg>\", 1)",
+        &["mesh"],
+    );
+    r.assert_error("failed to read SVG file");
 }
 
 #[test]

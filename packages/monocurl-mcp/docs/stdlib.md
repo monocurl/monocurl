@@ -75,8 +75,12 @@ import std.scene
   custom text fonts are not available in web runtimes yet. In web runtimes,
   `Text` and `Tex` use browser MathJax, but full `Latex` body fragments are not
   available yet.
-- `Image(...)` and the `textured{...}` image-texturing operator are not
-  available in web runtimes yet.
+- `Image(...)`, `Svg(...)`, and the `textured{...}` image-texturing operator are
+  not available in web runtimes yet. `Svg(filename, scale = 1)` takes a
+  project-relative `.svg` filename string such as `"icons/play.svg"`, not pasted
+  raw SVG markup; 100 SVG units map to `scale` scene units, file imports resolve
+  supported relative SVG references from the SVG file's folder, and solid
+  fills/strokes are the best-supported subset.
 - Scene-level `background` and `camera` are ordinary top-level names with
   special meaning to the renderer.
 

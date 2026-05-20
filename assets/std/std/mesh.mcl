@@ -291,6 +291,20 @@ let Image = |name, center = [0, 0, 0], size = [1, 1]| {
 }
 
 ## [overview]
+## Import an SVG file into mesh geometry.
+## [description]
+## `filename` should be a project-relative `.svg` file path, passed as a string such as `"icons/play.svg"` rather than pasted raw SVG markup. File imports resolve supported relative SVG references from the SVG file's folder. The importer handles ordinary solid-color fills and strokes best; unsupported SVG features such as gradients, filters, masks, and raster images may be ignored. SVG coordinates are y-down, so imported geometry is flipped into Monocurl's y-up scene space. At `scale = 1`, 100 SVG units map to 1 scene unit.
+## Not available in web runtimes yet.
+## [parameters]
+## filename: project-relative `.svg` file path
+## scale: scene scale where 100 SVG units equal `scale` scene units
+## [example]
+## ```
+## mesh icon = Svg("icons/play.svg", 1.2)
+## ```
+let Svg = |filename, scale = 1| __monocurl__native__ mk_svg(filename, scale)
+
+## [overview]
 ## Sample a color function over a rectangular grid.
 ## [description]
 ## By default each visible cell gets one flat color sampled at the cell corner. Pass `smooth = 1` to color vertices for smooth interpolation, or pass a callable as the fourth argument to use it as the mask while keeping flat colors. `color_at` receives `(pos, [ix, iy])`; `mask` receives `pos`.

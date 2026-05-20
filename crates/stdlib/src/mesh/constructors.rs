@@ -100,8 +100,25 @@ fn mesh_ref(idx: usize) -> i32 {
     super::helpers::mesh_ref(idx)
 }
 
-fn latex_meshes_to_value(meshes: Vec<std::sync::Arc<geo::mesh::Mesh>>) -> Value {
+fn mesh_list_value(meshes: Vec<std::sync::Arc<geo::mesh::Mesh>>) -> Value {
     list_value(meshes.into_iter().map(Value::Mesh))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn svg_source_string(
+    executor: &Executor,
+    stack_idx: usize,
+    source: &str,
+) -> Result<(String, Option<std::path::PathBuf>), ExecutorError> {
+    let path = resolve_file_path(executor, stack_idx, source)?;
+    let resources_dir = path.parent().map(|path| path.to_path_buf());
+    let source = std::fs::read_to_string(&path).map_err(|error| {
+        ExecutorError::invalid_invocation(format!(
+            "failed to read SVG file `{}`: {error}",
+            path.display()
+        ))
+    })?;
+    Ok((source, resources_dir))
 }
 
 fn read_text_scale(
@@ -1154,6 +1171,30 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
     Ok(Value::Mesh(std::sync::Arc::new(mesh)))
 }
 
+#[cfg(target_arch = "wasm32")]
+#[stdlib_func]
+pub async fn mk_svg(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
+    Err(ExecutorError::invalid_invocation(
+        "Svg(...) is not supported in the WebAssembly runtime yet",
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[stdlib_func]
+pub async fn mk_svg(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let filename = read_string(executor, stack_idx, -2, "filename").await?;
+    let (svg, resources_dir) = svg_source_string(executor, stack_idx, &filename)?;
+    let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
+    let meshes = text::render_svg_with_quality_and_resources_dir(
+        &svg,
+        scale,
+        text_render_quality(executor),
+        resources_dir,
+    )
+    .map_err(|error| ExecutorError::invalid_invocation(format!("svg render failed: {error:#}")))?;
+    Ok(mesh_list_value(meshes))
+}
+
 #[stdlib_func]
 pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let text = read_string(executor, stack_idx, -3, "text").await?;
@@ -1168,7 +1209,7 @@ pub async fn mk_text(executor: &mut Executor, stack_idx: usize) -> Result<Value,
         None => text::render_text_with_quality(&text, scale, quality),
     }
     .map_err(|error| ExecutorError::invalid_invocation(format!("text render failed: {error:#}")))?;
-    Ok(latex_meshes_to_value(meshes))
+    Ok(mesh_list_value(meshes))
 }
 
 #[stdlib_func]
@@ -1179,7 +1220,7 @@ pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
         .map_err(|error| {
             ExecutorError::invalid_invocation(format!("tex render failed: {error:#}"))
         })?;
-    Ok(latex_meshes_to_value(meshes))
+    Ok(mesh_list_value(meshes))
 }
 
 #[stdlib_func]
@@ -1196,7 +1237,7 @@ pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value
     .map_err(|error| {
         ExecutorError::invalid_invocation(format!("latex render failed: {error:#}"))
     })?;
-    Ok(latex_meshes_to_value(meshes))
+    Ok(mesh_list_value(meshes))
 }
 
 #[stdlib_func]
@@ -1327,7 +1368,7 @@ pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     .map_err(|error| {
         ExecutorError::invalid_invocation(format!("number render failed: {error:#}"))
     })?;
-    Ok(latex_meshes_to_value(meshes))
+    Ok(mesh_list_value(meshes))
 }
 
 #[stdlib_func]

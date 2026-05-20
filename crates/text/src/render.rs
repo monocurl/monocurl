@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    path::PathBuf,
     sync::{Arc, OnceLock},
 };
 
@@ -24,6 +25,7 @@ use crate::{
 const SVG_TEXT_FONT_SIZE: f32 = 1000.0;
 const SVG_TEXT_LINE_HEIGHT_EM: f32 = 1.2;
 const SVG_TEXT_UNITS_AT_SCALE_1: f32 = SVG_TEXT_FONT_SIZE * 4.0;
+const SVG_MESH_UNITS_AT_SCALE_1: f32 = 100.0;
 const SVG_TEXT_CANVAS_SIZE: f32 = 100_000.0;
 
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
@@ -109,6 +111,41 @@ pub fn render_latex_with_preamble(
     scale: f32,
 ) -> Result<Vec<Arc<Mesh>>> {
     render_latex_with_preamble_and_quality(body, additional_preamble, scale, RenderQuality::Normal)
+}
+
+pub fn render_svg(svg_source: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
+    render_svg_with_quality(svg_source, scale, RenderQuality::Normal)
+}
+
+pub fn render_svg_with_quality(
+    svg_source: &str,
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    render_svg_with_quality_and_resources_dir(svg_source, scale, quality, None)
+}
+
+pub fn render_svg_with_quality_and_resources_dir(
+    svg_source: &str,
+    scale: f32,
+    quality: RenderQuality,
+    resources_dir: Option<PathBuf>,
+) -> Result<Vec<Arc<Mesh>>> {
+    validate_scale(scale)?;
+    if svg_source.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let options = svg_mesh_options(resources_dir);
+    let rendered = cache::import_svg_with_options(
+        svg_source,
+        scale,
+        quality,
+        SVG_MESH_UNITS_AT_SCALE_1,
+        true,
+        &options,
+    )?;
+    Ok(rendered.meshes.into_iter().map(Arc::new).collect())
 }
 
 pub fn render_latex_with_quality(
@@ -414,6 +451,26 @@ fn font_svg_options(font: &str) -> Result<(usvg::Options<'static>, String)> {
     Ok((options, font_family))
 }
 
+fn svg_mesh_options(resources_dir: Option<PathBuf>) -> usvg::Options<'static> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut options = usvg::Options {
+            resources_dir,
+            ..usvg::Options::default()
+        };
+        options.fontdb = system_font_db().clone();
+        options
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        usvg::Options {
+            resources_dir,
+            ..usvg::Options::default()
+        }
+    }
+}
+
 fn system_font_db() -> &'static Arc<FontDatabase> {
     static DB: OnceLock<Arc<FontDatabase>> = OnceLock::new();
     DB.get_or_init(|| {
@@ -707,6 +764,30 @@ mod tests {
         );
         assert!(multi_line.iter().any(|mesh| mesh.tag == vec![1]));
         for mesh in multi_line {
+            assert!(
+                mesh.has_consistent_topology(),
+                "{}",
+                mesh.topology_mismatch_report()
+                    .unwrap_or_else(|| "no mismatch report".into())
+            );
+        }
+    }
+
+    #[test]
+    fn svg_import_scales_basic_shapes() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect x="0" y="0" width="100" height="100" fill="red"/></svg>"#;
+        let meshes = render_svg(svg, 1.0).unwrap();
+        let (min, max) = mesh_bounds(&meshes).unwrap();
+        let size = max - min;
+
+        assert!((size.x - 1.0).abs() < 1e-4, "svg width {}", size.x);
+        assert!(
+            (size.y.abs() - 1.0).abs() < 1e-4,
+            "svg height {}",
+            size.y.abs()
+        );
+        assert!(!meshes.is_empty());
+        for mesh in meshes {
             assert!(
                 mesh.has_consistent_topology(),
                 "{}",
