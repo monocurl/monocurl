@@ -137,13 +137,14 @@ pub fn render_svg_with_quality_and_resources_dir(
     }
 
     let options = svg_mesh_options(resources_dir);
-    let rendered = cache::import_svg_with_options(
+    let rendered = cache::import_svg_with_options_and_tag_decoding(
         svg_source,
         scale,
         quality,
         SVG_MESH_UNITS_AT_SCALE_1,
         true,
         &options,
+        false,
     )?;
     Ok(rendered.meshes.into_iter().map(Arc::new).collect())
 }
@@ -643,6 +644,10 @@ mod tests {
         bounds
     }
 
+    fn mesh_triangle_count(meshes: &[Arc<Mesh>]) -> usize {
+        meshes.iter().map(|mesh| mesh.tris.len()).sum()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn bundled_font_path() -> String {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -795,6 +800,60 @@ mod tests {
                     .unwrap_or_else(|| "no mismatch report".into())
             );
         }
+    }
+
+    #[test]
+    fn svg_import_preserves_colors_that_look_like_text_tag_markers() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#FFF5EB"/></svg>"##;
+        let meshes = render_svg(svg, 1.0).unwrap();
+        let color = meshes
+            .iter()
+            .flat_map(|mesh| &mesh.tris)
+            .map(|tri| tri.a.col)
+            .next()
+            .unwrap();
+
+        assert!((color.x - 1.0).abs() < 1e-6, "red {}", color.x);
+        assert!((color.y - 245.0 / 255.0).abs() < 1e-6, "green {}", color.y);
+        assert!((color.z - 235.0 / 255.0).abs() < 1e-6, "blue {}", color.z);
+        assert!(
+            meshes.iter().all(|mesh| mesh.tag.is_empty()),
+            "plain SVG colors should not be decoded as text tags"
+        );
+    }
+
+    #[test]
+    fn high_quality_svg_import_samples_curves_more_densely() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M 0 50 C 25 0 75 0 100 50 C 75 100 25 100 0 50 Z" fill="red"/></svg>"#;
+        let normal = render_svg_with_quality(svg, 1.0, RenderQuality::Normal).unwrap();
+        let high = render_svg_with_quality(svg, 1.0, RenderQuality::High).unwrap();
+        let normal_tris = mesh_triangle_count(&normal);
+        let high_tris = mesh_triangle_count(&high);
+
+        assert!(
+            high_tris > normal_tris,
+            "high-quality SVG import should emit more triangles, got normal={normal_tris}, high={high_tris}"
+        );
+    }
+
+    #[test]
+    fn high_quality_tex_uses_toned_down_curve_sampling() {
+        if !configure_test_backend() {
+            return;
+        }
+        let normal = render_tex_with_quality("S", 1.0, RenderQuality::Normal).unwrap();
+        let high = render_tex_with_quality("S", 1.0, RenderQuality::High).unwrap();
+        let normal_tris = mesh_triangle_count(&normal);
+        let high_tris = mesh_triangle_count(&high);
+
+        assert!(
+            high_tris >= normal_tris,
+            "high-quality TeX import should not be coarser than normal, got normal={normal_tris}, high={high_tris}"
+        );
+        assert!(
+            high_tris <= normal_tris * 2,
+            "high-quality TeX import should stay close to normal density, got normal={normal_tris}, high={high_tris}"
+        );
     }
 
     #[test]

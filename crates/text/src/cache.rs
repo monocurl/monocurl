@@ -139,10 +139,30 @@ pub(crate) fn import_svg_with_options(
     flip_y: bool,
     usvg_options: &usvg::Options,
 ) -> Result<svg::RenderedSvg> {
+    import_svg_with_options_and_tag_decoding(
+        svg_source,
+        scale,
+        quality,
+        svg_units_at_scale_1,
+        flip_y,
+        usvg_options,
+        true,
+    )
+}
+
+pub(crate) fn import_svg_with_options_and_tag_decoding(
+    svg_source: &str,
+    scale: f32,
+    quality: RenderQuality,
+    svg_units_at_scale_1: f32,
+    flip_y: bool,
+    usvg_options: &usvg::Options,
+    decode_text_tags: bool,
+) -> Result<svg::RenderedSvg> {
     svg::import(
         svg_source,
         scale / svg_units_at_scale_1,
-        svg_import_options(quality, flip_y),
+        svg_import_options(quality, flip_y, decode_text_tags),
         usvg_options,
     )
 }
@@ -263,12 +283,26 @@ fn cache() -> &'static Mutex<HashMap<CacheKey, CacheEntry>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn svg_import_options(quality: RenderQuality, flip_y: bool) -> svg::ImportOptions {
+fn svg_import_options(
+    quality: RenderQuality,
+    flip_y: bool,
+    decode_text_tags: bool,
+) -> svg::ImportOptions {
     svg::ImportOptions {
         curve_sampling: match quality {
             RenderQuality::Normal => svg::CurveSampling::Normal,
             RenderQuality::High => svg::CurveSampling::High,
         },
+        curve_length_basis: if decode_text_tags {
+            svg::CurveLengthBasis::Scene
+        } else {
+            svg::CurveLengthBasis::Svg
+        },
+        min_curve_samples: match (decode_text_tags, quality) {
+            (true, RenderQuality::High) => svg::HIGH_QUALITY_TEXT_MIN_CURVE_SAMPLES,
+            _ => svg::MIN_CURVE_SAMPLES,
+        },
+        decode_text_tags,
         flip_y,
     }
 }
