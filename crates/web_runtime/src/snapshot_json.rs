@@ -566,6 +566,7 @@ struct SerializableTranscriptEntry {
     span: SerializableSpan,
     section: u16,
     is_root: bool,
+    root_slide_index: Option<usize>,
     text: String,
 }
 
@@ -578,6 +579,7 @@ impl From<&TranscriptEntry> for SerializableTranscriptEntry {
             },
             section: entry.section,
             is_root: entry.is_root,
+            root_slide_index: entry.root_slide_index,
             text: entry.text().to_string(),
         }
     }

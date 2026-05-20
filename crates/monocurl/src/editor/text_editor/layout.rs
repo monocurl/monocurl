@@ -1,5 +1,22 @@
 use super::*;
 
+const MAX_INLINE_TRANSCRIPT_CHARS: usize = 160;
+
+fn clipped_inline_transcript_text(text: &str) -> String {
+    let mut prefix_end = None;
+    for (idx, (byte_idx, _)) in text.char_indices().enumerate() {
+        if idx == MAX_INLINE_TRANSCRIPT_CHARS.saturating_sub(3) {
+            prefix_end = Some(byte_idx);
+        }
+        if idx == MAX_INLINE_TRANSCRIPT_CHARS {
+            let mut clipped = text[..prefix_end.unwrap_or(byte_idx)].to_string();
+            clipped.push_str("...");
+            return clipped;
+        }
+    }
+    text.to_string()
+}
+
 impl TextEditor {
     fn line_range_and_text(&self, state: &TextualState, line: usize) -> (Count8, Count8, String) {
         let start_loc = Location8 { row: line, col: 0 };
@@ -60,7 +77,10 @@ impl TextEditor {
                 .collect();
             let total = transcript_entries.len();
             for entry in transcript_entries.iter().take(MAX_INLINE_ENTRIES) {
-                transcript_rows.push((entry.text.clone(), transcript_run.clone()));
+                transcript_rows.push((
+                    clipped_inline_transcript_text(&entry.text),
+                    transcript_run.clone(),
+                ));
             }
             if total > MAX_INLINE_ENTRIES {
                 let hidden = total - MAX_INLINE_ENTRIES;

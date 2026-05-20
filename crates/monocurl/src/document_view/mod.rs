@@ -26,14 +26,17 @@ use crate::{
         user_settings::UserSettings,
         window_state::{ActiveScreen, WindowState},
     },
-    theme::ThemeSettings,
+    theme::{FontSet, ThemeSettings},
     timeline::timeline_view::Timeline,
     viewport::viewport_view::Viewport,
 };
 
 mod actions;
 mod export;
+mod presentation;
 mod render;
+
+use presentation::ControlsWindow;
 
 const AUTO_HEADLESS_WINDOW_WIDTH: f32 = 720.0;
 
@@ -257,6 +260,7 @@ pub struct DocumentView {
     was_fullscreen_before_presenting: bool,
     is_presenting: bool,
     is_headless: bool,
+    controls_window: Option<WindowHandle<ControlsWindow>>,
 
     state: DocumentState,
     services: Entity<ServiceManager>,

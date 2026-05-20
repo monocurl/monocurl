@@ -69,6 +69,7 @@ impl DocumentView {
             was_fullscreen_before_presenting: false,
             is_presenting: false,
             is_headless: false,
+            controls_window: None,
             window_state: window_state.clone(),
             state,
             services,
@@ -543,10 +544,24 @@ impl DocumentView {
         )
     }
 
-    fn render_presentation(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_presentation(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let controls_open = self.controls_window_is_open(cx);
+        let audience = self
+            .viewport
+            .update(cx, |viewport, cx| viewport.render_presentation_audience(cx));
+        let audience_status = if controls_open {
+            None
+        } else {
+            Some(
+                self.viewport
+                    .update(cx, |viewport, cx| viewport.presentation_status_labels(cx)),
+            )
+        };
+
         div()
             .relative()
             .size_full()
+            .font_family(FontSet::UI)
             .child(
                 div()
                     .size_full()
@@ -565,8 +580,14 @@ impl DocumentView {
                     .on_action(cx.listener(Self::epsilon_backward))
                     .on_action(cx.listener(Self::export_image))
                     .on_action(cx.listener(Self::export_video))
-                    .child(self.viewport.clone()),
+                    .child(audience),
             )
+            .children(audience_status.map(|status| {
+                render_presentation_audience_toolbar(
+                    status,
+                    cx.listener(Self::open_controls_window_action),
+                )
+            }))
             .children(self.render_export_overlay(cx))
             .children(self.render_export_settings_modal(cx))
     }
@@ -650,6 +671,105 @@ impl DocumentView {
             .children(self.render_export_overlay(cx))
             .children(self.render_export_settings_modal(cx))
     }
+}
+
+fn render_presentation_controls_button(
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    div()
+        .id("presentation-controls-button")
+        .px(px(8.0))
+        .py(px(3.0))
+        .rounded(px(2.0))
+        .bg(Rgba {
+            r: 0.0,
+            g: 0.0,
+            b: 0.0,
+            a: 0.42,
+        })
+        .border(px(1.0))
+        .border_color(Rgba {
+            r: 0.55,
+            g: 0.55,
+            b: 0.55,
+            a: 0.38,
+        })
+        .text_color(Rgba {
+            r: 0.86,
+            g: 0.86,
+            b: 0.86,
+            a: 0.72,
+        })
+        .text_size(px(11.0))
+        .cursor_pointer()
+        .opacity(0.86)
+        .hover(|style| style.opacity(1.0))
+        .child("Controls")
+        .on_click(on_click)
+}
+
+fn render_presentation_audience_toolbar(
+    status: (String, String, Option<String>, bool),
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let (slide_label, time_label, title_label, show_pause_hint) = status;
+
+    div()
+        .id("presentation-audience-toolbar")
+        .absolute()
+        .top(px(8.0))
+        .left(px(8.0))
+        .right(px(8.0))
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .font_family(FontSet::UI)
+        .child(render_presentation_controls_button(on_click))
+        .child(
+            div()
+                .text_color(Rgba {
+                    r: 0.86,
+                    g: 0.86,
+                    b: 0.86,
+                    a: 0.78,
+                })
+                .text_size(px(12.0))
+                .child(slide_label),
+        )
+        .child(
+            div()
+                .text_color(Rgba {
+                    r: 0.68,
+                    g: 0.68,
+                    b: 0.68,
+                    a: 0.78,
+                })
+                .text_size(px(11.0))
+                .child(time_label),
+        )
+        .children(title_label.map(|title| {
+            div()
+                .text_color(Rgba {
+                    r: 0.68,
+                    g: 0.68,
+                    b: 0.68,
+                    a: 0.72,
+                })
+                .text_size(px(11.0))
+                .child(title)
+        }))
+        .children(show_pause_hint.then(|| div().flex_1()))
+        .children(show_pause_hint.then(|| {
+            div()
+                .text_color(Rgba {
+                    r: 0.68,
+                    g: 0.68,
+                    b: 0.68,
+                    a: 0.72,
+                })
+                .text_size(px(11.0))
+                .child("press shift + space to pause")
+        }))
 }
 
 impl Render for DocumentView {

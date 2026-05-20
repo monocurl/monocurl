@@ -7,8 +7,6 @@ use crate::{
     value::{Value, container::Map},
 };
 
-const MAX_ENTRY_LEN: usize = 160;
-
 /// transcript payload. currently string-only, but kept as an enum so richer
 /// display structures can be added without changing the transport surface
 #[derive(Clone, Debug)]
@@ -32,6 +30,10 @@ pub struct TranscriptEntry {
     /// (library imports) are included in the console transcript only and not
     /// rendered inline in the editor
     pub is_root: bool,
+    /// user-visible root slide index for entries originating from the root
+    /// module. root init entries use index 0; proper slides use 1-based
+    /// indexes. library/import entries do not have a root slide index.
+    pub root_slide_index: Option<usize>,
     pub kind: TranscriptEntryKind,
 }
 
@@ -87,20 +89,7 @@ impl Transcript {
 pub fn stringify_for_transcript(value: &Value) -> String {
     let mut out = String::new();
     write_value(value, &mut out, 0);
-    if out.chars().count() > MAX_ENTRY_LEN {
-        let mut cap = String::new();
-        let prefix_len = MAX_ENTRY_LEN.saturating_sub(3);
-        for (i, ch) in out.chars().enumerate() {
-            if i >= prefix_len {
-                break;
-            }
-            cap.push(ch);
-        }
-        cap.push_str("...");
-        cap
-    } else {
-        out
-    }
+    out
 }
 
 const MAX_DEPTH: usize = 6;
@@ -159,10 +148,6 @@ fn write_value(value: &Value, out: &mut String, depth: usize) {
                 }
                 let inner = with_heap(|h| h.get(el.key()).clone());
                 write_value(&inner, out, depth + 1);
-                if out.chars().count() > MAX_ENTRY_LEN + 10 {
-                    out.push_str(", ...");
-                    break;
-                }
             }
             out.push(']');
         }
@@ -197,10 +182,6 @@ fn write_map(map: &Map, out: &mut String, depth: usize) {
         out.push_str(" -> ");
         let inner = with_heap(|h| h.get(value_rc.key()).clone());
         write_value(&inner, out, depth + 1);
-        if out.chars().count() > MAX_ENTRY_LEN + 10 {
-            out.push_str(", ...");
-            break;
-        }
     }
     out.push('}');
 }

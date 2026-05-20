@@ -60,7 +60,6 @@ pub struct Viewport {
     execution_state: Entity<ExecutionState>,
     is_presenting: bool,
     aspect_preset: AspectRatioPreset,
-    show_params: bool,
     drag_state: Option<DragState>,
     camera_drag: Option<CameraDragState>,
     preview_camera: Option<PreviewCameraState>,
@@ -77,6 +76,8 @@ pub struct Viewport {
     ring_animation_nonce: usize,
     renderer: Renderer,
     scene_image_cache: SceneImageCache,
+    audience_renderer: Renderer,
+    audience_scene_image_cache: SceneImageCache,
 }
 
 impl Viewport {
@@ -99,7 +100,6 @@ impl Viewport {
             execution_state,
             is_presenting: false,
             aspect_preset: AspectRatioPreset::Wide,
-            show_params: false,
             drag_state: None,
             camera_drag: None,
             preview_camera: None,
@@ -119,6 +119,8 @@ impl Viewport {
             ring_animation_nonce: 0,
             renderer: Renderer::default(),
             scene_image_cache: SceneImageCache::default(),
+            audience_renderer: Renderer::default(),
+            audience_scene_image_cache: SceneImageCache::default(),
         };
 
         cx.spawn(async move |weak, cx| {
@@ -157,7 +159,6 @@ impl Viewport {
             self.ring_previous = hidden_ring;
         }
         if !presenting {
-            self.show_params = false;
             self.drag_state = None;
             self.slider_bounds.clear();
         }
@@ -211,7 +212,6 @@ impl Viewport {
     }
 
     pub fn toggle_params(&mut self, cx: &mut Context<Self>) {
-        self.show_params = !self.show_params;
         cx.notify();
     }
 

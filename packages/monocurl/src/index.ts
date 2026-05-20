@@ -220,6 +220,7 @@ export interface TranscriptEntry {
   span: SourceSpan;
   section: number;
   isRoot: boolean;
+  rootSlideIndex: number | null;
   text: string;
 }
 

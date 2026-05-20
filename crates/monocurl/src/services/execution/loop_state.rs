@@ -77,11 +77,9 @@ impl RuntimeState {
                 self.controller
                     .apply_command(RuntimeCommand::UpdateAspectRatio(aspect_ratio), now_seconds)
             }
-            ExecutionMessage::SeekTo { target } => {
-                log::info!("seek_to {:?}", target);
-                self.controller
-                    .apply_command(RuntimeCommand::SeekTo { target }, now_seconds)
-            }
+            ExecutionMessage::SeekTo { target } => self
+                .controller
+                .apply_command(RuntimeCommand::SeekTo { target }, now_seconds),
             ExecutionMessage::TogglePlay => {
                 let effect = self
                     .controller

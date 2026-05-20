@@ -2,7 +2,10 @@ use std::cell::RefCell;
 
 use smallvec::SmallVec;
 
-use crate::{error::ExecutorError, heap::{HeapKey, VRc, with_heap}};
+use crate::{
+    error::ExecutorError,
+    heap::{HeapKey, VRc, with_heap},
+};
 
 use super::{Value, rc_cached::RcCached};
 
@@ -175,7 +178,12 @@ pub fn lift_append_to_stateful(lhs: Value, rhs: Value) -> Result<Value, Executor
         }
         Value::Stateful(ref s) => match &s.body.root {
             StatefulNode::List(children) => (children.clone(), s.body.roots.clone()),
-            _ => return Err(ExecutorError::type_error("list", "stateful (non-list) expression")),
+            _ => {
+                return Err(ExecutorError::type_error(
+                    "list",
+                    "stateful (non-list) expression",
+                ));
+            }
         },
         other => return Err(ExecutorError::type_error("list", other.type_name())),
     };

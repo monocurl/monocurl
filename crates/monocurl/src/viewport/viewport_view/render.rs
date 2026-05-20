@@ -1,9 +1,11 @@
+use executor::transcript::SectionTranscript;
 use gpui::*;
 use renderer::SceneRenderData;
+use std::sync::Arc;
 
 use crate::{
     services::ServiceManager,
-    theme::ThemeSettings,
+    theme::{FontSet, ThemeSettings},
     timeline::{slide_label, slide_title_label, visual_slide_time},
     viewport::scene_renderer::{SceneImageRevision, retired_image_limit_for_presentation},
 };
@@ -27,6 +29,16 @@ const ASPECT_CONTROL_BUTTON_H: f32 = 16.0;
 const VIEWPORT_PREVIEW_CHROME_INSET_X: f32 = 8.0;
 const VIEWPORT_PREVIEW_CHROME_INSET_Y: f32 = 6.0;
 const PAUSE_HINT_TEXT: &str = "press shift + space to pause";
+const PRES_LAYOUT_PAD: f32 = 16.0;
+const PRES_LAYOUT_GAP: f32 = 16.0;
+const PRES_MIN_NOTES_H: f32 = 140.0;
+const AUDIENCE_ASPECT_RATIO: f32 = 16.0 / 9.0;
+const AUDIENCE_LETTERBOX_BG: Rgba = Rgba {
+    r: 0.0,
+    g: 0.0,
+    b: 0.0,
+    a: 1.0,
+};
 const VIEWPORT_OVERSCAN_SCRIM: Rgba = Rgba {
     r: 0.5,
     g: 0.5,
@@ -42,7 +54,21 @@ enum SceneStageMode {
     },
     Presentation {
         aspect_ratio: f32,
+        interactive: bool,
     },
+}
+
+impl SceneStageMode {
+    fn is_presentation(self) -> bool {
+        matches!(self, Self::Presentation { .. })
+    }
+
+    fn is_interactive(self) -> bool {
+        match self {
+            Self::Preview { .. } => true,
+            Self::Presentation { interactive, .. } => interactive,
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -53,17 +79,84 @@ struct SceneStageLayout {
     preview_ring: Option<RingStyle>,
 }
 
+#[derive(Clone, Copy)]
+enum SceneStageCache {
+    Main,
+    Audience,
+}
+
+impl Viewport {
+    pub(crate) fn presentation_status_labels(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> (String, String, Option<String>, bool) {
+        let execution = self.execution_state.read(cx);
+        let (slide_label, time_label, title_label) = match visual_slide_time(
+            execution.current_timestamp.slide,
+            execution.current_timestamp.time,
+            &execution.slide_durations,
+        ) {
+            None => (
+                format!("Slide 0 / {}", execution.slide_count.max(1)),
+                "0.00s".to_string(),
+                None,
+            ),
+            Some((slide, time)) => (
+                slide_label(slide, execution.slide_count.max(1)),
+                format!("{:.2}s", time),
+                slide_title_label(slide, &execution.slide_names),
+            ),
+        };
+
+        (slide_label, time_label, title_label, self.show_pause_hint)
+    }
+
+    pub(crate) fn render_presentation_audience(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let (background, scene_camera, meshes, scene_version) = {
+            let execution = self.execution_state.read(cx);
+            (
+                execution.background,
+                execution.camera.clone(),
+                execution.meshes.clone(),
+                execution.scene_version,
+            )
+        };
+        let display_camera = self.display_camera(&scene_camera);
+        let scene = SceneRenderData {
+            background,
+            camera: display_camera,
+            meshes,
+        };
+        let scene_revision = SceneImageRevision::new(scene_version, self.viewport_camera_version);
+
+        div()
+            .size_full()
+            .bg(AUDIENCE_LETTERBOX_BG)
+            .child(render_scene_stage(
+                scene,
+                scene_revision,
+                AUDIENCE_LETTERBOX_BG,
+                SceneStageMode::Presentation {
+                    aspect_ratio: AUDIENCE_ASPECT_RATIO,
+                    interactive: false,
+                },
+                SceneStageCache::Audience,
+                cx.weak_entity(),
+            ))
+            .into_any_element()
+    }
+}
+
 impl Render for Viewport {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = ThemeSettings::theme(cx);
         let (
             status,
             is_loading,
             params,
+            transcript,
             timestamp,
             slide_count,
-            slide_names,
-            durations,
             background,
             scene_camera,
             meshes,
@@ -75,10 +168,9 @@ impl Render for Viewport {
                 execution.status,
                 execution.is_loading,
                 execution.parameters.clone(),
+                execution.transcript.clone(),
                 execution.current_timestamp,
                 execution.slide_count,
-                execution.slide_names.clone(),
-                execution.slide_durations.clone(),
                 execution.background,
                 execution.camera.clone(),
                 execution.meshes.clone(),
@@ -135,6 +227,7 @@ impl Render for Viewport {
             return div()
                 .relative()
                 .size_full()
+                .font_family(FontSet::UI)
                 .bg(theme.viewport_background)
                 .child(render_scene_stage(
                     scene,
@@ -144,6 +237,7 @@ impl Render for Viewport {
                         ring_style,
                         aspect_ratio,
                     },
+                    SceneStageCache::Main,
                     weak_vp.clone(),
                 ))
                 .child(render_preview_aspect_controls(aspect_preset, weak_vp, cx))
@@ -160,16 +254,23 @@ impl Render for Viewport {
 
         let previous_ring = self.ring_previous;
         let ring_animation_id = format!("viewport-ring-{}", self.ring_animation_nonce);
+        let stage_height = presentation_stage_height(window, aspect_ratio);
         let stage = div()
             .relative()
             .flex()
             .flex_1()
             .size_full()
+            .border(px(1.0))
+            .border_color(PRES_BORDER)
             .child(render_scene_stage(
                 scene,
                 scene_revision,
                 presentation_stage_background,
-                SceneStageMode::Presentation { aspect_ratio },
+                SceneStageMode::Presentation {
+                    aspect_ratio,
+                    interactive: true,
+                },
+                SceneStageCache::Main,
                 weak_vp.clone(),
             ))
             .child(render_presentation_ring(
@@ -180,138 +281,9 @@ impl Render for Viewport {
 
         let services_weak: WeakEntity<ServiceManager> = self.services.downgrade();
         let controls = parameter_controls(self, params.as_ref(), services_weak, weak_vp.clone());
-        let (slide_label, time_label, title_label) =
-            match visual_slide_time(timestamp.slide, timestamp.time, &durations) {
-                None => (
-                    format!("Slide 0 / {}", slide_count.max(1)),
-                    "0.00s".to_string(),
-                    None,
-                ),
-                Some((slide, time)) => (
-                    slide_label(slide, slide_count.max(1)),
-                    format!("{:.2}s", time),
-                    slide_title_label(slide, &slide_names),
-                ),
-            };
-        let params_button = render_toolbar_button(
-            "pres-params-btn",
-            "Parameters",
-            cx.listener(|viewport, _, _, cx| viewport.toggle_params(cx)),
-        );
-        if self.show_params {
-            let reset_button = show_presentation_reset.then(|| {
-                div()
-                    .flex()
-                    .pb(px(8.0))
-                    .child(render_toolbar_button(
-                        "pres-camera-reset-btn",
-                        "Reset Camera",
-                        cx.listener(|viewport, _, _, cx| viewport.sync_viewport_camera(cx)),
-                    ))
-                    .into_any_element()
-            });
-            let sidebar_header = div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(10.0))
-                .px(px(12.0))
-                .h(px(PRES_TOOLBAR_H))
-                .flex_shrink_0()
-                .bg(PRES_TOOLBAR_BG)
-                .border_b(px(1.0))
-                .border_color(PRES_BORDER)
-                .child(params_button)
-                .child(
-                    div()
-                        .text_color(PRES_TEXT)
-                        .text_size(px(12.0))
-                        .child(slide_label),
-                )
-                .child(
-                    div()
-                        .text_color(PRES_MUTED)
-                        .text_size(px(11.0))
-                        .child(time_label),
-                )
-                .children(self.show_pause_hint.then(|| div().flex_1()))
-                .children(self.show_pause_hint.then(render_pause_hint));
-
-            let params_body = if controls.is_empty() && reset_button.is_none() {
-                div()
-                    .id("pres-params-list")
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(
-                        div()
-                            .text_color(PRES_MUTED)
-                            .text_size(px(12.0))
-                            .child("No active parameters"),
-                    )
-                    .into_any_element()
-            } else if controls.is_empty() {
-                div()
-                    .id("pres-params-list")
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .children(reset_button)
-                    .child(
-                        div().flex_1().flex().items_center().justify_center().child(
-                            div()
-                                .text_color(PRES_MUTED)
-                                .text_size(px(12.0))
-                                .child("No active parameters"),
-                        ),
-                    )
-                    .into_any_element()
-            } else {
-                div()
-                    .id("pres-params-list")
-                    .flex_1()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll_handle)
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .children(reset_button)
-                    .children(controls)
-                    .into_any_element()
-            };
-
-            let sidebar = div()
-                .flex()
-                .flex_col()
-                .w(px(PARAM_PANEL_W))
-                .flex_shrink_0()
-                .h_full()
-                .bg(PRES_BG)
-                .border_r(px(1.0))
-                .border_color(PRES_BORDER)
-                .child(sidebar_header)
-                .child(params_body);
-
-            return div()
-                .flex()
-                .flex_row()
-                .size_full()
-                .bg(PRES_BG)
-                .child(sidebar)
-                .child(
-                    div()
-                        .flex_1()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(PRES_BG)
-                        .p(px(24.0))
-                        .child(stage),
-                )
-                .into_any_element();
-        }
+        let notes = current_slide_notes(&transcript, timestamp.slide, slide_count);
+        let (slide_label, time_label, title_label, show_pause_hint) =
+            self.presentation_status_labels(cx);
 
         let toolbar = div()
             .flex()
@@ -322,7 +294,6 @@ impl Render for Viewport {
             .h(px(PRES_TOOLBAR_H))
             .flex_shrink_0()
             .bg(PRES_TOOLBAR_BG)
-            .child(params_button)
             .children(show_presentation_reset.then(|| {
                 render_small_toolbar_button(
                     "pres-camera-reset-btn",
@@ -348,27 +319,205 @@ impl Render for Viewport {
                     .text_size(px(11.0))
                     .child(title)
             }))
-            .children(self.show_pause_hint.then(|| div().flex_1()))
-            .children(self.show_pause_hint.then(render_pause_hint));
+            .children(show_pause_hint.then(|| div().flex_1()))
+            .children(show_pause_hint.then(render_pause_hint));
+
+        let notes_panel = render_notes_panel(notes);
+        let params_panel = render_parameters_panel(controls, &self.scroll_handle);
 
         div()
             .flex()
             .flex_col()
             .size_full()
+            .font_family(FontSet::UI)
             .bg(PRES_BG)
             .child(toolbar)
             .child(
                 div()
                     .flex_1()
                     .flex()
-                    .items_center()
-                    .justify_center()
+                    .flex_row()
+                    .min_h_0()
+                    .gap(px(PRES_LAYOUT_GAP))
                     .bg(PRES_BG)
-                    .p(px(24.0))
-                    .child(stage),
+                    .p(px(PRES_LAYOUT_PAD))
+                    .child(params_panel)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .min_h_0()
+                            .gap(px(PRES_LAYOUT_GAP))
+                            .child(
+                                div()
+                                    .h(px(stage_height))
+                                    .flex_shrink_0()
+                                    .min_h_0()
+                                    .child(stage),
+                            )
+                            .child(notes_panel),
+                    ),
             )
             .into_any_element()
     }
+}
+
+fn presentation_stage_height(window: &Window, aspect_ratio: f32) -> f32 {
+    let window_size = window.bounds().size;
+    let width = f32::from(window_size.width).max(1.0);
+    let height = f32::from(window_size.height).max(1.0);
+    let param_width = PARAM_PANEL_W + 48.0;
+    let stage_width = (width - PRES_LAYOUT_PAD * 2.0 - PRES_LAYOUT_GAP - param_width).max(1.0);
+    let body_height = (height - PRES_TOOLBAR_H - PRES_LAYOUT_PAD * 2.0).max(1.0);
+    let ideal_stage_height = stage_width / aspect_ratio.max(0.1);
+    let max_stage_height = (body_height - PRES_LAYOUT_GAP - PRES_MIN_NOTES_H).max(1.0);
+
+    ideal_stage_height.min(max_stage_height).max(1.0)
+}
+
+fn current_slide_notes(
+    transcript: &[Arc<SectionTranscript>],
+    slide: usize,
+    slide_count: usize,
+) -> Vec<String> {
+    let slide = if slide_count == 0 {
+        slide
+    } else {
+        slide.min(slide_count)
+    };
+
+    transcript
+        .iter()
+        .flat_map(|section| section.entries.iter())
+        .filter(|entry| entry.root_slide_index == Some(slide))
+        .map(|entry| entry.text().to_string())
+        .collect()
+}
+
+fn render_panel_header(label: &'static str) -> impl IntoElement {
+    div()
+        .h(px(32.0))
+        .flex()
+        .items_center()
+        .px(px(10.0))
+        .flex_shrink_0()
+        .border_b(px(1.0))
+        .border_color(PRES_BORDER)
+        .bg(PRES_TOOLBAR_BG)
+        .text_color(PRES_TEXT)
+        .text_size(px(12.0))
+        .child(label)
+}
+
+fn render_notes_panel(notes: Vec<String>) -> AnyElement {
+    let rows = if notes.is_empty() {
+        vec![
+            div()
+                .text_color(PRES_MUTED)
+                .child("(no transcript)")
+                .into_any_element(),
+        ]
+    } else {
+        notes
+            .into_iter()
+            .flat_map(|note| {
+                let mut rows = Vec::new();
+                let mut emitted = false;
+                for line in note.lines() {
+                    emitted = true;
+                    rows.push(
+                        div()
+                            .w_full()
+                            .text_color(PRES_TEXT)
+                            .child(if line.is_empty() {
+                                " ".to_string()
+                            } else {
+                                line.to_string()
+                            })
+                            .into_any_element(),
+                    );
+                }
+                if !emitted {
+                    rows.push(
+                        div()
+                            .w_full()
+                            .text_color(PRES_TEXT)
+                            .child(" ")
+                            .into_any_element(),
+                    );
+                }
+                rows
+            })
+            .collect()
+    };
+
+    div()
+        .id("pres-notes-panel")
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h_0()
+        .border(px(1.0))
+        .border_color(PRES_BORDER)
+        .bg(PRES_PANEL_BG)
+        .child(render_panel_header("Slide Transcript"))
+        .child(
+            div()
+                .id("pres-notes-scroll")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .px(px(10.0))
+                .py(px(8.0))
+                .text_size(px(12.0))
+                .line_height(px(17.0))
+                .children(rows),
+        )
+        .into_any_element()
+}
+
+fn render_parameters_panel(controls: Vec<AnyElement>, scroll: &ScrollHandle) -> AnyElement {
+    let body = if controls.is_empty() {
+        div()
+            .flex_1()
+            .flex()
+            .items_center()
+            .justify_center()
+            .px(px(12.0))
+            .child(
+                div()
+                    .text_color(PRES_MUTED)
+                    .text_size(px(12.0))
+                    .child("No active parameters"),
+            )
+            .into_any_element()
+    } else {
+        div()
+            .id("pres-params-list")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(scroll)
+            .px(px(12.0))
+            .py(px(8.0))
+            .children(controls)
+            .into_any_element()
+    };
+
+    div()
+        .flex()
+        .flex_col()
+        .w(px(PARAM_PANEL_W + 48.0))
+        .flex_shrink_0()
+        .min_h_0()
+        .border(px(1.0))
+        .border_color(PRES_BORDER)
+        .bg(PRES_BG)
+        .child(render_panel_header("Parameters"))
+        .child(body)
+        .into_any_element()
 }
 
 fn render_scene_stage(
@@ -376,6 +525,7 @@ fn render_scene_stage(
     scene_revision: SceneImageRevision,
     stage_background: Rgba,
     mode: SceneStageMode,
+    cache: SceneStageCache,
     weak_vp: WeakEntity<Viewport>,
 ) -> impl IntoElement {
     div()
@@ -389,14 +539,21 @@ fn render_scene_stage(
                 let weak_vp = weak_vp.clone();
                 move |_, bounds: Bounds<Pixels>, window, _cx| {
                     let layout = scene_stage_layout(bounds, mode);
-                    let retired_image_limit = retired_image_limit_for_presentation(matches!(
-                        mode,
-                        SceneStageMode::Presentation { .. }
-                    ));
+                    let retired_image_limit =
+                        retired_image_limit_for_presentation(mode.is_presentation());
                     let scene_image = weak_vp
                         .update(_cx, |viewport, _cx| {
-                            viewport.scene_image_cache.image_for(
-                                &mut viewport.renderer,
+                            let (renderer, image_cache) = match cache {
+                                SceneStageCache::Main => {
+                                    (&mut viewport.renderer, &mut viewport.scene_image_cache)
+                                }
+                                SceneStageCache::Audience => (
+                                    &mut viewport.audience_renderer,
+                                    &mut viewport.audience_scene_image_cache,
+                                ),
+                            };
+                            image_cache.image_for(
+                                renderer,
                                 &scene,
                                 scene_revision,
                                 layout.image_bounds,
@@ -424,7 +581,7 @@ fn render_scene_stage(
                         paint_preview_frame_border(window, frame_bounds, ring_style);
                     }
 
-                    {
+                    if mode.is_interactive() {
                         let weak_vp = weak_vp.clone();
                         window.on_mouse_event(move |event: &MouseDownEvent, phase, _, cx| {
                             let frame_bounds = scene_stage_layout(bounds, mode).interaction_bounds;
@@ -456,7 +613,7 @@ fn render_scene_stage(
                         });
                     }
 
-                    {
+                    if mode.is_interactive() {
                         let weak_vp = weak_vp.clone();
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                             let frame_bounds = scene_stage_layout(bounds, mode).interaction_bounds;
@@ -475,7 +632,7 @@ fn render_scene_stage(
                         });
                     }
 
-                    {
+                    if mode.is_interactive() {
                         let weak_vp = weak_vp.clone();
                         window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
                             if phase != DispatchPhase::Bubble {
@@ -512,7 +669,7 @@ fn scene_stage_layout(bounds: Bounds<Pixels>, mode: SceneStageMode) -> SceneStag
                 preview_ring: Some(ring_style),
             }
         }
-        SceneStageMode::Presentation { aspect_ratio } => {
+        SceneStageMode::Presentation { aspect_ratio, .. } => {
             let frame_bounds = aspect_frame_bounds(bounds, 0.0, aspect_ratio);
             SceneStageLayout {
                 image_bounds: frame_bounds,
@@ -807,27 +964,6 @@ fn aspect_preset_icon_size(preset: AspectRatioPreset) -> (f32, f32) {
 
 fn with_alpha(color: Rgba, a: f32) -> Rgba {
     Rgba { a, ..color }
-}
-
-fn render_toolbar_button(
-    id: &'static str,
-    label: &'static str,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> Stateful<Div> {
-    div()
-        .id(id)
-        .px(px(10.0))
-        .py(px(3.0))
-        .rounded(px(3.0))
-        .bg(PRES_PANEL_BG)
-        .border(px(1.0))
-        .border_color(PRES_BORDER)
-        .text_color(PRES_TEXT)
-        .text_size(px(12.0))
-        .cursor_pointer()
-        .hover(|style| style.opacity(0.75))
-        .child(label)
-        .on_click(on_click)
 }
 
 fn render_small_toolbar_button(
