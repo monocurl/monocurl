@@ -102,6 +102,96 @@ fn epsilon_backward_target(
 }
 
 impl DocumentView {
+    fn close_controls_window(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.controls_window.take() {
+            let _ = handle.update(cx, |_, window, _| {
+                window.remove_window();
+            });
+        }
+    }
+
+    fn controls_display_options(&self, w: &Window, cx: &mut Context<Self>) -> WindowOptions {
+        let control_display_id = w.display(cx).map(|display| display.id());
+        if let Some(display) = cx
+            .displays()
+            .into_iter()
+            .find(|display| Some(display.id()) != control_display_id)
+        {
+            return WindowOptions {
+                titlebar: None,
+                window_bounds: Some(WindowBounds::Fullscreen(display.bounds())),
+                display_id: Some(display.id()),
+                focus: true,
+                is_movable: false,
+                is_resizable: false,
+                is_minimizable: false,
+                window_background: WindowBackgroundAppearance::Opaque,
+                ..Default::default()
+            };
+        }
+
+        let window_size = size(px(1280.0), px(760.0));
+        WindowOptions {
+            titlebar: Some(TitlebarOptions {
+                title: Some("Presentation Controls".into()),
+                ..Default::default()
+            }),
+            window_bounds: Some(WindowBounds::centered(window_size, cx)),
+            window_min_size: Some(size(px(880.0), px(520.0))),
+            focus: true,
+            window_background: WindowBackgroundAppearance::Opaque,
+            ..Default::default()
+        }
+    }
+
+    pub(super) fn controls_window_is_open(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(handle) = self.controls_window.as_ref() else {
+            return false;
+        };
+
+        if handle.update(cx, |_, _, _| ()).is_ok() {
+            true
+        } else {
+            self.controls_window = None;
+            false
+        }
+    }
+
+    fn open_controls_window(&mut self, w: &Window, cx: &mut Context<Self>) {
+        if let Some(handle) = self.controls_window.as_ref()
+            && handle
+                .update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+        {
+            return;
+        }
+        self.controls_window = None;
+
+        let viewport = self.viewport.clone();
+        let document = cx.weak_entity();
+        let options = self.controls_display_options(w, cx);
+        match cx.open_window(options, move |_window, cx| {
+            cx.new(|cx| ControlsWindow::new(document, viewport, cx))
+        }) {
+            Ok(handle) => {
+                self.controls_window = Some(handle);
+            }
+            Err(error) => {
+                log::warn!("Unable to open presentation controls window: {error:#}");
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn open_controls_window_action(
+        &mut self,
+        _: &ClickEvent,
+        w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_controls_window(w, cx);
+    }
+
     pub fn focus(&self, window: &mut Window) {
         window.focus(&self.focus_handle);
     }
@@ -122,6 +212,7 @@ impl DocumentView {
         self.focus(w);
 
         if self.is_presenting {
+            self.close_controls_window(cx);
             if w.is_fullscreen() && !self.was_fullscreen_before_presenting {
                 w.toggle_fullscreen();
             }
@@ -134,14 +225,14 @@ impl DocumentView {
         } else {
             self.is_presenting = true;
             self.was_fullscreen_before_presenting = w.is_fullscreen();
-            if !w.is_fullscreen() {
-                w.toggle_fullscreen();
-            }
             self.viewport
                 .update(cx, |vp, cx| vp.set_presenting(true, cx));
             self.services.update(cx, |services, _| {
                 services.set_playback_mode(PlaybackMode::Presentation);
             });
+            if !w.is_fullscreen() {
+                w.toggle_fullscreen();
+            }
         }
         log::info!("Toggled presentation mode to {}", self.is_presenting);
         cx.notify();
@@ -178,10 +269,14 @@ impl DocumentView {
     pub(super) fn toggle_params_panel(
         &mut self,
         _: &ToggleParamsPanel,
-        _w: &mut Window,
+        w: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.viewport.update(cx, |vp, cx| vp.toggle_params(cx));
+        if self.is_presenting {
+            self.open_controls_window(w, cx);
+        } else {
+            self.viewport.update(cx, |vp, cx| vp.toggle_params(cx));
+        }
     }
 
     pub(super) fn toggle_timeline_console(
@@ -469,6 +564,11 @@ impl DocumentView {
 
 impl DocumentView {
     pub fn save_before_close(&mut self, cx: &mut App) {
+        if let Some(handle) = self.controls_window.take() {
+            let _ = handle.update(cx, |_, window, _| {
+                window.remove_window();
+            });
+        }
         self.editor.update(cx, |editor, cx| {
             editor.save(cx);
         });

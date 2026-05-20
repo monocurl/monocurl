@@ -20,6 +20,7 @@ struct ExecResult {
     /// the value captured from the root execution head's TOS, if any
     value: Option<Value>,
     transcript: Vec<String>,
+    transcript_root_slide_indexes: Vec<Option<usize>>,
     /// compile-time or runtime error messages
     errors: Vec<String>,
     _error_spans: Vec<Span8>,
@@ -34,6 +35,10 @@ impl ExecResult {
         vec![
             format!("value: {}", self.value_summary()),
             format!("transcript: {:?}", self.transcript),
+            format!(
+                "transcript root slide indexes: {:?}",
+                self.transcript_root_slide_indexes
+            ),
             format!("errors: {:?}", self.errors),
             format!("error spans: {:?}", self._error_spans),
         ]
@@ -253,6 +258,17 @@ impl ExecResult {
         self
     }
 
+    fn assert_transcript_root_slide_indexes(&self, expected: &[Option<usize>]) -> &Self {
+        self.assert_ok();
+        assert_eq!(
+            self.transcript_root_slide_indexes,
+            expected,
+            "transcript root slide index mismatch\n{}",
+            self.inspection()
+        );
+        self
+    }
+
     fn assert_first_error_span(&self, expected: Span8) -> &Self {
         assert!(
             !self._error_spans.is_empty(),
@@ -318,6 +334,7 @@ fn run_section_with_stdlib_and_aspect(
         return ExecResult {
             value: None,
             transcript: Vec::new(),
+            transcript_root_slide_indexes: Vec::new(),
             errors: parse_errors,
             _error_spans: vec![],
         };
@@ -338,6 +355,7 @@ fn run_section_with_stdlib_and_aspect(
         return ExecResult {
             value: None,
             transcript: Vec::new(),
+            transcript_root_slide_indexes: Vec::new(),
             errors: compile_errors,
             _error_spans: vec![],
         };
@@ -348,6 +366,7 @@ fn run_section_with_stdlib_and_aspect(
         return ExecResult {
             value: None,
             transcript: Vec::new(),
+            transcript_root_slide_indexes: Vec::new(),
             errors: vec!["no user section was compiled".into()],
             _error_spans: vec![],
         };
@@ -388,6 +407,12 @@ fn run_section_with_stdlib_and_aspect(
         .iter_entries()
         .map(|entry| entry.text().to_string())
         .collect();
+    let transcript_root_slide_indexes = executor
+        .state
+        .transcript
+        .iter_entries()
+        .map(|entry| entry.root_slide_index)
+        .collect();
 
     let value = executor
         .state
@@ -402,6 +427,7 @@ fn run_section_with_stdlib_and_aspect(
     ExecResult {
         value,
         transcript,
+        transcript_root_slide_indexes,
         errors: runtime_errors,
         _error_spans: error_spans,
     }

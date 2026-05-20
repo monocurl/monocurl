@@ -4,6 +4,7 @@ use crate::{
     error::ExecutorError,
     heap::{with_heap, with_heap_mut},
     state::LeaderKind,
+    time::Timestamp,
     value::{
         Value,
         container::{List, Map},
@@ -15,6 +16,18 @@ use crate::{
 use super::{ExecSingle, Executor, ops::BinOp};
 
 impl Executor {
+    fn root_slide_index_for_transcript_entry(&self, section_idx: usize) -> Option<usize> {
+        let section = &self.bytecode.sections[section_idx];
+        if section.flags.is_root_module && !section.flags.is_library {
+            Some(
+                self.internal_to_user_timestamp(Timestamp::at_end_of_slide(section_idx))
+                    .slide,
+            )
+        } else {
+            None
+        }
+    }
+
     #[inline(always)]
     pub(super) async fn execute_instr(
         &mut self,
@@ -307,6 +320,7 @@ impl Executor {
                 };
                 let section = &self.bytecode.sections[section_idx];
                 let is_root = section.flags.is_root_module;
+                let root_slide_index = self.root_slide_index_for_transcript_entry(section_idx);
                 let annotation_idx = self.state.stack(stack_idx).ip.1.saturating_sub(1) as usize;
                 let span = section.annotations[annotation_idx].source_loc.clone();
                 let text = crate::transcript::stringify_for_transcript(&resolved);
@@ -316,6 +330,7 @@ impl Executor {
                         span,
                         section: section_idx as u16,
                         is_root,
+                        root_slide_index,
                         kind: crate::transcript::TranscriptEntryKind::String(text),
                     },
                 );

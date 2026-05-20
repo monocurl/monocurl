@@ -1411,6 +1411,7 @@ mod tests {
                 span: 0..src.find(']').unwrap() + 1,
                 section: 0,
                 is_root: true,
+                root_slide_index: Some(1),
                 kind: TranscriptEntryKind::String("[1]".to_string()),
             }],
         };

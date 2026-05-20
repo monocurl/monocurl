@@ -12,10 +12,10 @@ use usvg::{FillRule, Node, Paint, Path as SvgPath, Tree};
 
 pub(crate) const DEFAULT_TEXT_STROKE_RADIUS: f32 = 0.55;
 const NORMAL_CURVE_SAMPLE_SPACING: f32 = 24.0;
-const HIGH_QUALITY_CURVE_SAMPLE_SPACING: f32 = 14.0;
+const HIGH_QUALITY_CURVE_SAMPLE_SPACING: f32 = 4.7;
 const MIN_CURVE_SAMPLES: usize = 4;
 const NORMAL_MAX_CURVE_SAMPLES: usize = 96;
-const HIGH_QUALITY_MAX_CURVE_SAMPLES: usize = 160;
+const HIGH_QUALITY_MAX_CURVE_SAMPLES: usize = 480;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CurveSampling {
