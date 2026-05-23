@@ -314,6 +314,10 @@ impl WrappedLine {
         self.wrap_boundaries.len() + 1
     }
 
+    pub fn is_source_row_at_y(&self, y: Pixels, line_height: Pixels) -> bool {
+        y >= px(0.0) && ((y / line_height) as usize) < self.primary_line_count()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = SingleWrappedLine<'_>> {
         (0..self.primary_line_count()).map(move |line_ix| {
             let prev_boundary = if line_ix > 0 {
