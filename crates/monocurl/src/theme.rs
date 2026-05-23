@@ -154,55 +154,65 @@ impl Theme {
     }
 
     pub fn light() -> Self {
-        let timeline_background = hsla(0.61, 0.21, 0.87, 1.0);
-        let chrome_background: Rgba = timeline_background.into();
+        let chrome_background = rgba(0xE8E2D8);
+        let sidebar_background = rgba(0xE0D8CC);
+        let toolbar_background = rgba(0xE3DCD2);
+        let modal_background = rgba(0xECE6DD);
+        let border = rgba(0xC4B5A4);
+        let border_soft = rgba(0xD6CABC);
+        let border_strong = rgba(0xA89580);
+        let text_primary = rgba(0x2C2420);
+        let text_muted = rgba(0x5A4A3C);
+        let accent = rgba(0xC04510);
+        let danger = rgba(0xD04E1A);
+        let timeline_background: Hsla = rgba(0xDED6CA).into();
 
         Self {
             mode: ThemeMode::Light,
             app_background: chrome_background,
             document_background: chrome_background,
             viewport_background: chrome_background,
-            viewport_stage_background: rgba(0xFAFBFD),
+            viewport_stage_background: modal_background,
             viewport_status_playing: rgba(0x8C8FA1),
             viewport_status_loading: rgba(0x1E66F5),
             viewport_status_paused: rgba(0x8C8FA1),
             viewport_status_runtime_error: rgba(0x8839EF),
             viewport_status_compile_error: rgba(0xD20F39),
 
-            text_primary: rgba(0x4C4F69),
-            text_muted: rgba(0x6C6F85),
-            link_text: rgba(0x1E66F5),
-            danger: rgba(0xD20F39),
+            text_primary,
+            text_muted,
+            link_text: accent,
+            danger,
 
-            accent: rgba(0x1E66F5),
+            accent,
 
-            navbar_background: chrome_background,
-            navbar_border: rgba(0x9CA0B0),
-            tab_background: chrome_background,
-            tab_active_background: rgba(0xECEFF5),
-            tab_close_hover_background: rgba(0xCCD2DB),
+            navbar_background: toolbar_background,
+            navbar_border: border,
+            tab_background: toolbar_background,
+            tab_active_background: modal_background,
+            tab_close_hover_background: border_soft,
 
-            home_sidebar_background: chrome_background,
+            home_sidebar_background: sidebar_background,
             home_panel_background: chrome_background,
             row_hover_overlay: Rgba {
-                a: 0.08,
-                ..rgba(0x11111B)
+                a: 0.10,
+                ..rgba(0x5A4635)
             },
 
-            split_divider: rgba(0x9CA0B0),
-            timeline_transport_color: rgba(0x1E66F5),
+            split_divider: border,
+            timeline_transport_color: accent,
 
             timeline_background,
 
-            timeline_toolbar_background: rgba(0xE1E6EE),
-            timeline_slide_background: chrome_background,
-            timeline_active_border: rgba(0x1E66F5),
-            timeline_inactive_border: rgba(0x8C8FA1),
-            timeline_connector: rgba(0xBCC0CC),
-            timeline_tick: rgba(0x7C7F93),
-            timeline_text: rgba(0x4C4F69),
-            timeline_subtext: rgba(0x6C6F85),
-            timeline_playhead: rgba(0x000000),
+            timeline_toolbar_background: rgba(0xD8CEC0),
+            timeline_slide_background: modal_background,
+            timeline_active_border: accent,
+            timeline_inactive_border: border_strong,
+            timeline_connector: border_soft,
+            timeline_tick: rgba(0x7A6C5D),
+            timeline_text: text_primary,
+            timeline_subtext: text_muted,
+            timeline_playhead: rgba(0x1A1410),
         }
     }
 
@@ -335,47 +345,75 @@ impl TextEditorStyles {
     }
 
     pub fn light() -> Self {
+        let editor_background = rgba(0xE8E2D8);
+        let editor_surface = rgba(0xE0D8CC);
+        let editor_toolbar = rgba(0xE3DCD2);
+        let modal_background = rgba(0xECE6DD);
+        let border_soft = rgba(0xD6CABC);
+        let text_primary = rgba(0x2C2420);
+        let text_muted = rgba(0x5A4A3C);
+        let text_soft = rgba(0x4A3E34);
+        let accent = rgba(0xC04510);
+        let blue = rgba(0x2F67CF);
+        let purple = rgba(0x8A3DB5);
+        let rose = rgba(0xA64D65);
+        let green = rgba(0x1E7A3A);
+        let amber = rgba(0xA85F00);
+        let red = rgba(0xD04E1A);
+
         Self {
-            bg_color: hsla(0.61, 0.16, 0.97, 1.0),
+            bg_color: editor_background.into(),
             text_font: gpui::font(FontSet::MONOSPACE),
 
             text_size: px(14.0),
             line_height: px(20.0),
-            control_flow_color: hsla(0.76, 0.59, 0.52, 1.0),
-            non_control_flow_color: hsla(0.98, 0.62, 0.47, 1.0),
-            comment_color: hsla(0.61, 0.13, 0.49, 0.65),
-            text_literal_color: hsla(0.36, 0.29, 0.44, 1.0),
-            numeric_literal_color: hsla(0.07, 0.99, 0.45, 1.0),
-            identifier_color: hsla(0.61, 0.16, 0.23, 1.0),
-            argument_label_color: hsla(0.93, 0.42, 0.50, 1.0),
-            invoked_function_color: hsla(0.58, 0.44, 0.49, 1.0),
-            invoked_operator_color: hsla(0.74, 0.26, 0.54, 1.0),
-            operator_color: hsla(0.54, 0.59, 0.45, 1.0),
-            punctuation_color: hsla(0.61, 0.13, 0.40, 1.0),
-            default_text_color: hsla(0.61, 0.16, 0.23, 1.0),
-            runtime_error_color: hsla(0.85, 0.76, 0.56, 1.0),
-            compile_time_error_color: hsla(0.01, 0.76, 0.56, 1.0),
-            compile_time_warning_color: hsla(0.13, 0.91, 0.62, 1.0),
-            cursor_color: hsla(0.03, 0.59, 0.65, 1.0),
+            control_flow_color: purple.into(),
+            non_control_flow_color: rose.into(),
+            comment_color: Rgba {
+                a: 0.72,
+                ..text_muted
+            }
+            .into(),
+            text_literal_color: green.into(),
+            numeric_literal_color: amber.into(),
+            identifier_color: text_primary.into(),
+            argument_label_color: rose.into(),
+            invoked_function_color: blue.into(),
+            invoked_operator_color: purple.into(),
+            operator_color: accent.into(),
+            punctuation_color: text_soft.into(),
+            default_text_color: text_primary.into(),
+            runtime_error_color: red.into(),
+            compile_time_error_color: red.into(),
+            compile_time_warning_color: amber.into(),
+            cursor_color: rgba(0x1A1410).into(),
             gutter_font: gpui::font(FontSet::MONOSPACE),
-            gutter_text_color: hsla(0.61, 0.13, 0.49, 1.0),
-            gutter_active_color: hsla(0.0, 0.59, 0.54, 1.0),
-            selection_color: hsla(0.05, 0.40, 0.76, 0.24),
-            active_line_color: hsla(0.61, 0.13, 0.91, 1.0),
-            search_match_color: hsla(0.13, 0.91, 0.62, 0.28),
-            active_search_match_color: hsla(0.13, 0.91, 0.54, 0.48),
-            scroll_color: hsla(0.61, 0.13, 0.40, 0.30),
-            scroll_background_color: hsla(0.61, 0.10, 0.82, 0.34),
-            popover_background_color: rgba(0xECEFF5),
-            popover_border_color: rgba(0xD6DBE5),
-            popover_shadow_color: hsla(0.0, 0.0, 0.0, 0.10),
-            popover_title_color: rgba(0x11111B),
-            popover_text_color: rgba(0x313244),
-            popover_highlight_color: rgba(0x1E66F5),
-            popover_selected_background_color: rgba(0xDEE4EC),
-            popover_hover_background_color: rgba(0xD1D7E2),
-            popover_active_argument_color: rgba(0x1E66F5),
-            popover_inactive_argument_color: rgba(0x6C6F85),
+            gutter_text_color: text_muted.into(),
+            gutter_active_color: accent.into(),
+            selection_color: Rgba { a: 0.22, ..accent }.into(),
+            active_line_color: editor_toolbar.into(),
+            search_match_color: Rgba { a: 0.24, ..amber }.into(),
+            active_search_match_color: Rgba { a: 0.42, ..amber }.into(),
+            scroll_color: Rgba {
+                a: 0.36,
+                ..rgba(0x9B958C)
+            }
+            .into(),
+            scroll_background_color: Rgba {
+                a: 0.18,
+                ..border_soft
+            }
+            .into(),
+            popover_background_color: modal_background,
+            popover_border_color: border_soft,
+            popover_shadow_color: hsla(0.08, 0.38, 0.16, 0.14),
+            popover_title_color: text_primary,
+            popover_text_color: text_primary,
+            popover_highlight_color: accent,
+            popover_selected_background_color: editor_toolbar,
+            popover_hover_background_color: editor_surface,
+            popover_active_argument_color: accent,
+            popover_inactive_argument_color: text_muted,
         }
     }
 
