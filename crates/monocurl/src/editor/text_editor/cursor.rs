@@ -92,7 +92,19 @@ impl TextEditor {
 
     fn vertical_cursor_movement(&self, delta_lines: isize, cx: &App) -> Location8 {
         let current_pos = self.line_map.point_for_location(self.cursor(cx).head);
-        let target_y = current_pos.y + delta_lines as f32 * self.line_height;
+        let mut target_y = current_pos.y + delta_lines as f32 * self.line_height;
+
+        if delta_lines != 0 {
+            let total_height = self.line_map.total_height();
+            let step_y = self.line_height * delta_lines.signum() as f32;
+            while target_y >= px(0.0)
+                && target_y < total_height
+                && !self.line_map.is_source_row_at_y(target_y)
+            {
+                target_y += step_y;
+            }
+        }
+
         match self
             .line_map
             .location_for_point(point(current_pos.x, target_y))

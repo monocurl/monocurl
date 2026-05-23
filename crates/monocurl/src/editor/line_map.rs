@@ -285,6 +285,20 @@ impl LineMap {
         agg.wrapped_line_count as f32 * self.line_height
     }
 
+    pub fn is_source_row_at_y(&self, y: Pixels) -> bool {
+        if y < gpui::px(0.0) || y >= self.total_height() {
+            return true;
+        }
+
+        let (prewrapped_line_no, wrapped_line_no) = self.lines_ending_before_y(y);
+        let leaf = self
+            .rope
+            .find_leaf(|agg| agg.prewrapped_line_count <= prewrapped_line_no);
+        let local_y = y - wrapped_line_no as f32 * self.line_height;
+
+        leaf.line.is_source_row_at_y(local_y, self.line_height)
+    }
+
     pub fn line_len(&self, line_no: usize) -> usize {
         let leaf = self
             .rope

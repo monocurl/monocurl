@@ -55,6 +55,7 @@ enum SceneStageMode {
     Presentation {
         aspect_ratio: f32,
         interactive: bool,
+        frame_ring: Option<RingStyle>,
     },
 }
 
@@ -76,7 +77,8 @@ struct SceneStageLayout {
     image_bounds: Bounds<Pixels>,
     interaction_bounds: Bounds<Pixels>,
     projection_bounds: Bounds<Pixels>,
-    preview_ring: Option<RingStyle>,
+    frame_ring: Option<RingStyle>,
+    mask_overscan: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -116,15 +118,19 @@ impl Viewport {
         interactive: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (background, scene_camera, meshes, scene_version) = {
+        let (status, is_loading, background, scene_camera, meshes, scene_version) = {
             let execution = self.execution_state.read(cx);
             (
+                execution.status,
+                execution.is_loading,
                 execution.background,
                 execution.camera.clone(),
                 execution.meshes.clone(),
                 execution.scene_version,
             )
         };
+        let theme = ThemeSettings::theme(cx);
+        let frame_ring = interactive.then(|| ring_style_for(status, true, is_loading, theme));
         let display_camera = self.display_camera(&scene_camera);
         let scene = SceneRenderData {
             background,
@@ -143,6 +149,7 @@ impl Viewport {
                 SceneStageMode::Presentation {
                     aspect_ratio: AUDIENCE_ASPECT_RATIO,
                     interactive,
+                    frame_ring,
                 },
                 SceneStageCache::Audience,
                 cx.weak_entity(),
@@ -273,6 +280,7 @@ impl Render for Viewport {
                 SceneStageMode::Presentation {
                     aspect_ratio,
                     interactive: true,
+                    frame_ring: None,
                 },
                 SceneStageCache::Main,
                 weak_vp.clone(),
@@ -579,10 +587,12 @@ fn render_scene_stage(
                             false,
                         );
                     }
-                    if let Some(ring_style) = layout.preview_ring {
+                    if let Some(ring_style) = layout.frame_ring {
                         let frame_bounds = layout.interaction_bounds;
-                        paint_overscan_mask(window, bounds, frame_bounds);
-                        paint_preview_frame_border(window, frame_bounds, ring_style);
+                        if layout.mask_overscan {
+                            paint_overscan_mask(window, bounds, frame_bounds);
+                        }
+                        paint_frame_border(window, frame_bounds, ring_style);
                     }
 
                     if mode.is_interactive() {
@@ -670,16 +680,22 @@ fn scene_stage_layout(bounds: Bounds<Pixels>, mode: SceneStageMode) -> SceneStag
                 image_bounds: bounds,
                 interaction_bounds: frame_bounds,
                 projection_bounds: frame_bounds,
-                preview_ring: Some(ring_style),
+                frame_ring: Some(ring_style),
+                mask_overscan: true,
             }
         }
-        SceneStageMode::Presentation { aspect_ratio, .. } => {
+        SceneStageMode::Presentation {
+            aspect_ratio,
+            frame_ring,
+            ..
+        } => {
             let frame_bounds = aspect_frame_bounds(bounds, 0.0, aspect_ratio);
             SceneStageLayout {
                 image_bounds: frame_bounds,
                 interaction_bounds: frame_bounds,
                 projection_bounds: frame_bounds,
-                preview_ring: None,
+                frame_ring,
+                mask_overscan: false,
             }
         }
     }
@@ -750,11 +766,7 @@ fn paint_overscan_mask(window: &mut Window, bounds: Bounds<Pixels>, frame_bounds
     }
 }
 
-fn paint_preview_frame_border(
-    window: &mut Window,
-    frame_bounds: Bounds<Pixels>,
-    ring_style: RingStyle,
-) {
+fn paint_frame_border(window: &mut Window, frame_bounds: Bounds<Pixels>, ring_style: RingStyle) {
     if ring_style.width <= 0.0 || ring_style.color.a <= f32::EPSILON {
         return;
     }
