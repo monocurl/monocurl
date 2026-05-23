@@ -358,7 +358,7 @@ impl DocumentView {
             })
             .collect::<Vec<_>>();
 
-        let fps_controls = (modal.kind == RequestedExport::Video).then(|| {
+        let fps_controls = modal.kind.uses_video_settings().then(|| {
             div()
                 .flex()
                 .flex_col()
@@ -583,6 +583,7 @@ impl DocumentView {
                     .on_action(cx.listener(Self::epsilon_backward))
                     .on_action(cx.listener(Self::export_image))
                     .on_action(cx.listener(Self::export_video))
+                    .on_action(cx.listener(Self::export_slides_as_videos))
                     .child(audience),
             )
             .children(audience_status.map(|(status, show_reset)| {
@@ -670,6 +671,7 @@ impl DocumentView {
             .on_action(cx.listener(Self::save_document_custom_path))
             .on_action(cx.listener(Self::export_image))
             .on_action(cx.listener(Self::export_video))
+            .on_action(cx.listener(Self::export_slides_as_videos))
             .on_action(cx.listener(Self::close_document))
             .on_action(cx.listener(Self::zoom_in))
             .on_action(cx.listener(Self::zoom_out))

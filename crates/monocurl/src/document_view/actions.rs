@@ -580,6 +580,15 @@ impl DocumentView {
         self.request_export(RequestedExport::Video, cx);
     }
 
+    pub(super) fn export_slides_as_videos(
+        &mut self,
+        _: &ExportSlidesAsVideos,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.request_export(RequestedExport::SlideVideos, cx);
+    }
+
     pub(super) fn close_document(
         &mut self,
         _: &CloseActiveDocument,

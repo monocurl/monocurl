@@ -13,8 +13,8 @@ use std::{
 
 use crate::{
     actions::{
-        Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide,
-        OpenSettings, Paste, PrevSlide, Quit, Redo, SaveActiveDocument,
+        Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportSlidesAsVideos, ExportVideo,
+        NextSlide, OpenSettings, Paste, PrevSlide, Quit, Redo, SaveActiveDocument,
         SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleHeadlessMode, TogglePlaying,
         TogglePresentationMode, ToggleSlideFold, Undo,
     },
@@ -151,6 +151,7 @@ impl MonocurlLauncher {
                     MenuItem::separator(),
                     MenuItem::action("Export as Image", ExportImage),
                     MenuItem::action("Export as Video", ExportVideo),
+                    MenuItem::action("Export Slides as Videos", ExportSlidesAsVideos),
                     MenuItem::separator(),
                     MenuItem::action("Present", TogglePresentationMode),
                     MenuItem::action("Toggle Headless Mode", ToggleHeadlessMode),

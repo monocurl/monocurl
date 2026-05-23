@@ -1,9 +1,9 @@
 use gpui::*;
 
 use crate::actions::{
-    EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide, PlayOrShowPauseHint,
-    PrevSlide, SceneEnd, SceneStart, SyncViewportCamera, ToggleParamsPanel, TogglePlaying,
-    TogglePresentationMode,
+    EpsilonBackward, EpsilonForward, ExportImage, ExportSlidesAsVideos, ExportVideo, NextSlide,
+    PlayOrShowPauseHint, PrevSlide, SceneEnd, SceneStart, SyncViewportCamera, ToggleParamsPanel,
+    TogglePlaying, TogglePresentationMode,
 };
 use crate::theme::FontSet;
 use crate::viewport::viewport_view::Viewport;
@@ -137,6 +137,15 @@ impl Render for ControlsWindow {
                     })
                     .ok();
             }))
+            .on_action(
+                cx.listener(|this, action: &ExportSlidesAsVideos, window, cx| {
+                    this.document
+                        .update(cx, |document, cx| {
+                            document.export_slides_as_videos(action, window, cx);
+                        })
+                        .ok();
+                }),
+            )
             .child(self.viewport.clone())
     }
 }

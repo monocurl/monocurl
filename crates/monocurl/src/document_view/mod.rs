@@ -10,8 +10,8 @@ use structs::rope::{Attribute, Rope, TextAggregate};
 
 use crate::{
     actions::{
-        CloseActiveDocument, EpsilonBackward, EpsilonForward, ExportImage, ExportVideo, NextSlide,
-        OpenFind, PlayOrShowPauseHint, PrevSlide, Redo, SaveActiveDocument,
+        CloseActiveDocument, EpsilonBackward, EpsilonForward, ExportImage, ExportSlidesAsVideos,
+        ExportVideo, NextSlide, OpenFind, PlayOrShowPauseHint, PrevSlide, Redo, SaveActiveDocument,
         SaveActiveDocumentCustomPath, SceneEnd, SceneStart, SyncViewportCamera, ToggleHeadlessMode,
         ToggleParamsPanel, TogglePlaying, TogglePresentationMode, ToggleTimelineConsole, Undo,
         UnfocusEditor, ZoomIn, ZoomOut,
@@ -89,6 +89,7 @@ pub struct OpenDocument {
 enum RequestedExport {
     Image,
     Video,
+    SlideVideos,
 }
 
 impl RequestedExport {
@@ -96,6 +97,7 @@ impl RequestedExport {
         match self {
             Self::Image => "Image",
             Self::Video => "Video",
+            Self::SlideVideos => "Slides as Videos",
         }
     }
 
@@ -103,6 +105,7 @@ impl RequestedExport {
         match self {
             Self::Image => "Exporting Image",
             Self::Video => "Exporting Video",
+            Self::SlideVideos => "Exporting Slides as Videos",
         }
     }
 
@@ -110,6 +113,7 @@ impl RequestedExport {
         match self {
             Self::Image => "Image Export Complete",
             Self::Video => "Video Export Complete",
+            Self::SlideVideos => "Slide Video Export Complete",
         }
     }
 
@@ -117,6 +121,7 @@ impl RequestedExport {
         match self {
             Self::Image => "Image Export Failed",
             Self::Video => "Video Export Failed",
+            Self::SlideVideos => "Slide Video Export Failed",
         }
     }
 
@@ -124,13 +129,14 @@ impl RequestedExport {
         match self {
             Self::Image => "Image Export Canceled",
             Self::Video => "Video Export Canceled",
+            Self::SlideVideos => "Slide Video Export Canceled",
         }
     }
 
     fn extension(self) -> &'static str {
         match self {
             Self::Image => "png",
-            Self::Video => "mp4",
+            Self::Video | Self::SlideVideos => "mp4",
         }
     }
 
@@ -138,7 +144,12 @@ impl RequestedExport {
         match self {
             Self::Image => "Open Image",
             Self::Video => "Open Video",
+            Self::SlideVideos => "Open Folder",
         }
+    }
+
+    fn uses_video_settings(self) -> bool {
+        matches!(self, Self::Video | Self::SlideVideos)
     }
 }
 
