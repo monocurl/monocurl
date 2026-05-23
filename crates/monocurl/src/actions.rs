@@ -9,7 +9,8 @@ actions!(
         SaveActiveDocument,
         CloseActiveDocument,
         ExportImage,
-        ExportVideo
+        ExportVideo,
+        ExportSlidesAsVideos
     ]
 );
 

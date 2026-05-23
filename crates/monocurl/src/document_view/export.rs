@@ -77,6 +77,11 @@ impl DocumentView {
 
         self.clear_export_state(cx);
 
+        if kind == RequestedExport::SlideVideos {
+            self.request_slide_video_export(cx);
+            return;
+        }
+
         let directory = self.export_directory();
         let name = self.export_filename(kind);
         let path = cx.prompt_for_new_path(&directory, Some(name.as_str()));
@@ -92,6 +97,38 @@ impl DocumentView {
             let _ = app.update(move |app| {
                 this.update(app, |this, cx| {
                     this.open_export_settings(kind, path, cx);
+                });
+            });
+        })
+        .detach();
+    }
+
+    fn request_slide_video_export(&mut self, cx: &mut Context<Self>) {
+        let options = PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Choose Export Directory".into()),
+        };
+        let path = cx.prompt_for_paths(options);
+
+        cx.spawn(async move |this, app| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
+            let Some(directory) = path
+                .await
+                .ok()
+                .and_then(|path| path.ok())
+                .flatten()
+                .and_then(|paths| paths.into_iter().next())
+            else {
+                return;
+            };
+
+            let _ = app.update(move |app| {
+                this.update(app, |this, cx| {
+                    this.open_export_settings(RequestedExport::SlideVideos, directory, cx);
                 });
             });
         })
@@ -168,6 +205,7 @@ impl DocumentView {
                     timestamp: ImageExportTimestamp::Exact(current_timestamp),
                 },
                 RequestedExport::Video => SceneExportKind::Video,
+                RequestedExport::SlideVideos => SceneExportKind::SlidesAsVideos,
             },
             settings,
         };

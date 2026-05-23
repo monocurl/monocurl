@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     io::BufWriter,
     path::{Path, PathBuf},
@@ -78,6 +78,7 @@ pub enum ImageExportTimestamp {
 pub enum ExportKind {
     Image { timestamp: ImageExportTimestamp },
     Video,
+    SlidesAsVideos,
 }
 
 #[derive(Clone, Debug)]
@@ -176,6 +177,21 @@ struct EncodedSample {
     is_sync: bool,
 }
 
+#[derive(Clone, Copy)]
+enum VideoProgressLabel {
+    Scene,
+    Slide {
+        slide_index: usize,
+        slide_count: usize,
+    },
+}
+
+struct VideoRenderPlan {
+    slide_durations: Vec<f64>,
+    slide_names: Vec<Option<String>>,
+    transcript: Vec<executor::transcript::TranscriptEntry>,
+}
+
 #[derive(Default)]
 struct AvcParameterSets {
     sps: Option<Vec<u8>>,
@@ -262,9 +278,22 @@ async fn export_scene_async(
     ensure!(request.settings.fps > 0, "video fps must be non-zero");
     check_cancelled(cancel_flag)?;
 
-    if let Some(parent) = request.output_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create export directory {}", parent.display()))?;
+    match request.kind {
+        ExportKind::SlidesAsVideos => {
+            std::fs::create_dir_all(&request.output_path).with_context(|| {
+                format!(
+                    "failed to create export directory {}",
+                    request.output_path.display()
+                )
+            })?;
+        }
+        _ => {
+            if let Some(parent) = request.output_path.parent() {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("failed to create export directory {}", parent.display())
+                })?;
+            }
+        }
     }
     check_cancelled(cancel_flag)?;
 
@@ -300,6 +329,25 @@ async fn export_scene_async(
                 0,
             )?;
             export_video(
+                prepared,
+                request.output_path,
+                request.settings,
+                cancel_flag,
+                on_progress,
+            )
+            .await
+        }
+        ExportKind::SlidesAsVideos => {
+            let prepared = prepare_scene(
+                &request.root_text,
+                &request.root_path,
+                &request.open_documents,
+                cancel_flag,
+                on_progress,
+                0,
+                0,
+            )?;
+            export_slide_videos(
                 prepared,
                 request.output_path,
                 request.settings,
@@ -513,137 +561,29 @@ async fn export_video(
 ) -> Result<ExportOutcome> {
     emit_progress_checked(cancel_flag, on_progress, "Evaluating timeline", 0, 0)?;
 
-    ensure!(
-        settings.render_size.width.is_multiple_of(2)
-            && settings.render_size.height.is_multiple_of(2),
-        "video render size must use even dimensions for H.264 export"
-    );
-    prepared
-        .executor
-        .update_aspect_ratio(settings.aspect_ratio());
-
-    let video_size = settings.render_size;
-    let slide_durations =
-        precompute_slide_durations(&mut prepared.executor, &prepared.root_text_rope).await?;
-    let transcript = collect_transcript(&prepared.executor);
+    validate_video_settings(settings)?;
+    let plan = prepare_video_render_plan(&mut prepared, settings).await?;
     check_cancelled(cancel_flag)?;
-    let frame_targets = build_frame_targets(&slide_durations, settings.fps);
+    let frame_targets = build_frame_targets(&plan.slide_durations, settings.fps);
     ensure!(!frame_targets.is_empty(), "scene has no slides to export");
 
     let total_steps = frame_targets.len() + 1;
-    let mp4_timescale = settings
-        .fps
-        .checked_mul(MP4_FRAME_DURATION)
-        .ok_or_else(|| anyhow!("mp4 timescale overflow"))?;
-
     let mut renderer = Renderer::try_new(RenderOptions::default())
         .context("failed to initialize blade renderer")?;
-    let mut encoder = Encoder::with_api_config(
-        openh264::OpenH264API::from_source(),
-        EncoderConfig::new()
-            .skip_frames(false)
-            .rate_control_mode(RateControlMode::Quality)
-            .complexity(Complexity::High)
-            .usage_type(UsageType::ScreenContentRealTime)
-            .adaptive_quantization(false)
-            .background_detection(false)
-            .max_frame_rate(FrameRate::from_hz(settings.fps as f32))
-            .bitrate(BitRate::from_bps(video_bitrate(video_size, settings.fps)))
-            .qp(video_qp_range(video_size))
-            .intra_frame_period(IntraFramePeriod::from_num_frames(settings.fps)),
-    )
-    .context("failed to initialize H.264 encoder")?;
-
-    let mut parameter_sets = AvcParameterSets::default();
-    let mut cleanup = PartialOutputCleanup::new(output_path.clone());
-    let mut writer = None;
-    let mut sample_start_time = 0_u64;
-    let mut previous_slide = None;
-
-    for (index, timestamp) in frame_targets.iter().copied().enumerate() {
-        emit_progress_checked(
-            cancel_flag,
-            on_progress,
-            format!("Rendering frame {} of {}", index + 1, frame_targets.len()),
-            index,
-            total_steps,
-        )?;
-
-        if index > 0 && previous_slide != Some(timestamp.slide) {
-            encoder.force_intra_frame();
-        }
-
-        let frame = render_frame(
-            &mut prepared.executor,
-            &prepared.root_text_rope,
-            &mut renderer,
-            timestamp,
-            video_size,
-        )
-        .await?;
-        check_cancelled(cancel_flag)?;
-
-        let encoded = encode_video_sample(&frame, video_size, &mut encoder, &mut parameter_sets)
-            .with_context(|| {
-                format!(
-                    "failed to encode H.264 sample at slide {} time {:.3} ({}x{})",
-                    timestamp.slide, timestamp.time, video_size.width, video_size.height
-                )
-            })?;
-        check_cancelled(cancel_flag)?;
-
-        if writer.is_none() {
-            ensure!(
-                parameter_sets.ready(),
-                "encoder did not emit SPS/PPS parameter sets for the initial video sample"
-            );
-            check_cancelled(cancel_flag)?;
-            let file = File::create(&output_path).with_context(|| {
-                format!("failed to create video export {}", output_path.display())
-            })?;
-            cleanup.arm();
-            writer = Some(start_mp4_writer(
-                BufWriter::new(file),
-                mp4_timescale,
-                video_size,
-                std::mem::take(&mut parameter_sets),
-            )?);
-        }
-
-        writer
-            .as_mut()
-            .unwrap()
-            .write_sample(
-                MP4_TRACK_ID,
-                &Mp4Sample {
-                    start_time: sample_start_time,
-                    duration: MP4_FRAME_DURATION,
-                    rendering_offset: 0,
-                    is_sync: encoded.is_sync,
-                    bytes: Bytes::from(encoded.bytes),
-                },
-            )
-            .with_context(|| format!("failed to write mp4 sample {}", index + 1))?;
-        check_cancelled(cancel_flag)?;
-
-        sample_start_time += u64::from(MP4_FRAME_DURATION);
-        previous_slide = Some(timestamp.slide);
-    }
-
-    emit_progress_checked(
+    let mut completed = 0;
+    let frames_written = write_video_file(
+        &mut prepared,
+        &mut renderer,
+        &output_path,
+        settings,
+        &frame_targets,
+        VideoProgressLabel::Scene,
+        &mut completed,
+        total_steps,
         cancel_flag,
         on_progress,
-        "Finalizing video",
-        frame_targets.len(),
-        total_steps,
-    )?;
-
-    writer
-        .as_mut()
-        .ok_or_else(|| anyhow!("video export produced no encoded samples"))?
-        .write_end()
-        .with_context(|| format!("failed to finalize video export {}", output_path.display()))?;
-    cleanup.keep();
+    )
+    .await?;
 
     emit_progress_checked(
         cancel_flag,
@@ -655,7 +595,98 @@ async fn export_video(
 
     Ok(ExportOutcome {
         output_path,
-        frames_written: frame_targets.len(),
+        frames_written,
+        transcript: plan.transcript,
+    })
+}
+
+async fn export_slide_videos(
+    mut prepared: PreparedScene,
+    output_dir: PathBuf,
+    settings: ExportSettings,
+    cancel_flag: &AtomicBool,
+    on_progress: &mut dyn FnMut(ExportProgress),
+) -> Result<ExportOutcome> {
+    emit_progress_checked(cancel_flag, on_progress, "Evaluating timeline", 0, 0)?;
+
+    validate_video_settings(settings)?;
+    let plan = prepare_video_render_plan(&mut prepared, settings).await?;
+    let slide_count = plan.slide_durations.len();
+    ensure!(slide_count > 0, "scene has no slides to export");
+    let output_paths = slide_video_output_paths(&output_dir, &plan.slide_names, slide_count)?;
+    check_cancelled(cancel_flag)?;
+
+    let total_frames: usize = plan
+        .slide_durations
+        .iter()
+        .map(|duration| frame_count_for_duration(*duration, settings.fps))
+        .sum();
+    let total_steps = total_frames + slide_count;
+    let mut completed = 0;
+    let mut frames_written = 0;
+    let mut renderer = Renderer::try_new(RenderOptions::default())
+        .context("failed to initialize blade renderer")?;
+
+    for (slide_index, duration) in plan.slide_durations.iter().copied().enumerate() {
+        let frame_targets = build_slide_frame_targets(slide_index, duration, settings.fps);
+        frames_written += write_video_file(
+            &mut prepared,
+            &mut renderer,
+            &output_paths[slide_index],
+            settings,
+            &frame_targets,
+            VideoProgressLabel::Slide {
+                slide_index,
+                slide_count,
+            },
+            &mut completed,
+            total_steps,
+            cancel_flag,
+            on_progress,
+        )
+        .await?;
+    }
+
+    emit_progress_checked(
+        cancel_flag,
+        on_progress,
+        "Finished slide video export",
+        total_steps,
+        total_steps,
+    )?;
+
+    Ok(ExportOutcome {
+        output_path: output_dir,
+        frames_written,
+        transcript: plan.transcript,
+    })
+}
+
+fn validate_video_settings(settings: ExportSettings) -> Result<()> {
+    ensure!(
+        settings.render_size.width.is_multiple_of(2)
+            && settings.render_size.height.is_multiple_of(2),
+        "video render size must use even dimensions for H.264 export"
+    );
+    Ok(())
+}
+
+async fn prepare_video_render_plan(
+    prepared: &mut PreparedScene,
+    settings: ExportSettings,
+) -> Result<VideoRenderPlan> {
+    prepared
+        .executor
+        .update_aspect_ratio(settings.aspect_ratio());
+
+    let slide_durations =
+        precompute_slide_durations(&mut prepared.executor, &prepared.root_text_rope).await?;
+    let slide_names = prepared.executor.real_slide_names();
+    let transcript = collect_transcript(&prepared.executor);
+
+    Ok(VideoRenderPlan {
+        slide_durations,
+        slide_names,
         transcript,
     })
 }
@@ -690,17 +721,361 @@ async fn precompute_slide_durations(
 }
 
 fn build_frame_targets(slide_durations: &[f64], fps: u32) -> Vec<Timestamp> {
-    let fps = fps as f64;
     let mut frames = Vec::new();
 
     for (slide, duration) in slide_durations.iter().copied().enumerate() {
-        let frame_count = ((duration * fps).ceil() as usize).max(1);
-        for frame in 0..frame_count {
-            frames.push(Timestamp::new(slide + 1, frame as f64 / fps));
-        }
+        frames.extend(build_slide_frame_targets(slide, duration, fps));
     }
 
     frames
+}
+
+fn build_slide_frame_targets(slide_index: usize, duration: f64, fps: u32) -> Vec<Timestamp> {
+    let fps_f64 = fps as f64;
+    let frame_count = frame_count_for_duration(duration, fps);
+    (0..frame_count)
+        .map(|frame| Timestamp::new(slide_index + 1, frame as f64 / fps_f64))
+        .collect()
+}
+
+fn frame_count_for_duration(duration: f64, fps: u32) -> usize {
+    ((duration * fps as f64).ceil() as usize).max(1)
+}
+
+async fn write_video_file(
+    prepared: &mut PreparedScene,
+    renderer: &mut Renderer,
+    output_path: &Path,
+    settings: ExportSettings,
+    frame_targets: &[Timestamp],
+    progress_label: VideoProgressLabel,
+    completed: &mut usize,
+    total_steps: usize,
+    cancel_flag: &AtomicBool,
+    on_progress: &mut dyn FnMut(ExportProgress),
+) -> Result<usize> {
+    ensure!(!frame_targets.is_empty(), "video has no frames to export");
+
+    let video_size = settings.render_size;
+    let mp4_timescale = settings
+        .fps
+        .checked_mul(MP4_FRAME_DURATION)
+        .ok_or_else(|| anyhow!("mp4 timescale overflow"))?;
+    let mut encoder = new_video_encoder(settings)?;
+    let mut parameter_sets = AvcParameterSets::default();
+    let mut cleanup = PartialOutputCleanup::new(output_path.to_path_buf());
+    let mut writer = None;
+    let mut sample_start_time = 0_u64;
+    let mut previous_slide = None;
+
+    for (index, timestamp) in frame_targets.iter().copied().enumerate() {
+        emit_progress_checked(
+            cancel_flag,
+            on_progress,
+            video_frame_progress_message(progress_label, index, frame_targets.len()),
+            *completed,
+            total_steps,
+        )?;
+
+        if index > 0 && previous_slide != Some(timestamp.slide) {
+            encoder.force_intra_frame();
+        }
+
+        let frame = render_frame(
+            &mut prepared.executor,
+            &prepared.root_text_rope,
+            renderer,
+            timestamp,
+            video_size,
+        )
+        .await?;
+        check_cancelled(cancel_flag)?;
+
+        let encoded = encode_video_sample(&frame, video_size, &mut encoder, &mut parameter_sets)
+            .with_context(|| {
+                format!(
+                    "failed to encode H.264 sample at slide {} time {:.3} ({}x{})",
+                    timestamp.slide, timestamp.time, video_size.width, video_size.height
+                )
+            })?;
+        check_cancelled(cancel_flag)?;
+
+        if writer.is_none() {
+            ensure!(
+                parameter_sets.ready(),
+                "encoder did not emit SPS/PPS parameter sets for the initial video sample"
+            );
+            check_cancelled(cancel_flag)?;
+            let file = File::create(output_path).with_context(|| {
+                format!("failed to create video export {}", output_path.display())
+            })?;
+            cleanup.arm();
+            writer = Some(start_mp4_writer(
+                BufWriter::new(file),
+                mp4_timescale,
+                video_size,
+                std::mem::take(&mut parameter_sets),
+            )?);
+        }
+
+        writer
+            .as_mut()
+            .unwrap()
+            .write_sample(
+                MP4_TRACK_ID,
+                &Mp4Sample {
+                    start_time: sample_start_time,
+                    duration: MP4_FRAME_DURATION,
+                    rendering_offset: 0,
+                    is_sync: encoded.is_sync,
+                    bytes: Bytes::from(encoded.bytes),
+                },
+            )
+            .with_context(|| format!("failed to write mp4 sample {}", index + 1))?;
+        check_cancelled(cancel_flag)?;
+
+        sample_start_time += u64::from(MP4_FRAME_DURATION);
+        previous_slide = Some(timestamp.slide);
+        *completed += 1;
+    }
+
+    emit_progress_checked(
+        cancel_flag,
+        on_progress,
+        video_finalize_progress_message(progress_label),
+        *completed,
+        total_steps,
+    )?;
+
+    writer
+        .as_mut()
+        .ok_or_else(|| anyhow!("video export produced no encoded samples"))?
+        .write_end()
+        .with_context(|| format!("failed to finalize video export {}", output_path.display()))?;
+    cleanup.keep();
+    *completed += 1;
+
+    Ok(frame_targets.len())
+}
+
+fn new_video_encoder(settings: ExportSettings) -> Result<Encoder> {
+    let video_size = settings.render_size;
+    Encoder::with_api_config(
+        openh264::OpenH264API::from_source(),
+        EncoderConfig::new()
+            .skip_frames(false)
+            .rate_control_mode(RateControlMode::Quality)
+            .complexity(Complexity::High)
+            .usage_type(UsageType::ScreenContentRealTime)
+            .adaptive_quantization(false)
+            .background_detection(false)
+            .max_frame_rate(FrameRate::from_hz(settings.fps as f32))
+            .bitrate(BitRate::from_bps(video_bitrate(video_size, settings.fps)))
+            .qp(video_qp_range(video_size))
+            .intra_frame_period(IntraFramePeriod::from_num_frames(settings.fps)),
+    )
+    .context("failed to initialize H.264 encoder")
+}
+
+fn video_frame_progress_message(
+    label: VideoProgressLabel,
+    frame_index: usize,
+    frame_count: usize,
+) -> String {
+    match label {
+        VideoProgressLabel::Scene => {
+            format!("Rendering frame {} of {}", frame_index + 1, frame_count)
+        }
+        VideoProgressLabel::Slide {
+            slide_index,
+            slide_count,
+        } => format!(
+            "Rendering slide {} of {}, frame {} of {}",
+            slide_index + 1,
+            slide_count,
+            frame_index + 1,
+            frame_count
+        ),
+    }
+}
+
+fn video_finalize_progress_message(label: VideoProgressLabel) -> String {
+    match label {
+        VideoProgressLabel::Scene => "Finalizing video".into(),
+        VideoProgressLabel::Slide {
+            slide_index,
+            slide_count,
+        } => format!("Finalizing slide {} of {}", slide_index + 1, slide_count),
+    }
+}
+
+fn slide_video_output_paths(
+    output_dir: &Path,
+    slide_names: &[Option<String>],
+    slide_count: usize,
+) -> Result<Vec<PathBuf>> {
+    let mut occupied = occupied_file_names(output_dir)?;
+    let mut paths = Vec::with_capacity(slide_count);
+
+    for slide_index in 0..slide_count {
+        let fallback = format!("Slide {}", slide_index + 1);
+        let raw_name = slide_names
+            .get(slide_index)
+            .and_then(|name| name.as_deref())
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(&fallback);
+        let mut stem = sanitize_file_stem(raw_name);
+        if stem.is_empty() {
+            stem = fallback;
+        }
+        let file_name = unique_file_name(output_dir, &mut occupied, &stem, "mp4");
+        paths.push(output_dir.join(file_name));
+    }
+
+    Ok(paths)
+}
+
+fn occupied_file_names(output_dir: &Path) -> Result<HashSet<String>> {
+    let mut occupied = HashSet::new();
+    if !output_dir.exists() {
+        return Ok(occupied);
+    }
+
+    for entry in std::fs::read_dir(output_dir)
+        .with_context(|| format!("failed to read export directory {}", output_dir.display()))?
+    {
+        let entry = entry?;
+        if let Some(name) = entry.file_name().to_str() {
+            occupied.insert(name.to_lowercase());
+        }
+    }
+    Ok(occupied)
+}
+
+fn unique_file_name(
+    output_dir: &Path,
+    occupied: &mut HashSet<String>,
+    stem: &str,
+    extension: &str,
+) -> String {
+    let mut suffix = None;
+    loop {
+        let file_name = match suffix {
+            None => format!("{stem}.{extension}"),
+            Some(index) => format!("{stem} ({index}).{extension}"),
+        };
+        let key = file_name.to_lowercase();
+        if !occupied.contains(&key) && !output_dir.join(&file_name).exists() {
+            occupied.insert(key);
+            return file_name;
+        }
+        suffix = Some(suffix.unwrap_or(0) + 1);
+    }
+}
+
+fn sanitize_file_stem(raw: &str) -> String {
+    let mut sanitized = String::new();
+    let mut last_was_space = false;
+
+    for ch in raw.chars() {
+        let ch = if ch.is_control()
+            || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*')
+        {
+            ' '
+        } else {
+            ch
+        };
+
+        if ch.is_whitespace() {
+            if !last_was_space {
+                sanitized.push(' ');
+                last_was_space = true;
+            }
+        } else {
+            sanitized.push(ch);
+            last_was_space = false;
+        }
+    }
+
+    let mut sanitized = sanitized
+        .trim_matches(|ch: char| ch.is_whitespace() || ch == '.')
+        .chars()
+        .take(120)
+        .collect::<String>();
+    sanitized = sanitized
+        .trim_matches(|ch: char| ch.is_whitespace() || ch == '.')
+        .to_string();
+
+    if is_reserved_windows_file_stem(&sanitized) {
+        sanitized.insert(0, '_');
+    }
+    sanitized
+}
+
+fn is_reserved_windows_file_stem(stem: &str) -> bool {
+    let upper = stem.to_ascii_uppercase();
+    matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || upper
+            .strip_prefix("COM")
+            .or_else(|| upper.strip_prefix("LPT"))
+            .is_some_and(|tail| tail.len() == 1 && tail.chars().all(|ch| matches!(ch, '1'..='9')))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, process, time::SystemTime};
+
+    fn temp_export_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "monocurl_exporter_{name}_{}_{}",
+            process::id(),
+            nanos
+        ))
+    }
+
+    #[test]
+    fn slide_video_output_paths_use_titles_fallbacks_and_unique_names() {
+        let dir = temp_export_dir("slide_names");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("Intro.mp4"), []).unwrap();
+
+        let names = vec![
+            Some("Intro".to_string()),
+            Some("Invalid/Name: Demo".to_string()),
+            None,
+            Some("Intro".to_string()),
+        ];
+        let paths = slide_video_output_paths(&dir, &names, names.len()).unwrap();
+        let file_names = paths
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            file_names,
+            vec![
+                "Intro (1).mp4",
+                "Invalid Name Demo.mp4",
+                "Slide 3.mp4",
+                "Intro (2).mp4",
+            ]
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sanitize_file_stem_avoids_empty_and_reserved_names() {
+        assert_eq!(sanitize_file_stem("  ...  "), "");
+        assert_eq!(sanitize_file_stem("CON"), "_CON");
+        assert_eq!(sanitize_file_stem("COM1"), "_COM1");
+        assert_eq!(sanitize_file_stem("Hello\tWorld"), "Hello World");
+    }
 }
 
 async fn render_frame(
