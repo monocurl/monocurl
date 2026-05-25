@@ -166,7 +166,6 @@ impl Navbar {
             .px_3()
             .h_full()
             .border_t(px(0.5))
-            .border_b(px(0.5))
             .border_color(theme.navbar_border)
             .flex_none()
             .text_color(theme.text_muted)

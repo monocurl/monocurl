@@ -1,6 +1,6 @@
 {
   "name": "@enigmurl/monocurl-mcp",
-  "version": "0.2.9",
+  "version": "0.2.13",
   "mcpName": "io.github.enigmurl/monocurl-mcp",
   "description": "Docs for the Monocurl animation language, standard library, examples, and CLI usage.",
   "type": "module",

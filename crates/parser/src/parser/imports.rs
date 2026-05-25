@@ -4,6 +4,7 @@ struct RootSectionTokens {
     tokens: Vec<(Token, Span8)>,
     name: Option<String>,
     slide_keyword_span: Option<Span8>,
+    source_end: Count8,
 }
 
 impl Parser {
@@ -166,6 +167,7 @@ impl Parser {
             tokens: Vec::new(),
             name: None,
             slide_keyword_span: None,
+            source_end: text_rope.codeunits(),
         }];
         let mut artifacts = ParseArtifacts::default();
         let mut token_index = 0;
@@ -195,10 +197,12 @@ impl Parser {
                 });
             }
 
+            sections.last_mut().unwrap().source_end = span.start;
             sections.push(RootSectionTokens {
                 tokens: Vec::new(),
                 name: None,
                 slide_keyword_span: Some(span.clone()),
+                source_end: text_rope.codeunits(),
             });
             token_index += 1;
 
@@ -271,13 +275,16 @@ impl Parser {
                 } else {
                     SectionType::Slide
                 };
-                let (mut parsed_section, sub_artifacts) = Self::parse_section(
+                let mut parser = SectionParser::new_with_source_end(
                     section.tokens,
                     f.text_rope.clone(),
                     stype,
-                    cursor,
                     f.root_import_span.clone(),
+                    cursor,
+                    section.source_end,
                 );
+                let mut parsed_section = parser.parse_section();
+                let sub_artifacts = parser.artifacts();
                 parsed_section.name = section.name;
                 parsed_sections.push(parsed_section);
                 artifacts.extend(sub_artifacts);
