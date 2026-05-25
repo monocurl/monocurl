@@ -78,9 +78,9 @@ pub(crate) fn build_text_document(text: &str, style: LatexDocumentStyle) -> Stri
 pub(crate) fn build_tex_document(tex: &str, style: LatexDocumentStyle) -> String {
     build_document(
         &format!(
-            r"\[
+            r"\noindent\(\displaystyle
 {tex}
-\]"
+\)"
         ),
         "",
         style,
@@ -432,9 +432,9 @@ mod tests {
     }
 
     #[test]
-    fn tex_document_wraps_input_in_display_math() {
+    fn tex_document_wraps_input_in_unindented_inline_displaystyle_math() {
         let doc = build_tex_document("x^2", LatexDocumentStyle::SystemLatex);
-        assert!(doc.contains("\n\\[\nx^2\n\\]\n"));
+        assert!(doc.contains("\n\\noindent\\(\\displaystyle\nx^2\n\\)\n"));
     }
 
     #[test]
