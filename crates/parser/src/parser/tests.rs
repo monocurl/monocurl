@@ -323,6 +323,19 @@ mod test {
     }
 
     #[test]
+    fn test_root_slide_end_diagnostic_stays_with_section() {
+        let content = "slide\nlet x = (1\nslide\nlet y = 2\n";
+        let second_slide_start = content[1..].find("slide").unwrap() + 1;
+        let (_sections, errors) = parse_root_test(content);
+        let diagnostic = errors
+            .iter()
+            .find(|diagnostic| diagnostic.title == "Illegal token: '<end of section>'")
+            .expect("expected end-of-section diagnostic");
+
+        assert_eq!(diagnostic.span.end, second_slide_start);
+    }
+
+    #[test]
     fn test_directional_literal_left() {
         let result = parse_expr_test("5l");
         let expected = Expression::Literal(Literal::Directional(DirectionalLiteral::Left(5.0)));

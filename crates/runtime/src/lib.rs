@@ -650,12 +650,14 @@ async fn playback_iteration(
 }
 
 fn max_slide(executor: &Executor, playback_mode: PlaybackMode) -> usize {
-    match playback_mode {
-        PlaybackMode::Presentation if executor.state.timestamp.time.is_infinite() => {
-            (executor.state.timestamp.slide + 1).min(executor.total_sections())
-        }
-        PlaybackMode::Presentation => executor.state.timestamp.slide,
-        PlaybackMode::Preview | PlaybackMode::Web => executor.total_sections(),
+    if matches!(playback_mode, PlaybackMode::Web) {
+        return executor.total_sections();
+    }
+
+    if executor.state.timestamp.time.is_infinite() {
+        (executor.state.timestamp.slide + 1).min(executor.total_sections())
+    } else {
+        executor.state.timestamp.slide
     }
 }
 
@@ -895,7 +897,7 @@ mod tests {
 
     use super::{
         CommandEffect, ParameterValue, PlaybackMode, PresentationUpdateTarget, RuntimeCommand,
-        RuntimeController, default_bytecode, mesh_attributes_from_runtime,
+        RuntimeController, default_bytecode, max_slide, mesh_attributes_from_runtime,
     };
 
     #[test]
@@ -987,6 +989,40 @@ mod tests {
         };
 
         assert!(!runtime.requires_future_reset(&message));
+    }
+
+    #[test]
+    fn preview_playback_uses_current_slide_as_boundary() {
+        let runtime = RuntimeController::with_native_funcs(
+            bytecode::Bytecode::new(vec![
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: true,
+                    is_library: true,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: false,
+                    is_library: false,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+                Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                    is_stdlib: false,
+                    is_library: false,
+                    is_init: false,
+                    is_root_module: true,
+                })),
+            ]),
+            Vec::new(),
+        );
+        let mut executor = runtime.executor.borrow_mut();
+        executor.state.timestamp = Timestamp::new(1, 0.5);
+        assert_eq!(max_slide(&executor, PlaybackMode::Preview), 1);
+
+        executor.state.timestamp = Timestamp::at_end_of_slide(1);
+        assert_eq!(max_slide(&executor, PlaybackMode::Preview), 2);
+        assert_eq!(max_slide(&executor, PlaybackMode::Web), 3);
     }
 
     #[test]

@@ -176,10 +176,7 @@ macro_rules! try_all {
                 if let Some((token, span)) = $self.peek_token() {
                     (Some(*token), span.clone())
                 } else {
-                    let end = $self.tokens.get($self.state.top().operating_range.end)
-                        .map(|(_, span)| span.end)
-                        .unwrap_or_else(|| $self.text_rope.codeunits());
-                    let span = end.saturating_sub(1)..end;
+                    let span = $self.synthetic_eof_span();
                     (None, span)
                 }
             };
@@ -338,6 +335,7 @@ pub struct SectionParser {
 
     text_rope: Rope<TextAggregate>,
     tokens: Vec<(Token, Span8)>,
+    source_end: Count8,
     token_index: usize,
 
     // expectation strings of next token for error messages
@@ -412,6 +410,15 @@ impl SectionParser {
         let span = self.tokens[self.token_index].1.clone();
         self.token_index += 1;
         span
+    }
+
+    fn synthetic_eof_span(&self) -> Span8 {
+        let end = self
+            .tokens
+            .get(self.state.top().operating_range.end)
+            .map(|(_, span)| span.end)
+            .unwrap_or(self.source_end);
+        end.saturating_sub(1)..end
     }
 
     fn nil_range(&self) -> Span8 {
@@ -526,12 +533,32 @@ impl SectionParser {
         root_import_span: Option<Span8>,
         cursor_position: Option<Count8>,
     ) -> Self {
+        let source_end = text.codeunits();
+        Self::new_with_source_end(
+            tokens,
+            text,
+            section_type,
+            root_import_span,
+            cursor_position,
+            source_end,
+        )
+    }
+
+    fn new_with_source_end(
+        tokens: Vec<(Token, Span8)>,
+        text: Rope<TextAggregate>,
+        section_type: SectionType,
+        root_import_span: Option<Span8>,
+        cursor_position: Option<Count8>,
+        source_end: Count8,
+    ) -> Self {
         SectionParser {
             precomputation: Precomputation::new(&tokens),
             state: ShortTermState::new(section_type, root_import_span, tokens.len()),
             cursor_position,
             text_rope: text,
             tokens,
+            source_end,
             token_index: 0,
             next_token_expectations: SmallVec::new(),
             next_token_hints: SmallVec::new(),
