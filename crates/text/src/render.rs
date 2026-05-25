@@ -703,6 +703,24 @@ mod tests {
     }
 
     #[test]
+    fn tex_initial_origin_stays_near_formula_bounds() {
+        if !configure_test_backend() {
+            return;
+        }
+        let tex = render_tex(r"a_i \to A", 1.0).unwrap();
+        let (min, max) = mesh_bounds(&tex).unwrap();
+        let size = max - min;
+
+        assert!(
+            min.x.abs() <= size.x,
+            "tex x origin drifted too far from formula bounds: min={}, max={}, width={}",
+            min.x,
+            max.x,
+            size.x
+        );
+    }
+
+    #[test]
     fn text_monocurl_has_consistent_topology() {
         if !configure_test_backend() {
             return;
