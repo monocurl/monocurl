@@ -134,6 +134,9 @@ in
           "render::tests::tex_and_text_have_similar_scale"
           "render::tests::tex_digits_and_letters_keep_expected_bounds"
           "render::tests::text_monocurl_has_consistent_topology"
+          "render::tests::font_text_from_file_keeps_text_tags"
+          "render::tests::high_quality_tex_uses_toned_down_curve_sampling"
+          "render::tests::tex_initial_origin_stays_near_formula_bounds"
         ];
         skippedTestsStr = lib.concatStringsSep " " (lib.map (testId: "--skip=${testId}") skippedTests);
       in "MONOCURL_ASSETS_DIR=${root}/assets cargo test --profile release -j $NIX_BUILD_CORES --offline -- --test-threads=$NIX_BUILD_CORES ${skippedTestsStr}";
