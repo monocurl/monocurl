@@ -298,7 +298,7 @@ let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_h
 ## meshes: optional leader references; [] asks Monocurl to find dirty mesh leaders
 ## path_arc: same circular-arc control as `Trans`
 ## similar_topo_hint: when truthy, first try vertex-by-vertex interpolation for tagged pairs with the same triangle graph
-## tag_map: optional map that remaps source tag lists before matching
+## tag_map: optional map that remaps source tag lists before matching. tag_map tells `TagTrans` that particular source tag lists and target tag lists should be treated as the same matching group. It is a map: write `[1 -> 2]` for scalar tags, `[[1, 2] -> [3, 4]]` for one full tag list to another full tag list, and `[[[1], [2]] -> [[3]]]` to group several full tag lists together. Tags not mentioned in `tag_map` still self-match normally; a tag mentioned on one side of the map will not also self-match outside that mapped group.
 ## [example]
 ## ```mcl video
 ## background = [0.035, 0.045, 0.060, 1]

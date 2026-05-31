@@ -35,7 +35,7 @@ pub struct SettingsWindow {
 
 impl SettingsWindow {
     pub fn open(cx: &mut App) {
-        let window_size = size(px(420.0), px(280.0));
+        let window_size = size(px(420.0), px(340.0));
         if !cx.has_global::<SettingsWindowHandle>() {
             cx.set_global(SettingsWindowHandle::default());
         }
@@ -242,6 +242,54 @@ impl SettingsWindow {
             )
             .into_any_element()
     }
+
+    fn auto_update_toggle(&self, enabled: bool, cx: &mut Context<Self>) -> AnyElement {
+        let theme = ThemeSettings::theme(cx);
+        let next_enabled = !enabled;
+        let track = div()
+            .id("auto-update-toggle")
+            .w(px(38.0))
+            .h(px(20.0))
+            .p(px(2.0))
+            .rounded(px(10.0))
+            .border_1()
+            .border_color(if enabled {
+                theme.accent
+            } else {
+                theme.navbar_border
+            })
+            .bg(if enabled {
+                theme.accent
+            } else {
+                theme.tab_active_background
+            })
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .hover(|style| style.opacity(0.92));
+        let track = if enabled {
+            track.justify_end()
+        } else {
+            track.justify_start()
+        };
+
+        track
+            .child(
+                div()
+                    .w(px(14.0))
+                    .h(px(14.0))
+                    .rounded(px(7.0))
+                    .bg(theme.viewport_stage_background),
+            )
+            .on_click(move |_, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+                UserSettings::update(cx, |settings| {
+                    settings.auto_update = next_enabled;
+                });
+            })
+            .into_any_element()
+    }
 }
 
 impl Render for SettingsWindow {
@@ -263,6 +311,50 @@ impl Render for SettingsWindow {
                     .flex()
                     .flex_col()
                     .gap(px(14.0))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(9.0))
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Updates"),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .items_center()
+                                    .gap(px(12.0))
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .min_w(px(0.0))
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(2.0))
+                                            .child(
+                                                div()
+                                                    .text_size(px(12.0))
+                                                    .text_color(theme.text_primary)
+                                                    .child("Automatically check for updates"),
+                                            )
+                                            .child(
+                                                div()
+                                                    .text_size(px(10.0))
+                                                    .text_color(theme.text_muted)
+                                                    .child(if settings.auto_update {
+                                                        "Enabled"
+                                                    } else {
+                                                        "Disabled"
+                                                    }),
+                                            ),
+                                    )
+                                    .child(self.auto_update_toggle(settings.auto_update, cx)),
+                            ),
+                    )
                     .child(
                         div()
                             .flex()

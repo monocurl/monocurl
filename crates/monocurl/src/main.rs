@@ -13,11 +13,13 @@ use std::{
 
 use crate::{
     actions::{
-        Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportSlidesAsVideos, ExportVideo,
-        NextSlide, OpenSettings, Paste, PrevSlide, Quit, Redo, SaveActiveDocument,
-        SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleHeadlessMode, TogglePlaying,
-        TogglePresentationMode, ToggleSlideFold, Undo,
+        CheckForUpdates, Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage,
+        ExportSlidesAsVideos, ExportVideo, InstallUpdate, NextSlide, OpenSettings, Paste,
+        PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd,
+        SceneStart, ToggleHeadlessMode, TogglePlaying, TogglePresentationMode, ToggleSlideFold,
+        Undo,
     },
+    auto_update::AutoUpdater,
     editor::text_editor,
     settings_window::SettingsWindow,
     state::user_settings::UserSettings,
@@ -30,6 +32,7 @@ use structs::assets::Assets;
 mod actions;
 #[cfg(not(target_os = "macos"))]
 mod app_menu_bar;
+mod auto_update;
 mod components;
 mod document_view;
 mod editor;
@@ -127,6 +130,12 @@ impl MonocurlLauncher {
     fn setup_global_actions(cx: &mut App) {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &OpenSettings, cx| SettingsWindow::open(cx));
+        cx.on_action(|_: &CheckForUpdates, cx| {
+            AutoUpdater::check_for_updates(cx.active_window(), cx);
+        });
+        cx.on_action(|_: &InstallUpdate, cx| {
+            AutoUpdater::restart_to_install(cx);
+        });
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     }
 
@@ -183,7 +192,10 @@ impl MonocurlLauncher {
             },
             Menu {
                 name: "Help".into(),
-                items: vec![],
+                items: vec![
+                    MenuItem::action("Check for Updates...", CheckForUpdates),
+                    MenuItem::action("Restart to Update", InstallUpdate),
+                ],
             },
         ]);
     }
@@ -229,6 +241,7 @@ impl MonocurlLauncher {
                 Self::setup_fonts(cx);
                 ThemeSettings::init(cx);
                 UserSettings::init(cx);
+                AutoUpdater::init(cx);
                 Self::setup_modules(cx);
                 Self::setup_global_actions(cx);
                 Self::setup_menus(cx);

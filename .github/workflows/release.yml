@@ -287,6 +287,45 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Generate update manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          base_url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+
+          asset_json() {
+            local os="$1"
+            local arch="$2"
+            local kind="$3"
+            local name="$4"
+            local comma="$5"
+            if [[ ! -f "dist/$name" ]]; then
+              echo "missing release asset: dist/$name" >&2
+              exit 1
+            fi
+
+            local sha
+            sha="$(sha256sum "dist/$name" | awk '{print $1}')"
+            printf '    {"os":"%s","arch":"%s","kind":"%s","name":"%s","url":"%s/%s","sha256":"%s"}%s\n' \
+              "$os" "$arch" "$kind" "$name" "$base_url" "$name" "$sha" "$comma"
+          }
+
+          {
+            printf '{\n'
+            printf '  "version": "%s",\n' "$version"
+            printf '  "notes_url": "https://github.com/%s/releases/tag/%s",\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME"
+            printf '  "assets": [\n'
+            asset_json "macos" "aarch64" "dmg" "Monocurl-macos-aarch64.dmg" ","
+            asset_json "macos" "x86_64" "dmg" "Monocurl-macos-x86_64.dmg" ","
+            asset_json "linux" "x86_64" "tar.gz" "Monocurl-linux-x86_64.tar.gz" ","
+            asset_json "windows" "x86_64" "inno" "Monocurl-windows-x86_64-installer.exe" ""
+            printf '  ]\n'
+            printf '}\n'
+          } > dist/latest.json
+
+          cat dist/latest.json
+
       - name: Upload to GitHub release
         uses: softprops/action-gh-release@v2
         with:

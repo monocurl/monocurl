@@ -37,3 +37,10 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: deskto
 
 [Run]
 Filename: "{app}\{#AppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(AppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#AppExeName}"; Flags: nowait skipifnotsilent; Check: IsUpdateMode
+
+[Code]
+function IsUpdateMode: Boolean;
+begin
+  Result := ExpandConstant('{param:update|false}') = 'true';
+end;

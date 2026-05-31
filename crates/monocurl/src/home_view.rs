@@ -5,6 +5,7 @@ use structs::assets::Assets;
 use ui_cli_shared::doc_type::DocumentType;
 
 use crate::{
+    auto_update::{AutoUpdateStatus, AutoUpdater, CURRENT_VERSION},
     components::{buttons::link_button, latex_warning::render_latex_warning},
     navbar_view::Navbar,
     state::{user_settings::UserSettings, window_state::WindowState},
@@ -17,10 +18,6 @@ const HOME_LOGO_WIDE_FRACTION: f32 = 0.58;
 const HOME_LOGO_MIN_EXPANDED_WIDTH: f32 = 520.0;
 const HOME_LOGO_MAX_WIDTH: f32 = 960.0;
 const HOME_LOGO_CARD_MAX_WIDTH: f32 = 430.0;
-const APP_VERSION: &str = match option_env!("MONOCURL_VERSION") {
-    Some(version) => version,
-    None => env!("CARGO_PKG_VERSION"),
-};
 
 #[derive(Clone, Copy)]
 struct LogoMetrics {
@@ -33,6 +30,12 @@ struct LogoMetrics {
     title_size: f32,
     links_height: f32,
     links_opacity: f32,
+}
+
+#[derive(Clone, Copy)]
+enum UpdateStatusAction {
+    Restart,
+    Retry,
 }
 
 impl LogoMetrics {
@@ -93,10 +96,81 @@ impl HomeView {
             cx.notify();
         })
         .detach();
+        if let Some(updater) = AutoUpdater::get(cx) {
+            cx.observe(&updater, |_this, _, cx| {
+                cx.notify();
+            })
+            .detach();
+        }
 
         let navbar = cx.new(|cx| Navbar::new(state.downgrade(), cx));
 
         Self { navbar, state }
+    }
+
+    fn render_update_status(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let theme = ThemeSettings::theme(cx);
+        let status = AutoUpdater::status(cx);
+
+        let (label, action_label, action) = match status {
+            AutoUpdateStatus::Idle => return None,
+            AutoUpdateStatus::Checking => ("Checking for updates".to_string(), None, None),
+            AutoUpdateStatus::Downloading { version } => {
+                (format!("Downloading v{version}"), None, None)
+            }
+            AutoUpdateStatus::Installing { version } => {
+                (format!("Installing v{version}"), None, None)
+            }
+            AutoUpdateStatus::ReadyToRestart { version } => (
+                format!("Update v{version} ready"),
+                Some("Restart"),
+                Some(UpdateStatusAction::Restart),
+            ),
+            AutoUpdateStatus::Errored { .. } => (
+                "Update failed".to_string(),
+                Some("Retry"),
+                Some(UpdateStatusAction::Retry),
+            ),
+        };
+
+        let row = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_end()
+            .gap(px(7.0))
+            .max_w(px(240.0))
+            .text_size(px(11.0))
+            .line_height(px(14.0))
+            .text_color(theme.text_muted)
+            .child(div().truncate().child(label));
+
+        let row = if let (Some(action_label), Some(action)) = (action_label, action) {
+            row.child(
+                div()
+                    .id(ElementId::Name(
+                        format!("update-status-{action_label}").into(),
+                    ))
+                    .text_color(theme.link_text)
+                    .cursor_pointer()
+                    .hover(|style| style.opacity(0.9))
+                    .child(action_label)
+                    .on_click(move |_, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        match action {
+                            UpdateStatusAction::Restart => AutoUpdater::restart_to_install(cx),
+                            UpdateStatusAction::Retry => {
+                                AutoUpdater::check_for_updates(Some(window.window_handle()), cx);
+                            }
+                        }
+                    }),
+            )
+        } else {
+            row
+        };
+
+        Some(row.into_any_element())
     }
 
     fn open(&mut self, path: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
@@ -155,7 +229,7 @@ impl HomeView {
 
     fn render_logo(&self, metrics: LogoMetrics, cx: &mut Context<Self>) -> AnyElement {
         let theme = ThemeSettings::theme(cx);
-        let version = format!("v{APP_VERSION}");
+        let version = format!("v{CURRENT_VERSION}");
 
         div()
             .flex()
@@ -227,10 +301,15 @@ impl HomeView {
                     .absolute()
                     .right(px(18.0))
                     .bottom(px(14.0))
+                    .flex()
+                    .flex_col()
+                    .items_end()
+                    .gap(px(3.0))
                     .text_size(px(11.0))
                     .line_height(px(14.0))
                     .text_color(theme.text_muted)
                     .opacity(metrics.links_opacity)
+                    .children(self.render_update_status(cx))
                     .child(version),
             )
             .bg(theme.home_sidebar_background)
