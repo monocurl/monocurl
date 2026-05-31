@@ -22,7 +22,7 @@ use crate::{
     auto_update::AutoUpdater,
     editor::text_editor,
     settings_window::SettingsWindow,
-    state::user_settings::UserSettings,
+    state::{user_settings::UserSettings, window_state::WindowState},
     theme::ThemeSettings,
     window::MonocurlWindow,
 };
@@ -206,14 +206,16 @@ impl MonocurlLauncher {
     }
 
     fn create_window(cx: &mut App) {
-        let restore_bounds = Bounds::centered(None, size(px(1280.0), px(720.0)), cx);
+        let window_min_size = size(px(520.0), px(420.0));
+        let window_bounds =
+            WindowState::initial_window_bounds(window_min_size, size(px(1280.0), px(720.0)), cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some("Monocurl".into()),
                 ..Default::default()
             }),
-            window_bounds: Some(WindowBounds::Maximized(restore_bounds)),
-            window_min_size: Some(size(px(520.), px(420.))),
+            window_bounds: Some(WindowBounds::Windowed(window_bounds)),
+            window_min_size: Some(window_min_size),
             #[cfg(target_os = "linux")]
             // temporary linux csd preview
             window_decorations: Some(WindowDecorations::Client),
