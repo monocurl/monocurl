@@ -26,6 +26,12 @@ impl MonocurlWindow {
         #[cfg(not(target_os = "macos"))]
         let app_menu_bar = cx.new(|cx| AppMenuBar::new(cx));
         cx.observe(&state, |_this, _, cx| cx.notify()).detach();
+        cx.observe_window_bounds(window, |this, window, cx| {
+            this.state.update(cx, |state, _| {
+                state.save_window_bounds(window);
+            });
+        })
+        .detach();
         cx.observe_global::<ThemeSettings>(|_this, cx| {
             cx.notify();
         })

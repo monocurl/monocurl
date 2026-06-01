@@ -23,11 +23,15 @@ FWDIR="$APP/Contents/Frameworks"
 EXE_NAME="$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist")"
 EXE="$APP/Contents/MacOS/$EXE_NAME"
 [[ -f "$EXE" ]] || { echo "[error] app executable not found: $EXE" >&2; exit 1; }
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist" 2>/dev/null \
+    || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $VERSION" "$APP/Contents/Info.plist"
 
 # ---- assets -----------------------------------------------------------------
 mkdir -p "$APP/Contents/Resources"
 rm -rf "$APP/Contents/Resources/assets"
-rsync -a --exclude .DS_Store "$ROOT/assets/" "$APP/Contents/Resources/assets/"
+mkdir -p "$APP/Contents/Resources/assets"
+cp -pR "$ROOT/assets/." "$APP/Contents/Resources/assets/"
+find "$APP/Contents/Resources/assets" -name .DS_Store -delete
 
 # ---- icns -------------------------------------------------------------------
 SRC="$ROOT/assets/AppIcon.appiconset"
@@ -66,7 +70,9 @@ fi
 mkdir -p "$ROOT/dist/macos"
 DMG="$ROOT/dist/macos/Monocurl-macos-${TARGET%%-*}.dmg"
 stage="$(mktemp -d)"; trap 'rm -rf "$stage"' EXIT
-ditto --noextattr --norsrc "$APP" "$stage/Monocurl.app"; ln -s /Applications "$stage/Applications"
+cp -pR "$APP" "$stage/"
+find "$stage/Monocurl.app" -name .DS_Store -delete
+ln -s /Applications "$stage/Applications"
 
 hdiutil create -volname Monocurl -srcfolder "$stage" -ov -format UDZO "$DMG"
 

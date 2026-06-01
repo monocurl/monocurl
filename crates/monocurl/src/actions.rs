@@ -1,6 +1,6 @@
 use gpui::actions;
 
-actions!(app, [Quit, OpenSettings]);
+actions!(app, [Quit, OpenSettings, CheckForUpdates]);
 
 actions!(
     document,

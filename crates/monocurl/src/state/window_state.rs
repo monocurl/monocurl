@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use gpui::{App, AppContext, Context, Entity, WeakEntity, Window};
+use gpui::{
+    App, AppContext, Bounds, Context, Entity, Pixels, Size, WeakEntity, Window, WindowBounds,
+    point, px, size,
+};
 use serde::{Deserialize, Serialize};
 use structs::assets::Assets;
 use ui_cli_shared::doc_type::DocumentType;
@@ -50,6 +53,7 @@ struct WindowStateSerde {
     pub screen: ActiveScreenSerde,
     pub recently_opened: Vec<RecentlyOpened>,
     pub open_documents: Vec<OpenDocumentSerde>,
+    pub window_bounds: Option<Bounds<Pixels>>,
 }
 
 #[derive(Clone, Debug)]
@@ -57,9 +61,138 @@ pub struct WindowState {
     pub screen: ActiveScreen,
     pub recently_opened: Vec<RecentlyOpened>,
     pub open_documents: Vec<OpenDocument>,
+    window_bounds: Option<Bounds<Pixels>>,
 }
 
 impl WindowState {
+    pub fn initial_window_bounds(
+        min_size: Size<Pixels>,
+        default_size: Size<Pixels>,
+        cx: &App,
+    ) -> Bounds<Pixels> {
+        Self::load_saved_window_bounds()
+            .and_then(|bounds| Self::validate_window_bounds(bounds, min_size, cx))
+            .unwrap_or_else(|| Bounds::centered(None, default_size, cx))
+    }
+
+    fn load_saved_window_bounds() -> Option<Bounds<Pixels>> {
+        let path = Self::save_file();
+        let data = std::fs::read_to_string(path).ok()?;
+        let state: WindowStateSerde = serde_json::from_str(&data).ok()?;
+        state.window_bounds
+    }
+
+    fn validate_window_bounds(
+        bounds: Bounds<Pixels>,
+        min_size: Size<Pixels>,
+        cx: &App,
+    ) -> Option<Bounds<Pixels>> {
+        let bounds_x = f32::from(bounds.origin.x);
+        let bounds_y = f32::from(bounds.origin.y);
+        let bounds_w = f32::from(bounds.size.width);
+        let bounds_h = f32::from(bounds.size.height);
+        if !bounds_x.is_finite()
+            || !bounds_y.is_finite()
+            || !bounds_w.is_finite()
+            || !bounds_h.is_finite()
+            || bounds_w <= 0.0
+            || bounds_h <= 0.0
+        {
+            return None;
+        }
+
+        let displays = cx.displays();
+        let saved_display_bounds = displays
+            .iter()
+            .map(|display| display.visible_bounds())
+            .find(|display_bounds| Self::bounds_intersect(bounds, *display_bounds));
+        let should_center = saved_display_bounds.is_none();
+        let display_bounds = saved_display_bounds
+            .or_else(|| cx.primary_display().map(|display| display.visible_bounds()))?;
+
+        Self::fit_window_bounds(bounds, min_size, display_bounds, should_center)
+    }
+
+    fn fit_window_bounds(
+        bounds: Bounds<Pixels>,
+        min_size: Size<Pixels>,
+        display_bounds: Bounds<Pixels>,
+        center: bool,
+    ) -> Option<Bounds<Pixels>> {
+        let bounds_x = f32::from(bounds.origin.x);
+        let bounds_y = f32::from(bounds.origin.y);
+        let bounds_w = f32::from(bounds.size.width);
+        let bounds_h = f32::from(bounds.size.height);
+        let display_x = f32::from(display_bounds.origin.x);
+        let display_y = f32::from(display_bounds.origin.y);
+        let display_w = f32::from(display_bounds.size.width);
+        let display_h = f32::from(display_bounds.size.height);
+        if !display_x.is_finite()
+            || !display_y.is_finite()
+            || !display_w.is_finite()
+            || !display_h.is_finite()
+            || display_w <= 0.0
+            || display_h <= 0.0
+        {
+            return None;
+        }
+
+        let min_w = f32::from(min_size.width).min(display_w);
+        let min_h = f32::from(min_size.height).min(display_h);
+        let width = bounds_w.clamp(min_w, display_w);
+        let height = bounds_h.clamp(min_h, display_h);
+        let (x, y) = if center {
+            (
+                display_x + (display_w - width) * 0.5,
+                display_y + (display_h - height) * 0.5,
+            )
+        } else {
+            (
+                bounds_x.clamp(display_x, (display_x + display_w - width).max(display_x)),
+                bounds_y.clamp(display_y, (display_y + display_h - height).max(display_y)),
+            )
+        };
+
+        Some(Bounds::new(
+            point(px(x), px(y)),
+            size(px(width), px(height)),
+        ))
+    }
+
+    fn bounds_intersect(a: Bounds<Pixels>, b: Bounds<Pixels>) -> bool {
+        let a_left = f32::from(a.origin.x);
+        let a_top = f32::from(a.origin.y);
+        let a_right = a_left + f32::from(a.size.width);
+        let a_bottom = a_top + f32::from(a.size.height);
+        let b_left = f32::from(b.origin.x);
+        let b_top = f32::from(b.origin.y);
+        let b_right = b_left + f32::from(b.size.width);
+        let b_bottom = b_top + f32::from(b.size.height);
+
+        a_left < b_right && a_right > b_left && a_top < b_bottom && a_bottom > b_top
+    }
+
+    fn current_window_bounds(window: &Window) -> Bounds<Pixels> {
+        match window.window_bounds() {
+            WindowBounds::Fullscreen(bounds) => bounds,
+            WindowBounds::Windowed(_) | WindowBounds::Maximized(_) => window.bounds(),
+        }
+    }
+
+    pub fn save_window_bounds(&mut self, window: &Window) {
+        if window.is_fullscreen() {
+            return;
+        }
+
+        let bounds = Self::current_window_bounds(window);
+        if self.window_bounds == Some(bounds) {
+            return;
+        }
+
+        self.window_bounds = Some(bounds);
+        self.save();
+    }
+
     fn focus_active_document(&self, window: &mut Window, cx: &mut App) {
         let ActiveScreen::Document(document) = &self.screen else {
             return;
@@ -109,7 +242,7 @@ impl WindowState {
             .collect()
     }
 
-    fn default_state(_window: &mut Window, _cx: &mut Context<Self>) -> Self {
+    fn default_state(window: &mut Window, _cx: &mut Context<Self>) -> Self {
         let default_paths = Self::default_scene_paths();
 
         let screen = ActiveScreen::Home;
@@ -122,6 +255,7 @@ impl WindowState {
             screen,
             recently_opened,
             open_documents: Vec::new(),
+            window_bounds: Some(Self::current_window_bounds(window)),
         }
     }
 
@@ -178,6 +312,7 @@ impl WindowState {
                 .filter(|recent| recent.path.exists())
                 .collect(),
             open_documents,
+            window_bounds: state.window_bounds,
         })
     }
 
@@ -211,6 +346,7 @@ impl WindowState {
                     path: doc.path.clone(),
                 })
                 .collect(),
+            window_bounds: self.window_bounds,
         };
 
         let data = serde_json::to_string_pretty(&serde).expect("Could not serialize window state");
@@ -399,5 +535,40 @@ impl WindowState {
 
         self.focus_active_document(window, cx);
         self.save();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_bounds(x: f32, y: f32, width: f32, height: f32) -> Bounds<Pixels> {
+        Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
+    }
+
+    #[test]
+    fn offscreen_window_bounds_are_centered_with_saved_size() {
+        let restored = WindowState::fit_window_bounds(
+            test_bounds(4000.0, 3000.0, 900.0, 700.0),
+            size(px(520.0), px(420.0)),
+            test_bounds(0.0, 0.0, 1920.0, 1080.0),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(restored, test_bounds(510.0, 190.0, 900.0, 700.0));
+    }
+
+    #[test]
+    fn onscreen_window_bounds_keep_origin_when_possible() {
+        let restored = WindowState::fit_window_bounds(
+            test_bounds(1800.0, 900.0, 900.0, 700.0),
+            size(px(520.0), px(420.0)),
+            test_bounds(0.0, 0.0, 1920.0, 1080.0),
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(restored, test_bounds(1020.0, 380.0, 900.0, 700.0));
     }
 }

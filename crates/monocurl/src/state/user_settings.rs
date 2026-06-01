@@ -11,14 +11,31 @@ pub enum LatexBackendPreference {
     System,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct UserSettings {
+    #[serde(default = "default_auto_update")]
+    pub auto_update: bool,
     pub latex_backend: LatexBackendPreference,
     pub system_latex_path: Option<PathBuf>,
     pub system_dvisvgm_path: Option<PathBuf>,
 }
 
 impl Global for UserSettings {}
+
+impl Default for UserSettings {
+    fn default() -> Self {
+        Self {
+            auto_update: true,
+            latex_backend: LatexBackendPreference::default(),
+            system_latex_path: None,
+            system_dvisvgm_path: None,
+        }
+    }
+}
+
+fn default_auto_update() -> bool {
+    true
+}
 
 impl UserSettings {
     fn save_file() -> PathBuf {

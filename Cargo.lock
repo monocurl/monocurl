@@ -4305,17 +4305,22 @@ dependencies = [
  "open",
  "parser",
  "renderer",
+ "reqwest",
  "runtime",
  "schemars",
+ "semver",
  "serde",
  "serde_json",
+ "sha2",
  "smallvec",
  "smol",
  "stdlib",
  "structs",
+ "tempfile",
  "text",
  "ui_cli_shared",
  "unicode-segmentation",
+ "walkdir",
 ]
 
 [[package]]

@@ -13,14 +13,15 @@ use std::{
 
 use crate::{
     actions::{
-        Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage, ExportSlidesAsVideos, ExportVideo,
-        NextSlide, OpenSettings, Paste, PrevSlide, Quit, Redo, SaveActiveDocument,
-        SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleHeadlessMode, TogglePlaying,
-        TogglePresentationMode, ToggleSlideFold, Undo,
+        CheckForUpdates, Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage,
+        ExportSlidesAsVideos, ExportVideo, NextSlide, OpenSettings, Paste, PrevSlide, Quit, Redo,
+        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleHeadlessMode,
+        TogglePlaying, TogglePresentationMode, ToggleSlideFold, Undo,
     },
+    auto_update::AutoUpdater,
     editor::text_editor,
     settings_window::SettingsWindow,
-    state::user_settings::UserSettings,
+    state::{user_settings::UserSettings, window_state::WindowState},
     theme::ThemeSettings,
     window::MonocurlWindow,
 };
@@ -30,6 +31,7 @@ use structs::assets::Assets;
 mod actions;
 #[cfg(not(target_os = "macos"))]
 mod app_menu_bar;
+mod auto_update;
 mod components;
 mod document_view;
 mod editor;
@@ -127,6 +129,9 @@ impl MonocurlLauncher {
     fn setup_global_actions(cx: &mut App) {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &OpenSettings, cx| SettingsWindow::open(cx));
+        cx.on_action(|_: &CheckForUpdates, cx| {
+            AutoUpdater::check_for_updates(cx.active_window(), cx);
+        });
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     }
 
@@ -183,7 +188,7 @@ impl MonocurlLauncher {
             },
             Menu {
                 name: "Help".into(),
-                items: vec![],
+                items: vec![MenuItem::action("Check for Updates...", CheckForUpdates)],
             },
         ]);
     }
@@ -194,14 +199,16 @@ impl MonocurlLauncher {
     }
 
     fn create_window(cx: &mut App) {
-        let restore_bounds = Bounds::centered(None, size(px(1280.0), px(720.0)), cx);
+        let window_min_size = size(px(520.0), px(420.0));
+        let window_bounds =
+            WindowState::initial_window_bounds(window_min_size, size(px(1280.0), px(720.0)), cx);
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some("Monocurl".into()),
                 ..Default::default()
             }),
-            window_bounds: Some(WindowBounds::Maximized(restore_bounds)),
-            window_min_size: Some(size(px(520.), px(420.))),
+            window_bounds: Some(WindowBounds::Windowed(window_bounds)),
+            window_min_size: Some(window_min_size),
             #[cfg(target_os = "linux")]
             // temporary linux csd preview
             window_decorations: Some(WindowDecorations::Client),
@@ -229,6 +236,7 @@ impl MonocurlLauncher {
                 Self::setup_fonts(cx);
                 ThemeSettings::init(cx);
                 UserSettings::init(cx);
+                AutoUpdater::init(cx);
                 Self::setup_modules(cx);
                 Self::setup_global_actions(cx);
                 Self::setup_menus(cx);
