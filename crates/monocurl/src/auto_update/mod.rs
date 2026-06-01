@@ -12,14 +12,12 @@ use semver::Version;
 
 use crate::state::user_settings::UserSettings;
 
-#[cfg(target_os = "windows")]
-use self::install::windows_update_dir;
 use self::{
     download::{download_asset, verify_asset},
-    install::{check_dependencies, install_asset},
+    install::{check_dependencies, update_dir},
     manifest::{
-        fetch_manifest, matching_asset, update_disabled_explanation, validate_asset_kind,
-        version_is_newer,
+        UpdateAsset, fetch_manifest, matching_asset, update_disabled_explanation,
+        validate_asset_kind, version_is_newer,
     },
 };
 
@@ -70,9 +68,9 @@ pub struct AutoUpdater {
     current_version: Version,
     worker_running: bool,
     manual_prompt_window: Option<AnyWindowHandle>,
-    ready_restart_path: Option<PathBuf>,
-    #[cfg(target_os = "windows")]
-    ready_windows_installer: Option<PathBuf>,
+    ready_update_asset: Option<UpdateAsset>,
+    ready_downloaded_asset: Option<PathBuf>,
+    ready_download_dir: Option<PathBuf>,
     #[cfg(target_os = "windows")]
     pending_windows_installer: Option<PathBuf>,
     #[cfg(target_os = "windows")]
@@ -90,8 +88,9 @@ enum UpdateOutcome {
     },
     ReadyToRestart {
         version: String,
-        restart_path: Option<PathBuf>,
-        windows_installer: Option<PathBuf>,
+        asset: Option<UpdateAsset>,
+        downloaded_asset: Option<PathBuf>,
+        download_dir: Option<PathBuf>,
     },
 }
 
@@ -189,9 +188,9 @@ impl AutoUpdater {
             current_version,
             worker_running: false,
             manual_prompt_window: None,
-            ready_restart_path: None,
-            #[cfg(target_os = "windows")]
-            ready_windows_installer: None,
+            ready_update_asset: None,
+            ready_downloaded_asset: None,
+            ready_download_dir: None,
             #[cfg(target_os = "windows")]
             pending_windows_installer: None,
             #[cfg(target_os = "windows")]
@@ -286,10 +285,11 @@ impl AutoUpdater {
         match result {
             Ok(UpdateOutcome::NoUpdate { version }) => {
                 self.status = AutoUpdateStatus::Idle;
-                self.ready_restart_path = None;
+                self.ready_update_asset = None;
+                self.ready_downloaded_asset = None;
+                self.ready_download_dir = None;
                 #[cfg(target_os = "windows")]
                 {
-                    self.ready_windows_installer = None;
                     self.pending_windows_installer = None;
                 }
                 if kind == UpdateCheckKind::Manual {
@@ -305,18 +305,16 @@ impl AutoUpdater {
             }
             Ok(UpdateOutcome::ReadyToRestart {
                 version,
-                restart_path,
-                windows_installer,
+                asset,
+                downloaded_asset,
+                download_dir,
             }) => {
-                self.ready_restart_path = restart_path;
+                self.ready_update_asset = asset;
+                self.ready_downloaded_asset = downloaded_asset;
+                self.ready_download_dir = download_dir;
                 #[cfg(target_os = "windows")]
                 {
-                    self.ready_windows_installer = windows_installer;
                     self.pending_windows_installer = None;
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let _ = windows_installer;
                 }
                 self.status = AutoUpdateStatus::ReadyToRestart {
                     version: version.clone(),
@@ -390,26 +388,64 @@ impl AutoUpdater {
     }
 
     fn restart_to_apply(&mut self, cx: &mut Context<Self>) {
+        let Some(version) = self.status.ready_version().map(str::to_string) else {
+            self.status = AutoUpdateStatus::Errored {
+                message: "No update is ready to install.".into(),
+            };
+            cx.notify();
+            return;
+        };
+
+        let Some(asset) = self.ready_update_asset.clone() else {
+            self.status = AutoUpdateStatus::Errored {
+                message: "The downloaded update metadata was not found.".into(),
+            };
+            cx.notify();
+            return;
+        };
+        let Some(downloaded_asset) = self.ready_downloaded_asset.clone() else {
+            self.status = AutoUpdateStatus::Errored {
+                message: "The downloaded update was not found.".into(),
+            };
+            cx.notify();
+            return;
+        };
+        let Some(download_dir) = self.ready_download_dir.clone() else {
+            self.status = AutoUpdateStatus::Errored {
+                message: "The downloaded update directory was not found.".into(),
+            };
+            cx.notify();
+            return;
+        };
+
+        self.status = AutoUpdateStatus::Installing {
+            version: version.clone(),
+        };
+        cx.notify();
+
         #[cfg(target_os = "windows")]
         {
-            let Some(installer) = self.ready_windows_installer.clone() else {
-                self.status = AutoUpdateStatus::Errored {
-                    message: "The downloaded installer was not found.".into(),
-                };
-                cx.notify();
-                return;
-            };
-
-            self.pending_windows_installer = Some(installer);
+            let _ = (asset, download_dir, version);
+            self.pending_windows_installer = Some(downloaded_asset);
             cx.quit();
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            if let Some(path) = self.ready_restart_path.clone() {
-                cx.set_restart_path(path);
+            match install::install_asset(&asset, &downloaded_asset, &download_dir) {
+                Ok(restart_path) => {
+                    if let Some(path) = restart_path {
+                        cx.set_restart_path(path);
+                    }
+                    cx.restart();
+                }
+                Err(error) => {
+                    self.status = AutoUpdateStatus::Errored {
+                        message: format!("{error:#}"),
+                    };
+                    cx.notify();
+                }
             }
-            cx.restart();
         }
     }
 }
@@ -468,8 +504,9 @@ fn run_update(
         });
         return Ok(UpdateOutcome::ReadyToRestart {
             version,
-            restart_path: None,
-            windows_installer: None,
+            asset: None,
+            downloaded_asset: None,
+            download_dir: None,
         });
     }
 
@@ -505,38 +542,15 @@ fn run_update(
         version: manifest.version.clone(),
     });
 
-    #[cfg(target_os = "windows")]
-    let (download_dir, _temp_dir) = (
-        windows_update_dir(&manifest.version)?,
-        None::<tempfile::TempDir>,
-    );
-
-    #[cfg(not(target_os = "windows"))]
-    let (download_dir, _temp_dir) = {
-        let temp_dir = tempfile::Builder::new()
-            .prefix("monocurl-update-")
-            .tempdir()
-            .context("failed to create update temporary directory")?;
-        (temp_dir.path().to_path_buf(), Some(temp_dir))
-    };
-
+    let download_dir = update_dir(&manifest.version)?;
     let downloaded_asset = download_asset(&client, &asset, &download_dir)?;
     verify_asset(&downloaded_asset, &asset.sha256)?;
 
-    emit_status(AutoUpdateStatus::Installing {
-        version: manifest.version.clone(),
-    });
-
-    let restart_path = install_asset(&asset, &downloaded_asset, &download_dir)?;
-
     Ok(UpdateOutcome::ReadyToRestart {
         version: manifest.version,
-        restart_path,
-        windows_installer: if cfg!(target_os = "windows") {
-            Some(downloaded_asset)
-        } else {
-            None
-        },
+        asset: Some(asset),
+        downloaded_asset: Some(downloaded_asset),
+        download_dir: Some(download_dir),
     })
 }
 

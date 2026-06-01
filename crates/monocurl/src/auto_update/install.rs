@@ -58,8 +58,7 @@ fn ensure_command(command: &str) -> Result<()> {
         .with_context(|| format!("could not find required command `{command}`"))
 }
 
-#[cfg(target_os = "windows")]
-pub(super) fn windows_update_dir(version: &str) -> Result<PathBuf> {
+pub(super) fn update_dir(version: &str) -> Result<PathBuf> {
     let dir = dirs::data_local_dir()
         .context("could not find local data directory")?
         .join("Monocurl")
@@ -309,9 +308,7 @@ $pidToWaitFor = {}
 $installer = '{}'
 $appExe = '{}'
 $appWorkingDir = '{}'
-while (Get-Process -Id $pidToWaitFor -ErrorAction SilentlyContinue) {{
-    Start-Sleep -Milliseconds 100
-}}
+Wait-Process -Id $pidToWaitFor -ErrorAction SilentlyContinue
 $install = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/MERGETASKS=!desktopicon') -Wait -PassThru
 if ($install.ExitCode -eq 0 -and (Test-Path -LiteralPath $appExe)) {{
     Start-Process -FilePath $appExe -WorkingDirectory $appWorkingDir
