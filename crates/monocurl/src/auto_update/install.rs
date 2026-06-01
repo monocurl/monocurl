@@ -1,52 +1,70 @@
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
 };
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::ffi::OsStr;
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+use std::process::Command;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::process::{Output, Stdio};
 
-use anyhow::{Context as AnyhowContext, Result, anyhow, bail};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use anyhow::anyhow;
+#[cfg(not(target_os = "windows"))]
+use anyhow::bail;
+use anyhow::{Context as AnyhowContext, Result};
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use super::manifest::UpdateAsset;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use super::sync::sync_dir_filtered;
 
+#[cfg(target_os = "macos")]
 pub(super) fn check_dependencies() -> Result<()> {
-    #[cfg(target_os = "macos")]
-    {
-        ensure_command("hdiutil")?;
-    }
+    ensure_command("hdiutil")
+}
 
-    #[cfg(target_os = "linux")]
-    {
-        ensure_command("tar")?;
-    }
+#[cfg(target_os = "linux")]
+pub(super) fn check_dependencies() -> Result<()> {
+    ensure_command("tar")
+}
 
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub(super) fn check_dependencies() -> Result<()> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 pub(super) fn install_asset(
-    asset: &UpdateAsset,
+    _asset: &UpdateAsset,
     downloaded_asset: &Path,
     download_dir: &Path,
 ) -> Result<Option<PathBuf>> {
-    match env::consts::OS {
-        "macos" => {
-            install_macos_update(downloaded_asset, download_dir)?;
-            Ok(None)
-        }
-        "linux" => install_linux_update(downloaded_asset, download_dir),
-        "windows" => {
-            if asset.kind != "inno" {
-                bail!("expected an Inno Setup installer for Windows updates");
-            }
-            Ok(None)
-        }
-        os => bail!("auto-updates are not supported on {os}"),
-    }
+    install_macos_update(downloaded_asset, download_dir)?;
+    Ok(None)
 }
 
+#[cfg(target_os = "linux")]
+pub(super) fn install_asset(
+    _asset: &UpdateAsset,
+    downloaded_asset: &Path,
+    download_dir: &Path,
+) -> Result<Option<PathBuf>> {
+    install_linux_update(downloaded_asset, download_dir)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub(super) fn install_asset(
+    _asset: &super::manifest::UpdateAsset,
+    _downloaded_asset: &Path,
+    _download_dir: &Path,
+) -> Result<Option<PathBuf>> {
+    bail!("auto-updates are not supported on {}", env::consts::OS)
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn ensure_command(command: &str) -> Result<()> {
     Command::new(command)
         .arg("--version")
@@ -102,11 +120,6 @@ fn install_macos_update(downloaded_dmg: &Path, temp_dir: &Path) -> Result<()> {
         .and_then(|output| ensure_output_success(output, "detach update disk image"));
 
     copy_result.and(detach_result)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn install_macos_update(_downloaded_dmg: &Path, _temp_dir: &Path) -> Result<()> {
-    bail!("macOS updates are only supported on macOS")
 }
 
 #[cfg(target_os = "macos")]
@@ -183,11 +196,6 @@ fn install_linux_update(downloaded_tar_gz: &Path, temp_dir: &Path) -> Result<Opt
     sync_dir_filtered(&app_dir, &installed_app, |_| false)?;
     refresh_linux_registration(&install_prefix, &installed_app)?;
     Ok(Some(installed_app.join("bin/monocurl")))
-}
-
-#[cfg(not(target_os = "linux"))]
-fn install_linux_update(_downloaded_tar_gz: &Path, _temp_dir: &Path) -> Result<Option<PathBuf>> {
-    bail!("Linux updates are only supported on Linux")
 }
 
 #[cfg(target_os = "linux")]
@@ -271,6 +279,7 @@ fn rewrite_linux_desktop_file(content: &str, app_dir: &Path) -> String {
     rewritten
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn ensure_output_success(output: Output, action: &str) -> Result<()> {
     if output.status.success() {
         return Ok(());
