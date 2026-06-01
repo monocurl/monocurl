@@ -4320,6 +4320,7 @@ dependencies = [
  "text",
  "ui_cli_shared",
  "unicode-segmentation",
+ "walkdir",
 ]
 
 [[package]]

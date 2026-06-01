@@ -10,18 +10,17 @@ use std::ffi::OsStr;
 use anyhow::{Context as AnyhowContext, Result, anyhow, bail};
 
 use super::manifest::UpdateAsset;
+use super::sync::sync_dir_filtered;
 
 pub(super) fn check_dependencies() -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         ensure_command("hdiutil")?;
-        ensure_command("rsync")?;
     }
 
     #[cfg(target_os = "linux")]
     {
         ensure_command("tar")?;
-        ensure_command("rsync")?;
     }
 
     Ok(())
@@ -93,14 +92,7 @@ fn install_macos_update(downloaded_dmg: &Path, temp_dir: &Path) -> Result<()> {
     ensure_output_success(output, "mount update disk image")?;
 
     let (mount_path, mounted_app) = find_mounted_app(&mount_root, app_name)?;
-    let source = format!("{}/", mounted_app.display());
-    let copy_result = Command::new("rsync")
-        .args(["-a", "--delete", "--exclude", "Icon?"])
-        .arg(source)
-        .arg(&app_path)
-        .output()
-        .context("failed to copy update bundle")
-        .and_then(|output| ensure_output_success(output, "copy update bundle"));
+    let copy_result = sync_dir_filtered(&mounted_app, &app_path, macos_finder_icon_file);
 
     let detach_result = Command::new("hdiutil")
         .args(["detach", "-force"])
@@ -154,6 +146,14 @@ fn find_mounted_app(mount_root: &Path, app_name: &OsStr) -> Result<(PathBuf, Pat
     )
 }
 
+#[cfg(target_os = "macos")]
+fn macos_finder_icon_file(relative_path: &Path) -> bool {
+    relative_path.file_name().is_some_and(|name| {
+        let name = name.to_string_lossy();
+        name.starts_with("Icon") && name.chars().count() == 5
+    })
+}
+
 #[cfg(target_os = "linux")]
 fn install_linux_update(downloaded_tar_gz: &Path, temp_dir: &Path) -> Result<Option<PathBuf>> {
     let extracted = temp_dir.join("extract");
@@ -179,15 +179,8 @@ fn install_linux_update(downloaded_tar_gz: &Path, temp_dir: &Path) -> Result<Opt
     fs::create_dir_all(&install_prefix)
         .with_context(|| format!("failed to create {}", install_prefix.display()))?;
 
-    let output = Command::new("rsync")
-        .args(["-a", "--delete"])
-        .arg(&app_dir)
-        .arg(&install_prefix)
-        .output()
-        .context("failed to copy Linux update")?;
-    ensure_output_success(output, "copy Linux update")?;
-
     let installed_app = install_prefix.join("monocurl.app");
+    sync_dir_filtered(&app_dir, &installed_app, |_| false)?;
     refresh_linux_registration(&install_prefix, &installed_app)?;
     Ok(Some(installed_app.join("bin/monocurl")))
 }

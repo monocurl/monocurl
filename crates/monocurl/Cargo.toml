@@ -47,6 +47,7 @@ sha2.workspace = true
 reqwest.workspace = true
 semver.workspace = true
 tempfile.workspace = true
+walkdir.workspace = true
 futures.workspace = true
 smol.workspace = true
 notify-debouncer-full.workspace = true

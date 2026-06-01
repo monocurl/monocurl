@@ -24,6 +24,7 @@ use self::{
 mod download;
 mod install;
 mod manifest;
+mod sync;
 
 pub const CURRENT_VERSION: &str = match option_env!("MONOCURL_VERSION") {
     Some(version) => version,
