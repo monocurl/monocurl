@@ -159,7 +159,9 @@ impl HomeView {
                         window.prevent_default();
                         cx.stop_propagation();
                         match action {
-                            UpdateStatusAction::Restart => AutoUpdater::restart_to_install(cx),
+                            UpdateStatusAction::Restart => {
+                                AutoUpdater::restart_from_update_status(cx)
+                            }
                             UpdateStatusAction::Retry => {
                                 AutoUpdater::check_for_updates(Some(window.window_handle()), cx);
                             }

@@ -301,17 +301,26 @@ fn ensure_output_success(output: Output, action: &str) -> Result<()> {
 
 #[cfg(target_os = "windows")]
 pub(super) fn spawn_windows_update_after_exit(installer: &Path) -> Result<()> {
+    let app_exe = env::current_exe().context("failed to resolve current executable")?;
+    let app_working_dir = env::current_dir().context("failed to resolve current directory")?;
     let script = format!(
         r#"
 $pidToWaitFor = {}
 $installer = '{}'
+$appExe = '{}'
+$appWorkingDir = '{}'
 while (Get-Process -Id $pidToWaitFor -ErrorAction SilentlyContinue) {{
     Start-Sleep -Milliseconds 100
 }}
-Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/update=true','/MERGETASKS=!desktopicon')
+$install = Start-Process -FilePath $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/MERGETASKS=!desktopicon') -Wait -PassThru
+if ($install.ExitCode -eq 0 -and (Test-Path -LiteralPath $appExe)) {{
+    Start-Process -FilePath $appExe -WorkingDirectory $appWorkingDir
+}}
 "#,
         std::process::id(),
-        powershell_string(installer)
+        powershell_string(installer),
+        powershell_string(&app_exe),
+        powershell_string(&app_working_dir)
     );
 
     Command::new("powershell.exe")

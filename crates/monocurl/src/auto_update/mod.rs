@@ -72,6 +72,8 @@ pub struct AutoUpdater {
     manual_prompt_window: Option<AnyWindowHandle>,
     ready_restart_path: Option<PathBuf>,
     #[cfg(target_os = "windows")]
+    ready_windows_installer: Option<PathBuf>,
+    #[cfg(target_os = "windows")]
     pending_windows_installer: Option<PathBuf>,
     #[cfg(target_os = "windows")]
     _quit_subscription: Option<Subscription>,
@@ -140,7 +142,7 @@ impl AutoUpdater {
         });
     }
 
-    pub fn restart_to_install(cx: &mut App) {
+    pub fn restart_from_update_status(cx: &mut App) {
         let mut ready = false;
         if let Some(updater) = Self::get(cx) {
             let _ = updater.update(cx, |updater, cx| {
@@ -188,6 +190,8 @@ impl AutoUpdater {
             worker_running: false,
             manual_prompt_window: None,
             ready_restart_path: None,
+            #[cfg(target_os = "windows")]
+            ready_windows_installer: None,
             #[cfg(target_os = "windows")]
             pending_windows_installer: None,
             #[cfg(target_os = "windows")]
@@ -285,6 +289,7 @@ impl AutoUpdater {
                 self.ready_restart_path = None;
                 #[cfg(target_os = "windows")]
                 {
+                    self.ready_windows_installer = None;
                     self.pending_windows_installer = None;
                 }
                 if kind == UpdateCheckKind::Manual {
@@ -306,7 +311,8 @@ impl AutoUpdater {
                 self.ready_restart_path = restart_path;
                 #[cfg(target_os = "windows")]
                 {
-                    self.pending_windows_installer = windows_installer;
+                    self.ready_windows_installer = windows_installer;
+                    self.pending_windows_installer = None;
                 }
                 #[cfg(not(target_os = "windows"))]
                 {
@@ -368,18 +374,16 @@ impl AutoUpdater {
                 window.prompt(
                     PromptLevel::Info,
                     &format!("Monocurl v{version} is ready"),
-                    Some("Restart Monocurl to apply the update."),
-                    &[PromptButton::cancel("Later"), PromptButton::ok("Restart")],
+                    Some("Use the Restart button in the bottom-right update status to apply it."),
+                    &["Ok"],
                     cx,
                 )
             })
             .ok();
 
         if let Some(prompt) = prompt {
-            cx.spawn(async move |_this, app| {
-                if prompt.await == Ok(1) {
-                    let _ = app.update(Self::restart_to_install);
-                }
+            cx.spawn(async move |_this, _app| {
+                let _ = prompt.await;
             })
             .detach();
         }
@@ -388,13 +392,15 @@ impl AutoUpdater {
     fn restart_to_apply(&mut self, cx: &mut Context<Self>) {
         #[cfg(target_os = "windows")]
         {
-            if self.pending_windows_installer.is_none() {
+            let Some(installer) = self.ready_windows_installer.clone() else {
                 self.status = AutoUpdateStatus::Errored {
                     message: "The downloaded installer was not found.".into(),
                 };
                 cx.notify();
                 return;
-            }
+            };
+
+            self.pending_windows_installer = Some(installer);
             cx.quit();
         }
 

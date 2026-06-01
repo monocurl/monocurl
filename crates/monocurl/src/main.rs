@@ -14,10 +14,9 @@ use std::{
 use crate::{
     actions::{
         CheckForUpdates, Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage,
-        ExportSlidesAsVideos, ExportVideo, InstallUpdate, NextSlide, OpenSettings, Paste,
-        PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd,
-        SceneStart, ToggleHeadlessMode, TogglePlaying, TogglePresentationMode, ToggleSlideFold,
-        Undo,
+        ExportSlidesAsVideos, ExportVideo, NextSlide, OpenSettings, Paste, PrevSlide, Quit, Redo,
+        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleHeadlessMode,
+        TogglePlaying, TogglePresentationMode, ToggleSlideFold, Undo,
     },
     auto_update::AutoUpdater,
     editor::text_editor,
@@ -133,9 +132,6 @@ impl MonocurlLauncher {
         cx.on_action(|_: &CheckForUpdates, cx| {
             AutoUpdater::check_for_updates(cx.active_window(), cx);
         });
-        cx.on_action(|_: &InstallUpdate, cx| {
-            AutoUpdater::restart_to_install(cx);
-        });
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     }
 
@@ -192,10 +188,7 @@ impl MonocurlLauncher {
             },
             Menu {
                 name: "Help".into(),
-                items: vec![
-                    MenuItem::action("Check for Updates...", CheckForUpdates),
-                    MenuItem::action("Restart to Update", InstallUpdate),
-                ],
+                items: vec![MenuItem::action("Check for Updates...", CheckForUpdates)],
             },
         ]);
     }
