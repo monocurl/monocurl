@@ -9,7 +9,7 @@ use std::{
 use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
     camera::camera_value_from_snapshot,
-    executor::{Executor, PlaybackAdvance, SeekToResult, StdlibFunc, TextRenderQuality},
+    executor::{Executor, StdlibFunc, TextRenderQuality},
     heap::{VRc, with_heap},
     scene_snapshot::{BackgroundSnapshot, CameraSnapshot, SceneSnapshot},
     state::LeaderKind,
@@ -19,6 +19,9 @@ use executor::{
 };
 use geo::mesh::Mesh;
 use stdlib::registry::registry;
+
+mod presentation;
+mod standard;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ParameterValue {
@@ -127,7 +130,7 @@ pub enum ExecutionStatus {
 impl PlaybackMode {
     pub fn default_time_interval(&self) -> f64 {
         match self {
-            PlaybackMode::Presentation => 1.0 / 120.0,
+            PlaybackMode::Presentation => 1.0 / 60.0,
             PlaybackMode::Preview | PlaybackMode::Web => 1.0 / 60.0,
         }
     }
@@ -178,6 +181,16 @@ impl LoadingSnapshotSink<'_> {
     }
 }
 
+trait PlaybackEngine {
+    async fn run_iteration(
+        executor: &mut Executor,
+        shared: &SharedRuntimeState,
+        now_seconds: f64,
+        iteration: &mut RuntimeIteration,
+        loading_snapshot_sink: &mut LoadingSnapshotSink<'_>,
+    );
+}
+
 struct SharedRuntimeState {
     target: Cell<Timestamp>,
     current_timestamp: Cell<Timestamp>,
@@ -189,6 +202,17 @@ struct SharedRuntimeState {
     pending_param_updates: RefCell<Vec<(PresentationUpdateTarget, ParameterValue)>>,
     last_update_at: Cell<f64>,
     snapshot_requested: Cell<bool>,
+    presentation: RefCell<presentation::PresentationState>,
+    /// mirror of "presentation has buffering/establish work left" so `needs_work`
+    /// can be answered without borrowing `presentation` (which the play future
+    /// holds mutably across its awaits). set by the iteration / reset path.
+    presentation_pending: Cell<bool>,
+    /// set by `TogglePlay` start so the next iteration re-anchors the consumer
+    /// clock without borrowing `presentation` from outside the play future.
+    presentation_reanchor: Cell<bool>,
+    /// set by `TogglePlay` start so delayed paused pre-rendering resumes inside
+    /// the presentation iteration.
+    presentation_resume_production: Cell<bool>,
 }
 
 impl SharedRuntimeState {
@@ -208,7 +232,28 @@ impl SharedRuntimeState {
             pending_param_updates: RefCell::new(Vec::new()),
             last_update_at: Cell::new(0.0),
             snapshot_requested: Cell::new(false),
+            presentation: RefCell::new(presentation::PresentationState::new(
+                executor.state.timestamp,
+            )),
+            presentation_pending: Cell::new(false),
+            presentation_reanchor: Cell::new(false),
+            presentation_resume_production: Cell::new(false),
         }
+    }
+
+    fn is_presentation(&self) -> bool {
+        matches!(self.playback_mode.get(), PlaybackMode::Presentation)
+    }
+
+    /// in presentation mode, the producer may have buffering work to do even when
+    /// paused and not waiting on a seek (speculatively rendering the next slide).
+    /// answered from a `Cell` mirror so it never borrows `presentation`, which the
+    /// in-flight play future holds mutably across its awaits.
+    fn presentation_needs_work(&self) -> bool {
+        self.is_presentation()
+            && !self.has_compiler_error.get()
+            && !self.has_runtime_error.get()
+            && self.presentation_pending.get()
     }
 
     fn user_to_internal_timestamp(&self, user_ts: Timestamp) -> Timestamp {
@@ -223,6 +268,7 @@ impl SharedRuntimeState {
             || !self.pending_param_updates.borrow().is_empty()
             || self.is_playing.get()
             || self.target.get() != self.current_timestamp.get()
+            || self.presentation_needs_work()
     }
 
     fn cancel_runtime_work(&self) {
@@ -231,7 +277,10 @@ impl SharedRuntimeState {
     }
 
     fn seek_requires_reset(&self, target: Timestamp) -> bool {
-        target < self.current_timestamp.get()
+        // presentation always resets so the optimistic queue / trailing reference
+        // are rebuilt around the new consumer position.
+        self.is_presentation()
+            || target < self.current_timestamp.get()
             || target < self.target.get()
             || self.has_runtime_error.get()
     }
@@ -284,6 +333,23 @@ impl RuntimeController {
         }
     }
 
+    /// rebuild presentation state around the current (just-restored) consumer
+    /// position. no-op outside presentation mode.
+    fn reset_presentation_state(&self, now_seconds: f64) {
+        if self.shared.is_presentation() {
+            let consumer = self.shared.current_timestamp.get();
+            // safe to borrow here: only ResetFuture commands call this, and the loop
+            // drops the in-flight play future (releasing its borrow) before applying them.
+            self.shared
+                .presentation
+                .borrow_mut()
+                .reset(consumer, now_seconds);
+            self.shared.presentation_pending.set(true);
+            self.shared.presentation_reanchor.set(false);
+            self.shared.presentation_resume_production.set(false);
+        }
+    }
+
     pub fn apply_command(&self, command: RuntimeCommand, now_seconds: f64) -> CommandEffect {
         match command {
             RuntimeCommand::UpdateBytecode { bytecode } => {
@@ -310,6 +376,7 @@ impl RuntimeController {
                     self.shared.has_compiler_error.set(true);
                 }
 
+                self.reset_presentation_state(now_seconds);
                 self.shared.snapshot_requested.set(true);
                 CommandEffect::ResetFuture
             }
@@ -335,6 +402,8 @@ impl RuntimeController {
                         .user_to_internal_timestamp(Timestamp::default())
                         .slide,
                 );
+                drop(executor);
+                self.reset_presentation_state(now_seconds);
                 self.shared.snapshot_requested.set(true);
 
                 CommandEffect::ResetFuture
@@ -357,6 +426,8 @@ impl RuntimeController {
                         .user_to_internal_timestamp(Timestamp::default())
                         .slide,
                 );
+                drop(executor);
+                self.reset_presentation_state(now_seconds);
                 self.shared.snapshot_requested.set(true);
 
                 CommandEffect::ResetFuture
@@ -373,6 +444,8 @@ impl RuntimeController {
                     executor.restore_live_state_to_cache_point(target);
                     self.shared.current_timestamp.set(executor.state.timestamp);
                     self.shared.has_runtime_error.set(false);
+                    drop(executor);
+                    self.reset_presentation_state(now_seconds);
                     CommandEffect::ResetFuture
                 } else {
                     CommandEffect::KeepFuture
@@ -384,6 +457,14 @@ impl RuntimeController {
                 self.shared.snapshot_requested.set(true);
                 if is_playing {
                     self.shared.last_update_at.set(now_seconds);
+                    if self.shared.is_presentation() {
+                        // start consuming the pre-rendered buffer from the current frame;
+                        // defer the actual re-anchor to the iteration (TogglePlay keeps the
+                        // play future, which holds the presentation borrow across awaits).
+                        self.shared.presentation_reanchor.set(true);
+                        self.shared.presentation_resume_production.set(true);
+                        self.shared.presentation_pending.set(true);
+                    }
                 }
                 CommandEffect::KeepFuture
             }
@@ -457,66 +538,17 @@ async fn run_play_session_iteration(
 ) -> RuntimeIteration {
     let mut iteration = RuntimeIteration::default();
 
-    if apply_pending_parameter_updates(executor, shared) {
-        shared.snapshot_requested.set(true);
-    }
-
-    if shared.has_compiler_error.get() {
-        if shared.snapshot_requested.get() {
-            shared.current_timestamp.set(shared.target.get());
-            iteration
-                .snapshots
-                .push(runtime_snapshot(executor, shared, false, None));
-            shared.snapshot_requested.set(false);
-        }
-        return iteration;
-    }
-
-    clamp_target_to_valid_timestamp(executor, shared);
-    shared.current_timestamp.set(executor.state.timestamp);
-
-    if executor.state.has_errors() {
-        shared.cancel_runtime_work();
-        if shared.snapshot_requested.get() {
-            iteration
-                .snapshots
-                .push(runtime_snapshot(executor, shared, false, None));
-            shared.snapshot_requested.set(false);
-        }
-        return iteration;
-    }
-
-    let current = executor.state.timestamp;
-    let target = shared.target.get();
-
-    if target != current {
-        sync_to_target(
+    if shared.is_presentation() {
+        <presentation::PresentationEngine as PlaybackEngine>::run_iteration(
             executor,
             shared,
-            target,
-            current,
+            now_seconds,
             &mut iteration,
             loading_snapshot_sink,
         )
         .await;
-        shared.snapshot_requested.set(false);
-        return iteration;
-    }
-
-    if shared.snapshot_requested.get() {
-        let scene_snapshot = capture_scene_snapshot(executor, shared)
-            .await
-            .ok()
-            .flatten();
-        iteration
-            .snapshots
-            .push(runtime_snapshot(executor, shared, false, scene_snapshot));
-        shared.snapshot_requested.set(false);
-        return iteration;
-    }
-
-    if shared.is_playing.get() {
-        playback_iteration(
+    } else {
+        <standard::StandardEngine as PlaybackEngine>::run_iteration(
             executor,
             shared,
             now_seconds,
@@ -555,98 +587,6 @@ fn apply_pending_parameter_updates(executor: &mut Executor, shared: &SharedRunti
     }
 
     applied_parameters
-}
-
-async fn sync_to_target(
-    executor: &mut Executor,
-    shared: &SharedRuntimeState,
-    target: Timestamp,
-    current: Timestamp,
-    iteration: &mut RuntimeIteration,
-    loading_snapshot_sink: &mut LoadingSnapshotSink<'_>,
-) {
-    loading_snapshot_sink.emit_or_defer(iteration, runtime_snapshot(executor, shared, true, None));
-
-    let result = if target < current {
-        executor.seek_to(target).await
-    } else {
-        executor.advance_to_target(target).await
-    };
-
-    let target_superseded = shared.target.get() != target;
-    match result {
-        SeekToResult::SeekedTo(reached) => {
-            shared.current_timestamp.set(reached);
-            if !target_superseded {
-                shared.target.set(reached);
-            }
-
-            if executor.state.has_errors() {
-                shared.cancel_runtime_work();
-            }
-        }
-        SeekToResult::Error(_) => {
-            shared.cancel_runtime_work();
-        }
-    }
-
-    if target_superseded {
-        return;
-    }
-
-    let scene_snapshot = capture_scene_snapshot(executor, shared)
-        .await
-        .ok()
-        .flatten();
-    iteration
-        .snapshots
-        .push(runtime_snapshot(executor, shared, false, scene_snapshot));
-}
-
-async fn playback_iteration(
-    executor: &mut Executor,
-    shared: &SharedRuntimeState,
-    now_seconds: f64,
-    iteration: &mut RuntimeIteration,
-    loading_snapshot_sink: &mut LoadingSnapshotSink<'_>,
-) {
-    let elapsed = (now_seconds - shared.last_update_at.get()).max(0.0);
-    let frame_interval =
-        Duration::from_secs_f64(shared.playback_mode.get().default_time_interval());
-    let max_slide = max_slide(executor, shared.playback_mode.get());
-
-    shared.last_update_at.set(now_seconds);
-
-    loading_snapshot_sink.emit_or_defer(iteration, runtime_snapshot(executor, shared, true, None));
-
-    match executor.advance_playback(max_slide, elapsed).await {
-        Ok(PlaybackAdvance::Advanced) => {}
-        Ok(PlaybackAdvance::PreparedSection) => {
-            shared.last_update_at.set(now_seconds);
-        }
-        Ok(PlaybackAdvance::Finished) => {
-            shared.is_playing.set(false);
-        }
-        Err(_) => {
-            shared.cancel_runtime_work();
-        }
-    }
-
-    shared.current_timestamp.set(executor.state.timestamp);
-    shared.target.set(executor.state.timestamp);
-
-    let scene_snapshot = capture_scene_snapshot(executor, shared)
-        .await
-        .ok()
-        .flatten();
-    iteration
-        .snapshots
-        .push(runtime_snapshot(executor, shared, false, scene_snapshot));
-    shared.snapshot_requested.set(false);
-
-    if shared.is_playing.get() {
-        iteration.next_frame_interval = Some(frame_interval);
-    }
 }
 
 fn max_slide(executor: &Executor, playback_mode: PlaybackMode) -> usize {
@@ -890,15 +830,228 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use executor::{
+        executor::Executor,
+        scene_snapshot::SceneSnapshot,
         state::ExecutionState,
         time::Timestamp,
         value::{Value, invoked_function::make_invoked_function},
     };
 
-    use super::{
-        CommandEffect, ParameterValue, PlaybackMode, PresentationUpdateTarget, RuntimeCommand,
-        RuntimeController, default_bytecode, max_slide, mesh_attributes_from_runtime,
+    use super::presentation::{
+        PreRenderedFrame, PresentationState, presentation_consume, presentation_producer_max_slide,
     };
+    use super::{
+        CommandEffect, ParameterSnapshot, ParameterValue, PlaybackMode, PresentationUpdateTarget,
+        RuntimeCommand, RuntimeController, RuntimeIteration, SharedRuntimeState, default_bytecode,
+        max_slide, mesh_attributes_from_runtime,
+    };
+
+    fn bytecode_with_section_count(count: usize) -> bytecode::Bytecode {
+        bytecode::Bytecode::new(
+            (0..count)
+                .map(|idx| {
+                    Arc::new(bytecode::SectionBytecode::new(bytecode::SectionFlags {
+                        is_stdlib: idx == 0,
+                        is_library: idx == 0,
+                        is_init: false,
+                        is_root_module: true,
+                    }))
+                })
+                .collect(),
+        )
+    }
+
+    fn presentation_test_frame(timestamp: Timestamp) -> PreRenderedFrame {
+        PreRenderedFrame {
+            timestamp,
+            scene: SceneSnapshot::default(),
+            parameters: ParameterSnapshot::default(),
+            completed_slide_duration: None,
+        }
+    }
+
+    #[test]
+    fn presentation_has_pending_production_tracks_buffer_done_and_error() {
+        let mut pres = PresentationState::new(Timestamp::default());
+        pres.needs_establish = false;
+        assert!(pres.has_pending_production());
+
+        for i in 0..PresentationState::lookahead_frames() {
+            pres.queue
+                .push_back(presentation_test_frame(Timestamp::new(1, i as f64)));
+        }
+        assert!(!pres.has_pending_production());
+
+        pres.queue.clear();
+        pres.producer_done = true;
+        assert!(!pres.has_pending_production());
+
+        pres.producer_done = false;
+        pres.producer_blocked_at_boundary = true;
+        assert!(!pres.has_pending_production());
+
+        pres.producer_blocked_at_boundary = false;
+        pres.production_suspended_by_param_update = true;
+        assert!(!pres.has_pending_production());
+
+        pres.production_suspended_by_param_update = false;
+        pres.deferred_error = Some((Timestamp::default(), Vec::new()));
+        assert!(!pres.has_pending_production());
+    }
+
+    #[test]
+    fn presentation_reset_rearms_state() {
+        let mut pres = PresentationState::new(Timestamp::default());
+        pres.queue
+            .push_back(presentation_test_frame(Timestamp::new(1, 0.0)));
+        pres.producer_done = true;
+        pres.producer_blocked_at_boundary = true;
+        pres.production_suspended_by_param_update = true;
+        pres.needs_establish = false;
+        pres.consumed_frames = 9;
+
+        pres.reset(Timestamp::new(2, 1.0), 5.0);
+
+        assert!(pres.queue.is_empty());
+        assert!(pres.trailing.is_none());
+        assert!(!pres.producer_done);
+        assert!(!pres.producer_blocked_at_boundary);
+        assert!(!pres.production_suspended_by_param_update);
+        assert!(pres.needs_establish);
+        assert_eq!(pres.consumer_timestamp, Timestamp::new(2, 1.0));
+        assert_eq!(pres.consumed_frames, 0);
+        assert_eq!(pres.play_anchor_wall, 5.0);
+    }
+
+    #[test]
+    fn presentation_consume_advances_by_wall_clock_and_drops_skipped_frames() {
+        let mut executor = Executor::new(default_bytecode(), Vec::new());
+        let shared = SharedRuntimeState::new(&executor);
+        let dt = PresentationState::frame_dt();
+
+        let mut pres = PresentationState::new(Timestamp::new(1, 0.0));
+        pres.play_anchor_wall = 0.0;
+        for i in 1..=10 {
+            pres.queue
+                .push_back(presentation_test_frame(Timestamp::new(1, i as f64 * dt)));
+        }
+
+        let mut iteration = RuntimeIteration::default();
+        // 3.5 frames of wall time elapsed -> consume 3 (buffer has them), emit latest only
+        smol::block_on(presentation_consume(
+            &mut executor,
+            &shared,
+            &mut pres,
+            3.5 * dt,
+            &mut iteration,
+        ));
+
+        assert_eq!(pres.consumed_frames, 3);
+        assert_eq!(pres.queue.len(), 7);
+        assert_eq!(pres.consumer_timestamp, Timestamp::new(1, 3.0 * dt));
+        assert_eq!(iteration.snapshots.len(), 1);
+    }
+
+    #[test]
+    fn needs_work_does_not_borrow_presentation_while_future_holds_it() {
+        // the play future holds `presentation` borrowed mutably across its awaits;
+        // `needs_work` (called by the loop between polls) must not also borrow it.
+        let runtime = RuntimeController::new();
+        runtime.apply_command(
+            RuntimeCommand::SetPlaybackMode(PlaybackMode::Presentation),
+            0.0,
+        );
+
+        let _guard = runtime.shared.presentation.borrow_mut();
+        // would panic with "already mutably borrowed" before the Cell mirror fix
+        let _ = runtime.needs_work();
+        let _ = runtime.seek_to_requires_reset(Timestamp::new(1, 0.0));
+    }
+
+    #[test]
+    fn presentation_consume_underflow_catches_up_to_real_time() {
+        // when the buffer is exhausted before the wall-clock target, consume must
+        // advance the live head to reach the target (NOT stop at the buffered frames,
+        // which would play in slow motion).
+        let mut executor = Executor::new(default_bytecode(), Vec::new());
+        let shared = SharedRuntimeState::new(&executor);
+        shared.is_playing.set(true);
+        let dt = PresentationState::frame_dt();
+
+        let mut pres = PresentationState::new(Timestamp::new(0, 0.0));
+        for i in 1..=2 {
+            pres.queue
+                .push_back(presentation_test_frame(Timestamp::new(0, i as f64 * dt)));
+        }
+
+        let mut iteration = RuntimeIteration::default();
+        // want 5 frames of wall time; only 2 buffered -> drain 2 then catch up to 5
+        smol::block_on(presentation_consume(
+            &mut executor,
+            &shared,
+            &mut pres,
+            5.0 * dt,
+            &mut iteration,
+        ));
+
+        assert!(pres.queue.is_empty());
+        assert_eq!(pres.consumed_frames, 5);
+    }
+
+    #[test]
+    fn presentation_consume_pauses_at_boundary_and_preserves_next_slide_buffer() {
+        let mut executor = Executor::new(bytecode_with_section_count(3), Vec::new());
+        executor.state.timestamp = Timestamp::at_end_of_slide(1);
+        let shared = SharedRuntimeState::new(&executor);
+        shared.is_playing.set(true);
+        let dt = PresentationState::frame_dt();
+
+        let mut pres = PresentationState::new(Timestamp::new(1, 1.0));
+        pres.producer_blocked_at_boundary = true;
+        pres.queue
+            .push_back(presentation_test_frame(Timestamp::at_end_of_slide(1)));
+        pres.queue
+            .push_back(presentation_test_frame(Timestamp::new(2, 0.0)));
+
+        let mut iteration = RuntimeIteration::default();
+        smol::block_on(presentation_consume(
+            &mut executor,
+            &shared,
+            &mut pres,
+            2.0 * dt,
+            &mut iteration,
+        ));
+
+        assert!(!shared.is_playing.get());
+        assert!(!pres.producer_blocked_at_boundary);
+        assert_eq!(pres.consumer_timestamp, Timestamp::at_end_of_slide(1));
+        assert_eq!(pres.queue.len(), 1);
+        assert_eq!(
+            pres.queue.front().unwrap().timestamp,
+            Timestamp::new(2, 0.0)
+        );
+    }
+
+    #[test]
+    fn presentation_producer_boundary_helper_allows_one_slide_from_boundary() {
+        let mut executor = Executor::new(bytecode_with_section_count(3), Vec::new());
+        let mut pres = PresentationState::new(Timestamp::new(1, 0.5));
+
+        executor.state.timestamp = Timestamp::new(1, 0.5);
+        assert_eq!(presentation_producer_max_slide(&executor, &pres), 1);
+
+        executor.state.timestamp = Timestamp::at_end_of_slide(1);
+        assert_eq!(presentation_producer_max_slide(&executor, &pres), 1);
+
+        pres.consumer_timestamp = Timestamp::at_end_of_slide(1);
+        assert_eq!(presentation_producer_max_slide(&executor, &pres), 2);
+
+        executor.state.timestamp = Timestamp::at_end_of_slide(2);
+        assert_eq!(presentation_producer_max_slide(&executor, &pres), 2);
+
+        pres.consumer_timestamp = Timestamp::at_end_of_slide(2);
+        assert_eq!(presentation_producer_max_slide(&executor, &pres), 3);
+    }
 
     #[test]
     fn update_bytecode_restores_live_executor_state_to_cache_point() {
@@ -989,6 +1142,20 @@ mod tests {
         };
 
         assert!(!runtime.requires_future_reset(&message));
+    }
+
+    #[test]
+    fn presentation_toggle_play_requests_production_resume() {
+        let runtime = RuntimeController::new();
+        runtime.shared.playback_mode.set(PlaybackMode::Presentation);
+
+        let effect = runtime.apply_command(RuntimeCommand::TogglePlay, 0.0);
+
+        assert_eq!(effect, CommandEffect::KeepFuture);
+        assert!(runtime.shared.is_playing.get());
+        assert!(runtime.shared.presentation_reanchor.get());
+        assert!(runtime.shared.presentation_resume_production.get());
+        assert!(runtime.shared.presentation_pending.get());
     }
 
     #[test]

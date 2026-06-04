@@ -1241,11 +1241,6 @@ pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn mk_brace(_e: &mut Executor, _s: usize) -> Result<Value, ExecutorError> {
-    todo!("curly brace spanning a mesh along a direction")
-}
-
-#[stdlib_func]
 pub async fn mk_measure(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     const MEASURE_EXTRUSION: f32 = 0.05;
 

@@ -1745,8 +1745,8 @@ fn test_trans_keeps_larger_surface_topology_when_source_is_more_detailed() {
 #[test]
 fn test_tag_trans_handles_everything_intro_badges() {
     let src = r#"
-        let soft = |c, a = 0.22| alpha{a} c
-        let badge = |shape, color, t = 0| tag{t} fill{soft(color)} stroke{color} shape
+        let translucent = |c, a = 0.22| alpha{a} c
+        let badge = |shape, color, t = 0| tag{t} fill{translucent(color)} stroke{color} shape
 
         mesh intro = [
             badge(shift{delta: [-5.5, 2.6, 0]} Circle(radius: 0.7), RED, 1),
@@ -1785,8 +1785,8 @@ fn test_tag_trans_handles_everything_intro_badges() {
 #[test]
 fn test_tag_trans_handles_everything_intro_after_operator_rewrite() {
     let src = r#"
-        let soft = |c, a = 0.22| alpha{a} c
-        let badge = |shape, color, t = 0| tag{t} fill{soft(color)} stroke{color} shape
+        let translucent = |c, a = 0.22| alpha{a} c
+        let badge = |shape, color, t = 0| tag{t} fill{translucent(color)} stroke{color} shape
 
         mesh intro = [
             badge(shift{[5.5, 2.6, 0]} Circle(0.7), RED, 1),

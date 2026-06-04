@@ -2,8 +2,12 @@ use std::collections::BTreeSet;
 
 use crate::{
     error::ExecutorError,
-    executor::{PlaybackAdvance, SeekOptions, SeekPrimitiveAnimSkipResult, SeekToResult},
+    executor::{
+        PlaybackAdvance, PlaybackAdvanceResult, PlaybackCacheMode, SeekOptions,
+        SeekPrimitiveAnimSkipResult, SeekToResult,
+    },
     heap::{VRc, heap_replace, with_heap, with_heap_mut},
+    scene_snapshot::SceneSnapshot,
     state::{BakedPrimitiveAnim, ExecutionState},
     time::Timestamp,
     value::{Value, anim_block::AnimBlock, leader::Leader, primitive_anim::PrimitiveAnim},
@@ -20,7 +24,7 @@ impl Executor {
         }
     }
 
-    fn finish_current_section(&mut self) {
+    fn finish_current_section(&mut self, cache_mode: PlaybackCacheMode) -> f64 {
         debug_assert!(self.state.execution_heads.is_empty());
         debug_assert!(self.state.primitive_anims.is_empty());
         debug_assert!(
@@ -28,9 +32,15 @@ impl Executor {
             "section completion requires a non-negative timestamp"
         );
 
-        self.note_current_timestamp_in_cache();
+        let slide_duration = self.state.timestamp.time;
+        if cache_mode.records_durations() {
+            self.note_current_timestamp_in_cache();
+        }
         self.state.timestamp.time = f64::INFINITY;
-        self.save_cache();
+        if cache_mode.records_entries() {
+            self.save_cache();
+        }
+        slide_duration
     }
 
     pub fn advance_section(&mut self) {
@@ -83,8 +93,13 @@ impl Executor {
         }
     }
 
-    async fn seek_primitive_anim_skip(&mut self, max_slide: usize) -> SeekPrimitiveAnimSkipResult {
+    async fn seek_primitive_anim_skip(
+        &mut self,
+        max_slide: usize,
+        cache_mode: PlaybackCacheMode,
+    ) -> SeekPrimitiveAnimSkipResult {
         let mut advanced_section = false;
+        let mut completed_slide_duration = None;
         loop {
             self.tick_yielder().await;
 
@@ -95,17 +110,21 @@ impl Executor {
                     self.advance_section();
                     advanced_section = true;
                 } else {
-                    return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
+                    return SeekPrimitiveAnimSkipResult::NoAnimsLeft {
+                        completed_slide_duration,
+                    };
                 }
             }
 
             match self.seek_primitive_anim().await {
                 SeekPrimitiveResult::EndOfSection => {
-                    self.finish_current_section();
+                    completed_slide_duration = Some(self.finish_current_section(cache_mode));
                     if self.state.timestamp.slide >= max_slide
                         || self.state.timestamp.slide + 1 >= self.bytecode.sections.len()
                     {
-                        return SeekPrimitiveAnimSkipResult::NoAnimsLeft;
+                        return SeekPrimitiveAnimSkipResult::NoAnimsLeft {
+                            completed_slide_duration,
+                        };
                     }
                 }
                 SeekPrimitiveResult::Error(e) => {
@@ -115,17 +134,23 @@ impl Executor {
             }
         }
 
-        SeekPrimitiveAnimSkipResult::PrimitiveAnim { advanced_section }
+        SeekPrimitiveAnimSkipResult::PrimitiveAnim {
+            advanced_section,
+            completed_slide_duration,
+        }
     }
 
     async fn step_primitive_anims(
         &mut self,
         dt: f64,
         options: SeekOptions,
+        cache_mode: PlaybackCacheMode,
     ) -> Result<(), ExecutorError> {
         debug_assert!(self.state.execution_heads.is_empty());
         self.state.timestamp.time += dt;
-        self.note_current_timestamp_in_cache();
+        if cache_mode.records_durations() {
+            self.note_current_timestamp_in_cache();
+        }
 
         let mut finished_indices = Vec::new();
         let mut in_progress = Vec::new();
@@ -175,20 +200,45 @@ impl Executor {
         max_slide: usize,
         dt: f64,
     ) -> Result<PlaybackAdvance, ExecutorError> {
+        self.advance_playback_with_cache_mode(max_slide, dt, PlaybackCacheMode::Full)
+            .await
+            .map(|result| result.advance)
+    }
+
+    async fn advance_playback_with_cache_mode(
+        &mut self,
+        max_slide: usize,
+        dt: f64,
+        cache_mode: PlaybackCacheMode,
+    ) -> Result<PlaybackAdvanceResult, ExecutorError> {
         debug_assert!(dt >= 0.0);
         self.state.pending_playback_time += dt;
+        let mut completed_slide_duration = None;
 
         while self.state.pending_playback_time > 0.0 || !self.state.execution_heads.is_empty() {
-            match self.seek_primitive_anim_skip(max_slide).await {
-                SeekPrimitiveAnimSkipResult::PrimitiveAnim { advanced_section } => {
+            match self.seek_primitive_anim_skip(max_slide, cache_mode).await {
+                SeekPrimitiveAnimSkipResult::PrimitiveAnim {
+                    advanced_section,
+                    completed_slide_duration: completed,
+                } => {
+                    completed_slide_duration = completed.or(completed_slide_duration);
                     if advanced_section {
                         self.state.pending_playback_time = 0.0;
-                        return Ok(PlaybackAdvance::PreparedSection);
+                        return Ok(PlaybackAdvanceResult {
+                            advance: PlaybackAdvance::PreparedSection,
+                            completed_slide_duration,
+                        });
                     }
                 }
-                SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
+                SeekPrimitiveAnimSkipResult::NoAnimsLeft {
+                    completed_slide_duration: completed,
+                } => {
+                    completed_slide_duration = completed.or(completed_slide_duration);
                     self.state.pending_playback_time = 0.0;
-                    return Ok(PlaybackAdvance::Finished);
+                    return Ok(PlaybackAdvanceResult {
+                        advance: PlaybackAdvance::Finished,
+                        completed_slide_duration,
+                    });
                 }
                 SeekPrimitiveAnimSkipResult::Error(e) => {
                     self.state.pending_playback_time = 0.0;
@@ -214,12 +264,31 @@ impl Executor {
                 self.state.timestamp
             );
 
-            self.step_primitive_anims(step_dt, SeekOptions::fast())
+            self.step_primitive_anims(step_dt, SeekOptions::fast(), cache_mode)
                 .await?;
             self.state.pending_playback_time -= step_dt;
         }
 
-        Ok(PlaybackAdvance::Advanced)
+        Ok(PlaybackAdvanceResult {
+            advance: PlaybackAdvance::Advanced,
+            completed_slide_duration,
+        })
+    }
+
+    /// produce one presentation frame: advance the live (producer) head by
+    /// `frame_dt` and capture the resulting scene. unlike `capture_stable_scene_snapshot`,
+    /// errors are returned rather than recorded into state, so the presentation
+    /// producer can quarantine a speculative error until the consumer reaches it.
+    pub async fn produce_frame(
+        &mut self,
+        max_slide: usize,
+        frame_dt: f64,
+    ) -> Result<(PlaybackAdvance, SceneSnapshot, Option<f64>), ExecutorError> {
+        let result = self
+            .advance_playback_with_cache_mode(max_slide, frame_dt, PlaybackCacheMode::Disabled)
+            .await?;
+        let scene = self.stable_scene_snapshot().await?;
+        Ok((result.advance, scene, result.completed_slide_duration))
     }
 
     pub async fn seek_to(&mut self, target: Timestamp) -> SeekToResult {
@@ -264,9 +333,12 @@ impl Executor {
         debug_assert_eq!(self.state.pending_playback_time, 0.0);
 
         loop {
-            match self.seek_primitive_anim_skip(target.slide).await {
+            match self
+                .seek_primitive_anim_skip(target.slide, PlaybackCacheMode::Full)
+                .await
+            {
                 SeekPrimitiveAnimSkipResult::PrimitiveAnim { .. } => {}
-                SeekPrimitiveAnimSkipResult::NoAnimsLeft => {
+                SeekPrimitiveAnimSkipResult::NoAnimsLeft { .. } => {
                     if let Err(error) = self.verify_scene_snapshot_after_seek_step(options).await {
                         return SeekToResult::Error(error);
                     }
@@ -297,7 +369,10 @@ impl Executor {
             });
             let dt = step_target - self.state.timestamp.time;
 
-            if let Err(e) = self.step_primitive_anims(dt, options).await {
+            if let Err(e) = self
+                .step_primitive_anims(dt, options, PlaybackCacheMode::Full)
+                .await
+            {
                 return SeekToResult::Error(e);
             }
             if let Err(e) = self.verify_scene_snapshot_after_seek_step(options).await {

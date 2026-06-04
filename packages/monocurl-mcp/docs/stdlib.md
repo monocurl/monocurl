@@ -28,7 +28,8 @@ import std.scene
   argument introspection helpers.
 - `std.math`: scalar math, vector math, interpolation helpers, statistics,
   and combinatorics.
-- `std.color`: named colors and color manipulation helpers.
+- `std.color`: named colors and color manipulation operators such as
+  `alpha{...}` and `soft{...}`.
 - `std.mesh`: primitive constructors, text/Tex/LaTeX constructors, graphing
   helpers, mesh styling/layout operators, tags, filters, topology queries, and
   mesh transforms.
