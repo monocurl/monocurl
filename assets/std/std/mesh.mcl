@@ -443,12 +443,6 @@ let Latex = |latex, scale = 1, additional_preamble = ""| __monocurl__native__ mk
 let text_tag = operator |target, tag| [target, __monocurl__native__ text_tag_encode(target, tag)]
 
 ## [overview]
-## Brace drawn next to a target mesh.
-## [description]
-## Reserved wrapper; the native implementation is not complete yet. Prefer `Measure` plus `Label` for current scenes.
-let Brace = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_brace(target, dir, buffer)
-
-## [overview]
 ## Measurement marker drawn next to a target mesh.
 ## [description]
 ## Builds a stroke spanning the target's bounds perpendicular to `dir`, offset by `buffer`.
