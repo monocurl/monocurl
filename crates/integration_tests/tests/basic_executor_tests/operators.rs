@@ -14,6 +14,22 @@ fn test_exec_operator_creation_and_invocation() {
 }
 
 #[test]
+fn test_std_color_soft_operator_default_and_explicit_amount() {
+    let r = run_with_stdlib(
+        "
+        let default_blue = soft{} BLUE
+        let explicit_blue = soft{0.4} BLUE
+        let result = [
+            default_blue[0], default_blue[1], default_blue[2], default_blue[3],
+            explicit_blue[0], explicit_blue[1], explicit_blue[2], explicit_blue[3]
+        ]
+    ",
+        &["color"],
+    );
+    r.assert_float_list_approx(&[0.802, 0.868, 0.912, 1.0, 0.64, 0.76, 0.84, 1.0], 1e-9);
+}
+
+#[test]
 fn test_exec_operator_creation() {
     let r = run("
         let result = operator |target, amount| {

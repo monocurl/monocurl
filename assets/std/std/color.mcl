@@ -128,3 +128,21 @@ let alpha = operator |target, a| {
     let [r, g, b, old_alpha] = __monocurl__native__ expect_list("color", target, 4)
     return [target, [r, g, b, a]]
 }
+
+# mix white with a color for soft fills and strokes.
+## [options]
+## important: true
+## [overview]
+## Return a softened color by blending white toward the target color.
+## [description]
+## This is an operator so it composes naturally inside styling, for example `fill{soft{} BLUE}`. It matches `lerp(WHITE, color, softness)`, and the optional softness value defaults to 0.22.
+## [parameters]
+## softness: amount of the target color mixed into white, default 0.22
+## [example]
+## ```mcl image
+## mesh disk = fill{soft{} BLUE} stroke{BLUE, 2} Circle(1)
+## ```
+let soft = operator |target, softness = 0.22| {
+    let color = __monocurl__native__ expect_list("color", target, 4)
+    return [target, WHITE + (color - WHITE) * softness]
+}
