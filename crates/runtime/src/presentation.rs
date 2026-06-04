@@ -226,20 +226,10 @@ async fn presentation_iteration_body(
         // fixed 60fps steps toward the lookahead horizon. Once the consumer catches
         // the producer, leave this tick in real-time catch-up mode.
         if shared.is_playing.get() && (had_buffer || pres.buffered() || resume_production) {
-            let producer_advanced = presentation_produce(executor, pres).await;
-            if producer_advanced {
-                iteration
-                    .snapshots
-                    .push(presentation_debug_snapshot(executor, shared, pres));
-            }
+            presentation_produce(executor, pres).await;
         }
     } else {
-        let producer_advanced = presentation_produce(executor, pres).await;
-        if producer_advanced {
-            iteration
-                .snapshots
-                .push(presentation_debug_snapshot(executor, shared, pres));
-        }
+        presentation_produce(executor, pres).await;
     }
 
     presentation_handle_drained(executor, shared, pres, iteration);
@@ -385,13 +375,12 @@ async fn presentation_apply_param_updates(
 }
 
 /// render up to a bounded batch of look-ahead frames from the live producer head.
-/// returns whether the producer frontier advanced this call.
-async fn presentation_produce(executor: &mut Executor, pres: &mut PresentationState) -> bool {
+async fn presentation_produce(executor: &mut Executor, pres: &mut PresentationState) {
     let dt = PresentationState::frame_dt();
     let mut produced = 0;
 
     if !pres.has_pending_production() {
-        return false;
+        return;
     }
     presentation_ensure_trailing_checkpoint(executor, pres);
 
@@ -430,8 +419,6 @@ async fn presentation_produce(executor: &mut Executor, pres: &mut PresentationSt
             }
         }
     }
-
-    produced > 0
 }
 
 fn presentation_ensure_trailing_checkpoint(executor: &Executor, pres: &mut PresentationState) {
@@ -709,29 +696,5 @@ fn presentation_display_snapshot(
         minimum_slide_durations: executor.real_minimum_slide_durations(),
         parameters,
         transcript,
-        debug_producer_timestamp: Some(
-            executor.internal_to_user_timestamp(executor.state.timestamp),
-        ),
-        debug_trailing_timestamp: pres
-            .trailing
-            .as_ref()
-            .map(|trailing| executor.internal_to_user_timestamp(trailing.timestamp)),
     }
-}
-
-/// DEBUG: a display snapshot with the scene/transcript suppressed, so emitting it
-/// moves the debug playheads without re-rendering the (unchanged) displayed frame.
-/// TODO: remove with the debug playhead UI.
-fn presentation_debug_snapshot(
-    executor: &Executor,
-    shared: &SharedRuntimeState,
-    pres: &PresentationState,
-) -> ExecutionSnapshot {
-    let mut snapshot = presentation_display_snapshot(executor, shared, pres);
-    snapshot.background = None;
-    snapshot.camera = None;
-    snapshot.camera_version = None;
-    snapshot.meshes = None;
-    snapshot.transcript = None;
-    snapshot
 }

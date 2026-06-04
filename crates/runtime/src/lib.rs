@@ -110,10 +110,6 @@ pub struct ExecutionSnapshot {
     pub minimum_slide_durations: Vec<Option<f64>>,
     pub parameters: Option<ParameterSnapshot>,
     pub transcript: Option<Vec<Arc<SectionTranscript>>>,
-    // DEBUG (presentation pre-rendering): optimistic producer frontier + parked
-    // trailing reference, user timestamps. TODO: remove once the engine is trusted.
-    pub debug_producer_timestamp: Option<Timestamp>,
-    pub debug_trailing_timestamp: Option<Timestamp>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -693,8 +689,6 @@ fn runtime_snapshot(
         minimum_slide_durations: executor.real_minimum_slide_durations(),
         parameters,
         transcript,
-        debug_producer_timestamp: None,
-        debug_trailing_timestamp: None,
     }
 }
 

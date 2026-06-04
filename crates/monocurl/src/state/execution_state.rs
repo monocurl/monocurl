@@ -32,10 +32,6 @@ pub struct ExecutionState {
     pub slide_count: usize,
     pub transcript: Vec<Arc<SectionTranscript>>,
     pub is_loading: bool,
-    // DEBUG (presentation pre-rendering): producer frontier + trailing reference.
-    // TODO: remove with the corresponding ExecutionSnapshot fields.
-    pub debug_producer_timestamp: Option<Timestamp>,
-    pub debug_trailing_timestamp: Option<Timestamp>,
     loading_pending: bool,
     loading_nonce: u64,
 }
@@ -59,8 +55,6 @@ impl Default for ExecutionState {
             slide_count: 0,
             transcript: Vec::new(),
             is_loading: false,
-            debug_producer_timestamp: None,
-            debug_trailing_timestamp: None,
             loading_pending: false,
             loading_nonce: 0,
         }
@@ -125,10 +119,6 @@ impl ExecutionState {
         self.parameters = snapshot.parameters;
         if let Some(transcript) = snapshot.transcript {
             self.transcript = transcript;
-        }
-        if !snapshot.is_loading {
-            self.debug_producer_timestamp = snapshot.debug_producer_timestamp;
-            self.debug_trailing_timestamp = snapshot.debug_trailing_timestamp;
         }
     }
 
