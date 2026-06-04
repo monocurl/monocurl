@@ -180,6 +180,7 @@ jobs:
   build-windows:
     name: Windows (${{ matrix.target }})
     runs-on: windows-latest
+    environment: release-signing
     permissions:
       contents: read
       id-token: write
