@@ -180,6 +180,9 @@ jobs:
   build-windows:
     name: Windows (${{ matrix.target }})
     runs-on: windows-latest
+    permissions:
+      contents: read
+      id-token: write
     strategy:
       matrix:
         include:
@@ -258,9 +261,61 @@ jobs:
         env:
           MONOCURL_VERSION: ${{ steps.version.outputs.version }}
 
+      - name: Azure login
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign Windows app binary
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERT_PROFILE }}
+          files: ${{ github.workspace }}\target\${{ matrix.target }}\release\monocurl.exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Monocurl
+          description-url: https://github.com/${{ github.repository }}
+
       - name: Post-bundle
         shell: pwsh
         run: ./bundling/windows/post-bundle.ps1 "${{ steps.version.outputs.version }}" "${{ matrix.target }}"
+
+      - name: Sign Windows installer
+        uses: azure/artifact-signing-action@v2
+        with:
+          endpoint: ${{ secrets.AZURE_ARTIFACT_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_ARTIFACT_SIGNING_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\dist\windows
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+          description: Monocurl Windows Installer
+          description-url: https://github.com/${{ github.repository }}
+
+      - name: Verify Windows signatures
+        shell: pwsh
+        run: |
+          $binary = "${{ github.workspace }}\target\${{ matrix.target }}\release\monocurl.exe"
+          $installer = Get-ChildItem -Path "${{ github.workspace }}\dist\windows" -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "windows installer not found"
+          }
+
+          foreach ($file in @($binary, $installer.FullName)) {
+            $signature = Get-AuthenticodeSignature -FilePath $file
+            Write-Host "${file}: $($signature.Status)"
+            if ($signature.Status -ne "Valid") {
+              $signature | Format-List *
+              throw "invalid Authenticode signature: $file"
+            }
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
