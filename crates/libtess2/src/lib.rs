@@ -605,7 +605,7 @@ fn separate_contours_with_sources(
             }
 
             let theta = 2.0 * PI * q as f32 * (contour_count - 1.0) / contour_count;
-            let delta = basis_x * (theta.cos() * 3e-3) + basis_y * (theta.sin() * 3e-3);
+            let delta = basis_x * (theta.cos() * 4e-3) + basis_y * (theta.sin() * 4e-3);
             (
                 *contour_idx,
                 contour.iter().map(|point| *point + delta).collect(),

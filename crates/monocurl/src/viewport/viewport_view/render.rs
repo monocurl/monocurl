@@ -113,6 +113,25 @@ impl Viewport {
         (slide_label, time_label, title_label, self.show_pause_hint)
     }
 
+    // DEBUG (presentation pre-rendering): optimistic producer + trailing playhead
+    // shown next to the live timestamp. TODO: remove once the engine is trusted.
+    pub(crate) fn presentation_debug_label(&self, cx: &mut Context<Self>) -> Option<String> {
+        fn fmt(ts: executor::time::Timestamp) -> String {
+            if ts.time.is_finite() {
+                format!("{}:{:.2}", ts.slide, ts.time)
+            } else {
+                format!("{}:end", ts.slide)
+            }
+        }
+        let execution = self.execution_state.read(cx);
+        let producer = execution.debug_producer_timestamp?;
+        let trailing = execution
+            .debug_trailing_timestamp
+            .map(fmt)
+            .unwrap_or_else(|| "-".to_string());
+        Some(format!("opt {} | trail {}", fmt(producer), trailing))
+    }
+
     pub(crate) fn render_presentation_audience(
         &mut self,
         interactive: bool,
@@ -325,6 +344,12 @@ impl Render for Viewport {
                     .text_size(px(11.0))
                     .child(time_label),
             )
+            .children(self.presentation_debug_label(cx).map(|label| {
+                div()
+                    .text_color(gpui::rgb(0xf2_b8_5c))
+                    .text_size(px(11.0))
+                    .child(label)
+            }))
             .children(title_label.map(|title| {
                 div()
                     .text_color(PRES_MUTED)

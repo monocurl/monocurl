@@ -20,6 +20,7 @@ use crate::executor::cacheing::ExecutionCache;
 use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
+pub use self::cacheing::LiveCheckpoint;
 pub(crate) use self::invoke::{fill_defaults, prepare_eager_call_args};
 use self::memory::{EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker};
 
@@ -35,8 +36,34 @@ enum SeekPrimitiveResult {
 
 enum SeekPrimitiveAnimSkipResult {
     Error(ExecutorError),
-    PrimitiveAnim { advanced_section: bool },
-    NoAnimsLeft,
+    PrimitiveAnim {
+        advanced_section: bool,
+        completed_slide_duration: Option<f64>,
+    },
+    NoAnimsLeft {
+        completed_slide_duration: Option<f64>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PlaybackCacheMode {
+    Full,
+    Disabled,
+}
+
+impl PlaybackCacheMode {
+    pub(crate) fn records_durations(self) -> bool {
+        matches!(self, Self::Full)
+    }
+
+    pub(crate) fn records_entries(self) -> bool {
+        matches!(self, Self::Full)
+    }
+}
+
+pub(crate) struct PlaybackAdvanceResult {
+    pub(crate) advance: PlaybackAdvance,
+    pub(crate) completed_slide_duration: Option<f64>,
 }
 
 #[derive(Debug)]

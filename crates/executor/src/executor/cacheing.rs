@@ -15,6 +15,16 @@ struct CacheEntry {
     slide_duration: f64,
 }
 
+/// an ad-hoc snapshot of the full live executor position (state + heap) at an
+/// arbitrary timestamp, not tied to a section boundary. used by presentation
+/// pre-rendering as the "trailing reference" the producer can be reset back to
+/// when a parameter update invalidates optimistically rendered frames.
+pub struct LiveCheckpoint {
+    pub timestamp: Timestamp,
+    state_after: RawHeapSnapshot<ExecutionState>,
+    heap_snap: RawHeapSnapshot<VirtualHeap>,
+}
+
 impl CacheEntry {
     pub fn slide_duration(&self) -> f64 {
         self.slide_duration
@@ -154,6 +164,35 @@ impl Executor {
         self.restore_latest_cache_before_or_reset(target);
     }
 
+    /// capture the current live executor position as a standalone checkpoint.
+    pub fn capture_live_checkpoint(&self) -> LiveCheckpoint {
+        LiveCheckpoint {
+            timestamp: self.state.timestamp,
+            state_after: RawHeapSnapshot::new(&self.state),
+            heap_snap: snapshot_heap(),
+        }
+    }
+
+    /// restore the live executor to a previously captured checkpoint. discards
+    /// any transient live state (e.g. an optimistic producer head that ran ahead).
+    pub fn restore_live_checkpoint(&mut self, checkpoint: &LiveCheckpoint) {
+        self.restore_cached_state(&checkpoint.state_after, &checkpoint.heap_snap);
+        self.state.pending_playback_time = 0.0;
+    }
+
+    /// commit the current section-end state into the seek cache. presentation
+    /// pre-rendering calls this only after the consumer has actually reached the
+    /// slide boundary.
+    pub fn commit_current_slide_cache_if_complete(&mut self, slide_duration: Option<f64>) {
+        if self.state.timestamp.time.is_infinite() && !self.state.has_errors() {
+            if let Some(slide_duration) = slide_duration {
+                self.save_cache_with_duration(slide_duration);
+            } else {
+                self.save_cache();
+            }
+        }
+    }
+
     pub(crate) fn rebase_at_cache_point(&mut self, target: Timestamp) {
         self.restore_live_state_to_cache_point(target);
     }
@@ -172,6 +211,10 @@ impl Executor {
                 .flatten()
                 .unwrap_or_default()
         };
+        self.save_cache_with_duration(slide_duration);
+    }
+
+    fn save_cache_with_duration(&mut self, slide_duration: f64) {
         let heap_snap = snapshot_heap();
         let state_after = RawHeapSnapshot::new(&self.state);
         self.cache.entries[self.state.timestamp.slide] = Some(CacheEntry {
@@ -219,7 +262,12 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::Arc,
+        task::{Context, Poll, RawWaker, RawWakerVTable, Waker},
+    };
 
     use bytecode::{Bytecode, SectionBytecode, SectionFlags};
 
@@ -241,6 +289,33 @@ mod tests {
                 .map(Arc::new)
                 .collect(),
         )
+    }
+
+    fn block_on<F: Future>(mut future: F) -> F::Output {
+        fn raw_waker() -> RawWaker {
+            fn clone(_: *const ()) -> RawWaker {
+                raw_waker()
+            }
+            fn wake(_: *const ()) {}
+            fn wake_by_ref(_: *const ()) {}
+            fn drop(_: *const ()) {}
+
+            RawWaker::new(
+                std::ptr::null(),
+                &RawWakerVTable::new(clone, wake, wake_by_ref, drop),
+            )
+        }
+
+        let waker = unsafe { Waker::from_raw(raw_waker()) };
+        let mut cx = Context::from_waker(&waker);
+        let mut future = unsafe { Pin::new_unchecked(&mut future) };
+
+        loop {
+            match future.as_mut().poll(&mut cx) {
+                Poll::Ready(output) => return output,
+                Poll::Pending => std::thread::yield_now(),
+            }
+        }
     }
 
     #[test]
@@ -575,6 +650,108 @@ mod tests {
             executor.state.stack(ExecutionState::ROOT_STACK_IDX).peek(),
             Value::Integer(5)
         ));
+    }
+
+    #[test]
+    fn live_checkpoint_round_trips_timestamp_state_and_heap() {
+        let bytecode = bytecode_with_sections(&[
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: true,
+                is_root_module: true,
+            },
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: false,
+                is_root_module: true,
+            },
+        ]);
+
+        let mut executor = Executor::new(bytecode, Vec::new());
+        executor.state.timestamp = Timestamp::new(1, 0.5);
+        executor
+            .state
+            .stack_mut(ExecutionState::ROOT_STACK_IDX)
+            .push(Value::List(List::new_with(vec![
+                VRc::new(Value::Integer(1)),
+                VRc::new(Value::Integer(2)),
+            ])));
+        executor
+            .state
+            .promote_to_var(ExecutionState::ROOT_STACK_IDX);
+        let list_key = executor
+            .state
+            .stack(ExecutionState::ROOT_STACK_IDX)
+            .peek()
+            .as_lvalue_key()
+            .unwrap();
+
+        let checkpoint = executor.capture_live_checkpoint();
+        assert_eq!(checkpoint.timestamp, Timestamp::new(1, 0.5));
+
+        // mutate the live head past the checkpoint
+        heap_replace(
+            list_key,
+            Value::List(List::new_with(vec![
+                VRc::new(Value::Integer(99)),
+                VRc::new(Value::Integer(2)),
+            ])),
+        );
+        executor.state.timestamp = Timestamp::new(1, 2.0);
+
+        executor.restore_live_checkpoint(&checkpoint);
+
+        assert_eq!(executor.state.timestamp, Timestamp::new(1, 0.5));
+        let restored = with_heap(|h| h.get(list_key).clone());
+        let Value::List(restored) = restored else {
+            panic!("expected list after restore");
+        };
+        match with_heap(|h| h.get(restored.elements[0].key()).clone()).elide_lvalue() {
+            Value::Integer(1) => {}
+            other => panic!(
+                "expected restored first element 1, got {}",
+                other.type_name()
+            ),
+        }
+    }
+
+    #[test]
+    fn produce_frame_reaches_boundary_without_committing_seek_cache() {
+        let bytecode = bytecode_with_sections(&[
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: true,
+                is_root_module: true,
+            },
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: false,
+                is_root_module: true,
+            },
+        ]);
+
+        let mut executor = Executor::new(bytecode, Vec::new());
+        executor.state.timestamp = Timestamp::new(1, 0.0);
+        executor.state.execution_heads.clear();
+
+        let (_, _, completed_duration) =
+            block_on(executor.produce_frame(1, 1.0)).expect("produce frame");
+
+        assert_eq!(executor.state.timestamp, Timestamp::at_end_of_slide(1));
+        assert!(executor.cache.entries[1].is_none());
+        assert!(executor.cache.minimum_durations[1].is_none());
+
+        executor.commit_current_slide_cache_if_complete(completed_duration);
+
+        assert!(executor.cache.entries[1].is_some());
+        assert_eq!(
+            executor.cache.entries[1].as_ref().unwrap().slide_duration,
+            0.0
+        );
     }
 
     #[test]
