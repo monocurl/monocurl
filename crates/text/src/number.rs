@@ -159,8 +159,11 @@ fn strip_negative_zero(out: &mut String) {
 }
 
 fn render_number_glyph(ch: char, scale: f32, quality: RenderQuality) -> Result<Vec<Arc<Mesh>>> {
-    let mut source = String::new();
-    source.push(ch);
+    // each glyph is rendered as its own tightly cropped tex page, which discards the
+    // shared baseline. the `\vphantom{0}` reference pins every glyph's box to the digit
+    // height/depth so short glyphs (`.`, `-`, `+`) keep their true vertical position
+    // instead of floating to the top of the line.
+    let source = format!(r"\vphantom{{0}}{ch}");
     render_tex_with_quality(&source, scale, quality)
 }
 
@@ -270,6 +273,28 @@ mod tests {
         );
         assert_eq!(format_number(12.3, Some(2), true).unwrap(), "+12.30");
         assert_eq!(format_number(-12.3, Some(1), true).unwrap(), "-12.3");
+    }
+
+    #[test]
+    fn decimal_point_sits_on_the_baseline() {
+        if !configure_test_backend() {
+            return;
+        }
+        let digit = render_number_string_with_quality("0", 1.0, RenderQuality::Normal).unwrap();
+        let period = render_number_string_with_quality(".", 1.0, RenderQuality::Normal).unwrap();
+        let (digit_min, digit_max) = mesh_bounds(&digit).unwrap();
+        let (period_min, period_max) = mesh_bounds(&period).unwrap();
+
+        // the dot must sit in the lower portion of the digit box (near the baseline),
+        // not float up to the top of the line.
+        let midpoint = digit_min.y + (digit_max.y - digit_min.y) * 0.5;
+        assert!(
+            period_max.y < midpoint,
+            "decimal point floated above the baseline: period_max.y={}, midpoint={}",
+            period_max.y,
+            midpoint
+        );
+        assert!(period_min.y >= digit_min.y - 1e-3);
     }
 
     #[test]

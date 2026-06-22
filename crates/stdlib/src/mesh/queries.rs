@@ -242,6 +242,40 @@ pub async fn mesh_tags(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     Ok(list_value(tags))
 }
 
+/// walk each mesh's dominant-sibling line topology, yielding segments in path
+/// order. open contours start at their leading endpoint, closed contours start
+/// wherever traversal first lands. non-dominant inverse siblings are skipped so
+/// a path is never counted twice.
+fn ordered_dominant_segments(tree: &MeshTree) -> Vec<(Float3, Float3)> {
+    let mut segments = Vec::new();
+    for mesh in tree.iter() {
+        let mut visited = vec![false; mesh.lins.len()];
+        for start in 0..mesh.lins.len() {
+            if !mesh.lins[start].is_dom_sib || visited[start] {
+                continue;
+            }
+            // rewind to the contour's first segment (prev < 0 marks an endpoint,
+            // prev == start marks a closed loop)
+            let mut begin = start;
+            while mesh.lins[begin].prev >= 0 && mesh.lins[begin].prev as usize != start {
+                begin = mesh.lins[begin].prev as usize;
+            }
+            // walk next, recording each segment once
+            let mut j = begin;
+            while !visited[j] {
+                visited[j] = true;
+                let lin = &mesh.lins[j];
+                segments.push((lin.a.pos, lin.b.pos));
+                if lin.next < 0 || lin.next as usize == begin {
+                    break;
+                }
+                j = lin.next as usize;
+            }
+        }
+    }
+    segments
+}
+
 #[stdlib_func]
 pub async fn mesh_sample(
     executor: &mut Executor,
@@ -250,46 +284,26 @@ pub async fn mesh_sample(
     let tree = read_mesh_tree_arg(executor, stack_idx, -2, "mesh").await?;
     let t = crate::read_float(executor, stack_idx, -1, "t")?.clamp(0.0, 1.0) as f32;
 
-    let mut lines = Vec::new();
-    let mut tris = Vec::new();
-    let mut dots = Vec::new();
-    for mesh in tree.iter() {
-        dots.extend(mesh.dots.iter().map(|dot| dot.pos));
-        lines.extend(mesh.lins.iter().map(|lin| (lin.a.pos, lin.b.pos)));
-        tris.extend(
-            mesh.tris
-                .iter()
-                .map(|tri| (tri.a.pos, tri.b.pos, tri.c.pos)),
-        );
+    let segments = ordered_dominant_segments(&tree);
+    if segments.is_empty() {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "mesh",
+            message: "can only sample on a mesh with at least one line",
+        });
     }
 
-    if !lines.is_empty() {
-        let lengths: Vec<_> = lines.iter().map(|(a, b)| (*b - *a).len()).collect();
-        let total = lengths.iter().sum::<f32>().max(1e-6);
-        let mut target = t * total;
-        for ((a, b), len) in lines.into_iter().zip(lengths) {
-            if target <= len {
-                return Ok(point_value(a.lerp(b, target / len.max(1e-6))));
-            }
-            target -= len;
+    let lengths: Vec<f32> = segments.iter().map(|(a, b)| (*b - *a).len()).collect();
+    let total = lengths.iter().sum::<f32>().max(1e-6);
+    let mut target = t * total;
+    for (&(a, b), &len) in segments.iter().zip(&lengths) {
+        if target <= len {
+            return Ok(point_value(a.lerp(b, target / len.max(1e-6))));
         }
+        target -= len;
     }
 
-    if !tris.is_empty() {
-        let idx = ((tris.len() - 1) as f32 * t).round() as usize;
-        let (a, b, c) = tris[idx];
-        return Ok(point_value((a + b + c) / 3.0));
-    }
-
-    if !dots.is_empty() {
-        let idx = ((dots.len() - 1) as f32 * t).round() as usize;
-        return Ok(point_value(dots[idx]));
-    }
-
-    Err(ExecutorError::InvalidArgument {
-        arg: "mesh",
-        message: "mesh tree must contain at least one vertex",
-    })
+    // float drift past the final segment lands on the path's end
+    Ok(point_value(segments[segments.len() - 1].1))
 }
 
 #[stdlib_func]
@@ -545,7 +559,64 @@ mod tests {
         simd::{Float3, Float4},
     };
 
-    use super::{append_mesh_into, mesh_ref};
+    use std::sync::Arc;
+
+    use super::{MeshTree, append_mesh_into, mesh_ref, ordered_dominant_segments};
+
+    fn poly_line(a: Float3, b: Float3, prev: i32, next: i32) -> Lin {
+        Lin {
+            a: LinVertex { pos: a, col: Float4::ONE },
+            b: LinVertex { pos: b, col: Float4::ONE },
+            norm: Float3::Z,
+            prev,
+            next,
+            inv: -1,
+            is_dom_sib: true,
+        }
+    }
+
+    #[test]
+    fn ordered_segments_skip_inverse_siblings_and_follow_path() {
+        let p0 = Float3::ZERO;
+        let p1 = Float3::X;
+        let p2 = Float3::new(2.0, 0.0, 0.0);
+        let mut mesh = Mesh {
+            dots: vec![],
+            lins: vec![poly_line(p0, p1, -1, 1), poly_line(p1, p2, 0, -1)],
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+            version: Mesh::fresh_version(),
+        };
+        // adds reversed inverse siblings + endpoint dots, like real path meshes
+        mesh.normalize_line_dot_topology();
+        assert!(mesh.lins.len() > 2, "normalize should add inverse siblings");
+        mesh.debug_assert_consistent_topology();
+
+        let tree = MeshTree::Mesh(Arc::new(mesh));
+        let segments = ordered_dominant_segments(&tree);
+        assert_eq!(segments, vec![(p0, p1), (p1, p2)]);
+    }
+
+    #[test]
+    fn ordered_segments_empty_without_lines() {
+        let mesh = Mesh {
+            dots: vec![Dot {
+                pos: Float3::ZERO,
+                norm: Float3::Z,
+                col: Float4::ONE,
+                inv: -1,
+                is_dom_sib: true,
+            }],
+            lins: vec![],
+            tris: vec![],
+            uniform: Uniforms::default(),
+            tag: vec![],
+            version: Mesh::fresh_version(),
+        };
+        let tree = MeshTree::Mesh(Arc::new(mesh));
+        assert!(ordered_dominant_segments(&tree).is_empty());
+    }
 
     #[test]
     fn append_mesh_remaps_negative_dot_inverse_refs() {
