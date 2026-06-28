@@ -100,6 +100,7 @@ in
         # priviledges
         skippedTests = [
           "errors::test_scene_snapshot_accepts_mid_write_text_mesh"
+
           "sync::test_rearrangement_scene_final_slide_seek_scan_stays_stable"
           "sync::test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_panic"
           "sync::test_scale_scales_text_about_global_tree_center"
@@ -117,7 +118,6 @@ in
           "live_values::test_axis3d_draws_axis_arrows_after_grid"
           "live_values::test_axis3d_label_up_controls_title_orientation"
           "live_values::test_axis_large_ticks_have_larger_stroke_radius"
-
           "live_values::test_axis_style_arrow_extrusion_controls_bounds"
           "live_values::test_axis_style_nil_label_map_suppresses_tick_labels"
           "live_values::test_axis_style_updates_axis_defaults"
@@ -126,11 +126,12 @@ in
           "live_values::test_label_places_latex_to_requested_side"
           "live_values::test_label_preserves_cross_axis_alignment"
           "live_values::test_number_constructor_accepts_decimal_and_sign_options"
-
           "live_values::test_tex_and_latex_accept_list_string_inputs"
           "live_values::test_text_tag_operator_tags_text_backends"
 
           "number::tests::number_renderer_lays_out_cached_glyphs"
+          "number::tests::decimal_point_sits_on_the_baseline"
+
           "render::tests::tex_and_text_have_similar_scale"
           "render::tests::tex_digits_and_letters_keep_expected_bounds"
           "render::tests::text_monocurl_has_consistent_topology"
