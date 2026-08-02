@@ -7,6 +7,7 @@ use structs::{
 };
 
 pub mod ast;
+pub mod documentation;
 pub mod import_context;
 pub mod parser;
 

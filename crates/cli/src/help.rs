@@ -2,11 +2,11 @@ use exporter::DEFAULT_VIDEO_FPS;
 
 use crate::command::{HelpTopic, ResolutionPreset};
 
-pub(crate) fn help_text(topic: HelpTopic) -> String {
+pub(crate) fn help_text(topic: HelpTopic, version: &str) -> String {
     match topic {
         HelpTopic::General => format!(
             "\
-Monocurl CLI
+Monocurl v{version}
 
 Usage:
   monocurl
@@ -101,6 +101,16 @@ Options:
   -h, --help                   show this message
 "
         .into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn general_help_includes_the_application_version() {
+        assert!(help_text(HelpTopic::General, "0.3.2").starts_with("Monocurl v0.3.2"));
     }
 }
 

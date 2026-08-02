@@ -373,16 +373,27 @@ impl AutoUpdater {
                 window.prompt(
                     PromptLevel::Info,
                     &format!("Monocurl v{version} is ready"),
-                    Some("Use the Restart button in the bottom-right update status to apply it."),
-                    &["Ok"],
+                    Some(
+                        "Restart now installs the downloaded update and launches the new version. \
+                         Choose Later to keep using this version and update manually.",
+                    ),
+                    &[
+                        PromptButton::Ok("Restart now".into()),
+                        PromptButton::Cancel("Later".into()),
+                    ],
                     cx,
                 )
             })
             .ok();
 
         if let Some(prompt) = prompt {
-            cx.spawn(async move |_this, _app| {
-                let _ = prompt.await;
+            cx.spawn(async move |this, app| {
+                if prompt.await != Ok(0) {
+                    return;
+                }
+                let _ = app.update(|cx| {
+                    let _ = this.update(cx, |updater, cx| updater.restart_to_apply(cx));
+                });
             })
             .detach();
         }

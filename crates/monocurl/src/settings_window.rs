@@ -57,6 +57,8 @@ impl SettingsWindow {
             window_bounds: Some(WindowBounds::centered(window_size, cx)),
             window_min_size: Some(window_size),
             is_resizable: false,
+            #[cfg(target_os = "linux")]
+            window_decorations: Some(WindowDecorations::Client),
             focus: true,
             ..Default::default()
         };
@@ -292,15 +294,81 @@ impl SettingsWindow {
     }
 }
 
+impl SettingsWindow {
+    #[cfg(target_os = "linux")]
+    fn render_linux_titlebar(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
+        let theme = ThemeSettings::theme(cx);
+        let controls = window.window_controls();
+
+        div()
+            .id("settings-titlebar")
+            .h(px(28.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .bg(theme.navbar_background)
+            .border_b_1()
+            .border_color(theme.navbar_border)
+            .child(
+                div()
+                    .id("settings-titlebar-drag")
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .px(px(10.0))
+                    .text_size(px(12.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Settings")
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                        cx.stop_propagation();
+                        window.start_window_move();
+                    })
+                    .on_click(move |event, window, cx| {
+                        cx.stop_propagation();
+                        if event.click_count() == 2 && controls.maximize {
+                            window.zoom_window();
+                        }
+                    }),
+            )
+            .child(
+                div()
+                    .id("settings-window-close")
+                    .w(px(42.0))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(18.0))
+                    .cursor_pointer()
+                    .hover({
+                        let danger = theme.danger;
+                        move |this| this.bg(danger)
+                    })
+                    .child("×")
+                    .on_click(|_, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        window.remove_window();
+                    }),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for SettingsWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(not(target_os = "linux"))]
+        let _ = window;
+
         let theme = ThemeSettings::theme(cx);
         let settings = UserSettings::read(cx).clone();
         let use_system = settings.latex_backend == LatexBackendPreference::System;
 
-        div()
+        let content = div()
             .font_family(FontSet::UI)
-            .size_full()
+            .flex_1()
+            .min_h_0()
             .bg(theme.app_background)
             .text_color(theme.text_primary)
             .key_context("settings")
@@ -413,7 +481,20 @@ impl Render for SettingsWindow {
                                     )),
                             ),
                     ),
-            )
+            );
+
+        #[cfg(target_os = "linux")]
+        {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(self.render_linux_titlebar(window, cx))
+                .child(content);
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        content
     }
 }
 

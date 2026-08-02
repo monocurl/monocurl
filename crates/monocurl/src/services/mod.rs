@@ -20,6 +20,7 @@ use futures::channel::mpsc::unbounded;
 use futures::{SinkExt, StreamExt, channel::mpsc::UnboundedSender};
 use gpui::{App, AppContext, Context, Entity};
 use lexer::token::Token;
+use parser::documentation::Documentation;
 use std::sync::Arc;
 use structs::rope::{Attribute, Rope, TextAggregate};
 
@@ -104,6 +105,10 @@ pub enum ServiceManagerMessage {
     },
     UpdateSlideInfo {
         slides: Vec<SlideInfo>,
+        version: usize,
+    },
+    UpdateDocumentation {
+        documentation: Vec<Documentation>,
         version: usize,
     },
     ExecutionStateUpdated {
@@ -278,6 +283,16 @@ impl ServiceManager {
             ServiceManagerMessage::UpdateSlideInfo { slides, version } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_slides(slides, version) {
+                        cx.notify();
+                    }
+                });
+            }
+            ServiceManagerMessage::UpdateDocumentation {
+                documentation,
+                version,
+            } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_documentation(documentation, version) {
                         cx.notify();
                     }
                 });

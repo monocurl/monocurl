@@ -41,6 +41,22 @@ mod test {
         (bundles, artifacts.error_diagnostics)
     }
 
+    #[test]
+    fn parser_preserves_documentation_for_root_declarations() {
+        let content = "## [overview]\n## User supplied helper.\nlet helper = |x| x\n";
+        let mut context = ParseImportContext::new(PathBuf::from("scene.mcs"));
+        let (_, artifacts) = Parser::parse(
+            &mut context,
+            lex_rope(content),
+            Rope::from_text(content),
+            None,
+        );
+
+        assert_eq!(artifacts.documentation.len(), 1);
+        assert_eq!(artifacts.documentation[0].name, "helper");
+        assert!(artifacts.documentation[0].is_root);
+    }
+
     fn parse_expr_test(content: &str) -> SpanTagged<Expression> {
         let lexed = lex(content);
         let text_rope = Rope::from_text(content);
@@ -167,6 +183,31 @@ mod test {
             }
             body => panic!("expected only exported declaration, got {body:?}"),
         }
+    }
+
+    #[test]
+    fn parser_preserves_documentation_from_imported_libraries() {
+        let mut backend = MemoryImportBackend::new();
+        backend.insert_module(
+            "lib",
+            "## [overview]\n## Imported helper.\nlet helper = |value| value\n",
+            true,
+        );
+        let mut context = ParseImportContext::with_backend(PathBuf::from("scene.mcs"), backend);
+        let (_, artifacts) = Parser::parse(
+            &mut context,
+            lex_rope("import lib\nlet value = helper(1)\n"),
+            Rope::from_text("import lib\nlet value = helper(1)\n"),
+            None,
+        );
+
+        let documentation = artifacts
+            .documentation
+            .iter()
+            .find(|documentation| documentation.name == "helper")
+            .unwrap();
+        assert_eq!(documentation.overview, "Imported helper.");
+        assert!(!documentation.is_root);
     }
 
     #[test]

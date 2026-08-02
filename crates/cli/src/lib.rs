@@ -9,12 +9,12 @@ mod parse;
 mod progress;
 mod style_trusted_html;
 
-pub fn run(args: Vec<OsString>) -> i32 {
+pub fn run(args: Vec<OsString>, version: &str) -> i32 {
     clean_latex_file_cache();
 
     match parse::parse_cli(args) {
         Ok(CliAction::Help(topic)) => {
-            println!("{}", help::help_text(topic));
+            println!("{}", help::help_text(topic, version));
             0
         }
         Ok(CliAction::Run(command)) => {

@@ -30,6 +30,7 @@ pub struct SingleLineInput {
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
+    key_context: &'static str,
     selected_range: Range<usize>,
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
@@ -40,10 +41,19 @@ pub struct SingleLineInput {
 
 impl SingleLineInput {
     pub fn new(placeholder: impl Into<SharedString>, cx: &mut Context<Self>) -> Self {
+        Self::new_with_key_context(placeholder, "single-line-input", cx)
+    }
+
+    pub fn new_with_key_context(
+        placeholder: impl Into<SharedString>,
+        key_context: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
             content: String::new(),
             placeholder: placeholder.into(),
+            key_context,
             selected_range: 0..0,
             selection_reversed: false,
             marked_range: None,
@@ -583,7 +593,7 @@ impl Render for SingleLineInput {
         let theme = ThemeSettings::theme(cx);
 
         div()
-            .key_context("single-line-input")
+            .key_context(self.key_context)
             .track_focus(&self.focus_handle(cx))
             .cursor(CursorStyle::IBeam)
             .flex()

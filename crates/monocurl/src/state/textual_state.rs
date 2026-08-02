@@ -3,6 +3,7 @@ use std::{cell::RefCell, ops::Range, rc::Rc, sync::Arc};
 use executor::transcript::SectionTranscript;
 use gpui::{App, Context, Entity, ScrollHandle, Window};
 use lexer::token::Token;
+use parser::documentation::Documentation;
 use smallvec::SmallVec;
 use structs::{
     rope::{Attribute, RLEAggregate, RLEData, Rope, TextAggregate, leaves_from_str},
@@ -376,6 +377,7 @@ pub struct TextualState {
     transcript: TranscriptIndex,
 
     slides: Vec<SlideInfo>,
+    documentation: Vec<Documentation>,
 
     version: usize,
 
@@ -442,7 +444,7 @@ impl TextualState {
         let replacement = TextReplacement::new(span.clone(), new_text.len());
         self.diagnostics.apply_replacement(&replacement);
         self.dirty_diagnostic_lines = self.dirty_diagnostic_lines.replace_range(
-            span.clone(),
+            del_range.clone(),
             std::iter::once(RLEData {
                 codeunits: ins_range.len(),
                 attribute: false,
@@ -705,6 +707,25 @@ impl TextualState {
         true
     }
 
+    pub fn documentation_for(&self, name: &str) -> Option<&Documentation> {
+        self.documentation
+            .iter()
+            .filter(|documentation| documentation.name == name)
+            .max_by_key(|documentation| documentation.is_root)
+    }
+
+    pub fn set_documentation(
+        &mut self,
+        documentation: Vec<Documentation>,
+        for_version: usize,
+    ) -> bool {
+        if for_version != self.version || self.documentation == documentation {
+            return false;
+        }
+        self.documentation = documentation;
+        true
+    }
+
     pub fn static_analysis_rope(&self) -> &Rope<Attribute<StaticAnalysisData>> {
         &self.static_analysis_rope
     }
@@ -755,6 +776,11 @@ impl TextualState {
     }
 
     pub fn line_has_new_attributes(&self, line_no: usize) -> bool {
+        let line_count = self.text_rope.utf8_prefix_summary(self.len()).newlines + 1;
+        if line_no >= line_count {
+            return false;
+        }
+
         if *self.dirty_diagnostic_lines.attribute_at(line_no) {
             return true;
         }
@@ -1397,6 +1423,37 @@ mod tests {
         assert!(state.slides().is_empty());
         assert!(state.set_slides(slides, 0));
         assert_eq!(state.slides()[0].line, 1);
+    }
+
+    #[test]
+    fn stale_line_indices_do_not_request_attribute_updates() {
+        let state = TextualState {
+            text_rope: Rope::from_text("one line"),
+            ..Default::default()
+        };
+
+        assert!(!state.line_has_new_attributes(1));
+    }
+
+    #[test]
+    fn dirty_line_rope_replaces_line_ranges_not_source_byte_ranges() {
+        let dirty_lines: Rope<RLEAggregate<bool>> = Rope::default().replace_range(
+            0..0,
+            std::iter::once(RLEData {
+                codeunits: 4,
+                attribute: false,
+            }),
+        );
+
+        let dirty_lines = dirty_lines.replace_range(
+            1..3,
+            std::iter::once(RLEData {
+                codeunits: 1,
+                attribute: false,
+            }),
+        );
+
+        assert_eq!(dirty_lines.codeunits(), 3);
     }
 
     #[test]

@@ -1,0 +1,7 @@
+[package]
+name = "rust_scene"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rust_scene_macros.workspace = true

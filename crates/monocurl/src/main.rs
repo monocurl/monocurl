@@ -261,7 +261,7 @@ fn main() {
 
     let args = env::args_os().skip(1).collect::<Vec<_>>();
     if !args.is_empty() {
-        process::exit(cli::run(args));
+        process::exit(cli::run(args, auto_update::CURRENT_VERSION));
     }
 
     MonocurlLauncher::launch();

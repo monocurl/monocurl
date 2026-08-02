@@ -179,6 +179,14 @@ impl CompilationService {
             .unwrap();
 
         self.sm_tx
+            .send(ServiceManagerMessage::UpdateDocumentation {
+                documentation: parse_artifacts.documentation.clone(),
+                version,
+            })
+            .await
+            .unwrap();
+
+        self.sm_tx
             .send(ServiceManagerMessage::UpdateStaticAnalysisRope {
                 analysis_rope,
                 version,

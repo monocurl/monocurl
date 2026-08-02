@@ -46,7 +46,7 @@ impl TextEditor {
             // only change if we move out of the hover item, or if version has changed
             let position_changed = self
                 .character_mouse_is_on_top_of(cx)
-                .is_none_or(|pos| !hover.span.contains(&pos));
+                .is_none_or(|pos| !hover.span().contains(&pos));
             let version_changed = version != self.state.read(cx).version();
             if position_changed || version_changed {
                 spawn_task(self, cx)
@@ -88,7 +88,19 @@ impl TextEditor {
                     .diagnostics()
                     .diagnostic_for_point(offset8)
                     .cloned();
-                editor.hover_item = diagnostic.map(|d| (editor.state.read(cx).version(), d));
+                let state = editor.state.read(cx);
+                let hover = diagnostic.map(HoverItem::Diagnostic).or_else(|| {
+                    let word = state.word(offset8, false);
+                    let name = state.read(word.clone());
+                    state
+                        .documentation_for(&name)
+                        .cloned()
+                        .map(|documentation| HoverItem::Documentation {
+                            documentation,
+                            span: word,
+                        })
+                });
+                editor.hover_item = hover.map(|item| (state.version(), item));
                 cx.notify();
             })
             .ok();

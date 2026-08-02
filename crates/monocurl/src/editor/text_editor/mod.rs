@@ -44,11 +44,30 @@ mod hover;
 mod input_handler;
 mod layout;
 mod mouse;
+mod navigation;
 mod popover_element;
 mod render;
 mod scroll;
 mod search;
 mod text_element;
+
+#[derive(Clone)]
+enum HoverItem {
+    Diagnostic(Diagnostic),
+    Documentation {
+        documentation: parser::documentation::Documentation,
+        span: Span8,
+    },
+}
+
+impl HoverItem {
+    fn span(&self) -> &Span8 {
+        match self {
+            Self::Diagnostic(diagnostic) => &diagnostic.span,
+            Self::Documentation { span, .. } => span,
+        }
+    }
+}
 
 use history::HistoryGroup;
 
@@ -76,7 +95,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("tab", Tab, None),
         KeyBinding::new("shift-tab", Untab, None),
         KeyBinding::new("secondary-/", ToggleComment, None),
-        KeyBinding::new("secondary-.", ToggleSlideFold, Some("editor")),
+        KeyBinding::new("secondary-shift-.", ToggleSlideFold, Some("editor")),
         KeyBinding::new("shift-left", SelectLeft, None),
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-alt-left", SelectLeftWord, None),
@@ -92,10 +111,22 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-c", Copy, None),
         KeyBinding::new("secondary-x", Cut, None),
         KeyBinding::new("secondary-f", OpenFind, None),
+        KeyBinding::new(
+            "secondary-g",
+            OpenGoToLine,
+            Some("editor && !find-panel && !go-to-line"),
+        ),
         KeyBinding::new("secondary-g", FindNext, Some("find-panel")),
         KeyBinding::new("secondary-shift-g", FindPrevious, Some("find-panel")),
         KeyBinding::new("shift-enter", FindPrevious, Some("find-panel")),
         KeyBinding::new("escape", CloseFind, Some("find-panel")),
+        KeyBinding::new("escape", CloseGoToLine, Some("go-to-line-input")),
+        KeyBinding::new("enter", ConfirmGoToLine, Some("go-to-line-input")),
+        KeyBinding::new("f8", NextDiagnostic, Some("editor")),
+        KeyBinding::new("shift-f8", PreviousDiagnostic, Some("editor")),
+        KeyBinding::new("secondary-down", NextSlideHeader, Some("editor")),
+        KeyBinding::new("secondary-up", PreviousSlideHeader, Some("editor")),
+        KeyBinding::new("f12", GoToDefinition, Some("editor")),
         KeyBinding::new("escape", CloseFind, Some("single-line-input")),
         KeyBinding::new("home", Home, None),
         KeyBinding::new("end", End, None),
@@ -151,7 +182,9 @@ pub struct TextEditor {
 
     find_query_input: Entity<SingleLineInput>,
     find_replace_input: Entity<SingleLineInput>,
+    go_to_line_input: Entity<SingleLineInput>,
     search: SearchState,
+    go_to_line_visible: bool,
 
     last_op_matched_character: Option<Count8>,
 
@@ -165,8 +198,8 @@ pub struct TextEditor {
     last_in_frame_mouse_position: Option<Point<Pixels>>,
     last_hover_start: Option<(Point<Pixels>, usize, Pixels)>,
     hover_task: Option<Task<()>>,
-    // version, diagnostic
-    hover_item: Option<(usize, Diagnostic)>,
+    // version, hover item
+    hover_item: Option<(usize, HoverItem)>,
     copied_hover_message: Option<String>,
 
     parameter_hint_suppression_task: Option<Task<()>>,
@@ -204,6 +237,9 @@ impl TextEditor {
         let focus_handle = cx.focus_handle();
         let find_query_input = cx.new(|cx| SingleLineInput::new("Find", cx));
         let find_replace_input = cx.new(|cx| SingleLineInput::new("Replace", cx));
+        let go_to_line_input = cx.new(|cx| {
+            SingleLineInput::new_with_key_context("Line[:column]", "go-to-line-input", cx)
+        });
 
         // re render whenever state changes
         // (mainly want the rerender when theres external changes to the state)
@@ -221,6 +257,13 @@ impl TextEditor {
             &find_query_input,
             |editor, _, event: &SingleLineInputEvent, cx| match event {
                 SingleLineInputEvent::Edited => editor.on_find_query_edited(cx),
+            },
+        )
+        .detach();
+        cx.subscribe(
+            &go_to_line_input,
+            |editor, _, event: &SingleLineInputEvent, cx| match event {
+                SingleLineInputEvent::Edited => editor.on_go_to_line_edited(cx),
             },
         )
         .detach();
@@ -262,7 +305,9 @@ impl TextEditor {
             save_dirty,
             find_query_input,
             find_replace_input,
+            go_to_line_input,
             search: SearchState::default(),
+            go_to_line_visible: false,
             last_op_matched_character: None,
 
             marked_range: None,

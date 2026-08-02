@@ -21,6 +21,7 @@ use crate::{
         Section, SectionBundle, SectionType, SpanTagged, Statement, Subscript, UnaryOperatorType,
         UnaryPreOperator, VariableType, While,
     },
+    documentation::Documentation,
     flatten_rope,
     import_context::{FileResult, ParseImportContext},
     parser::predicate::{
@@ -350,6 +351,7 @@ pub struct ParseArtifacts {
     pub error_diagnostics: Vec<Diagnostic>,
     pub cursor_possibilities: HashSet<Token>,
     pub root_slides: Vec<RootSlideInfo>,
+    pub documentation: Vec<Documentation>,
 }
 
 impl ParseArtifacts {
@@ -357,6 +359,7 @@ impl ParseArtifacts {
         self.error_diagnostics.extend(other.error_diagnostics);
         self.cursor_possibilities.extend(other.cursor_possibilities);
         self.root_slides.extend(other.root_slides);
+        self.documentation.extend(other.documentation);
     }
 }
 
