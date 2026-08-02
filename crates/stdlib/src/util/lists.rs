@@ -22,6 +22,9 @@ pub async fn list_len(executor: &mut Executor, stack_idx: usize) -> Result<Value
         .elide_cached_wrappers_rec()
     {
         Value::List(list) => Ok(Value::Integer(list.len() as i64)),
+        Value::Map(_) => Err(ExecutorError::invalid_operation(
+            "cannot iterate over a map directly; use map_items(map) to iterate [key, value] pairs",
+        )),
         other => Err(ExecutorError::type_error("list", other.type_name())),
     }
 }

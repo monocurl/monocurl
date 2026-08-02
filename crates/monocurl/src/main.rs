@@ -14,12 +14,14 @@ use std::{
 use crate::{
     actions::{
         CheckForUpdates, Copy, Cut, EpsilonBackward, EpsilonForward, ExportImage,
-        ExportSlidesAsVideos, ExportVideo, NextSlide, OpenSettings, Paste, PrevSlide, Quit, Redo,
-        SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd, SceneStart, ToggleHeadlessMode,
-        TogglePlaying, TogglePresentationMode, ToggleSlideFold, Undo,
+        ExportSlidesAsVideos, ExportVideo, NextSlide, OpenKeyBindings, OpenSettings, Paste,
+        PrevSlide, Quit, Redo, SaveActiveDocument, SaveActiveDocumentCustomPath, SceneEnd,
+        SceneStart, ToggleHeadlessMode, TogglePlaying, TogglePresentationMode, ToggleSlideFold,
+        Undo,
     },
     auto_update::AutoUpdater,
     editor::text_editor,
+    keybindings_window::KeyBindingsWindow,
     settings_window::SettingsWindow,
     state::{user_settings::UserSettings, window_state::WindowState},
     theme::ThemeSettings,
@@ -36,6 +38,7 @@ mod components;
 mod document_view;
 mod editor;
 mod home_view;
+mod keybindings_window;
 mod navbar_view;
 mod services;
 mod settings_window;
@@ -129,6 +132,7 @@ impl MonocurlLauncher {
     fn setup_global_actions(cx: &mut App) {
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &OpenSettings, cx| SettingsWindow::open(cx));
+        cx.on_action(|_: &OpenKeyBindings, cx| KeyBindingsWindow::open(cx));
         cx.on_action(|_: &CheckForUpdates, cx| {
             AutoUpdater::check_for_updates(cx.active_window(), cx);
         });
@@ -188,12 +192,17 @@ impl MonocurlLauncher {
             },
             Menu {
                 name: "Help".into(),
-                items: vec![MenuItem::action("Check for Updates...", CheckForUpdates)],
+                items: vec![
+                    MenuItem::action("Key Bindings", OpenKeyBindings),
+                    MenuItem::separator(),
+                    MenuItem::action("Check for Updates...", CheckForUpdates),
+                ],
             },
         ]);
     }
 
     fn setup_modules(cx: &mut App) {
+        components::prompt::init(cx);
         document_view::init(cx);
         text_editor::init(cx);
     }

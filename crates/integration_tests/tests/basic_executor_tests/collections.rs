@@ -3,6 +3,21 @@ use super::*;
 // -- collections: lists --
 
 #[test]
+fn test_iterating_map_explains_how_to_get_key_value_pairs() {
+    let r = run("\
+        let colors = [\"blue\" -> 1]
+        for ([key, value] in colors) {}
+    ");
+    r.assert_error("use map_items(map) to iterate [key, value] pairs");
+}
+
+#[test]
+fn test_hex_color_parses_html_rgb() {
+    let r = run_with_stdlib(r##"let result = hex("#009ee0")"##, &["color"]);
+    r.assert_float_list_approx(&[0.0, 158.0 / 255.0, 224.0 / 255.0, 1.0], 1e-9);
+}
+
+#[test]
 fn test_exec_empty_list() {
     let r = run("let xs = []");
     r.assert_ok();
@@ -152,6 +167,22 @@ fn test_to_string_joins_list_elements_recursively() {
         &["util"],
     );
     r.assert_string("A23nil4.5");
+}
+
+#[test]
+fn test_to_string_formats_numbers_with_decimal_places() {
+    let r = run_with_stdlib(
+        r#"
+        let result = [
+            to_string(1, 1),
+            to_string(-1.234, 2),
+            to_string(1.5, 0),
+            to_string(12345.678)
+        ]
+        "#,
+        &["util"],
+    );
+    r.assert_string_list(&["1.0", "-1.23", "2", "12345.7"]);
 }
 
 #[test]

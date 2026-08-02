@@ -1528,6 +1528,22 @@ fn test_number_constructor_accepts_decimal_and_sign_options() {
 }
 
 #[test]
+fn test_number_constructor_accepts_custom_font() {
+    let font = std::env::current_dir()
+        .unwrap()
+        .join("assets/font/IBMPlexMono-Regular.ttf");
+    let font = monocurl_string_escape(&font.to_string_lossy());
+    let source = format!(
+        r#"
+        let number = Number(1.5, 1, 0, "{font}")
+        let result = len(mesh_triangle_set(number)) > 0
+        "#
+    );
+    let r = run_with_stdlib(&source, &["mesh", "util"]);
+    r.assert_int(1);
+}
+
+#[test]
 fn test_camera_transfer_preserves_camera_space_under_translation() {
     let r = run_with_stdlib(
         "

@@ -6,6 +6,8 @@ use executor::{
 };
 use stdlib_macros::stdlib_func;
 
+const MAX_DECIMAL_PLACES: usize = 64;
+
 fn format_text_tag(tag: &[isize], target: &str) -> String {
     let tag = tag
         .iter()
@@ -50,16 +52,70 @@ async fn read_text_tag_list(
     Ok(out)
 }
 
+fn read_decimal_places(
+    executor: &Executor,
+    stack_idx: usize,
+) -> Result<Option<usize>, ExecutorError> {
+    match executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_lvalue()
+    {
+        Value::Nil => Ok(None),
+        Value::Integer(value) if (0..=MAX_DECIMAL_PLACES as i64).contains(&value) => {
+            Ok(Some(value as usize))
+        }
+        Value::Float(value)
+            if value.is_finite()
+                && value.fract() == 0.0
+                && (0.0..=MAX_DECIMAL_PLACES as f64).contains(&value) =>
+        {
+            Ok(Some(value as usize))
+        }
+        Value::Integer(_) | Value::Float(_) => Err(ExecutorError::InvalidArgument {
+            arg: "decimal_places",
+            message: "must be nil or a non-negative integer at most 64",
+        }),
+        other => Err(ExecutorError::type_error_for(
+            "nil / non-negative int",
+            other.type_name(),
+            "decimal_places",
+        )),
+    }
+}
+
 #[stdlib_func]
 pub async fn to_string(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let s = crate::stringify_value(executor, executor.state.stack(stack_idx).peek().clone())
-        .await
-        .map_err(|error| match error {
-            ExecutorError::TypeError { got, .. } => {
-                ExecutorError::type_error(crate::STRING_COMPATIBLE_DESC, got)
-            }
-            other => other,
-        })?;
+    let decimal_places = read_decimal_places(executor, stack_idx)?;
+    let value = executor.state.stack(stack_idx).read_at(-2).clone();
+    let resolved = value.clone().elide_wrappers_rec(executor).await?;
+    let s = match (resolved, decimal_places) {
+        (Value::Integer(value), decimal_places) => {
+            text::format_number(value as f64, decimal_places, false)
+                .map_err(|error| ExecutorError::invalid_invocation(error.to_string()))?
+        }
+        (Value::Float(value), decimal_places) => text::format_number(value, decimal_places, false)
+            .map_err(|error| ExecutorError::invalid_invocation(error.to_string()))?,
+        (other, Some(_)) => {
+            return Err(ExecutorError::type_error_for(
+                "number",
+                other.type_name(),
+                "x",
+            ));
+        }
+        (_, None) => {
+            crate::stringify_value(executor, value)
+                .await
+                .map_err(|error| match error {
+                    ExecutorError::TypeError { got, .. } => {
+                        ExecutorError::type_error(crate::STRING_COMPATIBLE_DESC, got)
+                    }
+                    other => other,
+                })?
+        }
+    };
     Ok(Value::String(s.into()))
 }
 

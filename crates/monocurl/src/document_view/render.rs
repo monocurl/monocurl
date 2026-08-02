@@ -4,6 +4,7 @@ use crate::components::latex_warning::render_latex_warning;
 impl DocumentView {
     pub fn new(
         path: PathBuf,
+        workspace: DocumentWorkspaceState,
         window_state: WeakEntity<WindowState>,
         dirty: Entity<bool>,
         window: &mut Window,
@@ -30,7 +31,30 @@ impl DocumentView {
             )
         });
         let viewport = cx.new(|cx| Viewport::new(services.clone(), cx));
-        let timeline = cx.new(|cx| Timeline::new(services.clone(), editor.downgrade(), cx));
+        let workspace_path = path.clone();
+        let workspace_state = window_state.clone();
+        let on_console_change: Rc<dyn Fn(bool, f32, &mut App)> =
+            Rc::new(move |visible, split, cx| {
+                if let Some(window_state) = workspace_state.upgrade() {
+                    let path = workspace_path.clone();
+                    window_state.update(cx, |window_state, _| {
+                        window_state.update_document_workspace(&path, |workspace| {
+                            workspace.console_visible = visible;
+                            workspace.console_split = split;
+                        });
+                    });
+                }
+            });
+        let timeline = cx.new(|cx| {
+            Timeline::new(
+                services.clone(),
+                editor.downgrade(),
+                workspace.console_visible,
+                workspace.console_split,
+                on_console_change,
+                cx,
+            )
+        });
 
         let document_path = path.clone();
         let window_state_up = window_state.upgrade().unwrap();
@@ -69,7 +93,9 @@ impl DocumentView {
             was_fullscreen_before_presenting: false,
             is_presenting: false,
             presentation_window: None,
-            is_headless: false,
+            is_headless: workspace.is_headless,
+            main_split: Rc::new(Cell::new(workspace.main_split)),
+            viewport_timeline_split: Rc::new(Cell::new(workspace.viewport_timeline_split)),
             controls_window: None,
             window_state: window_state.clone(),
             state,
@@ -599,12 +625,39 @@ impl DocumentView {
     }
 
     fn viewport_timeline(&self, divider_color: impl Into<Hsla>) -> Split {
+        let workspace_state = self.window_state.clone();
+        let workspace_path = self.path.clone();
         Split::new(
             Axis::Vertical,
             self.viewport.clone().into_any_element(),
             self.timeline.clone().into_any_element(),
         )
         .divider_color(divider_color)
+        .flex_state(self.viewport_timeline_split.clone())
+        .on_flex_change(move |split, cx| {
+            if let Some(window_state) = workspace_state.upgrade() {
+                let path = workspace_path.clone();
+                window_state.update(cx, |window_state, _| {
+                    window_state.update_document_workspace(&path, |workspace| {
+                        workspace.viewport_timeline_split = split;
+                    });
+                });
+            }
+        })
+    }
+
+    pub(super) fn update_workspace(
+        &self,
+        update: impl FnOnce(&mut DocumentWorkspaceState),
+        cx: &mut App,
+    ) {
+        let Some(window_state) = self.window_state.upgrade() else {
+            return;
+        };
+        let path = self.path.clone();
+        window_state.update(cx, |window_state, _| {
+            window_state.update_document_workspace(&path, update);
+        });
     }
 
     fn render_editor(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
@@ -628,6 +681,8 @@ impl DocumentView {
             self.viewport_timeline(theme.split_divider)
                 .into_any_element()
         } else {
+            let workspace_state = self.window_state.clone();
+            let workspace_path = self.path.clone();
             Split::new(
                 Axis::Horizontal,
                 self.render_editor(cx).into_any_element(),
@@ -636,6 +691,17 @@ impl DocumentView {
             )
             .default_flex(0.5)
             .divider_color(theme.split_divider)
+            .flex_state(self.main_split.clone())
+            .on_flex_change(move |split, cx| {
+                if let Some(window_state) = workspace_state.upgrade() {
+                    let path = workspace_path.clone();
+                    window_state.update(cx, |window_state, _| {
+                        window_state.update_document_workspace(&path, |workspace| {
+                            workspace.main_split = split;
+                        });
+                    });
+                }
+            })
             .into_any_element()
         };
 

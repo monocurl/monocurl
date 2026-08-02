@@ -1,8 +1,11 @@
+use std::{cell::Cell, rc::Rc};
+
 use executor::time::Timestamp;
 use gpui::*;
 
 use crate::{
     actions::{ZoomIn, ZoomOut},
+    components::split_pane::Split,
     editor::editor_view::Editor,
     services::ServiceManager,
     theme::ThemeSettings,
@@ -11,18 +14,12 @@ use crate::{
 use super::{
     console::render_console,
     metrics::{
-        DEFAULT_ZOOM_IDX, MIN_GAP, PX_PER_SEC, SLIDE_W, ZOOM_LEVELS, compute_gap_ws,
+        CONTENT_H, DEFAULT_ZOOM_IDX, MIN_GAP, PX_PER_SEC, SLIDE_W, ZOOM_LEVELS, compute_gap_ws,
         compute_playhead_x, compute_slide_xs, effective_durations,
     },
     toolbar::render_toolbar,
     track::render_track,
 };
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum BottomPanelMode {
-    Timeline,
-    Console,
-}
 
 pub struct Timeline {
     pub(super) services: Entity<ServiceManager>,
@@ -30,7 +27,9 @@ pub struct Timeline {
     pub(super) scroll: ScrollHandle,
     pub(super) console_scroll: ScrollHandle,
     pub(super) zoom_idx: usize,
-    pub(super) panel_mode: BottomPanelMode,
+    pub(super) console_visible: bool,
+    console_split: Rc<Cell<f32>>,
+    on_console_change: Rc<dyn Fn(bool, f32, &mut App)>,
     is_scrubbing: bool,
 }
 
@@ -38,6 +37,9 @@ impl Timeline {
     pub fn new(
         services: Entity<ServiceManager>,
         editor: WeakEntity<Editor>,
+        console_visible: bool,
+        console_split: f32,
+        on_console_change: Rc<dyn Fn(bool, f32, &mut App)>,
         cx: &mut Context<Self>,
     ) -> Self {
         let execution_state = services.read(cx).execution_state().clone();
@@ -65,7 +67,9 @@ impl Timeline {
             scroll: ScrollHandle::new(),
             console_scroll: ScrollHandle::new(),
             zoom_idx: DEFAULT_ZOOM_IDX,
-            panel_mode: BottomPanelMode::Timeline,
+            console_visible,
+            console_split: Rc::new(Cell::new(console_split)),
+            on_console_change,
             is_scrubbing: false,
         }
     }
@@ -94,19 +98,9 @@ impl Timeline {
 
     pub fn toggle_panel_mode(&mut self, cx: &mut Context<Self>) {
         self.is_scrubbing = false;
-        self.panel_mode = match self.panel_mode {
-            BottomPanelMode::Timeline => BottomPanelMode::Console,
-            BottomPanelMode::Console => BottomPanelMode::Timeline,
-        };
+        self.console_visible = !self.console_visible;
+        (self.on_console_change)(self.console_visible, self.console_split.get(), cx);
         cx.notify();
-    }
-
-    pub fn set_panel_mode(&mut self, mode: BottomPanelMode, cx: &mut Context<Self>) {
-        if self.panel_mode != mode {
-            self.is_scrubbing = false;
-            self.panel_mode = mode;
-            cx.notify();
-        }
     }
 
     pub(super) fn zoom_factor(&self) -> f32 {
@@ -315,29 +309,23 @@ impl Render for Timeline {
             current_time,
         );
 
-        let (console_entries, runtime_errors): (Vec<_>, Vec<_>) =
-            if self.panel_mode == BottomPanelMode::Console {
-                let services = self.services.read(cx);
-                let console_entries = services
-                    .execution_state()
-                    .read(cx)
-                    .transcript
-                    .iter()
-                    .flat_map(|s| s.entries.iter().cloned())
-                    .collect();
-                let runtime_errors = services
-                    .textual_state()
-                    .read(cx)
-                    .diagnostics()
-                    .diagnostics_list()
-                    .iter()
-                    .filter(|diagnostic| diagnostic.is_runtime())
-                    .map(|diagnostic| diagnostic.message.clone())
-                    .collect();
-                (console_entries, runtime_errors)
-            } else {
-                (Vec::new(), Vec::new())
-            };
+        let services = self.services.read(cx);
+        let console_entries = services
+            .execution_state()
+            .read(cx)
+            .transcript
+            .iter()
+            .flat_map(|s| s.entries.iter().cloned())
+            .collect();
+        let runtime_errors = services
+            .textual_state()
+            .read(cx)
+            .diagnostics()
+            .diagnostics_list()
+            .iter()
+            .filter(|diagnostic| diagnostic.is_runtime())
+            .map(|diagnostic| diagnostic.message.clone())
+            .collect();
 
         let toolbar = render_toolbar(
             self,
@@ -418,53 +406,61 @@ impl Render for Timeline {
                 )
         };
 
-        let body: AnyElement = match self.panel_mode {
-            BottomPanelMode::Timeline => {
-                let track = render_track(
-                    cx.weak_entity(),
-                    current_timestamp,
-                    target_timestamp,
-                    slide_count,
-                    slide_names,
-                    durations,
-                    minimum_durations,
-                    zoom,
-                    theme,
-                );
+        let track = render_track(
+            cx.weak_entity(),
+            current_timestamp,
+            target_timestamp,
+            slide_count,
+            slide_names,
+            durations,
+            minimum_durations,
+            zoom,
+            theme,
+        );
+        let timeline_body = div()
+            .relative()
+            .size_full()
+            .child(
                 div()
-                    .relative()
+                    .id("tl-scroll")
                     .flex()
-                    .flex_1()
-                    .min_h_0()
-                    .child(
-                        div()
-                            .id("tl-scroll")
-                            .flex()
-                            .size_full()
-                            .overflow_x_scroll()
-                            .track_scroll(&self.scroll)
-                            .on_mouse_down(MouseButton::Left, {
-                                let timeline = cx.weak_entity();
-                                move |event, window, cx| {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                    timeline
-                                        .update(cx, |timeline, cx| {
-                                            timeline.begin_scrub(event.position, cx);
-                                        })
-                                        .ok();
-                                }
-                            })
-                            .child(track),
-                    )
-                    .child(render_scrub_tracker(cx.weak_entity()))
-                    .child(zoom_controls(cx.weak_entity(), ZOOM_LEVELS[self.zoom_idx]))
-                    .into_any_element()
-            }
-            BottomPanelMode::Console => {
+                    .size_full()
+                    .overflow_x_scroll()
+                    .track_scroll(&self.scroll)
+                    .on_mouse_down(MouseButton::Left, {
+                        let timeline = cx.weak_entity();
+                        move |event, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            timeline
+                                .update(cx, |timeline, cx| timeline.begin_scrub(event.position, cx))
+                                .ok();
+                        }
+                    })
+                    .child(track),
+            )
+            .child(render_scrub_tracker(cx.weak_entity()))
+            .child(zoom_controls(cx.weak_entity(), ZOOM_LEVELS[self.zoom_idx]));
+
+        let body = if self.console_visible {
+            Split::new(
+                Axis::Vertical,
+                timeline_body.into_any_element(),
                 render_console(console_entries, runtime_errors, &self.console_scroll, theme)
-                    .into_any_element()
-            }
+                    .into_any_element(),
+            )
+            .default_flex(0.68)
+            .min_sizes(px(CONTENT_H + 10.0), px(60.0))
+            .flex_state(self.console_split.clone())
+            .on_flex_change({
+                let on_console_change = self.on_console_change.clone();
+                let console_visible = self.console_visible;
+                move |split, cx| on_console_change(console_visible, split, cx)
+            })
+            .divider_color(theme.split_divider)
+            .into_any_element()
+        } else {
+            timeline_body.into_any_element()
         };
 
         div()
