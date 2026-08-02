@@ -17,7 +17,8 @@ pub use config::{
 };
 pub use document::SpanMarker;
 pub use number::{
-    format_number, render_number, render_number_string_with_quality, render_number_with_quality,
+    format_number, render_number, render_number_string_with_quality,
+    render_number_with_font_and_quality, render_number_with_quality,
 };
 pub use render::{
     render_latex, render_latex_with_preamble, render_latex_with_preamble_and_quality,

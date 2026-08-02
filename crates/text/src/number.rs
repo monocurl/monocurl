@@ -6,7 +6,10 @@ use geo::{
     simd::Float3,
 };
 
-use crate::{RenderQuality, render::render_tex_with_quality, render::validate_scale};
+use crate::{
+    RenderQuality,
+    render::{render_tex_with_quality, render_text_with_font_and_quality, validate_scale},
+};
 
 const DEFAULT_NUMBER_SIGNIFICANT_DIGITS: usize = 6;
 const MAX_NUMBER_DECIMAL_PLACES: usize = 64;
@@ -74,12 +77,34 @@ pub fn render_number_string_with_quality(
     scale: f32,
     quality: RenderQuality,
 ) -> Result<Vec<Arc<Mesh>>> {
+    render_number_string_with_glyphs(text, scale, |ch| render_number_glyph(ch, scale, quality))
+}
+
+pub fn render_number_with_font_and_quality(
+    value: f64,
+    decimal_places: Option<usize>,
+    include_sign: bool,
+    scale: f32,
+    font: &str,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    let text = format_number(value, decimal_places, include_sign)?;
+    render_number_string_with_glyphs(&text, scale, |ch| {
+        render_text_with_font_and_quality(&ch.to_string(), scale, font, quality)
+    })
+}
+
+fn render_number_string_with_glyphs(
+    text: &str,
+    scale: f32,
+    mut render_glyph: impl FnMut(char) -> Result<Vec<Arc<Mesh>>>,
+) -> Result<Vec<Arc<Mesh>>> {
     validate_scale(scale)?;
     if text.is_empty() {
         return Ok(Vec::new());
     }
 
-    let digit_advance = number_digit_advance(scale, quality)?;
+    let digit_advance = number_digit_advance(scale, &mut render_glyph)?;
     let tracking = NUMBER_GLYPH_TRACKING_AT_SCALE_1 * scale;
     let mut cursor = 0.0f32;
     let mut out = Vec::new();
@@ -90,7 +115,7 @@ pub fn render_number_string_with_quality(
             continue;
         }
 
-        let mut glyph = render_number_glyph(ch, scale, quality)?;
+        let mut glyph = render_glyph(ch)?;
         let Some((min, max)) = mesh_collection_bounds(&glyph) else {
             cursor += digit_advance;
             continue;
@@ -167,8 +192,11 @@ fn render_number_glyph(ch: char, scale: f32, quality: RenderQuality) -> Result<V
     render_tex_with_quality(&source, scale, quality)
 }
 
-fn number_digit_advance(scale: f32, quality: RenderQuality) -> Result<f32> {
-    let meshes = render_number_glyph('0', scale, quality)?;
+fn number_digit_advance(
+    scale: f32,
+    render_glyph: &mut impl FnMut(char) -> Result<Vec<Arc<Mesh>>>,
+) -> Result<f32> {
+    let meshes = render_glyph('0')?;
     let Some((min, max)) = mesh_collection_bounds(&meshes) else {
         return Ok(scale * 0.5);
     };
