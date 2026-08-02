@@ -301,8 +301,12 @@ let str_join = |parts, sep = ""| __monocurl__native__ str_join(parts, sep)
 ## [overview]
 ## Convert a value to a string.
 ## [description]
-## Uses the same stringification rules as text constructors, so lists become concatenated text fragments.
-let to_string = |x| __monocurl__native__ to_string(x)
+## Non-numeric values use the same stringification rules as text constructors, so lists become concatenated text fragments. Numeric values use compact `%g`-style formatting by default; set `decimal_places` to a non-negative integer for fixed decimal formatting.
+## [example]
+## ```
+## let label = to_string(1, 1) # "1.0"
+## ```
+let to_string = |x, decimal_places = nil| __monocurl__native__ to_string(x, decimal_places)
 ## [overview]
 ## Convert an integer, float, or numeric string to an integer.
 ## [description]

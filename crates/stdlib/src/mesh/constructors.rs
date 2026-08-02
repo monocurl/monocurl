@@ -1358,16 +1358,22 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[stdlib_func]
 pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let value = crate::read_float(executor, stack_idx, -3, "value")?;
-    let decimal_places = read_optional_decimal_places(executor, stack_idx, -2, "decimal_places")?;
-    let include_sign = read_flag(executor, stack_idx, -1, "include_sign")?;
-    let meshes = text::render_number_with_quality(
-        value,
-        decimal_places,
-        include_sign,
-        1.0,
-        text_render_quality(executor),
-    )
+    let value = crate::read_float(executor, stack_idx, -4, "value")?;
+    let decimal_places = read_optional_decimal_places(executor, stack_idx, -3, "decimal_places")?;
+    let include_sign = read_flag(executor, stack_idx, -2, "include_sign")?;
+    let font = read_optional_string(executor, stack_idx, -1, "font")?;
+    let quality = text_render_quality(executor);
+    let meshes = match font {
+        Some(font) => {
+            let font = font_source_string(executor, stack_idx, &font)?;
+            let number =
+                text::format_number(value, decimal_places, include_sign).map_err(|error| {
+                    ExecutorError::invalid_invocation(format!("number format failed: {error:#}"))
+                })?;
+            text::render_text_with_font_and_quality(&number, 1.0, &font, quality)
+        }
+        None => text::render_number_with_quality(value, decimal_places, include_sign, 1.0, quality),
+    }
     .map_err(|error| {
         ExecutorError::invalid_invocation(format!("number render failed: {error:#}"))
     })?;

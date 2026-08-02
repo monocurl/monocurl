@@ -170,6 +170,22 @@ fn test_to_string_joins_list_elements_recursively() {
 }
 
 #[test]
+fn test_to_string_formats_numbers_with_decimal_places() {
+    let r = run_with_stdlib(
+        r#"
+        let result = [
+            to_string(1, 1),
+            to_string(-1.234, 2),
+            to_string(1.5, 0),
+            to_string(12345.678)
+        ]
+        "#,
+        &["util"],
+    );
+    r.assert_string_list(&["1.0", "-1.23", "2", "12345.7"]);
+}
+
+#[test]
 fn test_sample_includes_endpoint() {
     let r = run_with_stdlib(
         "
