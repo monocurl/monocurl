@@ -6,7 +6,42 @@ use executor::{
 };
 use stdlib_macros::stdlib_func;
 
-use crate::read_float;
+use crate::{STRING_COMPATIBLE_DESC, read_float, stringify_value};
+
+fn parse_hex_color(value: &str) -> Result<[f64; 4], String> {
+    let value = value.strip_prefix('#').unwrap_or(value);
+    if !matches!(value.len(), 6 | 8) || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("expected a 6- or 8-digit hexadecimal color, such as #009ee0".into());
+    }
+
+    let channel = |start| u8::from_str_radix(&value[start..start + 2], 16).unwrap() as f64 / 255.0;
+    Ok([
+        channel(0),
+        channel(2),
+        channel(4),
+        if value.len() == 8 { channel(6) } else { 1.0 },
+    ])
+}
+
+#[stdlib_func]
+pub async fn hex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let value = executor.state.stack(stack_idx).read_at(-1).clone();
+    let value = stringify_value(executor, value)
+        .await
+        .map_err(|error| match error {
+            ExecutorError::TypeError { got, .. } => {
+                ExecutorError::type_error_for(STRING_COMPATIBLE_DESC, got, "value")
+            }
+            other => other,
+        })?;
+    let color = parse_hex_color(&value).map_err(ExecutorError::invalid_operation)?;
+
+    Ok(Value::List(List::new_with(
+        color
+            .into_iter()
+            .map(|channel| VRc::new(Value::Float(channel))),
+    )))
+}
 
 #[stdlib_func]
 pub async fn hsv(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
@@ -35,4 +70,31 @@ pub async fn hsv(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         VRc::new(Value::Float(b + m)),
         VRc::new(Value::Float(a)),
     ])))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hex_color;
+
+    #[test]
+    fn parses_rgb_hex_with_opaque_alpha() {
+        assert_eq!(
+            parse_hex_color("#009ee0").unwrap(),
+            [0.0, 158.0 / 255.0, 224.0 / 255.0, 1.0]
+        );
+    }
+
+    #[test]
+    fn parses_rgba_hex() {
+        assert_eq!(
+            parse_hex_color("009ee080").unwrap(),
+            [0.0, 158.0 / 255.0, 224.0 / 255.0, 128.0 / 255.0]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_hex() {
+        assert!(parse_hex_color("#09e").is_err());
+        assert!(parse_hex_color("#009eez").is_err());
+    }
 }

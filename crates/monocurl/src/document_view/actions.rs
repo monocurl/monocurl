@@ -364,6 +364,7 @@ impl DocumentView {
         cx: &mut Context<Self>,
     ) {
         self.is_headless = !self.is_headless;
+        self.update_workspace(|workspace| workspace.is_headless = self.is_headless, cx);
         if self.is_headless {
             self.focus(w);
         }

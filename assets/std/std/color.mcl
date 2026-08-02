@@ -83,6 +83,18 @@ let CLEAR = [0.0, 0.0, 0.0, 0]
 ## ```
 let rgb = |r, g, b, a = 1| [r, g, b, a]
 
+## [overview]
+## Build an RGBA color from a hexadecimal HTML/CSS color literal.
+## [description]
+## Accepts `#RRGGBB` or `#RRGGBBAA`; the leading `#` is optional. Six-digit colors are fully opaque.
+## [parameters]
+## value: hexadecimal color string
+## [example]
+## ```
+## mesh logo = fill{hex("#009ee0")} Circle(1)
+## ```
+let hex = |value| __monocurl__native__ hex(value)
+
 # h in [0, 1], s, v, a in [0, 1].
 ## [options]
 ## important: true

@@ -70,6 +70,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("right", Right, None),
         KeyBinding::new("alt-left", LeftWord, None),
         KeyBinding::new("alt-right", RightWord, None),
+        KeyBinding::new("ctrl-left", LeftWord, None),
+        KeyBinding::new("ctrl-right", RightWord, None),
         KeyBinding::new("enter", Enter, None),
         KeyBinding::new("tab", Tab, None),
         KeyBinding::new("shift-tab", Untab, None),
@@ -79,6 +81,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-alt-left", SelectLeftWord, None),
         KeyBinding::new("shift-alt-right", SelectRightWord, None),
+        KeyBinding::new("shift-ctrl-left", SelectLeftWord, None),
+        KeyBinding::new("shift-ctrl-right", SelectRightWord, None),
         KeyBinding::new("shift-secondary-left", SelectHome, None),
         KeyBinding::new("shift-secondary-right", SelectEnd, None),
         KeyBinding::new("shift-up", SelectUp, None),
@@ -95,6 +99,8 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("escape", CloseFind, Some("single-line-input")),
         KeyBinding::new("home", Home, None),
         KeyBinding::new("end", End, None),
+        KeyBinding::new("shift-home", SelectHome, None),
+        KeyBinding::new("shift-end", SelectEnd, None),
         KeyBinding::new("ctrl-secondary-space", ShowCharacterPalette, None),
     ]);
 }

@@ -41,6 +41,53 @@ pub enum ActiveScreen {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct OpenDocumentSerde {
     pub path: PathBuf,
+    #[serde(default)]
+    pub workspace: DocumentWorkspaceState,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DocumentWorkspaceState {
+    #[serde(default)]
+    pub is_headless: bool,
+    #[serde(default = "default_console_visible")]
+    pub console_visible: bool,
+    #[serde(default = "default_split")]
+    pub main_split: f32,
+    #[serde(default = "default_split")]
+    pub viewport_timeline_split: f32,
+    #[serde(default = "default_console_split")]
+    pub console_split: f32,
+}
+
+const fn default_console_visible() -> bool {
+    false
+}
+const fn default_split() -> f32 {
+    0.5
+}
+const fn default_console_split() -> f32 {
+    0.68
+}
+
+impl Default for DocumentWorkspaceState {
+    fn default() -> Self {
+        Self {
+            is_headless: false,
+            console_visible: default_console_visible(),
+            main_split: default_split(),
+            viewport_timeline_split: default_split(),
+            console_split: default_console_split(),
+        }
+    }
+}
+
+impl DocumentWorkspaceState {
+    fn normalized(mut self) -> Self {
+        self.main_split = self.main_split.clamp(0.2, 0.8);
+        self.viewport_timeline_split = self.viewport_timeline_split.clamp(0.2, 0.8);
+        self.console_split = self.console_split.clamp(0.2, 0.8);
+        self
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -215,6 +262,7 @@ impl WindowState {
 
     fn make_open_document(
         path: PathBuf,
+        workspace: DocumentWorkspaceState,
         weak_state: WeakEntity<Self>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -223,7 +271,17 @@ impl WindowState {
         let dirty = cx.new(|_cx| false);
         OpenDocument {
             path,
-            view: cx.new(|cx| DocumentView::new(view_path, weak_state, dirty.clone(), window, cx)),
+            view: cx.new(|cx| {
+                DocumentView::new(
+                    view_path,
+                    workspace.clone(),
+                    weak_state,
+                    dirty.clone(),
+                    window,
+                    cx,
+                )
+            }),
+            workspace,
         }
     }
 
@@ -277,6 +335,7 @@ impl WindowState {
                 if serde.path.exists() {
                     Some(Self::make_open_document(
                         serde.path,
+                        serde.workspace.normalized(),
                         weak_state.clone(),
                         window,
                         cx,
@@ -344,6 +403,7 @@ impl WindowState {
                 .iter()
                 .map(|doc| OpenDocumentSerde {
                     path: doc.path.clone(),
+                    workspace: doc.workspace.clone(),
                 })
                 .collect(),
             window_bounds: self.window_bounds,
@@ -516,12 +576,14 @@ impl WindowState {
                 view: cx.new(|cx| {
                     DocumentView::new(
                         path.clone(),
+                        DocumentWorkspaceState::default(),
                         window_state.downgrade(),
                         dirty.clone(),
                         window,
                         cx,
                     )
                 }),
+                workspace: DocumentWorkspaceState::default(),
             });
         }
 
@@ -534,6 +596,24 @@ impl WindowState {
         );
 
         self.focus_active_document(window, cx);
+        self.save();
+    }
+
+    pub fn update_document_workspace(
+        &mut self,
+        path: &Path,
+        update: impl FnOnce(&mut DocumentWorkspaceState),
+    ) {
+        let Some(document) = self
+            .open_documents
+            .iter_mut()
+            .find(|document| document.path == path)
+        else {
+            return;
+        };
+
+        update(&mut document.workspace);
+        document.workspace = document.workspace.clone().normalized();
         self.save();
     }
 }
@@ -570,5 +650,16 @@ mod tests {
         .unwrap();
 
         assert_eq!(restored, test_bounds(1020.0, 380.0, 900.0, 700.0));
+    }
+
+    #[test]
+    fn missing_workspace_state_uses_defaults() {
+        let saved: OpenDocumentSerde = serde_json::from_str(r#"{"path":"example.mcs"}"#).unwrap();
+
+        assert!(!saved.workspace.is_headless);
+        assert!(!saved.workspace.console_visible);
+        assert_eq!(saved.workspace.main_split, 0.5);
+        assert_eq!(saved.workspace.viewport_timeline_split, 0.5);
+        assert_eq!(saved.workspace.console_split, 0.68);
     }
 }

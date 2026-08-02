@@ -5,7 +5,7 @@ use crate::theme::ThemeSettings;
 use super::{
     icons::{TRANSPORT_BTN_H, TRANSPORT_BTN_W, TransportIcon, transport_icon},
     metrics::{TOOLBAR_H, slide_label, slide_title_label, visual_slide_time},
-    timeline_view::{BottomPanelMode, Timeline},
+    timeline_view::Timeline,
 };
 
 pub(super) fn render_toolbar(
@@ -117,51 +117,33 @@ pub(super) fn render_toolbar(
                 .child(title)
         }));
 
-    let panel_mode = timeline.panel_mode;
-    let panel_tab = |id: &'static str, label: &'static str, mode: BottomPanelMode| {
-        let is_active = panel_mode == mode;
-        let this = cx.weak_entity();
-        div()
-            .id(id)
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_center()
-            .h_full()
-            .px(px(12.0))
-            .border_l(px(0.5))
-            .border_color(theme.navbar_border)
-            .bg(if is_active {
-                theme.tab_active_background
-            } else {
-                theme.tab_background
-            })
-            .text_color(theme.timeline_text)
-            .text_size(px(11.0))
-            .cursor_pointer()
-            .child(label)
-            .on_click(move |_, _, cx| {
-                this.update(cx, |tl, cx| tl.set_panel_mode(mode, cx)).ok();
-            })
-    };
-
-    let panel_tabs = div()
+    let console_visible = timeline.console_visible;
+    let timeline = cx.weak_entity();
+    let console_toggle = div()
+        .id("tl-console-toggle")
         .flex()
-        .flex_row()
+        .flex_none()
         .items_center()
+        .justify_center()
         .h_full()
-        .border_t(px(0.5))
+        .px(px(12.0))
+        .border_l(px(0.5))
         .border_color(theme.navbar_border)
-        .child(panel_tab(
-            "tl-tab-timeline",
-            "Timeline",
-            BottomPanelMode::Timeline,
-        ))
-        .child(panel_tab(
-            "tl-tab-console",
-            "Console",
-            BottomPanelMode::Console,
-        ));
+        .bg(if console_visible {
+            theme.tab_active_background
+        } else {
+            theme.tab_background
+        })
+        .text_color(theme.timeline_text)
+        .text_size(px(11.0))
+        .cursor_pointer()
+        .hover(|style| style.opacity(0.85))
+        .child("Console")
+        .on_click(move |_, _, cx| {
+            timeline
+                .update(cx, |timeline, cx| timeline.toggle_panel_mode(cx))
+                .ok();
+        });
 
     div()
         .flex()
@@ -176,5 +158,5 @@ pub(super) fn render_toolbar(
         .pl(px(24.0))
         .child(center_group)
         .child(div().flex_1())
-        .child(panel_tabs)
+        .child(console_toggle)
 }

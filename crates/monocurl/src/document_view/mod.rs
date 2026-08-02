@@ -1,6 +1,8 @@
 use std::{
+    cell::Cell,
     collections::HashMap,
     path::PathBuf,
+    rc::Rc,
     sync::{Arc, atomic::AtomicBool},
 };
 
@@ -24,7 +26,7 @@ use crate::{
         document_state::DocumentState,
         textual_state::LexData,
         user_settings::UserSettings,
-        window_state::{ActiveScreen, WindowState},
+        window_state::{ActiveScreen, DocumentWorkspaceState, WindowState},
     },
     theme::{FontSet, ThemeSettings},
     timeline::timeline_view::Timeline,
@@ -83,6 +85,7 @@ pub fn init(cx: &mut App) {
 pub struct OpenDocument {
     pub path: PathBuf,
     pub view: Entity<DocumentView>,
+    pub workspace: DocumentWorkspaceState,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -272,6 +275,8 @@ pub struct DocumentView {
     is_presenting: bool,
     presentation_window: Option<AnyWindowHandle>,
     is_headless: bool,
+    main_split: Rc<Cell<f32>>,
+    viewport_timeline_split: Rc<Cell<f32>>,
     controls_window: Option<WindowHandle<ControlsWindow>>,
 
     state: DocumentState,
