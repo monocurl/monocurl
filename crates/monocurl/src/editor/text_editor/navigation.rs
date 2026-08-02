@@ -201,13 +201,23 @@ impl TextEditor {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let current_row = self.cursor(cx).head.row;
-        let location = {
+        if let Some(location) = self.local_definition_location_at(self.cursor(cx).head, cx) {
+            self.move_to(location, false, true, cx);
+        }
+    }
+
+    pub(super) fn local_definition_location_at(
+        &self,
+        position: Location8,
+        cx: &App,
+    ) -> Option<Location8> {
+        let current_row = position.row;
+        {
             let state = self.state.read(cx);
-            let cursor = state.loc8_to_offset8(self.cursor(cx).head);
+            let cursor = state.loc8_to_offset8(position);
             let word = state.word(cursor, false);
             if word.is_empty() {
-                return;
+                return None;
             }
             let name = state.read(word);
             let source = state.read(0..state.len());
@@ -225,9 +235,6 @@ impl TextEditor {
                     row: *row,
                     col: *col,
                 })
-        };
-        if let Some(location) = location {
-            self.move_to(location, false, true, cx);
         }
     }
 }

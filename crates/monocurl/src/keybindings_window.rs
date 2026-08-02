@@ -65,7 +65,7 @@ const BINDINGS: &[(&str, &[(&str, &str)])] = &[
             ("Save As", "Cmd/Ctrl+Shift+S"),
             ("Close document", "Cmd/Ctrl+W"),
             ("Find", "Cmd/Ctrl+F"),
-            ("Undo / redo", "Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z"),
+            ("Undo / redo", "$UNDO_REDO"),
             ("Copy / cut / paste", "Cmd/Ctrl+C / X / V"),
             ("Present", "Cmd/Ctrl+P"),
             ("Show presentation controls", "Cmd/Ctrl+T"),
@@ -97,8 +97,8 @@ const BINDINGS: &[(&str, &[(&str, &str)])] = &[
     (
         "Text editing",
         &[
-            ("Move by word", "Alt+Arrow or Ctrl+Arrow"),
-            ("Select by word", "Shift+Alt+Arrow or Shift+Ctrl+Arrow"),
+            ("Move by word", "$WORD_MOVE"),
+            ("Select by word", "$WORD_SELECT"),
             ("Move to line start / end", "Home / End"),
             ("Select to line start / end", "Shift+Home / Shift+End"),
             (
@@ -127,6 +127,20 @@ const BINDINGS: &[(&str, &[(&str, &str)])] = &[
 ];
 
 fn platform_shortcut(shortcut: &str) -> String {
+    match shortcut {
+        "$UNDO_REDO" if cfg!(target_os = "macos") => {
+            return "Cmd+Z / Cmd+Shift+Z".to_string();
+        }
+        "$UNDO_REDO" => return "Ctrl+Z / Ctrl+Y".to_string(),
+        "$WORD_MOVE" if cfg!(target_os = "macos") => return "Option+Arrow".to_string(),
+        "$WORD_MOVE" => return "Alt+Arrow or Ctrl+Arrow".to_string(),
+        "$WORD_SELECT" if cfg!(target_os = "macos") => {
+            return "Shift+Option+Arrow".to_string();
+        }
+        "$WORD_SELECT" => return "Shift+Alt+Arrow or Shift+Ctrl+Arrow".to_string(),
+        _ => {}
+    }
+
     let primary_modifier = if cfg!(target_os = "macos") {
         "Cmd"
     } else {

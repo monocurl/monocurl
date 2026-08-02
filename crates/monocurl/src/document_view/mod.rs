@@ -79,6 +79,9 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-=", ZoomIn, None),
         KeyBinding::new("secondary--", ZoomOut, None),
     ]);
+
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([KeyBinding::new("secondary-y", Redo, None)]);
 }
 
 #[derive(Clone, Debug)]

@@ -77,20 +77,15 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-backspace", Backspace, None),
         KeyBinding::new("alt-backspace", BackspaceWord, None),
         KeyBinding::new("shift-alt-backspace", BackspaceWord, None),
-        KeyBinding::new("secondary-backspace", BackspaceLine, None),
-        KeyBinding::new("shift-secondary-backspace", BackspaceLine, None),
         KeyBinding::new("delete", Delete, None),
         KeyBinding::new("shift-delete", Delete, None),
         KeyBinding::new("alt-delete", DeleteWord, None),
-        KeyBinding::new("secondary-delete", DeleteLine, None),
         KeyBinding::new("up", Up, None),
         KeyBinding::new("down", Down, None),
         KeyBinding::new("left", Left, None),
         KeyBinding::new("right", Right, None),
         KeyBinding::new("alt-left", LeftWord, None),
         KeyBinding::new("alt-right", RightWord, None),
-        KeyBinding::new("ctrl-left", LeftWord, None),
-        KeyBinding::new("ctrl-right", RightWord, None),
         KeyBinding::new("enter", Enter, None),
         KeyBinding::new("tab", Tab, None),
         KeyBinding::new("shift-tab", Untab, None),
@@ -100,10 +95,6 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-right", SelectRight, None),
         KeyBinding::new("shift-alt-left", SelectLeftWord, None),
         KeyBinding::new("shift-alt-right", SelectRightWord, None),
-        KeyBinding::new("shift-ctrl-left", SelectLeftWord, None),
-        KeyBinding::new("shift-ctrl-right", SelectRightWord, None),
-        KeyBinding::new("shift-secondary-left", SelectHome, None),
-        KeyBinding::new("shift-secondary-right", SelectEnd, None),
         KeyBinding::new("shift-up", SelectUp, None),
         KeyBinding::new("shift-down", SelectDown, None),
         KeyBinding::new("secondary-a", SelectAll, None),
@@ -133,6 +124,25 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("shift-home", SelectHome, None),
         KeyBinding::new("shift-end", SelectEnd, None),
         KeyBinding::new("ctrl-secondary-space", ShowCharacterPalette, None),
+    ]);
+
+    #[cfg(target_os = "macos")]
+    cx.bind_keys([
+        KeyBinding::new("secondary-backspace", BackspaceLine, None),
+        KeyBinding::new("shift-secondary-backspace", BackspaceLine, None),
+        KeyBinding::new("secondary-delete", DeleteLine, None),
+        KeyBinding::new("shift-secondary-left", SelectHome, None),
+        KeyBinding::new("shift-secondary-right", SelectEnd, None),
+    ]);
+
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([
+        KeyBinding::new("ctrl-backspace", BackspaceWord, None),
+        KeyBinding::new("ctrl-delete", DeleteWord, None),
+        KeyBinding::new("ctrl-left", LeftWord, None),
+        KeyBinding::new("ctrl-right", RightWord, None),
+        KeyBinding::new("shift-ctrl-left", SelectLeftWord, None),
+        KeyBinding::new("shift-ctrl-right", SelectRightWord, None),
     ]);
 }
 

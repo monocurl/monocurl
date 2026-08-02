@@ -7,6 +7,19 @@ impl TextEditor {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let pos = self.closest_index_for_mouse_position(event.position);
+        if event.modifiers.secondary()
+            && let Some(definition) = self.local_definition_location_at(pos, cx)
+        {
+            self.focus_handle.focus(window);
+            self.move_to(definition, true, true, cx);
+            self.is_selecting = false;
+            self.auto_scroll_last_mouse_position = None;
+            self.stop_responding_to_mouse_movements();
+            self.reset_hover_task_if_necessary(cx);
+            return;
+        }
+
         let dist = point_dist(self.last_click_position - event.position);
         if dist <= MULTI_CLICK_TOLERANCE && self.focus_handle.is_focused(window) {
             self.click_count += 1;
@@ -20,7 +33,6 @@ impl TextEditor {
         self.auto_scroll_last_mouse_position = Some(event.position);
         self.start_responding_to_mouse_movements(cx);
 
-        let pos = self.closest_index_for_mouse_position(event.position);
         match self.click_count {
             1 => {
                 self.is_selecting = true;
