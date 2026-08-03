@@ -9,7 +9,7 @@ impl TextEditor {
     ) {
         let pos = self.closest_index_for_mouse_position(event.position);
         if event.modifiers.secondary()
-            && let Some(definition) = self.local_definition_location_at(pos, cx)
+            && let Some((_, definition)) = self.local_definition_at(pos, cx)
         {
             self.focus_handle.focus(window);
             self.move_to(definition, true, true, cx);
@@ -112,7 +112,35 @@ impl TextEditor {
         // mouse position tracking is mainly done in the listener registered in the paint
         // since we don't get mouse move events if the mouse is outside the view in this method
         self.last_in_frame_mouse_position = Some(event.position);
+        let link_span = event
+            .modifiers
+            .secondary()
+            .then(|| self.closest_index_for_mouse_position(event.position))
+            .and_then(|position| self.local_definition_at(position, cx).map(|(span, _)| span));
+        if self.definition_link_span != link_span {
+            self.definition_link_span = link_span;
+            cx.notify();
+        }
         if self.reset_hover_task_if_necessary(cx) {
+            cx.notify();
+        }
+    }
+
+    pub(super) fn on_modifiers_changed(
+        &mut self,
+        event: &ModifiersChangedEvent,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let link_span = event
+            .modifiers
+            .secondary()
+            .then_some(self.last_in_frame_mouse_position)
+            .flatten()
+            .map(|position| self.closest_index_for_mouse_position(position))
+            .and_then(|position| self.local_definition_at(position, cx).map(|(span, _)| span));
+        if self.definition_link_span != link_span {
+            self.definition_link_span = link_span;
             cx.notify();
         }
     }

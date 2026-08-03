@@ -1,9 +1,9 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, DispatchPhase, Element, ElementId, ElementInputHandler, Entity, GlobalElementId,
-    Hsla, IntoElement, LayoutId, MouseMoveEvent, Pixels, Point, Style, TextRun, Window, fill,
-    point, px, relative, size,
+    App, Bounds, CursorStyle, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
+    GlobalElementId, Hsla, IntoElement, LayoutId, MouseMoveEvent, Pixels, Point, Style, TextRun,
+    Window, fill, point, px, relative, size,
 };
 
 use crate::editor::{
@@ -29,6 +29,7 @@ pub struct PrepaintState {
     cursor_bounds: Option<Bounds<Pixels>>,
     selection_bounds: Vec<Bounds<Pixels>>,
     search_bounds: Vec<(Bounds<Pixels>, bool)>,
+    definition_link_bounds: Vec<Bounds<Pixels>>,
     active_line_bounds: Option<Bounds<Pixels>>,
     scroll_wheel_state: Option<ScrollBarState>,
 }
@@ -217,6 +218,47 @@ impl TextElement {
         }
 
         search_bounds
+    }
+
+    fn compute_definition_link_bounds(
+        &self,
+        editor: &TextEditor,
+        bounds: Bounds<Pixels>,
+        visible_lines: Range<usize>,
+        cx: &App,
+    ) -> Vec<Bounds<Pixels>> {
+        let Some(span) = editor.definition_link_span.clone() else {
+            return Vec::new();
+        };
+        let state = editor.state.read(cx);
+        let start = state.offset8_to_loc8(span.start);
+        let end = state.offset8_to_loc8(span.end);
+        if start.row != end.row || !visible_lines.contains(&start.row) {
+            return Vec::new();
+        }
+        let Some(multi_line) = editor.line_map.unwrapped_lines_iter(start.row).next() else {
+            return Vec::new();
+        };
+        let line_y = editor.line_map.y_range(start.row..start.row + 1).start;
+        multi_line
+            .line
+            .iter()
+            .enumerate()
+            .filter_map(|(wrapped_ix, line)| {
+                let x = line.x_range(start.col..end.col)?;
+                let y = line_y + editor.line_height * wrapped_ix as f32;
+                Some(Bounds::from_corners(
+                    point(
+                        bounds.left() + editor.gutter_width + x.start,
+                        bounds.top() + y,
+                    ),
+                    point(
+                        bounds.left() + editor.gutter_width + x.end,
+                        bounds.top() + y + editor.line_height,
+                    ),
+                ))
+            })
+            .collect()
     }
 
     fn compute_scroll_bar_state(
@@ -442,6 +484,8 @@ impl Element for TextElement {
             let active_line_bounds = self.compute_active_line_bounds(editor, bounds, window, cx);
             let search_bounds =
                 self.compute_search_bounds(editor, bounds, visible_lines.clone(), cx);
+            let definition_link_bounds =
+                self.compute_definition_link_bounds(editor, bounds, visible_lines.clone(), cx);
             let selection_bounds =
                 self.compute_selection_bounds(editor, bounds, visible_lines, window, cx);
             let scroll_wheel_bounds = self.compute_scroll_bar_state(editor, bounds, window, cx);
@@ -451,6 +495,7 @@ impl Element for TextElement {
                 cursor_bounds,
                 selection_bounds,
                 search_bounds,
+                definition_link_bounds,
                 active_line_bounds,
                 scroll_wheel_state: scroll_wheel_bounds,
             }
@@ -475,6 +520,7 @@ impl Element for TextElement {
         let scroll_background_color = editor.text_styles.scroll_background_color;
         let active_line_color = editor.text_styles.active_line_color;
         let selection_color = editor.text_styles.selection_color;
+        let definition_link_color = editor.text_styles.invoked_function_color;
         let search_match_color = editor.text_styles.search_match_color;
         let active_search_match_color = editor.text_styles.active_search_match_color;
         let gutter_width = editor.gutter_width;
@@ -517,6 +563,19 @@ impl Element for TextElement {
         for (line_num, y, shaped) in &prepaint.lines {
             self.paint_text_line(gutter_width, line_height, shaped, *y, bounds, window, cx);
             self.paint_gutter_line(*line_num, *y, bounds, window, cx);
+        }
+
+        for link_bounds in &prepaint.definition_link_bounds {
+            window.paint_quad(fill(
+                Bounds::new(
+                    point(link_bounds.left(), link_bounds.bottom() - px(1.0)),
+                    size(link_bounds.size.width, px(1.0)),
+                ),
+                definition_link_color,
+            ));
+        }
+        if !prepaint.definition_link_bounds.is_empty() {
+            window.set_window_cursor_style(CursorStyle::PointingHand);
         }
 
         if let Some(cursor_bounds) = prepaint.cursor_bounds {

@@ -98,7 +98,15 @@ impl PopoverElement {
                             .text_xs()
                             .text_color(styles.popover_text_color)
                             .child(diagnostic.message.clone()),
-                    ),
+                    )
+                    .children(diagnostic.hint.as_ref().map(|hint| {
+                        div()
+                            .mt(px(6.0))
+                            .text_xs()
+                            .text_color(styles.popover_text_color)
+                            .opacity(0.8)
+                            .child(format!("hint: {hint}"))
+                    })),
             )
             .on_mouse_move(|_, window, app| {
                 window.prevent_default();
@@ -108,7 +116,12 @@ impl PopoverElement {
     }
 
     fn diagnostic_copy_text(diagnostic: &Diagnostic) -> String {
-        format!("{}\n{}", diagnostic.title, diagnostic.message)
+        let hint = diagnostic
+            .hint
+            .as_deref()
+            .map(|hint| format!("\nhint: {hint}"))
+            .unwrap_or_default();
+        format!("{}\n{}{}", diagnostic.title, diagnostic.message, hint)
     }
 
     pub(super) fn is_diagnostic_copied(&self, diagnostic: &Diagnostic, cx: &App) -> bool {

@@ -44,6 +44,7 @@ impl ExecutionService {
                     span: runtime_error.span.clone(),
                     title: "Runtime Error".into(),
                     message: format_runtime_error_message(executor, root_text_rope, runtime_error),
+                    hint: runtime_error.hint.clone(),
                 })
                 .collect()
         });

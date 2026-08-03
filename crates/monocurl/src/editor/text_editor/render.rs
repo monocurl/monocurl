@@ -329,6 +329,7 @@ impl Render for TextEditor {
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_move(cx.listener(Self::on_mouse_move))
+                    .on_modifiers_changed(cx.listener(Self::on_modifiers_changed))
                     .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
                     .child(
                         div()

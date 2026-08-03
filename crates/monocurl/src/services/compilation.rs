@@ -93,6 +93,7 @@ impl CompilationService {
                 span: parse_error.span.clone(),
                 dtype: DiagnosticType::CompileTimeError,
                 title: parse_error.title.clone(),
+                hint: None,
             });
         }
 
@@ -102,6 +103,7 @@ impl CompilationService {
                 span: compile_error.span.clone(),
                 dtype: DiagnosticType::CompileTimeError,
                 title: "Compile Error".into(),
+                hint: None,
             });
         }
 
@@ -111,6 +113,7 @@ impl CompilationService {
                 span: compile_warning.span.clone(),
                 dtype: DiagnosticType::CompileTimeWarning,
                 title: "Compile Warning".into(),
+                hint: compile_warning.hint.clone(),
             });
         }
 

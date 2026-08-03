@@ -262,6 +262,9 @@ impl Render for KeyBindingsWindow {
 
         let content = div()
             .font_family(FontSet::UI)
+            .size_full()
+            .flex()
+            .flex_col()
             .flex_1()
             .min_h_0()
             .bg(theme.app_background)

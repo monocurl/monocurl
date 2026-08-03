@@ -12,12 +12,23 @@ pub enum DiagnosticType {
     RuntimeError,
 }
 
+impl DiagnosticType {
+    pub const fn precedence(self) -> u8 {
+        match self {
+            Self::CompileTimeWarning => 0,
+            Self::CompileTimeError => 1,
+            Self::RuntimeError => 2,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub dtype: DiagnosticType,
     pub span: Span8,
     pub title: String,
     pub message: String,
+    pub hint: Option<String>,
 }
 
 impl Diagnostic {
@@ -124,7 +135,8 @@ impl DiagnosticContainer {
     pub fn diagnostic_for_point(&self, point: Count8) -> Option<&Diagnostic> {
         self.diagnostics
             .iter()
-            .find(|d| d.span.start <= point && point < d.span.end)
+            .filter(|diagnostic| diagnostic.span.start <= point && point < diagnostic.span.end)
+            .max_by_key(|diagnostic| diagnostic.dtype.precedence())
     }
 
     pub fn diagnostics_list(&self) -> &[Diagnostic] {
@@ -182,5 +194,39 @@ impl DiagnosticContainer {
 
                 Some((yield_len, diags))
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn diagnostic(dtype: DiagnosticType) -> Diagnostic {
+        Diagnostic {
+            dtype,
+            span: 2..5,
+            title: String::new(),
+            message: String::new(),
+            hint: None,
+        }
+    }
+
+    #[test]
+    fn selects_the_highest_precedence_overlapping_diagnostic() {
+        let mut diagnostics = DiagnosticContainer::default();
+        diagnostics.set_compile_time_diagnostics(
+            [
+                diagnostic(DiagnosticType::CompileTimeError),
+                diagnostic(DiagnosticType::CompileTimeWarning),
+            ]
+            .into_iter(),
+        );
+
+        assert_eq!(
+            diagnostics
+                .diagnostic_for_point(3)
+                .map(|diagnostic| diagnostic.dtype),
+            Some(DiagnosticType::CompileTimeError)
+        );
     }
 }

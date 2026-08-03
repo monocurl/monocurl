@@ -206,6 +206,7 @@ pub struct TextEditor {
     cursor_blink_task: Option<Task<()>>,
 
     last_in_frame_mouse_position: Option<Point<Pixels>>,
+    definition_link_span: Option<Span8>,
     last_hover_start: Option<(Point<Pixels>, usize, Pixels)>,
     hover_task: Option<Task<()>>,
     // version, hover item
@@ -329,6 +330,7 @@ impl TextEditor {
             cursor_blink_task: None,
 
             last_in_frame_mouse_position: None,
+            definition_link_span: None,
             last_hover_start: None,
             hover_task: None,
 

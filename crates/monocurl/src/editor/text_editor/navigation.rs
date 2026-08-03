@@ -211,6 +211,15 @@ impl TextEditor {
         position: Location8,
         cx: &App,
     ) -> Option<Location8> {
+        self.local_definition_at(position, cx)
+            .map(|(_, location)| location)
+    }
+
+    pub(super) fn local_definition_at(
+        &self,
+        position: Location8,
+        cx: &App,
+    ) -> Option<(Span8, Location8)> {
         let current_row = position.row;
         {
             let state = self.state.read(cx);
@@ -219,7 +228,7 @@ impl TextEditor {
             if word.is_empty() {
                 return None;
             }
-            let name = state.read(word);
+            let name = state.read(word.clone());
             let source = state.read(0..state.len());
             let definitions = source
                 .lines()
@@ -231,9 +240,14 @@ impl TextEditor {
                 .rev()
                 .find(|(row, _)| *row <= current_row)
                 .or_else(|| definitions.first())
-                .map(|(row, col)| Location8 {
-                    row: *row,
-                    col: *col,
+                .map(|(row, col)| {
+                    (
+                        word,
+                        Location8 {
+                            row: *row,
+                            col: *col,
+                        },
+                    )
                 })
         }
     }
