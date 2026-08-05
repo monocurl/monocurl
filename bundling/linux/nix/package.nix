@@ -128,6 +128,7 @@ in
           "live_values::test_number_constructor_accepts_decimal_and_sign_options"
           "live_values::test_tex_and_latex_accept_list_string_inputs"
           "live_values::test_text_tag_operator_tags_text_backends"
+          "live_values::test_number_constructor_accepts_custom_font"
 
           "number::tests::number_renderer_lays_out_cached_glyphs"
           "number::tests::decimal_point_sits_on_the_baseline"
