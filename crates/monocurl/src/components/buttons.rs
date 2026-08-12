@@ -1,12 +1,13 @@
 use gpui::*;
 
 pub fn link_button(
-    text: &'static str,
+    text: impl Into<SharedString>,
     text_color: impl Into<Hsla>,
     action: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let text = text.into();
     div()
-        .id(text)
+        .id(text.clone())
         .child(text)
         .text_xs()
         .text_color(text_color)

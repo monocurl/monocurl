@@ -21,6 +21,7 @@ use crate::{
     },
     auto_update::AutoUpdater,
     editor::text_editor,
+    i18n::Localization,
     keybindings_window::KeyBindingsWindow,
     settings_window::SettingsWindow,
     state::{user_settings::UserSettings, window_state::WindowState},
@@ -38,6 +39,7 @@ mod components;
 mod document_view;
 mod editor;
 mod home_view;
+mod i18n;
 mod keybindings_window;
 mod navbar_view;
 mod services;
@@ -139,7 +141,8 @@ impl MonocurlLauncher {
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
     }
 
-    fn setup_menus(cx: &mut App) {
+    pub(crate) fn setup_menus(cx: &mut App) {
+        let text = |key| Localization::text(cx, key);
         cx.set_menus(vec![
             Menu {
                 name: "Monocurl".into(),
@@ -147,55 +150,55 @@ impl MonocurlLauncher {
                     #[cfg(target_os = "macos")]
                     MenuItem::os_submenu("Services", gpui::SystemMenuType::Services),
                     MenuItem::separator(),
-                    MenuItem::action("Quit Monocurl", Quit),
+                    MenuItem::action(text("menu.app.quit"), Quit),
                 ],
             },
             Menu {
-                name: "File".into(),
+                name: text("menu.file").into(),
                 items: vec![
-                    MenuItem::action("Settings...", OpenSettings),
+                    MenuItem::action(text("menu.file.settings"), OpenSettings),
                     MenuItem::separator(),
-                    MenuItem::action("Save", SaveActiveDocument),
-                    MenuItem::action("Save As", SaveActiveDocumentCustomPath),
+                    MenuItem::action(text("menu.file.save"), SaveActiveDocument),
+                    MenuItem::action(text("menu.file.save_as"), SaveActiveDocumentCustomPath),
                     MenuItem::separator(),
-                    MenuItem::action("Export as Image", ExportImage),
-                    MenuItem::action("Export as Video", ExportVideo),
-                    MenuItem::action("Export Slides as Videos", ExportSlidesAsVideos),
+                    MenuItem::action(text("menu.file.export_image"), ExportImage),
+                    MenuItem::action(text("menu.file.export_video"), ExportVideo),
+                    MenuItem::action(text("menu.file.export_slides"), ExportSlidesAsVideos),
                     MenuItem::separator(),
-                    MenuItem::action("Present", TogglePresentationMode),
-                    MenuItem::action("Toggle Headless Mode", ToggleHeadlessMode),
+                    MenuItem::action(text("menu.file.present"), TogglePresentationMode),
+                    MenuItem::action(text("menu.file.toggle_headless"), ToggleHeadlessMode),
                 ],
             },
             Menu {
-                name: "Edit".into(),
+                name: text("menu.edit").into(),
                 items: vec![
-                    MenuItem::os_action("Undo", Undo, OsAction::Undo),
-                    MenuItem::os_action("Redo", Redo, OsAction::Redo),
+                    MenuItem::os_action(text("menu.edit.undo"), Undo, OsAction::Undo),
+                    MenuItem::os_action(text("menu.edit.redo"), Redo, OsAction::Redo),
                     MenuItem::separator(),
-                    MenuItem::os_action("Cut", Cut, OsAction::Cut),
-                    MenuItem::os_action("Copy", Copy, OsAction::Copy),
-                    MenuItem::os_action("Paste", Paste, OsAction::Paste),
+                    MenuItem::os_action(text("menu.edit.cut"), Cut, OsAction::Cut),
+                    MenuItem::os_action(text("menu.edit.copy"), Copy, OsAction::Copy),
+                    MenuItem::os_action(text("menu.edit.paste"), Paste, OsAction::Paste),
                 ],
             },
             Menu {
-                name: "Editor".into(),
+                name: text("menu.editor").into(),
                 items: vec![
-                    MenuItem::action("Toggle Playing", TogglePlaying),
-                    MenuItem::action("Epsilon Forward", EpsilonForward),
-                    MenuItem::action("Epsilon Backward", EpsilonBackward),
-                    MenuItem::action("Next Slide", NextSlide),
-                    MenuItem::action("Previous Slide", PrevSlide),
-                    MenuItem::action("Fold Current Slide", ToggleSlideFold),
-                    MenuItem::action("Scene Start", SceneStart),
-                    MenuItem::action("Scene End", SceneEnd),
+                    MenuItem::action(text("menu.editor.toggle_playing"), TogglePlaying),
+                    MenuItem::action(text("menu.editor.epsilon_forward"), EpsilonForward),
+                    MenuItem::action(text("menu.editor.epsilon_backward"), EpsilonBackward),
+                    MenuItem::action(text("menu.editor.next_slide"), NextSlide),
+                    MenuItem::action(text("menu.editor.previous_slide"), PrevSlide),
+                    MenuItem::action(text("menu.editor.fold_slide"), ToggleSlideFold),
+                    MenuItem::action(text("menu.editor.scene_start"), SceneStart),
+                    MenuItem::action(text("menu.editor.scene_end"), SceneEnd),
                 ],
             },
             Menu {
-                name: "Help".into(),
+                name: text("menu.help").into(),
                 items: vec![
-                    MenuItem::action("Key Bindings", OpenKeyBindings),
+                    MenuItem::action(text("menu.help.key_bindings"), OpenKeyBindings),
                     MenuItem::separator(),
-                    MenuItem::action("Check for Updates...", CheckForUpdates),
+                    MenuItem::action(text("menu.help.check_updates"), CheckForUpdates),
                 ],
             },
         ]);
@@ -245,6 +248,7 @@ impl MonocurlLauncher {
                 Self::setup_fonts(cx);
                 ThemeSettings::init(cx);
                 UserSettings::init(cx);
+                Localization::init(cx);
                 AutoUpdater::init(cx);
                 Self::setup_modules(cx);
                 Self::setup_global_actions(cx);

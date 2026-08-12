@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use gpui::{App, Global, ReadGlobal, UpdateGlobal};
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{Language, Localization};
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LatexBackendPreference {
@@ -15,6 +17,8 @@ pub enum LatexBackendPreference {
 pub struct UserSettings {
     #[serde(default = "default_auto_update")]
     pub auto_update: bool,
+    #[serde(default)]
+    pub language: Language,
     pub latex_backend: LatexBackendPreference,
     pub system_latex_path: Option<PathBuf>,
     pub system_dvisvgm_path: Option<PathBuf>,
@@ -26,6 +30,7 @@ impl Default for UserSettings {
     fn default() -> Self {
         Self {
             auto_update: true,
+            language: Language::default(),
             latex_backend: LatexBackendPreference::default(),
             system_latex_path: None,
             system_dvisvgm_path: None,
@@ -79,15 +84,27 @@ impl UserSettings {
     }
 
     pub fn update(cx: &mut App, update: impl FnOnce(&mut Self)) {
+        let mut language = None;
         Self::update_global(cx, |settings, _cx| {
+            let previous_language = settings.language;
             update(settings);
             settings.save();
             settings.apply_latex_backend();
+            if settings.language != previous_language {
+                language = Some(settings.language);
+            }
         });
+        if let Some(language) = language {
+            Localization::set_language(cx, language);
+        }
     }
 
     pub fn use_bundled_latex(&mut self) {
         self.latex_backend = LatexBackendPreference::Bundled;
+    }
+
+    pub fn set_language(&mut self, language: Language) {
+        self.language = language;
     }
 
     pub fn use_system_latex(&mut self) {
