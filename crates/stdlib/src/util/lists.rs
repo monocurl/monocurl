@@ -67,12 +67,7 @@ pub async fn range(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
     let start = read_float(executor, stack_idx, -3, "start")?;
     let stop = read_float(executor, stack_idx, -2, "stop")?;
     let step = read_float(executor, stack_idx, -1, "step")?;
-    if step == 0.0 {
-        return Err(ExecutorError::InvalidArgument {
-            arg: "step",
-            message: "must be non-zero",
-        });
-    }
+    validate_range_arguments(start, stop, step)?;
 
     let all_ints = start.fract() == 0.0 && stop.fract() == 0.0 && step.fract() == 0.0;
 
@@ -91,6 +86,26 @@ pub async fn range(executor: &mut Executor, stack_idx: usize) -> Result<Value, E
     Ok(Value::List(executor::value::container::List::new_with(
         elements,
     )))
+}
+
+fn validate_range_arguments(start: f64, stop: f64, step: f64) -> Result<(), ExecutorError> {
+    for (value, arg) in [(start, "start"), (stop, "stop"), (step, "step")] {
+        if !value.is_finite() {
+            return Err(ExecutorError::InvalidArgument {
+                arg,
+                message: "must be finite",
+            });
+        }
+    }
+
+    if step == 0.0 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "step",
+            message: "must be non-zero",
+        });
+    }
+
+    Ok(())
 }
 
 fn sampled_number(value: f64) -> Value {
@@ -369,4 +384,35 @@ pub async fn min_of(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 #[stdlib_func]
 pub async fn max_of(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     extremum_of(executor, stack_idx, true).await
+}
+
+#[cfg(test)]
+mod tests {
+    use executor::error::ExecutorError;
+
+    use super::validate_range_arguments;
+
+    #[test]
+    fn range_rejects_non_finite_arguments() {
+        for (start, stop, step, arg) in [
+            (0.0, 10.0, f64::NAN, "step"),
+            (0.0, 10.0, f64::INFINITY, "step"),
+            (f64::NAN, 10.0, 1.0, "start"),
+            (0.0, f64::INFINITY, 1.0, "stop"),
+        ] {
+            assert!(matches!(
+                validate_range_arguments(start, stop, step),
+                Err(ExecutorError::InvalidArgument {
+                    arg: actual_arg,
+                    message: "must be finite",
+                }) if actual_arg == arg
+            ));
+        }
+    }
+
+    #[test]
+    fn range_accepts_finite_positive_and_negative_steps() {
+        assert!(validate_range_arguments(0.0, 10.0, 1.0).is_ok());
+        assert!(validate_range_arguments(10.0, 0.0, -1.0).is_ok());
+    }
 }
