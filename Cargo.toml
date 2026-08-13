@@ -15,6 +15,8 @@ members = [
   "crates/lexer",
   "crates/parser",
   "crates/renderer",
+  "crates/rust_scene",
+  "crates/rust_scene_macros",
   "crates/runtime",
   "crates/stdlib",
   "crates/stdlib-macros",
@@ -56,6 +58,9 @@ cc = "1.2.41"
 tiny-skia-path = "0.11.4"
 usvg = "0.45.1"
 image = "0.25.5"
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
 mp4 = "0.14.0"
 openh264 = "0.9.3"
 hayro-interpret = "0.4.0"
@@ -83,6 +88,8 @@ lexer = { path = "crates/lexer" }
 libtess2 = { path = "crates/libtess2" }
 parser = { path = "crates/parser" }
 renderer = { path = "crates/renderer" }
+rust_scene = { path = "crates/rust_scene" }
+rust_scene_macros = { path = "crates/rust_scene_macros" }
 runtime = { path = "crates/runtime" }
 inventory = "0.3"
 stdlib-macros = { path = "crates/stdlib-macros" }

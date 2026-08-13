@@ -85,14 +85,17 @@ where
             StaticAnalysisData::OperatorInvocation => self.style.invoked_operator_color,
         };
 
-        let underline = diagnostics.iter().next().map(|d| {
-            let color = d.color(self.style);
-            UnderlineStyle {
-                thickness: px(1.0),
-                color: Some(color),
-                wavy: true,
-            }
-        });
+        let underline = diagnostics
+            .iter()
+            .max_by_key(|diagnostic| diagnostic.dtype.precedence())
+            .map(|d| {
+                let color = d.color(self.style);
+                UnderlineStyle {
+                    thickness: px(1.0),
+                    color: Some(color),
+                    wavy: true,
+                }
+            });
 
         TextRun {
             len: size,

@@ -46,6 +46,7 @@ pub struct CompileError {
 pub struct CompileWarning {
     pub span: Span8,
     pub message: String,
+    pub hint: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -439,6 +440,7 @@ impl Compiler {
             self.warnings.push(CompileWarning {
                 span: updated_span,
                 message: warning.message.clone(),
+                hint: warning.hint.clone(),
             });
         }
 
@@ -990,12 +992,18 @@ impl Compiler {
         self.current_bundle.as_mut().unwrap().errors.push(error);
     }
 
-    fn warning(&mut self, span: Span8, msg: impl Into<String>) {
+    fn warning_with_hint(
+        &mut self,
+        span: Span8,
+        msg: impl Into<String>,
+        hint: Option<impl Into<String>>,
+    ) {
         let real_span = self.bundle_root_import_span.clone().unwrap_or(span);
 
         let warning = CompileWarning {
             span: real_span.clone(),
             message: msg.into(),
+            hint: hint.map(Into::into),
         };
         self.warnings.push(warning.clone());
         self.current_bundle.as_mut().unwrap().warnings.push(warning);

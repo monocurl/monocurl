@@ -718,6 +718,10 @@ mod test {
             has_warning(&result, "expression unused"),
             "expected useless-expression warning"
         );
+        assert!(result.warnings.iter().any(|warning| {
+            warning.hint.as_deref()
+                == Some("prefix it with `let _ =` to silence this warning if intentional")
+        }));
     }
 
     #[test]

@@ -61,7 +61,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("right", NextSlide, None),
         KeyBinding::new("secondary-right", NextSlide, None),
         KeyBinding::new("space", PlayOrShowPauseHint, Some("!editor")),
-        KeyBinding::new("secondary-g", PlayOrShowPauseHint, None),
+        KeyBinding::new("secondary-alt-p", PlayOrShowPauseHint, None),
         KeyBinding::new("shift-space", TogglePlaying, Some("!editor")),
         KeyBinding::new("secondary-shift-space,", TogglePlaying, None),
         KeyBinding::new(",", PrevSlide, Some("!editor")),
@@ -79,6 +79,9 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("secondary-=", ZoomIn, None),
         KeyBinding::new("secondary--", ZoomOut, None),
     ]);
+
+    #[cfg(not(target_os = "macos"))]
+    cx.bind_keys([KeyBinding::new("secondary-y", Redo, None)]);
 }
 
 #[derive(Clone, Debug)]

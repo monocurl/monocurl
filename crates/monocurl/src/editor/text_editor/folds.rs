@@ -6,23 +6,6 @@ use crate::state::{
 
 use super::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-enum FoldDiagnosticSeverity {
-    Warning,
-    CompileError,
-    RuntimeError,
-}
-
-impl FoldDiagnosticSeverity {
-    fn from_type(dtype: DiagnosticType) -> Self {
-        match dtype {
-            DiagnosticType::CompileTimeWarning => Self::Warning,
-            DiagnosticType::CompileTimeError => Self::CompileError,
-            DiagnosticType::RuntimeError => Self::RuntimeError,
-        }
-    }
-}
-
 impl TextEditor {
     pub(super) fn slide_body_line_range(
         slides: &[SlideInfo],
@@ -339,7 +322,7 @@ impl TextEditor {
                 body_offsets.start <= diagnostic.span.start
                     && diagnostic.span.end <= body_offsets.end
             })
-            .max_by_key(|diagnostic| FoldDiagnosticSeverity::from_type(diagnostic.dtype))
+            .max_by_key(|diagnostic| diagnostic.dtype.precedence())
             .map(|diagnostic| diagnostic.dtype)
     }
 }

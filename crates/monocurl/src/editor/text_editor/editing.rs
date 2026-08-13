@@ -399,14 +399,20 @@ impl TextEditor {
     fn selected_row_range(&self, cx: &App) -> Range<usize> {
         let cursor = self.cursor(cx);
         let start_row = cursor.anchor.min(cursor.head).row;
-        let end_row = cursor.anchor.max(cursor.head).row;
+        let mut end_row = cursor.anchor.max(cursor.head).row;
+        if !cursor.is_empty() && cursor.anchor.max(cursor.head).col == 0 && end_row > start_row {
+            end_row -= 1;
+        }
         start_row..end_row + 1
     }
 
     fn line_comment_prefix_len(line_text: &str) -> Option<(usize, usize)> {
-        if let Some(rest) = line_text.strip_prefix('#') {
+        let comment_col = line_text
+            .char_indices()
+            .find_map(|(column, character)| (!character.is_whitespace()).then_some(column))?;
+        if let Some(rest) = line_text[comment_col..].strip_prefix('#') {
             let removed = if rest.starts_with(' ') { 2 } else { 1 };
-            Some((0, removed))
+            Some((comment_col, removed))
         } else {
             None
         }
@@ -422,6 +428,24 @@ impl TextEditor {
         self.undo_group_boundary(cx);
 
         let row_range = self.selected_row_range(cx);
+        let comment_col = row_range
+            .clone()
+            .filter_map(|row| {
+                let state = self.state.read(cx);
+                let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
+                let line_end = state
+                    .loc8_to_offset8(Location8 {
+                        row: row + 1,
+                        col: 0,
+                    })
+                    .min(state.len());
+                state
+                    .read(line_start..line_end)
+                    .char_indices()
+                    .find_map(|(column, character)| (!character.is_whitespace()).then_some(column))
+            })
+            .min()
+            .unwrap_or(0);
         let should_uncomment = row_range.clone().all(|row| {
             let state = self.state.read(cx);
             let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
@@ -469,7 +493,7 @@ impl TextEditor {
                         adjust_cursor_after_uncomment(cursor.head.col, comment_col, removed_len);
                 }
             } else {
-                let comment_col = 0;
+                let comment_col = comment_col.min(line_text.trim_end_matches(['\r', '\n']).len());
                 self.replace(
                     line_start + comment_col..line_start + comment_col,
                     LINE_COMMENT_PREFIX,

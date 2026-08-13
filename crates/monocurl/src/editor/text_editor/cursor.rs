@@ -169,6 +169,16 @@ impl TextEditor {
             .min(state.len())
     }
 
+    pub(super) fn first_non_whitespace_column(&self, state: &TextualState, row: usize) -> usize {
+        let line_start = state.loc8_to_offset8(Location8 { row, col: 0 });
+        let line_end = self.line_end_offset(state, row);
+        state
+            .read(line_start..line_end)
+            .char_indices()
+            .find_map(|(column, character)| (!character.is_whitespace()).then_some(column))
+            .unwrap_or(0)
+    }
+
     pub(super) fn do_autocomplete_action(&mut self, cx: &mut Context<Self>) -> bool {
         let state = self.state.read(cx);
         state
@@ -368,10 +378,12 @@ impl TextEditor {
     }
 
     pub(super) fn select_home(&mut self, _: &SelectHome, _: &mut Window, cx: &mut Context<Self>) {
-        let new_pos = Location8 {
-            row: self.cursor(cx).head.row,
-            col: 0,
+        let row = self.cursor(cx).head.row;
+        let column = {
+            let state = self.state.read(cx);
+            self.first_non_whitespace_column(state, row)
         };
+        let new_pos = Location8 { row, col: column };
         self.select_to(new_pos, false, true, cx);
     }
 
@@ -383,10 +395,12 @@ impl TextEditor {
     }
 
     pub(super) fn home(&mut self, _: &Home, _: &mut Window, cx: &mut Context<Self>) {
-        let new_pos = Location8 {
-            row: self.cursor(cx).head.row,
-            col: 0,
+        let row = self.cursor(cx).head.row;
+        let column = {
+            let state = self.state.read(cx);
+            self.first_non_whitespace_column(state, row)
         };
+        let new_pos = Location8 { row, col: column };
         self.move_to(new_pos, false, true, cx);
     }
 

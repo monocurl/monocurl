@@ -6087,6 +6087,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_scene"
+version = "0.1.0"
+dependencies = [
+ "rust_scene_macros",
+]
+
+[[package]]
+name = "rust_scene_macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"

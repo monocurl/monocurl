@@ -1,4 +1,5 @@
 use super::*;
+use crate::documentation;
 
 struct RootSectionTokens {
     tokens: Vec<(Token, Span8)>,
@@ -261,12 +262,18 @@ impl Parser {
         f: PreparsedFile,
         cursor: Option<Count8>,
     ) -> (Arc<SectionBundle>, ParseArtifacts) {
+        let mut documentation = documentation::extract(
+            &f.text_rope.iterator(0).collect::<String>(),
+            &f.path,
+            f.root_import_span.is_none(),
+        );
         let file_index = currently_parsed.len();
         let imported_files = Self::imported_file_indices(currently_parsed, &f.imports);
 
         if f.root_import_span.is_none() {
             let (sections, split_artifacts) = Self::split_root_sections(f.tokens, &f.text_rope);
             let mut artifacts = ParseArtifacts::default();
+            artifacts.documentation.append(&mut documentation);
             artifacts.extend(split_artifacts);
             let mut parsed_sections = vec![];
             for (i, section) in sections.into_iter().enumerate() {
@@ -305,13 +312,14 @@ impl Parser {
             } else {
                 SectionType::UserLibrary
             };
-            let (section, artifacts) = Self::parse_section(
+            let (section, mut artifacts) = Self::parse_section(
                 f.tokens,
                 f.text_rope,
                 stype,
                 None,
                 f.root_import_span.clone(),
             );
+            artifacts.documentation.append(&mut documentation);
             (
                 Arc::new(SectionBundle {
                     file_path: f.path,
@@ -383,6 +391,7 @@ impl Parser {
                     error_diagnostics: p.errors,
                     cursor_possibilities: HashSet::default(),
                     root_slides: Vec::new(),
+                    documentation: Vec::new(),
                 },
             );
         };

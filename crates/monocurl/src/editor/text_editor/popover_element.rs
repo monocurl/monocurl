@@ -5,7 +5,7 @@ use crate::{
         diagnostics::Diagnostic,
         textual_state::{AutoCompleteState, ParameterHintArg, ParameterPositionState},
     },
-    text_editor::TextEditor,
+    text_editor::{HoverItem, TextEditor},
     theme::TextEditorStyles,
 };
 use gpui::{
@@ -19,6 +19,7 @@ use structs::text::Location8;
 
 mod autocomplete;
 mod diagnostic;
+mod documentation;
 mod parameter_hint;
 
 const PARAMETER_SUPRESSION_DUE_TO_CURSOR: Duration = Duration::from_millis(500);
@@ -70,7 +71,10 @@ impl PopoverElement {
     fn hovered_diagnostic(&mut self, cx: &mut App) -> Option<DiagnosticPopoverState> {
         let editor = self.editor.read(cx);
 
-        editor.hover_item.as_ref().map(|(_, d)| {
+        editor.hover_item.as_ref().and_then(|(_, hover)| {
+            let HoverItem::Diagnostic(d) = hover else {
+                return None;
+            };
             let state = editor.state.read(cx);
             let location8 = state.offset8_to_loc8(d.span.start);
             if editor.line_map.is_line_hidden(location8.row) {
@@ -82,7 +86,31 @@ impl PopoverElement {
                 diagnostic: d.clone(),
                 pos_in_container,
             })
-        })?
+        })
+    }
+
+    fn hovered_documentation(&mut self, cx: &mut App) -> Option<DocumentationPopoverState> {
+        let editor = self.editor.read(cx);
+        let (
+            _,
+            HoverItem::Documentation {
+                documentation,
+                span,
+            },
+        ) = editor.hover_item.as_ref()?
+        else {
+            return None;
+        };
+        let state = editor.state.read(cx);
+        let location8 = state.offset8_to_loc8(span.start);
+        if editor.line_map.is_line_hidden(location8.row) {
+            return None;
+        }
+        let pos_in_container = self.pos_of_loc(editor, location8);
+        Some(DocumentationPopoverState {
+            documentation: documentation.clone(),
+            pos_in_container,
+        })
     }
 
     fn autocomplete_state(
@@ -208,6 +236,11 @@ struct DiagnosticPopoverState {
     pos_in_container: Point<Pixels>,
 }
 
+struct DocumentationPopoverState {
+    documentation: parser::documentation::Documentation,
+    pos_in_container: Point<Pixels>,
+}
+
 struct AutoCompletePopoverState {
     autocomplete_state: Rc<RefCell<AutoCompleteState>>,
     pos_in_container: Point<Pixels>,
@@ -262,10 +295,13 @@ impl Element for PopoverElement {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let diagnostic_state = self.hovered_diagnostic(cx);
+        let documentation_state = self.hovered_documentation(cx);
         let styles = self.editor.read(cx).text_styles.clone();
 
         let mut children: SmallVec<_> = SmallVec::new();
-        if let Some(ref ac_state) = self.autocomplete_state(window, cx) {
+        if documentation_state.is_none()
+            && let Some(ref ac_state) = self.autocomplete_state(window, cx)
+        {
             let mut popover_content =
                 self.build_autocomplete_popover(&ac_state.autocomplete_state, &styles);
             let content_layout_id = popover_content.request_layout(window, cx);
@@ -303,6 +339,19 @@ impl Element for PopoverElement {
             children.push(ChildElementState {
                 popover_content,
                 pos_in_container: diag_state.pos_in_container,
+                prefer_up: false,
+                content_layout_id,
+            });
+        }
+
+        if let Some(ref documentation_state) = documentation_state {
+            let mut popover_content =
+                self.build_documentation_popover(&documentation_state.documentation, &styles);
+            let content_layout_id = popover_content.request_layout(window, cx);
+
+            children.push(ChildElementState {
+                popover_content,
+                pos_in_container: documentation_state.pos_in_container,
                 prefer_up: false,
                 content_layout_id,
             });

@@ -36,6 +36,8 @@ impl KeyBindingsWindow {
             }),
             window_bounds: Some(WindowBounds::centered(window_size, cx)),
             window_min_size: Some(size(px(420.0), px(360.0))),
+            #[cfg(target_os = "linux")]
+            window_decorations: Some(WindowDecorations::Client),
             focus: true,
             ..Default::default()
         };
@@ -63,7 +65,7 @@ const BINDINGS: &[(&str, &[(&str, &str)])] = &[
             ("Save As", "Cmd/Ctrl+Shift+S"),
             ("Close document", "Cmd/Ctrl+W"),
             ("Find", "Cmd/Ctrl+F"),
-            ("Undo / redo", "Cmd/Ctrl+Z / Cmd/Ctrl+Shift+Z"),
+            ("Undo / redo", "$UNDO_REDO"),
             ("Copy / cut / paste", "Cmd/Ctrl+C / X / V"),
             ("Present", "Cmd/Ctrl+P"),
             ("Show presentation controls", "Cmd/Ctrl+T"),
@@ -73,26 +75,30 @@ const BINDINGS: &[(&str, &[(&str, &str)])] = &[
         ],
     ),
     (
-        "Timeline and playback",
+        "Timeline and playback — inside editor",
         &[
-            ("Play / pause", "Cmd/Ctrl+G"),
+            ("Play / pause", "Cmd/Ctrl+Alt+P"),
             ("Previous / next slide", "Cmd/Ctrl+, / Cmd/Ctrl+."),
             ("Scene start / end", "Cmd/Ctrl+< / Cmd/Ctrl+>"),
             ("Step backward / forward", "Cmd/Ctrl+; / Cmd/Ctrl+'"),
             ("Timeline zoom", "Cmd/Ctrl+- / Cmd/Ctrl+="),
-            ("Play / pause outside the editor", "Space / Shift+Space"),
-            (
-                "Previous / next slide outside the editor",
-                ", / . or Left / Right",
-            ),
             ("Leave editor focus", "Esc"),
         ],
     ),
     (
-        "Editor",
+        "Timeline and playback — outside editor",
         &[
-            ("Move by word", "Alt+Arrow or Ctrl+Arrow"),
-            ("Select by word", "Shift+Alt+Arrow or Shift+Ctrl+Arrow"),
+            ("Play / pause", "Space / Shift+Space"),
+            ("Previous / next slide", ", / . or Left / Right"),
+            ("Scene start / end", "< / >"),
+            ("Step backward / forward", "; / '"),
+        ],
+    ),
+    (
+        "Text editing",
+        &[
+            ("Move by word", "$WORD_MOVE"),
+            ("Select by word", "$WORD_SELECT"),
             ("Move to line start / end", "Home / End"),
             ("Select to line start / end", "Shift+Home / Shift+End"),
             (
@@ -101,14 +107,40 @@ const BINDINGS: &[(&str, &[(&str, &str)])] = &[
             ),
             ("Select all", "Cmd/Ctrl+A"),
             ("Toggle comment", "Cmd/Ctrl+/"),
-            ("Fold current slide", "Cmd/Ctrl+."),
+            ("Fold current slide", "Cmd/Ctrl+Shift+."),
             ("Indent / unindent", "Tab / Shift+Tab"),
-            ("Find next / previous", "Cmd/Ctrl+G / Cmd/Ctrl+Shift+G"),
+            (
+                "Find next / previous",
+                "Cmd/Ctrl+G / Cmd/Ctrl+Shift+G (in Find)",
+            ),
+        ],
+    ),
+    (
+        "Code navigation — inside editor",
+        &[
+            ("Go to line (optionally :column)", "Cmd/Ctrl+G"),
+            ("Next / previous diagnostic", "F8 / Shift+F8"),
+            ("Next / previous slide header", "Cmd/Ctrl+Down / Up"),
+            ("Go to local definition", "F12"),
         ],
     ),
 ];
 
 fn platform_shortcut(shortcut: &str) -> String {
+    match shortcut {
+        "$UNDO_REDO" if cfg!(target_os = "macos") => {
+            return "Cmd+Z / Cmd+Shift+Z".to_string();
+        }
+        "$UNDO_REDO" => return "Ctrl+Z / Ctrl+Y".to_string(),
+        "$WORD_MOVE" if cfg!(target_os = "macos") => return "Option+Arrow".to_string(),
+        "$WORD_MOVE" => return "Alt+Arrow or Ctrl+Arrow".to_string(),
+        "$WORD_SELECT" if cfg!(target_os = "macos") => {
+            return "Shift+Option+Arrow".to_string();
+        }
+        "$WORD_SELECT" => return "Shift+Alt+Arrow or Shift+Ctrl+Arrow".to_string(),
+        _ => {}
+    }
+
     let primary_modifier = if cfg!(target_os = "macos") {
         "Cmd"
     } else {
@@ -125,8 +157,73 @@ fn platform_shortcut(shortcut: &str) -> String {
         .replace("Alt", word_modifier)
 }
 
+impl KeyBindingsWindow {
+    #[cfg(target_os = "linux")]
+    fn render_linux_titlebar(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
+        let theme = ThemeSettings::theme(cx);
+        let controls = window.window_controls();
+
+        div()
+            .id("key-bindings-titlebar")
+            .h(px(28.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .bg(theme.navbar_background)
+            .border_b_1()
+            .border_color(theme.navbar_border)
+            .child(
+                div()
+                    .id("key-bindings-titlebar-drag")
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .px(px(10.0))
+                    .text_size(px(12.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("Key Bindings")
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                        cx.stop_propagation();
+                        window.start_window_move();
+                    })
+                    .on_click(move |event, window, cx| {
+                        cx.stop_propagation();
+                        if event.click_count() == 2 && controls.maximize {
+                            window.zoom_window();
+                        }
+                    }),
+            )
+            .child(
+                div()
+                    .id("key-bindings-window-close")
+                    .w(px(42.0))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(18.0))
+                    .cursor_pointer()
+                    .hover({
+                        let danger = theme.danger;
+                        move |this| this.bg(danger)
+                    })
+                    .child("×")
+                    .on_click(|_, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        window.remove_window();
+                    }),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for KeyBindingsWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(not(target_os = "linux"))]
+        let _ = window;
+
         let theme = ThemeSettings::theme(cx);
         let sections = BINDINGS.iter().map(|(title, bindings)| {
             div()
@@ -163,9 +260,13 @@ impl Render for KeyBindingsWindow {
                 }))
         });
 
-        div()
+        let content = div()
             .font_family(FontSet::UI)
             .size_full()
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
             .bg(theme.app_background)
             .text_color(theme.text_primary)
             .key_context("key-bindings")
@@ -194,6 +295,19 @@ impl Render for KeyBindingsWindow {
                             )
                             .children(sections),
                     ),
-            )
+            );
+
+        #[cfg(target_os = "linux")]
+        {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(self.render_linux_titlebar(window, cx))
+                .child(content);
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        content
     }
 }

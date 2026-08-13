@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use gpui::*;
 
 use crate::{
+    i18n::Localization,
     state::user_settings::{LatexBackendPreference, UserSettings},
     theme::{FontSet, ThemeSettings},
 };
@@ -51,12 +52,14 @@ impl SettingsWindow {
 
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
-                title: Some("Settings".into()),
+                title: Some(Localization::text(cx, "settings.title").into()),
                 ..Default::default()
             }),
             window_bounds: Some(WindowBounds::centered(window_size, cx)),
             window_min_size: Some(window_size),
             is_resizable: false,
+            #[cfg(target_os = "linux")]
+            window_decorations: Some(WindowDecorations::Client),
             focus: true,
             ..Default::default()
         };
@@ -76,6 +79,10 @@ impl SettingsWindow {
             cx.notify();
         })
         .detach();
+        cx.observe_global::<Localization>(|_this, cx| {
+            cx.notify();
+        })
+        .detach();
 
         Self {
             focus_handle: cx.focus_handle(),
@@ -84,7 +91,7 @@ impl SettingsWindow {
 
     fn backend_button(
         &self,
-        label: &'static str,
+        label: String,
         active: bool,
         preference: LatexBackendPreference,
         cx: &mut Context<Self>,
@@ -172,15 +179,19 @@ impl SettingsWindow {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = ThemeSettings::theme(cx);
-        let status = path.map_or(
-            "Not set",
+        let status = path.map_or_else(
+            || Localization::text(cx, "settings.not_set"),
             |path| {
-                if path.is_file() { "Ready" } else { "Missing" }
+                if path.is_file() {
+                    Localization::text(cx, "settings.ready")
+                } else {
+                    Localization::text(cx, "settings.missing")
+                }
             },
         );
         let path_text = path
             .map(|path| compact_path(path))
-            .unwrap_or_else(|| "No binary selected".into());
+            .unwrap_or_else(|| Localization::text(cx, "settings.no_binary"));
 
         div()
             .flex()
@@ -233,7 +244,7 @@ impl SettingsWindow {
                         let hover = theme.row_hover_overlay;
                         move |style| style.bg(hover)
                     })
-                    .child("Choose...")
+                    .child(Localization::text(cx, "settings.choose"))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         window.prevent_default();
                         cx.stop_propagation();
@@ -292,15 +303,81 @@ impl SettingsWindow {
     }
 }
 
+impl SettingsWindow {
+    #[cfg(target_os = "linux")]
+    fn render_linux_titlebar(&self, window: &Window, cx: &Context<Self>) -> AnyElement {
+        let theme = ThemeSettings::theme(cx);
+        let controls = window.window_controls();
+
+        div()
+            .id("settings-titlebar")
+            .h(px(28.0))
+            .flex_none()
+            .flex()
+            .items_center()
+            .bg(theme.navbar_background)
+            .border_b_1()
+            .border_color(theme.navbar_border)
+            .child(
+                div()
+                    .id("settings-titlebar-drag")
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .px(px(10.0))
+                    .text_size(px(12.0))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(Localization::text(cx, "settings.title"))
+                    .on_mouse_down(MouseButton::Left, |_, window, cx| {
+                        cx.stop_propagation();
+                        window.start_window_move();
+                    })
+                    .on_click(move |event, window, cx| {
+                        cx.stop_propagation();
+                        if event.click_count() == 2 && controls.maximize {
+                            window.zoom_window();
+                        }
+                    }),
+            )
+            .child(
+                div()
+                    .id("settings-window-close")
+                    .w(px(42.0))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(18.0))
+                    .cursor_pointer()
+                    .hover({
+                        let danger = theme.danger;
+                        move |this| this.bg(danger)
+                    })
+                    .child("×")
+                    .on_click(|_, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        window.remove_window();
+                    }),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for SettingsWindow {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(not(target_os = "linux"))]
+        let _ = window;
+
         let theme = ThemeSettings::theme(cx);
         let settings = UserSettings::read(cx).clone();
         let use_system = settings.latex_backend == LatexBackendPreference::System;
 
-        div()
+        let content = div()
             .font_family(FontSet::UI)
-            .size_full()
+            .flex_1()
+            .min_h_0()
             .bg(theme.app_background)
             .text_color(theme.text_primary)
             .key_context("settings")
@@ -320,7 +397,7 @@ impl Render for SettingsWindow {
                                 div()
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Updates"),
+                                    .child(Localization::text(cx, "settings.updates")),
                             )
                             .child(
                                 div()
@@ -339,16 +416,19 @@ impl Render for SettingsWindow {
                                                 div()
                                                     .text_size(px(12.0))
                                                     .text_color(theme.text_primary)
-                                                    .child("Automatically check for updates"),
+                                                    .child(Localization::text(
+                                                        cx,
+                                                        "settings.auto_update",
+                                                    )),
                                             )
                                             .child(
                                                 div()
                                                     .text_size(px(10.0))
                                                     .text_color(theme.text_muted)
                                                     .child(if settings.auto_update {
-                                                        "Enabled"
+                                                        Localization::text(cx, "settings.enabled")
                                                     } else {
-                                                        "Disabled"
+                                                        Localization::text(cx, "settings.disabled")
                                                     }),
                                             ),
                                     )
@@ -360,12 +440,16 @@ impl Render for SettingsWindow {
                             .flex()
                             .flex_col()
                             .gap(px(3.0))
-                            .child(div().text_size(px(20.0)).child("Settings"))
+                            .child(
+                                div()
+                                    .text_size(px(20.0))
+                                    .child(Localization::text(cx, "settings.title")),
+                            )
                             .child(
                                 div()
                                     .text_size(px(11.0))
                                     .text_color(theme.text_muted)
-                                    .child("Some settings may require a restart to take effect."),
+                                    .child(Localization::text(cx, "settings.restart_note")),
                             ),
                     )
                     .child(
@@ -377,17 +461,17 @@ impl Render for SettingsWindow {
                                 div()
                                     .text_size(px(12.0))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child("LaTeX backend"),
+                                    .child(Localization::text(cx, "settings.latex_backend")),
                             )
                             .child(div().flex().flex_row().gap(px(8.0)).children([
                                 self.backend_button(
-                                    "Bundled",
+                                    Localization::text(cx, "settings.bundled"),
                                     !use_system,
                                     LatexBackendPreference::Bundled,
                                     cx,
                                 ),
                                 self.backend_button(
-                                    "System latex + dvisvgm",
+                                    Localization::text(cx, "settings.system_latex"),
                                     use_system,
                                     LatexBackendPreference::System,
                                     cx,
@@ -413,7 +497,20 @@ impl Render for SettingsWindow {
                                     )),
                             ),
                     ),
-            )
+            );
+
+        #[cfg(target_os = "linux")]
+        {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(self.render_linux_titlebar(window, cx))
+                .child(content);
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        content
     }
 }
 

@@ -265,10 +265,10 @@ impl Render for TextEditor {
             .flex()
             .flex_col()
             .size_full()
-            .key_context(if self.search.visible {
-                "editor find-panel"
-            } else {
-                "editor"
+            .key_context(match (self.search.visible, self.go_to_line_visible) {
+                (true, _) => "editor find-panel",
+                (false, true) => "editor go-to-line",
+                (false, false) => "editor",
             })
             .track_focus(&self.focus_handle(cx))
             .on_action(cx.listener(Self::backspace))
@@ -305,8 +305,16 @@ impl Render for TextEditor {
             .on_action(cx.listener(Self::copy))
             .on_action(cx.listener(Self::open_find))
             .on_action(cx.listener(Self::close_find))
+            .on_action(cx.listener(Self::open_go_to_line))
+            .on_action(cx.listener(Self::close_go_to_line))
+            .on_action(cx.listener(Self::confirm_go_to_line))
             .on_action(cx.listener(Self::find_next))
             .on_action(cx.listener(Self::find_previous))
+            .on_action(cx.listener(Self::next_diagnostic))
+            .on_action(cx.listener(Self::previous_diagnostic))
+            .on_action(cx.listener(Self::next_slide_header))
+            .on_action(cx.listener(Self::previous_slide_header))
+            .on_action(cx.listener(Self::go_to_definition))
             .on_action(cx.listener(Self::replace_current))
             .on_action(cx.listener(Self::replace_all))
             .child(
@@ -321,6 +329,7 @@ impl Render for TextEditor {
                     .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
                     .on_mouse_move(cx.listener(Self::on_mouse_move))
+                    .on_modifiers_changed(cx.listener(Self::on_modifiers_changed))
                     .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
                     .child(
                         div()
@@ -337,5 +346,6 @@ impl Render for TextEditor {
             )
             .child(PopoverElement::new(cx.entity()))
             .children(self.render_find_panel(cx))
+            .children(self.render_go_to_line_panel(cx))
     }
 }
