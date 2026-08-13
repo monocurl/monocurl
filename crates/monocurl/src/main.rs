@@ -36,6 +36,7 @@ mod actions;
 mod app_menu_bar;
 mod auto_update;
 mod components;
+mod diagnostics;
 mod document_view;
 mod editor;
 mod home_view;
@@ -259,9 +260,7 @@ impl MonocurlLauncher {
 }
 
 fn main() {
-    env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Info)
-        .init();
+    diagnostics::initialize();
 
     let args = env::args_os().skip(1).collect::<Vec<_>>();
     if !args.is_empty() {
