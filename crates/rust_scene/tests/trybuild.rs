@@ -1,4 +1,4 @@
-//! Milestone 3: `#[derive(Operator)]` error-case tests.
+//! `#[derive(Operator)]` / `#[operator]` error-case tests.
 //!
 //! `.stderr` golden files are checked in alongside each fixture (trybuild's
 //! default `compile_fail` behavior requires one). The
@@ -15,4 +15,5 @@ fn derive_operator_error_cases() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/non_keyed_field_without_hold.rs");
     t.compile_fail("tests/ui/name_collision_with_builtin.rs");
+    t.compile_fail("tests/ui/default_argument_rejected.rs");
 }

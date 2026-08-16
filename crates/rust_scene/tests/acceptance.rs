@@ -11,8 +11,6 @@ fn squash(target: MeshValue, factor: f64) -> MeshValue {
 
 #[test]
 fn squash_is_first_class() {
-    use SquashChainExt as _;
-
     let a = circle(1.0).squash(1.0);
     let b = circle(2.0).squash(0.5);
     let mid = a.lerp(&b, 0.5).unwrap(); // rule 3: radius 1.5, factor 0.75

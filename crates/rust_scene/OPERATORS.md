@@ -27,7 +27,7 @@ An operator transforms a mesh (or mesh-tree) and participates in animation:
 use monocurl::prelude::*;
 
 #[operator]
-fn wobble(target: MeshValue, amount: f64, #[default(10.0)] frequency: f64) -> MeshValue {
+fn wobble(target: MeshValue, amount: f64, frequency: f64) -> MeshValue {
     target.map_leaves(|m| m.point_map(|p| p + amount * (frequency * p.x).sin() * U))
 }
 ```
@@ -35,8 +35,7 @@ fn wobble(target: MeshValue, amount: f64, #[default(10.0)] frequency: f64) -> Me
 Usage — indistinguishable from a built-in:
 
 ```rust
-let m = circle(0.35).fill(BLUE.soft()).wobble(0.2);          // default frequency
-let m = circle(0.35).wobble(0.2, 3.0);                        // explicit
+let m = circle(0.35).fill(BLUE.soft()).wobble(0.2, 10.0);
 let mut ball = s.mesh(live! { Circle(radius: 0.35).wobble(amount: 0.2) });
 ball.amount = 0.35;                                           // typed knob
 ```
@@ -47,12 +46,16 @@ Rules:
   not become a slot.
 - Remaining parameters become **typed argument slots**, in order. Each slot
   type must implement `Keyed` (lerpable) — see "Slots and lerping" below.
-- `#[default(expr)]` marks trailing optional parameters. Since Rust has no
-  optional arguments, the generated chaining method comes in the arities that
-  drop defaulted parameters from the right (`wobble(amount)` and
-  `wobble(amount, frequency)` — implemented as one method per arity or via a
-  small generated args-tuple `impl`; pick whichever is simpler, but both
-  spellings above must compile).
+- **No default arguments.** Rust has neither optional parameters nor
+  overloading, and every way of faking them (one trait method per arity, an
+  args-tuple `impl`, a differently-named short function) buys a call spelling
+  at the cost of something un-Rust-like: name ambiguity, stray parentheses, or
+  a second name for the same operation. Every parameter is required and
+  positional. Operators that genuinely want ergonomic defaults use form B's
+  struct-literal entry point, which is the idiomatic Rust answer:
+  `mesh.with(Wobble { amount: 0.2, ..Default::default() })`. `#[default(..)]`
+  on a parameter is rejected at macro-expansion time with a message pointing
+  at that form.
 - The body runs on **every evaluation** (memoized by the retained tree). It
   must be pure with respect to its inputs; document this, do not enforce it.
 
@@ -71,8 +74,8 @@ fn rotate_about(target: MeshValue, angle: f64, pivot: Vec3) -> (MeshValue, MeshV
 }
 ```
 
-`endpoints` changes only the interpolation behavior; chaining, slots, labels,
-and defaults work identically.
+`endpoints` changes only the interpolation behavior; chaining, slots, and
+labels work identically.
 
 ## Authoring form B: `#[derive(Operator)]` on a struct
 
@@ -205,8 +208,7 @@ operator attribute — it is the same code path with `endpoints` replaced by
    Trybuild tests for error cases (non-`Keyed` field without `#[hold]`,
    name collisions with built-in methods → compile error with a clear message).
 4. **`#[operator]` / `#[operator(endpoints)]` fn attribute** desugaring to
-   form B, including `#[default(..)]` arity generation. `#[constructor]`
-   alongside.
+   form B. `#[constructor]` alongside.
 5. **`live!` slot wiring** (only once the `live!` macro itself lands): labeled
    args on chained operator calls resolve to `slot_mut` writes.
 

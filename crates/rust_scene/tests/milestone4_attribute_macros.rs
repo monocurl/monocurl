@@ -1,5 +1,5 @@
 //! Milestone 4: `#[operator]` / `#[operator(endpoints)]` / `#[constructor]`
-//! attribute macros, including `#[default(..)]` arity generation.
+//! attribute macros.
 
 use rust_scene::{Keyed, MeshValue, Shape, Vec3, circle, constructor, operator};
 
@@ -38,25 +38,19 @@ fn operator_endpoints_pop_uses_custom_identity_not_the_operand() {
 }
 
 #[constructor]
-fn ring(radius: f64, #[default(0.1)] thickness: f64) -> MeshValue {
-    // No dedicated "ring" shape in this minimal payload; reuse Circle and
-    // fold `thickness` into the radius so the test can still assert the
-    // default actually got threaded through.
+fn ring(radius: f64, thickness: f64) -> MeshValue {
+    // No dedicated "ring" shape in this minimal payload; reuse Circle and fold
+    // `thickness` into the radius so the test can assert both slots were
+    // threaded through.
     MeshValue::leaf(rust_scene::Leaf::new(Shape::Circle {
         radius: radius + thickness,
     }))
 }
 
 #[test]
-fn constructor_full_arity() {
+fn constructor_takes_all_parameters_positionally() {
     let mesh = ring(1.0, 0.5).evaluate();
     assert_eq!(mesh.as_leaf().unwrap().shape, Shape::Circle { radius: 1.5 });
-}
-
-#[test]
-fn constructor_default_arity_uses_default_expression() {
-    let mesh = ring_defaults(1.0).evaluate();
-    assert_eq!(mesh.as_leaf().unwrap().shape, Shape::Circle { radius: 1.1 });
 }
 
 #[test]
@@ -69,14 +63,12 @@ fn constructor_retains_identity_for_lerp_rule_3() {
     assert_eq!(mid.as_leaf().unwrap().shape, Shape::Circle { radius: 2.3 });
 }
 
-/// `#[default(..)]` arity on an operator: full arity
-/// (`WobbleField::wobble(amount, frequency)`) vs. defaults-dropped arity
-/// (`WobbleFieldDefaultsChainExt::wobble(amount)`). Each is exercised in its
-/// own module so only one of the two chaining traits is ever `use`d into a
-/// scope at a time — see `rust_scene_macros::attr_operator`'s module doc for
-/// why both can't be imported simultaneously in stable Rust.
+/// Multi-parameter operator: every parameter is required and positional, so a
+/// single chaining method covers the whole surface. There is no default-argument
+/// arity — see `rust_scene_macros::attr_operator`'s "No default arguments" note,
+/// and `tests/ui/default_argument_rejected.rs` for the rejection.
 #[operator]
-fn wobble_field(target: MeshValue, amount: f64, #[default(10.0)] frequency: f64) -> MeshValue {
+fn wobble_field(target: MeshValue, amount: f64, frequency: f64) -> MeshValue {
     target.map_leaves(|leaf| match leaf.shape {
         Shape::Circle { radius } => rust_scene::Leaf {
             shape: Shape::Circle {
@@ -87,31 +79,33 @@ fn wobble_field(target: MeshValue, amount: f64, #[default(10.0)] frequency: f64)
     })
 }
 
-// Each submodule imports only the specific items it needs (never `use
-// super::*`, which would glob in *both* chaining traits and reproduce the
-// E0034 ambiguity this split is meant to avoid) plus exactly one of the two
-// `WobbleField*ChainExt` traits.
-mod full_arity {
-    use super::WobbleFieldChainExt;
-    use rust_scene::{Shape, circle};
+#[test]
+fn all_parameters_are_positional() {
+    let mesh = circle(1.0).wobble_field(1.0, 2.0).evaluate();
+    assert_eq!(mesh.as_leaf().unwrap().shape, Shape::Circle { radius: 3.0 });
+}
 
-    #[test]
-    fn explicit_frequency_is_used() {
-        let mesh = circle(1.0).wobble_field(1.0, 2.0).evaluate();
-        assert_eq!(mesh.as_leaf().unwrap().shape, Shape::Circle { radius: 3.0 });
+impl Default for WobbleField {
+    fn default() -> Self {
+        Self {
+            amount: 1.0,
+            frequency: 10.0,
+        }
     }
 }
 
-mod default_arity {
-    use super::WobbleFieldDefaultsChainExt;
-    use rust_scene::{Shape, circle};
-
-    #[test]
-    fn omitted_frequency_uses_default_expression() {
-        let mesh = circle(1.0).wobble_field(1.0).evaluate();
-        assert_eq!(
-            mesh.as_leaf().unwrap().shape,
-            Shape::Circle { radius: 11.0 }
-        );
-    }
+/// The struct-literal entry point is how callers get defaults now: `WobbleField`
+/// is a plain struct, so `..Default::default()` fills whatever is omitted.
+#[test]
+fn struct_literal_with_default_stands_in_for_omitted_args() {
+    let mesh = circle(1.0)
+        .with(WobbleField {
+            amount: 1.0,
+            ..Default::default()
+        })
+        .evaluate();
+    assert_eq!(
+        mesh.as_leaf().unwrap().shape,
+        Shape::Circle { radius: 11.0 }
+    );
 }

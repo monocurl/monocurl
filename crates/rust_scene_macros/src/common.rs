@@ -4,7 +4,7 @@
 
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
-use syn::{Fields, Ident, Type, Visibility};
+use syn::{Attribute, Fields, Ident, Type, Visibility};
 
 use crate::naming::to_snake_case;
 
@@ -277,49 +277,20 @@ pub fn chaining_ext(
     }
 }
 
-/// The "defaults dropped from the right" chaining extension trait: same
-/// method name, only the required (non-defaulted) fields as parameters.
-/// Deliberately a *separate* trait from `chaining_ext`'s — see
-/// `rust_scene_macros::attr_operator` module doc for why arity overloading
-/// under one trait/method name isn't possible in stable Rust, and why callers
-/// must `use` only one of the two traits per scope.
-pub fn chaining_ext_with_defaults(
-    struct_ident: &Ident,
-    trait_ident: &Ident,
-    method_name: &Ident,
-    required: &[FieldSpec],
-    defaulted: &[(FieldSpec, TokenStream)],
-    vis: &Visibility,
-) -> TokenStream {
-    let params: Vec<_> = required
-        .iter()
-        .map(|field| {
-            let ident = &field.ident;
-            let ty = &field.ty;
-            quote! { #ident: #ty }
-        })
-        .collect();
-    let required_inits = required.iter().map(|field| {
-        let ident = &field.ident;
-        quote! { #ident }
-    });
-    let defaulted_inits = defaulted.iter().map(|(field, expr)| {
-        let ident = &field.ident;
-        quote! { #ident: (#expr) }
-    });
-
-    quote! {
-        #vis trait #trait_ident {
-            fn #method_name(self, #(#params),*) -> ::rust_scene::MeshValue;
-        }
-
-        impl #trait_ident for ::rust_scene::MeshValue {
-            fn #method_name(self, #(#params),*) -> ::rust_scene::MeshValue {
-                ::rust_scene::MeshValue::with(self, #struct_ident {
-                    #(#required_inits,)*
-                    #(#defaulted_inits,)*
-                })
-            }
+/// Rejects `#[default(expr)]` on a parameter. Monocurl operators and
+/// constructors have no default arguments; `..Default::default()` in form B's
+/// struct literal is the supported spelling. See `attr_operator`'s module doc.
+pub fn reject_default_attr(attrs: &[Attribute]) -> syn::Result<()> {
+    for attr in attrs {
+        if attr.path().is_ident("default") {
+            return Err(syn::Error::new_spanned(
+                attr,
+                "default arguments are not supported: every operator/constructor \
+                 parameter is required and positional. For defaults, use the \
+                 struct-literal form instead, e.g. \
+                 `mesh.with(Wobble { amount: 0.2, ..Default::default() })`.",
+            ));
         }
     }
+    Ok(())
 }
