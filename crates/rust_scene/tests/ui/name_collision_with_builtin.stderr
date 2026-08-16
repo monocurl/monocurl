@@ -1,0 +1,5 @@
+error: operator/constructor method name `with` conflicts with a built-in `MeshValue` method; rename the struct or function so its snake_case name does not collide
+ --> tests/ui/name_collision_with_builtin.rs:7:8
+  |
+7 | struct With {
+  |        ^^^^

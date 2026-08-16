@@ -1,0 +1,22 @@
+error[E0277]: the trait bound `NotKeyed: Keyed` is not satisfied
+  --> tests/ui/non_keyed_field_without_hold.rs:10:10
+   |
+10 | #[derive(Operator, Clone)]
+   |          ^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `Keyed` is not implemented for `NotKeyed`
+  --> tests/ui/non_keyed_field_without_hold.rs:8:1
+   |
+ 8 | struct NotKeyed;
+   | ^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `Keyed`:
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A,)
+             Color
+             Hold<T>
+             Leaf
+             MeshValue
+           and $N others
+   = note: this error originates in the derive macro `Operator` (in Nightly builds, run with -Z macro-backtrace for more info)

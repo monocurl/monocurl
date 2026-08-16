@@ -70,6 +70,7 @@ tectonic = { version = "0.16.9", default-features = false, features = [
   "geturl-reqwest",
 ] }
 tectonic_bundles = { version = "0.4.1", default-features = false }
+trybuild = "1"
 # keep xetex on the last engine that works with tectonic_xetex_layout 0.2.x;
 # layout 0.3.x conflicts with gpui's fontconfig stack.
 tectonic_engine_xetex = "=0.4.4"
