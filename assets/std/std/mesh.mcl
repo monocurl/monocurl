@@ -685,6 +685,7 @@ let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacin
 ## One-dimensional axis mesh along a basis vector.
 ## [description]
 ## Usually configured through `axis_style{"x", ...}` rather than by manually editing the compact `x_axis` style list.
+## In the style list, the last slot (`arrow_extrusion`) may be `nil` to hide the axis arrowheads, and `label_map` may be `nil` to hide tick labels.
 let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis1d(basis, normal, color, x_axis)
 
@@ -719,7 +720,8 @@ let NumberLine = |min = -5, max = 5, tick_spacing = 1, major_tick_rate = 1, axis
 ## [overview]
 ## Two-dimensional coordinate axes, optionally with grid lines.
 ## [description]
-## `basis` gives the scene-space x/y unit vectors for the graph. Use `grid_color` to draw grid lines; leave it `nil` for ticks only.
+## `basis` gives the scene-space x/y unit vectors for the graph. Use `grid_color` to draw grid lines; leave it `nil` for ticks only. Grid lines are already split into major/minor by each axis's `major_tick_rate`.
+## In each axis style list, set the last slot (`arrow_extrusion`) to `nil` to hide that axis's arrowheads.
 ## [example]
 ## ```mcl image
 ## mesh axes = axis_style{"x", -2, 2, "x"} axis_style{"y", -1, 3, "f(x)"} Axis2d()
