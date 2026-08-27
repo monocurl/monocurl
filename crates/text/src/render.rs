@@ -28,6 +28,12 @@ const SVG_TEXT_UNITS_AT_SCALE_1: f32 = SVG_TEXT_FONT_SIZE * 4.0;
 const SVG_MESH_UNITS_AT_SCALE_1: f32 = 100.0;
 const SVG_TEXT_CANVAS_SIZE: f32 = 100_000.0;
 
+/// SVG units (Typst points, at the 10pt base size set in the Typst preamble)
+/// that map to one scene unit when `scale == 1`. Tuned so `Typst("$x^2$")` comes
+/// out at roughly the same size as `Tex("x^2")` / `Text("x^2")`.
+#[cfg(not(target_arch = "wasm32"))]
+const TYPST_SVG_UNITS_AT_SCALE_1: f32 = 36.0;
+
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
     render_text_with_quality(text, scale, RenderQuality::Normal)
 }
@@ -155,6 +161,49 @@ pub fn render_latex_with_quality(
     quality: RenderQuality,
 ) -> Result<Vec<Arc<Mesh>>> {
     render_latex_with_preamble_and_quality(body, "", scale, quality)
+}
+
+pub fn render_typst(markup: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
+    render_typst_with_quality(markup, scale, RenderQuality::Normal)
+}
+
+/// Render Typst markup to mesh geometry (native/desktop only).
+///
+/// TODO: `\text_tag{...}` fragment tag recovery is not wired up for Typst yet;
+/// the whole snippet renders as untagged contours. Tag it from the outside with
+/// `tag{...}` for now.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn render_typst_with_quality(
+    markup: &str,
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    validate_scale(scale)?;
+    if markup.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let output = cache::render_cached(
+        BackendKind::Typst,
+        LatexBackendConfig::Bundled,
+        markup.to_owned(),
+        scale,
+        quality,
+        |markup| {
+            let svg = crate::typst_backend::render_typst_svg(&markup)?;
+            cache::import_svg(&svg, scale, quality, TYPST_SVG_UNITS_AT_SCALE_1, true)
+        },
+    )?;
+    Ok(output.meshes)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn render_typst_with_quality(
+    _markup: &str,
+    _scale: f32,
+    _quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    bail!("Typst is not supported by the browser text backend; use Tex(...) or Text(...) instead")
 }
 
 pub fn render_latex_with_preamble_and_quality(
@@ -882,6 +931,62 @@ mod tests {
         assert!(render_tex("   ", 1.0).unwrap().is_empty());
         assert!(render_latex("", 1.0).unwrap().is_empty());
         assert!(render_latex("   ", 1.0).unwrap().is_empty());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_empty_inputs_render_to_no_meshes() {
+        assert!(render_typst("", 1.0).unwrap().is_empty());
+        assert!(render_typst("   ", 1.0).unwrap().is_empty());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_hello_has_consistent_topology_and_reasonable_scale() {
+        let typst = render_typst("hello", 1.0).unwrap();
+        assert!(!typst.is_empty());
+
+        let text = render_text("hello", 1.0).unwrap();
+        let (typst_min, typst_max) = mesh_bounds(&typst).unwrap();
+        let (text_min, text_max) = mesh_bounds(&text).unwrap();
+        let typst_size = typst_max - typst_min;
+        let text_size = text_max - text_min;
+
+        let width_ratio = typst_size.x / text_size.x;
+        let height_ratio = typst_size.y.abs() / text_size.y.abs();
+        assert!(
+            (0.3..=3.0).contains(&width_ratio),
+            "typst/text width ratio {width_ratio}"
+        );
+        assert!(
+            (0.3..=3.0).contains(&height_ratio),
+            "typst/text height ratio {height_ratio}"
+        );
+
+        for mesh in typst {
+            assert!(
+                mesh.has_consistent_topology(),
+                "{}",
+                mesh.topology_mismatch_report()
+                    .unwrap_or_else(|| "no mismatch report".into())
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_math_renders_some_geometry() {
+        let meshes = render_typst("$x^2$", 1.0).unwrap();
+        assert!(!meshes.is_empty());
+        let (min, max) = mesh_bounds(&meshes).unwrap();
+        let size = max - min;
+        assert!(size.x > 0.0 && size.y.abs() > 0.0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_invalid_markup_is_an_error() {
+        assert!(render_typst("#panic(\"boom\")", 1.0).is_err());
     }
 
     #[test]

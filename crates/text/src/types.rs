@@ -58,6 +58,10 @@ pub(crate) enum BackendKind {
     Text,
     Tex,
     Latex,
+    // Only constructed on native builds; on wasm the Typst entrypoints bail out
+    // before touching the cache.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    Typst,
 }
 
 impl BackendKind {
@@ -67,6 +71,7 @@ impl BackendKind {
             Self::Text => "text",
             Self::Tex => "tex",
             Self::Latex => "latex",
+            Self::Typst => "typst",
         }
     }
 }

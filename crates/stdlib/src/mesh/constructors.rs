@@ -1223,6 +1223,26 @@ pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
     Ok(mesh_list_value(meshes))
 }
 
+#[cfg(target_arch = "wasm32")]
+#[stdlib_func]
+pub async fn mk_typst(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
+    Err(ExecutorError::invalid_invocation(
+        "Typst(...) is not supported in the WebAssembly runtime yet",
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[stdlib_func]
+pub async fn mk_typst(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let markup = read_string(executor, stack_idx, -2, "content").await?;
+    let scale = read_text_scale(executor, stack_idx, -1, "scale")?;
+    let meshes = text::render_typst_with_quality(&markup, scale, text_render_quality(executor))
+        .map_err(|error| {
+            ExecutorError::invalid_invocation(format!("typst render failed: {error:#}"))
+        })?;
+    Ok(mesh_list_value(meshes))
+}
+
 #[stdlib_func]
 pub async fn mk_latex(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let latex = read_string(executor, stack_idx, -3, "latex").await?;

@@ -419,6 +419,20 @@ let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 let Latex = |latex, scale = 1, additional_preamble = ""| __monocurl__native__ mk_latex(latex, scale, additional_preamble)
 
 ## [overview]
+## Typst markup compiled into mesh geometry.
+## [parameters]
+## content: Typst markup string, such as `"$x^2 + y^2 = z^2$"` or `"= Heading"`
+## scale: text scale in scene units
+## [description]
+## `content` is compiled by the bundled Typst engine and the resulting SVG is converted to mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply. The snippet is wrapped in a preamble that shrink-wraps the page (`auto` size, zero margin, transparent fill) so the geometry is tightly cropped. Bundled fonts cover the Typst defaults (New Computer Modern, Libertinus, DejaVu Sans Mono). Monocurl strings escape with `%`, not `\`, so Typst syntax such as `"$sum_(i=1)^n i$"` can be written directly; use `%%` when the string itself needs a percent character. Fragment-level `text_tag{...}` recovery is not supported yet; apply `tag{...}` outside `Typst` when the whole label should share one identity.
+## Not available in web runtimes yet; use `Text` or `Tex` for browser-compatible rendering.
+## [example]
+## ```
+## mesh eq = Typst("$x^2 + y^2 = z^2$", 0.8)
+## ```
+let Typst = |content, scale = 1| __monocurl__native__ mk_typst(content, scale)
+
+## [overview]
 ## Attach tags to text fragments before they become mesh contours.
 ## [description]
 ## Use text tags for equation transforms and selective coloring inside `Text`, `Tex`, and `Latex`. The tag can be an integer or a list of integers; the wrapper lowers to the LaTeX `\text_tag{...}{...}` marker before rendering. The rendered contours from that fragment then carry the requested tag list, just as if they had been tagged with `tag{...}` after they became meshes. Place `text_tag{...}` inside the text constructor for fragment-level identity. Place `tag{...}` outside the text constructor only when the entire rendered text mesh should share one identity. Raw TeX strings can use `\text_tag{1,2}{...}` or the numbered shorthand `\tag2{...}` directly. Nested text tags are allowed; the innermost tag owns the overlapping contours.
