@@ -107,6 +107,59 @@ fn open_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
     out
 }
 
+/// Build an open polyline that is split into separate contours wherever the
+/// sample list contains a `None` (a domain gap / discontinuity). Contiguous
+/// runs of `Some` points of length >= 2 each become their own contour.
+fn segmented_open_polyline(points: &[Option<Float3>], normal: Float3) -> Vec<geo::mesh::Lin> {
+    let mut out = Vec::with_capacity(points.len().saturating_sub(1));
+    let mut run: Vec<Float3> = Vec::new();
+    for point in points {
+        match point {
+            Some(p) => run.push(*p),
+            None => {
+                if run.len() >= 2 {
+                    push_open_polyline(&mut out, &run, normal);
+                }
+                run.clear();
+            }
+        }
+    }
+    if run.len() >= 2 {
+        push_open_polyline(&mut out, &run, normal);
+    }
+    out
+}
+
+/// Read a scalar `y = f(x)` sample. `nil` or a non-finite number is a domain
+/// gap (`Ok(None)`); a wrong type is still an error.
+fn explicit_sample_y(value: Value, name: &'static str) -> Result<Option<f32>, ExecutorError> {
+    match value.elide_cached_wrappers_rec() {
+        Value::Nil => Ok(None),
+        Value::Integer(v) => Ok(Some(v as f32)),
+        Value::Float(v) => Ok(v.is_finite().then_some(v as f32)),
+        other => Err(ExecutorError::type_error_for(
+            "float or nil",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
+/// Read a 3-D parametric sample. `nil` or any non-finite component is a domain
+/// gap (`Ok(None)`); a non-3-list is still an error.
+fn parametric_sample_point(
+    value: Value,
+    name: &'static str,
+) -> Result<Option<Float3>, ExecutorError> {
+    match value.elide_cached_wrappers_rec() {
+        Value::Nil => Ok(None),
+        other => {
+            let p = float3_from_value(other, name)?;
+            Ok((p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).then_some(p))
+        }
+    }
+}
+
 fn push_subdivided_line(out: &mut Vec<geo::mesh::Lin>, a: Float3, b: Float3, subdivision: usize) {
     let base = out.len();
     for i in 0..subdivision {
@@ -1757,9 +1810,10 @@ pub async fn mk_parametric(
     let values = invoke_callable_many(executor, &f, &args, "f").await?;
     let points = values
         .into_iter()
-        .map(|value| float3_from_value(value, "f"))
+        .map(|value| parametric_sample_point(value, "f"))
         .collect::<Result<Vec<_>, _>>()?;
-    let normal = points
+    let valid: Vec<Float3> = points.iter().filter_map(|p| *p).collect();
+    let normal = valid
         .windows(3)
         .find_map(|w| {
             let cross = (w[1] - w[0]).cross(w[2] - w[1]);
@@ -1768,7 +1822,7 @@ pub async fn mk_parametric(
         .unwrap_or(Float3::Z);
     Ok(mesh_from_parts(
         vec![],
-        open_polyline(&points, normal),
+        segmented_open_polyline(&points, normal),
         vec![],
     ))
 }
@@ -1798,22 +1852,11 @@ pub async fn mk_explicit(
     let values = invoke_callable_many(executor, &f, &args, "f").await?;
     let mut points = Vec::with_capacity(samples);
     for (x, value) in xs.into_iter().zip(values) {
-        let y = match value {
-            Value::Float(v) => v as f32,
-            Value::Integer(v) => v as f32,
-            other => {
-                return Err(ExecutorError::type_error_for(
-                    "float",
-                    other.type_name(),
-                    "f",
-                ));
-            }
-        };
-        points.push(Float3::new(x as f32, y, 0.0));
+        points.push(explicit_sample_y(value, "f")?.map(|y| Float3::new(x as f32, y, 0.0)));
     }
     Ok(mesh_from_parts(
         vec![],
-        open_polyline(&points, Float3::Z),
+        segmented_open_polyline(&points, Float3::Z),
         vec![],
     ))
 }

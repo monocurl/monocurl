@@ -753,7 +753,9 @@ let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1
 ## [overview]
 ## Sample a 3-D parametric curve function.
 ## [description]
-## The function receives `t` and must return a 3-D point. Endpoints are included.
+## The function receives `t` and returns a 3-D point. Endpoints are included. Where `f(t)`
+## returns `nil` or a point with a non-finite component, the curve is split into separate
+## contours rather than jumping across the gap.
 ## [parameters]
 ## t_min_max_samples: `[t_min, t_max, samples]`
 ## endpoint_dots: truthy to append visible `Dot`s at the two curve endpoints
@@ -778,8 +780,9 @@ let ParametricFunc = |f, t_min_max_samples = [0, 1, 64], endpoint_dots = 0| {
 ## (this is `ExplicitFuncDiff(f, |x| 0, ...)` under the hood). Set `endpoint_dots` truthy
 ## to append visible `Dot`s at the two ends. When either is used the result is a mesh list
 ## `[ (fill,) curve (, dots) ]` rather than a bare polyline.
-## `f` must return a number at every sample; for a function with a pole or a hole, restrict
-## the domain to a continuous interval (there is no gap/discontinuity handling yet).
+## Where `f(x)` returns `nil` or a non-finite number (a pole, a hole, a piecewise gap),
+## the curve is split into separate contours instead of drawing a vertical jump. The
+## optional `fill` still assumes a continuous curve.
 ## [parameters]
 ## x_min_max_samples: `[x_min, x_max, samples]`
 ## endpoint_dots: truthy to append visible `Dot`s at the curve endpoints

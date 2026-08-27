@@ -273,6 +273,42 @@ mesh dotted = stroke{CYAN} ExplicitFunc(|x| x*x, [-2, 2, 120], 1)
 `endpoint_dots` truthy → returns `[curve, Dot(f(t_min)), Dot(f(t_max))]`;
 otherwise unchanged (bare polyline).
 
+### Discontinuity / domain-gap handling — native (`graphs.rs`)
+
+`mk_explicit` and `mk_parametric` previously **errored** if the callback returned
+a non-number (or built a polyline with a huge vertical jump across a pole). Now:
+
+- callback returns `nil` → that sample is a **gap**
+- callback returns a non-finite number (`NaN`, `±inf`) — e.g. `sqrt(x*x-1)` where
+  the radicand is negative, `ln(-1)`, `1/(x*x)` blowing up — → that sample is a gap
+- a genuinely wrong type (string, list of the wrong length, mesh) → still an error
+
+At each gap the polyline is **split into a separate contour** (via
+`push_open_polyline` per contiguous run of ≥2 valid samples) instead of drawing a
+vertical line across the discontinuity. The result is still a single mesh; style
+operators, `stroke`, `Write`, etc. treat all contours together.
+
+Native detail: new helpers `explicit_sample_y` / `parametric_sample_point`
+(return `Option`), and `segmented_open_polyline(&[Option<Float3>], normal)`.
+`mk_explicit`/`mk_parametric` build `Vec<Option<Float3>>` and call it.
+
+Zero behaviour change for a callback that returns a finite number at every
+sample (test `test_explicit_func_continuous_unchanged`).
+
+```
+# before: runtime error "expected float, got nil"  (or a spurious vertical line)
+# after:  two clean branches
+mesh hyperbola = stroke{CYAN} ExplicitFunc(
+    |x| { if (abs(x) < 0.02) { return nil }; return 1 / x }, [-3, 3, 300])
+mesh sqrt_gap  = stroke{CYAN} ExplicitFunc(|x| sqrt(x * x - 1), [-3, 3, 300])
+mesh piecewise = stroke{CYAN} ParametricFunc(
+    |t| { if (t > 0.4 and t < 0.6) { return nil }; return [cos(t*TAU), sin(t*TAU), 0] },
+    [0, 1, 200])
+```
+
+`ExplicitFunc`'s `fill` option still assumes a continuous curve
+(`mk_explicit_diff` is unchanged — see skipped).
+
 ---
 
 ## 5. Vector fields
@@ -330,16 +366,18 @@ mesh grid = [
 ## Tests
 
 - `crates/integration_tests/tests/basic_executor_tests/stdlib_primitives.rs`
-  (new, registered in `basic_executor_tests.rs`) — 16 cases: `Angle` rank +
+  (new, registered in `basic_executor_tests.rs`) — 21 cases: `Angle` rank +
   reflex sweep, `RightAngle` square, `Brace` span/bulge/label-pair, `DashedLine`
   splitting (list + scalar `lengths`), `NumberLine` label density,
   `VectorField` arrow count + normalized-vs-true length + `color_at`,
-  `ExplicitFunc` `endpoint_dots` + `fill`, `ParametricFunc` `endpoint_dots`.
+  `ExplicitFunc` `endpoint_dots` + `fill`, `ParametricFunc` `endpoint_dots`,
+  `ExplicitFunc`/`ParametricFunc` gap-splitting (`nil` + non-finite) + a
+  continuity-unchanged regression check.
 - `crates/integration_tests/tests/basic_executor_tests/live_values.rs` —
   `test_axis_style_nil_arrow_extrusion_hides_arrowheads` (native axis change).
 
 Full run: `cargo test -p integration_tests --test basic_executor_tests` →
-**354 passed, 0 failed**.
+**358 passed, 0 failed**; `--test anim_tests` → **117 passed, 0 failed**.
 
 ---
 
@@ -347,10 +385,10 @@ Full run: `cargo test -p integration_tests --test basic_executor_tests` →
 
 Need native changes with wide blast radius; noted for a follow-up branch:
 
-- **Function-plot discontinuity / domain exclusion** — `mk_explicit` /
-  `mk_parametric` error on a non-numeric `f(x)` instead of breaking the polyline.
-  A `nil`/NaN → contour-break needs native work in `graphs.rs`. Today: restrict
-  the domain to a continuous interval.
+- **`ExplicitFuncDiff` / `ExplicitFunc(fill:)` gap handling** — `mk_explicit_diff`
+  still assumes both `f` and `g` are continuous over the domain; a `nil`/NaN
+  column would break its fill-strip run logic. The plain curve from
+  `ExplicitFunc` (no `fill`) does split correctly.
 - **Explicit tick-position list / ticks on both sides / centered ticks** — all in
   `read_axis_style` + `axis_tick_lins` in `graphs.rs`.
 - **`Arrow`/`Vector` tip-ratio / double-headed / tip-style knobs** —

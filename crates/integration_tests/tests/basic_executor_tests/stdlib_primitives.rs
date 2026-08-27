@@ -203,3 +203,60 @@ fn test_parametric_func_endpoint_dots() {
     );
     r.assert_int(3);
 }
+
+#[test]
+fn test_explicit_func_splits_at_nil_samples() {
+    // whole curve = 80 edges; nil-ing out the middle third drops samples and
+    // breaks the polyline, so far fewer edges and no giant jump segment.
+    let r = run_with_stdlib(
+        "
+        let whole = ExplicitFunc(|x| x, [-2, 2, 81])
+        let split = ExplicitFunc(|x| { if ((x * x) < 0.09) { return nil }; return x }, [-2, 2, 81])
+        let we = len(mesh_edge_set(whole))
+        let se = len(mesh_edge_set(split))
+        let result = (we == 80) + (se < 78) + (se > 40) + (mesh_rank(split) == 1)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(4);
+}
+
+#[test]
+fn test_explicit_func_splits_at_non_finite_samples() {
+    let r = run_with_stdlib(
+        "
+        let branches = ExplicitFunc(|x| sqrt(x * x - 1), [-2, 2, 81])
+        let e = len(mesh_edge_set(branches))
+        let result = (e > 20) + (e < 60)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_explicit_func_continuous_unchanged() {
+    let r = run_with_stdlib(
+        "
+        let parabola = ExplicitFunc(|x| x * x, [-2, 2, 41])
+        let result = (len(mesh_edge_set(parabola)) == 40) + (mesh_rank(parabola) == 1)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_parametric_func_splits_at_nil_samples() {
+    let r = run_with_stdlib(
+        "
+        let whole = ParametricFunc(|t| [t, t * t, 0], [0, 1, 51])
+        let split = ParametricFunc(|t| { if ((t > 0.4) and (t < 0.6)) { return nil }; return [t, t * t, 0] }, [0, 1, 51])
+        let we = len(mesh_edge_set(whole))
+        let se = len(mesh_edge_set(split))
+        let result = (we == 50) + (se < 48) + (se > 20)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
