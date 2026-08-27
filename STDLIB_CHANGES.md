@@ -466,7 +466,7 @@ mesh grid = [
 ## Tests
 
 - `crates/integration_tests/tests/basic_executor_tests/stdlib_primitives.rs`
-  (new) — 25 cases: `Angle`/`RightAngle`/`Brace`/`DashedLine`/`NumberLine`
+  (new) — 26 cases: `Angle`/`RightAngle`/`Brace`/`DashedLine`/`NumberLine`
   geometry; `VectorField` arrow count / length modes / `color_at`;
   `ExplicitFunc` `endpoint_dots` + `fill`; `ParametricFunc` `endpoint_dots`;
   `ExplicitFunc`/`ParametricFunc` gap-splitting (`nil` + non-finite) + a
@@ -479,7 +479,7 @@ mesh grid = [
   `test_axis_style_explicit_tick_positions`,
   `test_axis_style_explicit_ticks_place_labels_at_requested_values`.
 
-Full run: `--test basic_executor_tests` → **365 passed, 0 failed**;
+Full run: `--test basic_executor_tests` → **366 passed, 0 failed**;
 `--test anim_tests` → **117 passed, 0 failed**.
 
 ---
