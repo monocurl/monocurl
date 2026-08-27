@@ -1273,6 +1273,22 @@ fn test_axis_style_arrow_extrusion_controls_bounds() {
 }
 
 #[test]
+fn test_axis_style_nil_arrow_extrusion_hides_arrowheads() {
+    let r = run_with_stdlib(
+        "
+        let arrowed = Axis2d([1r, 1u], [0, 0, 0, 1], nil, [-2, 2, nil, 1, 0, nil, 0.2], [-2, 2, nil, 1, 0, nil, 0.2])
+        let bare = Axis2d([1r, 1u], [0, 0, 0, 1], nil, [-2, 2, nil, 1, 0, nil, nil], [-2, 2, nil, 1, 0, nil, nil])
+        let result =
+            (len(arrowed) > len(bare)) +
+            (mesh_right(arrowed)[0] > 2.05) +
+            (mesh_right(bare)[0] < 2.05)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
 fn test_axis_style_rejects_negative_arrow_extrusion() {
     let r = run_with_stdlib(
         "

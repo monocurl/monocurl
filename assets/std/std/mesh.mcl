@@ -455,6 +455,46 @@ let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 
     return __monocurl__native__ mk_field(x_min, x_max, y_min, y_max, x_samples, y_samples, mask, mesh_at)
 }
 
+## [options]
+## important: true
+## [overview]
+## Arrow vector field: an arrow at each grid point for the vector `f(pos)`, with a
+## length-normalisation mode and an optional colour-by-magnitude callback.
+## [description]
+## Thin wrapper over `Field` + `Arrow`. `mode` controls arrow length:
+## `"true"` draws the raw vector; `"normalized"` (default) draws every arrow at length
+## `length`; `"clamped"` draws the true direction with length capped at `length`.
+## `color_at` receives `(pos, magnitude)` and returns an RGBA colour; leave it `nil` to
+## keep the default arrow colour. `mask` receives `pos`.
+## [parameters]
+## f: function from a 3-D position to a 3-D vector
+## x_min_max_samples: `[x_min, x_max, samples]`
+## y_min_max_samples: `[y_min, y_max, samples]`
+## mode: `"true"`, `"normalized"`, or `"clamped"`
+## length: arrow length (`"normalized"`) or maximum length (`"clamped"`); ignored for `"true"`
+## color_at: optional `(pos, magnitude) -> RGBA` callback
+## mask: optional `pos -> truthy` filter
+## [example]
+## ```
+## mesh field = VectorField(|p| [-p[1], p[0], 0], [-2, 2, 13], [-2, 2, 13], "normalized", 0.18, |p, mag| [mag / 3, 0.4, 0.9, 1])
+## ```
+let VectorField = |f, x_min_max_samples = [-1, 1, 11], y_min_max_samples = [-1, 1, 11], mode = "normalized", length = 0.15, color_at = nil, mask = |pos| 1| {
+    let arrow_at = |p, idx| {
+        let v = f(p)
+        let mag = __monocurl__native__ sqrt(__monocurl__native__ dot(v, v))
+        var delta = v
+        if (mode == "normalized") {
+            if (mag > 0.000000001) { delta = v * (length / mag) } else { delta = [0, 0, 0] }
+        } else if (mode == "clamped") {
+            if (mag > length) { delta = v * (length / mag) }
+        }
+        let arrow = __monocurl__native__ mk_arrow(p, p + delta, 1b, 0)
+        if (__monocurl__native__ is_nil(color_at)) { return arrow }
+        return __monocurl__native__ op_recolor(arrow, color_at(p, mag), nil, 1)
+    }
+    return Field(arrow_at, x_min_max_samples, y_min_max_samples, mask)
+}
+
 # text / labels
 
 ## [options]
@@ -714,13 +754,16 @@ let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1
 ## The function receives `t` and must return a 3-D point. Endpoints are included.
 ## [parameters]
 ## t_min_max_samples: `[t_min, t_max, samples]`
+## endpoint_dots: truthy to append visible `Dot`s at the two curve endpoints
 ## [example]
 ## ```
 ## mesh spiral = stroke{CYAN} ParametricFunc(|t| [cos(t), sin(t), t / TAU], [0, TAU * 3, 180])
 ## ```
-let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
+let ParametricFunc = |f, t_min_max_samples = [0, 1, 64], endpoint_dots = 0| {
     let [min, max, samples] = __monocurl__native__ expect_list("t_min_max_samples", t_min_max_samples, 3)
-    return __monocurl__native__ mk_parametric(f, min, max, samples)
+    let curve = __monocurl__native__ mk_parametric(f, min, max, samples)
+    if (not endpoint_dots) { return curve }
+    return [curve, __monocurl__native__ mk_dot(f(min)), __monocurl__native__ mk_dot(f(max))]
 }
 
 ## [options]
@@ -729,13 +772,37 @@ let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
 ## Sample y = f(x) as a polyline in the XY plane.
 ## [description]
 ## Endpoints are included. Use `in_space{...}` to embed the graph into a custom axes coordinate system.
+## Set `fill` to an RGBA colour to also shade the area between the curve and the x axis
+## (this is `ExplicitFuncDiff(f, |x| 0, ...)` under the hood). Set `endpoint_dots` truthy
+## to append visible `Dot`s at the two ends. When either is used the result is a mesh list
+## `[ (fill,) curve (, dots) ]` rather than a bare polyline.
+## `f` must return a number at every sample; for a function with a pole or a hole, restrict
+## the domain to a continuous interval (there is no gap/discontinuity handling yet).
+## [parameters]
+## x_min_max_samples: `[x_min, x_max, samples]`
+## endpoint_dots: truthy to append visible `Dot`s at the curve endpoints
+## fill: optional RGBA colour to shade the area between the curve and the x axis
 ## [example]
 ## ```mcl image
 ## mesh graph = stroke{CYAN} ExplicitFunc(|x| sin(x), [-PI, PI, 160])
+## mesh shaded = stroke{CYAN} ExplicitFunc(|x| sin(x), [0, PI, 160], 0, [0.2, 0.6, 0.9, 0.4])
 ## ```
-let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128]| {
+let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128], endpoint_dots = 0, fill = nil| {
     let [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
-    return __monocurl__native__ mk_explicit(f, min, max, samples)
+    let curve = __monocurl__native__ mk_explicit(f, min, max, samples)
+    if (__monocurl__native__ is_nil(fill) and not endpoint_dots) { return curve }
+    var parts = []
+    if (not __monocurl__native__ is_nil(fill)) {
+        for (region in __monocurl__native__ mk_explicit_diff(f, (|x| 0), min, max, samples, fill, fill, [], [])) {
+            parts .= region
+        }
+    }
+    parts .= curve
+    if (endpoint_dots) {
+        parts .= __monocurl__native__ mk_dot([min, f(min), 0])
+        parts .= __monocurl__native__ mk_dot([max, f(max), 0])
+    }
+    return parts
 }
 
 ## [overview]

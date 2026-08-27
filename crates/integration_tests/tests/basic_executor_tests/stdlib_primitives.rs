@@ -125,3 +125,81 @@ fn test_number_line_nil_label_map_drops_labels() {
     );
     r.assert_int(1);
 }
+
+#[test]
+fn test_vector_field_draws_one_arrow_per_grid_point() {
+    let r = run_with_stdlib(
+        "
+        let field = VectorField(|p| [0 - p[1], p[0], 0], [-1, 1, 3], [-1, 1, 3], \"normalized\", 0.2)
+        let result = len(field)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(9);
+}
+
+#[test]
+fn test_vector_field_normalized_mode_makes_equal_length_arrows() {
+    // all arrows point +x (magnitude varies 3..9), so normalized width should be ~constant
+    let r = run_with_stdlib(
+        "
+        let norm_field = VectorField(|p| [(p[0] + 2) * 3, 0, 0], [-1, 1, 3], [-1, 1, 3], \"normalized\", 0.2)
+        let true_field = VectorField(|p| [(p[0] + 2) * 3, 0, 0], [-1, 1, 3], [-1, 1, 3], \"true\")
+        let nw = map(norm_field, |a| mesh_width(a))
+        let tw = map(true_field, |a| mesh_width(a))
+        let result = ((max_of(nw) - min_of(nw)) < 0.03) + ((max_of(tw) - min_of(tw)) > 0.1)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_vector_field_color_at_recolors_arrows() {
+    let r = run_with_stdlib(
+        "
+        let field = VectorField(|p| [1, 0, 0], [-1, 1, 2], [-1, 1, 2], \"true\", 1, |p, mag| [1, 0, 0, 1])
+        let result = mesh_rank(field[0]) >= 1
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_explicit_func_endpoint_dots_append_dots() {
+    let r = run_with_stdlib(
+        "
+        let plain = ExplicitFunc(|x| x * x, [-1, 1, 21])
+        let dotted = ExplicitFunc(|x| x * x, [-1, 1, 21], 1)
+        let result = (mesh_rank(plain) == 1) + (len(dotted) == 3) + (mesh_rank(dotted[1]) == 0)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_explicit_func_fill_adds_shaded_region() {
+    let r = run_with_stdlib(
+        "
+        let shaded = ExplicitFunc(|x| 1, [0, 2, 21], 0, [0.2, 0.6, 0.9, 0.4])
+        let ranks = map(shaded, |m| mesh_rank(m))
+        let result = (len(shaded) == 4) + (2 in ranks) + (1 in ranks)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_parametric_func_endpoint_dots() {
+    let r = run_with_stdlib(
+        "
+        let curve = ParametricFunc(|t| [t, t, 0], [0, 1, 16], 1)
+        let result = (len(curve) == 3) + (mesh_rank(curve[1]) == 0) + (mesh_rank(curve[2]) == 0)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
