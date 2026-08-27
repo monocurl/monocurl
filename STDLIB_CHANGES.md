@@ -157,23 +157,30 @@ mesh guide = stroke{LIGHT_GRAY} DashedLine(1.5l, 1.5r, [0.15, 0.08])
 
 ### Hide axis arrowheads — `arrow_extrusion = nil` (native, `graphs.rs`)
 
-Status: compiles, `cargo test -p integration_tests --test basic_executor_tests`
-green (incl. `test_axis_style_nil_arrow_extrusion_hides_arrowheads`).
-
 `Axis1d` / `Axis2d` / `Axis3d` always drew an arrowhead at each end of every
 axis; there was no way to turn them off. Now the `arrow_extrusion` slot of an
-axis style list (position 7, i.e. the last) accepts `nil`, mirroring the
-existing `label_map = nil` convention:
+axis style list (position 7, i.e. the last):
 
 - `nil` → no arrowheads; the axis title and bounds sit exactly at `range.max`.
-- a number (default `0.2`) → unchanged: arrowhead of that extrusion length.
+- a number (default `0.2`, `0` allowed) → unchanged: arrowhead of that
+  extrusion length (`0` = arrowhead flush with the axis end).
 
 Old signature (unchanged shape): style list
 `[min, max, (axis_title,) tick_spacing, major_tick_rate, label_map, arrow_extrusion]`.
 
 Native: `AxisStyle` gains a `draw_arrows: bool` field (default `true`);
-`read_axis_style` sets it `false` + `arrow_extrusion = 0.0` when the slot is
-`Value::Nil`; `push_axis_arrows` takes a `draw_arrows` argument and early-returns.
+`read_axis_style` sets it `false` when the slot is `Value::Nil`;
+`push_axis_arrows` takes a `draw_arrows` argument and early-returns.
+
+**Animating arrowheads in/out:** `lerp` errors on `lerp(nil, number)` and on any
+*unlabeled* `axis_style` argument that differs between the two endpoints, so
+animate a **labeled numeric** `arrow_extrusion` between a tiny value and the
+target — the arrows grow out as it goes:
+`axis_style{"x", -2, 2, nil, 0.25, 4, nil, arrow_extrusion: 0.01}` →
+`... arrow_extrusion: 0.4`.
+(`test_axis_style_arrow_extrusion_interpolates`.) Fully hiding→showing (`nil ↔
+number`) in one animation still isn't expressible; that needs runtime lerp
+support for `nil`.
 
 ```
 # before: arrowheads always present
@@ -183,9 +190,31 @@ mesh axes = axis_style{"x", 0, 4, "x", 0.25, 4, |x| x, nil}
             axis_style{"y", 0, 3, "y", 0.25, 4, |x| x, nil} Axis2d()
 ```
 
-Known limitation: animating between an arrow-less style (`nil` slot) and an
-arrowed one via `axis_style` may hit an interpolation error on the `nil ↔ number`
-slot. Static use is fine.
+### Explicit axis tick positions — native (`graphs.rs`)
+
+The `tick_spacing` slot of an axis style list may now be **a list of exact tick
+positions** instead of a uniform step:
+
+- a number → uniform ticks every `n` units (unchanged).
+- a list `[x0, x1, ...]` → a tick at each listed position, each drawn as a
+  **major** tick (and labelled, subject to `label_map`). Positions outside the
+  axis range are dropped. `major_tick_rate` is ignored in this mode.
+
+Works for `Axis1d` / `Axis2d` / `Axis3d` per-axis, via `axis_style` or a raw
+style list, and via `NumberLine`. Native: `AxisStyle` gains
+`explicit_ticks: Vec<f32>` plus `ticks()` / `tick_budget()` helpers; the three
+`mk_axis*` functions call those instead of `axis_tick_values` / `tick_count`
+directly. Zero change when `tick_spacing` is a number
+(`test_axis_style_explicit_tick_positions`,
+`test_axis_style_explicit_ticks_place_labels_at_requested_values`).
+
+```
+# before: only uniform spacing
+mesh ax = axis_style{"x", 0, 10, "t", 2} Axis2d()
+# after: label exactly the interesting points
+mesh ax = axis_style{"x", -1, 5, "t", [-1, 0, 1, 2.5, 5]} Axis2d()
+mesh nl = NumberLine(0, 7, [0, 3.5, 7], 1, nil, |x| Number(x, 1))
+```
 
 ### `NumberLine` — NEW
 
@@ -389,8 +418,9 @@ Need native changes with wide blast radius; noted for a follow-up branch:
   still assumes both `f` and `g` are continuous over the domain; a `nil`/NaN
   column would break its fill-strip run logic. The plain curve from
   `ExplicitFunc` (no `fill`) does split correctly.
-- **Explicit tick-position list / ticks on both sides / centered ticks** — all in
-  `read_axis_style` + `axis_tick_lins` in `graphs.rs`.
+- **One-sided ticks** — axis ticks are drawn symmetric about the axis line
+  (`axis_tick_lins` builds `p ± side*extend`). A "ticks only below the axis"
+  option would add a style slot + a branch there; not done.
 - **`Arrow`/`Vector` tip-ratio / double-headed / tip-style knobs** —
   `VectorLikeStyle` and the head geometry are hard-coded in
   `constructors.rs::vector_like_mesh`; exposing ratios means threading a style

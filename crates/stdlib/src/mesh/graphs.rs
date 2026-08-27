@@ -220,6 +220,10 @@ struct AxisStyle {
     /// draw the arrowheads at both ends of the axis. `false` when the style
     /// list's `arrow_extrusion` slot is `nil`.
     draw_arrows: bool,
+    /// explicit tick positions in axis coordinates. Empty = uniform ticks from
+    /// `range.tick_step`. Set when the `tick_spacing` slot is a list. Every
+    /// listed position is drawn as a major tick.
+    explicit_ticks: Vec<f32>,
 }
 
 impl AxisStyle {
@@ -231,6 +235,26 @@ impl AxisStyle {
             label_map: AxisLabelMap::DefaultFormat,
             arrow_extrusion: AXIS_BUFFER,
             draw_arrows: true,
+            explicit_ticks: Vec::new(),
+        }
+    }
+
+    /// Tick `(index, value)` pairs for this style — either the explicit list
+    /// (all major) or uniform ticks from `range`.
+    fn ticks(&self) -> Vec<(i64, f32)> {
+        if self.explicit_ticks.is_empty() {
+            axis_tick_values(self.range.min, self.range.max, self.range.tick_step)
+        } else {
+            self.explicit_ticks.iter().map(|&v| (0_i64, v)).collect()
+        }
+    }
+
+    /// Upper bound on how many ticks this style produces, for limit checks.
+    fn tick_budget(&self) -> usize {
+        if self.explicit_ticks.is_empty() {
+            tick_count(self.range.min, self.range.max, self.range.tick_step)
+        } else {
+            self.explicit_ticks.len()
         }
     }
 }
@@ -321,9 +345,11 @@ fn axis_title_from_value(
 }
 
 fn axis_style_third_arg_is_title(value: Value) -> bool {
+    // a number (tick_spacing) or a list (explicit tick positions) in slot 3 means
+    // there is no axis title
     !matches!(
         value.elide_cached_wrappers_rec(),
-        Value::Integer(_) | Value::Float(_)
+        Value::Integer(_) | Value::Float(_) | Value::List(_)
     )
 }
 
@@ -355,6 +381,7 @@ fn read_axis_style(
             let mut label_map = AxisLabelMap::DefaultFormat;
             let mut arrow_extrusion = AXIS_BUFFER;
             let mut draw_arrows = true;
+            let mut explicit_ticks: Vec<f32> = Vec::new();
             let range = match elements.len() {
                 1 => {
                     let radius = axis_number_from_value(
@@ -391,10 +418,24 @@ fn read_axis_style(
                         2
                     };
                     let tick_step = if elements.len() > tick_step_index {
-                        axis_number_from_value(
-                            with_heap(|h| h.get(elements[tick_step_index].key()).clone()),
-                            "tick_spacing",
-                        )?
+                        let raw = with_heap(|h| {
+                            h.get(elements[tick_step_index].key()).clone()
+                        });
+                        match raw.clone().elide_cached_wrappers_rec() {
+                            Value::List(list) => {
+                                for key in list.elements() {
+                                    let v = axis_number_from_value(
+                                        with_heap(|h| h.get(key.key()).clone()),
+                                        "tick_spacing",
+                                    )?;
+                                    if v.is_finite() {
+                                        explicit_ticks.push(v);
+                                    }
+                                }
+                                DEFAULT_AXIS_TICK_STEP
+                            }
+                            _ => axis_number_from_value(raw, "tick_spacing")?,
+                        }
                     } else {
                         DEFAULT_AXIS_TICK_STEP
                     };
@@ -431,6 +472,10 @@ fn read_axis_style(
                 }
             };
 
+            // keep only explicit ticks that fall inside the axis range
+            let eps = (range.max - range.min).abs() * 1e-4 + 1e-6;
+            explicit_ticks.retain(|&v| v >= range.min - eps && v <= range.max + eps);
+
             Ok(AxisStyle {
                 range,
                 title,
@@ -438,6 +483,7 @@ fn read_axis_style(
                 label_map,
                 arrow_extrusion,
                 draw_arrows,
+                explicit_ticks,
             })
         }
         other => Err(ExecutorError::type_error_for(
@@ -1224,7 +1270,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let style = read_axis_style(executor, stack_idx, -1, "x_axis")?;
     ensure_limit(
         "axis ticks",
-        tick_count(style.range.min, style.range.max, style.range.tick_step),
+        style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     let tick_dir = {
@@ -1235,7 +1281,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             polygon_basis(axis_dir).1
         }
     };
-    let ticks = axis_tick_values(style.range.min, style.range.max, style.range.tick_step);
+    let ticks = style.ticks();
     let mut axis_meshes = Vec::new();
     let (small_ticks, large_ticks) = axis_tick_lins(
         &ticks,
@@ -1296,20 +1342,12 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let grid_color = read_optional_color(executor, stack_idx, -1, "grid_color").await?;
     ensure_limit(
         "axis x ticks",
-        tick_count(
-            x_style.range.min,
-            x_style.range.max,
-            x_style.range.tick_step,
-        ),
+        x_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis y ticks",
-        tick_count(
-            y_style.range.min,
-            y_style.range.max,
-            y_style.range.tick_step,
-        ),
+        y_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     let x_dir = x_axis.normalize();
@@ -1322,16 +1360,8 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         });
     }
     let normal = normal.normalize();
-    let x_ticks = axis_tick_values(
-        x_style.range.min,
-        x_style.range.max,
-        x_style.range.tick_step,
-    );
-    let y_ticks = axis_tick_values(
-        y_style.range.min,
-        y_style.range.max,
-        y_style.range.tick_step,
-    );
+    let x_ticks = x_style.ticks();
+    let y_ticks = y_style.ticks();
     let mut axis_meshes = Vec::new();
     if let Some(grid_color) = grid_color {
         let (small_x, large_x) = axis_grid_lins(
@@ -1473,29 +1503,17 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let grid_color = read_optional_color(executor, stack_idx, -1, "grid_color").await?;
     ensure_limit(
         "axis x ticks",
-        tick_count(
-            x_style.range.min,
-            x_style.range.max,
-            x_style.range.tick_step,
-        ),
+        x_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis y ticks",
-        tick_count(
-            y_style.range.min,
-            y_style.range.max,
-            y_style.range.tick_step,
-        ),
+        y_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis z ticks",
-        tick_count(
-            z_style.range.min,
-            z_style.range.max,
-            z_style.range.tick_step,
-        ),
+        z_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     let x_dir = x_axis.normalize();
@@ -1514,21 +1532,9 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let xz_normal = y_dir;
     let yz_normal = normalize_or(y_dir.cross(z_dir), x_dir);
     let z_normal = normalize_or(x_dir.cross(z_dir), xy_normal);
-    let x_ticks = axis_tick_values(
-        x_style.range.min,
-        x_style.range.max,
-        x_style.range.tick_step,
-    );
-    let y_ticks = axis_tick_values(
-        y_style.range.min,
-        y_style.range.max,
-        y_style.range.tick_step,
-    );
-    let z_ticks = axis_tick_values(
-        z_style.range.min,
-        z_style.range.max,
-        z_style.range.tick_step,
-    );
+    let x_ticks = x_style.ticks();
+    let y_ticks = y_style.ticks();
+    let z_ticks = z_style.ticks();
     let mut axis_meshes = Vec::new();
     if let Some(grid_color) = grid_color {
         let (small_x_xy, large_x_xy) = axis_grid_lins(

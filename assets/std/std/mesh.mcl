@@ -663,8 +663,8 @@ let Number = |value, decimal_places = nil, include_sign = 0, font = nil|
 ## This is a configuration operator; compose it before `Axis1d`, `Axis2d`, or `Axis3d`. It uses `set_default` internally, so axis settings interpolate cleanly when the axis is animated.
 ## [parameters]
 ## axis: "x", "y", or "z"
-## tick_spacing: distance between ticks in axis coordinates
-## major_tick_rate: every nth tick is drawn/labelled as major
+## tick_spacing: distance between ticks in axis coordinates, or a list of exact tick positions (each drawn as a major tick, clipped to the axis range)
+## major_tick_rate: every nth tick is drawn/labelled as major (ignored when `tick_spacing` is an explicit list)
 ## label_map: function from value to tick label
 ## arrow_extrusion: arrowhead length in scene units, or `nil` to hide the axis arrowheads entirely
 ## [example]
@@ -685,7 +685,7 @@ let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacin
 ## One-dimensional axis mesh along a basis vector.
 ## [description]
 ## Usually configured through `axis_style{"x", ...}` rather than by manually editing the compact `x_axis` style list.
-## In the style list, the last slot (`arrow_extrusion`) may be `nil` to hide the axis arrowheads, and `label_map` may be `nil` to hide tick labels.
+## In the style list, `tick_spacing` may be a list of exact tick positions instead of a step, the last slot (`arrow_extrusion`) may be `nil` to hide the axis arrowheads, and `label_map` may be `nil` to hide tick labels.
 let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis1d(basis, normal, color, x_axis)
 
@@ -701,7 +701,7 @@ let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, ni
 ## [parameters]
 ## min: left end of the line in axis coordinates
 ## max: right end of the line in axis coordinates
-## tick_spacing: distance between ticks in axis coordinates
+## tick_spacing: distance between ticks, or a list of exact tick positions
 ## major_tick_rate: every nth tick is drawn/labelled as major
 ## axis_title: optional title placed past the positive end
 ## label_map: `nil` for no labels, or a function from value to tick label
@@ -711,6 +711,7 @@ let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, ni
 ## ```
 ## mesh line = NumberLine(0, 10, 1)
 ## mesh half = NumberLine(-2, 2, 0.5, 2, "x", |x| Number(x, 1))
+## mesh named = NumberLine(0, 7, [0, 3.5, 7], 1, nil, |x| Number(x, 1))
 ## ```
 let NumberLine = |min = -5, max = 5, tick_spacing = 1, major_tick_rate = 1, axis_title = nil, label_map = (|x| x), basis = 1r, color = [0, 0, 0, 1]|
     __monocurl__native__ mk_axis1d(basis, 1b, color, [min, max, axis_title, tick_spacing, major_tick_rate, label_map, 0.2])

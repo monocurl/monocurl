@@ -1289,6 +1289,55 @@ fn test_axis_style_nil_arrow_extrusion_hides_arrowheads() {
 }
 
 #[test]
+fn test_axis_style_arrow_extrusion_interpolates() {
+    // animating a labeled numeric arrow_extrusion must not error and grows the
+    // arrows out as it goes.
+    let r = run_with_stdlib(
+        "
+        let small = axis_style{\"x\", -2, 2, nil, 0.25, 4, nil, arrow_extrusion: 0.01} Axis1d()
+        let big = axis_style{\"x\", -2, 2, nil, 0.25, 4, nil, arrow_extrusion: 0.4} Axis1d()
+        let mid = lerp(small, big, 0.5)
+        let result =
+            (mesh_right(mid)[0] > mesh_right(small)[0]) +
+            (mesh_right(mid)[0] < mesh_right(big)[0])
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_axis_style_explicit_tick_positions() {
+    // an explicit tick list draws exactly those ticks (all major) instead of a
+    // uniform sweep; out-of-range entries (999) are dropped.
+    let r = run_with_stdlib(
+        "
+        let uniform = Axis1d(1r, 1b, [0, 0, 0, 1], [-10, 10, nil, 1, 1, nil, 0.2])
+        let explicit = Axis1d(1r, 1b, [0, 0, 0, 1], [-10, 10, nil, [0, 3, 7, 999], 1, nil, 0.2])
+        # each tick is one line segment; uniform has 21, explicit has 3 (999 dropped)
+        let result = (len(mesh_edge_set(uniform)) - len(mesh_edge_set(explicit))) == 18
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_axis_style_explicit_ticks_place_labels_at_requested_values() {
+    let r = run_with_stdlib(
+        "
+        let axis = Axis1d(1r, 1b, [0, 0, 0, 1], [-5, 5, nil, [-3, 4], 1, (|x| x), 0])
+        let n = len(axis)
+        let x0 = mesh_center(axis[n - 2])[0]
+        let x1 = mesh_center(axis[n - 1])[0]
+        let result = (abs(x0 + 3) < 0.5) + (abs(x1 - 4) < 0.5)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
 fn test_axis_style_rejects_negative_arrow_extrusion() {
     let r = run_with_stdlib(
         "
