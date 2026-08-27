@@ -197,8 +197,9 @@ let Angle = |vertex, a, b, radius = 0.4, samples = 32, reflex = 0| {
     let tau = 6.2831853071795864
     var sweep = raw - tau * __monocurl__native__ floor(raw / tau)
     if (sweep > 3.1415926535897932) { sweep = sweep - tau }
-    if (reflex and sweep >= 0) { sweep = sweep - tau }
-    if (reflex and sweep < 0) { sweep = sweep + tau }
+    if (reflex) {
+        if (sweep >= 0) { sweep = sweep - tau } else { sweep = sweep + tau }
+    }
     let n = __monocurl__native__ max(2, samples)
     var pts = []
     for (i in __monocurl__native__ range(0, n + 1, 1)) {
