@@ -11,9 +11,16 @@ axis arrowheads be turned off. No signature or behaviour changes to any existing
 constructor or operator, so every existing scene keeps working byte-for-byte
 (the axis change is opt-in via `nil`).
 
-Everything added is built by composing constructors/operators that already
-exist natively (`mk_polyline`, `mk_arc`, `mk_line`, `op_dashed`, `mk_label`,
-`mk_axis1d`), so there is no new native surface to maintain.
+Almost everything added is pure `.mcl` composing constructors/operators that
+already exist natively (`mk_polyline`, `mk_line`, `op_dashed`, `mk_label`,
+`mk_axis1d`, `mk_arrow`, `mk_field`, `mk_explicit_diff`, `mk_dot`), so there is
+no new native surface to maintain. The one native change is the axis
+arrowhead toggle in §3.
+
+Quick index of what's new: `Angle`, `RightAngle`, `Brace`, `DashedLine`,
+`NumberLine`, `VectorField` (new constructors); `ExplicitFunc` gains
+`endpoint_dots` + `fill`; `ParametricFunc` gains `endpoint_dots`; axis style
+lists accept `arrow_extrusion = nil` to hide arrowheads.
 
 ---
 
@@ -148,11 +155,10 @@ mesh guide = stroke{LIGHT_GRAY} DashedLine(1.5l, 1.5r, [0.15, 0.08])
 
 ## 3. Axes
 
-### Hide axis arrowheads — `arrow_extrusion = nil` (native, `graphs.rs`) — UNVERIFIED
+### Hide axis arrowheads — `arrow_extrusion = nil` (native, `graphs.rs`)
 
-> Status: code written, **not yet compiled/tested** (build paused for usage
-> budget). First resume step is `cargo check -p stdlib` + a unit test. See
-> `RESUME.md`.
+Status: compiles, `cargo test -p integration_tests --test basic_executor_tests`
+green (incl. `test_axis_style_nil_arrow_extrusion_hides_arrowheads`).
 
 `Axis1d` / `Axis2d` / `Axis3d` always drew an arrowhead at each end of every
 axis; there was no way to turn them off. Now the `arrow_extrusion` slot of an
@@ -217,28 +223,145 @@ mesh half = NumberLine(-2, 2, 0.5, 2, "x", |x| Number(x, 1))
 mesh bare = NumberLine(0, 10, 1, 1, nil, nil)   # ruler, no numbers
 ```
 
+### Tick-label number formatting — already supported, now documented
+
+No code change. `axis_style`'s `label_map` (and `NumberLine`'s) already accepts
+any `|value| ...` callable, so fixed-decimal / `Number`-style tick text is:
+
+```
+mesh axes = axis_style{"x", 0, 1, "p", 0.1, 2, |x| Number(x, 2)} Axis2d()
+mesh line = NumberLine(0, 1, 0.1, 2, nil, |x| Number(x, 2))
+```
+
+---
+
+## 4. Function plots
+
+### `ExplicitFunc` — `endpoint_dots` + `fill` (NEW optional args)
+
+```
+# before:
+let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128]| ...
+# after:
+let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128], endpoint_dots = 0, fill = nil| ...
+```
+
+| new arg | default | meaning |
+|---------|---------|---------|
+| `endpoint_dots` | `0` | truthy → append two visible `Dot`s at `(min, f(min))` and `(max, f(max))` |
+| `fill` | `nil` | RGBA colour → also shade the area between the curve and the x axis (delegates to `mk_explicit_diff(f, |x| 0, ...)`) |
+
+Behaviour: **unchanged** when both are falsy/`nil` — returns the bare polyline.
+When either is set the result is a flat mesh list:
+`[ <fill pos region>, <fill neg region>, <fill outline>, curve, <dot>, <dot> ]`
+(fill parts only if `fill`, dots only if `endpoint_dots`). `f` still must return
+a number at every sample — no discontinuity/pole handling (see skipped).
+
+```
+# after:
+mesh shaded = stroke{CYAN} ExplicitFunc(|x| sin(x), [0, PI, 160], 0, [0.2, 0.6, 0.9, 0.4])
+mesh dotted = stroke{CYAN} ExplicitFunc(|x| x*x, [-2, 2, 120], 1)
+```
+
+### `ParametricFunc` — `endpoint_dots` (NEW optional arg)
+
+```
+# before: let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| ...
+# after:  let ParametricFunc = |f, t_min_max_samples = [0, 1, 64], endpoint_dots = 0| ...
+```
+
+`endpoint_dots` truthy → returns `[curve, Dot(f(t_min)), Dot(f(t_max))]`;
+otherwise unchanged (bare polyline).
+
+---
+
+## 5. Vector fields
+
+### `VectorField` — NEW
+
+The standard "arrow at every grid point" helper. `Field` stays fully generic;
+this wraps it with the vector-field concerns the brief called out (length
+normalisation mode, colour-by-magnitude).
+
+```
+let VectorField = |f, x_min_max_samples = [-1, 1, 11], y_min_max_samples = [-1, 1, 11],
+                   mode = "normalized", length = 0.15, color_at = nil, mask = |pos| 1| ...
+```
+
+| arg | default | meaning |
+|-----|---------|---------|
+| `f` | — | `pos -> 3-D vector` |
+| `x_min_max_samples` / `y_min_max_samples` | `[-1,1,11]` | grid `[min, max, samples]` |
+| `mode` | `"normalized"` | `"true"` (raw vector), `"normalized"` (every arrow length `length`), `"clamped"` (true direction, length capped at `length`) |
+| `length` | `0.15` | arrow length (`"normalized"`) / cap (`"clamped"`); ignored for `"true"` |
+| `color_at` | `nil` | optional `(pos, magnitude) -> RGBA`; recolours each arrow |
+| `mask` | all | `pos -> truthy` cell filter |
+
+Behaviour: returns the same shape as `Field` — a list of `Arrow` meshes, one per
+unmasked grid point. Zero-magnitude points in `"normalized"` mode produce a
+degenerate (dot) arrow.
+
+```
+# before: hand-rolled
+mesh f = Field(|p, i| color{...} Arrow(p, p + 0.15*normalize(fn(p))), [-2,2,13], [-2,2,13])
+# after:
+mesh f = VectorField(fn, [-2, 2, 13], [-2, 2, 13], "normalized", 0.15,
+                     |p, mag| [mag / 3, 0.4, 0.9, 1])
+```
+
+---
+
+## 6. Grids — already supported, documented
+
+No code change. Major/minor grid lines already exist on `Axis2d`/`Axis3d`
+(`grid_color` + `major_tick_rate` split thick/thin, thick/faint). For a
+standalone `LineGrid`, compose two at different densities, and use `alpha{}` for
+opacity:
+
+```
+mesh grid = [
+    stroke{alpha{0.15} GRAY} LineGrid([-4, 4, 33], [-3, 3, 25]),   # minor
+    stroke{alpha{0.40} GRAY} LineGrid([-4, 4,  9], [-3, 3,  7])    # major
+]
+```
+
 ---
 
 ## Tests
 
-`crates/integration_tests/tests/basic_executor_tests/stdlib_primitives.rs`
-(new, registered in `basic_executor_tests.rs`) — 10 cases covering rank,
-edge/vertex counts, bounding boxes, the reflex sweep, dashed splitting,
-`Brace` label pairing, and `NumberLine` label density vs `major_tick_rate`.
+- `crates/integration_tests/tests/basic_executor_tests/stdlib_primitives.rs`
+  (new, registered in `basic_executor_tests.rs`) — 16 cases: `Angle` rank +
+  reflex sweep, `RightAngle` square, `Brace` span/bulge/label-pair, `DashedLine`
+  splitting (list + scalar `lengths`), `NumberLine` label density,
+  `VectorField` arrow count + normalized-vs-true length + `color_at`,
+  `ExplicitFunc` `endpoint_dots` + `fill`, `ParametricFunc` `endpoint_dots`.
+- `crates/integration_tests/tests/basic_executor_tests/live_values.rs` —
+  `test_axis_style_nil_arrow_extrusion_hides_arrowheads` (native axis change).
+
+Full run: `cargo test -p integration_tests --test basic_executor_tests` →
+**354 passed, 0 failed**.
 
 ---
 
 ## Deliberately skipped (and why)
 
-These were on the suggested list but need native changes that are risky to do
-well without a broad test pass; left for a follow-up branch:
+Need native changes with wide blast radius; noted for a follow-up branch:
 
-- **Explicit tick-position list / ticks-both-sides / tick number formatting on
-  the axis itself** — all live in `read_axis_style` list parsing in `graphs.rs`.
-- **`Field` length-normalisation modes / colour-by-magnitude** — native `mk_field`.
-- **`Arrow`/`Vector` tip-ratio knobs** — `VectorLikeStyle` is native-only today.
-- **`ExplicitFunc` fill-to-axis** — already expressible as
-  `ExplicitFuncDiff(f, |x| 0, ...)`; a dedicated flag is native work on
-  `mk_explicit`.
+- **Function-plot discontinuity / domain exclusion** — `mk_explicit` /
+  `mk_parametric` error on a non-numeric `f(x)` instead of breaking the polyline.
+  A `nil`/NaN → contour-break needs native work in `graphs.rs`. Today: restrict
+  the domain to a continuous interval.
+- **Explicit tick-position list / ticks on both sides / centered ticks** — all in
+  `read_axis_style` + `axis_tick_lins` in `graphs.rs`.
+- **`Arrow`/`Vector` tip-ratio / double-headed / tip-style knobs** —
+  `VectorLikeStyle` and the head geometry are hard-coded in
+  `constructors.rs::vector_like_mesh`; exposing ratios means threading a style
+  through `mk_arrow`/`mk_vector`/`mk_half_vector` + the mcl signatures + every
+  `Field`/`VectorField` call. `VectorField`'s length modes cover the common need.
+- **`ExplicitFunc2d` per-cell colour / `Field` native colour pass** — native
+  `mk_explicit2d` / `mk_field`.
 - **`outline{}` / `round_corners{}` operators** — no clean pure-`.mcl`
   composition; need native geometry ops.
+- **Standalone `LineGrid` major/minor as one styled mesh** — `mk_line_grid`
+  returns one flat mesh with no tag structure to select a subset; compose two
+  `LineGrid`s instead (see §6).
