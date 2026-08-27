@@ -4,23 +4,28 @@ Goal: round out the mesh standard library into a more complete, composable
 "primitive set" for explanatory diagrams — favouring small, broadly-useful
 building blocks over niche chart types.
 
-Scope of this branch: mostly **pure-`.mcl` additions to
-`assets/std/std/mesh.mcl`** (new constructors, no changes to existing ones),
-plus **one small native change** in `crates/stdlib/src/mesh/graphs.rs` to let
-axis arrowheads be turned off. No signature or behaviour changes to any existing
-constructor or operator, so every existing scene keeps working byte-for-byte
-(the axis change is opt-in via `nil`).
+Scope of this branch: new pure-`.mcl` constructors in `assets/std/std/mesh.mcl`
+plus a set of **native graph-customization knobs** in
+`crates/stdlib/src/mesh/{graphs,constructors}.rs`. **Every new argument is
+optional with a default that reproduces today's output exactly** — existing
+scenes render byte-for-byte identically (verified by dedicated
+`*_defaults_match_*` / `*_unchanged` / `*_interpolate` tests and the full
+`basic_executor_tests` + `anim_tests` suites).
 
-Almost everything added is pure `.mcl` composing constructors/operators that
-already exist natively (`mk_polyline`, `mk_line`, `op_dashed`, `mk_label`,
-`mk_axis1d`, `mk_arrow`, `mk_field`, `mk_explicit_diff`, `mk_dot`), so there is
-no new native surface to maintain. The one native change is the axis
-arrowhead toggle in §3.
+Quick index of what's new:
 
-Quick index of what's new: `Angle`, `RightAngle`, `Brace`, `DashedLine`,
-`NumberLine`, `VectorField` (new constructors); `ExplicitFunc` gains
-`endpoint_dots` + `fill`; `ParametricFunc` gains `endpoint_dots`; axis style
-lists accept `arrow_extrusion = nil` to hide arrowheads.
+- **New constructors** (pure `.mcl`): `Angle`, `RightAngle`, `Brace`,
+  `DashedLine`, `NumberLine`, `VectorField`.
+- **New optional args**: `ExplicitFunc` → `endpoint_dots`, `fill`;
+  `ParametricFunc` → `endpoint_dots`; `Arrow`/`Vector`/`VectorField` →
+  `tip_length`, `tip_width`.
+- **Native graph knobs**: axis style lists accept `arrow_extrusion = nil`
+  (hide arrowheads) and a **list** in the `tick_spacing` slot (explicit tick
+  positions); `ExplicitFunc`/`ParametricFunc` split into contours at
+  discontinuities (`nil` / non-finite `f`) instead of erroring.
+
+Native touch points: `graphs.rs` (`AxisStyle` + `mk_explicit`/`mk_parametric`),
+`constructors.rs` (`VectorLikeStyle` + `mk_arrow`/`mk_vector`).
 
 ---
 
@@ -374,9 +379,54 @@ mesh f = VectorField(fn, [-2, 2, 13], [-2, 2, 13], "normalized", 0.15,
                      |p, mag| [mag / 3, 0.4, 0.9, 1])
 ```
 
+`VectorField` also takes `tip_length` / `tip_width` (see §6) as its last two
+args, applied to every arrow — useful for dense fields (small heads) or emphasis.
+
 ---
 
-## 6. Grids — already supported, documented
+## 6. Arrow / Vector tip geometry — `tip_length` / `tip_width` (native, `constructors.rs`)
+
+`Arrow` and `Vector` had a fixed arrowhead shape (with an internal
+short-arrow-legibility clamp). Two optional multipliers now scale the head:
+
+```
+# before:
+let Arrow  = |start = [0,0,0], end = [1,0,0], normal = 1b, path_arc = 0| ...
+let Vector = |delta = 1r, tail = [0,0,0], normal = 1b| ...
+# after:
+let Arrow  = |start = [0,0,0], end = [1,0,0], normal = 1b, path_arc = 0,
+              tip_length = 1, tip_width = 1| ...
+let Vector = |delta = 1r, tail = [0,0,0], normal = 1b,
+              tip_length = 1, tip_width = 1| ...
+```
+
+| arg | default | meaning |
+|-----|---------|---------|
+| `tip_length` | `1` | multiplier on the arrowhead length along the shaft; `0` → no head (bare shaft) |
+| `tip_width` | `1` | multiplier on the arrowhead half-width |
+
+Native: `VectorLikeStyle` gains `head_len_scale` / `head_width_scale` (both `1.0`
+in `DEFAULT_VECTOR_LIKE_STYLE` and `AXIS_ARROW_STYLE`);
+`vector_like_mesh_with_style` multiplies the final `head_depth` / `head_half_width`
+by them and re-clamps to `0.9·len` / `0.45·len` (a no-op at scale `1.0`, since the
+built-in caps are tighter — so **existing arrows/vectors/axis arrows are
+byte-identical**, `test_arrow_tip_defaults_match_explicit_ones`). New helper
+`vector_like_mesh_with_tip`; `mk_arrow` / `mk_vector` read two extra float args
+(`mk_half_vector` unchanged — no head). Scales are clamped `>= 0`.
+
+```
+mesh stubby = Arrow(1.2l, 1.2r, 1b, 0, 0.6, 1.8)   # short fat head
+mesh line_end = Arrow(1.2l, 1.2r, 1b, 0, 0)         # no head at all
+mesh field = VectorField(fn, [-2,2,20], [-2,2,20], "normalized", 0.12,
+                         nil, |p| 1, 0.7, 0.7)       # small heads, dense field
+```
+
+Not done: **double-headed** (arrowhead at the tail too) needs restructuring the
+contour build in `vector_like_mesh_with_style`; left as a follow-up.
+
+---
+
+## 7. Grids — already supported, documented
 
 No code change. Major/minor grid lines already exist on `Axis2d`/`Axis3d`
 (`grid_color` + `major_tick_rate` split thick/thin, thick/faint). For a
@@ -395,18 +445,21 @@ mesh grid = [
 ## Tests
 
 - `crates/integration_tests/tests/basic_executor_tests/stdlib_primitives.rs`
-  (new, registered in `basic_executor_tests.rs`) — 21 cases: `Angle` rank +
-  reflex sweep, `RightAngle` square, `Brace` span/bulge/label-pair, `DashedLine`
-  splitting (list + scalar `lengths`), `NumberLine` label density,
-  `VectorField` arrow count + normalized-vs-true length + `color_at`,
-  `ExplicitFunc` `endpoint_dots` + `fill`, `ParametricFunc` `endpoint_dots`,
+  (new) — 25 cases: `Angle`/`RightAngle`/`Brace`/`DashedLine`/`NumberLine`
+  geometry; `VectorField` arrow count / length modes / `color_at`;
+  `ExplicitFunc` `endpoint_dots` + `fill`; `ParametricFunc` `endpoint_dots`;
   `ExplicitFunc`/`ParametricFunc` gap-splitting (`nil` + non-finite) + a
-  continuity-unchanged regression check.
+  continuity-unchanged regression; `Arrow` tip `defaults == explicit 1/1`,
+  `tip_width` widens head, `tip_length: 0` removes head; `Vector`/`VectorField`
+  tip pass-through.
 - `crates/integration_tests/tests/basic_executor_tests/live_values.rs` —
-  `test_axis_style_nil_arrow_extrusion_hides_arrowheads` (native axis change).
+  `test_axis_style_nil_arrow_extrusion_hides_arrowheads`,
+  `test_axis_style_arrow_extrusion_interpolates`,
+  `test_axis_style_explicit_tick_positions`,
+  `test_axis_style_explicit_ticks_place_labels_at_requested_values`.
 
-Full run: `cargo test -p integration_tests --test basic_executor_tests` →
-**358 passed, 0 failed**; `--test anim_tests` → **117 passed, 0 failed**.
+Full run: `--test basic_executor_tests` → **365 passed, 0 failed**;
+`--test anim_tests` → **117 passed, 0 failed**.
 
 ---
 
@@ -421,15 +474,13 @@ Need native changes with wide blast radius; noted for a follow-up branch:
 - **One-sided ticks** — axis ticks are drawn symmetric about the axis line
   (`axis_tick_lins` builds `p ± side*extend`). A "ticks only below the axis"
   option would add a style slot + a branch there; not done.
-- **`Arrow`/`Vector` tip-ratio / double-headed / tip-style knobs** —
-  `VectorLikeStyle` and the head geometry are hard-coded in
-  `constructors.rs::vector_like_mesh`; exposing ratios means threading a style
-  through `mk_arrow`/`mk_vector`/`mk_half_vector` + the mcl signatures + every
-  `Field`/`VectorField` call. `VectorField`'s length modes cover the common need.
+- **Double-headed arrows / custom tip shapes** — `tip_length`/`tip_width` scale
+  the existing single head (§6); a tail arrowhead needs restructuring the contour
+  build in `vector_like_mesh_with_style`.
 - **`ExplicitFunc2d` per-cell colour / `Field` native colour pass** — native
   `mk_explicit2d` / `mk_field`.
 - **`outline{}` / `round_corners{}` operators** — no clean pure-`.mcl`
   composition; need native geometry ops.
 - **Standalone `LineGrid` major/minor as one styled mesh** — `mk_line_grid`
   returns one flat mesh with no tag structure to select a subset; compose two
-  `LineGrid`s instead (see §6).
+  `LineGrid`s instead (see §7).

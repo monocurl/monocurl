@@ -260,3 +260,59 @@ fn test_parametric_func_splits_at_nil_samples() {
     );
     r.assert_int(3);
 }
+
+#[test]
+fn test_arrow_tip_defaults_match_explicit_ones() {
+    // passing tip_length/tip_width = 1 must be byte-identical to omitting them
+    let r = run_with_stdlib(
+        "
+        let a = Arrow([0, 0, 0], [1, 0, 0])
+        let b = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 1, 1)
+        let result =
+            (len(mesh_vertex_set(a)) == len(mesh_vertex_set(b))) +
+            (abs(mesh_height(a) - mesh_height(b)) < 0.00001) +
+            (abs(mesh_width(a) - mesh_width(b)) < 0.00001)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_arrow_tip_width_widens_head() {
+    let r = run_with_stdlib(
+        "
+        let normal = Arrow([0, 0, 0], [1, 0, 0])
+        let wide = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 1, 3)
+        let result = mesh_height(wide) > mesh_height(normal) * 2
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_arrow_tip_length_zero_removes_head() {
+    let r = run_with_stdlib(
+        "
+        let normal = Arrow([0, 0, 0], [1, 0, 0])
+        let headless = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 0, 1)
+        let result = mesh_height(headless) < mesh_height(normal) * 0.5
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_vector_and_vector_field_accept_tip_knobs() {
+    let r = run_with_stdlib(
+        "
+        let v = Vector([1, 0, 0], [0, 0, 0], 1b, 0.5, 2)
+        let field = VectorField(|p| [1, 0, 0], [-1, 1, 2], [-1, 1, 2], \"true\", 1, nil, |p| 1, 1.5, 1.5)
+        let result = (mesh_rank(v) == 2) + (len(field) == 4)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}

@@ -35,6 +35,11 @@ pub(super) struct VectorLikeStyle {
     pub(super) max_stem_radius_over_length: f32,
     pub(super) max_head_half_width_over_length: f32,
     pub(super) max_head_depth_over_length: f32,
+    /// user multiplier on the final arrowhead length (along the shaft). `1.0` =
+    /// default geometry.
+    pub(super) head_len_scale: f32,
+    /// user multiplier on the final arrowhead half-width. `1.0` = default.
+    pub(super) head_width_scale: f32,
 }
 
 const DEFAULT_VECTOR_LIKE_STYLE: VectorLikeStyle = VectorLikeStyle {
@@ -46,6 +51,8 @@ const DEFAULT_VECTOR_LIKE_STYLE: VectorLikeStyle = VectorLikeStyle {
     max_stem_radius_over_length: ARROW_MAX_STEM_RADIUS_OVER_LENGTH,
     max_head_half_width_over_length: ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH,
     max_head_depth_over_length: ARROW_MAX_HEAD_DEPTH_OVER_LENGTH,
+    head_len_scale: 1.0,
+    head_width_scale: 1.0,
 };
 
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
@@ -334,6 +341,24 @@ pub(super) fn vector_like_mesh(
     vector_like_mesh_with_style(tail, delta, normal, path_arc, DEFAULT_VECTOR_LIKE_STYLE)
 }
 
+/// Default arrow geometry with user multipliers on the arrowhead length and
+/// width. `1.0`/`1.0` reproduces `vector_like_mesh` exactly.
+pub(super) fn vector_like_mesh_with_tip(
+    tail: Float3,
+    delta: Float3,
+    normal: Float3,
+    path_arc: f64,
+    tip_len_scale: f32,
+    tip_width_scale: f32,
+) -> Result<Value, ExecutorError> {
+    let style = VectorLikeStyle {
+        head_len_scale: tip_len_scale.max(0.0),
+        head_width_scale: tip_width_scale.max(0.0),
+        ..DEFAULT_VECTOR_LIKE_STYLE
+    };
+    vector_like_mesh_with_style(tail, delta, normal, path_arc, style)
+}
+
 pub(super) fn vector_like_mesh_with_style(
     tail: Float3,
     delta: Float3,
@@ -364,10 +389,14 @@ pub(super) fn vector_like_mesh_with_style(
     let head_radius = (len * style.head_radius_over_length).min(style.max_head_radius);
     let stem_radius = (head_radius * style.stem_radius_over_head_radius)
         .min(len * style.max_stem_radius_over_length);
-    let head_half_width = (head_radius * style.head_width_over_radius)
-        .min(len * style.max_head_half_width_over_length);
-    let head_depth =
-        (head_radius * style.head_depth_over_radius).min(len * style.max_head_depth_over_length);
+    let head_half_width = ((head_radius * style.head_width_over_radius)
+        .min(len * style.max_head_half_width_over_length)
+        * style.head_width_scale)
+        .min(len * 0.45);
+    let head_depth = ((head_radius * style.head_depth_over_radius)
+        .min(len * style.max_head_depth_over_length)
+        * style.head_len_scale)
+        .min(len * 0.9);
     let sinc = if alpha <= 1e-6 {
         1.0
     } else {
@@ -708,11 +737,13 @@ pub async fn mk_line(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 
 #[stdlib_func]
 pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let start = read_float3(executor, stack_idx, -4, "start")?;
-    let end = read_float3(executor, stack_idx, -3, "end")?;
-    let normal = read_float3(executor, stack_idx, -2, "normal")?;
-    let path_arc = crate::read_float(executor, stack_idx, -1, "path_arc")?;
-    vector_like_mesh(start, end - start, normal, path_arc)
+    let start = read_float3(executor, stack_idx, -6, "start")?;
+    let end = read_float3(executor, stack_idx, -5, "end")?;
+    let normal = read_float3(executor, stack_idx, -4, "normal")?;
+    let path_arc = crate::read_float(executor, stack_idx, -3, "path_arc")?;
+    let tip_len = read_nonnegative_float(executor, stack_idx, -2, "tip_length")?;
+    let tip_width = read_nonnegative_float(executor, stack_idx, -1, "tip_width")?;
+    vector_like_mesh_with_tip(start, end - start, normal, path_arc, tip_len, tip_width)
 }
 
 #[stdlib_func]
@@ -1108,10 +1139,12 @@ pub async fn mk_bezier(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let tail = read_float3(executor, stack_idx, -3, "tail")?;
-    let delta = read_float3(executor, stack_idx, -2, "delta")?;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    vector_like_mesh(tail, delta, normal, 0.0)
+    let tail = read_float3(executor, stack_idx, -5, "tail")?;
+    let delta = read_float3(executor, stack_idx, -4, "delta")?;
+    let normal = read_float3(executor, stack_idx, -3, "normal")?;
+    let tip_len = read_nonnegative_float(executor, stack_idx, -2, "tip_length")?;
+    let tip_width = read_nonnegative_float(executor, stack_idx, -1, "tip_width")?;
+    vector_like_mesh_with_tip(tail, delta, normal, 0.0, tip_len, tip_width)
 }
 
 #[stdlib_func]
