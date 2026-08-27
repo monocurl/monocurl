@@ -115,6 +115,33 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
     __monocurl__native__ mk_line(start, end, normal)
 
 ## [overview]
+## A straight dashed line segment between two points.
+## [description]
+## Convenience for `dashed{lengths, offset} Line(start, end, normal)`. A scalar `lengths`
+## uses the same dash and gap length; a `[dash, gap]` pair sets them independently. The
+## result interpolates from a solid to a dashed line, so animating it dashes in.
+## [parameters]
+## lengths: dash length or `[dash, gap]`
+## offset: dash phase offset
+## normal: preferred stroke normal
+## [example]
+## ```
+## mesh guide = stroke{LIGHT_GRAY} DashedLine(1.5l, 1.5r, [0.15, 0.08])
+## ```
+let DashedLine = |start = [0, 0, 0], end = [1, 0, 0], lengths = [0.2, 0.1], offset = 0, normal = 1b| {
+    var dash = 0
+    var gap = 0
+    if (__monocurl__native__ is_list(lengths)) {
+        [dash, gap] = __monocurl__native__ expect_list("lengths", lengths, 2)
+    } else {
+        dash = lengths
+        gap = lengths
+    }
+    let base = __monocurl__native__ mk_line(start, end, normal)
+    return [base, __monocurl__native__ op_dashed(base, dash, gap, offset, nil)]
+}
+
+## [overview]
 ## A directed arrow from start to end, with an arrowhead at the tip.
 ## [description]
 ## `path_arc` bends the shaft by rotating along a circular arc instead of a straight segment. Its sign is relative to `normal`; use `0` for a straight arrow.
@@ -145,6 +172,60 @@ let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0|
 let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
     let [theta_start, theta_end] = __monocurl__native__ expect_list("theta", theta, 2)
     return __monocurl__native__ mk_arc(radius, theta_start, theta_end)
+}
+
+## [overview]
+## Arc marker for the angle at `vertex` between the rays toward `a` and `b`.
+## [description]
+## Drawn in the XY plane as a stroke arc of the given `radius`, sweeping the shorter way
+## from the `vertex`->`a` direction to the `vertex`->`b` direction. Set `reflex` truthy to
+## mark the outer (>PI) angle instead. Style it with `stroke{...}` and pair it with a
+## `Tex`/`Label` for the measure.
+## [parameters]
+## radius: arc radius in scene units
+## samples: number of segments approximating the arc
+## reflex: truthy to mark the reflex (outer) angle instead of the inner one
+## [example]
+## ```
+## mesh a = stroke{CYAN} Angle(ORIGIN, 1r, 1u + 1r)
+## ```
+let Angle = |vertex, a, b, radius = 0.4, samples = 32, reflex = 0| {
+    let da = a - vertex
+    let db = b - vertex
+    let start = __monocurl__native__ arctan2(da[1], da[0])
+    let raw = __monocurl__native__ arctan2(db[1], db[0]) - start
+    let tau = 6.2831853071795864
+    var sweep = raw - tau * __monocurl__native__ floor(raw / tau)
+    if (sweep > 3.1415926535897932) { sweep = sweep - tau }
+    if (reflex and sweep >= 0) { sweep = sweep - tau }
+    if (reflex and sweep < 0) { sweep = sweep + tau }
+    let n = __monocurl__native__ max(2, samples)
+    var pts = []
+    for (i in __monocurl__native__ range(0, n + 1, 1)) {
+        let ang = start + sweep * i / n
+        pts .= vertex + [radius * __monocurl__native__ cos(ang), radius * __monocurl__native__ sin(ang), 0]
+    }
+    return __monocurl__native__ mk_polyline(pts, 1b)
+}
+
+## [overview]
+## Right-angle (square corner) marker at `vertex`, between the rays toward `a` and `b`.
+## [description]
+## Two short segments of length `size` forming an L in the XY plane, for perpendicularity
+## marks on diagrams. Style with `stroke{...}`. The rays do not need to be exactly
+## perpendicular; the marker is always a square of the given size.
+## [parameters]
+## size: leg length of the corner marker in scene units
+## [example]
+## ```
+## mesh r = stroke{CYAN} RightAngle(ORIGIN, 1r, 1u)
+## ```
+let RightAngle = |vertex, a, b, size = 0.2| {
+    let da = a - vertex
+    let db = b - vertex
+    let ua = da * (size / __monocurl__native__ sqrt(__monocurl__native__ dot(da, da)))
+    let ub = db * (size / __monocurl__native__ sqrt(__monocurl__native__ dot(db, db)))
+    return __monocurl__native__ mk_polyline([vertex + ua, vertex + ua + ub, vertex + ub], 1b)
 }
 
 ## [overview]
@@ -455,6 +536,53 @@ let text_tag = operator |target, tag| [target, __monocurl__native__ text_tag_enc
 let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(target, dir, buffer)
 
 ## [overview]
+## Curly brace spanning from `start` to `end`, bulging to one side, with an optional label.
+## [description]
+## Sampled as a smooth stroke polyline in the XY plane: it meets both endpoints tangent to
+## the span and swells to `depth` at the midpoint, where a sharper tip points outward. By
+## default the brace bulges to the right of the `start`->`end` direction (its `-90 deg`
+## normal); pass `direction` to choose the bulge side explicitly. When `label` is a string,
+## the result is `[brace, text]` with the label placed just past the tip.
+## [parameters]
+## depth: bulge height at the midpoint, in scene units
+## direction: optional bulge direction; the component along the span is removed
+## samples: number of segments in the brace stroke (clamped to at least 8)
+## label: optional label string placed past the brace tip; `nil` for no label
+## label_scale: label text scale
+## label_buffer: gap between the brace tip and the label
+## [example]
+## ```
+## mesh b = stroke{CYAN} Brace(1.5l, 1.5r, 0.3)
+## mesh titled = stroke{CYAN} Brace(1.5l, 1.5r, 0.3, DOWN, 101, "width")
+## ```
+let Brace = |start, end, depth = 0.25, direction = nil, samples = 101, label = nil, label_scale = 1, label_buffer = 0.12| {
+    let span = end - start
+    let span_len = __monocurl__native__ sqrt(__monocurl__native__ dot(span, span))
+    let t_hat = span * (1 / span_len)
+    var n_hat = [t_hat[1], -t_hat[0], 0]
+    if (not __monocurl__native__ is_nil(direction)) {
+        let d = direction - t_hat * __monocurl__native__ dot(direction, t_hat)
+        let d_len = __monocurl__native__ sqrt(__monocurl__native__ dot(d, d))
+        if (d_len > 0.000001) { n_hat = d * (1 / d_len) }
+    }
+    let n = __monocurl__native__ max(8, samples)
+    let pi = 3.1415926535897932
+    var pts = []
+    for (i in __monocurl__native__ range(0, n + 1, 1)) {
+        let u = i / n
+        let m = 2 * __monocurl__native__ min(u, 1 - u)
+        let hump = 0.5 - 0.5 * __monocurl__native__ cos(pi * m)
+        let k = (u - 0.5) / 0.05
+        let tip = __monocurl__native__ exp(-k * k) * 0.5
+        let bulge = depth * (0.7 * hump + 0.3 * tip)
+        pts .= start + t_hat * (span_len * u) + n_hat * bulge
+    }
+    let brace = __monocurl__native__ mk_polyline(pts, 1b)
+    if (__monocurl__native__ is_nil(label)) { return brace }
+    return [brace, __monocurl__native__ mk_label(brace, label, label_scale, n_hat, label_buffer, nil)]
+}
+
+## [overview]
 ## Text label placed relative to a target mesh.
 ## [description]
 ## The label is rendered as text, then placed outside the target in `dir` while staying centered on the target's orthogonal direction.
@@ -518,6 +646,32 @@ let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacin
 ## Usually configured through `axis_style{"x", ...}` rather than by manually editing the compact `x_axis` style list.
 let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis1d(basis, normal, color, x_axis)
+
+## [options]
+## important: true
+## [overview]
+## A labelled number line: a friendlier `Axis1d` where every tick is labelled by default.
+## [description]
+## Thin convenience over `Axis1d`. Unlike `Axis1d`/`Axis2d`, `major_tick_rate` defaults to
+## `1`, so every tick gets a number. Pass `label_map = nil` for an unlabelled ruler, or a
+## `|value| ...` callable (for example `|x| Number(x, 1)`) for custom tick text. Set
+## `axis_title` for a label at the positive end.
+## [parameters]
+## min: left end of the line in axis coordinates
+## max: right end of the line in axis coordinates
+## tick_spacing: distance between ticks in axis coordinates
+## major_tick_rate: every nth tick is drawn/labelled as major
+## axis_title: optional title placed past the positive end
+## label_map: `nil` for no labels, or a function from value to tick label
+## basis: scene-space direction and unit length of one axis step
+## color: axis color
+## [example]
+## ```
+## mesh line = NumberLine(0, 10, 1)
+## mesh half = NumberLine(-2, 2, 0.5, 2, "x", |x| Number(x, 1))
+## ```
+let NumberLine = |min = -5, max = 5, tick_spacing = 1, major_tick_rate = 1, axis_title = nil, label_map = (|x| x), basis = 1r, color = [0, 0, 0, 1]|
+    __monocurl__native__ mk_axis1d(basis, 1b, color, [min, max, axis_title, tick_spacing, major_tick_rate, label_map, 0.2])
 
 ## [options]
 ## important: true
