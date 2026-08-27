@@ -626,7 +626,7 @@ let Number = |value, decimal_places = nil, include_sign = 0, font = nil|
 ## tick_spacing: distance between ticks in axis coordinates
 ## major_tick_rate: every nth tick is drawn/labelled as major
 ## label_map: function from value to tick label
-## arrow_extrusion: arrowhead length in scene units
+## arrow_extrusion: arrowhead length in scene units, or `nil` to hide the axis arrowheads entirely
 ## [example]
 ## ```
 ## mesh axes = axis_style{"x", 0, 4, "x"} axis_style{"y", 0, 3, "y"} Axis2d()

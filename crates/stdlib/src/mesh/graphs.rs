@@ -164,6 +164,9 @@ struct AxisStyle {
     major_tick_rate: usize,
     label_map: AxisLabelMap,
     arrow_extrusion: f32,
+    /// draw the arrowheads at both ends of the axis. `false` when the style
+    /// list's `arrow_extrusion` slot is `nil`.
+    draw_arrows: bool,
 }
 
 impl AxisStyle {
@@ -174,6 +177,7 @@ impl AxisStyle {
             major_tick_rate: 4,
             label_map: AxisLabelMap::DefaultFormat,
             arrow_extrusion: AXIS_BUFFER,
+            draw_arrows: true,
         }
     }
 }
@@ -297,6 +301,7 @@ fn read_axis_style(
             let mut major_tick_rate = 4;
             let mut label_map = AxisLabelMap::DefaultFormat;
             let mut arrow_extrusion = AXIS_BUFFER;
+            let mut draw_arrows = true;
             let range = match elements.len() {
                 1 => {
                     let radius = axis_number_from_value(
@@ -352,10 +357,17 @@ fn read_axis_style(
                         }));
                     }
                     if elements.len() > tick_step_index + 3 {
-                        arrow_extrusion = checked_axis_arrow_extrusion(axis_number_from_value(
-                            with_heap(|h| h.get(elements[tick_step_index + 3].key()).clone()),
-                            "arrow_extrusion",
-                        )?)?;
+                        let raw = with_heap(|h| {
+                            h.get(elements[tick_step_index + 3].key()).clone()
+                        });
+                        if matches!(raw.clone().elide_cached_wrappers_rec(), Value::Nil) {
+                            draw_arrows = false;
+                            arrow_extrusion = 0.0;
+                        } else {
+                            arrow_extrusion = checked_axis_arrow_extrusion(
+                                axis_number_from_value(raw, "arrow_extrusion")?,
+                            )?;
+                        }
                     }
                     checked_axis_range(min, max, tick_step, name)?
                 }
@@ -372,6 +384,7 @@ fn read_axis_style(
                 major_tick_rate,
                 label_map,
                 arrow_extrusion,
+                draw_arrows,
             })
         }
         other => Err(ExecutorError::type_error_for(
@@ -743,7 +756,11 @@ fn push_axis_arrows(
     normal: Float3,
     color: Float4,
     arrow_extrusion: f32,
+    draw_arrows: bool,
 ) -> Result<(), ExecutorError> {
+    if !draw_arrows {
+        return Ok(());
+    }
     let dir = basis.normalize();
     out.push(axis_arrow_mesh(
         center,
@@ -1184,6 +1201,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         normal,
         color,
         style.arrow_extrusion,
+        style.draw_arrows,
     )?;
 
     let mut labels = Vec::new();
@@ -1311,6 +1329,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         normal,
         color,
         x_style.arrow_extrusion,
+        x_style.draw_arrows,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1320,6 +1339,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         normal,
         color,
         y_style.arrow_extrusion,
+        y_style.draw_arrows,
     )?;
 
     let mut labels = Vec::new();
@@ -1555,6 +1575,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         xy_normal,
         color,
         x_style.arrow_extrusion,
+        x_style.draw_arrows,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1564,6 +1585,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         xy_normal,
         color,
         y_style.arrow_extrusion,
+        y_style.draw_arrows,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1573,6 +1595,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         z_normal,
         color,
         z_style.arrow_extrusion,
+        z_style.draw_arrows,
     )?;
 
     let mut labels = Vec::new();

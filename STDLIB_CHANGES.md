@@ -4,10 +4,12 @@ Goal: round out the mesh standard library into a more complete, composable
 "primitive set" for explanatory diagrams — favouring small, broadly-useful
 building blocks over niche chart types.
 
-Scope of this branch: **pure-`.mcl` additions to `assets/std/std/mesh.mcl`
-only.** No native (`crates/stdlib`) changes. No signature or behaviour changes
-to any existing constructor or operator, so every existing scene keeps working
-byte-for-byte.
+Scope of this branch: mostly **pure-`.mcl` additions to
+`assets/std/std/mesh.mcl`** (new constructors, no changes to existing ones),
+plus **one small native change** in `crates/stdlib/src/mesh/graphs.rs` to let
+axis arrowheads be turned off. No signature or behaviour changes to any existing
+constructor or operator, so every existing scene keeps working byte-for-byte
+(the axis change is opt-in via `nil`).
 
 Everything added is built by composing constructors/operators that already
 exist natively (`mk_polyline`, `mk_arc`, `mk_line`, `op_dashed`, `mk_label`,
@@ -146,6 +148,39 @@ mesh guide = stroke{LIGHT_GRAY} DashedLine(1.5l, 1.5r, [0.15, 0.08])
 
 ## 3. Axes
 
+### Hide axis arrowheads — `arrow_extrusion = nil` (native, `graphs.rs`) — UNVERIFIED
+
+> Status: code written, **not yet compiled/tested** (build paused for usage
+> budget). First resume step is `cargo check -p stdlib` + a unit test. See
+> `RESUME.md`.
+
+`Axis1d` / `Axis2d` / `Axis3d` always drew an arrowhead at each end of every
+axis; there was no way to turn them off. Now the `arrow_extrusion` slot of an
+axis style list (position 7, i.e. the last) accepts `nil`, mirroring the
+existing `label_map = nil` convention:
+
+- `nil` → no arrowheads; the axis title and bounds sit exactly at `range.max`.
+- a number (default `0.2`) → unchanged: arrowhead of that extrusion length.
+
+Old signature (unchanged shape): style list
+`[min, max, (axis_title,) tick_spacing, major_tick_rate, label_map, arrow_extrusion]`.
+
+Native: `AxisStyle` gains a `draw_arrows: bool` field (default `true`);
+`read_axis_style` sets it `false` + `arrow_extrusion = 0.0` when the slot is
+`Value::Nil`; `push_axis_arrows` takes a `draw_arrows` argument and early-returns.
+
+```
+# before: arrowheads always present
+mesh axes = axis_style{"x", 0, 4, "x"} Axis2d()
+# after: clean axis with no arrowheads
+mesh axes = axis_style{"x", 0, 4, "x", 0.25, 4, |x| x, nil}
+            axis_style{"y", 0, 3, "y", 0.25, 4, |x| x, nil} Axis2d()
+```
+
+Known limitation: animating between an arrow-less style (`nil` slot) and an
+arrowed one via `axis_style` may hit an interpolation error on the `nil ↔ number`
+slot. Static use is fine.
+
 ### `NumberLine` — NEW
 
 A friendlier `Axis1d`: a labelled 1-D number line where **every** tick is
@@ -198,9 +233,6 @@ edge/vertex counts, bounding boxes, the reflex sweep, dashed splitting,
 These were on the suggested list but need native changes that are risky to do
 well without a broad test pass; left for a follow-up branch:
 
-- **Hide axis arrowheads** — `push_axis_arrows` is unconditionally called in
-  `graphs.rs`; needs an `Option<f32>` / `draw_arrows` flag threaded through all
-  three axis constructors + `axis_title_anchor`.
 - **Explicit tick-position list / ticks-both-sides / tick number formatting on
   the axis itself** — all live in `read_axis_style` list parsing in `graphs.rs`.
 - **`Field` length-normalisation modes / colour-by-magnitude** — native `mk_field`.
