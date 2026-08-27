@@ -343,6 +343,27 @@ mesh piecewise = stroke{CYAN} ParametricFunc(
 `ExplicitFunc`'s `fill` option still assumes a continuous curve
 (`mk_explicit_diff` is unchanged — see skipped).
 
+### `ExplicitFunc2d` — `color_at` per-vertex colour (NEW optional arg, native)
+
+```
+# before: let ExplicitFunc2d = |f, x_min_max_samples = [-1,1,21], y_min_max_samples = [-1,1,21]| ...
+# after:  let ExplicitFunc2d = |f, ..., color_at = nil| ...
+```
+
+`color_at` is an optional `|x, y, z| -> RGBA` callback run per surface vertex —
+for height maps, gradient shading, sign colouring, etc. `nil` (default) keeps the
+flat default surface colour, byte-identical to before
+(`test_explicit_func_2d_color_at_sets_vertex_colors`). Native: `mk_explicit2d`
+reads an 8th arg; when non-`nil` it batches one call per grid vertex
+(`invoke_callable_many`) and writes the parsed `Float4` into each `SurfaceVertex`.
+
+`ColorGrid` already had this (its `color_at` + `smooth` flag), so no change there.
+
+```
+mesh bowl = ExplicitFunc2d(|x, y| x*x + y*y, [-1, 1, 41], [-1, 1, 41],
+                           |x, y, z| [z, 0.3, 1 - z, 1])
+```
+
 ---
 
 ## 5. Vector fields

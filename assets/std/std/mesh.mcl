@@ -823,14 +823,20 @@ let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128], endpoint_dots = 0, fill
 ## Sample z = f(x, y) as a 3-D surface.
 ## [description]
 ## The function receives `(x, y)` and returns z. The domain lists are `[min, max, samples]`.
+## Pass `color_at` as a `|x, y, z| ...` callback returning an RGBA colour to shade the
+## surface per vertex (for height maps / gradients); leave it `nil` for the default flat
+## surface colour.
+## [parameters]
+## color_at: optional `(x, y, z) -> RGBA` per-vertex colour callback
 ## [example]
 ## ```
 ## mesh surface = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 31], [-1, 1, 31])
+## mesh heat = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 41], [-1, 1, 41], |x, y, z| [z, 0.3, 1 - z, 1])
 ## ```
-let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21]| {
+let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], color_at = nil| {
     let [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
     let [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
-    return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
+    return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples, color_at)
 }
 
 ## [overview]

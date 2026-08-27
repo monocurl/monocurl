@@ -316,3 +316,19 @@ fn test_vector_and_vector_field_accept_tip_knobs() {
     );
     r.assert_int(2);
 }
+
+#[test]
+fn test_explicit_func_2d_color_at_sets_vertex_colors() {
+    let r = run_with_stdlib(
+        "
+        let plain = ExplicitFunc2d(|x, y| x + y, [-1, 1, 5], [-1, 1, 5])
+        let tinted = ExplicitFunc2d(|x, y| x + y, [-1, 1, 5], [-1, 1, 5], |x, y, z| [1, 0, 0, 1])
+        let result =
+            (mesh_rank(plain) == 2) +
+            (mesh_rank(tinted) == 2) +
+            (len(mesh_vertex_set(plain)) == len(mesh_vertex_set(tinted)))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}

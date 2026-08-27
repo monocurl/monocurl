@@ -1877,15 +1877,24 @@ pub async fn mk_explicit2d(
     let f = executor
         .state
         .stack(stack_idx)
-        .read_at(-7)
+        .read_at(-8)
         .clone()
         .elide_lvalue();
-    let x0 = crate::read_float(executor, stack_idx, -6, "x0")? as f32;
-    let x1 = crate::read_float(executor, stack_idx, -5, "x1")? as f32;
-    let y0 = crate::read_float(executor, stack_idx, -4, "y0")? as f32;
-    let y1 = crate::read_float(executor, stack_idx, -3, "y1")? as f32;
-    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -2, "x_samples")?);
-    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -1, "y_samples")?);
+    let x0 = crate::read_float(executor, stack_idx, -7, "x0")? as f32;
+    let x1 = crate::read_float(executor, stack_idx, -6, "x1")? as f32;
+    let y0 = crate::read_float(executor, stack_idx, -5, "y0")? as f32;
+    let y1 = crate::read_float(executor, stack_idx, -4, "y1")? as f32;
+    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -3, "x_samples")?);
+    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -2, "y_samples")?);
+    let color_at = {
+        let raw = executor
+            .state
+            .stack(stack_idx)
+            .read_at(-1)
+            .clone()
+            .elide_lvalue();
+        (!matches!(raw.clone().elide_cached_wrappers_rec(), Value::Nil)).then_some(raw)
+    };
     let nx = x_samples - 1;
     let ny = y_samples - 1;
     let cell_count = ensure_grid_cells("explicit surface cells", nx, ny)?;
@@ -1925,11 +1934,31 @@ pub async fn mk_explicit2d(
             faces.push([index(ix, iy), index(ix + 1, iy + 1), index(ix, iy + 1)]);
         }
     }
+    let colors: Vec<Float4> = if let Some(cb) = &color_at {
+        let color_args: Vec<SmallVec<[Value; 2]>> = vertices
+            .iter()
+            .map(|p| {
+                smallvec![
+                    Value::Float(p.x as f64),
+                    Value::Float(p.y as f64),
+                    Value::Float(p.z as f64),
+                ]
+            })
+            .collect();
+        invoke_callable_many(executor, cb, &color_args, "color_at")
+            .await?
+            .into_iter()
+            .map(|v| float4_from_value(v, "color_at"))
+            .collect::<Result<_, _>>()?
+    } else {
+        vec![Float4::new(0.0, 0.0, 0.0, 1.0); vertices.len()]
+    };
     let surface_vertices: Vec<_> = vertices
         .into_iter()
-        .map(|pos| SurfaceVertex {
+        .zip(colors)
+        .map(|(pos, col)| SurfaceVertex {
             pos,
-            col: Float4::new(0.0, 0.0, 0.0, 1.0),
+            col,
             uv: Float2::ZERO,
         })
         .collect();
