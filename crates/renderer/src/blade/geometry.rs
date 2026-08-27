@@ -220,6 +220,44 @@ pub(super) fn build_line_indices() -> [u16; 24] {
     ]
 }
 
+/// World-space mean of every triangle, line and dot vertex position. Used as the
+/// camera-independent back-to-front sort key for the transparent pass. Returns
+/// the origin for an empty mesh.
+pub(super) fn mesh_centroid(mesh: &Mesh) -> Float3 {
+    let mut sum = Float3::ZERO;
+    let mut count = 0.0f32;
+    for tri in &mesh.tris {
+        sum += tri.a.pos + tri.b.pos + tri.c.pos;
+        count += 3.0;
+    }
+    for lin in &mesh.lins {
+        sum += lin.a.pos + lin.b.pos;
+        count += 2.0;
+    }
+    for dot in &mesh.dots {
+        sum += dot.pos;
+        count += 1.0;
+    }
+    if count > 0.0 { sum / count } else { Float3::ZERO }
+}
+
+/// True when any rendered vertex has a partial alpha (strictly between fully
+/// transparent and fully opaque). Fully-transparent primitives are already
+/// dropped from the GPU buffers, so they must not count here.
+pub(super) fn mesh_has_translucent_vertex(mesh: &Mesh) -> bool {
+    fn translucent(col: Float4) -> bool {
+        col.w > f32::EPSILON && col.w < 1.0
+    }
+    mesh.tris
+        .iter()
+        .any(|tri| translucent(tri.a.col) || translucent(tri.b.col) || translucent(tri.c.col))
+        || mesh
+            .lins
+            .iter()
+            .any(|lin| translucent(lin.a.col) || translucent(lin.b.col))
+        || mesh.dots.iter().any(|dot| translucent(dot.col))
+}
+
 pub(super) fn mesh_line_radius_px(mesh: &Mesh, size: RenderSize, style: RenderStyle) -> f32 {
     let radius = if mesh.uniform.stroke_radius.is_finite() {
         mesh.uniform.stroke_radius.max(0.0)
@@ -253,15 +291,115 @@ pub(super) fn mesh_dot_radius_px(mesh: &Mesh, style: RenderStyle, raster_scale: 
 #[cfg(test)]
 mod tests {
     use geo::{
-        mesh::{Lin, LinVertex, Mesh, Uniforms},
-        simd::{Float3, Float4},
+        mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
+        simd::{Float2, Float3, Float4},
     };
 
     use crate::RenderStyle;
 
     use super::{
-        LINE_VERTICES_PER_INSTANCE, build_line_indices, build_line_vertices, mesh_dot_radius_px,
+        LINE_VERTICES_PER_INSTANCE, build_line_indices, build_line_vertices, mesh_centroid,
+        mesh_dot_radius_px, mesh_has_translucent_vertex,
     };
+
+    fn tri_vertex_at(pos: Float3, alpha: f32) -> TriVertex {
+        TriVertex {
+            pos,
+            col: Float4::new(1.0, 1.0, 1.0, alpha),
+            uv: Float2::ZERO,
+        }
+    }
+
+    fn opaque_tri(a: Float3, b: Float3, c: Float3) -> Tri {
+        Tri {
+            a: tri_vertex_at(a, 1.0),
+            b: tri_vertex_at(b, 1.0),
+            c: tri_vertex_at(c, 1.0),
+            ab: -1,
+            bc: -1,
+            ca: -1,
+            is_dom_sib: false,
+        }
+    }
+
+    fn mesh_of(dots: Vec<Dot>, lins: Vec<Lin>, tris: Vec<Tri>) -> Mesh {
+        Mesh {
+            dots,
+            lins,
+            tris,
+            uniform: Uniforms::default(),
+            tag: Vec::new(),
+            version: Mesh::fresh_version(),
+        }
+    }
+
+    #[test]
+    fn mesh_centroid_averages_tris_lines_and_dots_per_vertex() {
+        let tris = vec![opaque_tri(
+            Float3::new(0.0, 0.0, 0.0),
+            Float3::new(3.0, 0.0, 0.0),
+            Float3::new(0.0, 3.0, 0.0),
+        )];
+        let lins = vec![Lin {
+            a: LinVertex {
+                pos: Float3::new(0.0, 0.0, 0.0),
+                col: Float4::ONE,
+            },
+            b: LinVertex {
+                pos: Float3::new(0.0, 0.0, 6.0),
+                col: Float4::ONE,
+            },
+            norm: Float3::Z,
+            prev: -1,
+            next: -1,
+            inv: -1,
+            is_dom_sib: true,
+        }];
+        let dots = vec![Dot {
+            pos: Float3::new(0.0, 0.0, 0.0),
+            norm: Float3::Z,
+            col: Float4::ONE,
+            inv: -1,
+            is_dom_sib: true,
+        }];
+        // sum = (3,3,0) + (0,0,6) + (0,0,0) = (3,3,6); count = 3 + 2 + 1 = 6.
+        let c = mesh_centroid(&mesh_of(dots, lins, tris));
+        assert!((c.x - 0.5).abs() < 1e-6);
+        assert!((c.y - 0.5).abs() < 1e-6);
+        assert!((c.z - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn mesh_centroid_of_empty_mesh_is_origin() {
+        let c = mesh_centroid(&mesh_of(Vec::new(), Vec::new(), Vec::new()));
+        assert_eq!(c, Float3::ZERO);
+    }
+
+    #[test]
+    fn translucent_vertex_detection_ignores_fully_opaque_and_fully_transparent() {
+        let a = Float3::new(0.0, 0.0, 0.0);
+        let b = Float3::new(1.0, 0.0, 0.0);
+        let d = Float3::new(0.0, 1.0, 0.0);
+
+        let opaque = mesh_of(Vec::new(), Vec::new(), vec![opaque_tri(a, b, d)]);
+        assert!(!mesh_has_translucent_vertex(&opaque));
+
+        let mut partial = opaque_tri(a, b, d);
+        partial.b = tri_vertex_at(b, 0.5);
+        assert!(mesh_has_translucent_vertex(&mesh_of(
+            Vec::new(),
+            Vec::new(),
+            vec![partial]
+        )));
+
+        let mut zero = opaque_tri(a, b, d);
+        zero.c = tri_vertex_at(d, 0.0);
+        assert!(!mesh_has_translucent_vertex(&mesh_of(
+            Vec::new(),
+            Vec::new(),
+            vec![zero]
+        )));
+    }
 
     #[test]
     fn line_vertices_prefer_dominant_sibling_orientation() {

@@ -11,6 +11,7 @@ use super::{
 pub(super) struct Pipelines {
     pub(super) background: gpu::RenderPipeline,
     pub(super) triangles: gpu::RenderPipeline,
+    pub(super) triangles_blend: gpu::RenderPipeline,
     pub(super) lines: gpu::RenderPipeline,
     pub(super) dots: gpu::RenderPipeline,
 }
@@ -41,12 +42,22 @@ impl Pipelines {
             blend: None,
             write_mask: gpu::ColorWrites::default(),
         }];
-        let depth_stencil = gpu::DepthStencilState {
+        // Opaque geometry writes depth; transparent fills and all screen-space
+        // primitives (lines/dots) only test against it so they can never occlude
+        // geometry painted after them. Hardware slope-scaled bias is deliberately
+        // left at zero: line/dot quads are image-plane-parallel (slope ~ 0), so it
+        // would do nothing for them; depth ordering is handled in the shader via
+        // a perspective-correct eye-space decal bias plus the paint-rank offset.
+        let depth_write = gpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: true,
             depth_compare: gpu::CompareFunction::LessEqual,
             stencil: Default::default(),
             bias: Default::default(),
+        };
+        let depth_read_only = gpu::DepthStencilState {
+            depth_write_enabled: false,
+            ..depth_write.clone()
         };
 
         Self {
@@ -77,7 +88,25 @@ impl Pipelines {
                     front_face: gpu::FrontFace::Ccw,
                     ..Default::default()
                 },
-                depth_stencil: Some(depth_stencil.clone()),
+                depth_stencil: Some(depth_write.clone()),
+                fragment: Some(shader.at("fs_triangle")),
+                color_targets: &alpha_target,
+                multisample_state: gpu::MultisampleState {
+                    sample_count,
+                    ..Default::default()
+                },
+            }),
+            triangles_blend: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
+                name: "renderer-triangles-blend",
+                data_layouts: &[&TrianglesData::layout()],
+                vertex: shader.at("vs_triangle"),
+                vertex_fetches: &[],
+                primitive: gpu::PrimitiveState {
+                    topology: gpu::PrimitiveTopology::TriangleList,
+                    front_face: gpu::FrontFace::Ccw,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_read_only.clone()),
                 fragment: Some(shader.at("fs_triangle")),
                 color_targets: &alpha_target,
                 multisample_state: gpu::MultisampleState {
@@ -94,7 +123,7 @@ impl Pipelines {
                     topology: gpu::PrimitiveTopology::TriangleList,
                     ..Default::default()
                 },
-                depth_stencil: Some(depth_stencil.clone()),
+                depth_stencil: Some(depth_read_only.clone()),
                 fragment: Some(shader.at("fs_line")),
                 color_targets: &alpha_target,
                 multisample_state: gpu::MultisampleState {
@@ -111,7 +140,7 @@ impl Pipelines {
                     topology: gpu::PrimitiveTopology::TriangleList,
                     ..Default::default()
                 },
-                depth_stencil: Some(depth_stencil),
+                depth_stencil: Some(depth_read_only),
                 fragment: Some(shader.at("fs_dot")),
                 color_targets: &alpha_target,
                 multisample_state: gpu::MultisampleState {
@@ -125,6 +154,7 @@ impl Pipelines {
     pub(super) fn destroy(&mut self, gpu: &gpu::Context) {
         gpu.destroy_render_pipeline(&mut self.background);
         gpu.destroy_render_pipeline(&mut self.triangles);
+        gpu.destroy_render_pipeline(&mut self.triangles_blend);
         gpu.destroy_render_pipeline(&mut self.lines);
         gpu.destroy_render_pipeline(&mut self.dots);
     }
@@ -144,6 +174,9 @@ mod tests {
         assert!(source.contains("struct TriVertexPod"));
         assert!(source.contains("struct LineVertexPod"));
         assert!(source.contains("struct DotInstancePod"));
+        // The perspective-correct decal offset for lines/dots must stay wired in.
+        assert!(source.contains("eye_bias: f32"));
+        assert!(source.contains("width_eye * DECAL_SCALE"));
 
         let module = wgsl::parse_str(source).expect("blade.wgsl should parse successfully");
         Validator::new(

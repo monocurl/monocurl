@@ -95,6 +95,15 @@ const LIGHT_SRC: vec3<f32> = vec3<f32>(1.0, 1.0, 0.0);
 const GAMMA: f32 = 3.0;
 const ALPHA_CUTOFF: f32 = 1.0 / 255.0;
 
+// Decal bias for screen-space primitives (lines/dots). These primitives are
+// extruded parallel to the image plane, so they are never truly coplanar with
+// the fill they decorate. `eye_bias` nudges them toward the camera in eye space
+// by a multiple of their own eye-space half-width, keeping the offset invariant
+// to camera distance. Lines/dots never write depth, so this can only ever let
+// them win against their own fill, never occlude later geometry.
+const DECAL_SCALE: f32 = 2.0;
+const DECAL_MAX_FRACTION: f32 = 0.05;
+
 fn world_to_camera(world: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     let relative = world - camera.position.xyz;
     return vec3<f32>(
@@ -120,7 +129,12 @@ fn vector_to_camera(vector: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     );
 }
 
-fn project_camera(model: vec3<f32>, camera: CameraParams, depth_bias: f32) -> ProjectedPoint {
+fn project_camera(
+    model: vec3<f32>,
+    camera: CameraParams,
+    depth_bias: f32,
+    eye_bias: f32,
+) -> ProjectedPoint {
     let camera_x = model.x;
     let camera_y = model.y;
     let camera_z = model.z;
@@ -134,7 +148,15 @@ fn project_camera(model: vec3<f32>, camera: CameraParams, depth_bias: f32) -> Pr
     let clip_w = -camera_z;
     let clip_x = camera_x / (tan_half_fov * aspect) * viewport_scale.x;
     let clip_y = camera_y / tan_half_fov * viewport_scale.y;
-    let clip_z = -far * camera_z / (far - near) - (far * near) / (far - near);
+
+    // With eye_bias == 0.0 this is bit-identical to the unbiased projection.
+    // A positive eye_bias slides the point toward the camera along its view ray
+    // (clip.w is left unbiased), which is a pure depth-only decal offset.
+    var biased_camera_z = camera_z;
+    if (eye_bias > 0.0) {
+        biased_camera_z = min(camera_z + eye_bias, -near);
+    }
+    let clip_z = -far * biased_camera_z / (far - near) - (far * near) / (far - near);
 
     var clip = vec4<f32>(clip_x, clip_y, clip_z, clip_w);
     clip.z -= depth_bias * clip.w;
@@ -143,8 +165,13 @@ fn project_camera(model: vec3<f32>, camera: CameraParams, depth_bias: f32) -> Pr
     return ProjectedPoint(clip, clip.xy * inv_w);
 }
 
-fn project(world: vec3<f32>, camera: CameraParams, depth_bias: f32) -> ProjectedPoint {
-    return project_camera(world_to_camera(world, camera), camera, depth_bias);
+fn project(
+    world: vec3<f32>,
+    camera: CameraParams,
+    depth_bias: f32,
+    eye_bias: f32,
+) -> ProjectedPoint {
+    return project_camera(world_to_camera(world, camera), camera, depth_bias, eye_bias);
 }
 
 fn safe_normalize3(v: vec3<f32>) -> vec3<f32> {
@@ -170,7 +197,7 @@ fn fs_background(in: ColorOut) -> @location(0) vec4<f32> {
 @vertex
 fn vs_triangle(@builtin(vertex_index) vertex_index: u32) -> TriOut {
     let vertex = tri_vertices[vertex_index];
-    let projected = project(vertex.pos.xyz, tri_camera, tri_params.values.y);
+    let projected = project(vertex.pos.xyz, tri_camera, tri_params.values.y, 0.0);
     let model = world_to_camera(vertex.pos.xyz, tri_camera);
 
     var out: TriOut;
@@ -251,14 +278,16 @@ fn vs_line(
     let tan_half_fov = max(line_camera.clip.z, 0.05);
     let aspect = max(line_camera.clip.w, 0.1);
     let eye_depth = max(-model.z, line_camera.clip.x);
-    let scale = 2.0 * radius_px * eye_depth * tan_half_fov * aspect / viewport.x * extrude;
+    let width_eye = 2.0 * radius_px * eye_depth * tan_half_fov * aspect / viewport.x;
+    let scale = width_eye * extrude;
     let max_miter_scale = max(line_params.depth_bias.y, 0.0);
     let unclipped_length_sq = dot(unclipped, unclipped);
     var full_normal = unclipped * scale;
     if (dot(miter_clip, miter_clip) <= 1e-6 || unclipped_length_sq > max_miter_scale * max_miter_scale) {
         full_normal = miter_clip * scale;
     }
-    let projected = project_camera(model + full_normal, line_camera, line_params.depth_bias.x);
+    let eye_bias = min(width_eye * DECAL_SCALE, eye_depth * DECAL_MAX_FRACTION);
+    let projected = project_camera(model + full_normal, line_camera, line_params.depth_bias.x, eye_bias);
 
     var out: ColorOut;
     out.pos = projected.clip;
@@ -280,13 +309,20 @@ fn vs_dot(
     @builtin(instance_index) instance_index: u32,
 ) -> DotOut {
     let instance = dot_instances[instance_index];
-    let projected = project(instance.pos.xyz, dot_camera, dot_params.depth_bias.x);
+    let model = world_to_camera(instance.pos.xyz, dot_camera);
     let viewport = max(dot_params.viewport_and_radius.xy, vec2<f32>(1.0));
     let vertex_count = max(u32(dot_params.depth_bias.y), 3u);
     let angle = 2.0 * 3.141592653589793 * f32(vertex_index) / f32(vertex_count);
     let local = vec2<f32>(cos(angle), sin(angle));
     let radius_px = max(dot_params.viewport_and_radius.z, 0.0);
     let offset_ndc = local * radius_px * vec2<f32>(2.0 / viewport.x, 2.0 / viewport.y);
+
+    let tan_half_fov = max(dot_camera.clip.z, 0.05);
+    let aspect = max(dot_camera.clip.w, 0.1);
+    let eye_depth = max(-model.z, dot_camera.clip.x);
+    let width_eye = 2.0 * radius_px * eye_depth * tan_half_fov * aspect / viewport.x;
+    let eye_bias = min(width_eye * DECAL_SCALE, eye_depth * DECAL_MAX_FRACTION);
+    let projected = project_camera(model, dot_camera, dot_params.depth_bias.x, eye_bias);
 
     var out: DotOut;
     let position_xy = (projected.ndc + offset_ndc) * projected.clip.w;

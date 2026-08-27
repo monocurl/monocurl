@@ -14,8 +14,10 @@ use super::{
     MAX_FRAME_TIME_MS, MeshWorkItem, TARGET_FORMAT, TEXTURE_FORMAT, WHITE_TEXTURE,
     geometry::{
         build_dot_indices, build_dot_instances, build_line_vertices, build_triangle_vertices,
-        mesh_dot_radius_px, mesh_line_miter_scale, mesh_line_radius_px,
+        mesh_centroid, mesh_dot_radius_px, mesh_has_translucent_vertex, mesh_line_miter_scale,
+        mesh_line_radius_px,
     },
+    order,
     pipelines::Pipelines,
     resources::{
         BufferWithCount, CachedMesh, CachedTexture, IndexedBuffer, OffscreenTarget,
@@ -91,6 +93,7 @@ impl BladeRenderer {
         self.command_encoder.start();
         self.ensure_target(view.output_size);
 
+        let basis = scene.camera.basis();
         let mut items = Vec::with_capacity(scene.meshes.len());
         for (order, mesh) in scene.meshes.iter().enumerate() {
             if mesh.uniform.alpha <= 0.0 {
@@ -98,9 +101,20 @@ impl BladeRenderer {
             }
 
             let key = self.ensure_mesh(mesh, frame_index);
+            let mut texture_has_alpha = false;
             if let Some(path) = mesh.uniform.img.as_deref() {
                 self.ensure_texture(path, frame_index);
+                texture_has_alpha = self
+                    .texture_cache
+                    .get(path)
+                    .is_some_and(|entry| entry.has_alpha);
             }
+
+            let (centroid, translucent_vertices) = self
+                .mesh_cache
+                .get(&key)
+                .map(|cached| (cached.centroid, cached.translucent_vertices))
+                .unwrap_or((geo::simd::Float3::ZERO, false));
 
             items.push(MeshWorkItem {
                 key,
@@ -108,17 +122,36 @@ impl BladeRenderer {
                 mesh: Arc::clone(mesh),
                 texture_path: mesh.uniform.img.clone(),
                 z_index: mesh.uniform.z_index,
+                transparent: order::is_transparent(
+                    mesh.uniform.alpha,
+                    translucent_vertices,
+                    texture_has_alpha,
+                ),
+                depth: order::camera_depth(centroid, basis.position, basis.forward),
+                tri_bias: 0.0,
+                line_bias: 0.0,
+                dot_bias: 0.0,
             });
         }
+
+        // Canonical declaration rank drives the per-primitive NDC depth offsets,
+        // so the depth-test outcome for coplanar meshes is identical no matter
+        // how the paint order below reshuffles the draw sequence.
         items.sort_by_key(|item| (item.z_index, item.order));
+        let item_count = items.len();
+        for (rank, item) in items.iter_mut().enumerate() {
+            let bias = order::rank_bias(rank, item_count, DEPTH_STEP);
+            item.tri_bias = bias.tri;
+            item.line_bias = bias.line;
+            item.dot_bias = bias.dot;
+        }
+
+        // Final paint order: within each z_index, opaque (declaration order,
+        // depth-write on) then transparent (back-to-front, depth-write off).
+        items.sort_by(|a, b| order::draw_order_cmp(&a.sort_key(), &b.sort_key()));
 
         self.flush_pending_uploads();
-        self.draw_meshes(
-            &items,
-            view,
-            scene.camera.basis(),
-            Some(scene.background.color),
-        );
+        self.draw_meshes(&items, view, basis, Some(scene.background.color));
         self.copy_target_to_readback(view.output_size);
 
         let sync_point = self.gpu.submit(&mut self.command_encoder);
@@ -305,6 +338,8 @@ impl BladeRenderer {
                 triangles,
                 lines,
                 dots,
+                centroid: mesh_centroid(mesh),
+                translucent_vertices: mesh_has_translucent_vertex(mesh),
                 last_used_frame: frame_index,
             },
         );
@@ -317,14 +352,17 @@ impl BladeRenderer {
             return;
         }
 
-        let texture = match load_texture(path) {
-            Ok(image) => self.create_texture_with_upload(path, &image),
+        let (texture, has_alpha) = match load_texture(path) {
+            Ok(image) => {
+                let has_alpha = image.pixels().any(|pixel| pixel[3] < 255);
+                (self.create_texture_with_upload(path, &image), has_alpha)
+            }
             Err(error) => {
                 log::warn!(
                     "failed to load renderer texture {}: {error:#}",
                     path.display()
                 );
-                None
+                (None, false)
             }
         };
 
@@ -332,6 +370,7 @@ impl BladeRenderer {
             path.to_path_buf(),
             TextureCacheEntry {
                 texture,
+                has_alpha,
                 last_used_frame: frame_index,
             },
         );
@@ -458,7 +497,6 @@ impl BladeRenderer {
         let target = self.target.as_ref().expect("target should exist");
         let camera = CameraParams::from_basis(basis, view);
         let size = view.output_size;
-        let mut z_offset = 0.0;
         let color_target = match target.color_msaa_view {
             Some(msaa_view) => gpu::RenderTarget {
                 view: msaa_view,
@@ -512,7 +550,12 @@ impl BladeRenderer {
                     })
                     .map_or(self.white_texture.view, |texture| texture.view);
 
-                let mut encoder = pass.with(&self.pipelines.triangles);
+                let pipeline = if item.transparent {
+                    &self.pipelines.triangles_blend
+                } else {
+                    &self.pipelines.triangles
+                };
+                let mut encoder = pass.with(pipeline);
                 encoder.bind(
                     0,
                     &TrianglesData {
@@ -520,7 +563,7 @@ impl BladeRenderer {
                         tri_params: TriShaderParams {
                             values: [
                                 item.mesh.uniform.alpha as f32,
-                                z_offset,
+                                item.tri_bias,
                                 item.mesh.uniform.gloss,
                                 if item.mesh.uniform.smooth { 1.0 } else { 0.0 },
                             ],
@@ -531,7 +574,6 @@ impl BladeRenderer {
                     },
                 );
                 encoder.draw(0, triangles.count, 0, 1);
-                z_offset += DEPTH_STEP;
             }
 
             if let Some(lines) = buffers.lines.as_ref() {
@@ -550,7 +592,7 @@ impl BladeRenderer {
                                     item.mesh.uniform.alpha as f32,
                                 ],
                                 depth_bias: [
-                                    z_offset,
+                                    item.line_bias,
                                     mesh_line_miter_scale(item.mesh.as_ref()),
                                     0.0,
                                     0.0,
@@ -565,7 +607,6 @@ impl BladeRenderer {
                         0,
                         lines.count / LINE_VERTICES_PER_INSTANCE,
                     );
-                    z_offset += DEPTH_STEP;
                 }
             }
 
@@ -588,7 +629,7 @@ impl BladeRenderer {
                                     dot_radius,
                                     item.mesh.uniform.alpha as f32,
                                 ],
-                                depth_bias: [z_offset, dot_vertex_count as f32, 0.0, 0.0],
+                                depth_bias: [item.dot_bias, dot_vertex_count as f32, 0.0, 0.0],
                             },
                             dot_instances: dots.buffer.into(),
                         },
@@ -601,7 +642,6 @@ impl BladeRenderer {
                         0,
                         dots.count,
                     );
-                    z_offset += DEPTH_STEP;
                 }
             }
         }

@@ -210,6 +210,43 @@ mod tests {
     }
 
     #[test]
+    fn farther_transparent_surface_shows_through_nearer_transparent_surface() {
+        // Regression for the 3D partial-transparency bug: a nearer translucent
+        // triangle declared first must not depth-occlude a farther translucent
+        // triangle behind it. With depth writes disabled for the transparent
+        // pass + back-to-front ordering, the overlap region carries both colors.
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![
+                // near, declared first, red, alpha 0.5
+                Arc::new(translucent_triangle_mesh(
+                    Float4::new(1.0, 0.0, 0.0, 0.5),
+                    1.0,
+                )),
+                // far, blue, alpha 0.5
+                Arc::new(translucent_triangle_mesh(
+                    Float4::new(0.0, 0.0, 1.0, 0.5),
+                    -1.0,
+                )),
+            ],
+        };
+
+        let image = renderer.render(&scene, RenderSize::new(64, 64)).unwrap();
+        let [b, _g, r, a] = image.get_pixel(32, 32).0;
+
+        assert!(a > 0, "overlap pixel should be covered");
+        assert!(
+            r > 24 && b > 24,
+            "expected both the near (red) and far (blue) translucent surfaces to \
+             contribute at the overlap, got b={b} r={r} a={a}"
+        );
+    }
+
+    #[test]
     fn renders_standalone_line_pixels() {
         let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
             return;
@@ -418,6 +455,20 @@ mod tests {
             tag: Vec::new(),
             version: Mesh::fresh_version(),
         }
+    }
+
+    fn translucent_triangle_mesh(color: Float4, z: f32) -> Mesh {
+        let mut mesh = flat_triangle_mesh(color, 0);
+        for tri in &mut mesh.tris {
+            tri.a.pos.z = z;
+            tri.b.pos.z = z;
+            tri.c.pos.z = z;
+            tri.a.col = color;
+            tri.b.col = color;
+            tri.c.col = color;
+        }
+        mesh.uniform.alpha = color.w as f64;
+        mesh
     }
 
     fn count_red_pixels(image: &image::RgbaImage) -> usize {

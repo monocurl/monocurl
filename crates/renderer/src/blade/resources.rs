@@ -2,7 +2,7 @@ use std::{path::Path, sync::Weak};
 
 use anyhow::{Context as _, Result};
 use blade_graphics as gpu;
-use geo::mesh::Mesh;
+use geo::{mesh::Mesh, simd::Float3};
 use image::RgbaImage;
 
 use crate::RenderSize;
@@ -27,6 +27,12 @@ pub(super) struct CachedMesh {
     pub(super) triangles: Option<BufferWithCount>,
     pub(super) lines: Option<BufferWithCount>,
     pub(super) dots: Option<BufferWithCount>,
+    /// World-space mean of every triangle/line/dot position, used as the
+    /// back-to-front sort key for the transparent pass. Camera-independent.
+    pub(super) centroid: Float3,
+    /// True when any rendered vertex has a partial (non-0, non-1) alpha; makes
+    /// the mesh join the depth-write-off transparent pass.
+    pub(super) translucent_vertices: bool,
     pub(super) last_used_frame: u64,
 }
 
@@ -47,6 +53,10 @@ pub(super) struct CachedTexture {
 
 pub(super) struct TextureCacheEntry {
     pub(super) texture: Option<CachedTexture>,
+    /// True when the source image has any texel with alpha < 255; a mesh sampling
+    /// it must render in the transparent pass so its cut-out regions do not write
+    /// depth.
+    pub(super) has_alpha: bool,
     pub(super) last_used_frame: u64,
 }
 

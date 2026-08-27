@@ -1,4 +1,5 @@
 mod geometry;
+mod order;
 mod pipelines;
 mod renderer;
 mod resources;
@@ -57,4 +58,25 @@ struct MeshWorkItem {
     mesh: Arc<Mesh>,
     texture_path: Option<PathBuf>,
     z_index: i32,
+    /// Depth-write-off / back-to-front phase membership.
+    transparent: bool,
+    /// Camera-space depth of the mesh centroid (larger = farther).
+    depth: f32,
+    /// Perspective-safe NDC depth offset applied per primitive group. Derived
+    /// from the item's rank in canonical `(z_index, order)` order so it is
+    /// independent of the (possibly reordered) draw sequence.
+    tri_bias: f32,
+    line_bias: f32,
+    dot_bias: f32,
+}
+
+impl MeshWorkItem {
+    fn sort_key(&self) -> order::SortKey {
+        order::SortKey {
+            z_index: self.z_index,
+            transparent: self.transparent,
+            depth: self.depth,
+            order: self.order,
+        }
+    }
 }
