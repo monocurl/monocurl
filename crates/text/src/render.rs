@@ -991,6 +991,22 @@ mod tests {
         assert!(render_typst("#panic(\"boom\")", 1.0).is_err());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_plain_markup_produces_no_text_tags() {
+        // The SVG importer decodes `rgb(n,255,255)` fills back into mesh tags.
+        // Plain Typst output is solid black, so nothing should be tagged.
+        // (This locks in current behaviour; a future `text_tag` implementation
+        // would deliberately emit those marker colors.)
+        for markup in ["hello world", "$x^2 + y^2$", "= Heading"] {
+            let meshes = render_typst(markup, 1.0).unwrap();
+            assert!(
+                meshes.iter().all(|mesh| mesh.tag.is_empty()),
+                "plain Typst `{markup}` should not decode any text tags"
+            );
+        }
+    }
+
     #[test]
     fn bundled_backend_uses_basic_preamble_for_ascii_sources() {
         assert_eq!(

@@ -50,6 +50,10 @@ against the existing tree (tectonic, gpui, usvg 0.45, hayro).
 - Errors (parse/type/layout/`#panic`) surface as `text render failed: ...`.
 - Renders are cached via `cache::render_cached(BackendKind::Typst, ...)`, keyed by
   markup + scale + quality, same as the TeX backend's in-memory cache.
+- Tag decoding in the importer is left ON (consistent with `Tex`): a
+  `typst_plain_markup_produces_no_text_tags` test locks in that stock Typst
+  output (solid black) yields no accidental tags, and a future `text_tag`
+  implementation can rely on the decode path already being wired.
 - `RenderQuality` is forwarded from the executor like the other text natives.
 - **Global engine** (added in the second commit): the `TypstEngine` is built
   once in a `OnceLock` — fonts parsed once, `FontBook` derived once — with
@@ -104,12 +108,13 @@ $ cargo check -p stdlib
     Finished `dev` profile in 1.05s
 
 $ cargo test -p text typst
-running 4 tests
+running 5 tests
 test render::tests::typst_empty_inputs_render_to_no_meshes ... ok
 test render::tests::typst_invalid_markup_is_an_error ... ok
 test render::tests::typst_math_renders_some_geometry ... ok
 test render::tests::typst_hello_has_consistent_topology_and_reasonable_scale ... ok
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.06s
+test render::tests::typst_plain_markup_produces_no_text_tags ... ok
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.07s
 
 $ cargo check -p text --target wasm32-unknown-unknown
     Finished `dev` profile in 0.49s
