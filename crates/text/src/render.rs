@@ -29,10 +29,12 @@ const SVG_MESH_UNITS_AT_SCALE_1: f32 = 100.0;
 const SVG_TEXT_CANVAS_SIZE: f32 = 100_000.0;
 
 /// SVG units (Typst points, at the 10pt base size set in the Typst preamble)
-/// that map to one scene unit when `scale == 1`. Tuned so `Typst("$x^2$")` comes
-/// out at roughly the same size as `Tex("x^2")` / `Text("x^2")`.
+/// that map to one scene unit when `scale == 1`. Calibrated against the TeX
+/// backend: with this value `Typst("$x^2 + y^2 = z^2$")` renders within ~3% of
+/// the width/height of the equivalent `Tex("x^2 + y^2 = z^2")` (measured in the
+/// real renderer via `mesh_width`/`mesh_height`).
 #[cfg(not(target_arch = "wasm32"))]
-const TYPST_SVG_UNITS_AT_SCALE_1: f32 = 36.0;
+const TYPST_SVG_UNITS_AT_SCALE_1: f32 = 47.0;
 
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
     render_text_with_quality(text, scale, RenderQuality::Normal)

@@ -18,7 +18,7 @@ This reuses exactly the same SVG->mesh path as `Svg(...)` / the LaTeX backends.
 | --- | --- |
 | `Cargo.toml` (workspace) | new `[workspace.dependencies]`: `typst`, `typst-layout`, `typst-svg`, `typst-assets`, `typst-as-lib` |
 | `crates/text/Cargo.toml` | add those 5 deps under `cfg(not(target_arch = "wasm32"))` |
-| `crates/text/src/typst_backend.rs` | **new** native-only module: bundled fonts + `render_typst_svg(markup) -> Result<String>` |
+| `crates/text/src/typst_backend.rs` | **new** native-only module: global `TypstEngine` (built once), custom `FileResolver`, `render_typst_svg(markup) -> Result<String>` |
 | `crates/text/src/lib.rs` | `mod typst_backend` (native), re-export `render_typst`, `render_typst_with_quality` |
 | `crates/text/src/render.rs` | `render_typst` / `render_typst_with_quality` (native routes through cache + SVG import; wasm bails), `TYPST_SVG_UNITS_AT_SCALE_1`, unit tests |
 | `crates/text/src/types.rs` | `BackendKind::Typst` variant (+ wasm `as_str` arm) |
@@ -51,21 +51,35 @@ against the existing tree (tectonic, gpui, usvg 0.45, hayro).
 - Renders are cached via `cache::render_cached(BackendKind::Typst, ...)`, keyed by
   markup + scale + quality, same as the TeX backend's in-memory cache.
 - `RenderQuality` is forwarded from the executor like the other text natives.
+- **Global engine** (added in the second commit): the `TypstEngine` is built
+  once in a `OnceLock` — fonts parsed once, `FontBook` derived once — with
+  `comemo_evict_max_age(Some(30))`. The synthetic main file is served by a custom
+  `FileResolver` that reads a `Mutex<String>` holding the source for the compile
+  in flight; a second `Mutex<()>` (`TYPST_LOCK`) serialises compilation (Typst
+  leans on a process-global `comemo` cache, and the tectonic LaTeX backend is
+  effectively serial too). Effect on `cargo test -p text typst`: run time dropped
+  from ~7s to ~0.06s.
+- **Size calibration**: `TYPST_SVG_UNITS_AT_SCALE_1 = 47.0`, measured in the real
+  renderer (`monocurl transcript` + `mesh_width`/`mesh_height`). At scale 1:
+  `Tex("x^2 + y^2 = z^2")` = 1.490 x 0.300, `Typst("$x^2 + y^2 = z^2$")` (at 47)
+  ≈ 1.525 x 0.293 — within ~3% width, ~2% height. Verified visually: correct
+  orientation (upright, not mirrored — `flip_y = true` is right), transparent
+  background, tight crop.
 
 ## Stubbed / TODO
 
 - **`text_tag{...}` fragment tag recovery is NOT implemented for Typst** (v1).
   The whole snippet renders as untagged contours; use `tag{...}` on the outside.
-  Wiring this would need injecting per-fragment marker colors into the Typst
-  markup (Typst has `#text(fill: rgb(...))`) and decoding them like the LaTeX
-  `\text_tag` path — left as a follow-up. TODO comment in `render.rs`.
-- The `TypstEngine` (and therefore the `FontBook`) is rebuilt on every
-  `render_typst_svg` call. Font *bytes* are loaded once (`OnceLock`), but the
-  book is re-parsed each call. Fine for v1 (the SVG->mesh cache dedupes repeats);
-  a global engine + `comemo_evict_max_age(Some(N))` would speed up cold renders.
-- `TYPST_SVG_UNITS_AT_SCALE_1 = 36.0` chosen to match the TeX backend's
-  `NATIVE_SVG_UNITS_AT_SCALE_1`; eyeballed against `Text`/`Tex`, not precisely
-  calibrated.
+  The LaTeX path (`document::parse_text_tags` -> `apply_text_tag_markers`
+  inserting `\text_tag{N}{...}` -> the importer decoding `rgb(N,255,255)` fills
+  back into `mesh.tag`) does not port cleanly: the marker syntax is LaTeX, and
+  wrapping arbitrary Typst spans (especially inside `$...$` math) in
+  `#text(fill: rgb(N,255,255))[...]` is fragile. A proper implementation should
+  parse the fragment list, only wrap whole coherent fragments, and special-case
+  math mode. Left as a follow-up with a TODO in `render.rs` + `mesh.mcl`.
+- Typst `import` / packages / local files are intentionally unsupported for
+  inline snippets (the custom `FileResolver` only serves the synthetic main
+  file). Fine for a text constructor; revisit if users want `#import`.
 
 ## wasm status
 
@@ -80,34 +94,38 @@ WebAssembly runtime yet")`. Two `match kind { ... }` arms in `backend.rs` (nativ
 
 `cargo check -p text --target wasm32-unknown-unknown`: PASS (see below).
 
-## Test / build results
+## Test / build results (after global-engine + calibration changes)
 
 ```
 $ cargo check -p text
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.05s
+    Finished `dev` profile in 0.69s
 
 $ cargo check -p stdlib
-    Checking stdlib v0.1.0 (.../crates/stdlib)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.64s
+    Finished `dev` profile in 1.05s
 
 $ cargo test -p text typst
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 56s
-     Running unittests src/lib.rs
 running 4 tests
 test render::tests::typst_empty_inputs_render_to_no_meshes ... ok
 test render::tests::typst_invalid_markup_is_an_error ... ok
 test render::tests::typst_math_renders_some_geometry ... ok
 test render::tests::typst_hello_has_consistent_topology_and_reasonable_scale ... ok
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 6.76s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.06s
 
 $ cargo check -p text --target wasm32-unknown-unknown
-    Checking text v0.1.0 (.../crates/text)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.61s
-```
+    Finished `dev` profile in 0.49s
 
-```
 $ cargo build -p monocurl
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 40s
+    Finished `dev` profile   (whole app links with Typst backend included)
 ```
 
-The whole app links with the Typst backend included.
+## Real-app verification
+
+`./target/debug/monocurl image  scratch/typst_smoke.mcs`  — exported a PNG with
+`Tex` and `Typst` versions of the Pythagorean identity: Typst renders upright,
+un-mirrored, transparent background, tightly cropped.
+
+`./target/debug/monocurl transcript scratch/typst_measure.mcs` — printed
+`mesh_width`/`mesh_height` used to calibrate `TYPST_SVG_UNITS_AT_SCALE_1`.
+
+`scratch/typst_perf.mcs` — 8 distinct Typst snippets (sums, integrals, matrices,
+limits, `bold`, `nabla`) in one slide all render.
