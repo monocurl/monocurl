@@ -95,21 +95,26 @@ const LIGHT_SRC: vec3<f32> = vec3<f32>(1.0, 1.0, 0.0);
 const GAMMA: f32 = 3.0;
 const ALPHA_CUTOFF: f32 = 1.0 / 255.0;
 
-// Decal bias for screen-space primitives (lines/dots). These primitives are
-// extruded parallel to the image plane, so they are never truly coplanar with
-// the fill they decorate. `eye_bias` nudges them toward the camera in eye space
-// by a multiple of their own eye-space half-width, keeping the offset invariant
-// to camera distance. Lines/dots never write depth, so this can only ever let
-// them win against their own fill, never occlude later geometry.
+// Coplanar-stroke decal bias for screen-space primitives (lines/dots). These
+// primitives are extruded parallel to the image plane, so a stroke that
+// decorates a tilted fill is never truly coplanar with it: under a camera tilt
+// of theta the fill's depth sweeps +/- (stroke half-width in eye space) *
+// tan(theta) across the stroke, sinking half of it into the fill (MSAA sparkle).
+// `eye_bias` slides the stroke toward the camera along its own view ray by a
+// small multiple of its eye-space half-width so it stays in front of its own
+// fill. Because the half-width scales with eye depth, eye_bias / depth is
+// constant => camera-distance invariant.
 //
-// A stroke of eye-space half-width h sitting on a surface tilted by theta needs
-// bias > h * tan(theta) to stay in front of its own fill. DECAL_SCALE = 3 (bias
-// = 3 * full width = 6h) therefore holds up to tan(theta) ~ 6, i.e. ~80 degrees
-// of surface grazing; beyond that the fill can still bleed through. The MAX
-// clamp bounds the pull for near-plane geometry. Head-on (theta = 0) the bias is
-// irrelevant to ordering, so raising it does not touch the flat/2D case.
-const DECAL_SCALE: f32 = 3.0;
-const DECAL_MAX_FRACTION: f32 = 0.08;
+// The scale is kept deliberately small. Lines/dots test depth but never write
+// it, so the only failure mode of too-large a bias is a stroke that sits just
+// behind a *different* opaque mesh being pulled in front of it. DECAL_SCALE is
+// applied to the full eye-space width (= 2 * half-width), so bias = 2 *
+// DECAL_SCALE * half-width covers surface tilt up to atan(2 * DECAL_SCALE):
+// DECAL_SCALE = 1.5 => ~71 deg. DECAL_MAX_FRACTION caps the pull for very thick
+// strokes / very near geometry. Head-on (theta = 0) the bias never changes
+// ordering, so the flat/2D case is untouched.
+const DECAL_SCALE: f32 = 1.5;
+const DECAL_MAX_FRACTION: f32 = 0.02;
 
 fn world_to_camera(world: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     let relative = world - camera.position.xyz;
@@ -158,7 +163,7 @@ fn project_camera(
 
     // With eye_bias == 0.0 this is bit-identical to the unbiased projection.
     // A positive eye_bias slides the point toward the camera along its view ray
-    // (clip.w is left unbiased), which is a pure depth-only decal offset.
+    // (clip.w is left unbiased), a pure depth-only decal offset.
     var biased_camera_z = camera_z;
     if (eye_bias > 0.0) {
         biased_camera_z = min(camera_z + eye_bias, -near);
@@ -186,38 +191,6 @@ fn safe_normalize3(v: vec3<f32>) -> vec3<f32> {
         return normalize(v);
     }
     return vec3<f32>(0.0);
-}
-
-// ---------------------------------------------------------------------------
-// Weighted-blended order-independent transparency (McGuire / Bavoil 2013).
-//
-// The transparent pass accumulates every fragment into `oit_accum`
-// (premultiplied colour * weight, additive) and `oit_reveal` (running product
-// of 1 - alpha). A full-screen composite then blends the weighted average over
-// the resolved opaque colour. This removes the dependence on per-mesh and
-// per-triangle draw order for overlapping / intersecting translucent surfaces.
-// ---------------------------------------------------------------------------
-
-struct OitOut {
-    @location(0) accum: vec4<f32>,
-    @location(1) revealage: f32,
-}
-
-fn oit_weight(view_z: f32, alpha: f32) -> f32 {
-    // McGuire eq. 10: emphasise nearer fragments, bounded to keep fp16 sane.
-    let z = max(abs(view_z), 1e-4);
-    let a = z / 5.0;
-    let b = z / 200.0;
-    let denom = 1e-5 + a * a + b * b * b * b * b * b;
-    return alpha * clamp(10.0 / denom, 1e-2, 3e3);
-}
-
-fn oit_fragment(color: vec4<f32>, view_z: f32) -> OitOut {
-    let w = oit_weight(view_z, color.a);
-    var out: OitOut;
-    out.accum = vec4<f32>(color.rgb * color.a, color.a) * w;
-    out.revealage = color.a;
-    return out;
 }
 
 @vertex
@@ -248,7 +221,8 @@ fn vs_triangle(@builtin(vertex_index) vertex_index: u32) -> TriOut {
     return out;
 }
 
-fn triangle_shaded(in: TriOut) -> vec4<f32> {
+@fragment
+fn fs_triangle(in: TriOut) -> @location(0) vec4<f32> {
     let sampled = textureSample(t_color, s_color, in.uv);
     let normal = normalize(in.normal);
     let light_dir = normalize(in.model - LIGHT_SRC);
@@ -256,25 +230,10 @@ fn triangle_shaded(in: TriOut) -> vec4<f32> {
     let specular = gloss * pow(abs(dot(light_dir, normal)), GAMMA);
     let lit_rgb = in.color.rgb + (vec3<f32>(1.0) - in.color.rgb) * specular;
     let alpha = in.color.a * sampled.a * tri_params.values.x;
+    if (alpha <= ALPHA_CUTOFF) {
+        discard;
+    }
     return vec4<f32>(lit_rgb * sampled.rgb, alpha);
-}
-
-@fragment
-fn fs_triangle(in: TriOut) -> @location(0) vec4<f32> {
-    let color = triangle_shaded(in);
-    if (color.a <= ALPHA_CUTOFF) {
-        discard;
-    }
-    return color;
-}
-
-@fragment
-fn fs_triangle_oit(in: TriOut) -> OitOut {
-    let color = triangle_shaded(in);
-    if (color.a <= ALPHA_CUTOFF) {
-        discard;
-    }
-    return oit_fragment(color, in.model.z);
 }
 
 fn line_vertex_index(local_index: u32) -> u32 {
@@ -356,14 +315,6 @@ fn fs_line(in: ColorOut) -> @location(0) vec4<f32> {
     return in.color;
 }
 
-@fragment
-fn fs_line_oit(in: ColorOut) -> OitOut {
-    if (in.color.a <= ALPHA_CUTOFF) {
-        discard;
-    }
-    return oit_fragment(in.color, 1.0 / max(in.pos.w, 1e-6));
-}
-
 @vertex
 fn vs_dot(
     @builtin(vertex_index) vertex_index: u32,
@@ -398,44 +349,4 @@ fn fs_dot(in: DotOut) -> @location(0) vec4<f32> {
         discard;
     }
     return in.color;
-}
-
-@fragment
-fn fs_dot_oit(in: DotOut) -> OitOut {
-    if (in.color.a <= ALPHA_CUTOFF) {
-        discard;
-    }
-    return oit_fragment(in.color, 1.0 / max(in.pos.w, 1e-6));
-}
-
-struct FullscreenOut {
-    @builtin(position) pos: vec4<f32>,
-}
-
-var oit_accum_tex: texture_2d<f32>;
-var oit_reveal_tex: texture_2d<f32>;
-
-@vertex
-fn vs_oit_composite(@builtin(vertex_index) vertex_index: u32) -> FullscreenOut {
-    var out: FullscreenOut;
-    out.pos = vec4<f32>(QUAD_POSITIONS[vertex_index], 0.0, 1.0);
-    return out;
-}
-
-@fragment
-fn fs_oit_composite(in: FullscreenOut) -> @location(0) vec4<f32> {
-    let coord = vec2<i32>(in.pos.xy);
-    let revealage = textureLoad(oit_reveal_tex, coord, 0).r;
-    if (revealage >= 1.0) {
-        discard;
-    }
-    var accum = textureLoad(oit_accum_tex, coord, 0);
-    let sum = accum.r + accum.g + accum.b;
-    if (sum != sum || abs(sum) > 3.0e38) {
-        accum = vec4<f32>(vec3<f32>(accum.a), accum.a);
-    }
-    let avg = accum.rgb / max(accum.a, 1e-5);
-    // Blended with (src = 1 - src_alpha, dst = src_alpha):
-    //   out = avg * (1 - revealage) + dst * revealage
-    return vec4<f32>(avg, revealage);
 }

@@ -1,8 +1,4 @@
 mod geometry;
-/// CPU reference for the weighted-blended OIT compositing math (test-only).
-#[cfg(test)]
-mod oit;
-mod order;
 mod pipelines;
 mod renderer;
 mod resources;
@@ -27,9 +23,6 @@ use self::{
 const TARGET_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Bgra8Unorm;
 const TEXTURE_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Rgba8Unorm;
 const DEPTH_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Depth32Float;
-/// Weighted-blended OIT accumulation + revealage targets (see `blade.wgsl`).
-const OIT_ACCUM_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Rgba16Float;
-const OIT_REVEAL_FORMAT: gpu::TextureFormat = gpu::TextureFormat::R16Float;
 const MAX_FRAME_TIME_MS: u32 = 10_000;
 const DEPTH_STEP: f32 = 1e-6;
 const DESIRED_MSAA_SAMPLE_COUNT: u32 = 8;
@@ -64,25 +57,4 @@ struct MeshWorkItem {
     mesh: Arc<Mesh>,
     texture_path: Option<PathBuf>,
     z_index: i32,
-    /// Depth-write-off / back-to-front phase membership.
-    transparent: bool,
-    /// Camera-space depth of the mesh centroid (larger = farther).
-    depth: f32,
-    /// Perspective-safe NDC depth offset applied per primitive group. Derived
-    /// from the item's rank in canonical `(z_index, order)` order so it is
-    /// independent of the (possibly reordered) draw sequence.
-    tri_bias: f32,
-    line_bias: f32,
-    dot_bias: f32,
-}
-
-impl MeshWorkItem {
-    fn sort_key(&self) -> order::SortKey {
-        order::SortKey {
-            z_index: self.z_index,
-            transparent: self.transparent,
-            depth: self.depth,
-            order: self.order,
-        }
-    }
 }

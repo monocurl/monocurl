@@ -105,12 +105,6 @@ pub(super) struct DotsData {
     pub(super) dot_instances: gpu::BufferPiece,
 }
 
-#[derive(blade_macros::ShaderData)]
-pub(super) struct OitCompositeData {
-    pub(super) oit_accum_tex: gpu::TextureView,
-    pub(super) oit_reveal_tex: gpu::TextureView,
-}
-
 impl CameraParams {
     pub(super) fn from_basis(basis: CameraBasis, view: RenderView) -> Self {
         let output_size = view.output_size;
