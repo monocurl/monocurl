@@ -214,6 +214,43 @@ enum AxisLabelMap {
     Callable(Value),
 }
 
+/// Where a tick mark sits relative to the axis line.
+#[derive(Clone, Copy, PartialEq)]
+enum TickPlacement {
+    /// `p ± extend` — straddles the axis (default, unchanged).
+    Both,
+    /// `p .. p + extend` — only on the `+side` of the axis.
+    Positive,
+    /// `p - extend .. p` — only on the `-side` of the axis.
+    Negative,
+    /// `p ± extend/2` — straddles, half length.
+    Centered,
+}
+
+fn tick_placement_from_value(
+    value: Value,
+    name: &'static str,
+) -> Result<TickPlacement, ExecutorError> {
+    match value.elide_cached_wrappers_rec() {
+        Value::Nil => Ok(TickPlacement::Both),
+        Value::String(s) => match s.to_string().as_str() {
+            "both" => Ok(TickPlacement::Both),
+            "positive" => Ok(TickPlacement::Positive),
+            "negative" => Ok(TickPlacement::Negative),
+            "centered" => Ok(TickPlacement::Centered),
+            _ => Err(ExecutorError::InvalidArgument {
+                arg: name,
+                message: "must be \"both\", \"positive\", \"negative\", or \"centered\"",
+            }),
+        },
+        other => Err(ExecutorError::type_error_for(
+            "string or nil",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
 #[derive(Clone)]
 struct AxisStyle {
     range: AxisRange,
@@ -228,6 +265,8 @@ struct AxisStyle {
     /// `range.tick_step`. Set when the `tick_spacing` slot is a list. Every
     /// listed position is drawn as a major tick.
     explicit_ticks: Vec<f32>,
+    /// where tick marks sit relative to the axis line.
+    tick_placement: TickPlacement,
 }
 
 impl AxisStyle {
@@ -240,6 +279,7 @@ impl AxisStyle {
             arrow_extrusion: AXIS_BUFFER,
             draw_arrows: true,
             explicit_ticks: Vec::new(),
+            tick_placement: TickPlacement::Both,
         }
     }
 
@@ -386,6 +426,7 @@ fn read_axis_style(
             let mut arrow_extrusion = AXIS_BUFFER;
             let mut draw_arrows = true;
             let mut explicit_ticks: Vec<f32> = Vec::new();
+            let mut tick_placement = TickPlacement::Both;
             let range = match elements.len() {
                 1 => {
                     let radius = axis_number_from_value(
@@ -394,7 +435,7 @@ fn read_axis_style(
                     )?;
                     axis_radius_range(radius, name)?
                 }
-                2..=7 => {
+                2..=8 => {
                     let min = axis_number_from_value(
                         with_heap(|h| h.get(elements[0].key()).clone()),
                         name,
@@ -407,9 +448,9 @@ fn read_axis_style(
                         && axis_style_third_arg_is_title(with_heap(|h| {
                             h.get(elements[2].key()).clone()
                         }));
-                    if !has_title && elements.len() > 6 {
+                    if !has_title && elements.len() > 7 {
                         return Err(ExecutorError::invalid_operation(format!(
-                            "{name}: expected [min, max, tick_spacing, major_tick_rate, label_map, arrow_extrusion] or [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion]"
+                            "{name}: expected [min, max, (axis_title,) tick_spacing, major_tick_rate, label_map, arrow_extrusion, tick_placement]"
                         )));
                     }
                     let tick_step_index = if has_title {
@@ -467,11 +508,17 @@ fn read_axis_style(
                             )?;
                         }
                     }
+                    if elements.len() > tick_step_index + 4 {
+                        tick_placement = tick_placement_from_value(
+                            with_heap(|h| h.get(elements[tick_step_index + 4].key()).clone()),
+                            "tick_placement",
+                        )?;
+                    }
                     checked_axis_range(min, max, tick_step, name)?
                 }
                 len => {
                     return Err(ExecutorError::invalid_operation(format!(
-                        "{name}: expected a number or [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion], got list of length {len}"
+                        "{name}: expected a number or [min, max, (axis_title,) tick_spacing, major_tick_rate, label_map, arrow_extrusion, tick_placement], got list of length {len}"
                     )));
                 }
             };
@@ -488,6 +535,7 @@ fn read_axis_style(
                 arrow_extrusion,
                 draw_arrows,
                 explicit_ticks,
+                tick_placement,
             })
         }
         other => Err(ExecutorError::type_error_for(
@@ -891,6 +939,7 @@ fn axis_tick_lins(
     side: Float3,
     normal: Float3,
     major_tick_rate: usize,
+    placement: TickPlacement,
 ) -> (Vec<geo::mesh::Lin>, Vec<geo::mesh::Lin>) {
     let side = normalize_or(side, polygon_basis(basis.normalize()).1);
     let mut small = Vec::new();
@@ -904,7 +953,15 @@ fn axis_tick_lins(
         } else {
             SMALL_TICK_EXTEND
         };
-        target.push(default_lin(p - side * extend, p + side * extend, normal));
+        let (a, b) = match placement {
+            TickPlacement::Both => (p - side * extend, p + side * extend),
+            TickPlacement::Positive => (p, p + side * extend),
+            TickPlacement::Negative => (p - side * extend, p),
+            TickPlacement::Centered => {
+                (p - side * (extend * 0.5), p + side * (extend * 0.5))
+            }
+        };
+        target.push(default_lin(a, b, normal));
     }
     (small, large)
 }
@@ -1294,6 +1351,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         tick_dir,
         normal,
         style.major_tick_rate,
+        style.tick_placement,
     );
     push_styled_line_meshes(&mut axis_meshes, small_ticks, large_ticks, color, false);
     push_axis_arrows(
@@ -1396,6 +1454,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             y_dir,
             normal,
             x_style.major_tick_rate,
+            x_style.tick_placement,
         );
         let (small_y, large_y) = axis_tick_lins(
             &y_ticks,
@@ -1404,6 +1463,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             x_dir,
             normal,
             y_style.major_tick_rate,
+            y_style.tick_placement,
         );
         push_styled_line_meshes(&mut axis_meshes, small_x, large_x, color, false);
         push_styled_line_meshes(&mut axis_meshes, small_y, large_y, color, false);
@@ -1609,6 +1669,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             y_dir,
             xy_normal,
             x_style.major_tick_rate,
+            x_style.tick_placement,
         );
         let (small_y, large_y) = axis_tick_lins(
             &y_ticks,
@@ -1617,6 +1678,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             x_dir,
             xy_normal,
             y_style.major_tick_rate,
+            y_style.tick_placement,
         );
         let (small_z, large_z) = axis_tick_lins(
             &z_ticks,
@@ -1625,6 +1687,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             x_dir,
             z_normal,
             z_style.major_tick_rate,
+            z_style.tick_placement,
         );
         push_styled_line_meshes(&mut axis_meshes, small_x, large_x, color, false);
         push_styled_line_meshes(&mut axis_meshes, small_y, large_y, color, false);

@@ -675,15 +675,17 @@ let Number = |value, decimal_places = nil, include_sign = 0, font = nil|
 ## major_tick_rate: every nth tick is drawn/labelled as major (ignored when `tick_spacing` is an explicit list)
 ## label_map: function from value to tick label
 ## arrow_extrusion: arrowhead length in scene units, or `nil` to hide the axis arrowheads entirely
+## tick_placement: where tick marks sit relative to the axis line: `"both"` (default), `"positive"`, `"negative"`, or `"centered"` (half-length, straddling); `nil` means `"both"`
 ## [example]
 ## ```
 ## mesh axes = axis_style{"x", 0, 4, "x"} axis_style{"y", 0, 3, "y"} Axis2d()
+## mesh one_sided = axis_style{"x", 0, 4, "x", 1, 1, (|x| x), 0.2, "positive"} Axis2d()
 ## ```
-let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacing = 0.25, major_tick_rate = 4, label_map = (|x| x), arrow_extrusion = 0.2| {
+let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacing = 0.25, major_tick_rate = 4, label_map = (|x| x), arrow_extrusion = 0.2, tick_placement = nil| {
     if (axis != "x" and axis != "y" and axis != "z") {
         return __monocurl__native__ runtime_error("axis_style axis must be x, y, or z")
     }
-    let style = [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion]
+    let style = [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion, tick_placement]
     let name = axis + "_axis"
     let go = |level| __monocurl__native__ set_default(target, name, style, level)
     return [go(level: 0), go(level: 1)]
@@ -693,7 +695,7 @@ let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacin
 ## One-dimensional axis mesh along a basis vector.
 ## [description]
 ## Usually configured through `axis_style{"x", ...}` rather than by manually editing the compact `x_axis` style list.
-## In the style list, `tick_spacing` may be a list of exact tick positions instead of a step, the last slot (`arrow_extrusion`) may be `nil` to hide the axis arrowheads, and `label_map` may be `nil` to hide tick labels.
+## In the style list, `tick_spacing` may be a list of exact tick positions instead of a step, `arrow_extrusion` may be `nil` to hide the axis arrowheads, `label_map` may be `nil` to hide tick labels, and an 8th slot sets `tick_placement` (`"both"` / `"positive"` / `"negative"` / `"centered"`).
 let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis1d(basis, normal, color, x_axis)
 

@@ -1338,6 +1338,42 @@ fn test_axis_style_explicit_ticks_place_labels_at_requested_values() {
 }
 
 #[test]
+fn test_axis_style_tick_placement_modes() {
+    // x-axis: side is +y, LARGE_TICK_EXTEND = 0.075. arrows + labels suppressed
+    // so the axis mesh is just the tick marks.
+    let r = run_with_stdlib(
+        "
+        let default_p = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil])
+        let both = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil, \"both\"])
+        let pos = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil, \"positive\"])
+        let neg = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil, \"negative\"])
+        let cen = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil, \"centered\"])
+        let result =
+            (abs(mesh_down(default_p)[1] + 0.075) < 0.01) +
+            (abs(mesh_down(both)[1] + 0.075) < 0.01) +
+            (abs(mesh_down(pos)[1]) < 0.01) +
+            (abs(mesh_up(pos)[1] - 0.075) < 0.01) +
+            (abs(mesh_up(neg)[1]) < 0.01) +
+            (abs(mesh_down(neg)[1] + 0.075) < 0.01) +
+            (abs(mesh_down(cen)[1] + 0.0375) < 0.01)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(7);
+}
+
+#[test]
+fn test_axis_style_rejects_bad_tick_placement() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, 0.2, \"sideways\"])
+    ",
+        &["mesh"],
+    );
+    r.assert_error("tick_placement");
+}
+
+#[test]
 fn test_axis_style_rejects_negative_arrow_extrusion() {
     let r = run_with_stdlib(
         "

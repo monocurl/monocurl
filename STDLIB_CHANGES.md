@@ -223,6 +223,34 @@ mesh ax = axis_style{"x", -1, 5, "t", [-1, 0, 1, 2.5, 5]} Axis2d()
 mesh nl = NumberLine(0, 7, [0, 3.5, 7], 1, nil, |x| Number(x, 1))
 ```
 
+### Tick placement — `tick_placement` (native, `graphs.rs`)
+
+A new **8th slot** on the axis style list (and a `tick_placement` arg on the
+`axis_style` operator) controls where each tick mark sits relative to the axis
+line:
+
+| value | tick spans | note |
+|-------|-----------|------|
+| `nil` / `"both"` | `p − extend … p + extend` | **default, unchanged** |
+| `"positive"` | `p … p + extend` | one side only (the `+side`) |
+| `"negative"` | `p − extend … p` | one side only (the `−side`) |
+| `"centered"` | `p − extend/2 … p + extend/2` | straddling, half length |
+
+`+side` is the axis's perpendicular used for tick marks (for a default x-axis,
+`+y`; tick labels sit on the `−side`). Native: `AxisStyle` gains
+`tick_placement: TickPlacement` (default `Both`); `axis_tick_lins` branches on it
+for the two segment endpoints. Backward compatible — a 7-element style list or
+`nil` in slot 8 is `"both"`, byte-identical
+(`test_axis_style_tick_placement_modes` checks `default_p` / `both`).
+
+```
+# textbook one-sided x ticks:
+mesh ax = axis_style{"x", 0, 4, "x", 1, 1, (|x| x), 0.2, "positive"} Axis2d()
+# raw style list form:
+mesh ax = Axis2d([1r, 1u], [0,0,0,1], nil,
+                 [0, 4, "x", 1, 1, |x| x, 0.2, "positive"], [0, 3, "y", 1, 1, |x| x, 0.2, "positive"])
+```
+
 ### `NumberLine` — NEW
 
 A friendlier `Axis1d`: a labelled 1-D number line where **every** tick is
