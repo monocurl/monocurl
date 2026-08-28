@@ -320,8 +320,9 @@ let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128], endpoint_dots = 0, fill
 Behaviour: **unchanged** when both are falsy/`nil` — returns the bare polyline.
 When either is set the result is a flat mesh list:
 `[ <fill pos region>, <fill neg region>, <fill outline>, curve, <dot>, <dot> ]`
-(fill parts only if `fill`, dots only if `endpoint_dots`). `f` still must return
-a number at every sample — no discontinuity/pole handling (see skipped).
+(fill parts only if `fill`, dots only if `endpoint_dots`). Both the curve and the
+`fill` split around any `nil` / non-finite sample (see the discontinuity section
+below).
 
 ```
 # after:
