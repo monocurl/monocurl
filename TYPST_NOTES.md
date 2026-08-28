@@ -20,7 +20,8 @@ This reuses exactly the same SVG->mesh path as `Svg(...)` / the LaTeX backends.
 | `crates/text/Cargo.toml` | add those 5 deps under `cfg(not(target_arch = "wasm32"))` |
 | `crates/text/src/typst_backend.rs` | **new** native-only module: global `TypstEngine` (built once), custom `FileResolver`, `render_typst_svg(markup) -> Result<String>` |
 | `crates/text/src/lib.rs` | `mod typst_backend` (native), re-export `render_typst`, `render_typst_with_quality` |
-| `crates/text/src/render.rs` | `render_typst` / `render_typst_with_quality` (native routes through cache + SVG import; wasm bails), `TYPST_SVG_UNITS_AT_SCALE_1`, unit tests |
+| `crates/text/src/render.rs` | `render_typst` / `render_typst_with_quality` (native: parse tags -> apply markers -> cache + SVG import -> remap tags; wasm bails), `TYPST_SVG_UNITS_AT_SCALE_1`, unit tests |
+| `crates/text/src/document.rs` | `apply_typst_text_tag_markers` (native) + `typst_math_context`; factored shared `validate_marker_spans` out of `apply_text_tag_markers` |
 | `crates/text/src/types.rs` | `BackendKind::Typst` variant (+ wasm `as_str` arm) |
 | `crates/text/src/backend.rs` | `unreachable!()` arm for `BackendKind::Typst` (Typst never uses the LaTeX doc pipeline) |
 | `crates/stdlib/src/mesh/constructors.rs` | `mk_typst` native `#[stdlib_func]` + wasm stub |
@@ -50,10 +51,8 @@ against the existing tree (tectonic, gpui, usvg 0.45, hayro).
 - Errors (parse/type/layout/`#panic`) surface as `text render failed: ...`.
 - Renders are cached via `cache::render_cached(BackendKind::Typst, ...)`, keyed by
   markup + scale + quality, same as the TeX backend's in-memory cache.
-- Tag decoding in the importer is left ON (consistent with `Tex`): a
-  `typst_plain_markup_produces_no_text_tags` test locks in that stock Typst
-  output (solid black) yields no accidental tags, and a future `text_tag`
-  implementation can rely on the decode path already being wired.
+- **`text_tag` recovery works for both markup and math** (added in the third
+  commit — see its own section below).
 - `RenderQuality` is forwarded from the executor like the other text natives.
 - **Global engine** (added in the second commit): the `TypstEngine` is built
   once in a `OnceLock` — fonts parsed once, `FontBook` derived once — with
@@ -70,20 +69,49 @@ against the existing tree (tectonic, gpui, usvg 0.45, hayro).
   orientation (upright, not mirrored — `flip_y = true` is right), transparent
   background, tight crop.
 
-## Stubbed / TODO
+## `text_tag` recovery (third commit)
 
-- **`text_tag{...}` fragment tag recovery is NOT implemented for Typst** (v1).
-  The whole snippet renders as untagged contours; use `tag{...}` on the outside.
-  The LaTeX path (`document::parse_text_tags` -> `apply_text_tag_markers`
-  inserting `\text_tag{N}{...}` -> the importer decoding `rgb(N,255,255)` fills
-  back into `mesh.tag`) does not port cleanly: the marker syntax is LaTeX, and
-  wrapping arbitrary Typst spans (especially inside `$...$` math) in
-  `#text(fill: rgb(N,255,255))[...]` is fragile. A proper implementation should
-  parse the fragment list, only wrap whole coherent fragments, and special-case
-  math mode. Left as a follow-up with a TODO in `render.rs` + `mesh.mcl`.
-- Typst `import` / packages / local files are intentionally unsupported for
-  inline snippets (the custom `FileResolver` only serves the synthetic main
-  file). Fine for a text constructor; revisit if users want `#import`.
+`Typst` now supports the same tagging as `Tex`. `document::parse_text_tags`
+(already backend-agnostic) strips `\text_tag{...}{...}` / `\tagN{...}` markers —
+including the `text_tag{...}` list form, which the executor lowers to
+`\text_tag` before the string reaches `mk_typst` — and records tagged byte
+ranges. `render_typst_with_quality` then mirrors `render_tagged_backend`:
+
+1. `indexed_marker_spans` gives each span a synthetic single-component tag `i+1`.
+2. **`document::apply_typst_text_tag_markers`** (new, native-only) wraps each
+   range. It classifies the syntax context at the range start by scanning for
+   unescaped `$`:
+   - **markup**: `#text(fill: rgb(N, 255, 255))[ ...content... ]`
+   - **inline math** (`$x$`): `#text(fill: rgb(N, 255, 255))[$ ...content... $]`
+     — the `#` switches to code mode so `rgb` resolves, and re-entering `$...$`
+     keeps superscripts / fractions / etc. as math.
+   - **display math** (`$ x $`, spaces around): same but `[$ ... $]` so the
+     fragment stays display-styled.
+   It reuses the shared `apply_wrappers` / `validate_nested_ranges` /
+   `validate_marker_spans` helpers, so nesting (inner tag wins) works.
+3. The SVG importer decodes the `rgb(N,255,255)` fill back to `mesh.tag = [N]`
+   (decode path was already on).
+4. `apply_backend_text_tags` remaps `mesh.tag == [i+1]` to the caller's real tag
+   list `spans[i].tag` (so multi-component tags like `text_tag{[2, 7]}` work).
+
+**Layout is preserved** — a test asserts tagged math stays within 10% of the
+untagged bounds, and the visual check (`scratch/typst_tags.mcs`) shows correct
+per-term coloring of `$a^2 + b^2 = c^2$`, `$\tag1{x^2} + \tag2{2 x y} +
+\tag3{y^2}$`, and markup `\tag1{alpha} beta \tag2{gamma}` with no distortion.
+
+Note: `rgb(N, 255, 255)` is emitted as an exact `#NNffff` sRGB fill in the SVG
+(Typst does no color management for `rgb()`), so decoding is exact. The one
+Typst gotcha found: `$ x $` (whitespace-padded) is *display* math, `$x$` is
+inline — nothing to do with the wrapper.
+
+Context detection does not track `//` / `/* */` comments or `$` inside
+code-mode strings; those are not expected in `Typst(...)` snippets.
+
+## Not supported (intentional)
+
+- Typst `import` / packages / local files for inline snippets (the custom
+  `FileResolver` only serves the synthetic main file). Fine for a text
+  constructor; revisit if users want `#import`.
 
 ## wasm status
 
@@ -98,29 +126,33 @@ WebAssembly runtime yet")`. Two `match kind { ... }` arms in `backend.rs` (nativ
 
 `cargo check -p text --target wasm32-unknown-unknown`: PASS (see below).
 
-## Test / build results (after global-engine + calibration changes)
+## Test / build results (after tag-recovery changes)
 
 ```
-$ cargo check -p text
-    Finished `dev` profile in 0.69s
+$ cargo check -p text                                 -> Finished, no warnings
+$ cargo check -p stdlib                               -> Finished, no warnings
+$ cargo check -p text --target wasm32-unknown-unknown -> Finished, no warnings
+$ cargo build -p monocurl                             -> Finished (app links)
 
-$ cargo check -p stdlib
-    Finished `dev` profile in 1.05s
+$ cargo test -p text document
+running 12 tests
+... 8 pre-existing (incl. latex \color marker tests) ... ok
+test document::tests::typst_text_tag_markers_wrap_markup_and_math_differently ... ok
+test document::tests::typst_text_tag_markers_preserve_display_math_and_nesting ... ok
+test result: ok. 12 passed; 0 failed
 
 $ cargo test -p text typst
-running 5 tests
+running 9 tests
 test render::tests::typst_empty_inputs_render_to_no_meshes ... ok
 test render::tests::typst_invalid_markup_is_an_error ... ok
 test render::tests::typst_math_renders_some_geometry ... ok
 test render::tests::typst_hello_has_consistent_topology_and_reasonable_scale ... ok
 test render::tests::typst_plain_markup_produces_no_text_tags ... ok
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 29 filtered out; finished in 0.07s
-
-$ cargo check -p text --target wasm32-unknown-unknown
-    Finished `dev` profile in 0.49s
-
-$ cargo build -p monocurl
-    Finished `dev` profile   (whole app links with Typst backend included)
+test render::tests::typst_markup_text_tags_are_recovered ... ok
+test render::tests::typst_math_text_tags_are_recovered_and_preserve_layout ... ok
+test render::tests::typst_nested_text_tags_use_inner_priority ... ok
+test render::tests::typst_multi_component_text_tag_lists_are_recovered ... ok
+test result: ok. 9 passed; 0 failed; finished in 0.07s
 ```
 
 ## Real-app verification
@@ -134,3 +166,11 @@ un-mirrored, transparent background, tightly cropped.
 
 `scratch/typst_perf.mcs` — 8 distinct Typst snippets (sums, integrals, matrices,
 limits, `bold`, `nabla`) in one slide all render.
+
+`scratch/typst_tags.mcs` — `text_tag` recovery: `palette{}` operator colors by
+tag. `mesh_tags` reports `[1, 2, 3]` for both the list form
+(`[text_tag{1} "$a^2$", ...]`) and the raw form
+(`"$\tag1{x^2} + \tag2{2 x y} + \tag3{y^2}$"`), and `[1, 2]` for markup
+`"\tag1{alpha} beta \tag2{gamma} delta"`. Rendered PNG shows each term in its
+color, superscripts colored with their base, operators left black, no layout
+distortion.
