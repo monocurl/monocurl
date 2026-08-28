@@ -7,7 +7,7 @@ use image::RgbaImage;
 
 use crate::RenderSize;
 
-use super::DESIRED_MSAA_SAMPLE_COUNT;
+use super::{DESIRED_MSAA_SAMPLE_COUNT, OIT_ACCUM_FORMAT, OIT_REVEAL_FORMAT};
 
 pub(super) struct OffscreenTarget {
     pub(super) size: RenderSize,
@@ -18,7 +18,24 @@ pub(super) struct OffscreenTarget {
     pub(super) depth: gpu::Texture,
     pub(super) depth_view: gpu::TextureView,
     pub(super) readback: gpu::Buffer,
+    /// Weighted-blended OIT scratch targets. Allocated lazily on the first frame
+    /// that actually contains transparent geometry, so opaque-only scenes pay
+    /// nothing (and render through the unchanged single pass).
+    pub(super) oit: Option<OitTargets>,
     pub(super) needs_init: bool,
+}
+
+pub(super) struct OitTargets {
+    /// Single-sample, shader-readable accumulation target (resolve destination
+    /// when MSAA is active, otherwise the direct render target).
+    pub(super) accum: gpu::Texture,
+    pub(super) accum_view: gpu::TextureView,
+    pub(super) accum_msaa: Option<gpu::Texture>,
+    pub(super) accum_msaa_view: Option<gpu::TextureView>,
+    pub(super) reveal: gpu::Texture,
+    pub(super) reveal_view: gpu::TextureView,
+    pub(super) reveal_msaa: Option<gpu::Texture>,
+    pub(super) reveal_msaa_view: Option<gpu::TextureView>,
 }
 
 pub(super) struct CachedMesh {
@@ -144,6 +161,96 @@ pub(super) fn destroy_offscreen_target(gpu: &gpu::Context, target: OffscreenTarg
     gpu.destroy_texture_view(target.depth_view);
     gpu.destroy_texture(target.depth);
     gpu.destroy_buffer(target.readback);
+    if let Some(oit) = target.oit {
+        destroy_oit_targets(gpu, oit);
+    }
+}
+
+pub(super) fn destroy_oit_targets(gpu: &gpu::Context, oit: OitTargets) {
+    gpu.destroy_texture_view(oit.accum_view);
+    gpu.destroy_texture(oit.accum);
+    gpu.destroy_texture_view(oit.reveal_view);
+    gpu.destroy_texture(oit.reveal);
+    if let Some(view) = oit.accum_msaa_view {
+        gpu.destroy_texture_view(view);
+    }
+    if let Some(texture) = oit.accum_msaa {
+        gpu.destroy_texture(texture);
+    }
+    if let Some(view) = oit.reveal_msaa_view {
+        gpu.destroy_texture_view(view);
+    }
+    if let Some(texture) = oit.reveal_msaa {
+        gpu.destroy_texture(texture);
+    }
+}
+
+/// Creates the weighted-blended OIT scratch targets for `size` / `sample_count`.
+/// The returned textures are uninitialised; the caller must `init_texture` each
+/// one on the active command encoder before first use.
+pub(super) fn create_oit_targets(
+    gpu: &gpu::Context,
+    size: RenderSize,
+    sample_count: u32,
+) -> OitTargets {
+    let resolve_usage = gpu::TextureUsage::TARGET | gpu::TextureUsage::RESOURCE;
+    let make = |name: &str, format: gpu::TextureFormat, samples: u32, usage: gpu::TextureUsage| {
+        let texture = gpu.create_texture(gpu::TextureDesc {
+            name,
+            format,
+            size: extent(size),
+            array_layer_count: 1,
+            mip_level_count: 1,
+            sample_count: samples,
+            dimension: gpu::TextureDimension::D2,
+            usage,
+            external: None,
+        });
+        let view = gpu.create_texture_view(
+            texture,
+            gpu::TextureViewDesc {
+                name,
+                format,
+                dimension: gpu::ViewDimension::D2,
+                subresources: &Default::default(),
+            },
+        );
+        (texture, view)
+    };
+
+    let (accum, accum_view) =
+        make("renderer-oit-accum", OIT_ACCUM_FORMAT, 1, resolve_usage);
+    let (reveal, reveal_view) =
+        make("renderer-oit-reveal", OIT_REVEAL_FORMAT, 1, resolve_usage);
+
+    let (accum_msaa, accum_msaa_view, reveal_msaa, reveal_msaa_view) = if sample_count > 1 {
+        let (at, av) = make(
+            "renderer-oit-accum-msaa",
+            OIT_ACCUM_FORMAT,
+            sample_count,
+            gpu::TextureUsage::TARGET,
+        );
+        let (rt, rv) = make(
+            "renderer-oit-reveal-msaa",
+            OIT_REVEAL_FORMAT,
+            sample_count,
+            gpu::TextureUsage::TARGET,
+        );
+        (Some(at), Some(av), Some(rt), Some(rv))
+    } else {
+        (None, None, None, None)
+    };
+
+    OitTargets {
+        accum,
+        accum_view,
+        accum_msaa,
+        accum_msaa_view,
+        reveal,
+        reveal_view,
+        reveal_msaa,
+        reveal_msaa_view,
+    }
 }
 
 pub(super) fn choose_sample_count(gpu: &gpu::Context) -> u32 {

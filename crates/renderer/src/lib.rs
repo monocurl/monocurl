@@ -247,6 +247,52 @@ mod tests {
     }
 
     #[test]
+    fn intersecting_translucent_planes_are_draw_order_independent() {
+        // Two half-alpha planes that interpenetrate (z = +x and z = -x). Under
+        // weighted-blended OIT the composited image must not depend on the order
+        // the meshes are declared in — the whole point of the technique. (With
+        // the previous sorted per-mesh blend the crossing region flips colour
+        // when the declaration order is swapped.)
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let red = Arc::new(tilted_quad_mesh(Float4::new(1.0, 0.0, 0.0, 0.5), 1.0));
+        let blue = Arc::new(tilted_quad_mesh(Float4::new(0.0, 0.0, 1.0, 0.5), -1.0));
+
+        let scene_ab = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::clone(&red), Arc::clone(&blue)],
+        };
+        let scene_ba = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![blue, red],
+        };
+
+        let size = RenderSize::new(96, 96);
+        let ab = renderer.render(&scene_ab, size).unwrap();
+        let ba = renderer.render(&scene_ba, size).unwrap();
+
+        let mut differing = 0usize;
+        let mut max_delta = 0i32;
+        for (p, q) in ab.pixels().zip(ba.pixels()) {
+            let d = (0..4)
+                .map(|c| (p.0[c] as i32 - q.0[c] as i32).abs())
+                .max()
+                .unwrap();
+            max_delta = max_delta.max(d);
+            if d > 6 {
+                differing += 1;
+            }
+        }
+        assert!(
+            differing == 0,
+            "WBOIT composite changed with mesh order: {differing} px differ, max delta {max_delta}"
+        );
+    }
+
+    #[test]
     fn renders_standalone_line_pixels() {
         let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
             return;
@@ -451,6 +497,52 @@ mod tests {
                 gloss: geo::mesh::DEFAULT_GLOSS,
                 img: None,
                 z_index,
+            },
+            tag: Vec::new(),
+            version: Mesh::fresh_version(),
+        }
+    }
+
+    /// A two-triangle quad lying in the plane `z = slope * x`, spanning
+    /// x,y in [-0.7, 0.7], with a uniform translucent colour.
+    fn tilted_quad_mesh(color: Float4, slope: f32) -> Mesh {
+        let vert = |x: f32, y: f32| TriVertex {
+            pos: Float3::new(x, y, slope * x),
+            col: color,
+            uv: Float2::new(0.0, 0.0),
+        };
+        let (a, b, c, d) = (
+            vert(-0.7, -0.7),
+            vert(0.7, -0.7),
+            vert(0.7, 0.7),
+            vert(-0.7, 0.7),
+        );
+        Mesh {
+            dots: Vec::new(),
+            lins: Vec::new(),
+            tris: vec![
+                Tri {
+                    a,
+                    b,
+                    c,
+                    ab: -1,
+                    bc: -1,
+                    ca: -1,
+                    is_dom_sib: false,
+                },
+                Tri {
+                    a,
+                    b: c,
+                    c: d,
+                    ab: -1,
+                    bc: -1,
+                    ca: -1,
+                    is_dom_sib: false,
+                },
+            ],
+            uniform: Uniforms {
+                alpha: color.w as f64,
+                ..Uniforms::default()
             },
             tag: Vec::new(),
             version: Mesh::fresh_version(),

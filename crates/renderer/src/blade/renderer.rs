@@ -22,13 +22,27 @@ use super::{
     resources::{
         BufferWithCount, CachedMesh, CachedTexture, IndexedBuffer, OffscreenTarget,
         PendingBufferUpload, PendingTextureUpload, TextureCacheEntry, choose_sample_count,
-        create_sampled_texture, destroy_offscreen_target, destroy_texture, extent, load_texture,
+        create_oit_targets, create_sampled_texture, destroy_offscreen_target, destroy_texture,
+        extent, load_texture,
     },
     types::{
         BackgroundData, BackgroundParams, CameraParams, DotShaderParams, DotsData,
-        LineShaderParams, LinesData, TriShaderParams, TrianglesData,
+        LineShaderParams, LinesData, OitCompositeData, TriShaderParams, TrianglesData,
     },
 };
+
+/// Borrowed view of the renderer state needed to record one mesh item's draws,
+/// kept separate from `command_encoder` so a render pass (which mutably borrows
+/// the encoder) and the per-item draw helper can coexist.
+struct DrawCtx<'a> {
+    pipelines: &'a Pipelines,
+    mesh_cache: &'a std::collections::HashMap<usize, CachedMesh>,
+    texture_cache: &'a std::collections::HashMap<std::path::PathBuf, TextureCacheEntry>,
+    dot_index_buffers: &'a std::collections::HashMap<u16, IndexedBuffer>,
+    white_texture_view: gpu::TextureView,
+    texture_sampler: gpu::Sampler,
+    style: crate::RenderStyle,
+}
 
 impl BladeRenderer {
     pub(crate) fn new(style: crate::RenderStyle) -> Result<Self> {
@@ -304,6 +318,7 @@ impl BladeRenderer {
             depth,
             depth_view,
             readback,
+            oit: None,
             needs_init: false,
         });
     }
@@ -494,9 +509,42 @@ impl BladeRenderer {
             }
         }
 
-        let target = self.target.as_ref().expect("target should exist");
         let camera = CameraParams::from_basis(basis, view);
         let size = view.output_size;
+        let transparent_present = items.iter().any(|item| item.transparent);
+
+        // Lazily allocate the weighted-blended OIT scratch targets the first time
+        // a frame actually contains transparent geometry. Opaque-only scenes never
+        // enter this branch and render through the unchanged single pass below.
+        if transparent_present
+            && self
+                .target
+                .as_ref()
+                .is_some_and(|target| target.oit.is_none())
+        {
+            let oit = create_oit_targets(&self.gpu, size, self.sample_count);
+            self.command_encoder.init_texture(oit.accum);
+            self.command_encoder.init_texture(oit.reveal);
+            if let Some(texture) = oit.accum_msaa {
+                self.command_encoder.init_texture(texture);
+            }
+            if let Some(texture) = oit.reveal_msaa {
+                self.command_encoder.init_texture(texture);
+            }
+            self.target.as_mut().expect("target should exist").oit = Some(oit);
+        }
+
+        let ctx = DrawCtx {
+            pipelines: &self.pipelines,
+            mesh_cache: &self.mesh_cache,
+            texture_cache: &self.texture_cache,
+            dot_index_buffers: &self.dot_index_buffers,
+            white_texture_view: self.white_texture.view,
+            texture_sampler: self.texture_sampler,
+            style: self.style,
+        };
+
+        let target = self.target.as_ref().expect("target should exist");
         let color_target = match target.color_msaa_view {
             Some(msaa_view) => gpu::RenderTarget {
                 view: msaa_view,
@@ -509,140 +557,251 @@ impl BladeRenderer {
                 finish_op: gpu::FinishOp::Store,
             },
         };
-        let mut pass = self.command_encoder.render(
-            "renderer-scene",
-            gpu::RenderTargetSet {
-                colors: &[color_target],
-                depth_stencil: Some(gpu::RenderTarget {
-                    view: target.depth_view,
-                    init_op: gpu::InitOp::Clear(gpu::TextureColor::White),
-                    finish_op: gpu::FinishOp::Discard,
-                }),
-            },
-        );
 
-        if let Some(color) = background {
-            let mut encoder = pass.with(&self.pipelines.background);
+        // ---- Pass 1: background + opaque geometry (writes depth). ----
+        // The depth buffer must survive for the OIT pass to test against it.
+        {
+            let mut pass = self.command_encoder.render(
+                "renderer-opaque",
+                gpu::RenderTargetSet {
+                    colors: &[color_target],
+                    depth_stencil: Some(gpu::RenderTarget {
+                        view: target.depth_view,
+                        init_op: gpu::InitOp::Clear(gpu::TextureColor::White),
+                        finish_op: if transparent_present {
+                            gpu::FinishOp::Store
+                        } else {
+                            gpu::FinishOp::Discard
+                        },
+                    }),
+                },
+            );
+
+            if let Some(color) = background {
+                let mut encoder = pass.with(&self.pipelines.background);
+                encoder.bind(
+                    0,
+                    &BackgroundData {
+                        background: BackgroundParams {
+                            color: [color.0, color.1, color.2, color.3],
+                        },
+                    },
+                );
+                encoder.draw(0, 4, 0, 1);
+            }
+
+            for item in items.iter().filter(|item| !item.transparent) {
+                Self::draw_item_primitives(&ctx, &mut pass, item, camera, view, size, false);
+            }
+        }
+
+        if !transparent_present {
+            return;
+        }
+
+        // ---- Pass 2: weighted-blended OIT accumulation for transparent meshes.
+        // Depth test against the opaque depth buffer, no depth write. ----
+        let target = self.target.as_ref().expect("target should exist");
+        let oit = target.oit.as_ref().expect("oit targets should exist");
+        let (accum_rt, reveal_rt) = match (oit.accum_msaa_view, oit.reveal_msaa_view) {
+            (Some(accum_msaa), Some(reveal_msaa)) => (
+                gpu::RenderTarget {
+                    view: accum_msaa,
+                    init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack),
+                    finish_op: gpu::FinishOp::ResolveTo(oit.accum_view),
+                },
+                gpu::RenderTarget {
+                    view: reveal_msaa,
+                    init_op: gpu::InitOp::Clear(gpu::TextureColor::White),
+                    finish_op: gpu::FinishOp::ResolveTo(oit.reveal_view),
+                },
+            ),
+            _ => (
+                gpu::RenderTarget {
+                    view: oit.accum_view,
+                    init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack),
+                    finish_op: gpu::FinishOp::Store,
+                },
+                gpu::RenderTarget {
+                    view: oit.reveal_view,
+                    init_op: gpu::InitOp::Clear(gpu::TextureColor::White),
+                    finish_op: gpu::FinishOp::Store,
+                },
+            ),
+        };
+        {
+            let mut pass = self.command_encoder.render(
+                "renderer-oit",
+                gpu::RenderTargetSet {
+                    colors: &[accum_rt, reveal_rt],
+                    depth_stencil: Some(gpu::RenderTarget {
+                        view: target.depth_view,
+                        init_op: gpu::InitOp::Load,
+                        finish_op: gpu::FinishOp::Discard,
+                    }),
+                },
+            );
+            for item in items.iter().filter(|item| item.transparent) {
+                Self::draw_item_primitives(&ctx, &mut pass, item, camera, view, size, true);
+            }
+        }
+
+        // ---- Pass 3: composite the weighted average over the resolved colour. ----
+        let target = self.target.as_ref().expect("target should exist");
+        let oit = target.oit.as_ref().expect("oit targets should exist");
+        {
+            let mut pass = self.command_encoder.render(
+                "renderer-oit-composite",
+                gpu::RenderTargetSet {
+                    colors: &[gpu::RenderTarget {
+                        view: target.color_view,
+                        init_op: gpu::InitOp::Load,
+                        finish_op: gpu::FinishOp::Store,
+                    }],
+                    depth_stencil: None,
+                },
+            );
+            let mut encoder = pass.with(&self.pipelines.oit_composite);
             encoder.bind(
                 0,
-                &BackgroundData {
-                    background: BackgroundParams {
-                        color: [color.0, color.1, color.2, color.3],
-                    },
+                &OitCompositeData {
+                    oit_accum_tex: oit.accum_view,
+                    oit_reveal_tex: oit.reveal_view,
                 },
             );
             encoder.draw(0, 4, 0, 1);
         }
+    }
 
-        for item in items {
-            let Some(buffers) = self.mesh_cache.get(&item.key) else {
-                continue;
+    /// Draws one mesh item's triangles, then lines, then dots into `pass`.
+    /// With `oit` the geometry is routed through the weighted-blended OIT
+    /// pipelines (MRT accum + revealage); otherwise through the opaque /
+    /// simple-blend pipelines.
+    fn draw_item_primitives(
+        ctx: &DrawCtx<'_>,
+        pass: &mut gpu::RenderCommandEncoder<'_>,
+        item: &MeshWorkItem,
+        camera: CameraParams,
+        view: RenderView,
+        size: RenderSize,
+        oit: bool,
+    ) {
+        let Some(buffers) = ctx.mesh_cache.get(&item.key) else {
+            return;
+        };
+
+        if let Some(triangles) = buffers.triangles.as_ref() {
+            let texture_view = item
+                .texture_path
+                .as_ref()
+                .and_then(|path| {
+                    ctx.texture_cache
+                        .get(path)
+                        .and_then(|entry| entry.texture.as_ref())
+                })
+                .map_or(ctx.white_texture_view, |texture| texture.view);
+
+            let pipeline = if oit {
+                &ctx.pipelines.triangles_oit
+            } else {
+                &ctx.pipelines.triangles
             };
+            let mut encoder = pass.with(pipeline);
+            encoder.bind(
+                0,
+                &TrianglesData {
+                    tri_camera: camera,
+                    tri_params: TriShaderParams {
+                        values: [
+                            item.mesh.uniform.alpha as f32,
+                            item.tri_bias,
+                            item.mesh.uniform.gloss,
+                            if item.mesh.uniform.smooth { 1.0 } else { 0.0 },
+                        ],
+                    },
+                    t_color: texture_view,
+                    s_color: ctx.texture_sampler,
+                    tri_vertices: triangles.buffer.into(),
+                },
+            );
+            encoder.draw(0, triangles.count, 0, 1);
+        }
 
-            if let Some(triangles) = buffers.triangles.as_ref() {
-                let texture_view = item
-                    .texture_path
-                    .as_ref()
-                    .and_then(|path| {
-                        self.texture_cache
-                            .get(path)
-                            .and_then(|entry| entry.texture.as_ref())
-                    })
-                    .map_or(self.white_texture.view, |texture| texture.view);
-
-                let pipeline = if item.transparent {
-                    &self.pipelines.triangles_blend
+        if let Some(lines) = buffers.lines.as_ref() {
+            let line_radius = mesh_line_radius_px(item.mesh.as_ref(), size, ctx.style);
+            if line_radius > f32::EPSILON {
+                let pipeline = if oit {
+                    &ctx.pipelines.lines_oit
                 } else {
-                    &self.pipelines.triangles
+                    &ctx.pipelines.lines
                 };
                 let mut encoder = pass.with(pipeline);
                 encoder.bind(
                     0,
-                    &TrianglesData {
-                        tri_camera: camera,
-                        tri_params: TriShaderParams {
-                            values: [
+                    &LinesData {
+                        line_camera: camera,
+                        line_params: LineShaderParams {
+                            viewport_and_line_width: [
+                                size.width as f32,
+                                size.height as f32,
+                                line_radius,
                                 item.mesh.uniform.alpha as f32,
-                                item.tri_bias,
-                                item.mesh.uniform.gloss,
-                                if item.mesh.uniform.smooth { 1.0 } else { 0.0 },
+                            ],
+                            depth_bias: [
+                                item.line_bias,
+                                mesh_line_miter_scale(item.mesh.as_ref()),
+                                0.0,
+                                0.0,
                             ],
                         },
-                        t_color: texture_view,
-                        s_color: self.texture_sampler,
-                        tri_vertices: triangles.buffer.into(),
+                        line_vertices: lines.buffer.into(),
                     },
                 );
-                encoder.draw(0, triangles.count, 0, 1);
+                encoder.draw(
+                    0,
+                    LINE_INDICES_PER_INSTANCE,
+                    0,
+                    lines.count / LINE_VERTICES_PER_INSTANCE,
+                );
             }
+        }
 
-            if let Some(lines) = buffers.lines.as_ref() {
-                let line_radius = mesh_line_radius_px(item.mesh.as_ref(), size, self.style);
-                if line_radius > f32::EPSILON {
-                    let mut encoder = pass.with(&self.pipelines.lines);
-                    encoder.bind(
-                        0,
-                        &LinesData {
-                            line_camera: camera,
-                            line_params: LineShaderParams {
-                                viewport_and_line_width: [
-                                    size.width as f32,
-                                    size.height as f32,
-                                    line_radius,
-                                    item.mesh.uniform.alpha as f32,
-                                ],
-                                depth_bias: [
-                                    item.line_bias,
-                                    mesh_line_miter_scale(item.mesh.as_ref()),
-                                    0.0,
-                                    0.0,
-                                ],
-                            },
-                            line_vertices: lines.buffer.into(),
+        if let Some(dots) = buffers.dots.as_ref() {
+            let dot_radius = mesh_dot_radius_px(item.mesh.as_ref(), ctx.style, view.raster_scale);
+            let dot_vertex_count = item.mesh.uniform.dot_vertex_count.max(3);
+            if dot_radius > f32::EPSILON
+                && let Some(index_buffer) = ctx.dot_index_buffers.get(&dot_vertex_count)
+            {
+                let pipeline = if oit {
+                    &ctx.pipelines.dots_oit
+                } else {
+                    &ctx.pipelines.dots
+                };
+                let mut encoder = pass.with(pipeline);
+                encoder.bind(
+                    0,
+                    &DotsData {
+                        dot_camera: camera,
+                        dot_params: DotShaderParams {
+                            viewport_and_radius: [
+                                size.width as f32,
+                                size.height as f32,
+                                dot_radius,
+                                item.mesh.uniform.alpha as f32,
+                            ],
+                            depth_bias: [item.dot_bias, dot_vertex_count as f32, 0.0, 0.0],
                         },
-                    );
-                    encoder.draw(
-                        0,
-                        LINE_INDICES_PER_INSTANCE,
-                        0,
-                        lines.count / LINE_VERTICES_PER_INSTANCE,
-                    );
-                }
-            }
-
-            if let Some(dots) = buffers.dots.as_ref() {
-                let dot_radius =
-                    mesh_dot_radius_px(item.mesh.as_ref(), self.style, view.raster_scale);
-                let dot_vertex_count = item.mesh.uniform.dot_vertex_count.max(3);
-                if dot_radius > f32::EPSILON
-                    && let Some(index_buffer) = self.dot_index_buffers.get(&dot_vertex_count)
-                {
-                    let mut encoder = pass.with(&self.pipelines.dots);
-                    encoder.bind(
-                        0,
-                        &DotsData {
-                            dot_camera: camera,
-                            dot_params: DotShaderParams {
-                                viewport_and_radius: [
-                                    size.width as f32,
-                                    size.height as f32,
-                                    dot_radius,
-                                    item.mesh.uniform.alpha as f32,
-                                ],
-                                depth_bias: [item.dot_bias, dot_vertex_count as f32, 0.0, 0.0],
-                            },
-                            dot_instances: dots.buffer.into(),
-                        },
-                    );
-                    encoder.draw_indexed(
-                        index_buffer.buffer.into(),
-                        gpu::IndexType::U16,
-                        index_buffer.count,
-                        0,
-                        0,
-                        dots.count,
-                    );
-                }
+                        dot_instances: dots.buffer.into(),
+                    },
+                );
+                encoder.draw_indexed(
+                    index_buffer.buffer.into(),
+                    gpu::IndexType::U16,
+                    index_buffer.count,
+                    0,
+                    0,
+                    dots.count,
+                );
             }
         }
     }
