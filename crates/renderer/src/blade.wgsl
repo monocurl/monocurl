@@ -108,14 +108,17 @@ const ALPHA_CUTOFF: f32 = 1.0 / 255.0;
 // width, so eye_bias / eye_depth is constant => the offset is camera-distance
 // invariant and self-limiting for thick strokes.
 //
-// Both lines/dots and fills now write depth (see pipelines.rs), so this bias
-// must stay *far* smaller than the depth gap to any surface a stroke is
-// genuinely hidden behind, or that surface's own decorating wireframe on the
-// far side bleeds through it (the x-ray regression). It only needs to clear
-// depth-buffer noise between a stroke and its own coplanar fill, which is tiny;
-// DECAL_SCALE = 0.02 (bias ~= 0.02 * stroke eye-width, a few 1e-5 world units at
-// a typical camera) is enough for that and small enough that hidden-line removal
-// on a bumped surface + coplanar wireframe shows no bleed-through.
+// Fills write depth; lines/dots only test it (see pipelines.rs). So this bias can
+// only ever win the depth test against geometry drawn *before* the stroke - it
+// can never punch through an opaque mesh painted afterwards, and 2D paint order
+// is preserved byte-for-byte. It still has to stay *far* smaller than the depth
+// gap to any surface a stroke is genuinely hidden behind, or that surface's own
+// decorating wireframe on the far side bleeds through it (the x-ray regression).
+// It only needs to clear depth-buffer noise between a stroke and its own coplanar
+// fill, which is tiny; DECAL_SCALE = 0.02 (bias ~= 0.02 * stroke eye-width, a few
+// 1e-5 world units at a typical camera) is enough for that and small enough that
+// hidden-line removal on a bumped surface + coplanar wireframe shows no
+// bleed-through.
 // DECAL_MAX_FRACTION caps the pull for a very thick stroke very near the camera.
 // Head-on the bias never changes ordering, so the flat/2D case is untouched.
 const DECAL_SCALE: f32 = 0.02;
