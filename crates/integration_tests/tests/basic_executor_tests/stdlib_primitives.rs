@@ -332,3 +332,32 @@ fn test_explicit_func_2d_color_at_sets_vertex_colors() {
     );
     r.assert_int(3);
 }
+
+#[test]
+fn test_explicit_func_diff_splits_fill_at_gaps() {
+    let r = run_with_stdlib(
+        "
+        let cont = ExplicitFuncDiff(|x| x, |x| 0, [-2, 2, 41])
+        let split = ExplicitFuncDiff(|x| { if ((x * x) < 0.25) { return nil }; return x }, |x| 0, [-2, 2, 41])
+        let ct = len(mesh_triangle_set(cont[0]))
+        let st = len(mesh_triangle_set(split[0]))
+        # continuous still tiles fully; the gap removes ~10 columns of fill
+        let result = (ct == 40) + (st > 0) + (st < ct - 5)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_explicit_func_fill_with_pole_does_not_error() {
+    let r = run_with_stdlib(
+        "
+        let shaded = ExplicitFunc(|x| { if ((x * x) < 0.04) { return nil }; return 1 / x }, [-2, 2, 121], 0, [0.2, 0.6, 0.9, 0.4])
+        let ranks = map(shaded, |m| mesh_rank(m))
+        let result = (len(shaded) == 4) + (2 in ranks) + (1 in ranks)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}

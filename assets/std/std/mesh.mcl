@@ -790,8 +790,8 @@ let ParametricFunc = |f, t_min_max_samples = [0, 1, 64], endpoint_dots = 0| {
 ## to append visible `Dot`s at the two ends. When either is used the result is a mesh list
 ## `[ (fill,) curve (, dots) ]` rather than a bare polyline.
 ## Where `f(x)` returns `nil` or a non-finite number (a pole, a hole, a piecewise gap),
-## the curve is split into separate contours instead of drawing a vertical jump. The
-## optional `fill` still assumes a continuous curve.
+## both the curve and the optional `fill` are split into separate pieces around the gap
+## instead of drawing a vertical jump.
 ## [parameters]
 ## x_min_max_samples: `[x_min, x_max, samples]`
 ## endpoint_dots: truthy to append visible `Dot`s at the curve endpoints
@@ -856,7 +856,7 @@ let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 65], y_min_max_samples = [-
 ## [overview]
 ## Fill the signed area between two explicit functions.
 ## [description]
-## Returns two tagged filled regions, one for where `f` is below `g` and one for where it is above. This is useful for shaded inequalities or visualizing approximation error.
+## Returns two tagged filled regions, one for where `f` is below `g` and one for where it is above. This is useful for shaded inequalities or visualizing approximation error. Where either `f` or `g` returns `nil` or a non-finite number, that column is a gap and the fill and outline are split around it.
 ## [parameters]
 ## x_min_max_samples: `[x_min, x_max, samples]`
 ## fills: [lower_fill, upper_fill]

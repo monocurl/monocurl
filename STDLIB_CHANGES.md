@@ -21,11 +21,13 @@ Quick index of what's new:
   `tip_length`, `tip_width`.
 - **Native graph knobs**: axis style lists accept `arrow_extrusion = nil`
   (hide arrowheads) and a **list** in the `tick_spacing` slot (explicit tick
-  positions); `ExplicitFunc`/`ParametricFunc` split into contours at
-  discontinuities (`nil` / non-finite `f`) instead of erroring.
+  positions); `ExplicitFunc`/`ParametricFunc`/`ExplicitFuncDiff` (and
+  `ExplicitFunc(fill:)`) split into contours / fill pieces at discontinuities
+  (`nil` / non-finite `f`) instead of erroring.
 
-Native touch points: `graphs.rs` (`AxisStyle` + `mk_explicit`/`mk_parametric`),
-`constructors.rs` (`VectorLikeStyle` + `mk_arrow`/`mk_vector`).
+Native touch points: `graphs.rs` (`AxisStyle`, `mk_explicit`/`mk_parametric`/
+`mk_explicit_diff`, `mk_explicit2d`), `constructors.rs` (`VectorLikeStyle` +
+`mk_arrow`/`mk_vector`).
 
 ---
 
@@ -309,8 +311,9 @@ otherwise unchanged (bare polyline).
 
 ### Discontinuity / domain-gap handling — native (`graphs.rs`)
 
-`mk_explicit` and `mk_parametric` previously **errored** if the callback returned
-a non-number (or built a polyline with a huge vertical jump across a pole). Now:
+`mk_explicit`, `mk_parametric` **and `mk_explicit_diff`** previously **errored**
+if the callback returned a non-number (or built a polyline / fill with a huge
+vertical jump across a pole). Now:
 
 - callback returns `nil` → that sample is a **gap**
 - callback returns a non-finite number (`NaN`, `±inf`) — e.g. `sqrt(x*x-1)` where
@@ -322,12 +325,21 @@ At each gap the polyline is **split into a separate contour** (via
 vertical line across the discontinuity. The result is still a single mesh; style
 operators, `stroke`, `Write`, etc. treat all contours together.
 
-Native detail: new helpers `explicit_sample_y` / `parametric_sample_point`
-(return `Option`), and `segmented_open_polyline(&[Option<Float3>], normal)`.
-`mk_explicit`/`mk_parametric` build `Vec<Option<Float3>>` and call it.
+For `mk_explicit_diff` (and therefore `ExplicitFunc(fill: ...)` and
+`ExplicitFuncDiff`), a column where **either** `f` or `g` is `nil`/non-finite is a
+gap: the fill is tiled only over maximal runs of valid columns (the same-sign
+strip logic runs per run), and the `f` / `g` outlines are split around it.
 
-Zero behaviour change for a callback that returns a finite number at every
-sample (test `test_explicit_func_continuous_unchanged`).
+Native detail: new helpers `explicit_sample_y` / `parametric_sample_point`
+(return `Option`), `push_segmented_open_polyline` +
+`segmented_open_polyline(&[Option<Float3>], normal)`. `mk_explicit`/`mk_parametric`
+build `Vec<Option<Float3>>`; `mk_explicit_diff` builds a per-column `valid` mask
+and iterates maximal valid segments.
+
+Zero behaviour change for callbacks that return a finite number at every sample
+(tests `test_explicit_func_continuous_unchanged`,
+`test_explicit_func_diff_splits_fill_at_gaps` asserts the continuous tri count is
+unchanged).
 
 ```
 # before: runtime error "expected float, got nil"  (or a spurious vertical line)
@@ -338,10 +350,10 @@ mesh sqrt_gap  = stroke{CYAN} ExplicitFunc(|x| sqrt(x * x - 1), [-3, 3, 300])
 mesh piecewise = stroke{CYAN} ParametricFunc(
     |t| { if (t > 0.4 and t < 0.6) { return nil }; return [cos(t*TAU), sin(t*TAU), 0] },
     [0, 1, 200])
+mesh shaded_pole = stroke{CYAN} ExplicitFunc(
+    |x| { if (abs(x) < 0.05) { return nil }; return 1 / x }, [-3, 3, 300], 0,
+    [0.2, 0.6, 0.9, 0.35])
 ```
-
-`ExplicitFunc`'s `fill` option still assumes a continuous curve
-(`mk_explicit_diff` is unchanged — see skipped).
 
 ### `ExplicitFunc2d` — `color_at` per-vertex colour (NEW optional arg, native)
 
@@ -479,7 +491,7 @@ mesh grid = [
   `test_axis_style_explicit_tick_positions`,
   `test_axis_style_explicit_ticks_place_labels_at_requested_values`.
 
-Full run: `--test basic_executor_tests` → **366 passed, 0 failed**;
+Full run: `--test basic_executor_tests` → **368 passed, 0 failed**;
 `--test anim_tests` → **117 passed, 0 failed**.
 
 ---
@@ -488,18 +500,15 @@ Full run: `--test basic_executor_tests` → **366 passed, 0 failed**;
 
 Need native changes with wide blast radius; noted for a follow-up branch:
 
-- **`ExplicitFuncDiff` / `ExplicitFunc(fill:)` gap handling** — `mk_explicit_diff`
-  still assumes both `f` and `g` are continuous over the domain; a `nil`/NaN
-  column would break its fill-strip run logic. The plain curve from
-  `ExplicitFunc` (no `fill`) does split correctly.
-- **One-sided ticks** — axis ticks are drawn symmetric about the axis line
-  (`axis_tick_lins` builds `p ± side*extend`). A "ticks only below the axis"
-  option would add a style slot + a branch there; not done.
-- **Double-headed arrows / custom tip shapes** — `tip_length`/`tip_width` scale
-  the existing single head (§6); a tail arrowhead needs restructuring the contour
-  build in `vector_like_mesh_with_style`.
-- **`ExplicitFunc2d` per-cell colour / `Field` native colour pass** — native
-  `mk_explicit2d` / `mk_field`.
+- **One-sided / centered axis ticks** — `axis_tick_lins` draws ticks symmetric
+  about the axis (`p ± side·extend`); a placement mode needs a new style slot +
+  a branch there.
+- **Double-headed / custom-tip arrows** — `tip_length`/`tip_width` scale the
+  single head (§6); a tail head needs restructuring the contour build in
+  `vector_like_mesh_with_style`.
+- **`Field` native colour pass** — `mk_field` returns raw meshes; `VectorField`
+  layers colour in `.mcl` (`op_recolor` per arrow), which is enough. A native
+  colour arg on `mk_field` itself is not done.
 - **`outline{}` / `round_corners{}` operators** — no clean pure-`.mcl`
   composition; need native geometry ops.
 - **Standalone `LineGrid` major/minor as one styled mesh** — `mk_line_grid`

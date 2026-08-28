@@ -103,32 +103,34 @@ fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
     }
 }
 
-fn open_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
-    let mut out = Vec::with_capacity(points.len().saturating_sub(1));
-    push_open_polyline(&mut out, points, normal);
-    out
-}
-
-/// Build an open polyline that is split into separate contours wherever the
+/// Append an open polyline to `out`, split into separate contours wherever the
 /// sample list contains a `None` (a domain gap / discontinuity). Contiguous
 /// runs of `Some` points of length >= 2 each become their own contour.
-fn segmented_open_polyline(points: &[Option<Float3>], normal: Float3) -> Vec<geo::mesh::Lin> {
-    let mut out = Vec::with_capacity(points.len().saturating_sub(1));
+fn push_segmented_open_polyline(
+    out: &mut Vec<geo::mesh::Lin>,
+    points: &[Option<Float3>],
+    normal: Float3,
+) {
     let mut run: Vec<Float3> = Vec::new();
     for point in points {
         match point {
             Some(p) => run.push(*p),
             None => {
                 if run.len() >= 2 {
-                    push_open_polyline(&mut out, &run, normal);
+                    push_open_polyline(out, &run, normal);
                 }
                 run.clear();
             }
         }
     }
     if run.len() >= 2 {
-        push_open_polyline(&mut out, &run, normal);
+        push_open_polyline(out, &run, normal);
     }
+}
+
+fn segmented_open_polyline(points: &[Option<Float3>], normal: Float3) -> Vec<geo::mesh::Lin> {
+    let mut out = Vec::with_capacity(points.len().saturating_sub(1));
+    push_segmented_open_polyline(&mut out, points, normal);
     out
 }
 
@@ -2067,31 +2069,24 @@ pub async fn mk_explicit_diff(
     }
     let upper_values = invoke_callable_many(executor, &f, &args, "f").await?;
     let lower_values = invoke_callable_many(executor, &g, &args, "g").await?;
+    // a column is valid only if both f and g are finite there; `nil` / non-finite
+    // marks a domain gap and the fill / outline is split around it.
+    let mut valid = Vec::with_capacity(samples);
     for ((x, upper_value), lower_value) in xs.into_iter().zip(upper_values).zip(lower_values) {
-        let yf = match upper_value {
-            Value::Float(v) => v as f32,
-            Value::Integer(v) => v as f32,
-            other => {
-                return Err(ExecutorError::type_error_for(
-                    "float",
-                    other.type_name(),
-                    "f",
-                ));
+        let yf = explicit_sample_y(upper_value, "f")?;
+        let yg = explicit_sample_y(lower_value, "g")?;
+        match (yf, yg) {
+            (Some(a), Some(b)) => {
+                upper.push(Float3::new(x as f32, a, 0.0));
+                lower.push(Float3::new(x as f32, b, 0.0));
+                valid.push(true);
             }
-        };
-        let yg = match lower_value {
-            Value::Float(v) => v as f32,
-            Value::Integer(v) => v as f32,
-            other => {
-                return Err(ExecutorError::type_error_for(
-                    "float",
-                    other.type_name(),
-                    "g",
-                ));
+            _ => {
+                upper.push(Float3::new(x as f32, 0.0, 0.0));
+                lower.push(Float3::new(x as f32, 0.0, 0.0));
+                valid.push(false);
             }
-        };
-        upper.push(Float3::new(x as f32, yf, 0.0));
-        lower.push(Float3::new(x as f32, yg, 0.0));
+        }
     }
 
     // split contiguous same-sign columns into shared strips so interior columns
@@ -2117,24 +2112,42 @@ pub async fn mk_explicit_diff(
             }
         };
 
-    let mut run_start = 0usize;
-    let mut is_pos = interval_is_pos(0);
-    for i in 1..samples - 1 {
-        let next_is_pos = interval_is_pos(i);
-        if next_is_pos != is_pos {
-            if is_pos {
-                append_strip(&mut pos_verts, &mut pos_faces, run_start, i);
-            } else {
-                append_strip(&mut neg_verts, &mut neg_faces, run_start, i);
-            }
-            run_start = i;
-            is_pos = next_is_pos;
+    // for each maximal run of valid columns, tile it with same-sign strips
+    let mut i = 0usize;
+    while i < samples {
+        if !valid[i] {
+            i += 1;
+            continue;
         }
-    }
-    if is_pos {
-        append_strip(&mut pos_verts, &mut pos_faces, run_start, samples - 1);
-    } else {
-        append_strip(&mut neg_verts, &mut neg_faces, run_start, samples - 1);
+        let seg_start = i;
+        while i + 1 < samples && valid[i + 1] {
+            i += 1;
+        }
+        let seg_end = i;
+        i += 1;
+        if seg_end == seg_start {
+            continue;
+        }
+
+        let mut run_start = seg_start;
+        let mut is_pos = interval_is_pos(seg_start);
+        for k in (seg_start + 1)..seg_end {
+            let next_is_pos = interval_is_pos(k);
+            if next_is_pos != is_pos {
+                if is_pos {
+                    append_strip(&mut pos_verts, &mut pos_faces, run_start, k);
+                } else {
+                    append_strip(&mut neg_verts, &mut neg_faces, run_start, k);
+                }
+                run_start = k;
+                is_pos = next_is_pos;
+            }
+        }
+        if is_pos {
+            append_strip(&mut pos_verts, &mut pos_faces, run_start, seg_end);
+        } else {
+            append_strip(&mut neg_verts, &mut neg_faces, run_start, seg_end);
+        }
     }
 
     let build_region = |verts: Vec<Float3>, faces: Vec<[usize; 3]>, fill: Float4| {
@@ -2168,8 +2181,19 @@ pub async fn mk_explicit_diff(
     let pos_val = make_tagged_mesh(pos_lins, pos_tris, tag0);
     let neg_val = make_tagged_mesh(neg_lins, neg_tris, tag1);
 
-    let mut lins = open_polyline(&upper, Float3::Z);
-    push_open_polyline(&mut lins, &lower, Float3::Z);
+    let upper_opt: Vec<Option<Float3>> = upper
+        .iter()
+        .zip(&valid)
+        .map(|(p, &ok)| ok.then_some(*p))
+        .collect();
+    let lower_opt: Vec<Option<Float3>> = lower
+        .iter()
+        .zip(&valid)
+        .map(|(p, &ok)| ok.then_some(*p))
+        .collect();
+    let mut lins = Vec::new();
+    push_segmented_open_polyline(&mut lins, &upper_opt, Float3::Z);
+    push_segmented_open_polyline(&mut lins, &lower_opt, Float3::Z);
     let outline_val = mesh_from_parts(vec![], lins, vec![]);
 
     Ok(list_value([pos_val, neg_val, outline_val]))
