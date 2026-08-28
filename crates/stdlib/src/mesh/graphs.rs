@@ -50,6 +50,7 @@ const AXIS_ARROW_STYLE: VectorLikeStyle = VectorLikeStyle {
     max_head_depth_over_length: 0.32,
     head_len_scale: 1.0,
     head_width_scale: 1.0,
+    double_headed: false,
 };
 
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {

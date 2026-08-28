@@ -17,13 +17,15 @@ Quick index of what's new:
 - **New constructors** (pure `.mcl`): `Angle`, `RightAngle`, `Brace`,
   `DashedLine`, `NumberLine`, `VectorField`.
 - **New optional args**: `ExplicitFunc` → `endpoint_dots`, `fill`;
-  `ParametricFunc` → `endpoint_dots`; `Arrow`/`Vector`/`VectorField` →
-  `tip_length`, `tip_width`.
+  `ParametricFunc` → `endpoint_dots`; `ExplicitFunc2d` → `color_at`;
+  `Arrow`/`Vector` → `tip_length`, `tip_width`, `double_headed`
+  (`VectorField` → `tip_length`, `tip_width`).
 - **Native graph knobs**: axis style lists accept `arrow_extrusion = nil`
-  (hide arrowheads) and a **list** in the `tick_spacing` slot (explicit tick
-  positions); `ExplicitFunc`/`ParametricFunc`/`ExplicitFuncDiff` (and
-  `ExplicitFunc(fill:)`) split into contours / fill pieces at discontinuities
-  (`nil` / non-finite `f`) instead of erroring.
+  (hide arrowheads), a **list** in the `tick_spacing` slot (explicit tick
+  positions), and an 8th `tick_placement` slot (`"both"`/`"positive"`/
+  `"negative"`/`"centered"`); `ExplicitFunc`/`ParametricFunc`/`ExplicitFuncDiff`
+  (and `ExplicitFunc(fill:)`) split into contours / fill pieces at
+  discontinuities (`nil` / non-finite `f`) instead of erroring.
 
 Native touch points: `graphs.rs` (`AxisStyle`, `mk_explicit`/`mk_parametric`/
 `mk_explicit_diff`, `mk_explicit2d`), `constructors.rs` (`VectorLikeStyle` +
@@ -445,10 +447,9 @@ args, applied to every arrow — useful for dense fields (small heads) or emphas
 
 ---
 
-## 6. Arrow / Vector tip geometry — `tip_length` / `tip_width` (native, `constructors.rs`)
+## 6. Arrow / Vector tip geometry — `tip_length` / `tip_width` / `double_headed` (native, `constructors.rs`)
 
-`Arrow` and `Vector` had a fixed arrowhead shape (with an internal
-short-arrow-legibility clamp). Two optional multipliers now scale the head:
+`Arrow` and `Vector` had a fixed single arrowhead. Three optional args now:
 
 ```
 # before:
@@ -456,34 +457,41 @@ let Arrow  = |start = [0,0,0], end = [1,0,0], normal = 1b, path_arc = 0| ...
 let Vector = |delta = 1r, tail = [0,0,0], normal = 1b| ...
 # after:
 let Arrow  = |start = [0,0,0], end = [1,0,0], normal = 1b, path_arc = 0,
-              tip_length = 1, tip_width = 1| ...
+              tip_length = 1, tip_width = 1, double_headed = 0| ...
 let Vector = |delta = 1r, tail = [0,0,0], normal = 1b,
-              tip_length = 1, tip_width = 1| ...
+              tip_length = 1, tip_width = 1, double_headed = 0| ...
 ```
 
 | arg | default | meaning |
 |-----|---------|---------|
 | `tip_length` | `1` | multiplier on the arrowhead length along the shaft; `0` → no head (bare shaft) |
 | `tip_width` | `1` | multiplier on the arrowhead half-width |
+| `double_headed` | `0` | truthy → also draw a mirrored arrowhead at the tail (for span / interval / bidirectional markers) |
 
-Native: `VectorLikeStyle` gains `head_len_scale` / `head_width_scale` (both `1.0`
-in `DEFAULT_VECTOR_LIKE_STYLE` and `AXIS_ARROW_STYLE`);
-`vector_like_mesh_with_style` multiplies the final `head_depth` / `head_half_width`
-by them and re-clamps to `0.9·len` / `0.45·len` (a no-op at scale `1.0`, since the
-built-in caps are tighter — so **existing arrows/vectors/axis arrows are
-byte-identical**, `test_arrow_tip_defaults_match_explicit_ones`). New helper
-`vector_like_mesh_with_tip`; `mk_arrow` / `mk_vector` read two extra float args
-(`mk_half_vector` unchanged — no head). Scales are clamped `>= 0`.
+Native: `VectorLikeStyle` gains `head_len_scale` / `head_width_scale` (both `1.0`)
+and `double_headed` (`false`) in `DEFAULT_VECTOR_LIKE_STYLE` / `AXIS_ARROW_STYLE`.
+`vector_like_mesh_with_style`:
+
+- multiplies the final `head_depth` / `head_half_width` by the scales and
+  re-clamps to `0.9·len` / `0.45·len` — a no-op at scale `1.0` (built-in caps are
+  tighter);
+- when `double_headed`, the shaft also stops short at the start
+  (`shaft_start = head_depth / modded_length`, `0.0` otherwise so the sampling is
+  unchanged) and three extra contour points draw the tail head.
+
+So **existing arrows / vectors / axis arrows are byte-identical**
+(`test_arrow_tip_defaults_match_explicit_ones`,
+`test_arrow_double_headed_defaults_unchanged`). New helper
+`vector_like_mesh_with_tip`; `mk_arrow` / `mk_vector` read the extra args
+(`mk_half_vector` unchanged — no head). Scales clamped `>= 0`.
 
 ```
-mesh stubby = Arrow(1.2l, 1.2r, 1b, 0, 0.6, 1.8)   # short fat head
-mesh line_end = Arrow(1.2l, 1.2r, 1b, 0, 0)         # no head at all
-mesh field = VectorField(fn, [-2,2,20], [-2,2,20], "normalized", 0.12,
-                         nil, |p| 1, 0.7, 0.7)       # small heads, dense field
+mesh stubby   = Arrow(1.2l, 1.2r, 1b, 0, 0.6, 1.8)      # short fat head
+mesh line_end = Arrow(1.2l, 1.2r, 1b, 0, 0)             # no head at all
+mesh span     = Arrow(1.2l, 1.2r, 1b, 0, 1, 1, 1)       # heads on both ends
+mesh field    = VectorField(fn, [-2,2,20], [-2,2,20], "normalized", 0.12,
+                            nil, |p| 1, 0.7, 0.7)        # small heads, dense field
 ```
-
-Not done: **double-headed** (arrowhead at the tail too) needs restructuring the
-contour build in `vector_like_mesh_with_style`; left as a follow-up.
 
 ---
 
@@ -506,34 +514,28 @@ mesh grid = [
 ## Tests
 
 - `crates/integration_tests/tests/basic_executor_tests/stdlib_primitives.rs`
-  (new) — 26 cases: `Angle`/`RightAngle`/`Brace`/`DashedLine`/`NumberLine`
-  geometry; `VectorField` arrow count / length modes / `color_at`;
-  `ExplicitFunc` `endpoint_dots` + `fill`; `ParametricFunc` `endpoint_dots`;
-  `ExplicitFunc`/`ParametricFunc` gap-splitting (`nil` + non-finite) + a
-  continuity-unchanged regression; `Arrow` tip `defaults == explicit 1/1`,
-  `tip_width` widens head, `tip_length: 0` removes head; `Vector`/`VectorField`
-  tip pass-through.
-- `crates/integration_tests/tests/basic_executor_tests/live_values.rs` —
-  `test_axis_style_nil_arrow_extrusion_hides_arrowheads`,
-  `test_axis_style_arrow_extrusion_interpolates`,
-  `test_axis_style_explicit_tick_positions`,
-  `test_axis_style_explicit_ticks_place_labels_at_requested_values`.
+  (new) — 32 cases: `Angle`/`RightAngle`/`Brace`/`DashedLine`/`NumberLine`
+  geometry; `VectorField` arrow count / length modes / `color_at` / tip
+  pass-through; `ExplicitFunc` `endpoint_dots` + `fill`; `ParametricFunc`
+  `endpoint_dots`; `ExplicitFunc`/`ParametricFunc`/`ExplicitFuncDiff` gap-splitting
+  (`nil` + non-finite) + continuity-unchanged regressions; `ExplicitFunc2d`
+  `color_at`; `Arrow` tip `defaults == explicit`, `tip_width` widens, `tip_length:
+  0` removes head, `double_headed` adds a tail head + defaults unchanged.
+- `crates/integration_tests/tests/basic_executor_tests/live_values.rs` — 5 axis
+  cases: `nil` arrow_extrusion hides arrowheads, labeled-numeric extrusion
+  interpolates, explicit tick positions + label placement, `tick_placement`
+  modes + rejection.
 
-Full run: `--test basic_executor_tests` → **368 passed, 0 failed**;
-`--test anim_tests` → **117 passed, 0 failed**.
+Full run: `--test basic_executor_tests` → **373 passed, 0 failed**;
+`--test anim_tests` → **117 passed, 0 failed**; `cargo build -p monocurl` → ok.
 
 ---
 
 ## Deliberately skipped (and why)
 
-Need native changes with wide blast radius; noted for a follow-up branch:
-
-- **One-sided / centered axis ticks** — `axis_tick_lins` draws ticks symmetric
-  about the axis (`p ± side·extend`); a placement mode needs a new style slot +
-  a branch there.
-- **Double-headed / custom-tip arrows** — `tip_length`/`tip_width` scale the
-  single head (§6); a tail head needs restructuring the contour build in
-  `vector_like_mesh_with_style`.
+- **Custom arrow tip *shapes*** (`"line"` / `"bar"` heads instead of a triangle)
+  — `double_headed` is done (§6); alternate head geometries would each need a
+  contour branch in `vector_like_mesh_with_style`.
 - **`Field` native colour pass** — `mk_field` returns raw meshes; `VectorField`
   layers colour in `.mcl` (`op_recolor` per arrow), which is enough. A native
   colour arg on `mk_field` itself is not done.

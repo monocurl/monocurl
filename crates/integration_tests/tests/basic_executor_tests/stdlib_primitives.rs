@@ -361,3 +361,52 @@ fn test_explicit_func_fill_with_pole_does_not_error() {
     );
     r.assert_int(3);
 }
+
+#[test]
+fn test_arrow_double_headed_defaults_unchanged() {
+    let r = run_with_stdlib(
+        "
+        let plain = Arrow([0, 0, 0], [1, 0, 0])
+        let explicit = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 1, 1, 0)
+        let result =
+            (len(mesh_vertex_set(plain)) == len(mesh_vertex_set(explicit))) +
+            (len(mesh_triangle_set(plain)) == len(mesh_triangle_set(explicit))) +
+            (abs(mesh_left(plain)[0] - mesh_left(explicit)[0]) < 0.00001)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_arrow_double_headed_adds_a_tail_head() {
+    // a point just off-axis near the tail is inside the shaft width only when a
+    // tail head flares it out
+    let r = run_with_stdlib(
+        "
+        let single = Arrow([0, 0, 0], [1, 0, 0])
+        let doubled = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 1, 1, 1)
+        let probe = [0.1, 0.045, 0]
+        let result =
+            mesh_contains(doubled, probe) +
+            (not mesh_contains(single, probe)) +
+            (len(mesh_triangle_set(doubled)) > len(mesh_triangle_set(single))) +
+            (abs(mesh_left(doubled)[0]) < 0.001) +
+            (abs(mesh_right(doubled)[0] - 1) < 0.05)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(5);
+}
+
+#[test]
+fn test_vector_double_headed_via_native_accepts_flag() {
+    let r = run_with_stdlib(
+        "
+        let v = Vector([1, 0, 0], [0, 0, 0], 1b, 1, 1, 1)
+        let result = mesh_rank(v) == 2
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
