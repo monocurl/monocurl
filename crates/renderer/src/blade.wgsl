@@ -95,26 +95,31 @@ const LIGHT_SRC: vec3<f32> = vec3<f32>(1.0, 1.0, 0.0);
 const GAMMA: f32 = 3.0;
 const ALPHA_CUTOFF: f32 = 1.0 / 255.0;
 
-// Coplanar-stroke decal bias for screen-space primitives (lines/dots). These
-// primitives are extruded parallel to the image plane, so a stroke that
-// decorates a tilted fill is never truly coplanar with it: under a camera tilt
-// of theta the fill's depth sweeps +/- (stroke half-width in eye space) *
-// tan(theta) across the stroke, sinking half of it into the fill (MSAA sparkle).
-// `eye_bias` slides the stroke toward the camera along its own view ray by a
-// small multiple of its eye-space half-width so it stays in front of its own
-// fill. Because the half-width scales with eye depth, eye_bias / depth is
-// constant => camera-distance invariant.
+// Coplanar-stroke decal bias for screen-space primitives (lines/dots). A
+// line/dot quad is extruded parallel to the image plane, so a stroke that
+// decorates a fill sits at the constant eye depth of its centre while the fill
+// under it varies with the surface tilt. Exactly coplanar, the two depths are
+// within floating-point noise and the MSAA samples of the stroke sparkle in and
+// out of the fill as the camera moves.
 //
-// The scale is kept deliberately small. Lines/dots test depth but never write
-// it, so the only failure mode of too-large a bias is a stroke that sits just
-// behind a *different* opaque mesh being pulled in front of it. DECAL_SCALE is
-// applied to the full eye-space width (= 2 * half-width), so bias = 2 *
-// DECAL_SCALE * half-width covers surface tilt up to atan(2 * DECAL_SCALE):
-// DECAL_SCALE = 1.5 => ~71 deg. DECAL_MAX_FRACTION caps the pull for very thick
-// strokes / very near geometry. Head-on (theta = 0) the bias never changes
-// ordering, so the flat/2D case is untouched.
-const DECAL_SCALE: f32 = 1.5;
-const DECAL_MAX_FRACTION: f32 = 0.02;
+// `eye_bias` slides the stroke a hair toward the camera along its own view ray
+// (clip.w is left unbiased, so the vertex does not move on screen - a pure
+// depth-only decal). The pull is a small fraction of the stroke's own eye-space
+// width, so eye_bias / eye_depth is constant => the offset is camera-distance
+// invariant and self-limiting for thick strokes.
+//
+// Both lines/dots and fills now write depth (see pipelines.rs), so this bias
+// must stay *far* smaller than the depth gap to any surface a stroke is
+// genuinely hidden behind, or that surface's own decorating wireframe on the
+// far side bleeds through it (the x-ray regression). It only needs to clear
+// depth-buffer noise between a stroke and its own coplanar fill, which is tiny;
+// DECAL_SCALE = 0.02 (bias ~= 0.02 * stroke eye-width, a few 1e-5 world units at
+// a typical camera) is enough for that and small enough that hidden-line removal
+// on a bumped surface + coplanar wireframe shows no bleed-through.
+// DECAL_MAX_FRACTION caps the pull for a very thick stroke very near the camera.
+// Head-on the bias never changes ordering, so the flat/2D case is untouched.
+const DECAL_SCALE: f32 = 0.02;
+const DECAL_MAX_FRACTION: f32 = 0.002;
 
 fn world_to_camera(world: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     let relative = world - camera.position.xyz;

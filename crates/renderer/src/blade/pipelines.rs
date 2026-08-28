@@ -41,24 +41,30 @@ impl Pipelines {
             blend: None,
             write_mask: gpu::ColorWrites::default(),
         }];
-        // Opaque fills write depth. Lines and dots only test against it: they are
-        // extruded parallel to the image plane and carry a small camera-ward
-        // decal bias (see `blade.wgsl`) so they stay in front of their own fill.
-        // Keeping depth-write off means that bias can only ever let a stroke win
-        // against geometry drawn *before* it - it can never punch a hole in an
-        // opaque mesh painted afterwards, and 2D paint order is preserved
-        // exactly. Hardware bias is left at zero: image-plane-parallel quads have
-        // ~zero depth slope, so slope-scaled bias does nothing for them.
+        // Every mesh - fills, lines and dots alike - both tests and writes depth,
+        // exactly as on base 6080017. Lines/dots writing depth is what gives
+        // hidden-line removal: a stroke genuinely behind a separate opaque
+        // surface is occluded by that surface, and a stroke in *front* of a
+        // surface occludes it instead of a surface painted afterwards bleeding
+        // through. The small camera-ward eye-space "decal" bias in `blade.wgsl`
+        // (see DECAL_SCALE) keeps a stroke crisply on top of the fill it
+        // decorates under a tilted camera without z-fighting; it is deliberately
+        // far smaller than the gap to any surface meaningfully in front, so it
+        // cannot pop a hidden stroke through one.
+        //
+        // Hardware `bias` is left at Default: on the Metal backend
+        // `bias.constant` (i32) is cast straight to f32 in
+        // `setDepthBias_slopeScale_clamp` (vendor/blade-graphics-0.7.1/src/metal
+        // /command.rs), too coarse for the sub-unit offset a coplanar stroke
+        // needs, and `slope_scale` multiplies the primitive's own depth slope
+        // (~0 for an image-plane-parallel stroke quad). The shader decal carries
+        // the coplanar case instead.
         let depth_write = gpu::DepthStencilState {
             format: DEPTH_FORMAT,
             depth_write_enabled: true,
             depth_compare: gpu::CompareFunction::LessEqual,
             stencil: Default::default(),
             bias: Default::default(),
-        };
-        let depth_read_only = gpu::DepthStencilState {
-            depth_write_enabled: false,
-            ..depth_write.clone()
         };
 
         Self {
@@ -106,7 +112,7 @@ impl Pipelines {
                     topology: gpu::PrimitiveTopology::TriangleList,
                     ..Default::default()
                 },
-                depth_stencil: Some(depth_read_only.clone()),
+                depth_stencil: Some(depth_write.clone()),
                 fragment: Some(shader.at("fs_line")),
                 color_targets: &alpha_target,
                 multisample_state: gpu::MultisampleState {
@@ -123,7 +129,7 @@ impl Pipelines {
                     topology: gpu::PrimitiveTopology::TriangleList,
                     ..Default::default()
                 },
-                depth_stencil: Some(depth_read_only),
+                depth_stencil: Some(depth_write.clone()),
                 fragment: Some(shader.at("fs_dot")),
                 color_targets: &alpha_target,
                 multisample_state: gpu::MultisampleState {
