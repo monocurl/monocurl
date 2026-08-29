@@ -18,7 +18,7 @@ This reuses exactly the same SVG->mesh path as `Svg(...)` / the LaTeX backends.
 | --- | --- |
 | `Cargo.toml` (workspace) | new `[workspace.dependencies]`: `typst`, `typst-layout`, `typst-svg`, `typst-assets`, `typst-as-lib` |
 | `crates/text/Cargo.toml` | add those 5 deps under `cfg(not(target_arch = "wasm32"))` |
-| `crates/text/src/typst_backend.rs` | **new** native-only module: global `TypstEngine` (built once), custom `FileResolver`, `render_typst_svg(markup) -> Result<String>` |
+| `crates/text/src/typst_backend.rs` | **new** native-only module: global `TypstEngine` (built once), custom `FileResolver`, `render_typst_svg(markup) -> Result<String>`. `TYPST_PREAMBLE` also defines the native `tag(n, body)` tagging helper |
 | `crates/text/src/lib.rs` | `mod typst_backend` (native), re-export `render_typst`, `render_typst_with_quality` |
 | `crates/text/src/render.rs` | `render_typst` / `render_typst_with_quality` (native: parse tags -> apply markers -> cache + SVG import -> remap tags; wasm bails), `TYPST_SVG_UNITS_AT_SCALE_1`, unit tests |
 | `crates/text/src/document.rs` | `apply_typst_text_tag_markers` (native) + `typst_math_context`; factored shared `validate_marker_spans` out of `apply_text_tag_markers` |
@@ -103,6 +103,29 @@ Note: `rgb(N, 255, 255)` is emitted as an exact `#NNffff` sRGB fill in the SVG
 (Typst does no color management for `rgb()`), so decoding is exact. The one
 Typst gotcha found: `$ x $` (whitespace-padded) is *display* math, `$x$` is
 inline — nothing to do with the wrapper.
+
+### Native-Typst `tag(n, body)` helper
+
+`TYPST_PREAMBLE` also defines `#let tag(n, body) = text(fill: rgb(n, 255, 255))[#body]`,
+so a **single-component** tag can be written the idiomatic Typst way without the
+`\tagN` / `text_tag{...}` markers:
+
+```
+Typst("#tag(1)[alpha] beta #tag(2)[gamma]")
+Typst("$ #tag(1)[$a^2$] + #tag(2)[$b^2$] $")   # inside math, wrap the body in $...$
+```
+
+This needs **no** pre-parse — `#tag(...)` is plain Typst that the compiler
+resolves to the same `rgb(n, 255, 255)` sentinel the marker path emits, and the
+SVG importer decodes it to `mesh.tag = [n]` identically. `parse_text_tags` leaves
+`#tag(...)` untouched, so the two styles compose freely in one snippet.
+
+Deliberately limited to one component (`n` is one `rgb` channel, `0..=255`).
+Multi-component tags (`[2, 7]`, values >255, negatives) still need the
+`text_tag{[..]}` list form, which carries the real spec in a Monocurl-side side
+table keyed by synthetic index — a plain Typst function cannot hand that table
+back to Rust. The two-channel `rgb(255, G, B) -> [G, B]` importer path exists but
+is not wired to the helper for now.
 
 Context detection does not track `//` / `/* */` comments or `$` inside
 code-mode strings; those are not expected in `Typst(...)` snippets.

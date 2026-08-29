@@ -32,9 +32,15 @@ use typst_svg::SvgOptions;
 ///   `standalone`/`preview` LaTeX document class used by the TeX backend).
 /// * `fill: none` keeps the page background transparent so no stray background
 ///   rectangle is imported as a mesh.
+/// * `tag(n, body)` is the native-Typst spelling of a text tag: it paints the
+///   fragment in the exact `rgb(n, 255, 255)` sentinel colour that the shared
+///   SVG -> mesh importer decodes back into `mesh.tag = [n]` (same channel the
+///   `\text_tag` / `\tagN` markers use). `n` is a single tag component in
+///   `0..=255`; inside math write `#tag(1)[$a^2$]` so the fragment stays math.
 const TYPST_PREAMBLE: &str = "\
 #set page(width: auto, height: auto, margin: 0pt, fill: none)
 #set text(size: 10pt)
+#let tag(n, body) = text(fill: rgb(n, 255, 255))[#body]
 ";
 
 /// Virtual path of the synthetic main source file.

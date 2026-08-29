@@ -1089,6 +1089,22 @@ mod tests {
         assert!(meshes.iter().any(|mesh| mesh.tag == vec![2, 7]));
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_native_tag_helper_is_recovered_in_markup_and_math() {
+        // The `tag(n, body)` helper from TYPST_PREAMBLE is the native-Typst
+        // spelling; it paints the same `rgb(n, 255, 255)` sentinel the `\tagN`
+        // markers use, so the importer decodes it to `mesh.tag = [n]`.
+        let markup = render_typst("#tag(1)[alpha] beta #tag(2)[gamma]", 1.0).unwrap();
+        assert!(markup.iter().any(|mesh| mesh.tag == vec![1]));
+        assert!(markup.iter().any(|mesh| mesh.tag == vec![2]));
+        assert!(markup.iter().any(|mesh| mesh.tag.is_empty()));
+
+        let math = render_typst("$ #tag(1)[$a^2$] + #tag(2)[$b^2$] $", 1.0).unwrap();
+        assert!(math.iter().any(|mesh| mesh.tag == vec![1]));
+        assert!(math.iter().any(|mesh| mesh.tag == vec![2]));
+    }
+
     #[test]
     fn bundled_backend_uses_basic_preamble_for_ascii_sources() {
         assert_eq!(

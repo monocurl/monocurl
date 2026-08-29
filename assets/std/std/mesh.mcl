@@ -426,11 +426,13 @@ let Latex = |latex, scale = 1, additional_preamble = ""| __monocurl__native__ mk
 ## [description]
 ## `content` is compiled by the bundled Typst engine and the resulting SVG is converted to mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply. The snippet is wrapped in a preamble that shrink-wraps the page (`auto` size, zero margin, transparent fill) so the geometry is tightly cropped. Bundled fonts cover the Typst defaults (New Computer Modern, Libertinus, DejaVu Sans Mono). Monocurl strings escape with `%`, not `\`, so Typst syntax such as `"$sum_(i=1)^n i$"` can be written directly; use `%%` when the string itself needs a percent character.
 ## `Typst` supports the same text tagging as `Tex`: `text_tag{...}` list fragments, and raw `\text_tag{1,2}{...}` / `\tagN{...}` markers, become tagged mesh contours. Tags work in markup and inside `$...$` math; for math prefer per-fragment `$...$` units (`[text_tag{1} "$a^2$", " + ", text_tag{2} "$b^2$"]`).
+## The preamble also provides a native-Typst helper `tag(n, body)`, so a single-component tag can be written the Typst way: `"#tag(1)[alpha] beta #tag(2)[gamma]"`, or inside math `"$ #tag(1)[$a^2$] + #tag(2)[$b^2$] $"`. `n` is one tag component in `0..=255`; use the `text_tag{[..]}` list form for multi-component tags.
 ## Not available in web runtimes yet; use `Text` or `Tex` for browser-compatible rendering.
 ## [example]
 ## ```
 ## mesh eq = Typst("$x^2 + y^2 = z^2$", 0.8)
 ## mesh tagged = term_palette{} Typst([text_tag{1} "$a^2$", " + ", text_tag{2} "$b^2$"], 0.8)
+## mesh native = term_palette{} Typst("$ #tag(1)[$a^2$] + #tag(2)[$b^2$] $", 0.8)
 ## ```
 let Typst = |content, scale = 1| __monocurl__native__ mk_typst(content, scale)
 
