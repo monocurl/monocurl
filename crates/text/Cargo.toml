@@ -19,6 +19,11 @@ structs.workspace = true
 tectonic.workspace = true
 tectonic_bundles.workspace = true
 tectonic_engine_xetex.workspace = true
+typst.workspace = true
+typst-layout.workspace = true
+typst-svg.workspace = true
+typst-assets.workspace = true
+typst-as-lib.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen.workspace = true

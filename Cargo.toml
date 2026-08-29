@@ -76,6 +76,16 @@ tectonic_engine_xetex = "=0.4.4"
 
 gpui = { package = "gpui-ce", version = "0.3.3" }
 
+# Typst markup backend (native/desktop only). typst-as-lib wraps the typst
+# `World` trait; typst-assets supplies the default embedded fonts. Pinned to the
+# 0.15 typst release line (typst-as-lib 0.16 targets typst 0.15). Pure Rust, no
+# fontconfig/freetype, so no conflict with the tectonic_engine_xetex pin above.
+typst = "0.15"
+typst-layout = "0.15"
+typst-svg = "0.15"
+typst-assets = { version = "0.15", features = ["fonts"] }
+typst-as-lib = "0.16"
+
 autocomplete = { path = "crates/autocomplete" }
 bytecode = { path = "crates/bytecode" }
 cli = { path = "crates/cli" }

@@ -28,6 +28,14 @@ const SVG_TEXT_UNITS_AT_SCALE_1: f32 = SVG_TEXT_FONT_SIZE * 4.0;
 const SVG_MESH_UNITS_AT_SCALE_1: f32 = 100.0;
 const SVG_TEXT_CANVAS_SIZE: f32 = 100_000.0;
 
+/// SVG units (Typst points, at the 10pt base size set in the Typst preamble)
+/// that map to one scene unit when `scale == 1`. Calibrated against the TeX
+/// backend: with this value `Typst("$x^2 + y^2 = z^2$")` renders within ~3% of
+/// the width/height of the equivalent `Tex("x^2 + y^2 = z^2")` (measured in the
+/// real renderer via `mesh_width`/`mesh_height`).
+#[cfg(not(target_arch = "wasm32"))]
+const TYPST_SVG_UNITS_AT_SCALE_1: f32 = 47.0;
+
 pub fn render_text(text: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
     render_text_with_quality(text, scale, RenderQuality::Normal)
 }
@@ -155,6 +163,57 @@ pub fn render_latex_with_quality(
     quality: RenderQuality,
 ) -> Result<Vec<Arc<Mesh>>> {
     render_latex_with_preamble_and_quality(body, "", scale, quality)
+}
+
+pub fn render_typst(markup: &str, scale: f32) -> Result<Vec<Arc<Mesh>>> {
+    render_typst_with_quality(markup, scale, RenderQuality::Normal)
+}
+
+/// Render Typst markup to mesh geometry (native/desktop only).
+///
+/// `\text_tag{N}{...}` / `\tagN{...}` fragments (including the `text_tag{...}`
+/// list form, which the executor lowers to `\text_tag`) are recovered the same
+/// way as for `Tex`: each tagged span is wrapped in a
+/// `#text(fill: rgb(N, 255, 255))[...]` marker, the SVG importer decodes the
+/// fill colour back into a mesh tag, and the synthetic index tags are remapped
+/// to the caller's tag lists.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn render_typst_with_quality(
+    markup: &str,
+    scale: f32,
+    quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    validate_scale(scale)?;
+
+    let tagged = document::parse_text_tags(markup)?;
+    if tagged.source.trim().is_empty() && tagged.spans.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let marker_spans = indexed_marker_spans(&tagged.spans);
+    let source = document::apply_typst_text_tag_markers(&tagged.source, &marker_spans)?;
+
+    let output = cache::render_cached(
+        BackendKind::Typst,
+        LatexBackendConfig::Bundled,
+        source,
+        scale,
+        quality,
+        |source| {
+            let svg = crate::typst_backend::render_typst_svg(&source)?;
+            cache::import_svg(&svg, scale, quality, TYPST_SVG_UNITS_AT_SCALE_1, true)
+        },
+    )?;
+    Ok(apply_backend_text_tags(output, &tagged.spans))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn render_typst_with_quality(
+    _markup: &str,
+    _scale: f32,
+    _quality: RenderQuality,
+) -> Result<Vec<Arc<Mesh>>> {
+    bail!("Typst is not supported by the browser text backend; use Tex(...) or Text(...) instead")
 }
 
 pub fn render_latex_with_preamble_and_quality(
@@ -882,6 +941,168 @@ mod tests {
         assert!(render_tex("   ", 1.0).unwrap().is_empty());
         assert!(render_latex("", 1.0).unwrap().is_empty());
         assert!(render_latex("   ", 1.0).unwrap().is_empty());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_empty_inputs_render_to_no_meshes() {
+        assert!(render_typst("", 1.0).unwrap().is_empty());
+        assert!(render_typst("   ", 1.0).unwrap().is_empty());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_hello_has_consistent_topology_and_reasonable_scale() {
+        let typst = render_typst("hello", 1.0).unwrap();
+        assert!(!typst.is_empty());
+
+        let text = render_text("hello", 1.0).unwrap();
+        let (typst_min, typst_max) = mesh_bounds(&typst).unwrap();
+        let (text_min, text_max) = mesh_bounds(&text).unwrap();
+        let typst_size = typst_max - typst_min;
+        let text_size = text_max - text_min;
+
+        let width_ratio = typst_size.x / text_size.x;
+        let height_ratio = typst_size.y.abs() / text_size.y.abs();
+        assert!(
+            (0.3..=3.0).contains(&width_ratio),
+            "typst/text width ratio {width_ratio}"
+        );
+        assert!(
+            (0.3..=3.0).contains(&height_ratio),
+            "typst/text height ratio {height_ratio}"
+        );
+
+        for mesh in typst {
+            assert!(
+                mesh.has_consistent_topology(),
+                "{}",
+                mesh.topology_mismatch_report()
+                    .unwrap_or_else(|| "no mismatch report".into())
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_math_renders_some_geometry() {
+        let meshes = render_typst("$x^2$", 1.0).unwrap();
+        assert!(!meshes.is_empty());
+        let (min, max) = mesh_bounds(&meshes).unwrap();
+        let size = max - min;
+        assert!(size.x > 0.0 && size.y.abs() > 0.0);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_invalid_markup_is_an_error() {
+        assert!(render_typst("#panic(\"boom\")", 1.0).is_err());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_plain_markup_produces_no_text_tags() {
+        // The SVG importer decodes `rgb(n,255,255)` fills back into mesh tags.
+        // Plain Typst output is solid black, so nothing should be tagged.
+        // (This locks in current behaviour; a future `text_tag` implementation
+        // would deliberately emit those marker colors.)
+        for markup in ["hello world", "$x^2 + y^2$", "= Heading"] {
+            let meshes = render_typst(markup, 1.0).unwrap();
+            assert!(
+                meshes.iter().all(|mesh| mesh.tag.is_empty()),
+                "plain Typst `{markup}` should not decode any text tags"
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_markup_text_tags_are_recovered() {
+        let meshes = render_typst(r"\tag1{alpha} beta \tag2{gamma}", 1.0).unwrap();
+        assert!(!meshes.is_empty());
+        assert!(
+            meshes.iter().any(|mesh| mesh.tag == vec![1]),
+            "expected a mesh tagged [1]"
+        );
+        assert!(
+            meshes.iter().any(|mesh| mesh.tag == vec![2]),
+            "expected a mesh tagged [2]"
+        );
+        assert!(
+            meshes.iter().any(|mesh| mesh.tag.is_empty()),
+            "expected the untagged `beta` contours to stay untagged"
+        );
+        for mesh in &meshes {
+            assert!(
+                mesh.has_consistent_topology(),
+                "{}",
+                mesh.topology_mismatch_report()
+                    .unwrap_or_else(|| "no mismatch report".into())
+            );
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_math_text_tags_are_recovered_and_preserve_layout() {
+        let tagged =
+            render_typst(r"$\tag1{a^2} + \tag2{b^2} = \tag3{c^2}$", 1.0).unwrap();
+        let plain = render_typst("$a^2 + b^2 = c^2$", 1.0).unwrap();
+
+        for tag in [vec![1], vec![2], vec![3]] {
+            assert!(
+                tagged.iter().any(|mesh| mesh.tag == tag),
+                "expected a mesh tagged {tag:?}"
+            );
+        }
+
+        // The `#text(fill: ...)[$...$]` wrapper must not distort the equation.
+        let (tagged_min, tagged_max) = mesh_bounds(&tagged).unwrap();
+        let (plain_min, plain_max) = mesh_bounds(&plain).unwrap();
+        let tagged_size = tagged_max - tagged_min;
+        let plain_size = plain_max - plain_min;
+        let width_ratio = tagged_size.x / plain_size.x;
+        let height_ratio = tagged_size.y.abs() / plain_size.y.abs();
+        assert!(
+            (0.9..=1.1).contains(&width_ratio),
+            "tagged/plain width ratio {width_ratio}"
+        );
+        assert!(
+            (0.9..=1.1).contains(&height_ratio),
+            "tagged/plain height ratio {height_ratio}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_nested_text_tags_use_inner_priority() {
+        // Inner tag owns the overlapping contours, matching the Tex/LaTeX rule.
+        let meshes = render_typst(r"\tag1{a \tag2{b} c}", 1.0).unwrap();
+        assert!(meshes.iter().any(|mesh| mesh.tag == vec![1]));
+        assert!(meshes.iter().any(|mesh| mesh.tag == vec![2]));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_multi_component_text_tag_lists_are_recovered() {
+        let meshes = render_typst(r"\text_tag{[2, 7]}{x}", 1.0).unwrap();
+        assert!(meshes.iter().any(|mesh| mesh.tag == vec![2, 7]));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_native_tag_helper_is_recovered_in_markup_and_math() {
+        // The `tag(n, body)` helper from TYPST_PREAMBLE is the native-Typst
+        // spelling; it paints the same `rgb(n, 255, 255)` sentinel the `\tagN`
+        // markers use, so the importer decodes it to `mesh.tag = [n]`.
+        let markup = render_typst("#tag(1)[alpha] beta #tag(2)[gamma]", 1.0).unwrap();
+        assert!(markup.iter().any(|mesh| mesh.tag == vec![1]));
+        assert!(markup.iter().any(|mesh| mesh.tag == vec![2]));
+        assert!(markup.iter().any(|mesh| mesh.tag.is_empty()));
+
+        let math = render_typst("$ #tag(1)[$a^2$] + #tag(2)[$b^2$] $", 1.0).unwrap();
+        assert!(math.iter().any(|mesh| mesh.tag == vec![1]));
+        assert!(math.iter().any(|mesh| mesh.tag == vec![2]));
     }
 
     #[test]
