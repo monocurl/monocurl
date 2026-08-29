@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use gpui::*;
 
 use crate::{
-    i18n::Localization,
+    i18n::{Language, Localization},
     state::user_settings::{LatexBackendPreference, UserSettings},
     theme::{FontSet, ThemeSettings},
 };
@@ -36,7 +36,7 @@ pub struct SettingsWindow {
 
 impl SettingsWindow {
     pub fn open(cx: &mut App) {
-        let window_size = size(px(420.0), px(340.0));
+        let window_size = size(px(420.0), px(430.0));
         if !cx.has_global::<SettingsWindowHandle>() {
             cx.set_global(SettingsWindowHandle::default());
         }
@@ -87,6 +87,46 @@ impl SettingsWindow {
         Self {
             focus_handle: cx.focus_handle(),
         }
+    }
+
+    fn language_button(&self, language: Language, active: bool, cx: &mut Context<Self>) -> AnyElement {
+        let theme = ThemeSettings::theme(cx);
+        let bg = if active {
+            theme.accent
+        } else {
+            theme.tab_active_background
+        };
+        let text = if active {
+            theme.viewport_stage_background
+        } else {
+            theme.text_primary
+        };
+
+        div()
+            .id(ElementId::Name(format!("settings-language-{}", language.code()).into()))
+            .px(px(12.0))
+            .py(px(6.0))
+            .rounded(px(5.0))
+            .border_1()
+            .border_color(if active {
+                theme.accent
+            } else {
+                theme.navbar_border
+            })
+            .bg(bg)
+            .text_size(px(12.0))
+            .text_color(text)
+            .cursor_pointer()
+            .hover(|style| style.opacity(0.92))
+            .child(language.native_name())
+            .on_click(move |_, window, cx| {
+                window.prevent_default();
+                cx.stop_propagation();
+                UserSettings::update(cx, |settings| {
+                    settings.set_language(language);
+                });
+            })
+            .into_any_element()
     }
 
     fn backend_button(
@@ -388,6 +428,44 @@ impl Render for SettingsWindow {
                     .flex()
                     .flex_col()
                     .gap(px(14.0))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(9.0))
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(Localization::text(cx, "settings.language")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(10.0))
+                                    .text_color(theme.text_muted)
+                                    .child(Localization::text(cx, "settings.language.description")),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .flex_wrap()
+                                    .gap(px(8.0))
+                                    .pt(px(2.0))
+                                    .children(
+                                        Language::ALL
+                                            .into_iter()
+                                            .filter(|language| Localization::is_available(*language))
+                                            .map(|language| {
+                                                self.language_button(
+                                                    language,
+                                                    language == settings.language,
+                                                    cx,
+                                                )
+                                            }),
+                                    ),
+                            ),
+                    )
                     .child(
                         div()
                             .flex()
