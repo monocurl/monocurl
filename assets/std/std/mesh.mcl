@@ -12,7 +12,7 @@
 ## [description]
 ## Unlike most line/surface primitives, `Dot` has a visible default radius; topology dots created internally by other constructors are invisible unless styled.
 ## [example]
-## ```
+## ```mcl image
 ## mesh p = fill{CYAN} Dot([1, 0, 0])
 ## ```
 let Dot = |point = [0, 0, 0]| __monocurl__native__ mk_dot(point)
@@ -36,7 +36,7 @@ let Circle = |radius, samples = 64|
 ## [description]
 ## The inner loop is authored as a hole, so fill/stroke operators style the ring as one surface with a boundary.
 ## [example]
-## ```
+## ```mcl image
 ## mesh ring = fill{alpha{0.18} CYAN} stroke{CYAN} Annulus(0.7, 1.0)
 ## ```
 let Annulus = |inner, outer|
@@ -47,7 +47,7 @@ let Annulus = |inner, outer|
 ## [overview]
 ## A square centered at the origin with sides parallel to the axes.
 ## [example]
-## ```
+## ```mcl image
 ## mesh box = fill{alpha{0.2} ORANGE} stroke{ORANGE} Square(1.1)
 ## ```
 let Square = |width|
@@ -60,7 +60,7 @@ let Square = |width|
 ## [parameters]
 ## size: `[width, height]`
 ## [example]
-## ```
+## ```mcl image
 ## mesh card = fill{alpha{0.12} BLUE} stroke{BLUE} Rect([2.0, 0.8])
 ## ```
 let Rect = |size| {
@@ -73,7 +73,7 @@ let Rect = |size| {
 ## [parameters]
 ## n: clamped to at least 3 sides
 ## [example]
-## ```
+## ```mcl image
 ## mesh pentagon = RegularPolygon(5, 0.8)
 ## ```
 let RegularPolygon = |n, circumradius|
@@ -86,7 +86,7 @@ let RegularPolygon = |n, circumradius|
 ## [parameters]
 ## normal_hint: preferred face orientation; defaults to `1b`
 ## [example]
-## ```
+## ```mcl image
 ## mesh poly = fill{alpha{0.2} GREEN} Polygon([LEFT, UP, RIGHT, DOWN])
 ## ```
 let Polygon = |vertices, normal_hint = 1b|
@@ -97,7 +97,7 @@ let Polygon = |vertices, normal_hint = 1b|
 ## [parameters]
 ## normal_hint: preferred stroke normal; defaults to `1b`
 ## [example]
-## ```
+## ```mcl image
 ## mesh path = stroke{TEAL, 3} Polyline([1.2l, 0.4u, 1.2r])
 ## ```
 let Polyline = |vertices, normal_hint = 1b|
@@ -108,7 +108,7 @@ let Polyline = |vertices, normal_hint = 1b|
 ## [parameters]
 ## normal: preferred stroke normal, used by lighting and topology transforms
 ## [example]
-## ```
+## ```mcl image
 ## mesh l = stroke{WHITE} Line([0,0,0], [2,1,0])
 ## ```
 let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
@@ -125,7 +125,7 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
 ## offset: dash phase offset
 ## normal: preferred stroke normal
 ## [example]
-## ```
+## ```mcl image
 ## mesh guide = stroke{LIGHT_GRAY} DashedLine(1.5l, 1.5r, [0.15, 0.08])
 ## ```
 let DashedLine = |start = [0, 0, 0], end = [1, 0, 0], lengths = [0.2, 0.1], offset = 0, normal = 1b| {
@@ -154,7 +154,7 @@ let DashedLine = |start = [0, 0, 0], end = [1, 0, 0], lengths = [0.2, 0.1], offs
 ## tip_width: multiplier on the arrowhead width (1 = default)
 ## double_headed: truthy to also draw a mirrored arrowhead at the tail
 ## [example]
-## ```
+## ```mcl image
 ## mesh curved = color{ORANGE} Arrow(1.2l, 1.2r, 1b, PI / 3)
 ## mesh stubby = color{CYAN} Arrow(1.2l, 1.2r, 1b, 0, 0.6, 1.6)
 ## mesh span = color{WHITE} Arrow(1.2l, 1.2r, 1b, 0, 1, 1, 1)
@@ -171,7 +171,7 @@ let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0, tip_
 ## [parameters]
 ## theta: `[start, end]` angles in radians
 ## [example]
-## ```
+## ```mcl image
 ## mesh arc = stroke{CYAN} Arc(1, [0, PI])
 ## ```
 let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
@@ -191,7 +191,7 @@ let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
 ## samples: number of segments approximating the arc
 ## reflex: truthy to mark the reflex (outer) angle instead of the inner one
 ## [example]
-## ```
+## ```mcl image
 ## mesh a = stroke{CYAN} Angle(ORIGIN, 1r, 1u + 1r)
 ## ```
 let Angle = |vertex, a, b, radius = 0.4, samples = 32, reflex = 0| {
@@ -223,7 +223,7 @@ let Angle = |vertex, a, b, radius = 0.4, samples = 32, reflex = 0| {
 ## [parameters]
 ## size: leg length of the corner marker in scene units
 ## [example]
-## ```
+## ```mcl image
 ## mesh r = stroke{CYAN} RightAngle(ORIGIN, 1r, 1u)
 ## ```
 let RightAngle = |vertex, a, b, size = 0.2| {
@@ -242,7 +242,7 @@ let RightAngle = |vertex, a, b, size = 0.2| {
 ## radii: single radius or [start_radius, end_radius]
 ## normal: preferred plane normal
 ## [example]
-## ```
+## ```mcl image
 ## mesh pill = fill{alpha{0.18} BLUE} Capsule(LEFT, RIGHT, 0.25)
 ## ```
 let Capsule = |start_center, end_center, radii = 0.4, normal = 1b| {
@@ -264,7 +264,7 @@ let Capsule = |start_center, end_center, radii = 0.4, normal = 1b| {
 ## [parameters]
 ## normal_hint: preferred face orientation
 ## [example]
-## ```
+## ```mcl image
 ## mesh tri = fill{alpha{0.2} PURPLE} Triangle(1l, 1r, 1u)
 ## ```
 let Triangle = |p, q, r, normal_hint = 1b|
@@ -279,7 +279,7 @@ let Triangle = |p, q, r, normal_hint = 1b|
 ## [parameters]
 ## sample_depth: subdivision depth, clamped to at least 0
 ## [example]
-## ```
+## ```mcl image
 ## mesh globe = fill{alpha{0.2} BLUE} stroke{BLUE} Sphere(0.8)
 ## ```
 let Sphere = |radius, sample_depth = 2|
@@ -335,7 +335,7 @@ let Plane = |dist = 0, size = [4, 4]| {
 ## [description]
 ## With fewer than two control points this returns an empty mesh.
 ## [example]
-## ```
+## ```mcl image
 ## mesh curve = stroke{MAGENTA, 3} Bezier([1.4l, 1u, 1.4r])
 ## ```
 let Bezier = |control_points|
@@ -350,7 +350,7 @@ let Bezier = |control_points|
 ## tip_width: multiplier on the arrowhead width (1 = default)
 ## double_headed: truthy to also draw a mirrored arrowhead at the tail
 ## [example]
-## ```
+## ```mcl image
 ## mesh v = color{CYAN} Vector(0.8r + 0.4u, ORIGIN)
 ## ```
 let Vector = |delta = 1r, tail = [0, 0, 0], normal = 1b, tip_length = 1, tip_width = 1, double_headed = 0|
@@ -432,7 +432,7 @@ let ColorGrid = |color_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = 
 ## y_min_max_samples: `[y_min, y_max, samples]`
 ## subdivision: subdivisions per grid segment
 ## [example]
-## ```
+## ```mcl image
 ## mesh grid = stroke{LIGHT_GRAY} LineGrid([-2, 2, 9], [-1, 1, 5])
 ## ```
 ## [options]
@@ -486,7 +486,7 @@ let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 
 ## tip_length: multiplier on every arrowhead's length (1 = default)
 ## tip_width: multiplier on every arrowhead's width (1 = default)
 ## [example]
-## ```
+## ```mcl image
 ## mesh field = VectorField(|p| [-p[1], p[0], 0], [-2, 2, 13], [-2, 2, 13], "normalized", 0.18, |p, mag| [mag / 3, 0.4, 0.9, 1])
 ## ```
 let VectorField = |f, x_min_max_samples = [-1, 1, 11], y_min_max_samples = [-1, 1, 11], mode = "normalized", length = 0.15, color_at = nil, mask = |pos| 1, tip_length = 1, tip_width = 1| {
@@ -528,15 +528,15 @@ let Text = |text, scale = 1, font = nil| __monocurl__native__ mk_text(text, scal
 ## [overview]
 ## Math text converted through TeX into mesh geometry.
 ## [description]
-## `Tex` accepts a raw TeX string or a list of string-compatible fragments. Fragments wrapped in `text_tag{...}` become tagged mesh contours after rendering, which makes individual terms usable with `tag_filter`, filtered styling, `TagTrans`, and subset-transfer animations. Raw TeX can also contain `\text_tag{1,2}{...}` or shorthand wrappers like `\tag2{...}`. Monocurl strings escape with `%`, not `\`, so LaTeX commands can usually be written directly, such as `"\frac{a}{b}"`; use `%%` when the string itself needs a percent character.
+## `Tex` renders TeX math (the body is already in math mode -- no `$`). It takes a raw string or a list of fragments; the list is concatenated with **no separator**, so write `" + "` and other spacing as its own fragment. `text_tag{...}` fragments, and the raw `\text_tag{1,2}{...}` / `\tagN{...}` markers, become tagged mesh contours for `tag_filter`, filtered styling, and `TagTrans`.
+##
+## Monocurl strings escape with `%`, not `\`, so LaTeX commands are written directly (`"\frac{a}{b}"`); use `%%` for a literal percent. For non-math document structure use `Latex`; for Typst's lighter syntax use `Typst`.
 ## [parameters]
-## tex: TeX math fragment, string/list text fragments, or `text_tag{...}` fragments
-## scale: text scale in scene units
+## tex: a TeX math string, or a list of string / `text_tag{...}` fragments
+## scale: text height in scene units
 ## [example]
-## ```
-## mesh eq = Tex([text_tag{1} "a^2", " + ", text_tag{2} "b^2", " = ", text_tag{3} "c^2"], 0.8)
-## mesh raw = Tex("\tag1{a^2} + \tag2{b^2} = \tag3{c^2}", 0.8)
-## mesh word = Tex("\tag1{text} + \tag2{more}", 0.8)
+## ```mcl image
+## mesh eq = center{ORIGIN} Tex("P(A \mid B) = \frac{P(B \mid A)\,P(A)}{P(B)}", 0.9)
 ## ```
 let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 
@@ -547,49 +547,85 @@ let Tex = |tex, scale = 1| __monocurl__native__ mk_tex(tex, scale)
 ## scale: text scale in scene units
 ## additional_preamble: extra LaTeX declarations inserted before `\begin{document}`
 ## [description]
-## Use this when the input needs ordinary LaTeX body structure beyond display math; use `Tex` for ordinary displayed math. `additional_preamble` is inserted before `\begin{document}`, which is useful with the system backend for packages and font setup such as `\usepackage{fontspec}`. `Latex` supports the same text tagging markers as `Tex`, so `\text_tag{...}{...}`, `\tag2{...}`, and `text_tag{...}` fragments all become ordinary mesh tags after rendering.
-## Not available in web runtimes yet; use `Text` or `Tex` for browser-compatible MathJax rendering.
+## Use this when the input needs LaTeX body structure beyond a single display formula -- an `aligned` block, `\textbf` / `\text{}` prose, `enumerate`, a `tikzpicture`. For a plain formula use `Tex` (no `$`, already in math mode). `additional_preamble` is inserted before `\begin{document}` for `\usepackage{...}` and font setup such as `\usepackage{fontspec}` on the system backend. `Latex` takes the same `text_tag{...}` / `\tagN{...}` markers as `Tex`.
+##
+## Not available in web runtimes; a browser scene must use `Text` or `Tex`.
+## [example]
+## ```mcl image
+## mesh thm = center{ORIGIN} Latex("\textbf{Theorem.} Every ideal of $\mathbb{Z}$ is principal.", 0.6)
+## ```
 let Latex = |latex, scale = 1, additional_preamble = ""| __monocurl__native__ mk_latex(latex, scale, additional_preamble)
 
+## [options]
+## important: true
 ## [overview]
-## Typst markup compiled into mesh geometry.
-## [parameters]
-## content: Typst markup string or list of string/`text_tag{...}` fragments, such as `"$x^2 + y^2 = z^2$"` or `"= Heading"`
-## scale: text scale in scene units
+## Typst markup and math compiled into mesh geometry (desktop only).
 ## [description]
-## `content` is compiled by the bundled Typst engine and the resulting SVG is converted to mesh geometry, so `Write`, `Fade`, `tag_filter`, and styling operators all apply. The snippet is wrapped in a preamble that shrink-wraps the page (`auto` size, zero margin, transparent fill) so the geometry is tightly cropped. Bundled fonts cover the Typst defaults (New Computer Modern, Libertinus, DejaVu Sans Mono). Monocurl strings escape with `%`, not `\`, so Typst syntax such as `"$sum_(i=1)^n i$"` can be written directly; use `%%` when the string itself needs a percent character.
-## `Typst` supports the same text tagging as `Tex`: `text_tag{...}` list fragments, and raw `\text_tag{1,2}{...}` / `\tagN{...}` markers, become tagged mesh contours. Tags work in markup and inside `$...$` math; for math prefer per-fragment `$...$` units (`[text_tag{1} "$a^2$", " + ", text_tag{2} "$b^2$"]`).
-## The preamble also provides a native-Typst helper `tag(n, body)`, so a single-component tag can be written the Typst way: `"#tag(1)[alpha] beta #tag(2)[gamma]"`, or inside math `"$ #tag(1)[$a^2$] + #tag(2)[$b^2$] $"`. `n` is one tag component in `0..=255`; use the `text_tag{[..]}` list form for multi-component tags.
-## Not available in web runtimes yet; use `Text` or `Tex` for browser-compatible rendering.
+## `content` is compiled by the bundled Typst engine, rendered to SVG, and converted to contours, so `Write`, `Fade`, `TagTrans`, `tag_filter`, and every styling operator behave exactly as they do for `Tex`. The page is shrink-wrapped (`auto` size, zero margin, transparent fill) so the geometry is cropped to the ink. Bundled fonts cover the Typst defaults: New Computer Modern for math, Libertinus Serif for text, DejaVu Sans Mono for code.
+##
+## Reach for `Typst` over `Tex` when you want Typst's lighter math syntax (`sum_(i=1)^n`, `mat(1, 0; 0, 1)`, `cases(...)`) or its prose markup (`= Heading`, `*bold*`, `_italic_`). Math lives in `$...$`; `$ x $` with surrounding spaces is display style, `$x$` is inline. `Typst` is **not available in web runtimes** -- a browser scene must use `Tex` or `Text`. `#import`, Typst packages, and file reads are not available to inline snippets.
+##
+## Monocurl strings escape with `%`, not `\`, so Typst source is written directly (`"$sum_(i=1)^n i$"`); write `%%` for a literal percent and `%n` for a newline, since a string cannot span source lines. A list argument is joined with **no separator** -- `["= A", "= B"]` becomes `"= AB"` -- so put the breaks in yourself: `["= Title", "%n%n", "body text"]`.
+##
+## A fragment can be tagged three ways, all yielding ordinary mesh tags usable by `tag_filter`, filtered styling, and `TagTrans`:
+##
+## - `text_tag{...}` list fragments (`[text_tag{1} "$a^2$", " + ", text_tag{2} "$b^2$"]`) -- the portable form shared with `Tex`, and the only one that accepts a multi-component tag such as `text_tag{[2, 7]}`.
+## - raw `\tagN{...}` or `\text_tag{1,2}{...}` markers inside the string.
+## - the native Typst helper `tag(n, body)` supplied by the preamble: `"#tag(1)[alpha] beta #tag(2)[gamma]"`. Inside math keep the `#` and wrap the body in its own `$...$`: `"$ #tag(1)[$a^2$] + b^2 $"`. `n` is a single component in `0..=255`.
+## [parameters]
+## content: a Typst source string, or a list of string / `text_tag{...}` fragments
+## scale: text height in scene units; `Typst("$x^2$")` at scale 1 is close to `Tex("x^2")` at scale 1
 ## [example]
+## ```mcl image
+## # `%n%n` is a paragraph break; a Monocurl string cannot contain a real newline
+## mesh note = center{ORIGIN} Typst("= Pythagoras%n%nFor a right triangle, $a^2 + b^2 = c^2$.", 0.5)
 ## ```
-## mesh eq = Typst("$x^2 + y^2 = z^2$", 0.8)
-## mesh tagged = term_palette{} Typst([text_tag{1} "$a^2$", " + ", text_tag{2} "$b^2$"], 0.8)
-## mesh native = term_palette{} Typst("$ #tag(1)[$a^2$] + #tag(2)[$b^2$] $", 0.8)
+## [example]
+## ```mcl image
+## # per-term colour via the native `#tag(n)[...]` helper; note the inner `$...$`
+## let palette = operator |t|
+##     color{PURPLE, |g| 3 in g}
+##     color{ORANGE, |g| 2 in g}
+##     color{BLUE, |g| 1 in g}
+##     t
+## mesh eq = center{ORIGIN} palette{} Typst("$ #tag(1)[$a^2$] + #tag(2)[$b^2$] = #tag(3)[$c^2$] $", 1)
+## ```
+## [example]
+## ```mcl image
+## # Typst math shines on dense notation
+## mesh series = center{ORIGIN} Typst("$ sum_(k=1)^n k = (n(n+1)) / 2 $", 1)
 ## ```
 let Typst = |content, scale = 1| __monocurl__native__ mk_typst(content, scale)
 
+## [options]
+## important: true
 ## [overview]
-## Attach tags to text fragments before they become mesh contours.
+## Give an equation or label fragment a stable identity before it is rendered to contours.
 ## [description]
-## Use text tags for equation transforms and selective coloring inside `Text`, `Tex`, and `Latex`. The tag can be an integer or a list of integers; the wrapper lowers to the LaTeX `\text_tag{...}{...}` marker before rendering. The rendered contours from that fragment then carry the requested tag list, just as if they had been tagged with `tag{...}` after they became meshes. Place `text_tag{...}` inside the text constructor for fragment-level identity. Place `tag{...}` outside the text constructor only when the entire rendered text mesh should share one identity. Raw TeX strings can use `\text_tag{1,2}{...}` or the numbered shorthand `\tag2{...}` directly. Nested text tags are allowed; the innermost tag owns the overlapping contours.
+## `text_tag{tag} fragment` is the tool for equation choreography: it marks a slice of a `Text` / `Tex` / `Latex` / `Typst` argument so that every contour the backend produces for that slice carries `tag`. Those tags are then ordinary mesh tags -- `tag_filter`, filtered `color{...}` / `stroke{...}`, and `TagTrans` all key off them -- so "the `x^2` term" stays addressable across a whole slide sequence even as the glyphs move and reshape.
+##
+## `text_tag{...}` goes **inside** the constructor and tags only its fragment; `tag{...}` goes outside and relabels the entire rendered mesh. A raw string can carry the markers directly instead: `\text_tag{1,2}{...}` or the shorthand `\tagN{...}`.
+##
+## The argument is a list of fragments, and the backend concatenates them with **no separator** -- `["a", "b"]` renders as `ab`. Put spacing inside the strings (`" + "`, `"%n"`), not between list entries.
+##
+## Nesting is allowed and the **innermost** tag owns any overlapping contour, so `text_tag{1} ["(", text_tag{2} "x", ")"]` gives the parentheses tag `1` and the `x` tag `2`. A tag may be a list for several identities at once (`text_tag{[2, 10]}`); `text_tag{[]}` is a valid empty tag list.
 ## [parameters]
-## target: string-compatible text fragment to tag before rendering
-## tag: integer tag or list of integer tags; `[]` is allowed for an explicitly empty tag list
+## target: the string-compatible fragment to tag
+## tag: an integer, or a list of integers for multiple identities; `[]` is allowed
 ## [example]
+## ```mcl image
+## # one palette keyed purely by tag, reused for every state of the equation
+## let palette = operator |t|
+##     color{MAGENTA, |g| 3 in g}
+##     color{ORANGE, |g| 2 in g}
+##     color{BLUE, |g| 1 in g}
+##     t
+## mesh eq = center{ORIGIN} palette{} Tex([text_tag{1} "x^2", " + ", text_tag{2} "2x", " + ", text_tag{3} "1"], 1)
 ## ```
-## mesh eq = Tex([text_tag{1} "x", " + ", text_tag{[2, 10]} "1"], 0.8)
-## mesh highlighted = color{ORANGE, |tags| 2 in tags} eq
-##
-## let term_palette = operator |target|
-##     color{BLUE, |tags| 1 in tags}
-##     color{ORANGE, |tags| 2 in tags}
-##     color{MAGENTA, |tags| 3 in tags}
-##     target
-##
-## mesh raw = term_palette{} Tex("\tag1{x^2} + \tag2{2x} + \tag3{1}", 0.8)
-## mesh label = term_palette{} Text([text_tag{1} "left", " / ", text_tag{2} "right"], 0.5)
-## mesh raw_label = term_palette{} Text("\tag1{text} / \tag2{label}", 0.5)
+## [example]
+## ```mcl image
+## # raw markers in a plain string, and a multi-identity tag on the "1"
+## mesh eq = center{ORIGIN} color{ORANGE, |g| 9 in g} Tex("\tag1{a} + \text_tag{9}{1}", 1)
 ## ```
 let text_tag = operator |target, tag| [target, __monocurl__native__ text_tag_encode(target, tag)]
 
@@ -621,7 +657,7 @@ let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(
 ## label_scale: label text scale
 ## label_buffer: gap between the brace tip and the label
 ## [example]
-## ```
+## ```mcl image
 ## mesh b = stroke{CYAN} Brace(1.5l, 1.5r, 0.3)
 ## mesh titled = stroke{CYAN} Brace(1.5l, 1.5r, 0.3, DOWN, 101, "width")
 ## ```
@@ -739,10 +775,9 @@ let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, ni
 ## basis: scene-space direction and unit length of one axis step
 ## color: axis color
 ## [example]
-## ```
+## ```mcl image
 ## mesh line = NumberLine(0, 10, 1)
-## mesh half = NumberLine(-2, 2, 0.5, 2, "x", |x| Number(x, 1))
-## mesh named = NumberLine(0, 7, [0, 3.5, 7], 1, nil, |x| Number(x, 1))
+## mesh named = center{1d} NumberLine(0, 7, [0, 3.5, 7], 1, "t")
 ## ```
 let NumberLine = |min = -5, max = 5, tick_spacing = 1, major_tick_rate = 1, axis_title = nil, label_map = (|x| x), basis = 1r, color = [0, 0, 0, 1]|
     __monocurl__native__ mk_axis1d(basis, 1b, color, [min, max, axis_title, tick_spacing, major_tick_rate, label_map, 0.2])
@@ -792,7 +827,7 @@ let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1
 ## t_min_max_samples: `[t_min, t_max, samples]`
 ## endpoint_dots: truthy to append visible `Dot`s at the two curve endpoints
 ## [example]
-## ```
+## ```mcl image
 ## mesh spiral = stroke{CYAN} ParametricFunc(|t| [cos(t), sin(t), t / TAU], [0, TAU * 3, 180])
 ## ```
 let ParametricFunc = |f, t_min_max_samples = [0, 1, 64], endpoint_dots = 0| {
@@ -852,7 +887,7 @@ let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128], endpoint_dots = 0, fill
 ## [parameters]
 ## color_at: optional `(x, y, z) -> RGBA` per-vertex colour callback
 ## [example]
-## ```
+## ```mcl image
 ## mesh surface = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 31], [-1, 1, 31])
 ## mesh heat = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 41], [-1, 1, 41], |x, y, z| [z, 0.3, 1 - z, 1])
 ## ```
@@ -867,7 +902,7 @@ let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-
 ## [description]
 ## Uses a padded rectangular sign grid and extracts the boundary of the non-positive region as linked stroke loops; increase sample counts for sharper features.
 ## [example]
-## ```
+## ```mcl image
 ## mesh level = stroke{CYAN} ImplicitFunc2d(|x, y| x * x + y * y - 1)
 ## ```
 let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 65], y_min_max_samples = [-1, 1, 65]| {
@@ -885,7 +920,7 @@ let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 65], y_min_max_samples = [-
 ## fills: [lower_fill, upper_fill]
 ## tags: tags assigned to the two filled regions
 ## [example]
-## ```
+## ```mcl image
 ## mesh diff = ExplicitFuncDiff(|x| sin(x), |x| 0, [-PI, PI, 160])
 ## ```
 let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0.8, 0.3, 0.5], [0.8, 0.3, 0.3, 0.5]], tags = [[], []]| {
@@ -904,7 +939,7 @@ let ExplicitFuncDiff = |f, g, x_min_max_samples = [-5, 5, 128], fills = [[0.3, 0
 ## [parameters]
 ## align_dir: optional direction whose extreme edge should be aligned
 ## [example]
-## ```
+## ```mcl image
 ## mesh row = XStack([Circle(0.2), Square(0.4), Text("x")])
 ## ```
 let Stack = |meshes, dir, align_dir = [0, 0, 0]| __monocurl__native__ mk_stack(meshes, dir, align_dir)
@@ -953,7 +988,7 @@ let BoundingBox = |target, buffer = 0.1|
 ## [parameters]
 ## filter: optional tag predicate applied to mesh leaves
 ## [example]
-## ```
+## ```mcl image
 ## mesh moved = shift{2r + 1u} Circle(0.4)
 ## ```
 let shift = operator |target, delta, filter = nil| {
@@ -969,7 +1004,7 @@ let shift = operator |target, delta, filter = nil| {
 ## factor: scalar or vector scale
 ## filter: optional tag predicate applied to mesh leaves
 ## [example]
-## ```
+## ```mcl image
 ## mesh wide = scale{[2, 0.5, 1]} Circle(0.5)
 ## ```
 let scale = operator |target, factor = 1, filter = nil| {
@@ -988,7 +1023,7 @@ let scale = operator |target, factor = 1, filter = nil| {
 ## axis: rotation axis, default 1b
 ## pivot: optional point to rotate around; defaults to the affected mesh tree's bounding-box center
 ## [example]
-## ```
+## ```mcl image
 ## mesh spun = rotate{PI / 4, 1b} Square(1)
 ## ```
 let rotate = operator |target, radians, axis = 1b, pivot = nil, filter = nil| {
@@ -1015,7 +1050,7 @@ let fade = operator |target, opacity, filter = nil| {
 ## stroke_width: optional width; `nil` preserves existing width
 ## filter: optional tag predicate
 ## [example]
-## ```
+## ```mcl image
 ## mesh outline = fill{CLEAR} stroke{CYAN, 2} Circle(1)
 ## ```
 let stroke = operator |target, color, stroke_width = nil, filter = nil| {
@@ -1032,7 +1067,7 @@ let stroke = operator |target, color, stroke_width = nil, filter = nil| {
 ## [parameters]
 ## filter: optional tag predicate
 ## [example]
-## ```
+## ```mcl image
 ## mesh disk = fill{alpha{0.2} BLUE} Circle(1)
 ## ```
 let fill = operator |target, color, filter = nil| {
@@ -1080,7 +1115,7 @@ let normal_hint = operator |target, normal, filter = nil| {
 ## [description]
 ## Tags are stable identities for filters and tag-aware animations. A scalar tag becomes a one-element tag list; a list can give one mesh several identities. Use `tag{...}` after construction for whole mesh leaves. For text/Tex/LaTeX fragments, prefer `text_tag{...}` inside the constructor so only the generated contours for that fragment receive the tag.
 ## [example]
-## ```
+## ```mcl image
 ## mesh pair = [tag{1} Circle(0.3), tag{2} Square(0.4)]
 ## ```
 let tag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_retagged(target, |old| tag, filter)]
@@ -1108,7 +1143,7 @@ let gloss = operator |target, amount = 0.5, filter = nil| [target, __monocurl__n
 ## [description]
 ## The callback receives a 3-D point and should return a 3-D point. Callback invocations are batched internally for mesh-sized transforms.
 ## [example]
-## ```
+## ```mcl image
 ## mesh lifted = point_map{|p| [p[0], p[1], p[0] * p[0]]} LineGrid()
 ## ```
 let point_map = operator |target, f, filter = nil| {
@@ -1150,7 +1185,7 @@ let subset_map = operator |target, filter, f| [target, __monocurl__native__ op_s
 ## [description]
 ## `uprank` turns point chains into line segments and closed line contours into tessellated filled surfaces. It is useful before operations that expect surfaces, such as `extrude`, or when a closed outline should become fillable.
 ## [example]
-## ```
+## ```mcl image
 ## mesh disk = fill{alpha{0.16} CYAN} uprank{} Polyline([1l, 1u, 1r, 1d, 1l])
 ## ```
 let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_uprank(target, filter)]
@@ -1159,7 +1194,7 @@ let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_up
 ## [description]
 ## `downrank` turns surfaces into boundary strokes and strokes into endpoint dots. Use it for outlines/wire geometry, or to expose a filled shape's boundary for stroke-only proofs and construction diagrams.
 ## [example]
-## ```
+## ```mcl image
 ## mesh outline = stroke{WHITE} fill{CLEAR} downrank{} Rect([2, 1])
 ## ```
 let downrank = operator |target, filter = nil| [target, __monocurl__native__ op_downrank(target, filter)]
@@ -1177,7 +1212,7 @@ let wireframe = operator |target, filter = nil| [target, __monocurl__native__ op
 ## offset: phase offset
 ## filter: optional tag predicate
 ## [example]
-## ```
+## ```mcl image
 ## mesh guide = dashed{[0.15, 0.08]} stroke{LIGHT_GRAY} Line(1.5l, 1.5r)
 ## ```
 let dashed = operator |target, lengths = [0.2, 0.1], offset = 0, filter = nil| {
@@ -1206,8 +1241,8 @@ let tesselated = operator |target, depth = 1, filter = nil| [__monocurl__native_
 ## [description]
 ## Builds side walls from surface boundaries. Standalone closed line loops must be `uprank{}`ed first so the extruder sees a surface.
 ## [example]
-## ```
-## mesh block = extrude{0.5b} Square(1)
+## ```mcl image
+## mesh bar = extrude{0.5b} Square(1)
 ## ```
 let extrude = operator |target, delta, filter = nil| [__monocurl__native__ op_extrude(target, [0, 0, 0], filter), __monocurl__native__ op_extrude(target, delta, filter)]
 ## [overview]
@@ -1220,7 +1255,7 @@ let revolve = operator |target, rotation, filter = nil| [__monocurl__native__ op
 ## [description]
 ## Centers by bounding-box center, not by centroid.
 ## [example]
-## ```
+## ```mcl image
 ## mesh title = center{1.2u} Text("Title", 0.8)
 ## ```
 ## [options]
@@ -1332,7 +1367,7 @@ let projected = operator |target, screen, ray = 1b, filter = nil| {
 ## y_unit: local y basis
 ## z_unit: local z basis
 ## [example]
-## ```
+## ```mcl image
 ## let graph_space = operator |target| in_space{[-1.2, -1.0, 0], 0.45r, 0.45u} target
 ## mesh graph = graph_space{} ExplicitFunc(|x| x * x, [0, 3, 80])
 ## ```
