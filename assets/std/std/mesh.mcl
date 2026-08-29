@@ -115,6 +115,33 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
     __monocurl__native__ mk_line(start, end, normal)
 
 ## [overview]
+## A straight dashed line segment between two points.
+## [description]
+## Convenience for `dashed{lengths, offset} Line(start, end, normal)`. A scalar `lengths`
+## uses the same dash and gap length; a `[dash, gap]` pair sets them independently. The
+## result interpolates from a solid to a dashed line, so animating it dashes in.
+## [parameters]
+## lengths: dash length or `[dash, gap]`
+## offset: dash phase offset
+## normal: preferred stroke normal
+## [example]
+## ```
+## mesh guide = stroke{LIGHT_GRAY} DashedLine(1.5l, 1.5r, [0.15, 0.08])
+## ```
+let DashedLine = |start = [0, 0, 0], end = [1, 0, 0], lengths = [0.2, 0.1], offset = 0, normal = 1b| {
+    var dash = 0
+    var gap = 0
+    if (__monocurl__native__ is_list(lengths)) {
+        [dash, gap] = __monocurl__native__ expect_list("lengths", lengths, 2)
+    } else {
+        dash = lengths
+        gap = lengths
+    }
+    let base = __monocurl__native__ mk_line(start, end, normal)
+    return [base, __monocurl__native__ op_dashed(base, dash, gap, offset, nil)]
+}
+
+## [overview]
 ## A directed arrow from start to end, with an arrowhead at the tip.
 ## [description]
 ## `path_arc` bends the shaft by rotating along a circular arc instead of a straight segment. Its sign is relative to `normal`; use `0` for a straight arrow.
@@ -123,14 +150,19 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
 ## end: tip position, default [1, 0, 0]
 ## normal: preferred plane normal for the arrow body
 ## path_arc: signed arc angle in radians, default 0
+## tip_length: multiplier on the arrowhead length along the shaft (1 = default)
+## tip_width: multiplier on the arrowhead width (1 = default)
+## double_headed: truthy to also draw a mirrored arrowhead at the tail
 ## [example]
 ## ```
 ## mesh curved = color{ORANGE} Arrow(1.2l, 1.2r, 1b, PI / 3)
+## mesh stubby = color{CYAN} Arrow(1.2l, 1.2r, 1b, 0, 0.6, 1.6)
+## mesh span = color{WHITE} Arrow(1.2l, 1.2r, 1b, 0, 1, 1, 1)
 ## ```
 ## [options]
 ## important: true
-let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0|
-    __monocurl__native__ mk_arrow(start, end, normal, path_arc)
+let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0, tip_length = 1, tip_width = 1, double_headed = 0|
+    __monocurl__native__ mk_arrow(start, end, normal, path_arc, tip_length, tip_width, double_headed)
 
 ## [overview]
 ## Circular arc centered at the origin in the XY plane.
@@ -145,6 +177,61 @@ let Arrow = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b, path_arc = 0|
 let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
     let [theta_start, theta_end] = __monocurl__native__ expect_list("theta", theta, 2)
     return __monocurl__native__ mk_arc(radius, theta_start, theta_end)
+}
+
+## [overview]
+## Arc marker for the angle at `vertex` between the rays toward `a` and `b`.
+## [description]
+## Drawn in the XY plane as a stroke arc of the given `radius`, sweeping the shorter way
+## from the `vertex`->`a` direction to the `vertex`->`b` direction. Set `reflex` truthy to
+## mark the outer (>PI) angle instead. Style it with `stroke{...}` and pair it with a
+## `Tex`/`Label` for the measure.
+## [parameters]
+## radius: arc radius in scene units
+## samples: number of segments approximating the arc
+## reflex: truthy to mark the reflex (outer) angle instead of the inner one
+## [example]
+## ```
+## mesh a = stroke{CYAN} Angle(ORIGIN, 1r, 1u + 1r)
+## ```
+let Angle = |vertex, a, b, radius = 0.4, samples = 32, reflex = 0| {
+    let da = a - vertex
+    let db = b - vertex
+    let start = __monocurl__native__ arctan2(da[1], da[0])
+    let raw = __monocurl__native__ arctan2(db[1], db[0]) - start
+    let tau = 6.2831853071795864
+    var sweep = raw - tau * __monocurl__native__ floor(raw / tau)
+    if (sweep > 3.1415926535897932) { sweep = sweep - tau }
+    if (reflex) {
+        if (sweep >= 0) { sweep = sweep - tau } else { sweep = sweep + tau }
+    }
+    let n = __monocurl__native__ max(2, samples)
+    var pts = []
+    for (i in __monocurl__native__ range(0, n + 1, 1)) {
+        let ang = start + sweep * i / n
+        pts .= vertex + [radius * __monocurl__native__ cos(ang), radius * __monocurl__native__ sin(ang), 0]
+    }
+    return __monocurl__native__ mk_polyline(pts, 1b)
+}
+
+## [overview]
+## Right-angle (square corner) marker at `vertex`, between the rays toward `a` and `b`.
+## [description]
+## Two short segments of length `size` forming an L in the XY plane, for perpendicularity
+## marks on diagrams. Style with `stroke{...}`. The rays do not need to be exactly
+## perpendicular; the marker is always a square of the given size.
+## [parameters]
+## size: leg length of the corner marker in scene units
+## [example]
+## ```
+## mesh r = stroke{CYAN} RightAngle(ORIGIN, 1r, 1u)
+## ```
+let RightAngle = |vertex, a, b, size = 0.2| {
+    let da = a - vertex
+    let db = b - vertex
+    let ua = da * (size / __monocurl__native__ sqrt(__monocurl__native__ dot(da, da)))
+    let ub = db * (size / __monocurl__native__ sqrt(__monocurl__native__ dot(db, db)))
+    return __monocurl__native__ mk_polyline([vertex + ua, vertex + ua + ub, vertex + ub], 1b)
 }
 
 ## [overview]
@@ -258,12 +345,16 @@ let Bezier = |control_points|
 ## Arrow-like vector from a tail by a delta.
 ## [description]
 ## The arrowhead and shaft proportions are adjusted for short vectors so fields stay legible.
+## [parameters]
+## tip_length: multiplier on the arrowhead length (1 = default)
+## tip_width: multiplier on the arrowhead width (1 = default)
+## double_headed: truthy to also draw a mirrored arrowhead at the tail
 ## [example]
 ## ```
 ## mesh v = color{CYAN} Vector(0.8r + 0.4u, ORIGIN)
 ## ```
-let Vector = |delta = 1r, tail = [0, 0, 0], normal = 1b|
-    __monocurl__native__ mk_vector(tail, delta, normal)
+let Vector = |delta = 1r, tail = [0, 0, 0], normal = 1b, tip_length = 1, tip_width = 1, double_headed = 0|
+    __monocurl__native__ mk_vector(tail, delta, normal, tip_length, tip_width, double_headed)
 
 ## [overview]
 ## Simple line segment from `tail` to `tail + delta`.
@@ -373,6 +464,48 @@ let Field = |mesh_at, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 
     return __monocurl__native__ mk_field(x_min, x_max, y_min, y_max, x_samples, y_samples, mask, mesh_at)
 }
 
+## [options]
+## important: true
+## [overview]
+## Arrow vector field: an arrow at each grid point for the vector `f(pos)`, with a
+## length-normalisation mode and an optional colour-by-magnitude callback.
+## [description]
+## Thin wrapper over `Field` + `Arrow`. `mode` controls arrow length:
+## `"true"` draws the raw vector; `"normalized"` (default) draws every arrow at length
+## `length`; `"clamped"` draws the true direction with length capped at `length`.
+## `color_at` receives `(pos, magnitude)` and returns an RGBA colour; leave it `nil` to
+## keep the default arrow colour. `mask` receives `pos`.
+## [parameters]
+## f: function from a 3-D position to a 3-D vector
+## x_min_max_samples: `[x_min, x_max, samples]`
+## y_min_max_samples: `[y_min, y_max, samples]`
+## mode: `"true"`, `"normalized"`, or `"clamped"`
+## length: arrow length (`"normalized"`) or maximum length (`"clamped"`); ignored for `"true"`
+## color_at: optional `(pos, magnitude) -> RGBA` callback
+## mask: optional `pos -> truthy` filter
+## tip_length: multiplier on every arrowhead's length (1 = default)
+## tip_width: multiplier on every arrowhead's width (1 = default)
+## [example]
+## ```
+## mesh field = VectorField(|p| [-p[1], p[0], 0], [-2, 2, 13], [-2, 2, 13], "normalized", 0.18, |p, mag| [mag / 3, 0.4, 0.9, 1])
+## ```
+let VectorField = |f, x_min_max_samples = [-1, 1, 11], y_min_max_samples = [-1, 1, 11], mode = "normalized", length = 0.15, color_at = nil, mask = |pos| 1, tip_length = 1, tip_width = 1| {
+    let arrow_at = |p, idx| {
+        let v = f(p)
+        let mag = __monocurl__native__ sqrt(__monocurl__native__ dot(v, v))
+        var delta = v
+        if (mode == "normalized") {
+            if (mag > 0.000000001) { delta = v * (length / mag) } else { delta = [0, 0, 0] }
+        } else if (mode == "clamped") {
+            if (mag > length) { delta = v * (length / mag) }
+        }
+        let arrow = __monocurl__native__ mk_arrow(p, p + delta, 1b, 0, tip_length, tip_width, 0)
+        if (__monocurl__native__ is_nil(color_at)) { return arrow }
+        return __monocurl__native__ op_recolor(arrow, color_at(p, mag), nil, 1)
+    }
+    return Field(arrow_at, x_min_max_samples, y_min_max_samples, mask)
+}
+
 # text / labels
 
 ## [options]
@@ -473,6 +606,53 @@ let text_tag = operator |target, tag| [target, __monocurl__native__ text_tag_enc
 let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(target, dir, buffer)
 
 ## [overview]
+## Curly brace spanning from `start` to `end`, bulging to one side, with an optional label.
+## [description]
+## Sampled as a smooth stroke polyline in the XY plane: it meets both endpoints tangent to
+## the span and swells to `depth` at the midpoint, where a sharper tip points outward. By
+## default the brace bulges to the right of the `start`->`end` direction (its `-90 deg`
+## normal); pass `direction` to choose the bulge side explicitly. When `label` is a string,
+## the result is `[brace, text]` with the label placed just past the tip.
+## [parameters]
+## depth: bulge height at the midpoint, in scene units
+## direction: optional bulge direction; the component along the span is removed
+## samples: number of segments in the brace stroke (clamped to at least 8)
+## label: optional label string placed past the brace tip; `nil` for no label
+## label_scale: label text scale
+## label_buffer: gap between the brace tip and the label
+## [example]
+## ```
+## mesh b = stroke{CYAN} Brace(1.5l, 1.5r, 0.3)
+## mesh titled = stroke{CYAN} Brace(1.5l, 1.5r, 0.3, DOWN, 101, "width")
+## ```
+let Brace = |start, end, depth = 0.25, direction = nil, samples = 101, label = nil, label_scale = 1, label_buffer = 0.12| {
+    let span = end - start
+    let span_len = __monocurl__native__ sqrt(__monocurl__native__ dot(span, span))
+    let t_hat = span * (1 / span_len)
+    var n_hat = [t_hat[1], -t_hat[0], 0]
+    if (not __monocurl__native__ is_nil(direction)) {
+        let d = direction - t_hat * __monocurl__native__ dot(direction, t_hat)
+        let d_len = __monocurl__native__ sqrt(__monocurl__native__ dot(d, d))
+        if (d_len > 0.000001) { n_hat = d * (1 / d_len) }
+    }
+    let n = __monocurl__native__ max(8, samples)
+    let pi = 3.1415926535897932
+    var pts = []
+    for (i in __monocurl__native__ range(0, n + 1, 1)) {
+        let u = i / n
+        let m = 2 * __monocurl__native__ min(u, 1 - u)
+        let hump = 0.5 - 0.5 * __monocurl__native__ cos(pi * m)
+        let k = (u - 0.5) / 0.05
+        let tip = __monocurl__native__ exp(-k * k) * 0.5
+        let bulge = depth * (0.7 * hump + 0.3 * tip)
+        pts .= start + t_hat * (span_len * u) + n_hat * bulge
+    }
+    let brace = __monocurl__native__ mk_polyline(pts, 1b)
+    if (__monocurl__native__ is_nil(label)) { return brace }
+    return [brace, __monocurl__native__ mk_label(brace, label, label_scale, n_hat, label_buffer, nil)]
+}
+
+## [overview]
 ## Text label placed relative to a target mesh.
 ## [description]
 ## The label is rendered as text, then placed outside the target in `dir` while staying centered on the target's orthogonal direction.
@@ -512,19 +692,21 @@ let Number = |value, decimal_places = nil, include_sign = 0, font = nil|
 ## This is a configuration operator; compose it before `Axis1d`, `Axis2d`, or `Axis3d`. It uses `set_default` internally, so axis settings interpolate cleanly when the axis is animated.
 ## [parameters]
 ## axis: "x", "y", or "z"
-## tick_spacing: distance between ticks in axis coordinates
-## major_tick_rate: every nth tick is drawn/labelled as major
+## tick_spacing: distance between ticks in axis coordinates, or a list of exact tick positions (each drawn as a major tick, clipped to the axis range)
+## major_tick_rate: every nth tick is drawn/labelled as major (ignored when `tick_spacing` is an explicit list)
 ## label_map: function from value to tick label
-## arrow_extrusion: arrowhead length in scene units
+## arrow_extrusion: arrowhead length in scene units, or `nil` to hide the axis arrowheads entirely
+## tick_placement: where tick marks sit relative to the axis line: `"both"` (default), `"positive"`, `"negative"`, or `"centered"` (half-length, straddling); `nil` means `"both"`
 ## [example]
 ## ```
 ## mesh axes = axis_style{"x", 0, 4, "x"} axis_style{"y", 0, 3, "y"} Axis2d()
+## mesh one_sided = axis_style{"x", 0, 4, "x", 1, 1, (|x| x), 0.2, "positive"} Axis2d()
 ## ```
-let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacing = 0.25, major_tick_rate = 4, label_map = (|x| x), arrow_extrusion = 0.2| {
+let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacing = 0.25, major_tick_rate = 4, label_map = (|x| x), arrow_extrusion = 0.2, tick_placement = nil| {
     if (axis != "x" and axis != "y" and axis != "z") {
         return __monocurl__native__ runtime_error("axis_style axis must be x, y, or z")
     }
-    let style = [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion]
+    let style = [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion, tick_placement]
     let name = axis + "_axis"
     let go = |level| __monocurl__native__ set_default(target, name, style, level)
     return [go(level: 0), go(level: 1)]
@@ -534,15 +716,44 @@ let axis_style = operator |target, axis, min, max, axis_title = nil, tick_spacin
 ## One-dimensional axis mesh along a basis vector.
 ## [description]
 ## Usually configured through `axis_style{"x", ...}` rather than by manually editing the compact `x_axis` style list.
+## In the style list, `tick_spacing` may be a list of exact tick positions instead of a step, `arrow_extrusion` may be `nil` to hide the axis arrowheads, `label_map` may be `nil` to hide tick labels, and an 8th slot sets `tick_placement` (`"both"` / `"positive"` / `"negative"` / `"centered"`).
 let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, nil, 0.25, 4, |x| x, 0.2]|
     __monocurl__native__ mk_axis1d(basis, normal, color, x_axis)
 
 ## [options]
 ## important: true
 ## [overview]
+## A labelled number line: a friendlier `Axis1d` where every tick is labelled by default.
+## [description]
+## Thin convenience over `Axis1d`. Unlike `Axis1d`/`Axis2d`, `major_tick_rate` defaults to
+## `1`, so every tick gets a number. Pass `label_map = nil` for an unlabelled ruler, or a
+## `|value| ...` callable (for example `|x| Number(x, 1)`) for custom tick text. Set
+## `axis_title` for a label at the positive end.
+## [parameters]
+## min: left end of the line in axis coordinates
+## max: right end of the line in axis coordinates
+## tick_spacing: distance between ticks, or a list of exact tick positions
+## major_tick_rate: every nth tick is drawn/labelled as major
+## axis_title: optional title placed past the positive end
+## label_map: `nil` for no labels, or a function from value to tick label
+## basis: scene-space direction and unit length of one axis step
+## color: axis color
+## [example]
+## ```
+## mesh line = NumberLine(0, 10, 1)
+## mesh half = NumberLine(-2, 2, 0.5, 2, "x", |x| Number(x, 1))
+## mesh named = NumberLine(0, 7, [0, 3.5, 7], 1, nil, |x| Number(x, 1))
+## ```
+let NumberLine = |min = -5, max = 5, tick_spacing = 1, major_tick_rate = 1, axis_title = nil, label_map = (|x| x), basis = 1r, color = [0, 0, 0, 1]|
+    __monocurl__native__ mk_axis1d(basis, 1b, color, [min, max, axis_title, tick_spacing, major_tick_rate, label_map, 0.2])
+
+## [options]
+## important: true
+## [overview]
 ## Two-dimensional coordinate axes, optionally with grid lines.
 ## [description]
-## `basis` gives the scene-space x/y unit vectors for the graph. Use `grid_color` to draw grid lines; leave it `nil` for ticks only.
+## `basis` gives the scene-space x/y unit vectors for the graph. Use `grid_color` to draw grid lines; leave it `nil` for ticks only. Grid lines are already split into major/minor by each axis's `major_tick_rate`.
+## In each axis style list, set the last slot (`arrow_extrusion`) to `nil` to hide that axis's arrowheads.
 ## [example]
 ## ```mcl image
 ## mesh axes = axis_style{"x", -2, 2, "x"} axis_style{"y", -1, 3, "f(x)"} Axis2d()
@@ -574,16 +785,21 @@ let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1
 ## [overview]
 ## Sample a 3-D parametric curve function.
 ## [description]
-## The function receives `t` and must return a 3-D point. Endpoints are included.
+## The function receives `t` and returns a 3-D point. Endpoints are included. Where `f(t)`
+## returns `nil` or a point with a non-finite component, the curve is split into separate
+## contours rather than jumping across the gap.
 ## [parameters]
 ## t_min_max_samples: `[t_min, t_max, samples]`
+## endpoint_dots: truthy to append visible `Dot`s at the two curve endpoints
 ## [example]
 ## ```
 ## mesh spiral = stroke{CYAN} ParametricFunc(|t| [cos(t), sin(t), t / TAU], [0, TAU * 3, 180])
 ## ```
-let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
+let ParametricFunc = |f, t_min_max_samples = [0, 1, 64], endpoint_dots = 0| {
     let [min, max, samples] = __monocurl__native__ expect_list("t_min_max_samples", t_min_max_samples, 3)
-    return __monocurl__native__ mk_parametric(f, min, max, samples)
+    let curve = __monocurl__native__ mk_parametric(f, min, max, samples)
+    if (not endpoint_dots) { return curve }
+    return [curve, __monocurl__native__ mk_dot(f(min)), __monocurl__native__ mk_dot(f(max))]
 }
 
 ## [options]
@@ -592,27 +808,58 @@ let ParametricFunc = |f, t_min_max_samples = [0, 1, 64]| {
 ## Sample y = f(x) as a polyline in the XY plane.
 ## [description]
 ## Endpoints are included. Use `in_space{...}` to embed the graph into a custom axes coordinate system.
+## Set `fill` to an RGBA colour to also shade the area between the curve and the x axis
+## (this is `ExplicitFuncDiff(f, |x| 0, ...)` under the hood). Set `endpoint_dots` truthy
+## to append visible `Dot`s at the two ends. When either is used the result is a mesh list
+## `[ (fill,) curve (, dots) ]` rather than a bare polyline.
+## Where `f(x)` returns `nil` or a non-finite number (a pole, a hole, a piecewise gap),
+## both the curve and the optional `fill` are split into separate pieces around the gap
+## instead of drawing a vertical jump.
+## [parameters]
+## x_min_max_samples: `[x_min, x_max, samples]`
+## endpoint_dots: truthy to append visible `Dot`s at the curve endpoints
+## fill: optional RGBA colour to shade the area between the curve and the x axis
 ## [example]
 ## ```mcl image
 ## mesh graph = stroke{CYAN} ExplicitFunc(|x| sin(x), [-PI, PI, 160])
+## mesh shaded = stroke{CYAN} ExplicitFunc(|x| sin(x), [0, PI, 160], 0, [0.2, 0.6, 0.9, 0.4])
 ## ```
-let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128]| {
+let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128], endpoint_dots = 0, fill = nil| {
     let [min, max, samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
-    return __monocurl__native__ mk_explicit(f, min, max, samples)
+    let curve = __monocurl__native__ mk_explicit(f, min, max, samples)
+    if (__monocurl__native__ is_nil(fill) and not endpoint_dots) { return curve }
+    var parts = []
+    if (not __monocurl__native__ is_nil(fill)) {
+        for (region in __monocurl__native__ mk_explicit_diff(f, (|x| 0), min, max, samples, fill, fill, [], [])) {
+            parts .= region
+        }
+    }
+    parts .= curve
+    if (endpoint_dots) {
+        parts .= __monocurl__native__ mk_dot([min, f(min), 0])
+        parts .= __monocurl__native__ mk_dot([max, f(max), 0])
+    }
+    return parts
 }
 
 ## [overview]
 ## Sample z = f(x, y) as a 3-D surface.
 ## [description]
 ## The function receives `(x, y)` and returns z. The domain lists are `[min, max, samples]`.
+## Pass `color_at` as a `|x, y, z| ...` callback returning an RGBA colour to shade the
+## surface per vertex (for height maps / gradients); leave it `nil` for the default flat
+## surface colour.
+## [parameters]
+## color_at: optional `(x, y, z) -> RGBA` per-vertex colour callback
 ## [example]
 ## ```
 ## mesh surface = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 31], [-1, 1, 31])
+## mesh heat = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 41], [-1, 1, 41], |x, y, z| [z, 0.3, 1 - z, 1])
 ## ```
-let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21]| {
+let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], color_at = nil| {
     let [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
     let [y_min, y_max, y_samples] = __monocurl__native__ expect_list("y_min_max_samples", y_min_max_samples, 3)
-    return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples)
+    return __monocurl__native__ mk_explicit2d(f, x_min, x_max, y_min, y_max, x_samples, y_samples, color_at)
 }
 
 ## [overview]
@@ -632,7 +879,7 @@ let ImplicitFunc2d = |f, x_min_max_samples = [-1, 1, 65], y_min_max_samples = [-
 ## [overview]
 ## Fill the signed area between two explicit functions.
 ## [description]
-## Returns two tagged filled regions, one for where `f` is below `g` and one for where it is above. This is useful for shaded inequalities or visualizing approximation error.
+## Returns two tagged filled regions, one for where `f` is below `g` and one for where it is above. This is useful for shaded inequalities or visualizing approximation error. Where either `f` or `g` returns `nil` or a non-finite number, that column is a gap and the fill and outline are split around it.
 ## [parameters]
 ## x_min_max_samples: `[x_min, x_max, samples]`
 ## fills: [lower_fill, upper_fill]

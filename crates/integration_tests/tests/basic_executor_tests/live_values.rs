@@ -1273,6 +1273,107 @@ fn test_axis_style_arrow_extrusion_controls_bounds() {
 }
 
 #[test]
+fn test_axis_style_nil_arrow_extrusion_hides_arrowheads() {
+    let r = run_with_stdlib(
+        "
+        let arrowed = Axis2d([1r, 1u], [0, 0, 0, 1], nil, [-2, 2, nil, 1, 0, nil, 0.2], [-2, 2, nil, 1, 0, nil, 0.2])
+        let bare = Axis2d([1r, 1u], [0, 0, 0, 1], nil, [-2, 2, nil, 1, 0, nil, nil], [-2, 2, nil, 1, 0, nil, nil])
+        let result =
+            (len(arrowed) > len(bare)) +
+            (mesh_right(arrowed)[0] > 2.05) +
+            (mesh_right(bare)[0] < 2.05)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_axis_style_arrow_extrusion_interpolates() {
+    // animating a labeled numeric arrow_extrusion must not error and grows the
+    // arrows out as it goes.
+    let r = run_with_stdlib(
+        "
+        let small = axis_style{\"x\", -2, 2, nil, 0.25, 4, nil, arrow_extrusion: 0.01} Axis1d()
+        let big = axis_style{\"x\", -2, 2, nil, 0.25, 4, nil, arrow_extrusion: 0.4} Axis1d()
+        let mid = lerp(small, big, 0.5)
+        let result =
+            (mesh_right(mid)[0] > mesh_right(small)[0]) +
+            (mesh_right(mid)[0] < mesh_right(big)[0])
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_axis_style_explicit_tick_positions() {
+    // an explicit tick list draws exactly those ticks (all major) instead of a
+    // uniform sweep; out-of-range entries (999) are dropped.
+    let r = run_with_stdlib(
+        "
+        let uniform = Axis1d(1r, 1b, [0, 0, 0, 1], [-10, 10, nil, 1, 1, nil, 0.2])
+        let explicit = Axis1d(1r, 1b, [0, 0, 0, 1], [-10, 10, nil, [0, 3, 7, 999], 1, nil, 0.2])
+        # each tick is one line segment; uniform has 21, explicit has 3 (999 dropped)
+        let result = (len(mesh_edge_set(uniform)) - len(mesh_edge_set(explicit))) == 18
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_axis_style_explicit_ticks_place_labels_at_requested_values() {
+    let r = run_with_stdlib(
+        "
+        let axis = Axis1d(1r, 1b, [0, 0, 0, 1], [-5, 5, nil, [-3, 4], 1, (|x| x), 0])
+        let n = len(axis)
+        let x0 = mesh_center(axis[n - 2])[0]
+        let x1 = mesh_center(axis[n - 1])[0]
+        let result = (abs(x0 + 3) < 0.5) + (abs(x1 - 4) < 0.5)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_axis_style_tick_placement_modes() {
+    // x-axis: side is +y, LARGE_TICK_EXTEND = 0.075. arrows + labels suppressed
+    // so the axis mesh is just the tick marks.
+    let r = run_with_stdlib(
+        "
+        let default_p = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil])
+        let both = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil, \"both\"])
+        let pos = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil, \"positive\"])
+        let neg = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil, \"negative\"])
+        let cen = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, nil, \"centered\"])
+        let result =
+            (abs(mesh_down(default_p)[1] + 0.075) < 0.01) +
+            (abs(mesh_down(both)[1] + 0.075) < 0.01) +
+            (abs(mesh_down(pos)[1]) < 0.01) +
+            (abs(mesh_up(pos)[1] - 0.075) < 0.01) +
+            (abs(mesh_up(neg)[1]) < 0.01) +
+            (abs(mesh_down(neg)[1] + 0.075) < 0.01) +
+            (abs(mesh_down(cen)[1] + 0.0375) < 0.01)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(7);
+}
+
+#[test]
+fn test_axis_style_rejects_bad_tick_placement() {
+    let r = run_with_stdlib(
+        "
+        let result = Axis1d(1r, 1b, [0, 0, 0, 1], [-2, 2, nil, 1, 1, nil, 0.2, \"sideways\"])
+    ",
+        &["mesh"],
+    );
+    r.assert_error("tick_placement");
+}
+
+#[test]
 fn test_axis_style_rejects_negative_arrow_extrusion() {
     let r = run_with_stdlib(
         "

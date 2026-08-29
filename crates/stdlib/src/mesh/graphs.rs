@@ -48,6 +48,9 @@ const AXIS_ARROW_STYLE: VectorLikeStyle = VectorLikeStyle {
     max_stem_radius_over_length: 0.04,
     max_head_half_width_over_length: 0.18,
     max_head_depth_over_length: 0.32,
+    head_len_scale: 1.0,
+    head_width_scale: 1.0,
+    double_headed: false,
 };
 
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
@@ -101,10 +104,65 @@ fn normalize_or(vec: Float3, fallback: Float3) -> Float3 {
     }
 }
 
-fn open_polyline(points: &[Float3], normal: Float3) -> Vec<geo::mesh::Lin> {
+/// Append an open polyline to `out`, split into separate contours wherever the
+/// sample list contains a `None` (a domain gap / discontinuity). Contiguous
+/// runs of `Some` points of length >= 2 each become their own contour.
+fn push_segmented_open_polyline(
+    out: &mut Vec<geo::mesh::Lin>,
+    points: &[Option<Float3>],
+    normal: Float3,
+) {
+    let mut run: Vec<Float3> = Vec::new();
+    for point in points {
+        match point {
+            Some(p) => run.push(*p),
+            None => {
+                if run.len() >= 2 {
+                    push_open_polyline(out, &run, normal);
+                }
+                run.clear();
+            }
+        }
+    }
+    if run.len() >= 2 {
+        push_open_polyline(out, &run, normal);
+    }
+}
+
+fn segmented_open_polyline(points: &[Option<Float3>], normal: Float3) -> Vec<geo::mesh::Lin> {
     let mut out = Vec::with_capacity(points.len().saturating_sub(1));
-    push_open_polyline(&mut out, points, normal);
+    push_segmented_open_polyline(&mut out, points, normal);
     out
+}
+
+/// Read a scalar `y = f(x)` sample. `nil` or a non-finite number is a domain
+/// gap (`Ok(None)`); a wrong type is still an error.
+fn explicit_sample_y(value: Value, name: &'static str) -> Result<Option<f32>, ExecutorError> {
+    match value.elide_cached_wrappers_rec() {
+        Value::Nil => Ok(None),
+        Value::Integer(v) => Ok(Some(v as f32)),
+        Value::Float(v) => Ok(v.is_finite().then_some(v as f32)),
+        other => Err(ExecutorError::type_error_for(
+            "float or nil",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
+/// Read a 3-D parametric sample. `nil` or any non-finite component is a domain
+/// gap (`Ok(None)`); a non-3-list is still an error.
+fn parametric_sample_point(
+    value: Value,
+    name: &'static str,
+) -> Result<Option<Float3>, ExecutorError> {
+    match value.elide_cached_wrappers_rec() {
+        Value::Nil => Ok(None),
+        other => {
+            let p = float3_from_value(other, name)?;
+            Ok((p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).then_some(p))
+        }
+    }
 }
 
 fn push_subdivided_line(out: &mut Vec<geo::mesh::Lin>, a: Float3, b: Float3, subdivision: usize) {
@@ -157,6 +215,43 @@ enum AxisLabelMap {
     Callable(Value),
 }
 
+/// Where a tick mark sits relative to the axis line.
+#[derive(Clone, Copy, PartialEq)]
+enum TickPlacement {
+    /// `p ± extend` — straddles the axis (default, unchanged).
+    Both,
+    /// `p .. p + extend` — only on the `+side` of the axis.
+    Positive,
+    /// `p - extend .. p` — only on the `-side` of the axis.
+    Negative,
+    /// `p ± extend/2` — straddles, half length.
+    Centered,
+}
+
+fn tick_placement_from_value(
+    value: Value,
+    name: &'static str,
+) -> Result<TickPlacement, ExecutorError> {
+    match value.elide_cached_wrappers_rec() {
+        Value::Nil => Ok(TickPlacement::Both),
+        Value::String(s) => match s.to_string().as_str() {
+            "both" => Ok(TickPlacement::Both),
+            "positive" => Ok(TickPlacement::Positive),
+            "negative" => Ok(TickPlacement::Negative),
+            "centered" => Ok(TickPlacement::Centered),
+            _ => Err(ExecutorError::InvalidArgument {
+                arg: name,
+                message: "must be \"both\", \"positive\", \"negative\", or \"centered\"",
+            }),
+        },
+        other => Err(ExecutorError::type_error_for(
+            "string or nil",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
 #[derive(Clone)]
 struct AxisStyle {
     range: AxisRange,
@@ -164,6 +259,15 @@ struct AxisStyle {
     major_tick_rate: usize,
     label_map: AxisLabelMap,
     arrow_extrusion: f32,
+    /// draw the arrowheads at both ends of the axis. `false` when the style
+    /// list's `arrow_extrusion` slot is `nil`.
+    draw_arrows: bool,
+    /// explicit tick positions in axis coordinates. Empty = uniform ticks from
+    /// `range.tick_step`. Set when the `tick_spacing` slot is a list. Every
+    /// listed position is drawn as a major tick.
+    explicit_ticks: Vec<f32>,
+    /// where tick marks sit relative to the axis line.
+    tick_placement: TickPlacement,
 }
 
 impl AxisStyle {
@@ -174,6 +278,28 @@ impl AxisStyle {
             major_tick_rate: 4,
             label_map: AxisLabelMap::DefaultFormat,
             arrow_extrusion: AXIS_BUFFER,
+            draw_arrows: true,
+            explicit_ticks: Vec::new(),
+            tick_placement: TickPlacement::Both,
+        }
+    }
+
+    /// Tick `(index, value)` pairs for this style — either the explicit list
+    /// (all major) or uniform ticks from `range`.
+    fn ticks(&self) -> Vec<(i64, f32)> {
+        if self.explicit_ticks.is_empty() {
+            axis_tick_values(self.range.min, self.range.max, self.range.tick_step)
+        } else {
+            self.explicit_ticks.iter().map(|&v| (0_i64, v)).collect()
+        }
+    }
+
+    /// Upper bound on how many ticks this style produces, for limit checks.
+    fn tick_budget(&self) -> usize {
+        if self.explicit_ticks.is_empty() {
+            tick_count(self.range.min, self.range.max, self.range.tick_step)
+        } else {
+            self.explicit_ticks.len()
         }
     }
 }
@@ -264,9 +390,11 @@ fn axis_title_from_value(
 }
 
 fn axis_style_third_arg_is_title(value: Value) -> bool {
+    // a number (tick_spacing) or a list (explicit tick positions) in slot 3 means
+    // there is no axis title
     !matches!(
         value.elide_cached_wrappers_rec(),
-        Value::Integer(_) | Value::Float(_)
+        Value::Integer(_) | Value::Float(_) | Value::List(_)
     )
 }
 
@@ -297,6 +425,9 @@ fn read_axis_style(
             let mut major_tick_rate = 4;
             let mut label_map = AxisLabelMap::DefaultFormat;
             let mut arrow_extrusion = AXIS_BUFFER;
+            let mut draw_arrows = true;
+            let mut explicit_ticks: Vec<f32> = Vec::new();
+            let mut tick_placement = TickPlacement::Both;
             let range = match elements.len() {
                 1 => {
                     let radius = axis_number_from_value(
@@ -305,7 +436,7 @@ fn read_axis_style(
                     )?;
                     axis_radius_range(radius, name)?
                 }
-                2..=7 => {
+                2..=8 => {
                     let min = axis_number_from_value(
                         with_heap(|h| h.get(elements[0].key()).clone()),
                         name,
@@ -318,9 +449,9 @@ fn read_axis_style(
                         && axis_style_third_arg_is_title(with_heap(|h| {
                             h.get(elements[2].key()).clone()
                         }));
-                    if !has_title && elements.len() > 6 {
+                    if !has_title && elements.len() > 7 {
                         return Err(ExecutorError::invalid_operation(format!(
-                            "{name}: expected [min, max, tick_spacing, major_tick_rate, label_map, arrow_extrusion] or [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion]"
+                            "{name}: expected [min, max, (axis_title,) tick_spacing, major_tick_rate, label_map, arrow_extrusion, tick_placement]"
                         )));
                     }
                     let tick_step_index = if has_title {
@@ -333,10 +464,24 @@ fn read_axis_style(
                         2
                     };
                     let tick_step = if elements.len() > tick_step_index {
-                        axis_number_from_value(
-                            with_heap(|h| h.get(elements[tick_step_index].key()).clone()),
-                            "tick_spacing",
-                        )?
+                        let raw = with_heap(|h| {
+                            h.get(elements[tick_step_index].key()).clone()
+                        });
+                        match raw.clone().elide_cached_wrappers_rec() {
+                            Value::List(list) => {
+                                for key in list.elements() {
+                                    let v = axis_number_from_value(
+                                        with_heap(|h| h.get(key.key()).clone()),
+                                        "tick_spacing",
+                                    )?;
+                                    if v.is_finite() {
+                                        explicit_ticks.push(v);
+                                    }
+                                }
+                                DEFAULT_AXIS_TICK_STEP
+                            }
+                            _ => axis_number_from_value(raw, "tick_spacing")?,
+                        }
                     } else {
                         DEFAULT_AXIS_TICK_STEP
                     };
@@ -352,19 +497,36 @@ fn read_axis_style(
                         }));
                     }
                     if elements.len() > tick_step_index + 3 {
-                        arrow_extrusion = checked_axis_arrow_extrusion(axis_number_from_value(
-                            with_heap(|h| h.get(elements[tick_step_index + 3].key()).clone()),
-                            "arrow_extrusion",
-                        )?)?;
+                        let raw = with_heap(|h| {
+                            h.get(elements[tick_step_index + 3].key()).clone()
+                        });
+                        if matches!(raw.clone().elide_cached_wrappers_rec(), Value::Nil) {
+                            draw_arrows = false;
+                            arrow_extrusion = 0.0;
+                        } else {
+                            arrow_extrusion = checked_axis_arrow_extrusion(
+                                axis_number_from_value(raw, "arrow_extrusion")?,
+                            )?;
+                        }
+                    }
+                    if elements.len() > tick_step_index + 4 {
+                        tick_placement = tick_placement_from_value(
+                            with_heap(|h| h.get(elements[tick_step_index + 4].key()).clone()),
+                            "tick_placement",
+                        )?;
                     }
                     checked_axis_range(min, max, tick_step, name)?
                 }
                 len => {
                     return Err(ExecutorError::invalid_operation(format!(
-                        "{name}: expected a number or [min, max, axis_title, tick_spacing, major_tick_rate, label_map, arrow_extrusion], got list of length {len}"
+                        "{name}: expected a number or [min, max, (axis_title,) tick_spacing, major_tick_rate, label_map, arrow_extrusion, tick_placement], got list of length {len}"
                     )));
                 }
             };
+
+            // keep only explicit ticks that fall inside the axis range
+            let eps = (range.max - range.min).abs() * 1e-4 + 1e-6;
+            explicit_ticks.retain(|&v| v >= range.min - eps && v <= range.max + eps);
 
             Ok(AxisStyle {
                 range,
@@ -372,6 +534,9 @@ fn read_axis_style(
                 major_tick_rate,
                 label_map,
                 arrow_extrusion,
+                draw_arrows,
+                explicit_ticks,
+                tick_placement,
             })
         }
         other => Err(ExecutorError::type_error_for(
@@ -743,7 +908,11 @@ fn push_axis_arrows(
     normal: Float3,
     color: Float4,
     arrow_extrusion: f32,
+    draw_arrows: bool,
 ) -> Result<(), ExecutorError> {
+    if !draw_arrows {
+        return Ok(());
+    }
     let dir = basis.normalize();
     out.push(axis_arrow_mesh(
         center,
@@ -771,6 +940,7 @@ fn axis_tick_lins(
     side: Float3,
     normal: Float3,
     major_tick_rate: usize,
+    placement: TickPlacement,
 ) -> (Vec<geo::mesh::Lin>, Vec<geo::mesh::Lin>) {
     let side = normalize_or(side, polygon_basis(basis.normalize()).1);
     let mut small = Vec::new();
@@ -784,7 +954,15 @@ fn axis_tick_lins(
         } else {
             SMALL_TICK_EXTEND
         };
-        target.push(default_lin(p - side * extend, p + side * extend, normal));
+        let (a, b) = match placement {
+            TickPlacement::Both => (p - side * extend, p + side * extend),
+            TickPlacement::Positive => (p, p + side * extend),
+            TickPlacement::Negative => (p - side * extend, p),
+            TickPlacement::Centered => {
+                (p - side * (extend * 0.5), p + side * (extend * 0.5))
+            }
+        };
+        target.push(default_lin(a, b, normal));
     }
     (small, large)
 }
@@ -1154,7 +1332,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let style = read_axis_style(executor, stack_idx, -1, "x_axis")?;
     ensure_limit(
         "axis ticks",
-        tick_count(style.range.min, style.range.max, style.range.tick_step),
+        style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     let tick_dir = {
@@ -1165,7 +1343,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             polygon_basis(axis_dir).1
         }
     };
-    let ticks = axis_tick_values(style.range.min, style.range.max, style.range.tick_step);
+    let ticks = style.ticks();
     let mut axis_meshes = Vec::new();
     let (small_ticks, large_ticks) = axis_tick_lins(
         &ticks,
@@ -1174,6 +1352,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         tick_dir,
         normal,
         style.major_tick_rate,
+        style.tick_placement,
     );
     push_styled_line_meshes(&mut axis_meshes, small_ticks, large_ticks, color, false);
     push_axis_arrows(
@@ -1184,6 +1363,7 @@ pub async fn mk_axis1d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         normal,
         color,
         style.arrow_extrusion,
+        style.draw_arrows,
     )?;
 
     let mut labels = Vec::new();
@@ -1225,20 +1405,12 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let grid_color = read_optional_color(executor, stack_idx, -1, "grid_color").await?;
     ensure_limit(
         "axis x ticks",
-        tick_count(
-            x_style.range.min,
-            x_style.range.max,
-            x_style.range.tick_step,
-        ),
+        x_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis y ticks",
-        tick_count(
-            y_style.range.min,
-            y_style.range.max,
-            y_style.range.tick_step,
-        ),
+        y_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     let x_dir = x_axis.normalize();
@@ -1251,16 +1423,8 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         });
     }
     let normal = normal.normalize();
-    let x_ticks = axis_tick_values(
-        x_style.range.min,
-        x_style.range.max,
-        x_style.range.tick_step,
-    );
-    let y_ticks = axis_tick_values(
-        y_style.range.min,
-        y_style.range.max,
-        y_style.range.tick_step,
-    );
+    let x_ticks = x_style.ticks();
+    let y_ticks = y_style.ticks();
     let mut axis_meshes = Vec::new();
     if let Some(grid_color) = grid_color {
         let (small_x, large_x) = axis_grid_lins(
@@ -1291,6 +1455,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             y_dir,
             normal,
             x_style.major_tick_rate,
+            x_style.tick_placement,
         );
         let (small_y, large_y) = axis_tick_lins(
             &y_ticks,
@@ -1299,6 +1464,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             x_dir,
             normal,
             y_style.major_tick_rate,
+            y_style.tick_placement,
         );
         push_styled_line_meshes(&mut axis_meshes, small_x, large_x, color, false);
         push_styled_line_meshes(&mut axis_meshes, small_y, large_y, color, false);
@@ -1311,6 +1477,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         normal,
         color,
         x_style.arrow_extrusion,
+        x_style.draw_arrows,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1320,6 +1487,7 @@ pub async fn mk_axis2d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         normal,
         color,
         y_style.arrow_extrusion,
+        y_style.draw_arrows,
     )?;
 
     let mut labels = Vec::new();
@@ -1400,29 +1568,17 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let grid_color = read_optional_color(executor, stack_idx, -1, "grid_color").await?;
     ensure_limit(
         "axis x ticks",
-        tick_count(
-            x_style.range.min,
-            x_style.range.max,
-            x_style.range.tick_step,
-        ),
+        x_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis y ticks",
-        tick_count(
-            y_style.range.min,
-            y_style.range.max,
-            y_style.range.tick_step,
-        ),
+        y_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     ensure_limit(
         "axis z ticks",
-        tick_count(
-            z_style.range.min,
-            z_style.range.max,
-            z_style.range.tick_step,
-        ),
+        z_style.tick_budget(),
         MAX_AXIS_TICKS,
     )?;
     let x_dir = x_axis.normalize();
@@ -1441,21 +1597,9 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let xz_normal = y_dir;
     let yz_normal = normalize_or(y_dir.cross(z_dir), x_dir);
     let z_normal = normalize_or(x_dir.cross(z_dir), xy_normal);
-    let x_ticks = axis_tick_values(
-        x_style.range.min,
-        x_style.range.max,
-        x_style.range.tick_step,
-    );
-    let y_ticks = axis_tick_values(
-        y_style.range.min,
-        y_style.range.max,
-        y_style.range.tick_step,
-    );
-    let z_ticks = axis_tick_values(
-        z_style.range.min,
-        z_style.range.max,
-        z_style.range.tick_step,
-    );
+    let x_ticks = x_style.ticks();
+    let y_ticks = y_style.ticks();
+    let z_ticks = z_style.ticks();
     let mut axis_meshes = Vec::new();
     if let Some(grid_color) = grid_color {
         let (small_x_xy, large_x_xy) = axis_grid_lins(
@@ -1526,6 +1670,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             y_dir,
             xy_normal,
             x_style.major_tick_rate,
+            x_style.tick_placement,
         );
         let (small_y, large_y) = axis_tick_lins(
             &y_ticks,
@@ -1534,6 +1679,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             x_dir,
             xy_normal,
             y_style.major_tick_rate,
+            y_style.tick_placement,
         );
         let (small_z, large_z) = axis_tick_lins(
             &z_ticks,
@@ -1542,6 +1688,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
             x_dir,
             z_normal,
             z_style.major_tick_rate,
+            z_style.tick_placement,
         );
         push_styled_line_meshes(&mut axis_meshes, small_x, large_x, color, false);
         push_styled_line_meshes(&mut axis_meshes, small_y, large_y, color, false);
@@ -1555,6 +1702,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         xy_normal,
         color,
         x_style.arrow_extrusion,
+        x_style.draw_arrows,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1564,6 +1712,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         xy_normal,
         color,
         y_style.arrow_extrusion,
+        y_style.draw_arrows,
     )?;
     push_axis_arrows(
         &mut axis_meshes,
@@ -1573,6 +1722,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         z_normal,
         color,
         z_style.arrow_extrusion,
+        z_style.draw_arrows,
     )?;
 
     let mut labels = Vec::new();
@@ -1734,9 +1884,10 @@ pub async fn mk_parametric(
     let values = invoke_callable_many(executor, &f, &args, "f").await?;
     let points = values
         .into_iter()
-        .map(|value| float3_from_value(value, "f"))
+        .map(|value| parametric_sample_point(value, "f"))
         .collect::<Result<Vec<_>, _>>()?;
-    let normal = points
+    let valid: Vec<Float3> = points.iter().filter_map(|p| *p).collect();
+    let normal = valid
         .windows(3)
         .find_map(|w| {
             let cross = (w[1] - w[0]).cross(w[2] - w[1]);
@@ -1745,7 +1896,7 @@ pub async fn mk_parametric(
         .unwrap_or(Float3::Z);
     Ok(mesh_from_parts(
         vec![],
-        open_polyline(&points, normal),
+        segmented_open_polyline(&points, normal),
         vec![],
     ))
 }
@@ -1775,22 +1926,11 @@ pub async fn mk_explicit(
     let values = invoke_callable_many(executor, &f, &args, "f").await?;
     let mut points = Vec::with_capacity(samples);
     for (x, value) in xs.into_iter().zip(values) {
-        let y = match value {
-            Value::Float(v) => v as f32,
-            Value::Integer(v) => v as f32,
-            other => {
-                return Err(ExecutorError::type_error_for(
-                    "float",
-                    other.type_name(),
-                    "f",
-                ));
-            }
-        };
-        points.push(Float3::new(x as f32, y, 0.0));
+        points.push(explicit_sample_y(value, "f")?.map(|y| Float3::new(x as f32, y, 0.0)));
     }
     Ok(mesh_from_parts(
         vec![],
-        open_polyline(&points, Float3::Z),
+        segmented_open_polyline(&points, Float3::Z),
         vec![],
     ))
 }
@@ -1803,15 +1943,24 @@ pub async fn mk_explicit2d(
     let f = executor
         .state
         .stack(stack_idx)
-        .read_at(-7)
+        .read_at(-8)
         .clone()
         .elide_lvalue();
-    let x0 = crate::read_float(executor, stack_idx, -6, "x0")? as f32;
-    let x1 = crate::read_float(executor, stack_idx, -5, "x1")? as f32;
-    let y0 = crate::read_float(executor, stack_idx, -4, "y0")? as f32;
-    let y1 = crate::read_float(executor, stack_idx, -3, "y1")? as f32;
-    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -2, "x_samples")?);
-    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -1, "y_samples")?);
+    let x0 = crate::read_float(executor, stack_idx, -7, "x0")? as f32;
+    let x1 = crate::read_float(executor, stack_idx, -6, "x1")? as f32;
+    let y0 = crate::read_float(executor, stack_idx, -5, "y0")? as f32;
+    let y1 = crate::read_float(executor, stack_idx, -4, "y1")? as f32;
+    let x_samples = grid_axis_samples(read_int(executor, stack_idx, -3, "x_samples")?);
+    let y_samples = grid_axis_samples(read_int(executor, stack_idx, -2, "y_samples")?);
+    let color_at = {
+        let raw = executor
+            .state
+            .stack(stack_idx)
+            .read_at(-1)
+            .clone()
+            .elide_lvalue();
+        (!matches!(raw.clone().elide_cached_wrappers_rec(), Value::Nil)).then_some(raw)
+    };
     let nx = x_samples - 1;
     let ny = y_samples - 1;
     let cell_count = ensure_grid_cells("explicit surface cells", nx, ny)?;
@@ -1851,11 +2000,31 @@ pub async fn mk_explicit2d(
             faces.push([index(ix, iy), index(ix + 1, iy + 1), index(ix, iy + 1)]);
         }
     }
+    let colors: Vec<Float4> = if let Some(cb) = &color_at {
+        let color_args: Vec<SmallVec<[Value; 2]>> = vertices
+            .iter()
+            .map(|p| {
+                smallvec![
+                    Value::Float(p.x as f64),
+                    Value::Float(p.y as f64),
+                    Value::Float(p.z as f64),
+                ]
+            })
+            .collect();
+        invoke_callable_many(executor, cb, &color_args, "color_at")
+            .await?
+            .into_iter()
+            .map(|v| float4_from_value(v, "color_at"))
+            .collect::<Result<_, _>>()?
+    } else {
+        vec![Float4::new(0.0, 0.0, 0.0, 1.0); vertices.len()]
+    };
     let surface_vertices: Vec<_> = vertices
         .into_iter()
-        .map(|pos| SurfaceVertex {
+        .zip(colors)
+        .map(|(pos, col)| SurfaceVertex {
             pos,
-            col: Float4::new(0.0, 0.0, 0.0, 1.0),
+            col,
             uv: Float2::ZERO,
         })
         .collect();
@@ -1964,31 +2133,24 @@ pub async fn mk_explicit_diff(
     }
     let upper_values = invoke_callable_many(executor, &f, &args, "f").await?;
     let lower_values = invoke_callable_many(executor, &g, &args, "g").await?;
+    // a column is valid only if both f and g are finite there; `nil` / non-finite
+    // marks a domain gap and the fill / outline is split around it.
+    let mut valid = Vec::with_capacity(samples);
     for ((x, upper_value), lower_value) in xs.into_iter().zip(upper_values).zip(lower_values) {
-        let yf = match upper_value {
-            Value::Float(v) => v as f32,
-            Value::Integer(v) => v as f32,
-            other => {
-                return Err(ExecutorError::type_error_for(
-                    "float",
-                    other.type_name(),
-                    "f",
-                ));
+        let yf = explicit_sample_y(upper_value, "f")?;
+        let yg = explicit_sample_y(lower_value, "g")?;
+        match (yf, yg) {
+            (Some(a), Some(b)) => {
+                upper.push(Float3::new(x as f32, a, 0.0));
+                lower.push(Float3::new(x as f32, b, 0.0));
+                valid.push(true);
             }
-        };
-        let yg = match lower_value {
-            Value::Float(v) => v as f32,
-            Value::Integer(v) => v as f32,
-            other => {
-                return Err(ExecutorError::type_error_for(
-                    "float",
-                    other.type_name(),
-                    "g",
-                ));
+            _ => {
+                upper.push(Float3::new(x as f32, 0.0, 0.0));
+                lower.push(Float3::new(x as f32, 0.0, 0.0));
+                valid.push(false);
             }
-        };
-        upper.push(Float3::new(x as f32, yf, 0.0));
-        lower.push(Float3::new(x as f32, yg, 0.0));
+        }
     }
 
     // split contiguous same-sign columns into shared strips so interior columns
@@ -2014,24 +2176,42 @@ pub async fn mk_explicit_diff(
             }
         };
 
-    let mut run_start = 0usize;
-    let mut is_pos = interval_is_pos(0);
-    for i in 1..samples - 1 {
-        let next_is_pos = interval_is_pos(i);
-        if next_is_pos != is_pos {
-            if is_pos {
-                append_strip(&mut pos_verts, &mut pos_faces, run_start, i);
-            } else {
-                append_strip(&mut neg_verts, &mut neg_faces, run_start, i);
-            }
-            run_start = i;
-            is_pos = next_is_pos;
+    // for each maximal run of valid columns, tile it with same-sign strips
+    let mut i = 0usize;
+    while i < samples {
+        if !valid[i] {
+            i += 1;
+            continue;
         }
-    }
-    if is_pos {
-        append_strip(&mut pos_verts, &mut pos_faces, run_start, samples - 1);
-    } else {
-        append_strip(&mut neg_verts, &mut neg_faces, run_start, samples - 1);
+        let seg_start = i;
+        while i + 1 < samples && valid[i + 1] {
+            i += 1;
+        }
+        let seg_end = i;
+        i += 1;
+        if seg_end == seg_start {
+            continue;
+        }
+
+        let mut run_start = seg_start;
+        let mut is_pos = interval_is_pos(seg_start);
+        for k in (seg_start + 1)..seg_end {
+            let next_is_pos = interval_is_pos(k);
+            if next_is_pos != is_pos {
+                if is_pos {
+                    append_strip(&mut pos_verts, &mut pos_faces, run_start, k);
+                } else {
+                    append_strip(&mut neg_verts, &mut neg_faces, run_start, k);
+                }
+                run_start = k;
+                is_pos = next_is_pos;
+            }
+        }
+        if is_pos {
+            append_strip(&mut pos_verts, &mut pos_faces, run_start, seg_end);
+        } else {
+            append_strip(&mut neg_verts, &mut neg_faces, run_start, seg_end);
+        }
     }
 
     let build_region = |verts: Vec<Float3>, faces: Vec<[usize; 3]>, fill: Float4| {
@@ -2065,8 +2245,19 @@ pub async fn mk_explicit_diff(
     let pos_val = make_tagged_mesh(pos_lins, pos_tris, tag0);
     let neg_val = make_tagged_mesh(neg_lins, neg_tris, tag1);
 
-    let mut lins = open_polyline(&upper, Float3::Z);
-    push_open_polyline(&mut lins, &lower, Float3::Z);
+    let upper_opt: Vec<Option<Float3>> = upper
+        .iter()
+        .zip(&valid)
+        .map(|(p, &ok)| ok.then_some(*p))
+        .collect();
+    let lower_opt: Vec<Option<Float3>> = lower
+        .iter()
+        .zip(&valid)
+        .map(|(p, &ok)| ok.then_some(*p))
+        .collect();
+    let mut lins = Vec::new();
+    push_segmented_open_polyline(&mut lins, &upper_opt, Float3::Z);
+    push_segmented_open_polyline(&mut lins, &lower_opt, Float3::Z);
     let outline_val = mesh_from_parts(vec![], lins, vec![]);
 
     Ok(list_value([pos_val, neg_val, outline_val]))

@@ -35,6 +35,13 @@ pub(super) struct VectorLikeStyle {
     pub(super) max_stem_radius_over_length: f32,
     pub(super) max_head_half_width_over_length: f32,
     pub(super) max_head_depth_over_length: f32,
+    /// user multiplier on the final arrowhead length (along the shaft). `1.0` =
+    /// default geometry.
+    pub(super) head_len_scale: f32,
+    /// user multiplier on the final arrowhead half-width. `1.0` = default.
+    pub(super) head_width_scale: f32,
+    /// also draw an arrowhead at the tail (mirrored). `false` = single head.
+    pub(super) double_headed: bool,
 }
 
 const DEFAULT_VECTOR_LIKE_STYLE: VectorLikeStyle = VectorLikeStyle {
@@ -46,6 +53,9 @@ const DEFAULT_VECTOR_LIKE_STYLE: VectorLikeStyle = VectorLikeStyle {
     max_stem_radius_over_length: ARROW_MAX_STEM_RADIUS_OVER_LENGTH,
     max_head_half_width_over_length: ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH,
     max_head_depth_over_length: ARROW_MAX_HEAD_DEPTH_OVER_LENGTH,
+    head_len_scale: 1.0,
+    head_width_scale: 1.0,
+    double_headed: false,
 };
 
 fn mesh_limit_error(kind: &str, actual: usize, limit: usize) -> ExecutorError {
@@ -334,6 +344,27 @@ pub(super) fn vector_like_mesh(
     vector_like_mesh_with_style(tail, delta, normal, path_arc, DEFAULT_VECTOR_LIKE_STYLE)
 }
 
+/// Default arrow geometry with user multipliers on the arrowhead length and
+/// width, and an optional tail arrowhead. `1.0`/`1.0`/`false` reproduces
+/// `vector_like_mesh` exactly.
+pub(super) fn vector_like_mesh_with_tip(
+    tail: Float3,
+    delta: Float3,
+    normal: Float3,
+    path_arc: f64,
+    tip_len_scale: f32,
+    tip_width_scale: f32,
+    double_headed: bool,
+) -> Result<Value, ExecutorError> {
+    let style = VectorLikeStyle {
+        head_len_scale: tip_len_scale.max(0.0),
+        head_width_scale: tip_width_scale.max(0.0),
+        double_headed,
+        ..DEFAULT_VECTOR_LIKE_STYLE
+    };
+    vector_like_mesh_with_style(tail, delta, normal, path_arc, style)
+}
+
 pub(super) fn vector_like_mesh_with_style(
     tail: Float3,
     delta: Float3,
@@ -364,10 +395,14 @@ pub(super) fn vector_like_mesh_with_style(
     let head_radius = (len * style.head_radius_over_length).min(style.max_head_radius);
     let stem_radius = (head_radius * style.stem_radius_over_head_radius)
         .min(len * style.max_stem_radius_over_length);
-    let head_half_width = (head_radius * style.head_width_over_radius)
-        .min(len * style.max_head_half_width_over_length);
-    let head_depth =
-        (head_radius * style.head_depth_over_radius).min(len * style.max_head_depth_over_length);
+    let head_half_width = ((head_radius * style.head_width_over_radius)
+        .min(len * style.max_head_half_width_over_length)
+        * style.head_width_scale)
+        .min(len * 0.45);
+    let head_depth = ((head_radius * style.head_depth_over_radius)
+        .min(len * style.max_head_depth_over_length)
+        * style.head_len_scale)
+        .min(len * 0.9);
     let sinc = if alpha <= 1e-6 {
         1.0
     } else {
@@ -379,6 +414,12 @@ pub(super) fn vector_like_mesh_with_style(
     } else {
         ((modded_length - head_depth).max(0.0) / modded_length).clamp(0.0, 1.0)
     };
+    // with a tail head, the shaft also stops short at the start
+    let shaft_start = if style.double_headed && modded_length > 1e-6 {
+        (head_depth / modded_length).clamp(0.0, 1.0).min(shaft_end)
+    } else {
+        0.0
+    };
 
     let start = tail;
     let end = tail + delta;
@@ -386,7 +427,12 @@ pub(super) fn vector_like_mesh_with_style(
     let mut centers = Vec::with_capacity(samples);
     for i in 0..samples {
         let t = i as f32 / (samples - 1) as f32;
-        centers.push(path_arc_point(start, t * shaft_end, end, path_arc_vec));
+        centers.push(path_arc_point(
+            start,
+            shaft_start + t * (shaft_end - shaft_start),
+            end,
+            path_arc_vec,
+        ));
     }
 
     let mut offsets = Vec::with_capacity(samples);
@@ -399,7 +445,7 @@ pub(super) fn vector_like_mesh_with_style(
 
     let tip_dir = normalize_or(end - centers[samples - 1], tangent);
     let side_dir = normalize_or(offsets[samples - 1], normal.cross(tip_dir));
-    let mut contour = Vec::with_capacity(samples * 2 + 3);
+    let mut contour = Vec::with_capacity(samples * 2 + 6);
     for (center, offset) in centers.iter().zip(offsets.iter()) {
         contour.push(*center + *offset);
     }
@@ -408,6 +454,13 @@ pub(super) fn vector_like_mesh_with_style(
     contour.push(centers[samples - 1] - side_dir * head_half_width);
     for (center, offset) in centers.iter().zip(offsets.iter()).rev() {
         contour.push(*center - *offset);
+    }
+    if style.double_headed {
+        let tail_dir = normalize_or(start - centers[0], -tangent);
+        let tail_side = normalize_or(offsets[0], normal.cross(tail_dir));
+        contour.push(centers[0] - tail_side * head_half_width);
+        contour.push(start);
+        contour.push(centers[0] + tail_side * head_half_width);
     }
     orient_contour_to_normal(&mut contour, normal);
 
@@ -708,11 +761,22 @@ pub async fn mk_line(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 
 #[stdlib_func]
 pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let start = read_float3(executor, stack_idx, -4, "start")?;
-    let end = read_float3(executor, stack_idx, -3, "end")?;
-    let normal = read_float3(executor, stack_idx, -2, "normal")?;
-    let path_arc = crate::read_float(executor, stack_idx, -1, "path_arc")?;
-    vector_like_mesh(start, end - start, normal, path_arc)
+    let start = read_float3(executor, stack_idx, -7, "start")?;
+    let end = read_float3(executor, stack_idx, -6, "end")?;
+    let normal = read_float3(executor, stack_idx, -5, "normal")?;
+    let path_arc = crate::read_float(executor, stack_idx, -4, "path_arc")?;
+    let tip_len = read_nonnegative_float(executor, stack_idx, -3, "tip_length")?;
+    let tip_width = read_nonnegative_float(executor, stack_idx, -2, "tip_width")?;
+    let double_headed = read_flag(executor, stack_idx, -1, "double_headed")?;
+    vector_like_mesh_with_tip(
+        start,
+        end - start,
+        normal,
+        path_arc,
+        tip_len,
+        tip_width,
+        double_headed,
+    )
 }
 
 #[stdlib_func]
@@ -1108,10 +1172,21 @@ pub async fn mk_bezier(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 
 #[stdlib_func]
 pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let tail = read_float3(executor, stack_idx, -3, "tail")?;
-    let delta = read_float3(executor, stack_idx, -2, "delta")?;
-    let normal = read_float3(executor, stack_idx, -1, "normal")?;
-    vector_like_mesh(tail, delta, normal, 0.0)
+    let tail = read_float3(executor, stack_idx, -6, "tail")?;
+    let delta = read_float3(executor, stack_idx, -5, "delta")?;
+    let normal = read_float3(executor, stack_idx, -4, "normal")?;
+    let tip_len = read_nonnegative_float(executor, stack_idx, -3, "tip_length")?;
+    let tip_width = read_nonnegative_float(executor, stack_idx, -2, "tip_width")?;
+    let double_headed = read_flag(executor, stack_idx, -1, "double_headed")?;
+    vector_like_mesh_with_tip(
+        tail,
+        delta,
+        normal,
+        0.0,
+        tip_len,
+        tip_width,
+        double_headed,
+    )
 }
 
 #[stdlib_func]
