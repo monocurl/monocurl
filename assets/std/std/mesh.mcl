@@ -12,8 +12,10 @@
 ## [description]
 ## Unlike most line/surface primitives, `Dot` has a visible default radius; topology dots created internally by other constructors are invisible unless styled.
 ## [example]
-## ```mcl image
-## mesh p = fill{CYAN} Dot([1, 0, 0])
+## ```mcl
+## mesh a = color{RED} Dot(1.5l)
+## mesh b = color{BLUE} Dot(ORIGIN)
+## mesh c = color{GREEN} Dot(1.5r)
 ## ```
 let Dot = |point = [0, 0, 0]| __monocurl__native__ mk_dot(point)
 
@@ -26,7 +28,7 @@ let Dot = |point = [0, 0, 0]| __monocurl__native__ mk_dot(point)
 ## samples: number of line segments used to approximate the curve (default 64)
 ## [example]
 ## ```mcl image
-## mesh c = stroke{CYAN} Circle(1.5)
+## mesh c = fill{alpha{0.15} CYAN} stroke{CYAN, 2} Circle(1.4)
 ## ```
 let Circle = |radius, samples = 64|
     __monocurl__native__ mk_circle(radius, samples)
@@ -37,7 +39,7 @@ let Circle = |radius, samples = 64|
 ## The inner loop is authored as a hole, so fill/stroke operators style the ring as one surface with a boundary.
 ## [example]
 ## ```mcl image
-## mesh ring = fill{alpha{0.18} CYAN} stroke{CYAN} Annulus(0.7, 1.0)
+## mesh ring = fill{alpha{0.25} CYAN} stroke{CYAN, 2} Annulus(0.65, 1.15)
 ## ```
 let Annulus = |inner, outer|
     __monocurl__native__ mk_annulus(inner, outer)
@@ -48,7 +50,7 @@ let Annulus = |inner, outer|
 ## A square centered at the origin with sides parallel to the axes.
 ## [example]
 ## ```mcl image
-## mesh box = fill{alpha{0.2} ORANGE} stroke{ORANGE} Square(1.1)
+## mesh box = fill{alpha{0.28} ORANGE} stroke{ORANGE, 2} Square(1.7)
 ## ```
 let Square = |width|
     __monocurl__native__ mk_square(width)
@@ -61,7 +63,7 @@ let Square = |width|
 ## size: `[width, height]`
 ## [example]
 ## ```mcl image
-## mesh card = fill{alpha{0.12} BLUE} stroke{BLUE} Rect([2.0, 0.8])
+## mesh card = fill{alpha{0.22} BLUE} stroke{BLUE, 2} Rect([2.6, 1.4])
 ## ```
 let Rect = |size| {
     let [width, height] = __monocurl__native__ expect_list("size", size, 2)
@@ -74,7 +76,7 @@ let Rect = |size| {
 ## n: clamped to at least 3 sides
 ## [example]
 ## ```mcl image
-## mesh pentagon = RegularPolygon(5, 0.8)
+## mesh pentagon = fill{alpha{0.25} TEAL} stroke{TEAL, 2} RegularPolygon(5, 1.3)
 ## ```
 let RegularPolygon = |n, circumradius|
     __monocurl__native__ mk_regular_polygon(n, circumradius)
@@ -109,7 +111,7 @@ let Polyline = |vertices, normal_hint = 1b|
 ## normal: preferred stroke normal, used by lighting and topology transforms
 ## [example]
 ## ```mcl image
-## mesh l = stroke{WHITE} Line([0,0,0], [2,1,0])
+## mesh l = stroke{BLUE, 3} Line([-2, -1, 0], [2, 1, 0])
 ## ```
 let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
     __monocurl__native__ mk_line(start, end, normal)
@@ -119,14 +121,18 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
 ## [description]
 ## Convenience for `dashed{lengths, offset} Line(start, end, normal)`. A scalar `lengths`
 ## uses the same dash and gap length; a `[dash, gap]` pair sets them independently. The
-## result interpolates from a solid to a dashed line, so animating it dashes in.
+## result interpolates from a solid to a dashed line, so animating it dashes in --
+## a plain `dashed{...} Line(...)` renders dashed right away instead.
 ## [parameters]
 ## lengths: dash length or `[dash, gap]`
 ## offset: dash phase offset
 ## normal: preferred stroke normal
 ## [example]
-## ```mcl image
-## mesh guide = stroke{LIGHT_GRAY} DashedLine(1.5l, 1.5r, [0.15, 0.08])
+## ```mcl
+## mesh guide = stroke{LIGHT_GRAY, 2} Line(1.5l, 1.5r)
+## slide "dash it in"
+##     guide = stroke{BLUE, 2} DashedLine(1.5l, 1.5r, [0.15, 0.08])
+##     play Lerp(0.8, [&guide])
 ## ```
 let DashedLine = |start = [0, 0, 0], end = [1, 0, 0], lengths = [0.2, 0.1], offset = 0, normal = 1b| {
     var dash = 0
@@ -155,9 +161,9 @@ let DashedLine = |start = [0, 0, 0], end = [1, 0, 0], lengths = [0.2, 0.1], offs
 ## double_headed: truthy to also draw a mirrored arrowhead at the tail
 ## [example]
 ## ```mcl image
-## mesh curved = color{ORANGE} Arrow(1.2l, 1.2r, 1b, PI / 3)
-## mesh stubby = color{CYAN} Arrow(1.2l, 1.2r, 1b, 0, 0.6, 1.6)
-## mesh span = color{WHITE} Arrow(1.2l, 1.2r, 1b, 0, 1, 1, 1)
+## mesh straight = color{CYAN} Arrow(1.5l + 0.75u, 1.5r + 0.75u)
+## mesh curved = color{ORANGE} Arrow(1.5l, 1.5r, 1b, PI / 3)
+## mesh stubby = color{PURPLE} Arrow(1.5l + 0.85d, 1.5r + 0.85d, 1b, 0, 0.6, 1.7)
 ## ```
 ## [options]
 ## important: true
@@ -192,7 +198,10 @@ let Arc = |radius = 1, theta = [0, 3.14159265358979]| {
 ## reflex: truthy to mark the reflex (outer) angle instead of the inner one
 ## [example]
 ## ```mcl image
-## mesh a = stroke{CYAN} Angle(ORIGIN, 1r, 1u + 1r)
+## let O = 1.1l
+## mesh ray_a = stroke{DARK_GRAY, 2} Line(O, O + [2.4, 0, 0])
+## mesh ray_b = stroke{DARK_GRAY, 2} Line(O, O + [1.7, 1.7, 0])
+## mesh mark = stroke{CYAN, 3} Angle(O, O + 1r, O + 1u + 1r, 0.55)
 ## ```
 let Angle = |vertex, a, b, radius = 0.4, samples = 32, reflex = 0| {
     let da = a - vertex
@@ -224,7 +233,10 @@ let Angle = |vertex, a, b, radius = 0.4, samples = 32, reflex = 0| {
 ## size: leg length of the corner marker in scene units
 ## [example]
 ## ```mcl image
-## mesh r = stroke{CYAN} RightAngle(ORIGIN, 1r, 1u)
+## let O = 0.7l + 0.7d
+## mesh ray_a = stroke{DARK_GRAY, 2} Line(O, O + [2.4, 0, 0])
+## mesh ray_b = stroke{DARK_GRAY, 2} Line(O, O + [0, 2.4, 0])
+## mesh mark = stroke{CYAN, 3} RightAngle(O, O + 1r, O + 1u, 0.35)
 ## ```
 let RightAngle = |vertex, a, b, size = 0.2| {
     let da = a - vertex
@@ -265,7 +277,7 @@ let Capsule = |start_center, end_center, radii = 0.4, normal = 1b| {
 ## normal_hint: preferred face orientation
 ## [example]
 ## ```mcl image
-## mesh tri = fill{alpha{0.2} PURPLE} Triangle(1l, 1r, 1u)
+## mesh tri = fill{alpha{0.28} PURPLE} stroke{PURPLE, 2} Triangle(1.4l, 1.4r, 1.4u)
 ## ```
 let Triangle = |p, q, r, normal_hint = 1b|
     __monocurl__native__ mk_triangle(p, q, r, normal_hint)
@@ -280,7 +292,9 @@ let Triangle = |p, q, r, normal_hint = 1b|
 ## sample_depth: subdivision depth, clamped to at least 0
 ## [example]
 ## ```mcl image
-## mesh globe = fill{alpha{0.2} BLUE} stroke{BLUE} Sphere(0.8)
+## mesh floor = stroke{LIGHT_GRAY, 1} LineGrid([-1.6, 1.6, 9], [-1.6, 1.6, 9])
+## mesh globe = fill{alpha{0.5} BLUE} stroke{alpha{0.6} BLUE, 1} Sphere(1.1, 3)
+## camera = Camera([2.7, -2.5, 1.9], [0, 0, 0], [0, 0, 1])
 ## ```
 let Sphere = |radius, sample_depth = 2|
     __monocurl__native__ mk_sphere(radius, sample_depth)
@@ -658,8 +672,8 @@ let Measure = |target, dir = 1d, buffer = 0.15| __monocurl__native__ mk_measure(
 ## label_buffer: gap between the brace tip and the label
 ## [example]
 ## ```mcl image
-## mesh b = stroke{CYAN} Brace(1.5l, 1.5r, 0.3)
-## mesh titled = stroke{CYAN} Brace(1.5l, 1.5r, 0.3, DOWN, 101, "width")
+## mesh bar = center{0.5u} fill{alpha{0.2} BLUE} stroke{BLUE, 2} Rect([3, 0.7])
+## mesh bracket = center{0.4d} stroke{CYAN, 2.5} Brace(1.5l, 1.5r, 0.4, DOWN, 101, "width")
 ## ```
 let Brace = |start, end, depth = 0.25, direction = nil, samples = 101, label = nil, label_scale = 1, label_buffer = 0.12| {
     let span = end - start
@@ -776,8 +790,8 @@ let Axis1d = |basis = 1r, normal = 1b, color = [0, 0, 0, 1], x_axis = [-5, 5, ni
 ## color: axis color
 ## [example]
 ## ```mcl image
-## mesh line = NumberLine(0, 10, 1)
-## mesh named = center{1d} NumberLine(0, 7, [0, 3.5, 7], 1, "t")
+## mesh line = center{0.6u} NumberLine(-3, 3, 1)
+## mesh titled = center{0.9d} NumberLine(-3, 3, 1, 3, "t")
 ## ```
 let NumberLine = |min = -5, max = 5, tick_spacing = 1, major_tick_rate = 1, axis_title = nil, label_map = (|x| x), basis = 1r, color = [0, 0, 0, 1]|
     __monocurl__native__ mk_axis1d(basis, 1b, color, [min, max, axis_title, tick_spacing, major_tick_rate, label_map, 0.2])
@@ -828,7 +842,7 @@ let PolarAxis = |center = [0, 0, 0], theta = [-5, 5, 1, 1], radius = [0, 5, 1, 1
 ## endpoint_dots: truthy to append visible `Dot`s at the two curve endpoints
 ## [example]
 ## ```mcl image
-## mesh spiral = stroke{CYAN} ParametricFunc(|t| [cos(t), sin(t), t / TAU], [0, TAU * 3, 180])
+## mesh spiral = stroke{CYAN, 3} ParametricFunc(|t| [t / 9 * cos(t), t / 9 * sin(t), 0], [0, TAU * 3, 220])
 ## ```
 let ParametricFunc = |f, t_min_max_samples = [0, 1, 64], endpoint_dots = 0| {
     let [min, max, samples] = __monocurl__native__ expect_list("t_min_max_samples", t_min_max_samples, 3)
@@ -888,8 +902,14 @@ let ExplicitFunc = |f, x_min_max_samples = [-5, 5, 128], endpoint_dots = 0, fill
 ## color_at: optional `(x, y, z) -> RGBA` per-vertex colour callback
 ## [example]
 ## ```mcl image
-## mesh surface = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 31], [-1, 1, 31])
-## mesh heat = ExplicitFunc2d(|x, y| x * x + y * y, [-1, 1, 41], [-1, 1, 41], |x, y, z| [z, 0.3, 1 - z, 1])
+## mesh bowl = fill{alpha{0.3} BLUE} stroke{alpha{0.5} BLUE, 1} ExplicitFunc2d(|x, y| 0.6 * (x * x + y * y) - 0.6, [-1.3, 1.3, 19], [-1.3, 1.3, 19])
+## camera = Camera([2.8, -2.6, 2.1], [0, 0, 0], [0, 0, 1])
+## ```
+## [example]
+## ```mcl image
+## # colour-by-height via the color_at callback
+## mesh heat = ExplicitFunc2d(|x, y| 0.5 * (x * x + y * y) - 0.6, [-1.2, 1.2, 25], [-1.2, 1.2, 25], |x, y, z| keyframe_lerp([0 -> BLUE, 0.5 -> CYAN, 1 -> ORANGE], z + 0.6))
+## camera = Camera([2.8, -2.6, 2.2], [0, 0, 0], [0, 0, 1])
 ## ```
 let ExplicitFunc2d = |f, x_min_max_samples = [-1, 1, 21], y_min_max_samples = [-1, 1, 21], color_at = nil| {
     let [x_min, x_max, x_samples] = __monocurl__native__ expect_list("x_min_max_samples", x_min_max_samples, 3)
@@ -989,7 +1009,8 @@ let BoundingBox = |target, buffer = 0.1|
 ## filter: optional tag predicate applied to mesh leaves
 ## [example]
 ## ```mcl image
-## mesh moved = shift{2r + 1u} Circle(0.4)
+## mesh home = fill{alpha{0.1} GRAY} stroke{GRAY, 2} Circle(0.5)
+## mesh moved = fill{alpha{0.28} CYAN} stroke{CYAN, 2} shift{1.9r + 0.9u} Circle(0.5)
 ## ```
 let shift = operator |target, delta, filter = nil| {
     let go = |d| __monocurl__native__ op_shift(target, d, filter)
@@ -1005,7 +1026,8 @@ let shift = operator |target, delta, filter = nil| {
 ## filter: optional tag predicate applied to mesh leaves
 ## [example]
 ## ```mcl image
-## mesh wide = scale{[2, 0.5, 1]} Circle(0.5)
+## mesh unit = fill{alpha{0.1} GRAY} stroke{GRAY, 2} Circle(0.7)
+## mesh wide = fill{alpha{0.28} ORANGE} stroke{ORANGE, 2} scale{[2.2, 0.55, 1]} Circle(0.7)
 ## ```
 let scale = operator |target, factor = 1, filter = nil| {
     let go = |s| __monocurl__native__ op_scale(target, s, filter)
@@ -1024,7 +1046,8 @@ let scale = operator |target, factor = 1, filter = nil| {
 ## pivot: optional point to rotate around; defaults to the affected mesh tree's bounding-box center
 ## [example]
 ## ```mcl image
-## mesh spun = rotate{PI / 4, 1b} Square(1)
+## mesh axis_aligned = fill{alpha{0.1} GRAY} stroke{GRAY, 2} Square(1.4)
+## mesh spun = fill{alpha{0.28} ORANGE} stroke{ORANGE, 2} rotate{PI / 5, 1b} Square(1.4)
 ## ```
 let rotate = operator |target, radians, axis = 1b, pivot = nil, filter = nil| {
     let go = |angle| __monocurl__native__ op_rotate(target, angle, axis, pivot, filter)
@@ -1115,8 +1138,13 @@ let normal_hint = operator |target, normal, filter = nil| {
 ## [description]
 ## Tags are stable identities for filters and tag-aware animations. A scalar tag becomes a one-element tag list; a list can give one mesh several identities. Use `tag{...}` after construction for whole mesh leaves. For text/Tex/LaTeX fragments, prefer `text_tag{...}` inside the constructor so only the generated contours for that fragment receive the tag.
 ## [example]
-## ```mcl image
-## mesh pair = [tag{1} Circle(0.3), tag{2} Square(0.4)]
+## ```mcl
+## mesh a = tag{1} fill{alpha{0.2} CYAN} Circle(0.6)
+## mesh b = tag{2} fill{alpha{0.2} ORANGE} shift{2r} Square(0.9)
+## slide "swap identities"
+##     a = tag{1} fill{alpha{0.2} CYAN} shift{2r} Circle(0.6)
+##     b = tag{2} fill{alpha{0.2} ORANGE} Square(0.9)
+##     play TagTrans(1)
 ## ```
 let tag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_retagged(target, |old| tag, filter)]
 
@@ -1186,7 +1214,7 @@ let subset_map = operator |target, filter, f| [target, __monocurl__native__ op_s
 ## `uprank` turns point chains into line segments and closed line contours into tessellated filled surfaces. It is useful before operations that expect surfaces, such as `extrude`, or when a closed outline should become fillable.
 ## [example]
 ## ```mcl image
-## mesh disk = fill{alpha{0.16} CYAN} uprank{} Polyline([1l, 1u, 1r, 1d, 1l])
+## mesh loop = stroke{CYAN, 2.5} uprank{} Polyline([1.3l, 1.3u, 1.3r, 1.3d, 1.3l])
 ## ```
 let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_uprank(target, filter)]
 ## [overview]
@@ -1195,7 +1223,7 @@ let uprank = operator |target, filter = nil| [target, __monocurl__native__ op_up
 ## `downrank` turns surfaces into boundary strokes and strokes into endpoint dots. Use it for outlines/wire geometry, or to expose a filled shape's boundary for stroke-only proofs and construction diagrams.
 ## [example]
 ## ```mcl image
-## mesh outline = stroke{WHITE} fill{CLEAR} downrank{} Rect([2, 1])
+## mesh outline = stroke{BLUE, 3} downrank{} Rect([2.6, 1.5])
 ## ```
 let downrank = operator |target, filter = nil| [target, __monocurl__native__ op_downrank(target, filter)]
 ## [overview]
@@ -1242,7 +1270,8 @@ let tesselated = operator |target, depth = 1, filter = nil| [__monocurl__native_
 ## Builds side walls from surface boundaries. Standalone closed line loops must be `uprank{}`ed first so the extruder sees a surface.
 ## [example]
 ## ```mcl image
-## mesh bar = extrude{0.5b} Square(1)
+## mesh bar = fill{alpha{0.35} BLUE} stroke{BLUE, 1.5} extrude{1.3b} Square(1.1)
+## camera = Camera([2.4, -2.2, 1.7], [0, 0, 0], [0, 0, 1])
 ## ```
 let extrude = operator |target, delta, filter = nil| [__monocurl__native__ op_extrude(target, [0, 0, 0], filter), __monocurl__native__ op_extrude(target, delta, filter)]
 ## [overview]
@@ -1368,8 +1397,8 @@ let projected = operator |target, screen, ray = 1b, filter = nil| {
 ## z_unit: local z basis
 ## [example]
 ## ```mcl image
-## let graph_space = operator |target| in_space{[-1.2, -1.0, 0], 0.45r, 0.45u} target
-## mesh graph = graph_space{} ExplicitFunc(|x| x * x, [0, 3, 80])
+## mesh frame = stroke{LIGHT_GRAY, 2} downrank{} Rect([3, 3])
+## mesh graph = stroke{CYAN, 2} in_space{ORIGIN, 1.3r, 1.3u} ExplicitFunc(|x| x * x, [-1, 1, 60])
 ## ```
 let in_space = operator |target, axis_center = [0, 0, 0], x_unit = 1r, y_unit = 1u, z_unit = 1b, filter = nil| {
     let go = |level| __monocurl__native__ op_in_space(target, axis_center, x_unit, y_unit, z_unit, filter, level)
