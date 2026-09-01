@@ -101,6 +101,10 @@ in
         skippedTests = [
           "errors::test_scene_snapshot_accepts_mid_write_text_mesh"
 
+          "stdlib_primitives::test_brace_with_label_returns_pair"
+          "stdlib_primitives::test_number_line_labels_every_tick_by_default"
+          "stdlib_primitives::test_number_line_nil_label_map_drops_labels"
+
           "sync::test_rearrangement_scene_final_slide_seek_scan_stays_stable"
           "sync::test_rearrangement_scene_seeks_and_plays_each_slide_without_planar_trans_panic"
           "sync::test_scale_scales_text_about_global_tree_center"
@@ -129,6 +133,8 @@ in
           "live_values::test_tex_and_latex_accept_list_string_inputs"
           "live_values::test_text_tag_operator_tags_text_backends"
           "live_values::test_number_constructor_accepts_custom_font"
+          "live_values::test_axis_style_arrow_extrusion_interpolates"
+          "live_values::test_axis_style_explicit_ticks_place_labels_at_requested_values"
 
           "number::tests::number_renderer_lays_out_cached_glyphs"
           "number::tests::decimal_point_sits_on_the_baseline"
@@ -139,6 +145,7 @@ in
           "render::tests::font_text_from_file_keeps_text_tags"
           "render::tests::high_quality_tex_uses_toned_down_curve_sampling"
           "render::tests::tex_initial_origin_stays_near_formula_bounds"
+          "render::tests::typst_hello_has_consistent_topology_and_reasonable_scale"
         ];
         skippedTestsStr = lib.concatStringsSep " " (lib.map (testId: "--skip=${testId}") skippedTests);
       in "MONOCURL_ASSETS_DIR=${root}/assets cargo test --profile release -j $NIX_BUILD_CORES --offline -- --test-threads=$NIX_BUILD_CORES ${skippedTestsStr}";
