@@ -7,15 +7,25 @@ use crate::value::Value;
 
 pub type HeapKey = u32;
 
-thread_local! {
-    static VHEAP: RefCell<VirtualHeap> = RefCell::new(VirtualHeap::new());
+/// the heap and its inhibit flag share one thread-local so that a refcount
+/// change costs a single TLS lookup instead of two; these are the hottest
+/// operations in the interpreter
+struct HeapCell {
+    heap: RefCell<VirtualHeap>,
     /// when set, VRc::clone and VRc::drop skip refcount changes.
     /// also checked by heap_release to prevent snapshot drops from corrupting live heap.
-    static HEAP_INHIBIT_REFCOUNT: Cell<bool> = const { Cell::new(false) };
+    inhibit: Cell<bool>,
+}
+
+thread_local! {
+    static HEAP: HeapCell = HeapCell {
+        heap: RefCell::new(VirtualHeap::new()),
+        inhibit: Cell::new(false),
+    };
 }
 
 fn refcount_inhibited() -> bool {
-    HEAP_INHIBIT_REFCOUNT.try_with(|f| f.get()).unwrap_or(true)
+    HEAP.try_with(|cell| cell.inhibit.get()).unwrap_or(true)
 }
 
 pub struct VirtualHeap {
@@ -119,15 +129,19 @@ pub struct VWeak(pub HeapKey);
 
 impl Clone for VRc {
     fn clone(&self) -> Self {
-        if !refcount_inhibited() {
-            let _ = VHEAP.try_with(|h| {
-                let heap = h.borrow();
-                let c = heap.ref_counts[self.0 as usize].get();
-                heap.ref_counts[self.0 as usize].set(c + 1);
-            });
-        }
+        let _ = HEAP.try_with(|cell| retain_in(cell, self.0));
         VRc(self.0)
     }
+}
+
+#[inline]
+fn retain_in(cell: &HeapCell, key: HeapKey) {
+    if cell.inhibit.get() {
+        return;
+    }
+    let heap = cell.heap.borrow();
+    let count = &heap.ref_counts[key as usize];
+    count.set(count.get() + 1);
 }
 
 impl Drop for VRc {
@@ -183,8 +197,8 @@ impl VWeak {
 }
 
 pub fn heap_alloc(val: Value) -> HeapKey {
-    VHEAP.with(|h| {
-        let mut heap = h.borrow_mut();
+    HEAP.with(|cell| {
+        let mut heap = cell.heap.borrow_mut();
         if let Some(key) = heap.free_list.get_mut().pop() {
             *heap.slots[key as usize].get_mut() = Some(val);
             heap.ref_counts[key as usize].set(1);
@@ -200,34 +214,29 @@ pub fn heap_alloc(val: Value) -> HeapKey {
 
 /// increment refcount; skipped during snapshot/restore
 pub fn heap_retain(key: HeapKey) {
-    if !refcount_inhibited() {
-        let _ = VHEAP.try_with(|h| {
-            let heap = h.borrow();
-            let c = heap.ref_counts[key as usize].get();
-            heap.ref_counts[key as usize].set(c + 1);
-        });
-    }
+    let _ = HEAP.try_with(|cell| retain_in(cell, key));
 }
 
 /// decrement refcount; free slot if it hits zero.
-/// no-op when HEAP_INHIBIT_REFCOUNT is set (prevents snapshot drops from corrupting live heap).
+/// no-op while refcounting is inhibited (prevents snapshot drops from corrupting the live heap).
 pub fn heap_release(key: HeapKey) {
-    if refcount_inhibited() {
-        return;
-    }
-    let Ok(should_free) = VHEAP.try_with(|h| {
-        let heap = h.borrow();
-        let old = heap.ref_counts[key as usize].get();
+    let Ok(should_free) = HEAP.try_with(|cell| {
+        if cell.inhibit.get() {
+            return false;
+        }
+        let heap = cell.heap.borrow();
+        let count = &heap.ref_counts[key as usize];
+        let old = count.get();
         debug_assert!(old > 0, "heap_release on already-freed HeapKey {}", key);
-        heap.ref_counts[key as usize].set(old - 1);
+        count.set(old - 1);
         old == 1
     }) else {
         return;
     };
     if should_free {
         // use shared borrow + per-slot borrow_mut; safe for reentry from nested heap_releases
-        let Ok(val) = VHEAP.try_with(|h| {
-            let heap = h.borrow();
+        let Ok(val) = HEAP.try_with(|cell| {
+            let heap = cell.heap.borrow();
             heap.free_list.borrow_mut().push(key);
             heap.slots[key as usize].borrow_mut().take().unwrap()
         }) else {
@@ -240,29 +249,29 @@ pub fn heap_release(key: HeapKey) {
 
 /// swap the slot value safely: borrow released before dropping the old value
 pub fn heap_replace(key: HeapKey, new_val: Value) {
-    let old = VHEAP.with(|h| {
-        let heap = h.borrow();
+    let old = HEAP.with(|cell| {
+        let heap = cell.heap.borrow();
         heap.slots[key as usize].borrow_mut().replace(new_val)
     });
     drop(old);
 }
 
 pub fn heap_ref_count(key: HeapKey) -> u32 {
-    VHEAP.with(|h| h.borrow().ref_counts[key as usize].get())
+    HEAP.with(|cell| cell.heap.borrow().ref_counts[key as usize].get())
 }
 
 pub fn with_heap<R>(f: impl FnOnce(&VirtualHeap) -> R) -> R {
-    VHEAP.with(|h| f(&h.borrow()))
+    HEAP.with(|cell| f(&cell.heap.borrow()))
 }
 
 /// same as with_heap but signals intent to mutate via per-slot RefCells
 pub fn with_heap_mut<R>(f: impl FnOnce(&VirtualHeap) -> R) -> R {
-    VHEAP.with(|h| f(&h.borrow()))
+    HEAP.with(|cell| f(&cell.heap.borrow()))
 }
 
 /// snapshot the heap; INHIBIT prevents VRc refcount side-effects during clone
 pub fn snapshot_heap() -> RawHeapSnapshot<VirtualHeap> {
-    VHEAP.with(|h| RawHeapSnapshot::new(&*h.borrow()))
+    HEAP.with(|cell| RawHeapSnapshot::new(&*cell.heap.borrow()))
 }
 
 /// restore the heap from a snapshot; INHIBIT prevents the old heap's drop
@@ -270,7 +279,7 @@ pub fn snapshot_heap() -> RawHeapSnapshot<VirtualHeap> {
 pub fn restore_heap(snap: &RawHeapSnapshot<VirtualHeap>) {
     with_inhibit(|| {
         let new_heap = snap.raw_clone();
-        let _old = VHEAP.with(|h| std::mem::replace(&mut *h.borrow_mut(), new_heap));
+        let _old = HEAP.with(|cell| std::mem::replace(&mut *cell.heap.borrow_mut(), new_heap));
         drop(_old);
     });
 }
@@ -283,14 +292,14 @@ pub fn raw_clone<T: Clone>(val: &T) -> T {
 /// run `f` with refcount inhibited; restores prior inhibit state on return.
 /// use this when dropping values that were snapshotted without refcount tracking.
 pub fn with_inhibit<R>(f: impl FnOnce() -> R) -> R {
-    let prev = HEAP_INHIBIT_REFCOUNT.try_with(|f| {
-        let prev = f.get();
-        f.set(true);
+    let prev = HEAP.try_with(|cell| {
+        let prev = cell.inhibit.get();
+        cell.inhibit.set(true);
         prev
     });
     let r = f();
     if let Ok(prev) = prev {
-        let _ = HEAP_INHIBIT_REFCOUNT.try_with(|f| f.set(prev));
+        let _ = HEAP.try_with(|cell| cell.inhibit.set(prev));
     }
     r
 }

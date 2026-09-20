@@ -13,7 +13,10 @@ use crate::{
     },
 };
 
-use super::{ExecSingle, Executor, ops::BinOp};
+use super::{
+    ExecSingle, Executor,
+    ops::{BinOp, resolved_numeric},
+};
 
 impl Executor {
     fn root_slide_index_for_transcript_entry(&self, section_idx: usize) -> Option<usize> {
@@ -28,13 +31,15 @@ impl Executor {
         }
     }
 
-    #[inline(always)]
-    pub(super) async fn execute_instr(
+    /// run `instr` when it cannot suspend. returns `None` (leaving the stack
+    /// untouched) for the instructions that genuinely need to await, so the
+    /// interpreter only pays for a future when one is actually required
+    pub(super) fn execute_instr_sync(
         &mut self,
         section_idx: usize,
         stack_idx: usize,
         instr: Instruction,
-    ) -> ExecSingle {
+    ) -> Option<ExecSingle> {
         match instr {
             Instruction::PushNil => {
                 self.state.stack_mut(stack_idx).push(Value::Nil);
@@ -81,7 +86,9 @@ impl Executor {
                 if !allow_stateful
                     && matches!(self.state.stack(stack_idx).peek(), Value::Stateful(_))
                 {
-                    return ExecSingle::Error(ExecutorError::stateful_illegal_assignment());
+                    return Some(ExecSingle::Error(
+                        ExecutorError::stateful_illegal_assignment(),
+                    ));
                 }
                 self.state.promote_to_var(stack_idx);
             }
@@ -96,7 +103,9 @@ impl Executor {
                     self.state.stack(stack_idx).peek().clone().elide_lvalue(),
                     Value::Stateful(_)
                 ) {
-                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
+                    return Some(ExecSingle::Error(
+                        ExecutorError::stateful_requires_mesh_assignment(),
+                    ));
                 }
                 let name =
                     self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
@@ -106,12 +115,13 @@ impl Executor {
 
             Instruction::PushDeepCopy { stack_delta } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let lvalue_resolved = match self.read_current_value(val).await {
-                    Ok(value) => value,
-                    Err(error) => return ExecSingle::Error(error),
-                };
+                // only stateful values need evaluating, and those are rare
+                let resolved = val.elide_lvalue_leader_rec();
+                if matches!(resolved, Value::Stateful(_)) {
+                    return None;
+                }
 
-                self.state.stack_mut(stack_idx).push(lvalue_resolved);
+                self.state.stack_mut(stack_idx).push(resolved);
             }
             Instruction::PushCopy {
                 stack_delta,
@@ -120,16 +130,19 @@ impl Executor {
             } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let copied = match copy_mode {
-                    CopyValueMode::Read => match self.read_current_value(val).await {
-                        Ok(value) => value,
-                        Err(error) => return ExecSingle::Error(error),
-                    },
+                    CopyValueMode::Read => {
+                        let resolved = val.elide_lvalue_leader_rec();
+                        if matches!(resolved, Value::Stateful(_)) {
+                            return None;
+                        }
+                        resolved
+                    }
                     CopyValueMode::Reference => val.force_elide_lvalue(),
                     CopyValueMode::Raw => val,
                 };
 
                 if let Value::Stateful(_) = copied {
-                    return ExecSingle::Error(ExecutorError::direct_stateful_copy());
+                    return Some(ExecSingle::Error(ExecutorError::direct_stateful_copy()));
                 }
 
                 if pop_tos {
@@ -160,10 +173,10 @@ impl Executor {
                 let leader_cell_key = match val.as_lvalue_key() {
                     Some(k) => k,
                     None => {
-                        return ExecSingle::Error(ExecutorError::type_error(
+                        return Some(ExecSingle::Error(ExecutorError::type_error(
                             "param variable",
                             val.type_name(),
-                        ));
+                        )));
                     }
                 };
 
@@ -177,19 +190,19 @@ impl Executor {
                                 self.state
                                     .stack_mut(stack_idx)
                                     .push(Value::Stateful(stateful));
-                                return ExecSingle::Continue;
+                                return Some(ExecSingle::Continue);
                             }
 
-                            return ExecSingle::Error(ExecutorError::invalid_access(
+                            return Some(ExecSingle::Error(ExecutorError::invalid_access(
                                 "$ can only be used with 'param' variables, not 'mesh' (unless the mesh contains a stateful value)",
-                            ));
+                            )));
                         }
                     }
                     _ => {
-                        return ExecSingle::Error(ExecutorError::type_error(
+                        return Some(ExecSingle::Error(ExecutorError::type_error(
                             "param leader",
                             cell_val.type_name(),
-                        ));
+                        )));
                     }
                 }
 
@@ -228,14 +241,150 @@ impl Executor {
                 match val {
                     Value::Lambda(rc) => stack.push(Value::Operator(Operator(rc))),
                     _ => {
-                        return ExecSingle::Error(ExecutorError::type_error(
+                        return Some(ExecSingle::Error(ExecutorError::type_error(
                             "lambda",
                             val.type_name(),
-                        ));
+                        )));
                     }
                 }
             }
 
+            Instruction::LambdaInvoke { .. } | Instruction::OperatorInvoke { .. } => return None,
+            Instruction::ConvertToLiveOperator => {
+                return Some(self.exec_convert_to_live_operator(stack_idx));
+            }
+
+            Instruction::Jump { section, to } => {
+                self.state.stack_mut(stack_idx).ip = (section, to);
+            }
+            Instruction::ConditionalJump { section, to } => {
+                let condition = resolved_numeric(self.state.stack(stack_idx).read_at(-1))?;
+                let truthy = condition.check_truthy().ok()?;
+                let stack = self.state.stack_mut(stack_idx);
+                stack.pop();
+                if truthy {
+                    stack.ip = (section, to);
+                }
+            }
+            Instruction::Return { stack_delta } => {
+                return Some(self.exec_return(stack_idx, stack_delta));
+            }
+            Instruction::Pop { count } => {
+                self.state.stack_mut(stack_idx).pop_n(count as usize);
+            }
+
+            Instruction::NativeInvoke { .. } => return None,
+            Instruction::IncrementByOne { stack_delta } => {
+                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
+                let Some(key) = val.as_lvalue_key() else {
+                    return Some(ExecSingle::Error(ExecutorError::type_error(
+                        "lvalue",
+                        val.type_name(),
+                    )));
+                };
+                let result = with_heap_mut(|heap| {
+                    let mut cell = heap.get_mut(key);
+                    match &mut *cell {
+                        Value::Integer(n) => {
+                            *n += 1;
+                            Ok(())
+                        }
+                        Value::Float(f) => {
+                            *f += 1.0;
+                            Ok(())
+                        }
+                        other => Err(ExecutorError::type_error("int / float", other.type_name())),
+                    }
+                });
+                if let Err(err) = result {
+                    return Some(ExecSingle::Error(err));
+                }
+            }
+
+            Instruction::Play | Instruction::Observe => return None,
+
+            Instruction::Negate => return self.try_negate(stack_idx),
+            Instruction::Not => return self.try_not(stack_idx),
+
+            Instruction::Subscript { .. } => return None,
+            Instruction::SubscriptLocal { .. } => return None,
+            Instruction::ContainerLen { stack_delta } => {
+                return Some(self.exec_container_len(stack_idx, stack_delta));
+            }
+            Instruction::Attribute {
+                mutable,
+                string_index,
+            } => {
+                return Some(self.exec_attribute(stack_idx, section_idx, mutable, string_index));
+            }
+
+            Instruction::Add => return self.try_binary_op(stack_idx, BinOp::Add),
+            Instruction::Sub => return self.try_binary_op(stack_idx, BinOp::Sub),
+            Instruction::Mul => return self.try_binary_op(stack_idx, BinOp::Mul),
+            Instruction::Div => return self.try_binary_op(stack_idx, BinOp::Div),
+            Instruction::Power => return self.try_binary_op(stack_idx, BinOp::Power),
+            Instruction::Lt => return self.try_binary_op(stack_idx, BinOp::Lt),
+            Instruction::Le => return self.try_binary_op(stack_idx, BinOp::Le),
+            Instruction::Gt => return self.try_binary_op(stack_idx, BinOp::Gt),
+            Instruction::Ge => return self.try_binary_op(stack_idx, BinOp::Ge),
+            Instruction::Eq => return self.try_binary_op(stack_idx, BinOp::Eq),
+            Instruction::Ne => return self.try_binary_op(stack_idx, BinOp::Ne),
+            Instruction::IntDiv => return self.try_binary_op(stack_idx, BinOp::IntDiv),
+            Instruction::In => return self.try_binary_op(stack_idx, BinOp::In),
+            Instruction::Assign => return Some(self.exec_assign(stack_idx)),
+            Instruction::AppendAssign => return Some(self.exec_append_assign(stack_idx)),
+            Instruction::Append => return Some(self.exec_append(stack_idx)),
+
+            Instruction::EndOfExecutionHead => {
+                self.finish_execution_head(stack_idx);
+                return Some(ExecSingle::EndOfHead);
+            }
+        }
+
+        Some(ExecSingle::Continue)
+    }
+
+    /// the instructions that `execute_instr_sync` declines
+    pub(super) async fn execute_instr_async(
+        &mut self,
+        section_idx: usize,
+        stack_idx: usize,
+        instr: Instruction,
+    ) -> ExecSingle {
+        match instr {
+            Instruction::PushDeepCopy { stack_delta } => {
+                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
+                let lvalue_resolved = match self.read_current_value(val).await {
+                    Ok(value) => value,
+                    Err(error) => return ExecSingle::Error(error),
+                };
+
+                self.state.stack_mut(stack_idx).push(lvalue_resolved);
+            }
+            Instruction::PushCopy {
+                stack_delta,
+                copy_mode,
+                pop_tos,
+            } => {
+                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
+                let copied = match copy_mode {
+                    CopyValueMode::Read => match self.read_current_value(val).await {
+                        Ok(value) => value,
+                        Err(error) => return ExecSingle::Error(error),
+                    },
+                    CopyValueMode::Reference => val.force_elide_lvalue(),
+                    CopyValueMode::Raw => val,
+                };
+
+                if let Value::Stateful(_) = copied {
+                    return ExecSingle::Error(ExecutorError::direct_stateful_copy());
+                }
+
+                if pop_tos {
+                    self.state.stack_mut(stack_idx).pop();
+                }
+                self.state.stack_mut(stack_idx).push(copied);
+            }
             Instruction::LambdaInvoke {
                 stateful,
                 labeled,
@@ -254,13 +403,6 @@ impl Executor {
                     .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args)
                     .await;
             }
-            Instruction::ConvertToLiveOperator => {
-                return self.exec_convert_to_live_operator(stack_idx);
-            }
-
-            Instruction::Jump { section, to } => {
-                self.state.stack_mut(stack_idx).ip = (section, to);
-            }
             Instruction::ConditionalJump { section, to } => {
                 let val = self.state.stack_mut(stack_idx).pop();
                 let val = match val.elide_wrappers_rec(self).await {
@@ -275,40 +417,9 @@ impl Executor {
                     Err(e) => return ExecSingle::Error(e),
                 }
             }
-            Instruction::Return { stack_delta } => {
-                return self.exec_return(stack_idx, stack_delta);
-            }
-            Instruction::Pop { count } => {
-                self.state.stack_mut(stack_idx).pop_n(count as usize);
-            }
-
             Instruction::NativeInvoke { index, arg_count } => {
                 return self.exec_native_invoke(stack_idx, index, arg_count).await;
             }
-            Instruction::IncrementByOne { stack_delta } => {
-                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let Some(key) = val.as_lvalue_key() else {
-                    return ExecSingle::Error(ExecutorError::type_error("lvalue", val.type_name()));
-                };
-                let result = with_heap_mut(|heap| {
-                    let mut cell = heap.get_mut(key);
-                    match &mut *cell {
-                        Value::Integer(n) => {
-                            *n += 1;
-                            Ok(())
-                        }
-                        Value::Float(f) => {
-                            *f += 1.0;
-                            Ok(())
-                        }
-                        other => Err(ExecutorError::type_error("int / float", other.type_name())),
-                    }
-                });
-                if let Err(err) = result {
-                    return ExecSingle::Error(err);
-                }
-            }
-
             Instruction::Play => {
                 return self.exec_play(stack_idx).await;
             }
@@ -357,15 +468,6 @@ impl Executor {
             Instruction::SubscriptLocal { stack_delta } => {
                 return self.exec_subscript_local(stack_idx, stack_delta).await;
             }
-            Instruction::ContainerLen { stack_delta } => {
-                return self.exec_container_len(stack_idx, stack_delta);
-            }
-            Instruction::Attribute {
-                mutable,
-                string_index,
-            } => {
-                return self.exec_attribute(stack_idx, section_idx, mutable, string_index);
-            }
 
             Instruction::Add => return self.exec_binary_op(stack_idx, BinOp::Add).await,
             Instruction::Sub => return self.exec_binary_op(stack_idx, BinOp::Sub).await,
@@ -380,14 +482,8 @@ impl Executor {
             Instruction::Ne => return self.exec_binary_op(stack_idx, BinOp::Ne).await,
             Instruction::IntDiv => return self.exec_binary_op(stack_idx, BinOp::IntDiv).await,
             Instruction::In => return self.exec_binary_op(stack_idx, BinOp::In).await,
-            Instruction::Assign => return self.exec_assign(stack_idx),
-            Instruction::AppendAssign => return self.exec_append_assign(stack_idx),
-            Instruction::Append => return self.exec_append(stack_idx),
 
-            Instruction::EndOfExecutionHead => {
-                self.finish_execution_head(stack_idx);
-                return ExecSingle::EndOfHead;
-            }
+            other => unreachable!("{other:?} is always handled by execute_instr_sync"),
         }
 
         ExecSingle::Continue

@@ -13,7 +13,7 @@ pub(crate) mod ops;
 use std::pin::Pin;
 use std::{future::Future, sync::Arc};
 
-use bytecode::Bytecode;
+use bytecode::{Bytecode, Instruction};
 use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
@@ -109,6 +109,20 @@ pub enum TextRenderQuality {
     High,
 }
 
+/// outcome of a run of instructions attempted without suspending
+pub(crate) enum SyncRun {
+    /// the next instruction needs the asynchronous path
+    Suspend,
+    /// execution produced a result other than `Continue`
+    Done(ExecSingle),
+    /// the run hit its instruction budget; the caller should yield and resume
+    BudgetExhausted,
+}
+
+/// how many instructions one synchronous run may execute before handing control
+/// back so the cooperative yielder can run
+pub(crate) const SYNC_RUN_BUDGET: u32 = 256;
+
 /// result of executing a single instruction
 pub(crate) enum ExecSingle {
     Continue,
@@ -202,22 +216,78 @@ impl Executor {
         self.aspect_ratio
     }
 
+    /// fetch and advance past the next instruction
     #[inline(always)]
-    pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
+    fn fetch(&mut self, stack_idx: usize) -> Result<(usize, Instruction), ExecutorError> {
         self.state.last_stack_idx = stack_idx;
+        self.memory_checker.tick()?;
 
-        if let Err(err) = self.memory_checker.tick() {
-            return ExecSingle::Error(err);
+        let (section, offset) = self.state.stack(stack_idx).ip;
+        let section_idx = section as usize;
+        let instr = self.bytecode.sections[section_idx].instructions[offset as usize];
+        self.state.stack_mut(stack_idx).ip = (section, offset + 1);
+
+        Ok((section_idx, instr))
+    }
+
+    /// run instructions until one needs to suspend, the budget runs out, or
+    /// execution produces a result. the great majority of instructions never
+    /// await, so this loop is what the interpreter spends its time in
+    #[inline(always)]
+    pub(crate) fn execute_sync_run(&mut self, stack_idx: usize, mut budget: u32) -> SyncRun {
+        while budget > 0 {
+            let restore_ip = self.state.stack(stack_idx).ip;
+            let (section_idx, instr) = match self.fetch(stack_idx) {
+                Ok(fetched) => fetched,
+                Err(error) => return SyncRun::Done(ExecSingle::Error(error)),
+            };
+
+            match self.execute_instr_sync(section_idx, stack_idx, instr) {
+                Some(ExecSingle::Continue) => budget -= 1,
+                Some(other) => return SyncRun::Done(other),
+                None => {
+                    // nothing was mutated; rewind so the async path re-fetches
+                    self.state.stack_mut(stack_idx).ip = restore_ip;
+                    return SyncRun::Suspend;
+                }
+            }
         }
 
-        let ip = self.state.stack(stack_idx).ip;
-        let section_idx = ip.0 as usize;
-        let instr_idx = ip.1 as usize;
+        SyncRun::BudgetExhausted
+    }
 
-        let instr = self.bytecode.sections[section_idx].instructions[instr_idx];
+    /// drive one execution head until it produces something other than
+    /// `Continue`, staying in the synchronous run for as long as the instruction
+    /// stream allows and yielding cooperatively between runs
+    pub(crate) async fn run_until_break(&mut self, stack_idx: usize) -> ExecSingle {
+        loop {
+            match self.execute_sync_run(stack_idx, SYNC_RUN_BUDGET) {
+                SyncRun::Done(result) => return result,
+                SyncRun::BudgetExhausted => self.tick_yielder().await,
+                SyncRun::Suspend => {
+                    self.tick_yielder().await;
+                    match self.execute_one(stack_idx).await {
+                        ExecSingle::Continue => {}
+                        other => return other,
+                    }
+                }
+            }
+        }
+    }
 
-        self.state.stack_mut(stack_idx).ip = (section_idx as u16, (instr_idx + 1) as u32);
+    #[inline(always)]
+    pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
+        let (section_idx, instr) = match self.fetch(stack_idx) {
+            Ok(fetched) => fetched,
+            Err(error) => return ExecSingle::Error(error),
+        };
 
-        self.execute_instr(section_idx, stack_idx, instr).await
+        match self.execute_instr_sync(section_idx, stack_idx, instr) {
+            Some(result) => result,
+            None => {
+                self.execute_instr_async(section_idx, stack_idx, instr)
+                    .await
+            }
+        }
     }
 }
