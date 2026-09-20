@@ -1,0 +1,9 @@
+# a different runtime failure shape than errors.mcs: calling a non-function
+
+import std.util
+import std.math
+
+let not_a_function = 5
+print "before"
+print not_a_function(1)
+print "unreachable"

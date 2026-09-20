@@ -1,0 +1,31 @@
+# mesh transform and styling operators
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+mesh shifted = shift{delta: 1r} Circle(radius: 0.5)
+mesh scaled = scale{factor: 2} Square(0.5)
+mesh stroked = stroke{color: RED, stroke_width: 3} Circle(radius: 0.8)
+mesh filled = fill{color: BLUE} RegularPolygon(n: 5, circumradius: 0.6)
+mesh mapped = point_map{|point| [point[0] * 2, point[1], point[2]]} Circle(radius: 0.4)
+mesh stacked = XStack([Circle(radius: 0.2), Square(0.3), Circle(radius: 0.2)])
+mesh boxed = BoundingBox(Circle(radius: 0.7))
+
+print len([shifted, scaled, stroked, filled, mapped, stacked, boxed])
+
+slide "Show"
+    play Set()
+
+slide "Move"
+    shifted.delta = 2r
+    scaled.factor = 3
+    play Lerp(1)
+
+slide "Restyle"
+    stroked.color = GREEN
+    filled.color = ORANGE
+    play Lerp(1)

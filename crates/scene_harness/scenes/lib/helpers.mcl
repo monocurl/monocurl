@@ -1,0 +1,17 @@
+# a user library imported by user_library.mcs
+
+import std.util
+import std.math
+import std.mesh
+
+let double = |x| x * 2
+
+let poly = |coefficients, x| {
+    var total = 0
+    for ([power, coefficient] in enumerate(coefficients)) {
+        total = total + coefficient * (x ^ power)
+    }
+    return total
+}
+
+let scaled_circle = |factor| scale{factor: factor} Circle(radius: 1)

@@ -1,0 +1,12 @@
+# runtime error reporting; each slide isolates one failure so the messages
+# themselves are covered, not just the happy paths
+
+import std.util
+import std.math
+
+print "before"
+
+let divide = |a, b| a / b
+print divide(1, 0)
+
+print "unreachable"
