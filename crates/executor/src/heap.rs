@@ -28,10 +28,6 @@ thread_local! {
     };
 }
 
-fn refcount_inhibited() -> bool {
-    HEAP.try_with(|cell| cell.inhibit.get()).unwrap_or(true)
-}
-
 pub struct VirtualHeap {
     slots: Vec<RefCell<Option<Value>>>,
     ref_counts: Vec<Cell<u32>>,
@@ -150,10 +146,35 @@ fn retain_in(cell: &HeapCell, key: HeapKey) {
 
 impl Drop for VRc {
     fn drop(&mut self) {
-        if !refcount_inhibited() {
-            heap_release(self.0);
-        }
+        // one thread-local lookup, not three: dropping references is among the
+        // most frequent things the interpreter does
+        let _ = HEAP.try_with(|cell| release_in(cell, self.0));
     }
+}
+
+/// decrement, and free the slot if that was the last reference. the slot's value
+/// is dropped after the heap borrow is released, because dropping it can release
+/// further slots
+#[inline]
+fn release_in(cell: &HeapCell, key: HeapKey) {
+    if cell.inhibit.get() {
+        return;
+    }
+
+    let freed = {
+        let heap = cell.heap.borrow();
+        let count = &heap.ref_counts[key as usize];
+        let old = count.get();
+        debug_assert!(old > 0, "heap_release on already-freed HeapKey {key}");
+        count.set(old - 1);
+        if old == 1 {
+            heap.free_list.borrow_mut().push(key);
+            heap.slots[key as usize].borrow_mut().take()
+        } else {
+            None
+        }
+    };
+    drop(freed);
 }
 
 impl VRc {
@@ -224,31 +245,7 @@ pub fn heap_retain(key: HeapKey) {
 /// decrement refcount; free slot if it hits zero.
 /// no-op while refcounting is inhibited (prevents snapshot drops from corrupting the live heap).
 pub fn heap_release(key: HeapKey) {
-    let Ok(should_free) = HEAP.try_with(|cell| {
-        if cell.inhibit.get() {
-            return false;
-        }
-        let heap = cell.heap.borrow();
-        let count = &heap.ref_counts[key as usize];
-        let old = count.get();
-        debug_assert!(old > 0, "heap_release on already-freed HeapKey {}", key);
-        count.set(old - 1);
-        old == 1
-    }) else {
-        return;
-    };
-    if should_free {
-        // use shared borrow + per-slot borrow_mut; safe for reentry from nested heap_releases
-        let Ok(val) = HEAP.try_with(|cell| {
-            let heap = cell.heap.borrow();
-            heap.free_list.borrow_mut().push(key);
-            heap.slots[key as usize].borrow_mut().take().unwrap()
-        }) else {
-            return;
-        };
-        // val dropped after borrow released; nested heap_releases are fine
-        drop(val);
-    }
+    let _ = HEAP.try_with(|cell| release_in(cell, key));
 }
 
 /// swap the slot value safely: borrow released before dropping the old value
