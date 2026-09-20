@@ -7,6 +7,7 @@ edition = "2024"
 compiler.workspace = true
 executor.workspace = true
 geo.workspace = true
+renderer.workspace = true
 lexer.workspace = true
 parser.workspace = true
 stdlib.workspace = true
@@ -20,3 +21,7 @@ path = "tests/corpus.rs"
 [[bin]]
 name = "mcbench"
 path = "src/bin/mcbench.rs"
+
+[[bin]]
+name = "mcrender"
+path = "src/bin/mcrender.rs"
