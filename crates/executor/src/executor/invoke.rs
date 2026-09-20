@@ -549,34 +549,30 @@ impl Executor {
                 stack.push(cap.clone());
             }
 
-            loop {
-                self.tick_yielder().await;
-
-                match self.execute_one(temp_idx).await {
-                    ExecSingle::Continue => {}
-                    ExecSingle::EndOfHead => {
-                        let result = if self.state.stack(temp_idx).stack_len() > 0 {
-                            self.state.stack_mut(temp_idx).pop()
-                        } else {
-                            Value::Nil
-                        };
-                        self.state.free_stack(temp_idx);
-                        self.state.last_stack_idx = trace_parent_idx
-                            .unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
-                        self.state.call_depth -= 1;
-                        return Ok(result);
-                    }
-                    ExecSingle::Play => {
-                        self.state.free_stack(temp_idx);
-                        self.state.call_depth -= 1;
-                        return Err(ExecutorError::PlayInLabeledInvocation);
-                    }
-                    ExecSingle::Error(e) => {
-                        self.state.free_stack(temp_idx);
-                        self.state.call_depth -= 1;
-                        return Err(e);
-                    }
+            match self.run_until_break(temp_idx).await {
+                ExecSingle::EndOfHead => {
+                    let result = if self.state.stack(temp_idx).stack_len() > 0 {
+                        self.state.stack_mut(temp_idx).pop()
+                    } else {
+                        Value::Nil
+                    };
+                    self.state.free_stack(temp_idx);
+                    self.state.last_stack_idx =
+                        trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
+                    self.state.call_depth -= 1;
+                    Ok(result)
                 }
+                ExecSingle::Play => {
+                    self.state.free_stack(temp_idx);
+                    self.state.call_depth -= 1;
+                    Err(ExecutorError::PlayInLabeledInvocation)
+                }
+                ExecSingle::Error(e) => {
+                    self.state.free_stack(temp_idx);
+                    self.state.call_depth -= 1;
+                    Err(e)
+                }
+                ExecSingle::Continue => unreachable!("run_until_break never returns Continue"),
             }
         })
     }
@@ -636,41 +632,36 @@ impl Executor {
                     return Err(e);
                 }
 
-                loop {
-                    self.tick_yielder().await;
-
-                    match self.execute_one(temp_idx).await {
-                        ExecSingle::Continue => {}
-                        ExecSingle::EndOfHead => {
-                            let raw = if self.state.stack(temp_idx).stack_len()
-                                > self.state.stack(temp_idx).retained_prefix_len
-                            {
-                                self.state.stack_mut(temp_idx).pop()
-                            } else {
-                                Value::Nil
-                            };
-                            let result = match self.materialize_cached_value(raw).await {
-                                Ok(result) => result,
-                                Err(e) => {
-                                    self.state.free_stack(temp_idx);
-                                    self.state.call_depth -= 1;
-                                    return Err(e);
-                                }
-                            };
-                            results.push(result);
-                            break;
-                        }
-                        ExecSingle::Play => {
-                            self.state.free_stack(temp_idx);
-                            self.state.call_depth -= 1;
-                            return Err(ExecutorError::PlayInLabeledInvocation);
-                        }
-                        ExecSingle::Error(e) => {
-                            self.state.free_stack(temp_idx);
-                            self.state.call_depth -= 1;
-                            return Err(e);
-                        }
+                match self.run_until_break(temp_idx).await {
+                    ExecSingle::EndOfHead => {
+                        let raw = if self.state.stack(temp_idx).stack_len()
+                            > self.state.stack(temp_idx).retained_prefix_len
+                        {
+                            self.state.stack_mut(temp_idx).pop()
+                        } else {
+                            Value::Nil
+                        };
+                        let result = match self.materialize_cached_value(raw).await {
+                            Ok(result) => result,
+                            Err(e) => {
+                                self.state.free_stack(temp_idx);
+                                self.state.call_depth -= 1;
+                                return Err(e);
+                            }
+                        };
+                        results.push(result);
                     }
+                    ExecSingle::Play => {
+                        self.state.free_stack(temp_idx);
+                        self.state.call_depth -= 1;
+                        return Err(ExecutorError::PlayInLabeledInvocation);
+                    }
+                    ExecSingle::Error(e) => {
+                        self.state.free_stack(temp_idx);
+                        self.state.call_depth -= 1;
+                        return Err(e);
+                    }
+                    ExecSingle::Continue => unreachable!("run_until_break never returns Continue"),
                 }
             }
 
