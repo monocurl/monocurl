@@ -325,7 +325,9 @@ impl Executor {
             Instruction::Not => return self.try_not(stack_idx),
 
             Instruction::Subscript { .. } => return None,
-            Instruction::SubscriptLocal { .. } => return None,
+            Instruction::SubscriptLocal { stack_delta } => {
+                return self.try_subscript_local(stack_idx, stack_delta);
+            }
             Instruction::ContainerLen { stack_delta } => {
                 return Some(self.exec_container_len(stack_idx, stack_delta));
             }
