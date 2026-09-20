@@ -7015,6 +7015,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "scene_harness"
+version = "0.1.0"
+dependencies = [
+ "compiler",
+ "executor",
+ "geo",
+ "lexer",
+ "parser",
+ "smol",
+ "stdlib",
+ "structs",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"

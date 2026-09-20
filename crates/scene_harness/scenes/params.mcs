@@ -1,0 +1,31 @@
+# params, stateful references, and live re-evaluation
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+
+param radius = 1
+param offset = 0l
+
+mesh live_circle = Circle(radius: $radius)
+mesh shifted = shift{delta: $offset} Circle(radius: 0.5)
+
+print is_mesh(live_circle)
+
+slide "Set"
+    play Set()
+
+slide "Grow"
+    radius = 3
+    play Lerp(1)
+
+slide "Shift"
+    offset = 2r
+    play Lerp(1)
+
+slide "Both"
+    radius = 1
+    offset = 1l
+    play Lerp(1)

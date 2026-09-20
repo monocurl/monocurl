@@ -18,6 +18,7 @@ members = [
   "crates/rust_scene",
   "crates/rust_scene_macros",
   "crates/runtime",
+  "crates/scene_harness",
   "crates/stdlib",
   "crates/stdlib-macros",
   "crates/structs",
@@ -102,6 +103,7 @@ renderer = { path = "crates/renderer" }
 rust_scene = { path = "crates/rust_scene" }
 rust_scene_macros = { path = "crates/rust_scene_macros" }
 runtime = { path = "crates/runtime" }
+scene_harness = { path = "crates/scene_harness" }
 inventory = "0.3"
 stdlib-macros = { path = "crates/stdlib-macros" }
 stdlib = { path = "crates/stdlib", default-features = false }

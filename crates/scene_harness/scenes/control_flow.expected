@@ -1,0 +1,14 @@
+# transcript
+["fizz", "one", 2, "fizz", "one", 5, "fizz", "one", 8, "fizz"]
+18
+[0, 2, 4, 6, 8, 10]
+[5, 4, 3, 2, 1]
+[[0, 1], [0, 2], [1, 0], [1, 2], [2, 0], [2, 1]]
+24
+
+# runtime errors
+
+# end timestamp
+slide 0, end of slide
+
+# timeline

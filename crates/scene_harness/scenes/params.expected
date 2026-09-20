@@ -1,0 +1,105 @@
+# transcript
+1
+
+# runtime errors
+
+# end timestamp
+slide 4, end of slide
+
+# timeline
+slide 1 @ 0.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=57331b2534868ac8
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 1
+  param offset = [0.0, 0.0, 0.0] (len 3)
+slide 1 @ 0.35
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=57331b2534868ac8
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 1
+  param offset = [0.0, 0.0, 0.0] (len 3)
+slide 1 @ 0.80
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=57331b2534868ac8
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 1
+  param offset = [0.0, 0.0, 0.0] (len 3)
+slide 1 @ 1.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=57331b2534868ac8
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 1
+  param offset = [0.0, 0.0, 0.0] (len 3)
+slide 2 @ 0.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=57331b2534868ac8
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 1 -> 3
+  param offset = [0.0, 0.0, 0.0] (len 3)
+slide 2 @ 0.35
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=da61461495787cf5
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 1.470339 -> 3
+  param offset = [0.0, 0.0, 0.0] (len 3)
+slide 2 @ 0.80
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=a1afbe991ff4f10d
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 2.88416 -> 3
+  param offset = [0.0, 0.0, 0.0] (len 3)
+slide 2 @ 1.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b053fb16af68f6c1
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 3
+  param offset = [0.0, 0.0, 0.0] (len 3)
+slide 3 @ 0.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b053fb16af68f6c1
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=eba7b5d78b6f64ae
+  param radius = 3
+  param offset = [0.0, 0.0, 0.0] (len 3) -> [2.0, 0.0, 0.0] (len 3)
+slide 3 @ 0.35
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b053fb16af68f6c1
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=405988d1cbf9e50e
+  param radius = 3
+  param offset = [0.470339, 0.0, 0.0] (len 3) -> [2.0, 0.0, 0.0] (len 3)
+slide 3 @ 0.80
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b053fb16af68f6c1
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=77dc479601bbb3ef
+  param radius = 3
+  param offset = [1.88416, 0.0, 0.0] (len 3) -> [2.0, 0.0, 0.0] (len 3)
+slide 3 @ 1.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b053fb16af68f6c1
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=95067282587b44f5
+  param radius = 3
+  param offset = [2.0, 0.0, 0.0] (len 3)
+slide 4 @ 0.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b053fb16af68f6c1
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=95067282587b44f5
+  param radius = 3 -> 1
+  param offset = [2.0, 0.0, 0.0] (len 3) -> [-1.0, 0.0, 0.0] (len 3)
+slide 4 @ 0.35
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=bccdbb5b0aa91aee
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=fb8480b1441065e5
+  param radius = 2.529661 -> 1
+  param offset = [1.294492, 0.0, 0.0] (len 3) -> [-1.0, 0.0, 0.0] (len 3)
+slide 4 @ 0.80
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=4e59e65971f3bc2b
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=de96142693c6e9c6
+  param radius = 1.11584 -> 1
+  param offset = [-0.82624, 0.0, 0.0] (len 3) -> [-1.0, 0.0, 0.0] (len 3)
+slide 4 @ 1.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=57331b2534868ac8
+  mesh[1] dots=0, lins=64, tris=62, tag=[], fp=2fcbe09653da6871
+  param radius = 1
+  param offset = [-1.0, 0.0, 0.0] (len 3)
