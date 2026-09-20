@@ -19,6 +19,28 @@ fn follow_heap_lvalues(mut key: HeapKey) -> (HeapKey, Value) {
     (key, value)
 }
 
+/// walk lvalue indirection down to the slot that actually holds the value,
+/// without copying anything along the way
+fn follow_heap_lvalue_key(mut key: HeapKey) -> HeapKey {
+    while let Some(next_key) = with_heap(|heap| heap.get(key).as_lvalue_key()) {
+        key = next_key;
+    }
+    key
+}
+
+/// append to the list living in `key` in place. the element is allocated before
+/// the slot is borrowed, because allocating reborrows the heap
+fn append_to_list_slot(key: HeapKey, element: Value) -> Result<(), ExecutorError> {
+    let element = VRc::new(element);
+    with_heap_mut(|heap| match &mut *heap.get_mut(key) {
+        Value::List(list) => {
+            list.elements.push(element);
+            Ok(())
+        }
+        other => Err(ExecutorError::type_error("list", other.type_name())),
+    })
+}
+
 fn retained_lvalue(key: HeapKey) -> Value {
     Value::Lvalue(VRc::retain_key(key))
 }
@@ -130,47 +152,49 @@ impl Executor {
         };
 
         let rhs = rhs.elide_lvalue_leader_rec();
-        let (key, base_val) = follow_heap_lvalues(key);
+        // appending to a plain list is the common case and must stay O(1): copying
+        // the list out of its slot to push one element would make building a list
+        // quadratic in its length
+        let key = follow_heap_lvalue_key(key);
+        let is_plain_list = with_heap(|heap| matches!(&*heap.get(key), Value::List(_)));
 
-        let appended_key = match base_val {
-            Value::List(mut list) => {
-                if matches!(rhs, Value::Stateful(_)) {
-                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
-                }
-                list.elements.push(VRc::new(rhs));
-                heap_replace(key, Value::List(list));
-                key
+        let appended_key = if is_plain_list {
+            if matches!(rhs, Value::Stateful(_)) {
+                return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
             }
-            Value::Leader(leader) => {
-                let (inner_key, inner_val) = follow_heap_lvalues(leader.leader_rc.key());
-
-                if matches!(rhs, Value::Stateful(_)) || matches!(inner_val, Value::Stateful(_)) {
-                    let new_stateful = match lift_append_to_stateful(inner_val, rhs) {
-                        Ok(v) => v,
-                        Err(e) => return ExecSingle::Error(e),
-                    };
-                    heap_replace(inner_key, new_stateful);
-                } else {
-                    let Value::List(mut list) = inner_val else {
-                        return ExecSingle::Error(ExecutorError::type_error(
-                            "list",
-                            inner_val.type_name(),
-                        ));
-                    };
-                    list.elements.push(VRc::new(rhs));
-                    heap_replace(inner_key, Value::List(list));
-                }
-
-                with_heap_mut(|h| {
-                    if let Value::Leader(l) = &mut *h.get_mut(key) {
-                        l.last_modified_stack = Some(stack_idx);
-                        l.leader_version += 1;
-                    }
-                });
-
-                inner_key
+            if let Err(error) = append_to_list_slot(key, rhs) {
+                return ExecSingle::Error(error);
             }
-            _ => return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name())),
+            key
+        } else {
+            let base_val = with_heap(|heap| heap.get(key).clone());
+            let Value::Leader(leader) = base_val else {
+                return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name()));
+            };
+
+            let inner_key = follow_heap_lvalue_key(leader.leader_rc.key());
+            let inner_is_stateful =
+                with_heap(|heap| matches!(&*heap.get(inner_key), Value::Stateful(_)));
+
+            if matches!(rhs, Value::Stateful(_)) || inner_is_stateful {
+                let inner_val = with_heap(|heap| heap.get(inner_key).clone());
+                let new_stateful = match lift_append_to_stateful(inner_val, rhs) {
+                    Ok(v) => v,
+                    Err(e) => return ExecSingle::Error(e),
+                };
+                heap_replace(inner_key, new_stateful);
+            } else if let Err(error) = append_to_list_slot(inner_key, rhs) {
+                return ExecSingle::Error(error);
+            }
+
+            with_heap_mut(|h| {
+                if let Value::Leader(l) = &mut *h.get_mut(key) {
+                    l.last_modified_stack = Some(stack_idx);
+                    l.leader_version += 1;
+                }
+            });
+
+            inner_key
         };
 
         self.state
