@@ -9,6 +9,8 @@ mod svg;
 mod system;
 #[cfg(not(target_arch = "wasm32"))]
 mod tectonic;
+#[cfg(not(target_arch = "wasm32"))]
+mod typst_backend;
 mod types;
 
 pub use cache::clean_stale_file_cache;
@@ -25,7 +27,8 @@ pub use render::{
     render_latex_with_quality, render_svg, render_svg_with_quality,
     render_svg_with_quality_and_resources_dir, render_tex, render_tex_marked,
     render_tex_marked_with_quality, render_tex_with_quality, render_text, render_text_with_font,
-    render_text_with_font_and_quality, render_text_with_quality,
+    render_text_with_font_and_quality, render_text_with_quality, render_typst,
+    render_typst_with_quality,
 };
 pub use types::{
     LatexBackendConfig, RenderQuality, RenderedOutput, SystemBackendConfig, SystemBackendStatus,

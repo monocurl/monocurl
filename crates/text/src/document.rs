@@ -143,6 +143,62 @@ pub(crate) fn apply_text_tag_markers(source: &str, spans: &[TaggedSpan]) -> Resu
         return Ok(source.to_owned());
     }
 
+    validate_marker_spans(source, spans)?;
+
+    Ok(apply_wrappers(
+        source,
+        spans.iter().map(|span| Wrapper {
+            range: span.range.clone(),
+            open: text_tag_marker_open(span.tag[0]),
+            close: "}".into(),
+        }),
+    ))
+}
+
+/// Typst analogue of [`apply_text_tag_markers`]: wraps each tagged span in a
+/// `#text(fill: rgb(N, 255, 255))[...]` marker so the shared SVG -> mesh importer
+/// can decode the fill colour back into a mesh tag (exactly as the LaTeX
+/// `\color[RGB]{N,255,255}` marker is decoded).
+///
+/// Spans inside a `$ ... $` math region get the content re-wrapped in `$...$`
+/// after the `#` switch to code mode, so superscripts / fractions / etc. keep
+/// their math meaning. Display style (`$ x $` with surrounding spaces) is
+/// preserved.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn apply_typst_text_tag_markers(source: &str, spans: &[TaggedSpan]) -> Result<String> {
+    if spans.is_empty() {
+        return Ok(source.to_owned());
+    }
+
+    validate_marker_spans(source, spans)?;
+
+    Ok(apply_wrappers(
+        source,
+        spans.iter().map(|span| {
+            let tag = span.tag[0].clamp(0, u8::MAX as isize);
+            let (open, close) = match typst_math_context(source, span.range.start) {
+                TypstMathContext::Markup => {
+                    (format!("#text(fill: rgb({tag}, 255, 255))["), "]".to_owned())
+                }
+                TypstMathContext::Inline => (
+                    format!("#text(fill: rgb({tag}, 255, 255))[$"),
+                    "$]".to_owned(),
+                ),
+                TypstMathContext::Display => (
+                    format!("#text(fill: rgb({tag}, 255, 255))[$ "),
+                    " $]".to_owned(),
+                ),
+            };
+            Wrapper {
+                range: span.range.clone(),
+                open,
+                close,
+            }
+        }),
+    ))
+}
+
+fn validate_marker_spans(source: &str, spans: &[TaggedSpan]) -> Result<()> {
     for span in spans {
         if span.range.start >= span.range.end || span.range.end > source.len() {
             bail!("text tag span is out of bounds");
@@ -157,16 +213,48 @@ pub(crate) fn apply_text_tag_markers(source: &str, spans: &[TaggedSpan]) -> Resu
     validate_nested_ranges(
         spans.iter().map(|span| span.range.clone()),
         "text tag spans are not properly nested",
-    )?;
+    )
+}
 
-    Ok(apply_wrappers(
-        source,
-        spans.iter().map(|span| Wrapper {
-            range: span.range.clone(),
-            open: text_tag_marker_open(span.tag[0]),
-            close: "}".into(),
-        }),
-    ))
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TypstMathContext {
+    Markup,
+    Inline,
+    Display,
+}
+
+/// Classifies the Typst syntax context at byte offset `pos` by scanning the
+/// preceding text for unescaped `$` delimiters. Good enough for the small
+/// snippets passed to `Typst(...)`; does not track `//` / `/* */` comments or
+/// `$` inside code-mode strings.
+#[cfg(not(target_arch = "wasm32"))]
+fn typst_math_context(source: &str, pos: usize) -> TypstMathContext {
+    let mut open: Option<usize> = None;
+    let mut escaped = false;
+    for (index, ch) in source[..pos].char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' => escaped = true,
+            '$' => open = if open.is_some() { None } else { Some(index) },
+            _ => {}
+        }
+    }
+
+    match open {
+        None => TypstMathContext::Markup,
+        Some(open) => {
+            let after = source[open + '$'.len_utf8()..].chars().next();
+            if after.is_some_and(char::is_whitespace) {
+                TypstMathContext::Display
+            } else {
+                TypstMathContext::Inline
+            }
+        }
+    }
 }
 
 fn parse_text_tags_impl(source: &str) -> Result<TaggedSource> {
@@ -421,8 +509,9 @@ fn text_tag_marker_open(tag: isize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        LatexDocumentStyle, TaggedSource, TaggedSpan, apply_text_tag_markers, build_latex_document,
-        build_tex_document, build_text_document, parse_text_tags,
+        LatexDocumentStyle, TaggedSource, TaggedSpan, apply_text_tag_markers,
+        apply_typst_text_tag_markers, build_latex_document, build_tex_document, build_text_document,
+        parse_text_tags,
     };
 
     #[test]
@@ -560,6 +649,57 @@ mod tests {
         assert_eq!(
             tagged,
             r"{\color[RGB]{1,255,255} \frac{a}{{\color[RGB]{2,255,255} b}}}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_text_tag_markers_wrap_markup_and_math_differently() {
+        let tagged = apply_typst_text_tag_markers(
+            "lhs $mid$ rhs",
+            &[
+                TaggedSpan {
+                    tag: vec![1],
+                    range: 0..3,
+                },
+                TaggedSpan {
+                    tag: vec![2],
+                    range: 5..8,
+                },
+                TaggedSpan {
+                    tag: vec![3],
+                    range: 10..13,
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            tagged,
+            "#text(fill: rgb(1, 255, 255))[lhs] $#text(fill: rgb(2, 255, 255))[$mid$]$ \
+             #text(fill: rgb(3, 255, 255))[rhs]"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn typst_text_tag_markers_preserve_display_math_and_nesting() {
+        let tagged = apply_typst_text_tag_markers(
+            "$ a b $",
+            &[
+                TaggedSpan {
+                    tag: vec![1],
+                    range: 2..5,
+                },
+                TaggedSpan {
+                    tag: vec![2],
+                    range: 4..5,
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            tagged,
+            "$ #text(fill: rgb(1, 255, 255))[$ a #text(fill: rgb(2, 255, 255))[$ b $] $] $"
         );
     }
 }
