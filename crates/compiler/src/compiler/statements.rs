@@ -354,13 +354,11 @@ impl Compiler {
         self.push_scope();
 
         self.compile_val(&start.1, &start.0);
+        // the bound and the counter are compiler-generated, cannot be named by
+        // the user, and are never taken as lvalues, so they stay plain stack
+        // values rather than heap slots. that also unboxes the loop variable,
+        // which names the counter's slot
         let current_pos = self.stack_depth() - 1;
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            start.0.clone(),
-        );
         self.define_symbol(
             "\x00range_current",
             VariableType::Var,
@@ -370,12 +368,6 @@ impl Compiler {
 
         self.compile_val(&stop.1, &stop.0);
         let stop_pos = self.stack_depth() - 1;
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            stop.0.clone(),
-        );
         self.define_symbol(
             "\x00range_stop",
             VariableType::Let,

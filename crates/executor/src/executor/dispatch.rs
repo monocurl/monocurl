@@ -304,10 +304,25 @@ impl Executor {
                 return self.try_native_invoke(stack_idx, index, arg_count);
             }
             Instruction::IncrementByOne { stack_delta } => {
+                // an unboxed counter is incremented where it sits
+                let stack = self.state.stack_mut(stack_idx);
+                let index = (stack.var_stack.len() as i32 + stack_delta) as usize;
+                match &mut stack.var_stack[index] {
+                    Value::Integer(n) => {
+                        *n += 1;
+                        return Some(ExecSingle::Continue);
+                    }
+                    Value::Float(f) => {
+                        *f += 1.0;
+                        return Some(ExecSingle::Continue);
+                    }
+                    _ => {}
+                }
+
                 let slot = self.state.stack(stack_idx).read_at(stack_delta);
                 let Some(key) = slot.as_lvalue_key() else {
                     return Some(ExecSingle::Error(ExecutorError::type_error(
-                        "lvalue",
+                        "int / float",
                         slot.type_name(),
                     )));
                 };

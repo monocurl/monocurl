@@ -600,7 +600,7 @@ mod test {
     }
 
     #[test]
-    fn range_loops_name_the_induction_slot_instead_of_copying_it() {
+    fn range_loops_keep_their_counter_unboxed() {
         let result = compile_with_prelude(
             "let range = |start, stop| __monocurl__native__ range(start, stop)",
             "var total = 0\nfor (i in range(0, 4)) {\n    total = total + i\n}",
@@ -608,16 +608,20 @@ mod test {
         no_errors(&result);
 
         let section = root_slide_section(&result);
-        // the induction variable and the loop bound are the only two ConvertVars;
-        // a per-iteration copy of the binding would add a third
+        // only the user's `var total` needs a heap slot: the counter, the bound
+        // and the loop variable that names the counter all stay on the stack
         let conversions = section
             .instructions
             .iter()
             .filter(|instr| matches!(instr, Instruction::ConvertVar { .. }))
             .count();
-        assert_eq!(
-            conversions, 3,
-            "expected only `total`, the induction slot and the loop bound to be promoted"
+        assert_eq!(conversions, 1, "only `total` should be promoted");
+        assert!(
+            section
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::IncrementByOne { .. })),
+            "the counter should still be advanced in place"
         );
     }
 
