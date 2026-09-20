@@ -93,7 +93,8 @@ impl TextEditor {
                     let word = state.word(offset8, false);
                     let name = state.read(word.clone());
                     state
-                        .documentation_for(&name)
+                        .resolved_reference_at(offset8)
+                        .and_then(|_| state.documentation_for(&name))
                         .cloned()
                         .map(|documentation| HoverItem::Documentation {
                             documentation,

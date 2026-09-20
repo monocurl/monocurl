@@ -27,6 +27,12 @@ pub use slide::SlideInfo;
 
 pub type LexData = Token;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedReference {
+    pub span: Span8,
+    pub declaration_span: Option<Span8>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AutoCompleteCategory {
     Keyword,
@@ -378,6 +384,7 @@ pub struct TextualState {
 
     slides: Vec<SlideInfo>,
     documentation: Vec<Documentation>,
+    resolved_references: Vec<ResolvedReference>,
 
     version: usize,
 
@@ -723,6 +730,24 @@ impl TextualState {
             return false;
         }
         self.documentation = documentation;
+        true
+    }
+
+    pub fn resolved_reference_at(&self, offset: Count8) -> Option<&ResolvedReference> {
+        self.resolved_references
+            .iter()
+            .find(|reference| reference.span.start <= offset && offset < reference.span.end)
+    }
+
+    pub fn set_resolved_references(
+        &mut self,
+        references: Vec<ResolvedReference>,
+        for_version: usize,
+    ) -> bool {
+        if for_version != self.version || self.resolved_references == references {
+            return false;
+        }
+        self.resolved_references = references;
         true
     }
 

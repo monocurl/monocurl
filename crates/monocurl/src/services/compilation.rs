@@ -16,7 +16,7 @@ use structs::text::{Count8, Location8, Span8};
 use crate::state::diagnostics::{Diagnostic, DiagnosticType};
 use crate::state::textual_state::{
     AutoCompleteCategory, AutoCompleteItem, Cursor, ParameterHintArg, ParameterPositionHint,
-    SlideInfo,
+    ResolvedReference, SlideInfo,
 };
 use crate::{
     services::{ServiceManagerMessage, execution::ExecutionMessage},
@@ -175,6 +175,16 @@ impl CompilationService {
         let slides = Self::slide_info_from_parse(&parse_artifacts, &text_rope);
         let compile_result = compile(compile_state, cursor_pos, &parsed_bundles);
         let analysis_rope = static_analysis_rope(&compile_result, text_rope.codeunits());
+        let resolved_references = compile_result
+            .root_references
+            .iter()
+            .map(|reference| ResolvedReference {
+                span: reference.span.clone(),
+                declaration_span: (!reference.symbol.is_imported())
+                    .then(|| reference.symbol.declaration_span.clone())
+                    .flatten(),
+            })
+            .collect();
 
         self.sm_tx
             .send(ServiceManagerMessage::UpdateSlideInfo { slides, version })
@@ -192,6 +202,14 @@ impl CompilationService {
         self.sm_tx
             .send(ServiceManagerMessage::UpdateStaticAnalysisRope {
                 analysis_rope,
+                version,
+            })
+            .await
+            .unwrap();
+
+        self.sm_tx
+            .send(ServiceManagerMessage::UpdateResolvedReferences {
+                references: resolved_references,
                 version,
             })
             .await
