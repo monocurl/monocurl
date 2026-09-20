@@ -8,8 +8,8 @@ use std::{path::PathBuf, time::Duration};
 
 use executor::executor::SeekOptions;
 use scene_harness::{
-    SceneTimings, bench_scenes, corpus_scenes, measure_playback, run_scene_file,
-    use_repo_assets,
+    SceneTimings, bench_scenes, corpus_scenes, measure_edit_cycle, measure_playback,
+    run_scene_file, use_repo_assets,
 };
 
 struct Args {
@@ -18,6 +18,7 @@ struct Args {
     options: SeekOptions,
     print_transcript: bool,
     playback: bool,
+    edit: bool,
     fps: u32,
     scenes: Vec<PathBuf>,
 }
@@ -28,6 +29,7 @@ fn parse_args() -> Args {
     let mut options = SeekOptions::fast();
     let mut print_transcript = false;
     let mut playback = false;
+    let mut edit = false;
     let mut fps = 60;
     let mut scenes = Vec::new();
 
@@ -50,6 +52,7 @@ fn parse_args() -> Args {
             "--corpus" => scenes.extend(corpus_scenes()),
             "--transcript" => print_transcript = true,
             "--playback" => playback = true,
+            "--edit" => edit = true,
             "--fps" => {
                 fps = argv
                     .next()
@@ -70,6 +73,7 @@ fn parse_args() -> Args {
         options,
         print_transcript,
         playback,
+        edit,
         fps,
         scenes,
     }
@@ -77,6 +81,33 @@ fn parse_args() -> Args {
 
 fn millis(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1e3
+}
+
+fn run_edit_cycle(args: &Args) {
+    println!(
+        "{:<34} {:>10} {:>12} {:>12}",
+        "scene", "edits", "parse ms", "compile ms"
+    );
+    println!("{}", "-".repeat(72));
+
+    for scene in &args.scenes {
+        let name = scene
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let Ok(source) = std::fs::read_to_string(scene) else {
+            continue;
+        };
+
+        let timings = measure_edit_cycle(&source, scene, args.iterations.max(1));
+        println!(
+            "{:<34} {:>10} {:>12.3} {:>12.3}",
+            name,
+            timings.edits,
+            millis(timings.mean_parse()),
+            millis(timings.mean_compile()),
+        );
+    }
 }
 
 fn run_playback(args: &Args) {
@@ -122,6 +153,11 @@ fn run_playback(args: &Args) {
 fn main() {
     use_repo_assets();
     let args = parse_args();
+
+    if args.edit {
+        run_edit_cycle(&args);
+        return;
+    }
 
     if args.playback {
         run_playback(&args);

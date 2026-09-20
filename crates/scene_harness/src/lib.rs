@@ -247,6 +247,58 @@ fn round3(value: geo::simd::Float3) -> [f32; 3] {
     [value.x, value.y, value.z].map(|component| (component * 1e4).round() / 1e4)
 }
 
+/// latency of one edit-recompile cycle, with import and compiler caches warm,
+/// which is what the editor pays on every keystroke
+#[derive(Clone, Debug, Default)]
+pub struct EditTimings {
+    pub edits: usize,
+    pub parse: Duration,
+    pub compile: Duration,
+}
+
+impl EditTimings {
+    pub fn mean_parse(&self) -> Duration {
+        self.parse.checked_div(self.edits.max(1) as u32).unwrap_or_default()
+    }
+
+    pub fn mean_compile(&self) -> Duration {
+        self.compile.checked_div(self.edits.max(1) as u32).unwrap_or_default()
+    }
+}
+
+/// re-parse and re-compile `source` `edits` times against warm caches, the way
+/// the editor's compilation service does while the user types
+pub fn measure_edit_cycle(source: &str, path: &Path, edits: usize) -> EditTimings {
+    let mut import_context = ParseImportContext::new(path.to_path_buf());
+    let mut compiler_cache = CompilerCache::default();
+    let mut timings = EditTimings::default();
+
+    for edit in 0..edits + 1 {
+        // vary the text so nothing can memoize the whole document
+        let edited = format!("{source}
+# edit {edit}");
+        let text_rope = Rope::from_text(edited.as_str());
+        let lex_rope = lex_rope_from_str(edited.as_str());
+
+        let started = Instant::now();
+        let (bundles, _) = Parser::parse(&mut import_context, lex_rope, text_rope, None);
+        let parsed = started.elapsed();
+
+        let started = Instant::now();
+        let _ = compile(&mut compiler_cache, None, &bundles);
+        let compiled = started.elapsed();
+
+        // the first pass populates the caches; the editor is never in that state
+        if edit > 0 {
+            timings.edits += 1;
+            timings.parse += parsed;
+            timings.compile += compiled;
+        }
+    }
+
+    timings
+}
+
 /// per-frame timings from stepping a scene the way live preview does
 #[derive(Clone, Debug, Default)]
 pub struct PlaybackTimings {
