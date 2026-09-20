@@ -277,17 +277,13 @@ impl Compiler {
         let loop_stack = self.stack_depth();
 
         // condition: idx < len(iter)
+        // the container is read in place on every step: copying it out would make
+        // iteration quadratic in the container's length
         let d = self.stack_delta(idx_pos);
-        self.emit_copy(d, span.clone());
+        self.emit_copy_ref(d, span.clone());
         let d = self.stack_delta(iter_pos);
-        self.emit_copy(d, container_span.clone());
-
-        let len_idx = registry().index_of("list_len") as u16;
-        self.emit(
-            Instruction::NativeInvoke {
-                index: len_idx,
-                arg_count: 1,
-            },
+        self.emit_push(
+            Instruction::ContainerLen { stack_delta: d },
             container_span.clone(),
         );
 
@@ -307,15 +303,13 @@ impl Compiler {
         // body scope with the for variable
         self.push_scope();
         self.compile_for_binding(&f.pattern, span, |compiler| {
-            let d = compiler.stack_delta(iter_pos);
-            compiler.emit_copy(d, container_span.clone());
             let d = compiler.stack_delta(idx_pos);
-            compiler.emit_copy(d, span.clone());
+            compiler.emit_copy_ref(d, span.clone());
+            let d = compiler.stack_delta(iter_pos);
             compiler.emit(
-                Instruction::Subscript { mutable: false },
+                Instruction::SubscriptLocal { stack_delta: d },
                 container_span.clone(),
             );
-            compiler.dec_stack(1);
         });
 
         self.compile_statements(&f.body.1);

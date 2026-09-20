@@ -147,6 +147,18 @@ pub enum Instruction {
     Subscript {
         mutable: bool,
     },
+    /// pops the index from the top of stack and reads the container held at
+    /// `stack_delta` in place, pushing the selected element. unlike a copy
+    /// followed by `Subscript` this never duplicates the container, which is what
+    /// keeps iteration linear
+    SubscriptLocal {
+        stack_delta: i32,
+    },
+    /// pushes the length of the container held at `stack_delta`, reading it in
+    /// place
+    ContainerLen {
+        stack_delta: i32,
+    },
     Attribute {
         mutable: bool,
         string_index: u32,

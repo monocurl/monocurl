@@ -594,20 +594,19 @@ mod test {
         let result = test_compile(&[bundle0, bundle1]);
         no_errors(&result);
 
-        let list_len_idx = registry().index_of("list_len") as u16;
         let section = root_slide_section(&result);
         assert!(
             section
                 .instructions
                 .iter()
-                .any(|instr| matches!(instr, Instruction::Subscript { .. })),
+                .any(|instr| matches!(instr, Instruction::SubscriptLocal { .. })),
             "shadowed range should keep the generic list iteration path"
         );
         assert!(
-            section.instructions.iter().any(|instr| matches!(
-                instr,
-                Instruction::NativeInvoke { index, .. } if *index == list_len_idx
-            )),
+            section
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::ContainerLen { .. })),
             "shadowed range should still measure the produced list"
         );
     }
