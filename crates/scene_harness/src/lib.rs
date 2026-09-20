@@ -307,6 +307,9 @@ pub struct PlaybackTimings {
     pub worst: Duration,
     /// 95th percentile frame time: what a viewer perceives as stutter
     pub p95: Duration,
+    /// the slowest frames, newest measurement first, as (frame index, duration).
+    /// long single frames are what read as a hitch, so they are worth naming
+    pub slowest: Vec<(usize, Duration)>,
     pub errors: Vec<String>,
 }
 
@@ -328,6 +331,7 @@ pub fn measure_playback(
     let mut timings = PlaybackTimings::default();
     let frame_dt = 1.0 / f64::from(fps.max(1));
     let mut frame_times = Vec::new();
+    let mut indexed_times: Vec<(usize, Duration)> = Vec::new();
 
     smol::block_on(async {
         // start from the beginning of the scene rather than wherever preparation left off
@@ -351,6 +355,7 @@ pub fn measure_playback(
             }
 
             frame_times.push(elapsed);
+            indexed_times.push((frame_times.len() - 1, elapsed));
             timings.total += elapsed;
             timings.worst = timings.worst.max(elapsed);
 
@@ -360,6 +365,10 @@ pub fn measure_playback(
             }
         }
     });
+
+    indexed_times.sort_unstable_by_key(|(_, elapsed)| std::cmp::Reverse(*elapsed));
+    indexed_times.truncate(5);
+    timings.slowest = indexed_times;
 
     frame_times.sort_unstable();
     timings.frames = frame_times.len();

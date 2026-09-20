@@ -144,6 +144,13 @@ fn run_playback(args: &Args) {
                     millis(timings.p95),
                     millis(timings.worst),
                 );
+                let slowest = timings
+                    .slowest
+                    .iter()
+                    .map(|(frame, elapsed)| format!("#{frame} {:.1}ms", millis(*elapsed)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!("    slowest frames: {slowest}");
             }
             Err(error) => eprintln!("{name}: {error}"),
         }
