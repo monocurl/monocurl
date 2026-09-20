@@ -1,0 +1,66 @@
+# the range induction variable is aliased rather than copied per iteration;
+# these pin down the semantics that has to preserve
+
+import std.util
+import std.math
+
+# each closure made in the loop must capture that iteration's value
+var closures = []
+for (i in range(0, 4)) {
+    closures .= |x| x + i
+}
+print map(closures, |f| f(10))
+
+# shadowing inside the body
+var shadowed = []
+for (i in range(0, 3)) {
+    let i = i * 100
+    shadowed .= i
+}
+print shadowed
+
+# the loop variable is visible to nested scopes and nested loops
+var pairs = []
+for (i in range(0, 3)) {
+    for (j in range(0, 2)) {
+        pairs .= [i, j]
+    }
+}
+print pairs
+
+# break and continue leave the binding well formed
+var picked = []
+for (i in range(0, 10)) {
+    if (mod(i, 2) == 0) {
+        continue
+    }
+    if (i > 6) {
+        break
+    }
+    picked .= i
+}
+print picked
+
+# the induction variable is not visible after the loop
+let after = block {
+    var last = -1
+    for (i in range(0, 3)) {
+        last = i
+    }
+    return last
+}
+print after
+
+# a loop over a list still binds by value
+var doubled = []
+for (value in [5, 6, 7]) {
+    doubled .= value * 2
+}
+print doubled
+
+# destructuring a range element is still rejected the same way
+var sums = []
+for ([a, b] in [[1, 2], [3, 4]]) {
+    sums .= a + b
+}
+print sums

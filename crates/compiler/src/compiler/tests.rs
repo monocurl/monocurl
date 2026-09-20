@@ -600,6 +600,28 @@ mod test {
     }
 
     #[test]
+    fn range_loops_name_the_induction_slot_instead_of_copying_it() {
+        let result = compile_with_prelude(
+            "let range = |start, stop| __monocurl__native__ range(start, stop)",
+            "var total = 0\nfor (i in range(0, 4)) {\n    total = total + i\n}",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        // the induction variable and the loop bound are the only two ConvertVars;
+        // a per-iteration copy of the binding would add a third
+        let conversions = section
+            .instructions
+            .iter()
+            .filter(|instr| matches!(instr, Instruction::ConvertVar { .. }))
+            .count();
+        assert_eq!(
+            conversions, 3,
+            "expected only `total`, the induction slot and the loop bound to be promoted"
+        );
+    }
+
+    #[test]
     fn branches_test_the_condition_without_negating_it() {
         for source in [
             "var x = 0\nif (x < 1) {\n    x = 1\n}",

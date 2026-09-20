@@ -403,10 +403,23 @@ impl Compiler {
         });
 
         self.push_scope();
-        self.compile_for_binding(&f.pattern, span, |compiler| {
-            let d = compiler.stack_delta(current_pos);
-            compiler.emit_copy(d, start.0.clone());
-        });
+        if let BindingPattern::Identifier(identifier) = &f.pattern.1 {
+            // the induction variable already lives in a slot, and a `let` binding
+            // can neither be assigned nor referenced, so name that slot instead of
+            // copying it into a fresh one on every iteration
+            self.register_symbol(
+                &identifier.0,
+                VariableType::Let,
+                SymbolFunctionInfo::None,
+                current_pos,
+                false,
+            );
+        } else {
+            self.compile_for_binding(&f.pattern, span, |compiler| {
+                let d = compiler.stack_delta(current_pos);
+                compiler.emit_copy(d, start.0.clone());
+            });
+        }
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone());
