@@ -2,7 +2,7 @@ use bytecode::{CopyValueMode, Instruction};
 
 use crate::{
     error::ExecutorError,
-    heap::{with_heap, with_heap_mut},
+    heap::{VRc, VWeak, with_heap, with_heap_mut},
     state::LeaderKind,
     time::Timestamp,
     value::{
@@ -166,17 +166,19 @@ impl Executor {
                 stack_delta,
                 force_ephemeral,
             } => {
-                let vrc = match self.state.stack(stack_idx).read_at(stack_delta) {
-                    Value::Lvalue(vrc) => vrc.clone(),
-                    Value::WeakLvalue(vweak) => vweak.upgrade(),
-                    _ => panic!("PushLvalue: not an lvalue at delta {}", stack_delta),
+                // the pushed reference is non-owning, so only an ephemeral needs a
+                // retain; taking one unconditionally meant a retain and a release
+                // per push for nothing
+                let Some(key) = self.state.stack(stack_idx).read_at(stack_delta).as_lvalue_key()
+                else {
+                    panic!("PushLvalue: not an lvalue at delta {stack_delta}");
                 };
                 if force_ephemeral {
-                    self.state.ephemeral_pool.push(vrc.clone());
+                    self.state.ephemeral_pool.push(VRc::retain_key(key));
                 }
                 self.state
                     .stack_mut(stack_idx)
-                    .push(Value::WeakLvalue(vrc.downgrade()));
+                    .push(Value::WeakLvalue(VWeak::from(key)));
             }
             Instruction::PushStateful { stack_delta } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();

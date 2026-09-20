@@ -78,15 +78,21 @@ impl Executor {
             None => return ExecSingle::Error(ExecutorError::CannotAssignTo(lhs.type_name())),
         };
 
-        let (key, target) = follow_heap_lvalues(key);
+        // peek at the target's shape rather than copying it out: assigning to a
+        // list-valued variable would otherwise duplicate the whole list first
+        let key = follow_heap_lvalue_key(key);
+        let leader = with_heap(|heap| match &*heap.get(key) {
+            Value::Leader(leader) => Some((leader.leader_rc.key(), leader.kind)),
+            _ => None,
+        });
 
-        match target {
-            Value::Leader(leader) => {
+        match leader {
+            Some((leader_key, kind)) => {
                 let rhs = rhs.elide_lvalue_leader_rec();
-                if matches!(rhs, Value::Stateful(_)) && leader.kind != LeaderKind::Mesh {
+                if matches!(rhs, Value::Stateful(_)) && kind != LeaderKind::Mesh {
                     return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
-                heap_replace(leader.leader_rc.key(), rhs);
+                heap_replace(leader_key, rhs);
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(key) {
                         l.last_modified_stack = Some(stack_idx);
@@ -94,7 +100,7 @@ impl Executor {
                     }
                 });
             }
-            _ => {
+            None => {
                 if matches!(rhs, Value::Stateful(_)) {
                     return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
