@@ -1,0 +1,46 @@
+# appending in place must not be visible through a copy taken beforehand
+
+import std.util
+import std.math
+
+var base = [1, 2]
+var snapshot = base
+base .= 3
+print snapshot
+print base
+
+var outer = [[1], [2]]
+var inner_copy = outer[0]
+inner_copy .= 99
+print outer
+print inner_copy
+
+# appending inside a loop, with a copy taken mid-way
+var grown = []
+var mid = []
+for (i in range(0, 5)) {
+    grown .= i
+    if (i == 2) {
+        mid = grown
+    }
+}
+print mid
+print grown
+
+# the dot-append form through a block
+let collected = block {
+    . 1
+    . 2
+    . 3
+}
+var collected_copy = collected
+print collected
+print collected_copy
+
+# appending a list appends a detached copy of it
+var element = [0]
+var container = []
+container .= element
+element[0] = 7
+print container
+print element
