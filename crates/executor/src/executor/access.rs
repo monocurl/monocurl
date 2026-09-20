@@ -202,9 +202,6 @@ impl Executor {
         stack_idx: usize,
         stack_delta: i32,
     ) -> ExecSingle {
-        // `stack_delta` is relative to the stack that still holds the index, so the
-        // container is read before the index is popped
-        let container = self.state.stack(stack_idx).read_at(stack_delta).clone();
         let index = self.state.stack_mut(stack_idx).pop();
         let index = match self.read_subscript_value(index).await {
             Ok(value) => value.elide_cached_wrappers_rec(),
@@ -216,49 +213,67 @@ impl Executor {
         };
         let idx = idx as usize;
 
-        let element = match container.elide_cached_wrappers() {
-            Value::List(list) => match list.elements().get(idx) {
-                Some(element) => with_heap(|h| h.get(element.key()).clone()),
-                None => {
-                    return ExecSingle::Error(ExecutorError::IndexOutOfBounds {
+        // the index has been popped, so the container sits one slot higher than
+        // the delta the compiler emitted
+        let container_delta = stack_delta + 1;
+        let element = self
+            .state
+            .stack(stack_idx)
+            .read_at(container_delta)
+            .with_elided_cached_wrappers(|resolved| match resolved {
+                Value::List(list) => match list.elements().get(idx) {
+                    Some(element) => Ok(Some(with_heap(|h| h.get(element.key()).clone()))),
+                    None => Err(ExecutorError::IndexOutOfBounds {
                         index: idx,
                         len: list.len(),
-                    });
-                }
-            },
-            other => {
-                // fall back to the general path for maps, strings, and anything
-                // still wrapped in an invocation that has not been evaluated yet
-                let stack = self.state.stack_mut(stack_idx);
-                stack.push(other);
-                stack.push(Value::Integer(idx as i64));
-                return self.exec_subscript(stack_idx, false).await;
-            }
-        };
+                    }),
+                },
+                // maps, strings, and invocations that have not been evaluated yet
+                // fall back to the general path
+                _ => Ok(None),
+            });
 
-        self.state
-            .stack_mut(stack_idx)
-            .push(element.elide_cached_wrappers_rec());
-        ExecSingle::Continue
+        match element {
+            Ok(Some(element)) => {
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(element.elide_cached_wrappers_rec());
+                ExecSingle::Continue
+            }
+            Ok(None) => {
+                let container = self.state.stack(stack_idx).read_at(container_delta).clone();
+                let stack = self.state.stack_mut(stack_idx);
+                stack.push(container);
+                stack.push(Value::Integer(idx as i64));
+                self.exec_subscript(stack_idx, false).await
+            }
+            Err(error) => ExecSingle::Error(error),
+        }
     }
 
     /// push the length of the container living at `stack_delta`, reading it in place
     pub(super) fn exec_container_len(&mut self, stack_idx: usize, stack_delta: i32) -> ExecSingle {
-        let container = self.state.stack(stack_idx).read_at(stack_delta);
-        let len = match container.clone().elide_cached_wrappers() {
-            Value::List(list) => list.len(),
-            Value::Map(_) => {
-                return ExecSingle::Error(ExecutorError::invalid_operation(
+        let len = self
+            .state
+            .stack(stack_idx)
+            .read_at(stack_delta)
+            .with_elided_cached_wrappers(|resolved| match resolved {
+                Value::List(list) => Ok(list.len()),
+                Value::Map(_) => Err(ExecutorError::invalid_operation(
                     "cannot iterate over a map directly; use map_items(map) to iterate [key, value] pairs",
-                ));
-            }
-            other => return ExecSingle::Error(ExecutorError::type_error("list", other.type_name())),
-        };
+                )),
+                other => Err(ExecutorError::type_error("list", other.type_name())),
+            });
 
-        self.state
-            .stack_mut(stack_idx)
-            .push(Value::Integer(len as i64));
-        ExecSingle::Continue
+        match len {
+            Ok(len) => {
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::Integer(len as i64));
+                ExecSingle::Continue
+            }
+            Err(error) => ExecSingle::Error(error),
+        }
     }
 
     pub(super) async fn exec_subscript(&mut self, stack_idx: usize, mutable: bool) -> ExecSingle {
