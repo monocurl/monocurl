@@ -128,6 +128,15 @@ pub enum Instruction {
         section: u16,
         to: u32,
     },
+    // the whole header of a `for i in range(a, b)` loop: reads the counter at
+    // `current_delta` and the bound just above it, and jumps when the counter has
+    // reached the bound. saves the two copies, the compare and the branch that the
+    // header would otherwise run on every iteration. always targets the enclosing
+    // section, since a loop never spans two
+    RangeLoopTest {
+        current_delta: i16,
+        to: u32,
+    },
     Return {
         stack_delta: i32,
     },

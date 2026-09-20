@@ -676,7 +676,8 @@ impl Compiler {
         match &mut self.current_section_mut().instructions[instr_idx] {
             Instruction::Jump { to, .. }
             | Instruction::ConditionalJump { to, .. }
-            | Instruction::JumpIfFalse { to, .. } => *to = target,
+            | Instruction::JumpIfFalse { to, .. }
+            | Instruction::RangeLoopTest { to, .. } => *to = target,
             _ => panic!("patch_jump on non-jump instruction"),
         }
     }

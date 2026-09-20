@@ -378,14 +378,29 @@ impl Compiler {
         let condition_ip = self.instruction_pointer();
         let loop_stack = self.stack_depth();
 
-        let d = self.stack_delta(current_pos);
-        self.emit_copy(d, start.0.clone());
-        let d = self.stack_delta(stop_pos);
-        self.emit_copy(d, stop.0.clone());
-        self.emit(Instruction::Lt, span.clone());
-        self.dec_stack(1);
+        let exit_jump = match i16::try_from(self.stack_delta(current_pos)) {
+            // the bound sits directly above the counter, so one delta locates both
+            Ok(current_delta) if stop_pos == current_pos + 1 => {
+                let idx = self.instruction_pointer() as usize;
+                self.emit(
+                    Instruction::RangeLoopTest { current_delta, to: 0 },
+                    span.clone(),
+                );
+                idx
+            }
+            // a frame deep enough to overflow the delta falls back to the
+            // unfused header
+            _ => {
+                let d = self.stack_delta(current_pos);
+                self.emit_copy(d, start.0.clone());
+                let d = self.stack_delta(stop_pos);
+                self.emit_copy(d, stop.0.clone());
+                self.emit(Instruction::Lt, span.clone());
+                self.dec_stack(1);
 
-        let exit_jump = self.emit_jump_if_false_patch(span.clone());
+                self.emit_jump_if_false_patch(span.clone())
+            }
+        };
 
         self.frame_mut().loop_contexts.push(LoopContext {
             continue_target: None,

@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     ExecSingle, Executor,
-    ops::{BinOp, resolved_numeric},
+    ops::{BinOp, eval_binary, resolved_numeric},
 };
 
 impl Executor {
@@ -293,6 +293,30 @@ impl Executor {
                     stack.ip = (section, to);
                 }
             }
+            Instruction::RangeLoopTest { current_delta, to } => {
+                let stack = self.state.stack(stack_idx);
+                let index = (stack.var_stack.len() as i32 + i32::from(current_delta)) as usize;
+                let keep_going = match (&stack.var_stack[index], &stack.var_stack[index + 1]) {
+                    (Value::Integer(current), Value::Integer(stop)) => current < stop,
+                    (Value::Float(current), Value::Float(stop)) => current < stop,
+                    // a bound that is not a plain number of the counter's type:
+                    // rare, so it goes through the same promotion as `Lt` would
+                    (current, stop) => {
+                        let current = resolved_numeric(current)?;
+                        let stop = resolved_numeric(stop)?;
+                        match eval_binary(&current, &stop, BinOp::Lt)
+                            .and_then(|less| less.check_truthy())
+                        {
+                            Ok(keep_going) => keep_going,
+                            Err(error) => return Some(ExecSingle::Error(error)),
+                        }
+                    }
+                };
+
+                if !keep_going {
+                    self.state.stack_mut(stack_idx).ip = (section_idx as u16, to);
+                }
+            }
             Instruction::Return { stack_delta } => {
                 return Some(self.exec_return(stack_idx, stack_delta));
             }
@@ -448,6 +472,32 @@ impl Executor {
                 return self
                     .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args)
                     .await;
+            }
+            Instruction::RangeLoopTest { current_delta, to } => {
+                // only a counter or bound that still needs awaiting gets here:
+                // push the pair and reuse the ordinary comparison
+                let stack = self.state.stack_mut(stack_idx);
+                let index = (stack.var_stack.len() as i32 + i32::from(current_delta)) as usize;
+                let current = stack.var_stack[index].clone();
+                let stop = stack.var_stack[index + 1].clone();
+                stack.push(current);
+                stack.push(stop);
+
+                match self.exec_binary_op(stack_idx, BinOp::Lt).await {
+                    ExecSingle::Continue => {}
+                    other => return other,
+                }
+
+                let less = self.state.stack_mut(stack_idx).pop();
+                let less = match less.elide_wrappers_rec(self).await {
+                    Ok(value) => value,
+                    Err(error) => return ExecSingle::Error(error),
+                };
+                match less.check_truthy() {
+                    Ok(false) => self.state.stack_mut(stack_idx).ip = (section_idx as u16, to),
+                    Ok(true) => {}
+                    Err(error) => return ExecSingle::Error(error),
+                }
             }
             Instruction::ConditionalJump { section, to } | Instruction::JumpIfFalse { section, to } => {
                 let jump_when = matches!(instr, Instruction::ConditionalJump { .. });
