@@ -2623,6 +2623,7 @@ dependencies = [
 name = "geo"
 version = "0.1.0"
 dependencies = [
+ "rustc-hash 2.1.2",
  "wide",
 ]
 
@@ -6627,6 +6628,7 @@ dependencies = [
  "image",
  "log",
  "naga",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]

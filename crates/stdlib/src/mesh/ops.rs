@@ -9,7 +9,7 @@ use executor::{
 };
 use geo::{
     mesh::{Lin, Mesh, make_mesh_mut},
-    mesh_build::{BoundaryEdge, IndexedSurface, SurfaceVertex},
+    mesh_build::{BoundaryEdge, BoundaryEdges, IndexedSurface, SurfaceVertex},
     simd::{Float3, Float4},
 };
 use smallvec::{SmallVec, smallvec};
@@ -289,7 +289,8 @@ fn subdivide_indexed_surface(surface: &IndexedSurface) -> IndexedSurface {
         faces.push([ab, bc, ca]);
     }
 
-    let mut boundary_edges = HashMap::with_capacity(surface.boundary_edges.len() * 2);
+    let mut boundary_edges =
+        BoundaryEdges::with_capacity_and_hasher(surface.boundary_edges.len() * 2, Default::default());
     for (&(a, b), template) in &surface.boundary_edges {
         let mid = edge_midpoints[&if a <= b { (a, b) } else { (b, a) }];
         boundary_edges.insert(
@@ -1684,7 +1685,7 @@ pub async fn op_extrude(executor: &mut Executor, stack_idx: usize) -> Result<Val
             faces.push([b, a + base_vertex_count, b + base_vertex_count]);
         }
 
-        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         mesh.lins = lins;
         mesh.tris = tris;
         mesh.debug_assert_consistent_topology();
@@ -1756,7 +1757,7 @@ pub async fn op_revolve(executor: &mut Executor, stack_idx: usize) -> Result<Val
             }
         }
 
-        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         mesh.lins = lins;
         mesh.tris = tris;
         mesh.debug_assert_consistent_topology();
@@ -2023,7 +2024,7 @@ mod tests {
             },
         ];
         let faces = vec![[0, 1, 2], [0, 2, 3]];
-        let boundary_edges = HashMap::from([
+        let boundary_edges = BoundaryEdges::from_iter([
             (
                 (0, 1),
                 BoundaryEdge {
@@ -2135,7 +2136,7 @@ mod tests {
             },
         ];
         let faces = vec![[0, 1, 3], [0, 3, 2]];
-        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         let mesh = Mesh {
             dots: vec![],
             lins,

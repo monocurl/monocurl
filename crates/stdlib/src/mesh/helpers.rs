@@ -18,7 +18,7 @@ use executor::{
 };
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms, make_mesh_mut},
-    mesh_build::{self, BoundaryEdge, IndexedLineMesh, IndexedSurface, SurfaceVertex},
+    mesh_build::{self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
 use libtess2::{TessellationOptions, WindingRule};
@@ -797,7 +797,7 @@ pub(crate) fn push_closed_polyline(
 pub(crate) fn build_indexed_surface(
     vertices: &[SurfaceVertex],
     faces: &[[usize; 3]],
-    boundary_edges: &HashMap<(usize, usize), BoundaryEdge>,
+    boundary_edges: &BoundaryEdges,
 ) -> (Vec<Lin>, Vec<Tri>) {
     mesh_build::build_indexed_surface(vertices, faces, boundary_edges)
 }
@@ -995,7 +995,7 @@ fn tessellate_planar_loops_with_options(
     }
     let normal = resolve_planar_normal(&contours, normal);
 
-    let mut source_boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
+    let mut source_boundary_edges = BoundaryEdges::default();
     let mut source_offset = 0usize;
     for contour in &contours {
         for i in 0..contour.len() {
@@ -1044,7 +1044,7 @@ fn tessellate_planar_loops_with_options(
         })
         .collect();
 
-    let mut boundary_edges = HashMap::<(usize, usize), BoundaryEdge>::new();
+    let mut boundary_edges = BoundaryEdges::default();
     for face in &tess.triangles {
         for (a, b) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])].into_iter() {
             let edge = match (tess.source_vertex_indices[a], tess.source_vertex_indices[b]) {

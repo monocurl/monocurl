@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
     mesh::DEFAULT_DOT_RADIUS,
-    mesh_build::SurfaceVertex,
+    mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
 use stdlib_macros::stdlib_func;
@@ -934,7 +933,7 @@ pub fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         ]);
     }
 
-    let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+    let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -1068,7 +1067,7 @@ pub fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value, Execu
             uv: Float2::ZERO,
         })
         .collect();
-    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &HashMap::new());
+    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &BoundaryEdges::default());
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -1118,7 +1117,7 @@ pub fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exec
             uv: Float2::ZERO,
         })
         .collect();
-    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &HashMap::new());
+    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &BoundaryEdges::default());
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 

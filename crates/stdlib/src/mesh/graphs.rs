@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
 use geo::{
     mesh::Mesh,
-    mesh_build::SurfaceVertex,
+    mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
 use smallvec::{SmallVec, smallvec};
@@ -1162,7 +1161,7 @@ pub async fn mk_color_grid(
             faces.push([a, c, d]);
         }
 
-        let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+        let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         return Ok(mesh_from_parts(vec![], lins, tris));
     }
 
@@ -1197,7 +1196,7 @@ pub async fn mk_color_grid(
         faces.push([a, c, d]);
     }
 
-    let (mut lins, mut tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+    let (mut lins, mut tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
     for (tri_pair, color) in tris.chunks_mut(2).zip(colors) {
         for tri in tri_pair {
             tri.a.col = color;
@@ -2028,7 +2027,7 @@ pub async fn mk_explicit2d(
             uv: Float2::ZERO,
         })
         .collect();
-    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &HashMap::new());
+    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &BoundaryEdges::default());
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -2223,7 +2222,7 @@ pub async fn mk_explicit_diff(
                 uv: Float2::ZERO,
             })
             .collect();
-        build_indexed_surface(&vertices, &faces, &HashMap::new())
+        build_indexed_surface(&vertices, &faces, &BoundaryEdges::default())
     };
 
     let (pos_lins, pos_tris) = build_region(pos_verts, pos_faces, fill0);

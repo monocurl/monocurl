@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+
+use rustc_hash::FxHashMap;
 
 use geo::{
     mesh::Mesh,
@@ -44,8 +45,10 @@ pub(super) fn build_triangle_vertices(mesh: &Mesh) -> Vec<TriVertexPod> {
     vertices
 }
 
-fn averaged_triangle_normals(mesh: &Mesh) -> HashMap<PositionKey, Float3> {
-    let mut normals = HashMap::new();
+/// keys are vertex positions from our own meshes, so a fast non-cryptographic
+/// hash is appropriate here
+fn averaged_triangle_normals(mesh: &Mesh) -> FxHashMap<PositionKey, Float3> {
+    let mut normals = FxHashMap::default();
 
     for tri in &mesh.tris {
         if tri.a.col.w <= f32::EPSILON && tri.b.col.w <= f32::EPSILON && tri.c.col.w <= f32::EPSILON
@@ -70,7 +73,7 @@ fn averaged_triangle_normals(mesh: &Mesh) -> HashMap<PositionKey, Float3> {
 }
 
 fn triangle_vertex_normal(
-    smooth_normals: Option<&HashMap<PositionKey, Float3>>,
+    smooth_normals: Option<&FxHashMap<PositionKey, Float3>>,
     pos: Float3,
     fallback: Float3,
 ) -> Float3 {

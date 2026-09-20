@@ -399,7 +399,7 @@ fn tessellate_planar_loops(
         })
         .collect();
     let (mut lins, tris) =
-        mesh_build::build_indexed_surface(&vertices, &tess.triangles, &HashMap::new());
+        mesh_build::build_indexed_surface(&vertices, &tess.triangles, &mesh_build::BoundaryEdges::default());
     for line in &mut lins {
         line.norm = normal;
     }
