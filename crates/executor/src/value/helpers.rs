@@ -132,6 +132,12 @@ impl Value {
     /// wrapper it is about to discard
     pub fn elide_lvalue_leader_rec(&self) -> Value {
         match self {
+            // scalars are by far the most common case and copy without touching
+            // the heap or the generic clone glue
+            Value::Nil => Value::Nil,
+            Value::Integer(n) => Value::Integer(*n),
+            Value::Float(f) => Value::Float(*f),
+            Value::Complex { re, im } => Value::Complex { re: *re, im: *im },
             Value::Lvalue(reference) => {
                 with_heap(|heap| heap.get(reference.key()).elide_lvalue_leader_rec())
             }
