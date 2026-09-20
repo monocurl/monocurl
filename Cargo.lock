@@ -7023,6 +7023,7 @@ dependencies = [
  "geo",
  "lexer",
  "parser",
+ "renderer",
  "smol",
  "stdlib",
  "structs",
