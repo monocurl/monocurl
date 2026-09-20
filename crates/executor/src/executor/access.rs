@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-use super::{ExecSingle, Executor};
+use super::{ExecSingle, Executor, ops::resolved_numeric};
 
 fn follow_heap_lvalues(mut key: HeapKey) -> (HeapKey, Value) {
     let mut value = with_heap(|h| h.get(key).clone());
@@ -217,6 +217,45 @@ impl Executor {
                 other => return Ok(other.elide_cached_wrappers_rec()),
             };
         }
+    }
+
+    /// the shape iteration actually produces: a plain integer index into a plain
+    /// list. resolved without suspending, so generic `for` loops stay in the
+    /// synchronous run
+    pub(super) fn try_subscript_local(
+        &mut self,
+        stack_idx: usize,
+        stack_delta: i32,
+    ) -> Option<ExecSingle> {
+        let stack = self.state.stack(stack_idx);
+        let Value::Integer(index) = resolved_numeric(stack.read_at(-1))? else {
+            return None;
+        };
+        let index = index as usize;
+
+        let element = stack
+            .read_at(stack_delta)
+            .with_elided_cached_wrappers(|resolved| match resolved {
+                Value::List(list) => match list.elements().get(index) {
+                    Some(element) => Some(Ok(with_heap(|h| h.get(element.key()).clone()))),
+                    None => Some(Err(ExecutorError::IndexOutOfBounds {
+                        index,
+                        len: list.len(),
+                    })),
+                },
+                _ => None,
+            })?;
+
+        self.state.stack_mut(stack_idx).pop();
+        Some(match element {
+            Ok(element) => {
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(element.elide_cached_wrappers_rec());
+                ExecSingle::Continue
+            }
+            Err(error) => ExecSingle::Error(error),
+        })
     }
 
     /// read the container living at `stack_delta` without copying it out of its
