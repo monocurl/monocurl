@@ -1,0 +1,38 @@
+# numeric tower, operators, and precedence
+
+import std.util
+import std.math
+
+let ints = [7 + 3, 7 - 3, 7 * 3, 7 // 3, mod(7, 3), 7 ^ 3]
+print ints
+
+let floats = [7 / 2, 7.5 - 0.5, 2.0 ^ 0.5]
+print floats
+
+let mixed = [1 + 2.5, 3 * 1.5, 10 / 4]
+print mixed
+
+let comparisons = [1 < 2, 2 <= 2, 3 > 4, 4 >= 4, 5 == 5, 5 != 5]
+print comparisons
+
+let logic = [1 and 0, 1 or 0, not 0, not 1]
+print logic
+
+let unary = [-4, -(2 + 3)]
+print unary
+
+let precedence = 2 + 3 * 4 ^ 2 - 6 / 3
+print precedence
+
+let complex_values = [1i * 1i, (2 + 3i) * (2 - 3i), real(4 + 5i), imag(4 + 5i)]
+print complex_values
+
+let conversions = [to_int(3.9), to_float(4)]
+print conversions
+print to_string(3.14159, 2)
+
+let types = [type_of(1), type_of(1.0), type_of("s"), type_of([]), type_of([->])]
+print types
+
+let directions = [1l, 1r, 1u, 1d, 1f, 1b]
+print directions

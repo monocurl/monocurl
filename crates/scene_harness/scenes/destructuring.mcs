@@ -1,0 +1,27 @@
+# declaration and loop destructuring
+
+import std.util
+import std.math
+
+let [a, b] = [1, 2]
+print [a, b]
+
+var [c, d] = [10, 20]
+c = c + d
+print [c, d]
+
+var pairs = []
+for ([index, value] in enumerate(["p", "q", "r"])) {
+    pairs .= [index, value]
+}
+print pairs
+
+var sums = []
+for ([x, y] in zip([1, 2, 3], [10, 20, 30])) {
+    sums .= x + y
+}
+print sums
+
+let triple = [7, 8, 9]
+let [p, q, r] = triple
+print [p, q, r]

@@ -1,0 +1,31 @@
+# labeled invocations, attribute reads and writes
+
+import std.util
+import std.math
+
+let f = |x, y| x * (y + 1)
+
+var inv = f(a: 2, 1)
+print inv
+inv.a = 3
+print inv
+
+let g = |base, exponent, offset = 0| base ^ exponent + offset
+var call = g(base: 2, exponent: 3)
+print call
+call.exponent = 4
+print call
+call.base = 3
+print call
+
+print has_attr(call, "base")
+print has_attr(call, "missing")
+print get_attr(call, "base")
+print set_attr(call, "base", 5)
+
+print sort(get_defaults(call))
+
+var nested = g(base: g(base: 2, exponent: 2), exponent: 2)
+print nested
+nested.base.exponent = 3
+print nested

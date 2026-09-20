@@ -1,0 +1,43 @@
+# anim blocks, parallel play, rate operators
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+
+mesh a = Circle(radius: 0.5)
+mesh b = shift{2r} Square(1)
+
+let grow_a = anim {
+    a.radius = 1.5
+    play Lerp(1)
+    print "grew a"
+    a.radius = 0.8
+    play Lerp(0.5)
+}
+
+let move_b = anim {
+    b = shift{3r} Square(1)
+    play Trans(1.2, [&b])
+    print "moved b"
+}
+
+slide "Setup"
+    play Set()
+
+slide "Parallel"
+    play [grow_a, move_b]
+
+slide "Rates"
+    a.radius = 2
+    play slow{2} Lerp(0.5)
+    a.radius = 1
+    play fast{2} Lerp(2)
+    a.radius = 1.5
+    play rate{linear} Lerp(0.5)
+
+slide "Delay"
+    a.radius = 0.5
+    b = shift{1r} Square(1)
+    play [delay{0.3} Lerp(0.5, [&a]), Trans(0.5, [&b])]

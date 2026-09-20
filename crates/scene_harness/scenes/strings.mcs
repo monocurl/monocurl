@@ -1,0 +1,18 @@
+# string primitives
+
+import std.util
+
+let s = "Hello, Monocurl"
+print [str_len(s), str_upper(s), str_lower(s)]
+print str_replace(s, "Monocurl", "World")
+print str_split("a,b,c", ",")
+print str_join(["a", "b", "c"], "-")
+print str_join(["a", "b", "c"])
+
+let pieces = map(str_split("1 2 3", " "), |p| to_int(p))
+print pieces
+print sum(pieces)
+
+print to_string(42)
+print to_string(1.5)
+print to_string(1.23456789, 4)

@@ -1,0 +1,22 @@
+# interpreter-bound: tight arithmetic loop without user function calls
+
+import std.util
+import std.math
+
+var accumulator = 0.0
+for (i in range(0, 200000)) {
+    accumulator = accumulator + i * 0.5 - 1.0
+}
+print accumulator
+
+var integer_total = 0
+for (i in range(0, 200000)) {
+    integer_total = integer_total + i
+}
+print integer_total
+
+var trig = 0.0
+for (i in range(0, 20000)) {
+    trig = trig + sin(i * 0.001) * cos(i * 0.002)
+}
+print to_string(trig, 6)

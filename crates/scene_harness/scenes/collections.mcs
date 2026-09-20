@@ -1,0 +1,55 @@
+# lists, maps, slicing, and the container stdlib
+
+import std.util
+import std.math
+
+let base = [5, 3, 9, 1, 7]
+print [len(base), base[0], base[4]]
+
+print reverse(base)
+print sort(base)
+print sort(base, |x| -x)
+
+print map(base, |x| x * 2)
+print filter(base, |x| x > 4)
+print reduce(base, 0, |acc, x| acc + x)
+print [sum(base), product([1, 2, 3, 4]), mean([1, 2, 3, 4])]
+print [max_of(base), min_of(base)]
+
+print take(base, 2)
+print drop(base, 2)
+print list_subset(base, [0, 2, 4])
+print zip([1, 2, 3], ["a", "b", "c"])
+print enumerate(["x", "y"])
+
+print flatten([[1, 2], [3], [4, 5]])
+print depth([[1, [2]], 3])
+
+var grown = []
+grown .= 1
+grown = grown .. 2
+grown .= 3
+print grown
+
+let nested = [[1, 2], [3, 4]]
+print nested[1][0]
+
+let scores = ["a" -> 1, "b" -> 2, "c" -> 3]
+print [len(scores), scores["b"]]
+print sort(map_keys(scores))
+print sort(map_values(scores))
+
+var mutable_map = ["k" -> 0]
+mutable_map["k"] = 5
+mutable_map["j"] = 7
+print [mutable_map["k"], mutable_map["j"], len(mutable_map)]
+
+print ["b" in scores, "z" in scores, 3 in base, 100 in base]
+
+print range(0, 10, 3)
+print sample(0, 1, 5)
+print sample_clopen(0, 1, 4)
+print const_list("x", 3)
+print all([1, 1, 1])
+print any([0, 0, 1])
+print count(base, |x| x > 4)

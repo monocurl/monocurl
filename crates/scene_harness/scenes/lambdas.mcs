@@ -1,0 +1,66 @@
+# lambdas, closures, defaults, recursion, higher order use
+
+import std.util
+import std.math
+
+let add = |a, b| a + b
+print add(2, 3)
+
+let with_default = |a, b = 10, c = 100| a + b + c
+print [with_default(1), with_default(1, 2), with_default(1, 2, 3)]
+
+let make_adder = |n| |x| x + n
+let add_five = make_adder(5)
+print [add_five(1), add_five(10)]
+
+# recursion is expressed by passing the function to itself
+let fib = |self, n| {
+    if (n < 2) {
+        return n
+    }
+    return self(self, n - 1) + self(self, n - 2)
+}
+print map(range(0, 12), |n| fib(fib, n))
+
+let ackermann_ish = |self, m, n| {
+    if (m == 0) {
+        return n + 1
+    }
+    if (n == 0) {
+        return self(self, m - 1, 1)
+    }
+    return self(self, m - 1, self(self, m, n - 1))
+}
+print ackermann_ish(ackermann_ish, 2, 3)
+
+let compose = |f, g| |x| f(g(x))
+let double_then_inc = compose(|x| x + 1, |x| x * 2)
+print double_then_inc(5)
+
+let block_lambda = || block {
+    let a = 2
+    let b = 3
+    return a ^ b
+}
+print block_lambda()
+
+let accumulate = || block {
+    . 1
+    . 2
+    let ignored = 99
+    _ .= 3
+}
+print accumulate()
+
+let apply_twice = |f, x| f(f(x))
+print apply_twice(|x| x * 3, 2)
+
+# local mutation inside a lambda body is fine; capture of a mutable is not
+let running_total = |values| {
+    var total = 0
+    for (value in values) {
+        total = total + value
+    }
+    return total
+}
+print running_total(range(1, 11))

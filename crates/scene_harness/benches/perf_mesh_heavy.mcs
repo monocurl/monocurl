@@ -1,0 +1,30 @@
+# geometry-bound: many samples through the mesh constructors
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+mesh curve = stroke{color: BLUE} ParametricFunc(
+    f: |t| [cos(6 * PI * t) * t, sin(6 * PI * t) * t, 0],
+    t_min_max_samples: [0, 1, 2000]
+)
+mesh grid = ColorGrid(
+    |pos, idx| [mod(pos[0] + 1, 1), mod(pos[1] + 1, 1), 0.5, 1],
+    [-2, 2, 60],
+    [-2, 2, 60]
+)
+mesh surface = ExplicitFunc2d(
+    |x, y| 0.4 * sin(2 * x) * cos(2 * y),
+    [-2, 2, 40],
+    [-2, 2, 40]
+)
+
+slide "Build"
+    play Set()
+
+slide "Animate"
+    curve.t_min_max_samples = [0, 1.4, 2000]
+    play Lerp(1)
