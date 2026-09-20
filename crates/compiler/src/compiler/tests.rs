@@ -555,6 +555,123 @@ mod test {
         );
     }
 
+    /// build a two-bundle program: a stdlib-flagged prelude, then a user slide
+    fn compile_with_prelude(prelude: &str, slide: &str) -> CompileResult {
+        let prelude_bundle = Arc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section {
+                body: parse_stmts_as(prelude, SectionType::StandardLibrary),
+                section_type: SectionType::StandardLibrary,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+        let slide_bundle = Arc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 1,
+            imported_files: vec![0],
+            sections: vec![Section {
+                body: parse_stmts(slide),
+                section_type: SectionType::Slide,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+
+        test_compile(&[prelude_bundle, slide_bundle])
+    }
+
+    fn calls_native(section: &bytecode::SectionBytecode, name: &str) -> bool {
+        let index = registry().index_of(name) as u16;
+        section.instructions.iter().any(|instr| {
+            matches!(instr, Instruction::NativeInvoke { index: i, .. } if *i == index)
+        })
+    }
+
+    fn invokes_lambda(section: &bytecode::SectionBytecode) -> bool {
+        section
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instruction::LambdaInvoke { .. }))
+    }
+
+    #[test]
+    fn stdlib_wrapper_calls_lower_to_the_native_directly() {
+        let result = compile_with_prelude(
+            "let sqrt = |x| __monocurl__native__ sqrt(x)",
+            "let y = sqrt(16)",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        assert!(
+            calls_native(section, "sqrt"),
+            "a plain wrapper call should reach the native directly"
+        );
+        assert!(
+            !invokes_lambda(section),
+            "a plain wrapper call should not build a call frame"
+        );
+    }
+
+    #[test]
+    fn shadowed_stdlib_wrapper_keeps_the_user_definition() {
+        let result = compile_with_prelude(
+            "let sqrt = |x| __monocurl__native__ sqrt(x)",
+            "let sqrt = |x| x\nlet y = sqrt(16)",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        assert!(
+            !calls_native(section, "sqrt"),
+            "a shadowing definition must not be replaced by the native"
+        );
+        assert!(invokes_lambda(section));
+    }
+
+    #[test]
+    fn labeled_wrapper_calls_keep_their_live_invocation() {
+        let result = compile_with_prelude(
+            "let sqrt = |x| __monocurl__native__ sqrt(x)",
+            "let y = sqrt(x: 16)",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        assert!(
+            !calls_native(section, "sqrt"),
+            "a labeled call stays a live invocation so its argument can be edited"
+        );
+        assert!(invokes_lambda(section));
+    }
+
+    #[test]
+    fn wrappers_with_defaults_are_not_plain_aliases() {
+        let result = compile_with_prelude(
+            "let clamp = |x, low = 0| __monocurl__native__ min(x, low)",
+            "let y = clamp(16)",
+        );
+        no_errors(&result);
+
+        assert!(invokes_lambda(root_slide_section(&result)));
+    }
+
+    #[test]
+    fn wrappers_that_reorder_their_parameters_are_not_aliases() {
+        let result = compile_with_prelude(
+            "let flipped = |a, b| __monocurl__native__ min(b, a)",
+            "let y = flipped(1, 2)",
+        );
+        no_errors(&result);
+
+        assert!(invokes_lambda(root_slide_section(&result)));
+    }
+
     #[test]
     fn test_for_shadowed_range_keeps_generic_lowering() {
         let bundle0 = Arc::new(SectionBundle {

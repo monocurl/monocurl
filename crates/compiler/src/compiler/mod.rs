@@ -134,10 +134,21 @@ impl SymbolFunctionInfo {
     }
 }
 
+/// a `let`-bound lambda whose body is nothing but a native call over its own
+/// parameters, in order. `std.math`'s `cos`, `sqrt` and friends are all of this
+/// shape, and calling them through a real frame costs several instructions and a
+/// call setup for what is one native operation
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeAlias {
+    pub index: u16,
+    pub arg_count: u16,
+}
+
 #[derive(Clone, Debug)]
 pub struct Symbol {
     pub name: String,
     pub declaration_span: Option<Span8>,
+    native_alias: Option<NativeAlias>,
     imported: bool,
     declared_in_stdlib: bool,
     stack_position: usize,
@@ -192,6 +203,53 @@ struct CompilerFrame {
     stack_depth: usize,
     loop_contexts: Vec<LoopContext>,
     kind: FrameKind,
+}
+
+/// recognise `let f = |a, b| __monocurl__native__ g(a, b)`: a constant binding to
+/// a lambda that forwards its parameters, unchanged and in order, to one native
+fn native_alias(value: &Expression, var_type: VariableType) -> Option<NativeAlias> {
+    if var_type != VariableType::Let {
+        return None;
+    }
+    let Expression::LambdaDefinition(lambda) = value else {
+        return None;
+    };
+    if lambda
+        .args
+        .iter()
+        .any(|arg| arg.default_value.is_some() || arg.must_be_reference)
+    {
+        return None;
+    }
+
+    let LambdaBody::Inline(body) = &lambda.body.1 else {
+        return None;
+    };
+    let Expression::NativeInvocation(native) = &**body else {
+        return None;
+    };
+    if native.arguments.len() != lambda.args.len() {
+        return None;
+    }
+
+    let forwards_parameters = native
+        .arguments
+        .iter()
+        .zip(&lambda.args)
+        .all(|(argument, parameter)| match &argument.1 {
+            Expression::IdentifierReference(ir @ IdentifierReference::Value(_)) => {
+                ident_ref_name(ir) == parameter.identifier.1.0
+            }
+            _ => false,
+        });
+    if !forwards_parameters {
+        return None;
+    }
+
+    Some(NativeAlias {
+        index: registry().index_of(ident_ref_name(&native.function.1)) as u16,
+        arg_count: native.arguments.len() as u16,
+    })
 }
 
 fn ident_ref_name(ir: &IdentifierReference) -> &str {
@@ -791,6 +849,7 @@ impl Compiler {
             Arc::new(Symbol {
                 name: name.to_string(),
                 declaration_span: None,
+                native_alias: None,
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
@@ -835,6 +894,7 @@ impl Compiler {
             Arc::new(Symbol {
                 name: name.to_string(),
                 declaration_span,
+                native_alias: None,
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
@@ -857,6 +917,7 @@ impl Compiler {
             Arc::new(Symbol {
                 name: symbol.name.clone(),
                 declaration_span: symbol.declaration_span.clone(),
+                native_alias: symbol.native_alias,
                 imported: false,
                 declared_in_stdlib: symbol.declared_in_stdlib,
                 stack_position: position,
@@ -890,6 +951,7 @@ impl Compiler {
             Arc::new(Symbol {
                 name: name.to_string(),
                 declaration_span: Some(declaration_span),
+                native_alias: native_alias(value, var_type),
                 imported: false,
                 declared_in_stdlib,
                 stack_position: position,
@@ -899,6 +961,16 @@ impl Compiler {
                 function_info: SymbolFunctionInfo::from(value),
             }),
         );
+    }
+
+    /// the native a call to `expr` can be lowered to directly, if any
+    fn native_alias_for_expr(&mut self, expr: &Expression) -> Option<NativeAlias> {
+        match expr {
+            Expression::IdentifierReference(ir) => self
+                .lookup(ident_ref_name(ir), None, None)
+                .and_then(|symbol| symbol.native_alias),
+            _ => None,
+        }
     }
 
     fn special_function_for_expr(&mut self, expr: &Expression) -> Option<SpecialFunction> {
