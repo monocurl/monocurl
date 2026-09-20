@@ -114,9 +114,12 @@ impl Executor {
             }
 
             Instruction::PushDeepCopy { stack_delta } => {
-                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 // only stateful values need evaluating, and those are rare
-                let resolved = val.elide_lvalue_leader_rec();
+                let resolved = self
+                    .state
+                    .stack(stack_idx)
+                    .read_at(stack_delta)
+                    .elide_lvalue_leader_rec();
                 if matches!(resolved, Value::Stateful(_)) {
                     return None;
                 }
@@ -128,17 +131,26 @@ impl Executor {
                 copy_mode,
                 pop_tos,
             } => {
-                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let copied = match copy_mode {
                     CopyValueMode::Read => {
-                        let resolved = val.elide_lvalue_leader_rec();
+                        let resolved = self
+                            .state
+                            .stack(stack_idx)
+                            .read_at(stack_delta)
+                            .elide_lvalue_leader_rec();
                         if matches!(resolved, Value::Stateful(_)) {
                             return None;
                         }
                         resolved
                     }
-                    CopyValueMode::Reference => val.force_elide_lvalue(),
-                    CopyValueMode::Raw => val,
+                    CopyValueMode::Reference => self
+                        .state
+                        .stack(stack_idx)
+                        .read_at(stack_delta)
+                        .force_elide_lvalue(),
+                    CopyValueMode::Raw => {
+                        self.state.stack(stack_idx).read_at(stack_delta).clone()
+                    }
                 };
 
                 if let Value::Stateful(_) = copied {
@@ -249,7 +261,12 @@ impl Executor {
                 }
             }
 
-            Instruction::LambdaInvoke { .. } | Instruction::OperatorInvoke { .. } => return None,
+            Instruction::LambdaInvoke {
+                stateful,
+                labeled,
+                num_args,
+            } => return self.try_lambda_invoke(stack_idx, stateful, labeled, num_args),
+            Instruction::OperatorInvoke { .. } => return None,
             Instruction::ConvertToLiveOperator => {
                 return Some(self.exec_convert_to_live_operator(stack_idx));
             }

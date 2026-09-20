@@ -85,6 +85,38 @@ impl Executor {
     }
 
     #[inline]
+    /// a plain unlabeled call of a lambda with no default arguments is just a
+    /// frame setup, so it never has to suspend. anything else (stateful calls,
+    /// labeled calls, defaults to fill in) goes through the asynchronous path
+    pub(super) fn try_lambda_invoke(
+        &mut self,
+        stack_idx: usize,
+        stateful: bool,
+        labeled: bool,
+        num_args: u32,
+    ) -> Option<ExecSingle> {
+        if stateful || labeled {
+            return None;
+        }
+
+        let lambda = match self.state.stack(stack_idx).peek().clone().elide_lvalue() {
+            Value::Lambda(lambda) if lambda.defaults.is_empty() => lambda,
+            // type errors and default filling are reported by the general path
+            _ => return None,
+        };
+
+        if num_args != u32::from(lambda.required_args) {
+            return None;
+        }
+
+        self.state.stack_mut(stack_idx).pop();
+        if let Some(error) = self.ensure_non_stateful_lambda_args(stack_idx, num_args as usize) {
+            return Some(ExecSingle::Error(error));
+        }
+
+        Some(self.setup_lambda_call(stack_idx, num_args as usize, &lambda))
+    }
+
     pub(super) async fn exec_lambda_invoke(
         &mut self,
         stack_idx: usize,

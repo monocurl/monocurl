@@ -8,7 +8,7 @@ use crate::{
 
 use super::{
     Value,
-    container::Map,
+    container::{List, Map},
     invoked_function::InvokedFunction,
     invoked_operator::InvokedOperator,
     stateful::{Stateful, StatefulNode, reset_stateful_cache, to_follower_stateful},
@@ -127,20 +127,23 @@ impl Value {
         }
     }
 
-    /// creates owned copy of self which elides lvalues and leaders recursively
-    pub fn elide_lvalue_leader_rec(self) -> Value {
+    /// creates owned copy of self which elides lvalues and leaders recursively.
+    /// takes `&self` so that reading through a variable does not first copy the
+    /// wrapper it is about to discard
+    pub fn elide_lvalue_leader_rec(&self) -> Value {
         match self {
-            Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()).elide_lvalue_leader_rec(),
-            Value::WeakLvalue(vweak) => {
-                with_heap(|h| h.get(vweak.key()).clone()).elide_lvalue_leader_rec()
+            Value::Lvalue(reference) => {
+                with_heap(|heap| heap.get(reference.key()).elide_lvalue_leader_rec())
             }
-            Value::Leader(ref leader) => {
-                with_heap(|h| h.get(leader.leader_rc.key()).clone()).elide_lvalue_leader_rec()
+            Value::WeakLvalue(reference) => {
+                with_heap(|heap| heap.get(reference.key()).elide_lvalue_leader_rec())
             }
-            Value::List(mut list) => {
-                list.elements = list.elements.iter().map(elided_heap_ref_value).collect();
-                Value::List(list)
+            Value::Leader(leader) => {
+                with_heap(|heap| heap.get(leader.leader_rc.key()).elide_lvalue_leader_rec())
             }
+            Value::List(list) => Value::List(List::new_with(
+                list.elements().iter().map(elided_heap_ref_value),
+            )),
             Value::Map(map) => {
                 let mut out = Map::new();
                 for key in &map.insertion_order {
@@ -151,7 +154,7 @@ impl Value {
                 }
                 Value::Map(out)
             }
-            other => other,
+            other => other.clone(),
         }
     }
 
