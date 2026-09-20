@@ -18,9 +18,13 @@ struct HeapCell {
 }
 
 thread_local! {
-    static HEAP: HeapCell = HeapCell {
-        heap: RefCell::new(VirtualHeap::new()),
-        inhibit: Cell::new(false),
+    // const-initialized so access skips the lazy-initialization check; the
+    // interpreter touches this on essentially every value read
+    static HEAP: HeapCell = const {
+        HeapCell {
+            heap: RefCell::new(VirtualHeap::new()),
+            inhibit: Cell::new(false),
+        }
     };
 }
 
@@ -67,7 +71,7 @@ impl<T> Drop for RawHeapSnapshot<T> {
 }
 
 impl VirtualHeap {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             slots: Vec::new(),
             ref_counts: Vec::new(),
