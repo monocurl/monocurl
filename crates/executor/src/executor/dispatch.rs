@@ -354,6 +354,12 @@ impl Executor {
             Instruction::Subscript { mutable } => {
                 return self.exec_subscript(stack_idx, mutable).await;
             }
+            Instruction::SubscriptLocal { stack_delta } => {
+                return self.exec_subscript_local(stack_idx, stack_delta).await;
+            }
+            Instruction::ContainerLen { stack_delta } => {
+                return self.exec_container_len(stack_idx, stack_delta);
+            }
             Instruction::Attribute {
                 mutable,
                 string_index,

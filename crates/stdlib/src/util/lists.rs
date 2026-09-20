@@ -19,7 +19,7 @@ pub async fn list_len(executor: &mut Executor, stack_idx: usize) -> Result<Value
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_cached_wrappers_rec()
+        .elide_cached_wrappers()
     {
         Value::List(list) => Ok(Value::Integer(list.len() as i64)),
         Value::Map(_) => Err(ExecutorError::invalid_operation(
@@ -36,7 +36,7 @@ pub async fn len(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_cached_wrappers_rec()
+        .elide_cached_wrappers()
     {
         Value::List(list) => list.len(),
         Value::Map(map) => map.len(),

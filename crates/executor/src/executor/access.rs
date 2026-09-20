@@ -179,6 +179,9 @@ impl Executor {
         ExecSingle::Continue
     }
 
+    /// resolve wrappers around a subscript base or index without descending into
+    /// container elements: only the element that is actually selected needs to be
+    /// elided, and deep-eliding the whole container makes indexing O(n)
     async fn read_subscript_value(&mut self, value: Value) -> Result<Value, ExecutorError> {
         let mut value = value.elide_lvalue();
         loop {
@@ -186,9 +189,76 @@ impl Executor {
                 Value::Leader(ref leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
                 Value::InvokedFunction(ref inv) => InvokedFunction::value(inv, self).await?,
                 Value::InvokedOperator(ref inv) => InvokedOperator::value(inv, self).await?,
+                other @ (Value::List(_) | Value::Map(_)) => return Ok(other),
                 other => return Ok(other.elide_cached_wrappers_rec()),
             };
         }
+    }
+
+    /// read the container living at `stack_delta` without copying it out of its
+    /// slot, then push the element selected by the index on top of stack
+    pub(super) async fn exec_subscript_local(
+        &mut self,
+        stack_idx: usize,
+        stack_delta: i32,
+    ) -> ExecSingle {
+        // `stack_delta` is relative to the stack that still holds the index, so the
+        // container is read before the index is popped
+        let container = self.state.stack(stack_idx).read_at(stack_delta).clone();
+        let index = self.state.stack_mut(stack_idx).pop();
+        let index = match self.read_subscript_value(index).await {
+            Ok(value) => value.elide_cached_wrappers_rec(),
+            Err(error) => return ExecSingle::Error(error),
+        };
+
+        let Value::Integer(idx) = index else {
+            return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
+        };
+        let idx = idx as usize;
+
+        let element = match container.elide_cached_wrappers() {
+            Value::List(list) => match list.elements().get(idx) {
+                Some(element) => with_heap(|h| h.get(element.key()).clone()),
+                None => {
+                    return ExecSingle::Error(ExecutorError::IndexOutOfBounds {
+                        index: idx,
+                        len: list.len(),
+                    });
+                }
+            },
+            other => {
+                // fall back to the general path for maps, strings, and anything
+                // still wrapped in an invocation that has not been evaluated yet
+                let stack = self.state.stack_mut(stack_idx);
+                stack.push(other);
+                stack.push(Value::Integer(idx as i64));
+                return self.exec_subscript(stack_idx, false).await;
+            }
+        };
+
+        self.state
+            .stack_mut(stack_idx)
+            .push(element.elide_cached_wrappers_rec());
+        ExecSingle::Continue
+    }
+
+    /// push the length of the container living at `stack_delta`, reading it in place
+    pub(super) fn exec_container_len(&mut self, stack_idx: usize, stack_delta: i32) -> ExecSingle {
+        let container = self.state.stack(stack_idx).read_at(stack_delta);
+        let len = match container.clone().elide_cached_wrappers() {
+            Value::List(list) => list.len(),
+            Value::Map(_) => {
+                return ExecSingle::Error(ExecutorError::invalid_operation(
+                    "cannot iterate over a map directly; use map_items(map) to iterate [key, value] pairs",
+                ));
+            }
+            other => return ExecSingle::Error(ExecutorError::type_error("list", other.type_name())),
+        };
+
+        self.state
+            .stack_mut(stack_idx)
+            .push(Value::Integer(len as i64));
+        ExecSingle::Continue
     }
 
     pub(super) async fn exec_subscript(&mut self, stack_idx: usize, mutable: bool) -> ExecSingle {
@@ -312,7 +382,8 @@ impl Executor {
                         len: list.elements.len(),
                     });
                 }
-                let val = with_heap(|h| h.get(list.elements[idx].key()).clone());
+                let val = with_heap(|h| h.get(list.elements[idx].key()).clone())
+                    .elide_cached_wrappers_rec();
                 self.state.stack_mut(stack_idx).push(val);
             }
             Value::Map(map) => {
@@ -322,7 +393,7 @@ impl Executor {
                 };
                 let val = map
                     .get(&key_hash)
-                    .map(|k| with_heap(|h| h.get(k.key()).clone()))
+                    .map(|k| with_heap(|h| h.get(k.key()).clone()).elide_cached_wrappers_rec())
                     .unwrap_or(Value::Nil);
                 self.state.stack_mut(stack_idx).push(val);
             }
