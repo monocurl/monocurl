@@ -18,8 +18,10 @@ impl PeriodicMemoryChecker {
         }
     }
 
-    pub(super) fn tick(&mut self) -> Result<(), ExecutorError> {
-        self.count += 1;
+    /// account for `instructions` executed since the last call. the interpreter
+    /// reports a whole run at once rather than ticking inside its inner loop
+    pub(super) fn tick_by(&mut self, instructions: u32) -> Result<(), ExecutorError> {
+        self.count = self.count.saturating_add(instructions);
         if self.count < self.period {
             return Ok(());
         }
@@ -55,6 +57,6 @@ mod tests {
 
         let used = with_heap(|heap| heap.slot_count());
         let mut checker = PeriodicMemoryChecker::new(used - 1, 1);
-        assert!(checker.tick().is_err());
+        assert!(checker.tick_by(1).is_err());
     }
 }

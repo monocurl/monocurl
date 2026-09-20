@@ -123,8 +123,12 @@ pub enum TextRenderQuality {
 
 /// outcome of a run of instructions attempted without suspending
 pub(crate) enum SyncRun {
-    /// the next instruction needs the asynchronous path
-    Suspend,
+    /// the instruction that was fetched needs the asynchronous path. it is
+    /// carried out so the caller does not have to rewind and re-decode it
+    Suspend {
+        section_idx: usize,
+        instr: Instruction,
+    },
     /// execution produced a result other than `Continue`
     Done(ExecSingle),
     /// the run hit its instruction budget; the caller should yield and resume
@@ -230,42 +234,42 @@ impl Executor {
 
     /// fetch and advance past the next instruction
     #[inline(always)]
-    fn fetch(&mut self, stack_idx: usize) -> Result<(usize, Instruction), ExecutorError> {
-        self.state.last_stack_idx = stack_idx;
-        self.memory_checker.tick()?;
-
+    fn fetch(&mut self, stack_idx: usize) -> (usize, Instruction) {
         let (section, offset) = self.state.stack(stack_idx).ip;
         let section_idx = section as usize;
         let instr = self.bytecode.sections[section_idx].instructions[offset as usize];
         self.state.stack_mut(stack_idx).ip = (section, offset + 1);
 
-        Ok((section_idx, instr))
+        (section_idx, instr)
     }
 
     /// run instructions until one needs to suspend, the budget runs out, or
     /// execution produces a result. the great majority of instructions never
     /// await, so this loop is what the interpreter spends its time in
     #[inline(always)]
-    pub(crate) fn execute_sync_run(&mut self, stack_idx: usize, mut budget: u32) -> SyncRun {
-        while budget > 0 {
-            let restore_ip = self.state.stack(stack_idx).ip;
-            let (section_idx, instr) = match self.fetch(stack_idx) {
-                Ok(fetched) => fetched,
-                Err(error) => return SyncRun::Done(ExecSingle::Error(error)),
-            };
+    pub(crate) fn execute_sync_run(&mut self, stack_idx: usize, budget: u32) -> SyncRun {
+        self.state.last_stack_idx = stack_idx;
 
-            match self.execute_instr_sync(section_idx, stack_idx, instr) {
-                Some(ExecSingle::Continue) => budget -= 1,
-                Some(other) => return SyncRun::Done(other),
-                None => {
-                    // nothing was mutated; rewind so the async path re-fetches
-                    self.state.stack_mut(stack_idx).ip = restore_ip;
-                    return SyncRun::Suspend;
-                }
+        let mut remaining = budget;
+        let outcome = loop {
+            if remaining == 0 {
+                break SyncRun::BudgetExhausted;
             }
-        }
 
-        SyncRun::BudgetExhausted
+            let (section_idx, instr) = self.fetch(stack_idx);
+            match self.execute_instr_sync(section_idx, stack_idx, instr) {
+                Some(ExecSingle::Continue) => remaining -= 1,
+                Some(other) => break SyncRun::Done(other),
+                None => break SyncRun::Suspend { section_idx, instr },
+            }
+        };
+
+        // reported per run rather than per instruction: the check is periodic
+        // anyway, and the counter has no business in the inner loop
+        match self.memory_checker.tick_by(budget - remaining) {
+            Ok(()) => outcome,
+            Err(error) => SyncRun::Done(ExecSingle::Error(error)),
+        }
     }
 
     /// drive one execution head until it produces something other than
@@ -276,9 +280,9 @@ impl Executor {
             match self.execute_sync_run(stack_idx, SYNC_RUN_BUDGET) {
                 SyncRun::Done(result) => return result,
                 SyncRun::BudgetExhausted => self.tick_yielder().await,
-                SyncRun::Suspend => {
+                SyncRun::Suspend { section_idx, instr } => {
                     self.tick_yielder().await;
-                    match self.execute_one(stack_idx).await {
+                    match self.execute_instr_async(section_idx, stack_idx, instr).await {
                         ExecSingle::Continue => {}
                         other => return other,
                     }
@@ -287,19 +291,4 @@ impl Executor {
         }
     }
 
-    #[inline(always)]
-    pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
-        let (section_idx, instr) = match self.fetch(stack_idx) {
-            Ok(fetched) => fetched,
-            Err(error) => return ExecSingle::Error(error),
-        };
-
-        match self.execute_instr_sync(section_idx, stack_idx, instr) {
-            Some(result) => result,
-            None => {
-                self.execute_instr_async(section_idx, stack_idx, instr)
-                    .await
-            }
-        }
-    }
 }
