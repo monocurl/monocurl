@@ -878,7 +878,7 @@ pub async fn op_normal_hint(
 
 #[cfg(target_arch = "wasm32")]
 #[stdlib_func]
-pub async fn op_retextured(
+pub fn op_retextured(
     _executor: &mut Executor,
     _stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

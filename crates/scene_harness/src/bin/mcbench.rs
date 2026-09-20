@@ -7,13 +7,18 @@
 use std::{path::PathBuf, time::Duration};
 
 use executor::executor::SeekOptions;
-use scene_harness::{SceneTimings, bench_scenes, corpus_scenes, run_scene_file, use_repo_assets};
+use scene_harness::{
+    SceneTimings, bench_scenes, corpus_scenes, measure_playback, run_scene_file,
+    use_repo_assets,
+};
 
 struct Args {
     iterations: usize,
     warmup: usize,
     options: SeekOptions,
     print_transcript: bool,
+    playback: bool,
+    fps: u32,
     scenes: Vec<PathBuf>,
 }
 
@@ -22,6 +27,8 @@ fn parse_args() -> Args {
     let mut warmup = 1;
     let mut options = SeekOptions::fast();
     let mut print_transcript = false;
+    let mut playback = false;
+    let mut fps = 60;
     let mut scenes = Vec::new();
 
     let mut argv = std::env::args().skip(1);
@@ -42,6 +49,13 @@ fn parse_args() -> Args {
             "--strict" => options = SeekOptions::strict(),
             "--corpus" => scenes.extend(corpus_scenes()),
             "--transcript" => print_transcript = true,
+            "--playback" => playback = true,
+            "--fps" => {
+                fps = argv
+                    .next()
+                    .and_then(|value| value.parse().ok())
+                    .expect("--fps expects a number")
+            }
             other => scenes.push(PathBuf::from(other)),
         }
     }
@@ -55,6 +69,8 @@ fn parse_args() -> Args {
         warmup,
         options,
         print_transcript,
+        playback,
+        fps,
         scenes,
     }
 }
@@ -63,9 +79,54 @@ fn millis(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1e3
 }
 
+fn run_playback(args: &Args) {
+    println!(
+        "{:<34} {:>8} {:>10} {:>10} {:>10} {:>10}",
+        "scene", "frames", "total ms", "mean ms", "p95 ms", "worst ms"
+    );
+    println!("{}", "-".repeat(86));
+
+    for scene in &args.scenes {
+        let name = scene
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let source = match std::fs::read_to_string(scene) {
+            Ok(source) => source,
+            Err(error) => {
+                eprintln!("{name}: {error}");
+                continue;
+            }
+        };
+
+        match measure_playback(&source, scene, args.fps) {
+            Ok(timings) => {
+                if !timings.errors.is_empty() {
+                    eprintln!("{name}: {:?}", timings.errors);
+                }
+                println!(
+                    "{:<34} {:>8} {:>10.1} {:>10.2} {:>10.2} {:>10.2}",
+                    name,
+                    timings.frames,
+                    millis(timings.total),
+                    millis(timings.mean()),
+                    millis(timings.p95),
+                    millis(timings.worst),
+                );
+            }
+            Err(error) => eprintln!("{name}: {error}"),
+        }
+    }
+}
+
 fn main() {
     use_repo_assets();
     let args = parse_args();
+
+    if args.playback {
+        run_playback(&args);
+        return;
+    }
 
     println!(
         "{:<34} {:>10} {:>10} {:>10} {:>10}",

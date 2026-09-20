@@ -28,6 +28,18 @@ pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorEr
 
 pub type StdlibFunc = for<'a> fn(&'a mut Executor, usize) -> StdlibReturn<'a>;
 
+/// entry point for a native that never suspends
+pub type StdlibSyncFunc = fn(&mut Executor, usize) -> Result<Value, ExecutorError>;
+
+/// a native function as the executor sees it. `call_sync` is present whenever the
+/// native cannot suspend, which lets the interpreter run it without building a
+/// future at all
+#[derive(Clone, Copy)]
+pub struct NativeFunction {
+    pub call: StdlibFunc,
+    pub call_sync: Option<StdlibSyncFunc>,
+}
+
 enum SeekPrimitiveResult {
     Error(ExecutorError),
     EndOfSection,
@@ -134,7 +146,7 @@ pub(crate) enum ExecSingle {
 pub struct Executor {
     pub state: ExecutionState,
     pub(crate) bytecode: Bytecode,
-    pub(crate) native_funcs: Vec<StdlibFunc>,
+    pub(crate) native_funcs: Vec<NativeFunction>,
     pub(crate) cache: ExecutionCache,
     pub(crate) yielder: PeriodicYielder,
     aspect_ratio: f32,
@@ -151,7 +163,7 @@ fn normalize_aspect_ratio(aspect_ratio: f32) -> f32 {
 }
 
 impl Executor {
-    pub fn new(bytecode: Bytecode, native_funcs: Vec<StdlibFunc>) -> Self {
+    pub fn new(bytecode: Bytecode, native_funcs: Vec<NativeFunction>) -> Self {
         let cache = ExecutionCache::new(&bytecode);
         Self {
             state: ExecutionState::new(),

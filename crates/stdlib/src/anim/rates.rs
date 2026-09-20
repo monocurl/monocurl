@@ -4,7 +4,7 @@ use stdlib_macros::stdlib_func;
 use super::helpers::read_time;
 
 #[stdlib_func]
-pub async fn rate_bounce(
+pub fn rate_bounce(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -25,7 +25,7 @@ pub async fn rate_bounce(
 }
 
 #[stdlib_func]
-pub async fn rate_elastic(
+pub fn rate_elastic(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

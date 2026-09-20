@@ -290,7 +290,9 @@ impl Executor {
                 self.state.stack_mut(stack_idx).pop_n(count as usize);
             }
 
-            Instruction::NativeInvoke { .. } => return None,
+            Instruction::NativeInvoke { index, arg_count } => {
+                return self.try_native_invoke(stack_idx, index, arg_count);
+            }
             Instruction::IncrementByOne { stack_delta } => {
                 let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
                 let Some(key) = val.as_lvalue_key() else {

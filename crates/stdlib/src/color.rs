@@ -44,7 +44,7 @@ pub async fn hex(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 }
 
 #[stdlib_func]
-pub async fn hsv(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn hsv(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let h = read_float(executor, stack_idx, -4, "h")?;
     let s = read_float(executor, stack_idx, -3, "s")?;
     let v = read_float(executor, stack_idx, -2, "v")?;

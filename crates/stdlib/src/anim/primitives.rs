@@ -8,7 +8,7 @@ use stdlib_macros::stdlib_func;
 use super::helpers::{progression_from, read_time};
 
 #[stdlib_func]
-pub async fn set(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn set(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let candidates = executor.state.stack(stack_idx).read_at(-1).clone();
     Ok(Value::PrimitiveAnim(PrimitiveAnim::Set {
         candidates: Box::new(candidates),
@@ -16,7 +16,7 @@ pub async fn set(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 }
 
 #[stdlib_func]
-pub async fn lerp_anim(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn lerp_anim(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let stack = executor.state.stack(stack_idx);
     let candidates = stack.read_at(-5).clone();
     let rate = stack.read_at(-3).clone();
@@ -58,7 +58,7 @@ pub async fn lerp_anim(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn wait(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn wait(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let time = read_time(executor, stack_idx, -1)?;
     Ok(Value::PrimitiveAnim(PrimitiveAnim::Wait { time }))
 }

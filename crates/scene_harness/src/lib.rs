@@ -9,7 +9,7 @@ use std::{
 
 use compiler::{cache::CompilerCache, compiler::compile};
 use executor::{
-    executor::{Executor, SeekOptions, SeekToResult},
+    executor::{Executor, PlaybackAdvance, SeekOptions, SeekToResult},
     heap::with_heap,
     scene_snapshot::SceneSnapshot,
     state::LeaderKind,
@@ -245,6 +245,78 @@ fn scene_summary(snapshot: &SceneSnapshot) -> Vec<String> {
 
 fn round3(value: geo::simd::Float3) -> [f32; 3] {
     [value.x, value.y, value.z].map(|component| (component * 1e4).round() / 1e4)
+}
+
+/// per-frame timings from stepping a scene the way live preview does
+#[derive(Clone, Debug, Default)]
+pub struct PlaybackTimings {
+    pub frames: usize,
+    pub total: Duration,
+    pub worst: Duration,
+    /// 95th percentile frame time: what a viewer perceives as stutter
+    pub p95: Duration,
+    pub errors: Vec<String>,
+}
+
+impl PlaybackTimings {
+    pub fn mean(&self) -> Duration {
+        self.total.checked_div(self.frames.max(1) as u32).unwrap_or_default()
+    }
+}
+
+/// step a scene frame by frame at `fps`, producing a rendered snapshot for each
+/// frame, which is what the viewport does during live preview. one-shot seeks
+/// hide the per-frame cost that actually makes the editor feel slow
+pub fn measure_playback(
+    source: &str,
+    path: &Path,
+    fps: u32,
+) -> Result<PlaybackTimings, SceneError> {
+    let (mut executor, _) = prepare(source, path)?;
+    let mut timings = PlaybackTimings::default();
+    let frame_dt = 1.0 / f64::from(fps.max(1));
+    let mut frame_times = Vec::new();
+
+    smol::block_on(async {
+        // start from the beginning of the scene rather than wherever preparation left off
+        let _ = executor
+            .seek_to_with_options(Timestamp::new(0, 0.0), SeekOptions::fast())
+            .await;
+
+        let max_slide = executor.total_sections();
+        loop {
+            let started = Instant::now();
+            let advance = executor.produce_frame(max_slide, frame_dt).await;
+            let elapsed = started.elapsed();
+
+            match advance {
+                Ok((PlaybackAdvance::Finished, _, _)) => break,
+                Ok(_) => {}
+                Err(error) => {
+                    timings.errors.push(error.to_string());
+                    break;
+                }
+            }
+
+            frame_times.push(elapsed);
+            timings.total += elapsed;
+            timings.worst = timings.worst.max(elapsed);
+
+            // a runaway scene should not hang the benchmark
+            if frame_times.len() > 100_000 {
+                break;
+            }
+        }
+    });
+
+    frame_times.sort_unstable();
+    timings.frames = frame_times.len();
+    if !frame_times.is_empty() {
+        let index = (frame_times.len() * 95 / 100).min(frame_times.len() - 1);
+        timings.p95 = frame_times[index];
+    }
+
+    Ok(timings)
 }
 
 /// scene-level params, reported as follower state with the target appended when
