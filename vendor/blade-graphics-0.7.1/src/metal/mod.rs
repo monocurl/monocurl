@@ -606,7 +606,12 @@ impl crate::traits::CommandDevice for Context {
 
     fn wait_for(&self, sp: &SyncPoint, timeout_ms: u32) -> bool {
         use metal::MTLCommandBuffer as _;
+        // MONOCURL: back off gradually instead of sleeping a whole millisecond
+        // between polls. a frame whose GPU work takes well under a millisecond
+        // was otherwise charged a full sleep tick, which showed up as a fixed
+        // ~1.8ms stall on every rendered frame regardless of scene size.
         let start = time::Instant::now();
+        let mut spins = 0u32;
         loop {
             if let metal::MTLCommandBufferStatus::Completed = sp.cmd_buf.status() {
                 return true;
@@ -614,7 +619,17 @@ impl crate::traits::CommandDevice for Context {
             if start.elapsed().as_millis() >= timeout_ms as u128 {
                 return false;
             }
-            thread::sleep(time::Duration::from_millis(1));
+
+            spins += 1;
+            if spins <= 256 {
+                std::hint::spin_loop();
+            } else if spins <= 2048 {
+                thread::yield_now();
+            } else if spins <= 4096 {
+                thread::sleep(time::Duration::from_micros(50));
+            } else {
+                thread::sleep(time::Duration::from_millis(1));
+            }
         }
     }
 }
