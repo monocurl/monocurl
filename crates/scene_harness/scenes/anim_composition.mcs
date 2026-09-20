@@ -1,0 +1,30 @@
+# animation composition helpers
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+mesh a = Circle(radius: 0.4)
+mesh b = shift{delta: 1r} Circle(radius: 0.4)
+mesh c = shift{delta: 2r} Circle(radius: 0.4)
+
+slide "Appear"
+    play Set()
+
+slide "Lagged"
+    a.radius = 0.8
+    b.radius = 0.8
+    c.radius = 0.8
+    play LaggedMap([Lerp(0.5, [&a]), Lerp(0.5, [&b]), Lerp(0.5, [&c])])
+
+slide "Transfer"
+    play Transfer(&a, &b)
+
+slide "Highlight"
+    play Highlight(&c, RED, 0.6)
+
+slide "Grow And Fade"
+    play [Grow(0.5, [&b]), Fade(0.5, [&c])]
