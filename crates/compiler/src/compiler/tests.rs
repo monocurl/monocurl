@@ -600,6 +600,34 @@ mod test {
     }
 
     #[test]
+    fn branches_test_the_condition_without_negating_it() {
+        for source in [
+            "var x = 0\nif (x < 1) {\n    x = 1\n}",
+            "var x = 0\nwhile (x < 3) {\n    x = x + 1\n}",
+            "var total = 0\nfor (value in [1, 2]) {\n    total = total + value\n}",
+        ] {
+            let result = compile_src(source);
+            no_errors(&result);
+
+            let section = root_slide_section(&result);
+            assert!(
+                section
+                    .instructions
+                    .iter()
+                    .any(|instr| matches!(instr, Instruction::JumpIfFalse { .. })),
+                "expected a falsy branch for {source:?}"
+            );
+            assert!(
+                !section
+                    .instructions
+                    .iter()
+                    .any(|instr| matches!(instr, Instruction::Not)),
+                "a branch should not negate its own test in {source:?}"
+            );
+        }
+    }
+
+    #[test]
     fn stdlib_wrapper_calls_lower_to_the_native_directly() {
         let result = compile_with_prelude(
             "let sqrt = |x| __monocurl__native__ sqrt(x)",

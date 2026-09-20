@@ -121,6 +121,13 @@ pub enum Instruction {
         section: u16,
         to: u32,
     },
+    // pops TOS; jumps when falsy. every loop and conditional branches on the
+    // negation of its test, so emitting `Not` first would cost an instruction
+    // per iteration
+    JumpIfFalse {
+        section: u16,
+        to: u32,
+    },
     Return {
         stack_delta: i32,
     },

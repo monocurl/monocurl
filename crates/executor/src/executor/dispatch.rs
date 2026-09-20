@@ -282,6 +282,15 @@ impl Executor {
                     stack.ip = (section, to);
                 }
             }
+            Instruction::JumpIfFalse { section, to } => {
+                let condition = resolved_numeric(self.state.stack(stack_idx).read_at(-1))?;
+                let truthy = condition.check_truthy().ok()?;
+                let stack = self.state.stack_mut(stack_idx);
+                stack.pop();
+                if !truthy {
+                    stack.ip = (section, to);
+                }
+            }
             Instruction::Return { stack_delta } => {
                 return Some(self.exec_return(stack_idx, stack_delta));
             }
@@ -423,17 +432,18 @@ impl Executor {
                     .exec_operator_invoke(stack_idx, section_idx, stateful, labeled, num_args)
                     .await;
             }
-            Instruction::ConditionalJump { section, to } => {
+            Instruction::ConditionalJump { section, to } | Instruction::JumpIfFalse { section, to } => {
+                let jump_when = matches!(instr, Instruction::ConditionalJump { .. });
                 let val = self.state.stack_mut(stack_idx).pop();
                 let val = match val.elide_wrappers_rec(self).await {
                     Ok(v) => v,
                     Err(e) => return ExecSingle::Error(e),
                 };
                 match val.check_truthy() {
-                    Ok(true) => {
+                    Ok(truthy) if truthy == jump_when => {
                         self.state.stack_mut(stack_idx).ip = (section, to);
                     }
-                    Ok(false) => {}
+                    Ok(_) => {}
                     Err(e) => return ExecSingle::Error(e),
                 }
             }
