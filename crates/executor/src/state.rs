@@ -102,21 +102,14 @@ impl ExecutionStack {
     }
 }
 
+/// kept out of line so the stack accessors stay small enough to inline
+#[cold]
+#[inline(never)]
+fn ghost_stack() -> ! {
+    panic!("ghost stack has no live frame")
+}
+
 impl ExecutionStackSlot {
-    fn as_alive(&self) -> Option<&ExecutionStack> {
-        match self {
-            Self::Alive(stack) => Some(stack),
-            Self::Ghost(_) => None,
-        }
-    }
-
-    fn as_alive_mut(&mut self) -> Option<&mut ExecutionStack> {
-        match self {
-            Self::Alive(stack) => Some(stack),
-            Self::Ghost(_) => None,
-        }
-    }
-
     fn ip(&self) -> InstructionPointer {
         match self {
             Self::Alive(stack) => stack.ip,
@@ -327,16 +320,20 @@ impl ExecutionState {
         self.execution_stacks[idx] = ExecutionStackSlot::Ghost(ghost);
     }
 
+    #[inline]
     pub fn stack(&self, idx: usize) -> &ExecutionStack {
-        self.execution_stacks[idx]
-            .as_alive()
-            .expect("ghost stack has no live frame")
+        match &self.execution_stacks[idx] {
+            ExecutionStackSlot::Alive(stack) => stack,
+            ExecutionStackSlot::Ghost(_) => ghost_stack(),
+        }
     }
 
+    #[inline]
     pub fn stack_mut(&mut self, idx: usize) -> &mut ExecutionStack {
-        self.execution_stacks[idx]
-            .as_alive_mut()
-            .expect("ghost stack has no live frame")
+        match &mut self.execution_stacks[idx] {
+            ExecutionStackSlot::Alive(stack) => stack,
+            ExecutionStackSlot::Ghost(_) => ghost_stack(),
+        }
     }
 
     pub fn stack_ip(&self, idx: usize) -> InstructionPointer {
