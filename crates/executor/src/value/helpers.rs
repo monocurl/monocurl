@@ -58,6 +58,22 @@ fn elided_heap_ref_value(value_ref: &VRc) -> VRc {
     VRc::new(value)
 }
 
+/// borrow a wrapper's cached value in place; falls back to the wrapper itself
+/// when nothing has been cached yet
+fn with_cached_value<R>(
+    cell: &Cell<Option<Box<Value>>>,
+    fallback: &Value,
+    inspect: impl FnOnce(&Value) -> R,
+) -> R {
+    let cached = cell.take();
+    let result = match &cached {
+        Some(value) => value.with_elided_cached_wrappers(inspect),
+        None => inspect(fallback),
+    };
+    cell.set(cached);
+    result
+}
+
 fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
     let cached = cell.take();
     let cloned = cached.as_ref().map(|value| (**value).clone());
@@ -145,6 +161,35 @@ impl Value {
             Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()),
             Value::WeakLvalue(vweak) => with_heap(|h| h.get(vweak.key()).clone()),
             other => other,
+        }
+    }
+
+    /// inspect the value these wrapper layers resolve to without copying it out
+    /// of its heap slot. containers can be arbitrarily large, so read-only
+    /// operations on them (length, indexing) go through here rather than cloning
+    /// the container first.
+    ///
+    /// `inspect` runs while the heap is borrowed, so it must not allocate heap
+    /// slots; reading and cloning individual values is fine.
+    pub fn with_elided_cached_wrappers<R>(&self, inspect: impl FnOnce(&Value) -> R) -> R {
+        match self {
+            Value::Lvalue(reference) => {
+                with_heap(|heap| heap.get(reference.key()).with_elided_cached_wrappers(inspect))
+            }
+            Value::WeakLvalue(reference) => {
+                with_heap(|heap| heap.get(reference.key()).with_elided_cached_wrappers(inspect))
+            }
+            Value::Leader(leader) => with_heap(|heap| {
+                heap.get(leader.leader_rc.key())
+                    .with_elided_cached_wrappers(inspect)
+            }),
+            Value::InvokedFunction(invoked) => {
+                with_cached_value(&invoked.cache.0, self, inspect)
+            }
+            Value::InvokedOperator(invoked) => {
+                with_cached_value(&invoked.cache.cached_result, self, inspect)
+            }
+            concrete => inspect(concrete),
         }
     }
 
