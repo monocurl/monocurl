@@ -166,9 +166,8 @@ impl Executor {
                 stack_delta,
                 force_ephemeral,
             } => {
-                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let vrc = match val {
-                    Value::Lvalue(vrc) => vrc,
+                let vrc = match self.state.stack(stack_idx).read_at(stack_delta) {
+                    Value::Lvalue(vrc) => vrc.clone(),
                     Value::WeakLvalue(vweak) => vweak.upgrade(),
                     _ => panic!("PushLvalue: not an lvalue at delta {}", stack_delta),
                 };
@@ -294,11 +293,11 @@ impl Executor {
                 return self.try_native_invoke(stack_idx, index, arg_count);
             }
             Instruction::IncrementByOne { stack_delta } => {
-                let val = self.state.stack(stack_idx).read_at(stack_delta).clone();
-                let Some(key) = val.as_lvalue_key() else {
+                let slot = self.state.stack(stack_idx).read_at(stack_delta);
+                let Some(key) = slot.as_lvalue_key() else {
                     return Some(ExecSingle::Error(ExecutorError::type_error(
                         "lvalue",
-                        val.type_name(),
+                        slot.type_name(),
                     )));
                 };
                 let result = with_heap_mut(|heap| {

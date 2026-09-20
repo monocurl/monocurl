@@ -156,7 +156,11 @@ impl Executor {
 /// which routes the caller to the general asynchronous path
 pub(super) fn resolved_numeric(value: &Value) -> Option<Value> {
     match value {
-        Value::Integer(_) | Value::Float(_) | Value::Complex { .. } => Some(value.clone()),
+        // rebuilt rather than cloned: these payloads are Copy, and going through
+        // Value::clone means an out-of-line call with a jump table
+        Value::Integer(n) => Some(Value::Integer(*n)),
+        Value::Float(f) => Some(Value::Float(*f)),
+        Value::Complex { re, im } => Some(Value::Complex { re: *re, im: *im }),
         Value::Lvalue(reference) => with_heap(|heap| resolved_numeric(&heap.get(reference.key()))),
         Value::WeakLvalue(reference) => {
             with_heap(|heap| resolved_numeric(&heap.get(reference.key())))
@@ -200,6 +204,16 @@ fn promote_pair(lhs: Value, rhs: Value) -> (Value, Value) {
 }
 
 pub(crate) fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorError> {
+    // matching numeric types need no promotion, so skip the copies it would take
+    if matches!(
+        (lhs, rhs),
+        (Value::Integer(_), Value::Integer(_))
+            | (Value::Float(_), Value::Float(_))
+            | (Value::Complex { .. }, Value::Complex { .. })
+    ) {
+        return eval_non_list_binary(lhs, rhs, op);
+    }
+
     match (lhs, rhs, op) {
         (Value::List(lhs_list), Value::List(rhs_list), BinOp::Add) => {
             return combine_lists(lhs_list, rhs_list, BinOp::Add);
