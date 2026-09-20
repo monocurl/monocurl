@@ -432,6 +432,28 @@ impl Compiler {
             }
         }
 
+        // a plain call of a stdlib wrapper such as cos(x) is lowered straight to
+        // its native, skipping the lambda value and the call frame
+        if !labeled
+            && !stateful
+            && let Some(alias) = self.native_alias_for_expr(&l.lambda.1)
+            && u32::from(alias.arg_count) == num_args
+        {
+            for (_, arg) in &l.arguments.1 {
+                self.compile_val(&arg.1, &arg.0);
+            }
+            self.emit(
+                Instruction::NativeInvoke {
+                    index: alias.index,
+                    arg_count: alias.arg_count,
+                },
+                span.clone(),
+            );
+            self.dec_stack(num_args as usize);
+            self.inc_stack();
+            return;
+        }
+
         // doing arguments first is useful for stack
         // but it also guarantees deepest first ordering for references
         for (_, arg) in &l.arguments.1 {
