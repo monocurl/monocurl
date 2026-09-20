@@ -335,18 +335,9 @@ fn orient_contour_to_normal(contour: &mut [Float3], normal: Float3) {
     }
 }
 
-pub(super) fn vector_like_mesh(
-    tail: Float3,
-    delta: Float3,
-    normal: Float3,
-    path_arc: f64,
-) -> Result<Value, ExecutorError> {
-    vector_like_mesh_with_style(tail, delta, normal, path_arc, DEFAULT_VECTOR_LIKE_STYLE)
-}
-
 /// Default arrow geometry with user multipliers on the arrowhead length and
-/// width, and an optional tail arrowhead. `1.0`/`1.0`/`false` reproduces
-/// `vector_like_mesh` exactly.
+/// width, and an optional tail arrowhead. `1.0`/`1.0`/`false` reproduces the
+/// default style exactly.
 pub(super) fn vector_like_mesh_with_tip(
     tail: Float3,
     delta: Float3,
@@ -507,7 +498,7 @@ mod tests {
 
     use super::{
         ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH, closed_polyline, fan_tris, mesh_ref, open_polyline,
-        triangle_mesh, vector_like_mesh,
+        DEFAULT_VECTOR_LIKE_STYLE, triangle_mesh, vector_like_mesh_with_style,
     };
 
     fn mesh_y_radius(mesh: &geo::mesh::Mesh) -> f32 {
@@ -576,7 +567,14 @@ mod tests {
     #[test]
     fn vector_like_mesh_builds_connected_arrow_surface() {
         let Value::Mesh(mesh) =
-            vector_like_mesh(Float3::ZERO, Float3::new(1.0, 0.0, 0.0), Float3::Z, 0.0).unwrap()
+            vector_like_mesh_with_style(
+                Float3::ZERO,
+                Float3::new(1.0, 0.0, 0.0),
+                Float3::Z,
+                0.0,
+                DEFAULT_VECTOR_LIKE_STYLE,
+            )
+            .unwrap()
         else {
             panic!("expected mesh");
         };
@@ -590,7 +588,14 @@ mod tests {
     #[test]
     fn vector_like_mesh_supports_curved_arrow_paths() {
         let Value::Mesh(mesh) =
-            vector_like_mesh(Float3::ZERO, Float3::new(1.0, 0.0, 0.0), Float3::Z, 0.8).unwrap()
+            vector_like_mesh_with_style(
+                Float3::ZERO,
+                Float3::new(1.0, 0.0, 0.0),
+                Float3::Z,
+                0.8,
+                DEFAULT_VECTOR_LIKE_STYLE,
+            )
+            .unwrap()
         else {
             panic!("expected mesh");
         };
@@ -603,7 +608,7 @@ mod tests {
     #[test]
     fn vector_like_mesh_scales_down_for_short_arrows() {
         let Value::Mesh(mesh) =
-            vector_like_mesh(Float3::ZERO, Float3::new(0.05, 0.0, 0.0), Float3::Z, 0.0).unwrap()
+            vector_like_mesh_with_style(Float3::ZERO, Float3::new(0.05, 0.0, 0.0), Float3::Z, 0.0, DEFAULT_VECTOR_LIKE_STYLE).unwrap()
         else {
             panic!("expected mesh");
         };
