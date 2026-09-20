@@ -540,14 +540,18 @@ impl Executor {
         {
             let stack = self.state.stack_mut(stack_idx);
             let arg_start = stack.stack_len() - pushed_args;
+            // only reference parameters need rewriting, and the argument is
+            // already sitting in the slot, so take it rather than copying it
             for arg_idx in 0..pushed_args {
+                if !lambda.arg_is_reference(arg_idx) {
+                    continue;
+                }
                 let slot_idx = arg_start + arg_idx;
-                let arg = stack.var_stack[slot_idx].clone();
-                stack.var_stack[slot_idx] =
-                    match prepare_lambda_argument(lambda, arg_idx, arg, true) {
-                        Ok(arg) => arg,
-                        Err(error) => return ExecSingle::Error(error),
-                    };
+                let arg = std::mem::replace(&mut stack.var_stack[slot_idx], Value::Nil);
+                stack.var_stack[slot_idx] = match wrap_reference_argument(arg, true) {
+                    Ok(arg) => arg,
+                    Err(error) => return ExecSingle::Error(error),
+                };
             }
 
             let missing = lambda.total_args().saturating_sub(pushed_args);
