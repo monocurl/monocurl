@@ -112,6 +112,31 @@ fn test_mesh_forward_backward_use_right_handed_depth() {
     r.assert_int(2);
 }
 
+#[test]
+fn test_rectangular_prism_builds_a_closed_outward_facing_surface() {
+    let r = run_with_stdlib("let result = RectangularPrism([2, 4, 6])", &["mesh"]);
+    r.assert_ok();
+
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(
+        r.value.as_ref().expect("expected prism result"),
+        &mut meshes,
+    );
+    assert_eq!(meshes.len(), 1);
+
+    let mesh = &meshes[0];
+    assert_eq!(mesh.tris.len(), 12);
+    assert!(mesh.has_consistent_topology());
+    for tri in &mesh.tris {
+        let center = (tri.a.pos + tri.b.pos + tri.c.pos) / 3.0;
+        let normal = (tri.b.pos - tri.a.pos).cross(tri.c.pos - tri.a.pos);
+        assert!(
+            normal.dot(center) > 0.0,
+            "prism face should point away from the origin"
+        );
+    }
+}
+
 // -- COW: list element independence after aliasing --
 
 #[test]

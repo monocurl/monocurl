@@ -890,8 +890,8 @@ pub async fn mk_rect_prism(
         center + Float3::new(-hx, hy, hz),
     ];
     let faces = [
-        [0, 1, 2],
-        [0, 2, 3],
+        [0, 2, 1],
+        [0, 3, 2],
         [4, 5, 6],
         [4, 6, 7],
         [0, 1, 5],
