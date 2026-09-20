@@ -315,11 +315,15 @@ let Trans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_h
 ## play TagTrans(1.2, [&pair])
 ## ```
 ## [example]
-## ```
-## mesh eq = Tex([text_tag{1} "x", " + ", text_tag{2} "1"], 0.8)
+## ```mcl video
+## background = [0.035, 0.045, 0.060, 1]
+## # the two terms keep their identity by tag, so each glyph slides to its
+## # new position instead of the whole formula cross-fading
+## mesh eq = color{WHITE} Tex([text_tag{1} "x", " + ", text_tag{2} "1"], 0.9)
+## slide "commute"
 ## play Set()
-## eq = Tex([text_tag{2} "1", " + ", text_tag{1} "x"], 0.8)
-## play TagTrans(1, [&eq])
+## eq = color{WHITE} Tex([text_tag{2} "1", " + ", text_tag{1} "x"], 0.9)
+## play TagTrans(1.2, [&eq])
 ## ```
 let TagTrans = |time = 1, &meshes = [], path_arc = 0, rate = smooth, similar_topo_hint = 0, tag_map = nil| {
     let embed = |start, dst| __monocurl__native__ tag_trans_embed_with_options_and_tag_map(start, dst, similar_topo_hint, tag_map)

@@ -449,6 +449,8 @@ mod live_values;
 mod operators;
 #[path = "basic_executor_tests/references.rs"]
 mod references;
+#[path = "basic_executor_tests/stdlib_primitives.rs"]
+mod stdlib_primitives;
 #[path = "basic_executor_tests/transcript.rs"]
 mod transcript;
 #[path = "basic_executor_tests/validation.rs"]

@@ -92,6 +92,9 @@ fn native_document(
         BackendKind::Text => document::build_text_document(source, style),
         BackendKind::Tex => document::build_tex_document(source, style),
         BackendKind::Latex => document::build_latex_document(source, additional_preamble, style),
+        // Typst has its own backend (`crate::typst_backend`) and never routes
+        // through the LaTeX document builder.
+        BackendKind::Typst => unreachable!("Typst does not use the LaTeX document pipeline"),
     }
 }
 
@@ -137,6 +140,7 @@ fn latex_font_preamble_hint(additional_preamble: &str) -> bool {
 fn browser_source(kind: BackendKind, source: &str) -> String {
     match kind {
         BackendKind::Text | BackendKind::Tex | BackendKind::Latex => source.to_string(),
+        BackendKind::Typst => unreachable!("Typst is not supported on the browser backend"),
     }
 }
 

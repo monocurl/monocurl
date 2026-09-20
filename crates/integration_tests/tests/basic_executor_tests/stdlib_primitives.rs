@@ -1,0 +1,412 @@
+use super::*;
+
+// Coverage for the mesh.mcl primitives added in feat/stdlib-primitives:
+// Angle, RightAngle, Brace, DashedLine, NumberLine.
+
+#[test]
+fn test_angle_builds_stroke_arc() {
+    let r = run_with_stdlib(
+        "
+        let a = Angle([0, 0, 0], [1, 0, 0], [0, 1, 0])
+        let result = (mesh_rank(a) == 1) + (len(mesh_vertex_set(a)) > 8)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_angle_reflex_sweeps_the_long_way() {
+    let r = run_with_stdlib(
+        "
+        let inner = Angle([0, 0, 0], [1, 0, 0], [0, 1, 0], 0.4, 64, 0)
+        let outer = Angle([0, 0, 0], [1, 0, 0], [0, 1, 0], 0.4, 64, 1)
+        let inner_len = len(mesh_edge_set(inner))
+        let outer_len = len(mesh_edge_set(outer))
+        # both are 64-sample arcs; the reflex arc spans a wider bounding box
+        let inner_w = mesh_width(inner)
+        let outer_w = mesh_width(outer)
+        let result = (inner_len == outer_len) + (outer_w > inner_w)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_right_angle_is_three_point_square_corner() {
+    let r = run_with_stdlib(
+        "
+        let m = RightAngle([0, 0, 0], [1, 0, 0], [0, 1, 0], 0.2)
+        let result =
+            (mesh_rank(m) == 1) +
+            (len(mesh_edge_set(m)) == 2) +
+            (abs(mesh_width(m) - 0.2) < 0.0001) +
+            (abs(mesh_height(m) - 0.2) < 0.0001)
+    ",
+        &["mesh", "math", "util"],
+    );
+    r.assert_int(4);
+}
+
+#[test]
+fn test_brace_spans_endpoints_and_bulges() {
+    let r = run_with_stdlib(
+        "
+        let b = Brace([-1, 0, 0], [1, 0, 0], 0.3)
+        let result =
+            (mesh_rank(b) == 1) +
+            (abs(mesh_width(b) - 2) < 0.001) +
+            (mesh_height(b) > 0.15)
+    ",
+        &["mesh", "math"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_brace_with_label_returns_pair() {
+    let r = run_with_stdlib(
+        "
+        let b = Brace([-1, 0, 0], [1, 0, 0], 0.3, DOWN, 101, \"w\")
+        let result = len(b)
+    ",
+        &["mesh", "math", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_dashed_line_splits_into_dash_segments() {
+    let r = run_with_stdlib(
+        "
+        let d = DashedLine([0, 0, 0], [2, 0, 0], [0.2, 0.1])
+        let result = (mesh_rank(d) == 1) + (len(mesh_edge_set(d)) > 2)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_dashed_line_scalar_lengths() {
+    let r = run_with_stdlib(
+        "
+        let d = DashedLine([0, 0, 0], [2, 0, 0], 0.15)
+        let result = mesh_rank(d) == 1
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_number_line_labels_every_tick_by_default() {
+    let r = run_with_stdlib(
+        "
+        let line = NumberLine(0, 4, 1)
+        let ticks = NumberLine(0, 4, 1, 4)
+        let result = len(line) > len(ticks)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_number_line_nil_label_map_drops_labels() {
+    let r = run_with_stdlib(
+        "
+        let labelled = NumberLine(0, 4, 1)
+        let bare = NumberLine(0, 4, 1, 1, nil, nil)
+        let result = len(labelled) > len(bare)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_vector_field_draws_one_arrow_per_grid_point() {
+    let r = run_with_stdlib(
+        "
+        let field = VectorField(|p| [0 - p[1], p[0], 0], [-1, 1, 3], [-1, 1, 3], \"normalized\", 0.2)
+        let result = len(field)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(9);
+}
+
+#[test]
+fn test_vector_field_normalized_mode_makes_equal_length_arrows() {
+    // all arrows point +x (magnitude varies 3..9), so normalized width should be ~constant
+    let r = run_with_stdlib(
+        "
+        let norm_field = VectorField(|p| [(p[0] + 2) * 3, 0, 0], [-1, 1, 3], [-1, 1, 3], \"normalized\", 0.2)
+        let true_field = VectorField(|p| [(p[0] + 2) * 3, 0, 0], [-1, 1, 3], [-1, 1, 3], \"true\")
+        let nw = map(norm_field, |a| mesh_width(a))
+        let tw = map(true_field, |a| mesh_width(a))
+        let result = ((max_of(nw) - min_of(nw)) < 0.03) + ((max_of(tw) - min_of(tw)) > 0.1)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_vector_field_color_at_recolors_arrows() {
+    let r = run_with_stdlib(
+        "
+        let field = VectorField(|p| [1, 0, 0], [-1, 1, 2], [-1, 1, 2], \"true\", 1, |p, mag| [1, 0, 0, 1])
+        let result = mesh_rank(field[0]) >= 1
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_explicit_func_endpoint_dots_append_dots() {
+    let r = run_with_stdlib(
+        "
+        let plain = ExplicitFunc(|x| x * x, [-1, 1, 21])
+        let dotted = ExplicitFunc(|x| x * x, [-1, 1, 21], 1)
+        let result = (mesh_rank(plain) == 1) + (len(dotted) == 3) + (mesh_rank(dotted[1]) == 0)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_explicit_func_fill_adds_shaded_region() {
+    let r = run_with_stdlib(
+        "
+        let shaded = ExplicitFunc(|x| 1, [0, 2, 21], 0, [0.2, 0.6, 0.9, 0.4])
+        let ranks = map(shaded, |m| mesh_rank(m))
+        let result = (len(shaded) == 4) + (2 in ranks) + (1 in ranks)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_parametric_func_endpoint_dots() {
+    let r = run_with_stdlib(
+        "
+        let curve = ParametricFunc(|t| [t, t, 0], [0, 1, 16], 1)
+        let result = (len(curve) == 3) + (mesh_rank(curve[1]) == 0) + (mesh_rank(curve[2]) == 0)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_explicit_func_splits_at_nil_samples() {
+    // whole curve = 80 edges; nil-ing out the middle third drops samples and
+    // breaks the polyline, so far fewer edges and no giant jump segment.
+    let r = run_with_stdlib(
+        "
+        let whole = ExplicitFunc(|x| x, [-2, 2, 81])
+        let split = ExplicitFunc(|x| { if ((x * x) < 0.09) { return nil }; return x }, [-2, 2, 81])
+        let we = len(mesh_edge_set(whole))
+        let se = len(mesh_edge_set(split))
+        let result = (we == 80) + (se < 78) + (se > 40) + (mesh_rank(split) == 1)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(4);
+}
+
+#[test]
+fn test_explicit_func_splits_at_non_finite_samples() {
+    let r = run_with_stdlib(
+        "
+        let branches = ExplicitFunc(|x| sqrt(x * x - 1), [-2, 2, 81])
+        let e = len(mesh_edge_set(branches))
+        let result = (e > 20) + (e < 60)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_explicit_func_continuous_unchanged() {
+    let r = run_with_stdlib(
+        "
+        let parabola = ExplicitFunc(|x| x * x, [-2, 2, 41])
+        let result = (len(mesh_edge_set(parabola)) == 40) + (mesh_rank(parabola) == 1)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_parametric_func_splits_at_nil_samples() {
+    let r = run_with_stdlib(
+        "
+        let whole = ParametricFunc(|t| [t, t * t, 0], [0, 1, 51])
+        let split = ParametricFunc(|t| { if ((t > 0.4) and (t < 0.6)) { return nil }; return [t, t * t, 0] }, [0, 1, 51])
+        let we = len(mesh_edge_set(whole))
+        let se = len(mesh_edge_set(split))
+        let result = (we == 50) + (se < 48) + (se > 20)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_arrow_tip_defaults_match_explicit_ones() {
+    // passing tip_length/tip_width = 1 must be byte-identical to omitting them
+    let r = run_with_stdlib(
+        "
+        let a = Arrow([0, 0, 0], [1, 0, 0])
+        let b = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 1, 1)
+        let result =
+            (len(mesh_vertex_set(a)) == len(mesh_vertex_set(b))) +
+            (abs(mesh_height(a) - mesh_height(b)) < 0.00001) +
+            (abs(mesh_width(a) - mesh_width(b)) < 0.00001)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_arrow_tip_width_widens_head() {
+    let r = run_with_stdlib(
+        "
+        let normal = Arrow([0, 0, 0], [1, 0, 0])
+        let wide = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 1, 3)
+        let result = mesh_height(wide) > mesh_height(normal) * 2
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_arrow_tip_length_zero_removes_head() {
+    let r = run_with_stdlib(
+        "
+        let normal = Arrow([0, 0, 0], [1, 0, 0])
+        let headless = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 0, 1)
+        let result = mesh_height(headless) < mesh_height(normal) * 0.5
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
+fn test_vector_and_vector_field_accept_tip_knobs() {
+    let r = run_with_stdlib(
+        "
+        let v = Vector([1, 0, 0], [0, 0, 0], 1b, 0.5, 2)
+        let field = VectorField(|p| [1, 0, 0], [-1, 1, 2], [-1, 1, 2], \"true\", 1, nil, |p| 1, 1.5, 1.5)
+        let result = (mesh_rank(v) == 2) + (len(field) == 4)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(2);
+}
+
+#[test]
+fn test_explicit_func_2d_color_at_sets_vertex_colors() {
+    let r = run_with_stdlib(
+        "
+        let plain = ExplicitFunc2d(|x, y| x + y, [-1, 1, 5], [-1, 1, 5])
+        let tinted = ExplicitFunc2d(|x, y| x + y, [-1, 1, 5], [-1, 1, 5], |x, y, z| [1, 0, 0, 1])
+        let result =
+            (mesh_rank(plain) == 2) +
+            (mesh_rank(tinted) == 2) +
+            (len(mesh_vertex_set(plain)) == len(mesh_vertex_set(tinted)))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_explicit_func_diff_splits_fill_at_gaps() {
+    let r = run_with_stdlib(
+        "
+        let cont = ExplicitFuncDiff(|x| x, |x| 0, [-2, 2, 41])
+        let split = ExplicitFuncDiff(|x| { if ((x * x) < 0.25) { return nil }; return x }, |x| 0, [-2, 2, 41])
+        let ct = len(mesh_triangle_set(cont[0]))
+        let st = len(mesh_triangle_set(split[0]))
+        # continuous still tiles fully; the gap removes ~10 columns of fill
+        let result = (ct == 40) + (st > 0) + (st < ct - 5)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_explicit_func_fill_with_pole_does_not_error() {
+    let r = run_with_stdlib(
+        "
+        let shaded = ExplicitFunc(|x| { if ((x * x) < 0.04) { return nil }; return 1 / x }, [-2, 2, 121], 0, [0.2, 0.6, 0.9, 0.4])
+        let ranks = map(shaded, |m| mesh_rank(m))
+        let result = (len(shaded) == 4) + (2 in ranks) + (1 in ranks)
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_arrow_double_headed_defaults_unchanged() {
+    let r = run_with_stdlib(
+        "
+        let plain = Arrow([0, 0, 0], [1, 0, 0])
+        let explicit = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 1, 1, 0)
+        let result =
+            (len(mesh_vertex_set(plain)) == len(mesh_vertex_set(explicit))) +
+            (len(mesh_triangle_set(plain)) == len(mesh_triangle_set(explicit))) +
+            (abs(mesh_left(plain)[0] - mesh_left(explicit)[0]) < 0.00001)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(3);
+}
+
+#[test]
+fn test_arrow_double_headed_adds_a_tail_head() {
+    // a point just off-axis near the tail is inside the shaft width only when a
+    // tail head flares it out
+    let r = run_with_stdlib(
+        "
+        let single = Arrow([0, 0, 0], [1, 0, 0])
+        let doubled = Arrow([0, 0, 0], [1, 0, 0], 1b, 0, 1, 1, 1)
+        let probe = [0.1, 0.045, 0]
+        let result =
+            mesh_contains(doubled, probe) +
+            (not mesh_contains(single, probe)) +
+            (len(mesh_triangle_set(doubled)) > len(mesh_triangle_set(single))) +
+            (abs(mesh_left(doubled)[0]) < 0.001) +
+            (abs(mesh_right(doubled)[0] - 1) < 0.05)
+    ",
+        &["mesh", "util", "math"],
+    );
+    r.assert_int(5);
+}
+
+#[test]
+fn test_vector_double_headed_via_native_accepts_flag() {
+    let r = run_with_stdlib(
+        "
+        let v = Vector([1, 0, 0], [0, 0, 0], 1b, 1, 1, 1)
+        let result = mesh_rank(v) == 2
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
