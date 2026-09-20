@@ -1,5 +1,6 @@
 use std::cell::Cell;
 
+
 use crate::{
     error::ExecutorError,
     executor::Executor,
@@ -31,31 +32,16 @@ impl AttrMutation {
     }
 }
 
-/// does eliding lvalues and leaders out of `value` actually change anything?
-/// checked by reference so that already-concrete containers can be shared instead
-/// of being rebuilt slot by slot
-fn slot_needs_lvalue_leader_elision(key: HeapKey) -> bool {
-    with_heap(|heap| match &*heap.get(key) {
-        Value::Lvalue(_) | Value::WeakLvalue(_) | Value::Leader(_) => true,
-        Value::List(list) => list
-            .elements()
-            .iter()
-            .any(|element| slot_needs_lvalue_leader_elision(element.key())),
-        Value::Map(map) => map
-            .iter()
-            .any(|(_, element)| slot_needs_lvalue_leader_elision(element.key())),
-        _ => false,
-    })
+/// eliding is also what detaches a copy: every element gets a fresh slot, so a
+/// later in-place write through one copy is invisible through the other. sharing
+/// slots that look like they need no elision would alias the two, and for a
+/// self-assignment such as `x[0] = x` it makes the list reference itself
+fn read_slot(key: HeapKey) -> Value {
+    with_heap(|heap| heap.get(key).clone())
 }
 
 fn elided_heap_ref_value(value_ref: &VRc) -> VRc {
-    let key = value_ref.key();
-    if !slot_needs_lvalue_leader_elision(key) {
-        return value_ref.clone();
-    }
-
-    let value = with_heap(|h| h.get(key).clone()).elide_lvalue_leader_rec();
-    VRc::new(value)
+    VRc::new(read_slot(value_ref.key()).elide_lvalue_leader_rec())
 }
 
 /// borrow a wrapper's cached value in place; falls back to the wrapper itself
@@ -81,38 +67,9 @@ fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
     cloned
 }
 
-/// same idea as [`slot_needs_lvalue_leader_elision`], but for the wrapper kinds
-/// that [`Value::elide_cached_wrappers_rec`] resolves
-fn slot_needs_cached_wrapper_elision(key: HeapKey) -> bool {
-    with_heap(|heap| match &*heap.get(key) {
-        Value::Lvalue(_) | Value::WeakLvalue(_) | Value::Leader(_) => true,
-        Value::InvokedFunction(invoked) => cache_is_populated(&invoked.cache.0),
-        Value::InvokedOperator(invoked) => cache_is_populated(&invoked.cache.cached_result),
-        Value::List(list) => list
-            .elements()
-            .iter()
-            .any(|element| slot_needs_cached_wrapper_elision(element.key())),
-        Value::Map(map) => map
-            .iter()
-            .any(|(_, element)| slot_needs_cached_wrapper_elision(element.key())),
-        _ => false,
-    })
-}
-
-fn cache_is_populated(cell: &Cell<Option<Box<Value>>>) -> bool {
-    let cached = cell.take();
-    let populated = cached.is_some();
-    cell.set(cached);
-    populated
-}
-
+/// detaches for the same reason [`elided_heap_ref_value`] does
 fn cached_elided_heap_ref_value(value_ref: &VRc) -> VRc {
-    let key = value_ref.key();
-    if !slot_needs_cached_wrapper_elision(key) {
-        return value_ref.clone();
-    }
-
-    let value = with_heap(|h| h.get(key).clone()).elide_cached_wrappers_rec();
+    let value = with_heap(|heap| heap.get(value_ref.key()).clone()).elide_cached_wrappers_rec();
     VRc::new(value)
 }
 
@@ -138,14 +95,12 @@ impl Value {
             Value::Integer(n) => Value::Integer(*n),
             Value::Float(f) => Value::Float(*f),
             Value::Complex { re, im } => Value::Complex { re: *re, im: *im },
-            Value::Lvalue(reference) => {
-                with_heap(|heap| heap.get(reference.key()).elide_lvalue_leader_rec())
-            }
-            Value::WeakLvalue(reference) => {
-                with_heap(|heap| heap.get(reference.key()).elide_lvalue_leader_rec())
-            }
+            // the slot is read out before recursing: eliding a container
+            // allocates, and allocating re-borrows the heap
+            Value::Lvalue(reference) => read_slot(reference.key()).elide_lvalue_leader_rec(),
+            Value::WeakLvalue(reference) => read_slot(reference.key()).elide_lvalue_leader_rec(),
             Value::Leader(leader) => {
-                with_heap(|heap| heap.get(leader.leader_rc.key()).elide_lvalue_leader_rec())
+                read_slot(leader.leader_rc.key()).elide_lvalue_leader_rec()
             }
             Value::List(list) => Value::List(List::new_with(
                 list.elements().iter().map(elided_heap_ref_value),

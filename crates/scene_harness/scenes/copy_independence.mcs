@@ -1,0 +1,43 @@
+# copying a container must detach it: writing through one copy has to stay
+# invisible through the other, including when a value is assigned into itself
+
+import std.util
+import std.math
+
+var source = [1, 2, 3]
+var copy = source
+copy[0] = 99
+print source
+print copy
+
+var nested = [[1, 2], [3, 4]]
+var nested_copy = nested
+nested_copy[0][0] = 99
+print nested
+print nested_copy
+
+# a list assigned into one of its own elements must not become self referential
+var self_ref = [0, 0, 0]
+self_ref[0] = self_ref
+print self_ref
+self_ref[0] = self_ref
+print self_ref
+self_ref[0][0] = self_ref
+print self_ref
+
+# the same through a lambda argument
+let mutate = |v| {
+    var local = v
+    local[0] = -1
+    return local
+}
+var original = [7, 8, 9]
+print mutate(original)
+print original
+
+# and through a list held in a map
+var holder = ["k" -> [1, 2]]
+var taken = holder["k"]
+taken[0] = 42
+print holder["k"]
+print taken

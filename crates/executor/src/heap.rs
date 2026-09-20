@@ -221,20 +221,22 @@ impl VWeak {
     }
 }
 
+#[inline]
+fn alloc_in(heap: &mut VirtualHeap, val: Value) -> HeapKey {
+    if let Some(key) = heap.free_list.get_mut().pop() {
+        *heap.slots[key as usize].get_mut() = Some(val);
+        heap.ref_counts[key as usize].set(1);
+        key
+    } else {
+        let idx = heap.slots.len() as u32;
+        heap.slots.push(RefCell::new(Some(val)));
+        heap.ref_counts.push(Cell::new(1));
+        idx
+    }
+}
+
 pub fn heap_alloc(val: Value) -> HeapKey {
-    HEAP.with(|cell| {
-        let mut heap = cell.heap.borrow_mut();
-        if let Some(key) = heap.free_list.get_mut().pop() {
-            *heap.slots[key as usize].get_mut() = Some(val);
-            heap.ref_counts[key as usize].set(1);
-            key
-        } else {
-            let idx = heap.slots.len() as u32;
-            heap.slots.push(RefCell::new(Some(val)));
-            heap.ref_counts.push(Cell::new(1));
-            idx
-        }
-    })
+    HEAP.with(|cell| alloc_in(&mut cell.heap.borrow_mut(), val))
 }
 
 /// increment refcount; skipped during snapshot/restore

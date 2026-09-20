@@ -336,6 +336,7 @@ mod tests {
 
     use crate::{
         mesh::Mesh,
+        mesh_build::BoundaryEdges,
         simd::{Float2, Float3, Float4},
     };
 

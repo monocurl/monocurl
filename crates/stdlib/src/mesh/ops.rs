@@ -1986,11 +1986,9 @@ pub async fn op_in_space(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use geo::{
         mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
-        mesh_build::mesh_ref,
+        mesh_build::{BoundaryEdges, mesh_ref},
         simd::{Float2, Float3, Float4},
     };
 
