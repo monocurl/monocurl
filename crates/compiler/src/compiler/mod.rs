@@ -137,6 +137,7 @@ impl SymbolFunctionInfo {
 #[derive(Clone, Debug)]
 pub struct Symbol {
     pub name: String,
+    pub declaration_span: Option<Span8>,
     imported: bool,
     declared_in_stdlib: bool,
     stack_position: usize,
@@ -146,6 +147,12 @@ pub struct Symbol {
     // may appear as let, even though declared as var
     pub var_type: VariableType,
     pub function_info: SymbolFunctionInfo,
+}
+
+impl Symbol {
+    pub fn is_imported(&self) -> bool {
+        self.imported
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -783,6 +790,7 @@ impl Compiler {
             name.to_string(),
             Arc::new(Symbol {
                 name: name.to_string(),
+                declaration_span: None,
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
@@ -802,11 +810,31 @@ impl Compiler {
         position: usize,
         preserve_lvalues_on_copy: bool,
     ) {
+        self.register_symbol_with_declaration(
+            name,
+            None,
+            var_type,
+            function_info,
+            position,
+            preserve_lvalues_on_copy,
+        );
+    }
+
+    fn register_symbol_with_declaration(
+        &mut self,
+        name: &str,
+        declaration_span: Option<Span8>,
+        var_type: VariableType,
+        function_info: SymbolFunctionInfo,
+        position: usize,
+        preserve_lvalues_on_copy: bool,
+    ) {
         let declared_in_stdlib = self.current_section().flags.is_stdlib;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
             Arc::new(Symbol {
                 name: name.to_string(),
+                declaration_span,
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
@@ -828,6 +856,7 @@ impl Compiler {
             symbol.name.clone(),
             Arc::new(Symbol {
                 name: symbol.name.clone(),
+                declaration_span: symbol.declaration_span.clone(),
                 imported: false,
                 declared_in_stdlib: symbol.declared_in_stdlib,
                 stack_position: position,
@@ -842,6 +871,7 @@ impl Compiler {
     fn define_declared_symbol(
         &mut self,
         name: &str,
+        declaration_span: Span8,
         var_type: VariableType,
         value: &Expression,
         preserve_lvalues_on_copy: bool,
@@ -859,6 +889,7 @@ impl Compiler {
             name.to_string(),
             Arc::new(Symbol {
                 name: name.to_string(),
+                declaration_span: Some(declaration_span),
                 imported: false,
                 declared_in_stdlib,
                 stack_position: position,

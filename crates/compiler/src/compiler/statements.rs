@@ -116,7 +116,7 @@ impl Compiler {
                 );
             }
         }
-        self.define_declared_symbol(name, vt, &d.value.1, false);
+        self.define_declared_symbol(name, d.pattern.0.clone(), vt, &d.value.1, false);
     }
 
     fn validate_declared_name(&mut self, name: &str, vt: VariableType, span: &Span8) {

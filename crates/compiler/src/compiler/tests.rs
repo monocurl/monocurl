@@ -725,6 +725,24 @@ mod test {
     }
 
     #[test]
+    fn references_resolve_to_shadowing_lambda_parameters() {
+        let src = "let fun = |value| value\nlet arg = |fun| {\n    fun\n}";
+        let result = compile_src(src);
+        let reference_start = src.rfind("fun").unwrap();
+        let parameter_start = src.find("|fun|").unwrap() + 1;
+
+        let reference = result
+            .root_references
+            .iter()
+            .find(|reference| reference.span.start == reference_start)
+            .expect("expected lambda-body reference");
+        assert_eq!(
+            reference.symbol.declaration_span,
+            Some(parameter_start..parameter_start + 3)
+        );
+    }
+
+    #[test]
     fn test_no_warning_for_expression_statement_with_assignment() {
         let result = compile_src("var x = 0\nx = 1");
         assert!(

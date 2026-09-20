@@ -220,36 +220,13 @@ impl TextEditor {
         position: Location8,
         cx: &App,
     ) -> Option<(Span8, Location8)> {
-        let current_row = position.row;
-        {
-            let state = self.state.read(cx);
-            let cursor = state.loc8_to_offset8(position);
-            let word = state.word(cursor, false);
-            if word.is_empty() {
-                return None;
-            }
-            let name = state.read(word.clone());
-            let source = state.read(0..state.len());
-            let definitions = source
-                .lines()
-                .enumerate()
-                .filter_map(|(row, line)| declaration_location(line, &name).map(|col| (row, col)))
-                .collect::<Vec<_>>();
-            definitions
-                .iter()
-                .rev()
-                .find(|(row, _)| *row <= current_row)
-                .or_else(|| definitions.first())
-                .map(|(row, col)| {
-                    (
-                        word,
-                        Location8 {
-                            row: *row,
-                            col: *col,
-                        },
-                    )
-                })
-        }
+        let state = self.state.read(cx);
+        let offset = state.loc8_to_offset8(position);
+        let reference = state.resolved_reference_at(offset)?;
+        Some((
+            reference.span.clone(),
+            state.offset8_to_loc8(reference.declaration_span.as_ref()?.start),
+        ))
     }
 }
 
@@ -258,25 +235,4 @@ fn parse_line_location(query: &str) -> Option<Location8> {
     let row = line.trim().parse::<usize>().ok()?.checked_sub(1)?;
     let col = column.trim().parse::<usize>().ok()?.checked_sub(1)?;
     Some(Location8 { row, col })
-}
-
-fn declaration_location(line: &str, name: &str) -> Option<usize> {
-    let trimmed = line.trim_start();
-    let indentation = line.len() - trimmed.len();
-    for keyword in ["let", "var", "mesh", "anim", "param"] {
-        let Some(after_keyword) = trimmed.strip_prefix(keyword) else {
-            continue;
-        };
-        if !after_keyword.starts_with(char::is_whitespace) {
-            continue;
-        }
-        let rest = after_keyword.trim_start();
-        let identifier = rest
-            .split(|character: char| !(character.is_alphanumeric() || character == '_'))
-            .next()?;
-        if identifier == name {
-            return Some(indentation + keyword.len() + (after_keyword.len() - rest.len()));
-        }
-    }
-    None
 }
