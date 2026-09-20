@@ -674,7 +674,9 @@ impl Compiler {
 
     fn patch_jump(&mut self, instr_idx: usize, target: u32) {
         match &mut self.current_section_mut().instructions[instr_idx] {
-            Instruction::Jump { to, .. } | Instruction::ConditionalJump { to, .. } => *to = target,
+            Instruction::Jump { to, .. }
+            | Instruction::ConditionalJump { to, .. }
+            | Instruction::JumpIfFalse { to, .. } => *to = target,
             _ => panic!("patch_jump on non-jump instruction"),
         }
     }
@@ -802,6 +804,20 @@ impl Compiler {
         let idx = self.instruction_pointer() as usize;
         self.emit(
             Instruction::ConditionalJump {
+                section: self.section_index(),
+                to: 0,
+            },
+            span,
+        );
+        self.dec_stack(1);
+        idx
+    }
+
+    /// branch when the test is falsy; returns the instruction index to patch
+    fn emit_jump_if_false_patch(&mut self, span: Span8) -> usize {
+        let idx = self.instruction_pointer() as usize;
+        self.emit(
+            Instruction::JumpIfFalse {
                 section: self.section_index(),
                 to: 0,
             },

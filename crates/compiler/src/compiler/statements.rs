@@ -204,8 +204,7 @@ impl Compiler {
     pub(super) fn compile_while(&mut self, w: &While, span: &Span8) {
         let loop_start = self.instruction_pointer();
         self.compile_val(&w.condition.1, &w.condition.0);
-        self.emit(Instruction::Not, w.condition.0.clone());
-        let exit_jump = self.emit_cond_jump_patch(w.condition.0.clone());
+        let exit_jump = self.emit_jump_if_false_patch(w.condition.0.clone());
 
         let loop_stack = self.stack_depth();
         self.frame_mut().loop_contexts.push(LoopContext {
@@ -290,8 +289,7 @@ impl Compiler {
         self.emit(Instruction::Lt, span.clone());
         self.dec_stack(1);
 
-        self.emit(Instruction::Not, span.clone());
-        let exit_jump = self.emit_cond_jump_patch(span.clone()); // depth = loop_stack
+        let exit_jump = self.emit_jump_if_false_patch(span.clone()); // depth = loop_stack
 
         self.frame_mut().loop_contexts.push(LoopContext {
             continue_target: None, // patched below after increment is emitted
@@ -395,8 +393,7 @@ impl Compiler {
         self.emit(Instruction::Lt, span.clone());
         self.dec_stack(1);
 
-        self.emit(Instruction::Not, span.clone());
-        let exit_jump = self.emit_cond_jump_patch(span.clone());
+        let exit_jump = self.emit_jump_if_false_patch(span.clone());
 
         self.frame_mut().loop_contexts.push(LoopContext {
             continue_target: None,
@@ -506,8 +503,7 @@ impl Compiler {
 
     pub(super) fn compile_if(&mut self, i: &If, span: &Span8) {
         self.compile_val(&i.condition.1, &i.condition.0);
-        self.emit(Instruction::Not, i.condition.0.clone());
-        let skip_if = self.emit_cond_jump_patch(i.condition.0.clone());
+        let skip_if = self.emit_jump_if_false_patch(i.condition.0.clone());
 
         self.push_scope();
         self.compile_statements(&i.if_block.1);
