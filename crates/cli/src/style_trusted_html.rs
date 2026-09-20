@@ -9,11 +9,11 @@ use compiler::{
     compiler::{compile, static_analysis_rope},
 };
 use lexer::{
-    lexer::Lexer,
+    lex_rope_from_str,
     token::{Token, TokenCategory},
 };
 use parser::{import_context::ParseImportContext, parser::Parser};
-use structs::rope::{Attribute, RLEData, Rope};
+use structs::rope::{Attribute, Rope};
 use ui_cli_shared::static_analysis::StaticAnalysisData;
 
 pub(crate) fn run_command() -> Result<()> {
@@ -51,15 +51,6 @@ fn style_trusted_html(source: &str, root_path: PathBuf) -> String {
     styled_source_html(source, &lex_rope, &analysis_rope)
 }
 
-fn lex_rope_from_str(source: &str) -> Rope<Attribute<Token>> {
-    Rope::default().replace_range(
-        0..0,
-        Lexer::new(source.chars()).map(|(attribute, codeunits)| RLEData {
-            codeunits,
-            attribute,
-        }),
-    )
-}
 
 fn styled_source_html(
     source: &str,

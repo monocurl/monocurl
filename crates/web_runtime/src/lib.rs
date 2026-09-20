@@ -8,13 +8,13 @@ use compiler::{
 };
 use executor::scene_snapshot::CameraSnapshot;
 use geo::simd::Float3;
-use lexer::{lexer::Lexer, token::Token};
+use lexer::lex_rope_from_str;
 use parser::{
     import_context::{MemoryImportBackend, ParseImportContext},
     parser::{Diagnostic as ParseDiagnostic, Parser},
 };
 use serde::{Deserialize, Serialize};
-use structs::rope::{Attribute, RLEData, Rope};
+use structs::rope::Rope;
 
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::*;
@@ -444,12 +444,3 @@ fn insert_embedded_stdlib(import_backend: &mut MemoryImportBackend) {
     }
 }
 
-fn lex_rope_from_str(source: &str) -> Rope<Attribute<Token>> {
-    Rope::default().replace_range(
-        0..0,
-        Lexer::new(source.chars()).map(|(attribute, codeunits)| RLEData {
-            codeunits,
-            attribute,
-        }),
-    )
-}
