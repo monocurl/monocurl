@@ -156,7 +156,7 @@ async fn tag_trans_embed_impl(
 }
 
 #[stdlib_func]
-pub async fn trans_lerp_value(
+pub fn trans_lerp_value(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

@@ -4,7 +4,7 @@ use stdlib_macros::stdlib_func;
 use super::helpers::read_int;
 
 #[stdlib_func]
-pub async fn factorial(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn factorial(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let n = read_int(executor, stack_idx, -1, "n")?;
     if n < 0 {
         return Err(ExecutorError::InvalidArgument {
@@ -16,7 +16,7 @@ pub async fn factorial(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn choose(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn choose(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let n = read_int(executor, stack_idx, -2, "n")?;
     let r = read_int(executor, stack_idx, -1, "r")?;
     if r < 0 || r > n {
@@ -31,7 +31,7 @@ pub async fn choose(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 }
 
 #[stdlib_func]
-pub async fn permute(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn permute(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let n = read_int(executor, stack_idx, -2, "n")?;
     let r = read_int(executor, stack_idx, -1, "r")?;
     if r < 0 || r > n {
@@ -41,7 +41,7 @@ pub async fn permute(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 }
 
 #[stdlib_func]
-pub async fn gcd(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn gcd(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let a = read_int(executor, stack_idx, -2, "n")?.abs();
     let b = read_int(executor, stack_idx, -1, "m")?.abs();
     let (mut a, mut b) = (a, b);
@@ -54,7 +54,7 @@ pub async fn gcd(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 }
 
 #[stdlib_func]
-pub async fn lcm(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn lcm(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let a = read_int(executor, stack_idx, -2, "n")?;
     let b = read_int(executor, stack_idx, -1, "m")?;
     if a == 0 || b == 0 {
@@ -70,7 +70,7 @@ pub async fn lcm(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 }
 
 #[stdlib_func]
-pub async fn is_prime(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn is_prime(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let n = read_int(executor, stack_idx, -1, "n")?;
     let prime = match n {
         n if n < 2 => false,
@@ -93,7 +93,7 @@ pub async fn is_prime(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn random(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn random(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let low = crate::read_float(executor, stack_idx, -2, "low")?;
     let high = crate::read_float(executor, stack_idx, -1, "high")?;
     Ok(Value::Float(
@@ -102,7 +102,7 @@ pub async fn random(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 }
 
 #[stdlib_func]
-pub async fn randint(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn randint(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let low = read_int(executor, stack_idx, -2, "low")?;
     let high = read_int(executor, stack_idx, -1, "high")?;
     if high <= low {

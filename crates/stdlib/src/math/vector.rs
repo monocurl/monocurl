@@ -9,7 +9,7 @@ use stdlib_macros::stdlib_func;
 use super::helpers::read_list;
 
 #[stdlib_func]
-pub async fn dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let u = read_list(executor, stack_idx, -2, "u")?;
     let v = read_list(executor, stack_idx, -1, "v")?;
     if u.len() != v.len() {
@@ -25,7 +25,7 @@ pub async fn dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 }
 
 #[stdlib_func]
-pub async fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn cross(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let u = read_list(executor, stack_idx, -2, "u")?;
     let v = read_list(executor, stack_idx, -1, "v")?;
     if u.len() != 3 || v.len() != 3 {

@@ -28,7 +28,7 @@ pub async fn write_embed(
 }
 
 #[stdlib_func]
-pub async fn write_lerp_value(
+pub fn write_lerp_value(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

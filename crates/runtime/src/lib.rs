@@ -9,7 +9,7 @@ use std::{
 use bytecode::{Bytecode, Instruction, SectionBytecode, SectionFlags};
 use executor::{
     camera::camera_value_from_snapshot,
-    executor::{Executor, StdlibFunc, TextRenderQuality},
+    executor::{Executor, NativeFunction, TextRenderQuality},
     heap::{VRc, with_heap},
     scene_snapshot::{BackgroundSnapshot, CameraSnapshot, SceneSnapshot},
     state::LeaderKind,
@@ -301,7 +301,7 @@ impl RuntimeController {
         Self::with_native_funcs(default_bytecode(), registry().func_table())
     }
 
-    pub fn with_native_funcs(bytecode: Bytecode, native_funcs: Vec<StdlibFunc>) -> Self {
+    pub fn with_native_funcs(bytecode: Bytecode, native_funcs: Vec<NativeFunction>) -> Self {
         let executor = Executor::new(bytecode, native_funcs);
         let shared = SharedRuntimeState::new(&executor);
         Self {

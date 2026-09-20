@@ -1220,7 +1220,7 @@ pub async fn mk_color_grid(
 }
 
 #[stdlib_func]
-pub async fn mk_line_grid(
+pub fn mk_line_grid(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -1802,7 +1802,7 @@ pub async fn mk_axis3d(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mk_polar_axis(
+pub fn mk_polar_axis(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

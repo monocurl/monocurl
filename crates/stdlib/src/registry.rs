@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use executor::executor::StdlibFunc;
+use executor::executor::{NativeFunction, StdlibFunc, StdlibSyncFunc};
 
 pub struct FunctionEntry {
     pub name: &'static str,
     pub func: StdlibFunc,
+    /// present when the native never suspends, letting the interpreter call it
+    /// without allocating and polling a future
+    pub sync_func: Option<StdlibSyncFunc>,
 }
 
 inventory::collect!(FunctionEntry);
@@ -34,10 +37,15 @@ impl Registry {
         *self.index_map.get(name).unwrap()
     }
 
-    /// build a function table (Vec<NativeFunc>) ordered by index,
-    /// suitable for passing to the executor.
-    pub fn func_table(&self) -> Vec<StdlibFunc> {
-        self.entries.iter().map(|e| e.func).collect()
+    /// build the executor's native function table, ordered by index
+    pub fn func_table(&self) -> Vec<NativeFunction> {
+        self.entries
+            .iter()
+            .map(|entry| NativeFunction {
+                call: entry.func,
+                call_sync: entry.sync_func,
+            })
+            .collect()
     }
 
     pub fn len(&self) -> usize {

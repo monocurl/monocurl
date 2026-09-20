@@ -4,7 +4,7 @@ use stdlib_macros::stdlib_func;
 use super::helpers::read_list;
 
 #[stdlib_func]
-pub async fn mean(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mean(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let v = read_list(executor, stack_idx, -1, "v")?;
     if v.is_empty() {
         return Err(ExecutorError::InvalidArgument {
@@ -16,7 +16,7 @@ pub async fn mean(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 }
 
 #[stdlib_func]
-pub async fn variance(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn variance(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let v = read_list(executor, stack_idx, -1, "v")?;
     if v.is_empty() {
         return Err(ExecutorError::InvalidArgument {

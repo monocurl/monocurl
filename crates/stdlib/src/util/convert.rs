@@ -144,7 +144,7 @@ pub async fn text_tag_encode(
 }
 
 #[stdlib_func]
-pub async fn to_int(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn to_int(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)
@@ -168,7 +168,7 @@ pub async fn to_int(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 }
 
 #[stdlib_func]
-pub async fn to_float(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn to_float(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)

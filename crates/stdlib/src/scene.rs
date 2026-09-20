@@ -73,7 +73,7 @@ fn camera_value(
 }
 
 #[stdlib_func]
-pub async fn initial_camera(
+pub fn initial_camera(
     _executor: &mut Executor,
     _stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -99,7 +99,7 @@ pub async fn initial_camera(
 }
 
 #[stdlib_func]
-pub async fn initial_background(
+pub fn initial_background(
     _executor: &mut Executor,
     _stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -118,7 +118,7 @@ pub async fn initial_background(
 }
 
 #[stdlib_func]
-pub async fn aspect_ratio(
+pub fn aspect_ratio(
     executor: &mut Executor,
     _stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -126,6 +126,6 @@ pub async fn aspect_ratio(
 }
 
 #[stdlib_func]
-pub async fn mk_camera(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_camera(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     camera_value(executor, stack_idx, -5, -4, -3, -2, -1)
 }

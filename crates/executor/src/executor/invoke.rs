@@ -462,11 +462,34 @@ impl Executor {
         func_index: u16,
         arg_count: u16,
     ) -> ExecSingle {
-        let func = self.native_funcs[func_index as usize];
-        match func(self, stack_idx).await {
+        let func = self.native_funcs[func_index as usize].call;
+        let result = func(self, stack_idx).await;
+        self.finish_native_invoke(stack_idx, arg_count, result)
+    }
+
+    /// natives that cannot suspend are called directly, with no future allocated
+    pub(super) fn try_native_invoke(
+        &mut self,
+        stack_idx: usize,
+        func_index: u16,
+        arg_count: u16,
+    ) -> Option<ExecSingle> {
+        let call = self.native_funcs[func_index as usize].call_sync?;
+        let result = call(self, stack_idx);
+        Some(self.finish_native_invoke(stack_idx, arg_count, result))
+    }
+
+    fn finish_native_invoke(
+        &mut self,
+        stack_idx: usize,
+        arg_count: u16,
+        result: Result<Value, ExecutorError>,
+    ) -> ExecSingle {
+        match result {
             Ok(val) => {
-                self.state.stack_mut(stack_idx).pop_n(arg_count as usize);
-                self.state.stack_mut(stack_idx).push(val);
+                let stack = self.state.stack_mut(stack_idx);
+                stack.pop_n(arg_count as usize);
+                stack.push(val);
                 ExecSingle::Continue
             }
             Err(e) => ExecSingle::Error(e),
