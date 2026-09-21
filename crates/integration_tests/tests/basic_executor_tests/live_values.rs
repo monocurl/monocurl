@@ -1655,9 +1655,12 @@ fn test_number_constructor_accepts_decimal_and_sign_options() {
 
 #[test]
 fn test_number_constructor_accepts_custom_font() {
-    let font = std::env::current_dir()
-        .unwrap()
-        .join("assets/font/IBMPlexMono-Regular.ttf");
+    // resolved through the assets directory rather than the working directory:
+    // cargo runs this binary from the package root, so the old path pointed at a
+    // font that does not exist and the test only passed where the text backend
+    // silently fell back to a system font
+    let font = Assets::font("IBMPlexMono-Regular.ttf");
+    assert!(font.is_file(), "missing test font: {}", font.display());
     let font = monocurl_string_escape(&font.to_string_lossy());
     let source = format!(
         r#"
