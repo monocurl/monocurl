@@ -3,6 +3,15 @@
 //! each scene has a committed `.expected` file recording its transcript, runtime
 //! errors, and end timestamp. run with `UPDATE_EXPECT=1` to rewrite them after an
 //! intentional behaviour change, and read the diff before committing it.
+//!
+//! the expectations are bit-exact and therefore only reproduce on the kind of
+//! machine that wrote them, so this runs on the host the committed goldens came
+//! from and is skipped elsewhere. a mesh fingerprint folds well over a thousand
+//! f32 coordinates and compares them by exact hash equality, so at any fixed
+//! quantization some coordinate lands on a rounding boundary and two targets
+//! whose trigonometry differs in the last few ulp disagree; coarsening the step
+//! only trades the odds, it does not fix the comparison. see
+//! https://github.com/monocurl/monocurl/issues/68
 
 use std::path::Path;
 
@@ -87,6 +96,11 @@ fn check(scene: &Path, actual: String) {
 }
 
 #[test]
+#[cfg_attr(
+    not(all(target_os = "macos", target_arch = "aarch64")),
+    ignore = "goldens are bit-exact and were generated on macOS aarch64; \
+              rerun with UPDATE_EXPECT=1 to retarget them at this host"
+)]
 fn corpus_scenes_match_expectations() {
     use_repo_assets();
 
