@@ -33,7 +33,7 @@ jobs:
       - name: Install build dependencies
         run: |
           brew install pkg-config icu4c freetype graphite2 libpng
-          cargo install cargo-bundle --locked
+          cargo install cargo-bundle --locked --version 0.12.0
 
           ICU_PREFIX="$(brew --prefix icu4c 2>/dev/null || true)"
           if [[ -z "$ICU_PREFIX" || ! -d "$ICU_PREFIX/lib/pkgconfig" ]]; then
