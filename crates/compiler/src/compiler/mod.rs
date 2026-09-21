@@ -1,4 +1,3 @@
-mod unboxing;
 mod closures;
 mod cursor;
 mod expressions;
@@ -7,6 +6,7 @@ mod stateful;
 mod statements;
 #[cfg(test)]
 mod tests;
+mod unboxing;
 mod warnings;
 
 use std::collections::{HashMap, HashSet};

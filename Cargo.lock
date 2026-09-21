@@ -4854,7 +4854,7 @@ dependencies = [
 
 [[package]]
 name = "monocurl"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "bytecode",
