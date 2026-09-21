@@ -98,6 +98,16 @@ impl Compiler {
         }
         let name = &d.pattern.1.as_identifier().unwrap().0;
         self.validate_declared_name(name, vt, span);
+        // every section of a bundle shares the top scope, and that scope is what
+        // gets exported, so a variable declared there can be written through by
+        // a later slide or another bundle that this section's scan never saw.
+        // only a nested scope is guaranteed to be fully described by it
+        let scoped_to_this_section = self.frames.len() > 1 || self.frame().scopes.len() > 1;
+        let unboxed = scoped_to_this_section
+            && matches!(vt, VariableType::Let | VariableType::Var)
+            && !self
+                .slot_requirements
+                .needs_slot(name, vt == VariableType::Var);
         match vt {
             VariableType::Mesh => {
                 let ni = self.intern_string(name);
@@ -107,7 +117,8 @@ impl Compiler {
                 let ni = self.intern_string(name);
                 self.emit(Instruction::ConvertParam { name_index: ni }, span.clone());
             }
-            VariableType::Let | VariableType::Var | VariableType::Reference => {
+            // a reference variable is the reference, so it always needs a slot
+            VariableType::Reference => {
                 self.emit(
                     Instruction::ConvertVar {
                         allow_stateful: false,
@@ -115,8 +126,20 @@ impl Compiler {
                     span.clone(),
                 );
             }
+            VariableType::Let | VariableType::Var => {
+                if unboxed {
+                    self.emit(Instruction::BindLocal, span.clone());
+                } else {
+                    self.emit(
+                        Instruction::ConvertVar {
+                            allow_stateful: false,
+                        },
+                        span.clone(),
+                    );
+                }
+            }
         }
-        self.define_declared_symbol(name, d.pattern.0.clone(), vt, &d.value.1, false);
+        self.define_declared_symbol(name, d.pattern.0.clone(), vt, &d.value.1, false, unboxed);
     }
 
     fn validate_declared_name(&mut self, name: &str, vt: VariableType, span: &Span8) {

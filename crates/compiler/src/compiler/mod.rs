@@ -1,3 +1,4 @@
+mod unboxing;
 mod closures;
 mod cursor;
 mod expressions;
@@ -153,6 +154,9 @@ pub struct Symbol {
     declared_in_stdlib: bool,
     stack_position: usize,
     preserve_lvalues_on_copy: bool,
+    /// lives directly in its stack entry rather than behind a heap slot; see
+    /// [`unboxing`] for when that is allowed
+    unboxed: bool,
     special_function: Option<SpecialFunction>,
     // how the symbol looks like to the current bundle
     // may appear as let, even though declared as var
@@ -292,6 +296,8 @@ struct Compiler {
     // of the current bundle
     bundle_root_import_span: Option<Span8>,
     deferred_expr_depth: usize,
+    /// which names the section being compiled must keep in heap slots
+    slot_requirements: unboxing::SlotRequirements,
 }
 
 impl Compiler {
@@ -316,6 +322,7 @@ impl Compiler {
             possible_cursor_identifiers: Vec::new(),
             references: Vec::new(),
             deferred_expr_depth: 0,
+            slot_requirements: unboxing::SlotRequirements::default(),
         }
     }
 
@@ -611,6 +618,10 @@ impl Compiler {
         bytecode.import_display_index = current_bundle.import_display_index;
         self.current_bundle.as_mut().unwrap().current_bytecode = Some(bytecode);
 
+        // covers the section's nested closures too, so one scan decides every
+        // declaration compiled below
+        self.slot_requirements = unboxing::scan(&section.body);
+
         // symbols declared here land in the current top scope (no push/pop)
         self.compile_statements(&section.body);
         if self.current_section().flags.is_init {
@@ -870,6 +881,7 @@ impl Compiler {
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                unboxed: false,
                 special_function: None,
                 var_type,
                 function_info,
@@ -915,6 +927,7 @@ impl Compiler {
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                unboxed: false,
                 special_function: None,
                 var_type,
                 function_info,
@@ -939,6 +952,7 @@ impl Compiler {
                 declared_in_stdlib: symbol.declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                unboxed: false,
                 special_function: symbol.special_function,
                 var_type: symbol.var_type,
                 function_info: symbol.function_info.clone(),
@@ -953,6 +967,7 @@ impl Compiler {
         var_type: VariableType,
         value: &Expression,
         preserve_lvalues_on_copy: bool,
+        unboxed: bool,
     ) {
         let position = self.stack_depth() - 1;
         let declared_in_stdlib = self.current_section().flags.is_stdlib;
@@ -973,6 +988,7 @@ impl Compiler {
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                unboxed,
                 special_function,
                 var_type,
                 function_info: SymbolFunctionInfo::from(value),

@@ -82,6 +82,36 @@ impl Executor {
                 self.state.sync_all_leaders();
             }
 
+            Instruction::BindLocal => {
+                // the value is already sitting in the entry that becomes the
+                // variable, so binding only has to reject what ConvertVar would
+                if matches!(self.state.stack(stack_idx).peek(), Value::Stateful(_)) {
+                    return Some(ExecSingle::Error(
+                        ExecutorError::stateful_illegal_assignment(),
+                    ));
+                }
+            }
+            Instruction::StoreLocal { stack_delta } => {
+                // detaches exactly as Assign does, so a stored container cannot
+                // alias the expression it came from
+                let value = self
+                    .state
+                    .stack(stack_idx)
+                    .read_at(-1)
+                    .elide_lvalue_leader_rec();
+                // the same rejection Assign makes for a plain variable target
+                if matches!(value, Value::Stateful(_)) {
+                    return Some(ExecSingle::Error(
+                        ExecutorError::stateful_requires_mesh_assignment(),
+                    ));
+                }
+
+                // the assigned expression stays on the stack for the statement
+                // to pop, which is the shape Assign leaves behind
+                let stack = self.state.stack_mut(stack_idx);
+                let index = (stack.var_stack.len() as i32 + stack_delta) as usize;
+                stack.var_stack[index] = value;
+            }
             Instruction::ConvertVar { allow_stateful } => {
                 if !allow_stateful
                     && matches!(self.state.stack(stack_idx).peek(), Value::Stateful(_))

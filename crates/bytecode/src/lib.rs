@@ -56,6 +56,15 @@ pub enum Instruction {
     ConvertMesh {
         name_index: u32,
     },
+    // a `let`/`var` local that nothing takes a reference into stays in its stack
+    // entry instead of a heap slot. BindLocal keeps ConvertVar's rejection of
+    // stateful initializers without allocating; StoreLocal writes through to the
+    // entry. see the compiler's `unboxing` module for when these are emitted
+    BindLocal,
+    StoreLocal {
+        stack_delta: i32,
+    },
+
     ConvertVar {
         allow_stateful: bool,
     },

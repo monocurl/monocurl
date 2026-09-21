@@ -543,7 +543,7 @@ mod test {
             section
                 .instructions
                 .iter()
-                .any(|instr| matches!(instr, Instruction::Lt)),
+                .any(|instr| matches!(instr, Instruction::RangeLoopTest { .. })),
             "optimized stdlib range loop should use a counted comparison"
         );
         assert!(
@@ -609,7 +609,8 @@ mod test {
 
         let section = root_slide_section(&result);
         // only the user's `var total` needs a heap slot: the counter, the bound
-        // and the loop variable that names the counter all stay on the stack
+        // and the loop variable that names the counter all stay on the stack.
+        // `total` lives in the section's shared top scope, so it keeps its slot
         let conversions = section
             .instructions
             .iter()
@@ -987,6 +988,7 @@ mod test {
     }
 
     // `var x = 0\nx = 1` — covers PushLvalue, Assign, and Pop for expression statements.
+    // a section's top scope is shared with every other section, so x keeps its slot.
     #[test]
     fn test_bytecode_var_assign() {
         let result = compile_stmts(vec![
@@ -1114,6 +1116,51 @@ mod test {
             vec![true, false, true]
         );
         assert_eq!(sec.lambda_prototypes[0].arg_names, vec!["x", "y", "z"]);
+    }
+
+    #[test]
+    fn nested_locals_skip_the_heap_unless_something_references_them() {
+        // `sum` and `step` are scoped to the lambda body, so nothing outside it
+        // can write through them; `acc` is appended to, which needs a slot
+        let result = compile_src(
+            "
+            let f = |n| {
+                var sum = 0
+                let step = 2
+                sum = sum + step
+                return sum
+            }
+            let g = |n| {
+                var acc = []
+                acc .= n
+                return acc
+            }
+        ",
+        );
+        no_errors(&result);
+
+        let sec = root_slide_section(&result);
+        let conversions = sec
+            .instructions
+            .iter()
+            .filter(|instr| matches!(instr, Instruction::ConvertVar { .. }))
+            .count();
+        // the two top-level `let f` / `let g`, plus `acc`
+        assert_eq!(conversions, 3, "only `acc` should be promoted inside a body");
+        assert_eq!(
+            sec.instructions
+                .iter()
+                .filter(|instr| matches!(instr, Instruction::BindLocal))
+                .count(),
+            2,
+            "`sum` and `step` should bind in place"
+        );
+        assert!(
+            sec.instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::StoreLocal { .. })),
+            "`sum` should be written through its stack entry"
+        );
     }
 
     #[test]
