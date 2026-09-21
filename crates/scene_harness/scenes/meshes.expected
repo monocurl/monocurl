@@ -10,121 +10,121 @@ slide 6, end of slide
 # timeline
 slide 1 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=1e0626d63dd9ff3e
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=8300e364742b33ca
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 1 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=1e0626d63dd9ff3e
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=8300e364742b33ca
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 1 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=1e0626d63dd9ff3e
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=8300e364742b33ca
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 1 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=1e0626d63dd9ff3e
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=8300e364742b33ca
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 2 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=1e0626d63dd9ff3e
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=8300e364742b33ca
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 2 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=ca7a09ea661f1aed
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=4c02a74aed199f8d
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 2 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=eaa12a690c9d088d
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=cce4edc97c124cc0
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 2 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 3 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 3 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=31118c48ac3afb13
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e06d96aa4e1ed75f
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 3 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=3e3571a41f3cfa78
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e756a9ad40264f9a
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 3 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 4 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=371ffbcd0966a479
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=f4341ad04bd2364c
 slide 4 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=ee723dc0ef297a61
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=0b86e0e8fe881b40
 slide 4 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=12779e4e109d9094
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=d9745d115c6671e8
 slide 4 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=3062af5011c18788
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=7beb80ffd0b67748
 slide 5 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=3062af5011c18788
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=6, tris=4, tag=[], fp=7beb80ffd0b67748
 slide 5 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=e0b3684be89045e8
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=8c5a81976211ebb3
 slide 5 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=79d0e9249915674f
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=570595c158fab62a
 slide 5 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=2acd83d8a09d7d2b
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=8e44546ee49ef540
 slide 6 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=2acd83d8a09d7d2b
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=8e44546ee49ef540
 slide 6 @ 0.35
   camera pos [0.0, 0.0, 4.4703] look_at [0.0, 0.0, 3.4703]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=2acd83d8a09d7d2b
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=8e44546ee49ef540
 slide 6 @ 0.80
   camera pos [0.0, 0.0, 5.8842] look_at [0.0, 0.0, 4.8842]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=2acd83d8a09d7d2b
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=8e44546ee49ef540
 slide 6 @ 1.00
   camera pos [0.0, 0.0, 6.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=27e5eaae2da5599a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=e7743a9ccfcb5b9b
-  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=2acd83d8a09d7d2b
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b62abf596a8012ef
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=22a2d927233a6b28
+  mesh[2] dots=0, lins=9, tris=7, tag=[], fp=8e44546ee49ef540
