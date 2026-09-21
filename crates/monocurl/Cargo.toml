@@ -16,6 +16,8 @@ icon = [
 resources = ["assets"]
 category = "public.app-category.education"
 short_description = "Mathematical animation editor"
+
+[package.metadata.bundle.osx]
 minimum_system_version = "11.0"
 
 [dependencies]
