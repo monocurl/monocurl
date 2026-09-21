@@ -10,68 +10,68 @@ slide 4, end of slide
 # timeline
 slide 1 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=5bde1dcbcc046bf0
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=7c5f786cfeca1e86
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
 slide 1 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=5bde1dcbcc046bf0
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=7c5f786cfeca1e86
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
 slide 1 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=5bde1dcbcc046bf0
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=7c5f786cfeca1e86
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
 slide 1 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=5bde1dcbcc046bf0
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=7c5f786cfeca1e86
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
 slide 2 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=5bde1dcbcc046bf0
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=7c5f786cfeca1e86
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
   !! animation block was already played
 slide 2 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=5bde1dcbcc046bf0
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=7c5f786cfeca1e86
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
   !! animation block was already played
 slide 2 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=5bde1dcbcc046bf0
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=c8aff557b0b1c6fc
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=7c5f786cfeca1e86
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=5aec047bf64a98cd
   !! animation block was already played
 slide 2 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b9dc2e1acc9e283f
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=9db6c954d49e7566
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=f6668684d8c4e30e
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=ba02c3450be447f7
 slide 3 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=b9dc2e1acc9e283f
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=9db6c954d49e7566
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=f6668684d8c4e30e
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=ba02c3450be447f7
 slide 3 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=4e932713bc80fb50
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=9db6c954d49e7566
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=2dd2d8b8a08cf042
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=ba02c3450be447f7
 slide 3 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=8300e364742b33ca
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=9db6c954d49e7566
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=1e0626d63dd9ff3e
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=ba02c3450be447f7
 slide 3 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=fbd447267619961a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=9db6c954d49e7566
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=cf57bf2f0a18a8ea
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=ba02c3450be447f7
 slide 4 @ 0.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=fbd447267619961a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=9db6c954d49e7566
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=cf57bf2f0a18a8ea
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=ba02c3450be447f7
 slide 4 @ 0.35
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=fbd447267619961a
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=a4cd58c8e0e54ad4
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=cf57bf2f0a18a8ea
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=ef8c44d800bb1b17
 slide 4 @ 0.80
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=0c65089763b414d8
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=a9005cc27f3f916a
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=6a088344b48f5b98
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=61919a42970b6017
 slide 4 @ 1.00
   camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
-  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=5bde1dcbcc046bf0
-  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=a9005cc27f3f916a
+  mesh[0] dots=0, lins=64, tris=62, tag=[], fp=7c5f786cfeca1e86
+  mesh[1] dots=0, lins=4, tris=2, tag=[], fp=61919a42970b6017

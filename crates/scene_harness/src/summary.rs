@@ -18,22 +18,10 @@ fn round(value: f64) -> f64 {
     if scaled == 0.0 { 0.0 } else { scaled }
 }
 
-/// geometry is quantized far more coarsely than values are printed, because the
-/// fingerprint has to agree across machines. an f32 coordinate in the range a
-/// scene occupies carries roughly 2e-7 per unit in the last place, so rounding
-/// at 1e-6 left only a few of them of headroom -- far less than two targets'
-/// trigonometry and vectorization differ by, and aarch64 and x86_64 duly
-/// disagreed. 1e-3 keeps thousands of ulp of slack while any real geometry
-/// change stays orders of magnitude larger than the step
-fn quantize_coordinate(value: f32) -> i64 {
-    let scaled = (value as f64 * 1e3).round();
-    if scaled == 0.0 { 0 } else { scaled as i64 }
-}
-
 fn fold(accumulator: &mut u64, value: f32) {
     *accumulator = accumulator
         .rotate_left(7)
-        .wrapping_add(quantize_coordinate(value) as u64)
+        .wrapping_add(round(value as f64).to_bits())
         .wrapping_mul(0x9E37_79B9_7F4A_7C15);
 }
 
