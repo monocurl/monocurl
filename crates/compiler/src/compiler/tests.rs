@@ -543,7 +543,7 @@ mod test {
             section
                 .instructions
                 .iter()
-                .any(|instr| matches!(instr, Instruction::Lt)),
+                .any(|instr| matches!(instr, Instruction::RangeLoopTest { .. })),
             "optimized stdlib range loop should use a counted comparison"
         );
         assert!(
@@ -553,6 +553,178 @@ mod test {
                 .any(|instr| matches!(instr, Instruction::IncrementByOne { .. })),
             "optimized stdlib range loop should use the dedicated induction increment opcode"
         );
+    }
+
+    /// build a two-bundle program: a stdlib-flagged prelude, then a user slide
+    fn compile_with_prelude(prelude: &str, slide: &str) -> CompileResult {
+        let prelude_bundle = Arc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 0,
+            imported_files: vec![],
+            sections: vec![Section {
+                body: parse_stmts_as(prelude, SectionType::StandardLibrary),
+                section_type: SectionType::StandardLibrary,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+        let slide_bundle = Arc::new(SectionBundle {
+            file_path: PathBuf::new(),
+            file_index: 1,
+            imported_files: vec![0],
+            sections: vec![Section {
+                body: parse_stmts(slide),
+                section_type: SectionType::Slide,
+                name: None,
+            }],
+            root_import_span: None,
+            was_cached: false,
+        });
+
+        test_compile(&[prelude_bundle, slide_bundle])
+    }
+
+    fn calls_native(section: &bytecode::SectionBytecode, name: &str) -> bool {
+        let index = registry().index_of(name) as u16;
+        section.instructions.iter().any(|instr| {
+            matches!(instr, Instruction::NativeInvoke { index: i, .. } if *i == index)
+        })
+    }
+
+    fn invokes_lambda(section: &bytecode::SectionBytecode) -> bool {
+        section
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instruction::LambdaInvoke { .. }))
+    }
+
+    #[test]
+    fn range_loops_keep_their_counter_unboxed() {
+        let result = compile_with_prelude(
+            "let range = |start, stop| __monocurl__native__ range(start, stop)",
+            "var total = 0\nfor (i in range(0, 4)) {\n    total = total + i\n}",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        // only the user's `var total` needs a heap slot: the counter, the bound
+        // and the loop variable that names the counter all stay on the stack.
+        // `total` lives in the section's shared top scope, so it keeps its slot
+        let conversions = section
+            .instructions
+            .iter()
+            .filter(|instr| matches!(instr, Instruction::ConvertVar { .. }))
+            .count();
+        assert_eq!(conversions, 1, "only `total` should be promoted");
+        assert!(
+            section
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::IncrementByOne { .. })),
+            "the counter should still be advanced in place"
+        );
+    }
+
+    #[test]
+    fn branches_test_the_condition_without_negating_it() {
+        for source in [
+            "var x = 0\nif (x < 1) {\n    x = 1\n}",
+            "var x = 0\nwhile (x < 3) {\n    x = x + 1\n}",
+            "var total = 0\nfor (value in [1, 2]) {\n    total = total + value\n}",
+        ] {
+            let result = compile_src(source);
+            no_errors(&result);
+
+            let section = root_slide_section(&result);
+            assert!(
+                section
+                    .instructions
+                    .iter()
+                    .any(|instr| matches!(instr, Instruction::JumpIfFalse { .. })),
+                "expected a falsy branch for {source:?}"
+            );
+            assert!(
+                !section
+                    .instructions
+                    .iter()
+                    .any(|instr| matches!(instr, Instruction::Not)),
+                "a branch should not negate its own test in {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn stdlib_wrapper_calls_lower_to_the_native_directly() {
+        let result = compile_with_prelude(
+            "let sqrt = |x| __monocurl__native__ sqrt(x)",
+            "let y = sqrt(16)",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        assert!(
+            calls_native(section, "sqrt"),
+            "a plain wrapper call should reach the native directly"
+        );
+        assert!(
+            !invokes_lambda(section),
+            "a plain wrapper call should not build a call frame"
+        );
+    }
+
+    #[test]
+    fn shadowed_stdlib_wrapper_keeps_the_user_definition() {
+        let result = compile_with_prelude(
+            "let sqrt = |x| __monocurl__native__ sqrt(x)",
+            "let sqrt = |x| x\nlet y = sqrt(16)",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        assert!(
+            !calls_native(section, "sqrt"),
+            "a shadowing definition must not be replaced by the native"
+        );
+        assert!(invokes_lambda(section));
+    }
+
+    #[test]
+    fn labeled_wrapper_calls_keep_their_live_invocation() {
+        let result = compile_with_prelude(
+            "let sqrt = |x| __monocurl__native__ sqrt(x)",
+            "let y = sqrt(x: 16)",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        assert!(
+            !calls_native(section, "sqrt"),
+            "a labeled call stays a live invocation so its argument can be edited"
+        );
+        assert!(invokes_lambda(section));
+    }
+
+    #[test]
+    fn wrappers_with_defaults_are_not_plain_aliases() {
+        let result = compile_with_prelude(
+            "let clamp = |x, low = 0| __monocurl__native__ min(x, low)",
+            "let y = clamp(16)",
+        );
+        no_errors(&result);
+
+        assert!(invokes_lambda(root_slide_section(&result)));
+    }
+
+    #[test]
+    fn wrappers_that_reorder_their_parameters_are_not_aliases() {
+        let result = compile_with_prelude(
+            "let flipped = |a, b| __monocurl__native__ min(b, a)",
+            "let y = flipped(1, 2)",
+        );
+        no_errors(&result);
+
+        assert!(invokes_lambda(root_slide_section(&result)));
     }
 
     #[test]
@@ -594,20 +766,19 @@ mod test {
         let result = test_compile(&[bundle0, bundle1]);
         no_errors(&result);
 
-        let list_len_idx = registry().index_of("list_len") as u16;
         let section = root_slide_section(&result);
         assert!(
             section
                 .instructions
                 .iter()
-                .any(|instr| matches!(instr, Instruction::Subscript { .. })),
+                .any(|instr| matches!(instr, Instruction::SubscriptLocal { .. })),
             "shadowed range should keep the generic list iteration path"
         );
         assert!(
-            section.instructions.iter().any(|instr| matches!(
-                instr,
-                Instruction::NativeInvoke { index, .. } if *index == list_len_idx
-            )),
+            section
+                .instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::ContainerLen { .. })),
             "shadowed range should still measure the produced list"
         );
     }
@@ -725,6 +896,24 @@ mod test {
     }
 
     #[test]
+    fn references_resolve_to_shadowing_lambda_parameters() {
+        let src = "let fun = |value| value\nlet arg = |fun| {\n    fun\n}";
+        let result = compile_src(src);
+        let reference_start = src.rfind("fun").unwrap();
+        let parameter_start = src.find("|fun|").unwrap() + 1;
+
+        let reference = result
+            .root_references
+            .iter()
+            .find(|reference| reference.span.start == reference_start)
+            .expect("expected lambda-body reference");
+        assert_eq!(
+            reference.symbol.declaration_span,
+            Some(parameter_start..parameter_start + 3)
+        );
+    }
+
+    #[test]
     fn test_no_warning_for_expression_statement_with_assignment() {
         let result = compile_src("var x = 0\nx = 1");
         assert!(
@@ -799,6 +988,7 @@ mod test {
     }
 
     // `var x = 0\nx = 1` — covers PushLvalue, Assign, and Pop for expression statements.
+    // a section's top scope is shared with every other section, so x keeps its slot.
     #[test]
     fn test_bytecode_var_assign() {
         let result = compile_stmts(vec![
@@ -926,6 +1116,51 @@ mod test {
             vec![true, false, true]
         );
         assert_eq!(sec.lambda_prototypes[0].arg_names, vec!["x", "y", "z"]);
+    }
+
+    #[test]
+    fn nested_locals_skip_the_heap_unless_something_references_them() {
+        // `sum` and `step` are scoped to the lambda body, so nothing outside it
+        // can write through them; `acc` is appended to, which needs a slot
+        let result = compile_src(
+            "
+            let f = |n| {
+                var sum = 0
+                let step = 2
+                sum = sum + step
+                return sum
+            }
+            let g = |n| {
+                var acc = []
+                acc .= n
+                return acc
+            }
+        ",
+        );
+        no_errors(&result);
+
+        let sec = root_slide_section(&result);
+        let conversions = sec
+            .instructions
+            .iter()
+            .filter(|instr| matches!(instr, Instruction::ConvertVar { .. }))
+            .count();
+        // the two top-level `let f` / `let g`, plus `acc`
+        assert_eq!(conversions, 3, "only `acc` should be promoted inside a body");
+        assert_eq!(
+            sec.instructions
+                .iter()
+                .filter(|instr| matches!(instr, Instruction::BindLocal))
+                .count(),
+            2,
+            "`sum` and `step` should bind in place"
+        );
+        assert!(
+            sec.instructions
+                .iter()
+                .any(|instr| matches!(instr, Instruction::StoreLocal { .. })),
+            "`sum` should be written through its stack entry"
+        );
     }
 
     #[test]

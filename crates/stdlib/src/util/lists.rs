@@ -13,13 +13,13 @@ use crate::read_float;
 use super::helpers::{compare_values, invoke_key_lambda, list_depth, read_int, read_rc_list};
 
 #[stdlib_func]
-pub async fn list_len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn list_len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_cached_wrappers_rec()
+        .elide_cached_wrappers()
     {
         Value::List(list) => Ok(Value::Integer(list.len() as i64)),
         Value::Map(_) => Err(ExecutorError::invalid_operation(
@@ -30,13 +30,13 @@ pub async fn list_len(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let n = match executor
         .state
         .stack(stack_idx)
         .peek()
         .clone()
-        .elide_cached_wrappers_rec()
+        .elide_cached_wrappers()
     {
         Value::List(list) => list.len(),
         Value::Map(map) => map.len(),
@@ -52,7 +52,7 @@ pub async fn len(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 }
 
 #[stdlib_func]
-pub async fn depth(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn depth(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let value = executor
         .state
         .stack(stack_idx)
@@ -168,7 +168,7 @@ pub async fn sample_clopen(
 }
 
 #[stdlib_func]
-pub async fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn reverse(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)
@@ -233,7 +233,7 @@ pub async fn sort(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 }
 
 #[stdlib_func]
-pub async fn zip(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn zip(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let u = read_rc_list(executor, stack_idx, -2, "u")?;
     let v = read_rc_list(executor, stack_idx, -1, "v")?;
     let elements = u
@@ -252,7 +252,7 @@ pub async fn zip(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 }
 
 #[stdlib_func]
-pub async fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -1, "v")?;
     let elements = list
         .elements()
@@ -270,7 +270,7 @@ pub async fn enumerate(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
     Ok(Value::List(executor::value::container::List::new_with(
@@ -279,7 +279,7 @@ pub async fn take(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 }
 
 #[stdlib_func]
-pub async fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let list = read_rc_list(executor, stack_idx, -2, "v")?;
     let n = read_int(executor, stack_idx, -1, "n")?.max(0) as usize;
     Ok(Value::List(executor::value::container::List::new_with(
@@ -288,7 +288,7 @@ pub async fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 }
 
 #[stdlib_func]
-pub async fn list_subset(
+pub fn list_subset(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

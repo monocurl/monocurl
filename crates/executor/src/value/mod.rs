@@ -63,3 +63,21 @@ pub enum Value {
     /// non-owning lvalue reference — pushed via PushLvalue.
     WeakLvalue(VWeak),
 }
+
+
+#[cfg(test)]
+mod layout {
+    use super::*;
+
+    /// `Value` is copied constantly, so its size is a load-bearing property:
+    /// `List` is stored inline, which saves an allocation per list, and `Map` is
+    /// not, because its table would more than double this. The exact figure
+    /// depends on which smallvec features the build resolves to, so this guards
+    /// against bloat rather than pinning a number.
+    #[test]
+    fn value_stays_small() {
+        assert!(std::mem::size_of::<Value>() <= 32);
+        assert!(std::mem::size_of::<List>() <= 32);
+        assert_eq!(std::mem::size_of::<Map>(), 8);
+    }
+}

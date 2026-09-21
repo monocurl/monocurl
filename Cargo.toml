@@ -18,6 +18,7 @@ members = [
   "crates/rust_scene",
   "crates/rust_scene_macros",
   "crates/runtime",
+  "crates/scene_harness",
   "crates/stdlib",
   "crates/stdlib-macros",
   "crates/structs",
@@ -35,7 +36,7 @@ log = "0.4.25"
 env_logger = "0.11"
 arrayvec = "0.7.6"
 arraydeque = "0.5.1"
-smallvec = "1.15.1"
+smallvec = { version = "1.15.1", features = ["union"] }
 unicode-segmentation = "1.12.0"
 open = "5.3.2"
 dirs = "5.0.0"
@@ -53,6 +54,7 @@ wasm-bindgen-futures = "0.4"
 smol = "2.0.2"
 notify-debouncer-full = "0.7.0"
 itertools = "0.14.0"
+rustc-hash = "2.1"
 wide = "0.7"
 cc = "1.2.41"
 tiny-skia-path = "0.11.4"
@@ -70,6 +72,7 @@ tectonic = { version = "0.16.9", default-features = false, features = [
   "geturl-reqwest",
 ] }
 tectonic_bundles = { version = "0.4.1", default-features = false }
+trybuild = "1"
 # keep xetex on the last engine that works with tectonic_xetex_layout 0.2.x;
 # layout 0.3.x conflicts with gpui's fontconfig stack.
 tectonic_engine_xetex = "=0.4.4"
@@ -101,6 +104,7 @@ renderer = { path = "crates/renderer" }
 rust_scene = { path = "crates/rust_scene" }
 rust_scene_macros = { path = "crates/rust_scene_macros" }
 runtime = { path = "crates/runtime" }
+scene_harness = { path = "crates/scene_harness" }
 inventory = "0.3"
 stdlib-macros = { path = "crates/stdlib-macros" }
 stdlib = { path = "crates/stdlib", default-features = false }

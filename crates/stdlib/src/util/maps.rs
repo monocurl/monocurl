@@ -34,7 +34,7 @@ fn map_from(executor: &Executor, stack_idx: usize, index: i32) -> Result<Map, Ex
 }
 
 #[stdlib_func]
-pub async fn map_len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn map_len(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     match executor
         .state
         .stack(stack_idx)
@@ -48,13 +48,13 @@ pub async fn map_len(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 }
 
 #[stdlib_func]
-pub async fn map_keys(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn map_keys(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let m = map_from(executor, stack_idx, -1)?;
     Ok(list_from(m.insertion_order.iter().map(key_to_value)))
 }
 
 #[stdlib_func]
-pub async fn map_values(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn map_values(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let m = map_from(executor, stack_idx, -1)?;
     Ok(Value::List(executor::value::container::List::new_with(
         m.iter().map(|(_, v)| v.clone()),
@@ -62,7 +62,7 @@ pub async fn map_values(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn map_items(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn map_items(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let m = map_from(executor, stack_idx, -1)?;
     Ok(Value::List(executor::value::container::List::new_with(
         m.iter().map(|(k, v)| {

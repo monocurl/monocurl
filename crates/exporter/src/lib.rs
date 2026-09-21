@@ -20,7 +20,7 @@ use executor::{
     time::Timestamp,
 };
 use image::ImageFormat;
-use lexer::{lexer::Lexer, token::Token};
+use lexer::lex_rope_from_str;
 use mp4::{
     AvcConfig, Bytes, FourCC, MediaConfig, Mp4Config, Mp4Sample, Mp4Writer, TrackConfig, TrackType,
 };
@@ -37,7 +37,7 @@ use parser::{
 };
 use renderer::{RenderOptions, RenderSize, Renderer, RgbaImage, SceneRenderData};
 use stdlib::registry::registry;
-use structs::rope::{Attribute, RLEData, Rope, TextAggregate};
+use structs::rope::{Rope, TextAggregate};
 
 pub const DEFAULT_EXPORT_SIZE: RenderSize = RenderSize::new(1920, 1080);
 pub const DEFAULT_VIDEO_FPS: u32 = 60;
@@ -1251,15 +1251,6 @@ fn video_qp_range(size: RenderSize) -> QpRange {
     }
 }
 
-fn lex_rope_from_str(text: &str) -> Rope<Attribute<Token>> {
-    Rope::default().replace_range(
-        0..0,
-        Lexer::new(text.chars()).map(|(attribute, codeunits)| RLEData {
-            codeunits,
-            attribute,
-        }),
-    )
-}
 
 fn emit_progress(
     on_progress: &mut dyn FnMut(ExportProgress),

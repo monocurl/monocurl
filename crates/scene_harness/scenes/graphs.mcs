@@ -1,0 +1,36 @@
+# graphing constructors
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+mesh axis =
+    axis_style{"x", -3, 3}
+    axis_style{"y", -2, 2}
+    Axis2d()
+
+mesh curve = stroke{color: BLUE} ExplicitFunc(
+    f: |x| sin(x),
+    x_min_max_samples: [-3, 3, 64]
+)
+
+mesh spiral = stroke{color: RED} ParametricFunc(
+    f: |t| [cos(4 * PI * t) * t, sin(4 * PI * t) * t, 0],
+    t_min_max_samples: [0, 1, 64]
+)
+
+mesh line = NumberLine(min: -3, max: 3, tick_spacing: 1)
+
+slide "Draw"
+    play Set()
+
+slide "Reshape"
+    curve.f = |x| cos(x)
+    play Trans(1, [&curve])
+
+slide "Extend"
+    spiral.t_min_max_samples = [0, 1.5, 64]
+    play Lerp(1)

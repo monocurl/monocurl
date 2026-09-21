@@ -56,6 +56,15 @@ pub enum Instruction {
     ConvertMesh {
         name_index: u32,
     },
+    // a `let`/`var` local that nothing takes a reference into stays in its stack
+    // entry instead of a heap slot. BindLocal keeps ConvertVar's rejection of
+    // stateful initializers without allocating; StoreLocal writes through to the
+    // entry. see the compiler's `unboxing` module for when these are emitted
+    BindLocal,
+    StoreLocal {
+        stack_delta: i32,
+    },
+
     ConvertVar {
         allow_stateful: bool,
     },
@@ -121,6 +130,22 @@ pub enum Instruction {
         section: u16,
         to: u32,
     },
+    // pops TOS; jumps when falsy. every loop and conditional branches on the
+    // negation of its test, so emitting `Not` first would cost an instruction
+    // per iteration
+    JumpIfFalse {
+        section: u16,
+        to: u32,
+    },
+    // the whole header of a `for i in range(a, b)` loop: reads the counter at
+    // `current_delta` and the bound just above it, and jumps when the counter has
+    // reached the bound. saves the two copies, the compare and the branch that the
+    // header would otherwise run on every iteration. always targets the enclosing
+    // section, since a loop never spans two
+    RangeLoopTest {
+        current_delta: i16,
+        to: u32,
+    },
     Return {
         stack_delta: i32,
     },
@@ -146,6 +171,18 @@ pub enum Instruction {
 
     Subscript {
         mutable: bool,
+    },
+    /// pops the index from the top of stack and reads the container held at
+    /// `stack_delta` in place, pushing the selected element. unlike a copy
+    /// followed by `Subscript` this never duplicates the container, which is what
+    /// keeps iteration linear
+    SubscriptLocal {
+        stack_delta: i32,
+    },
+    /// pushes the length of the container held at `stack_delta`, reading it in
+    /// place
+    ContainerLen {
+        stack_delta: i32,
     },
     Attribute {
         mutable: bool,

@@ -1,0 +1,62 @@
+# if / for / while / break / continue
+
+import std.util
+import std.math
+
+var classified = []
+for (n in range(0, 10)) {
+    if (mod(n, 3) == 0) {
+        classified .= "fizz"
+    }
+    else if (mod(n, 3) == 1) {
+        classified .= "one"
+    }
+    else {
+        classified .= n
+    }
+}
+print classified
+
+var first_over = nil
+for (n in range(0, 100)) {
+    if (n * n > 300) {
+        first_over = n
+        break
+    }
+}
+print first_over
+
+var evens = []
+for (n in range(0, 12)) {
+    if (mod(n, 2) == 1) {
+        continue
+    }
+    evens .= n
+}
+print evens
+
+var countdown = 5
+var steps = []
+while (countdown > 0) {
+    steps .= countdown
+    countdown = countdown - 1
+}
+print steps
+
+var nested = []
+for (row in range(0, 3)) {
+    for (col in range(0, 3)) {
+        if (col == row) {
+            continue
+        }
+        nested .= [row, col]
+    }
+}
+print nested
+
+let block_value = block {
+    let a = 4
+    let b = 6
+    return a * b
+}
+print block_value

@@ -61,7 +61,7 @@ pub async fn lagged_map(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn anim_time_scale(
+pub fn anim_time_scale(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -76,7 +76,7 @@ pub async fn anim_time_scale(
 }
 
 #[stdlib_func]
-pub async fn anim_delayed(
+pub fn anim_delayed(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -91,7 +91,7 @@ pub async fn anim_delayed(
 }
 
 #[stdlib_func]
-pub async fn anim_with_rate(
+pub fn anim_with_rate(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

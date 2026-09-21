@@ -1,0 +1,40 @@
+# stdlib wrappers are lowered to direct native calls; make sure that stays
+# invisible to the language
+
+import std.util
+import std.math
+
+print [sqrt(16), cos(0), sin(0), abs(-3), floor(2.7), ceil(2.1)]
+
+# shadowing a stdlib name must win over the stdlib definition
+let cos = |x| "shadowed"
+print cos(0)
+
+let inner = || {
+    let sqrt = |x| x
+    return sqrt(16)
+}
+print inner()
+
+# used as a value rather than called directly
+let applied = map([1, 4, 9], sqrt)
+print applied
+
+let alias = sqrt
+print alias(25)
+
+let apply = |f, x| f(x)
+print apply(sqrt, 36)
+
+# wrappers that take defaults are not plain aliases
+print [log(100, 10), log2(8), log10(1000)]
+
+# a wrapper called with a label stays a live invocation
+var labeled = sqrt(x: 49)
+print labeled
+labeled.x = 81
+print labeled
+
+# nested and repeated calls
+print sqrt(sqrt(16))
+print [mod(7, 3), min(2, 5), max(2, 5), gcd(12, 18)]

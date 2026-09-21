@@ -165,7 +165,7 @@ pub(super) fn compare_values(lhs: &Value, rhs: &Value) -> Result<Ordering, Execu
 }
 
 #[stdlib_func]
-pub async fn lambda_fallthrough_error(
+pub fn lambda_fallthrough_error(
     _executor: &mut Executor,
     _stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

@@ -89,6 +89,11 @@ impl Compiler {
                 }
                 match sym.var_type {
                     VariableType::Reference => self.emit_copy_ref(delta, span.clone()),
+                    // only reachable once an error has already been reported --
+                    // a writable unboxed variable is lowered by compile_assign,
+                    // and everything else the scan keeps in a slot. emit a read
+                    // rather than a reference so the bytecode stays well formed
+                    _ if sym.unboxed => self.emit_symbol_copy(&sym, span.clone()),
                     _ => self.emit_lvalue(delta, span.clone()),
                 }
             }
@@ -247,10 +252,44 @@ impl Compiler {
     }
 
     pub(super) fn compile_assign(&mut self, b: &BinaryOperator, span: &Span8) {
+        // writing a whole unboxed variable needs no reference to it: evaluate the
+        // value and store straight into its stack entry. the value stays on the
+        // stack, which is the shape Assign leaves behind
+        if let Some(position) = self.unboxed_assign_target(&b.lhs.1, &b.lhs.0) {
+            self.compile_val(&b.rhs.1, &b.rhs.0);
+            let stack_delta = self.stack_delta(position);
+            self.emit(Instruction::StoreLocal { stack_delta }, span.clone());
+            return;
+        }
+
         self.compile_expr(true, None, &b.lhs.1, &b.lhs.0);
         self.compile_val(&b.rhs.1, &b.rhs.0);
         self.emit(Instruction::Assign, span.clone());
         self.dec_stack(1);
+    }
+
+    /// the stack position of a bare identifier that names an unboxed variable and
+    /// may be written, if this target is one
+    fn unboxed_assign_target(&mut self, lhs: &Expression, span: &Span8) -> Option<usize> {
+        let Expression::IdentifierReference(ir) = lhs else {
+            return None;
+        };
+        if !matches!(ir, IdentifierReference::Value(_)) {
+            return None;
+        }
+
+        let name = ident_ref_name(ir);
+        let symbol = self.lookup(name, None, None)?;
+        // a `let` is reported as immutable by the general path, which this must
+        // not skip past
+        if !symbol.unboxed || symbol.var_type != VariableType::Var {
+            return None;
+        }
+
+        // the general path would have recorded this read for the editor's
+        // cross-references; taking the fast path must not lose it
+        self.lookup(name, Some(span.clone()), None);
+        Some(symbol.stack_position)
     }
 
     pub(super) fn compile_dot_assign(&mut self, b: &BinaryOperator, span: &Span8) {
@@ -430,6 +469,28 @@ impl Compiler {
             for (arg_position, (label, arg)) in l.arguments.1.iter().enumerate() {
                 self.validate_reference_argument_syntax(&args, arg_position, label.as_ref(), arg);
             }
+        }
+
+        // a plain call of a stdlib wrapper such as cos(x) is lowered straight to
+        // its native, skipping the lambda value and the call frame
+        if !labeled
+            && !stateful
+            && let Some(alias) = self.native_alias_for_expr(&l.lambda.1)
+            && u32::from(alias.arg_count) == num_args
+        {
+            for (_, arg) in &l.arguments.1 {
+                self.compile_val(&arg.1, &arg.0);
+            }
+            self.emit(
+                Instruction::NativeInvoke {
+                    index: alias.index,
+                    arg_count: alias.arg_count,
+                },
+                span.clone(),
+            );
+            self.dec_stack(num_args as usize);
+            self.inc_stack();
+            return;
         }
 
         // doing arguments first is useful for stack

@@ -1,6 +1,6 @@
 [package]
 name = "monocurl"
-version = "0.1.0"
+version = "0.3.4"
 edition.workspace = true
 
 [package.metadata.bundle]

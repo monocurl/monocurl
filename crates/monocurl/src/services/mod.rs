@@ -10,7 +10,7 @@ use crate::{
         diagnostics::Diagnostic,
         execution_state::ExecutionState,
         textual_state::{
-            AutoCompleteItem, Cursor, LexData, ParameterPositionHint, SlideInfo,
+            AutoCompleteItem, Cursor, LexData, ParameterPositionHint, ResolvedReference, SlideInfo,
             StaticAnalysisData, TextualState, TransactionSummary,
         },
     },
@@ -83,6 +83,10 @@ pub enum ServiceManagerMessage {
     },
     UpdateStaticAnalysisRope {
         analysis_rope: Rope<Attribute<StaticAnalysisData>>,
+        version: usize,
+    },
+    UpdateResolvedReferences {
+        references: Vec<ResolvedReference>,
         version: usize,
     },
     UpdateCompileDiagnostics {
@@ -234,6 +238,16 @@ impl ServiceManager {
             } => {
                 self.textual_state.update(cx, |state, cx| {
                     if state.set_static_analysis_rope(analysis_rope, version) {
+                        cx.notify();
+                    }
+                });
+            }
+            ServiceManagerMessage::UpdateResolvedReferences {
+                references,
+                version,
+            } => {
+                self.textual_state.update(cx, |state, cx| {
+                    if state.set_resolved_references(references, version) {
                         cx.notify();
                     }
                 });

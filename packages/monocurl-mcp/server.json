@@ -3,12 +3,12 @@
   "name": "io.github.enigmurl/monocurl-mcp",
   "title": "Monocurl MCP",
   "description": "Docs for the Monocurl animation language, standard library, examples, and CLI usage.",
-  "version": "0.2.9",
+  "version": "0.3.4",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@enigmurl/monocurl-mcp",
-      "version": "0.2.9",
+      "version": "0.3.4",
       "transport": {
         "type": "stdio"
       }

@@ -1,5 +1,6 @@
 use std::cell::Cell;
 
+
 use crate::{
     error::ExecutorError,
     executor::Executor,
@@ -8,7 +9,7 @@ use crate::{
 
 use super::{
     Value,
-    container::Map,
+    container::{List, Map},
     invoked_function::InvokedFunction,
     invoked_operator::InvokedOperator,
     stateful::{Stateful, StatefulNode, reset_stateful_cache, to_follower_stateful},
@@ -31,15 +32,32 @@ impl AttrMutation {
     }
 }
 
+/// eliding is also what detaches a copy: every element gets a fresh slot, so a
+/// later in-place write through one copy is invisible through the other. sharing
+/// slots that look like they need no elision would alias the two, and for a
+/// self-assignment such as `x[0] = x` it makes the list reference itself
+fn read_slot(key: HeapKey) -> Value {
+    with_heap(|heap| heap.get(key).clone())
+}
+
 fn elided_heap_ref_value(value_ref: &VRc) -> VRc {
-    let key = value_ref.key();
-    let val = with_heap(|h| h.get(key).clone());
-    let value = if val.may_need_lvalue_leader_elision() {
-        val.elide_lvalue_leader_rec()
-    } else {
-        val
+    VRc::new(read_slot(value_ref.key()).elide_lvalue_leader_rec())
+}
+
+/// borrow a wrapper's cached value in place; falls back to the wrapper itself
+/// when nothing has been cached yet
+fn with_cached_value<R>(
+    cell: &Cell<Option<Box<Value>>>,
+    fallback: &Value,
+    inspect: impl FnOnce(&Value) -> R,
+) -> R {
+    let cached = cell.take();
+    let result = match &cached {
+        Some(value) => value.with_elided_cached_wrappers(inspect),
+        None => inspect(fallback),
     };
-    VRc::new(value)
+    cell.set(cached);
+    result
 }
 
 fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
@@ -49,9 +67,9 @@ fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
     cloned
 }
 
+/// detaches for the same reason [`elided_heap_ref_value`] does
 fn cached_elided_heap_ref_value(value_ref: &VRc) -> VRc {
-    let key = value_ref.key();
-    let value = with_heap(|h| h.get(key).clone()).elide_cached_wrappers_rec();
+    let value = with_heap(|heap| heap.get(value_ref.key()).clone()).elide_cached_wrappers_rec();
     VRc::new(value)
 }
 
@@ -66,25 +84,27 @@ impl Value {
         }
     }
 
-    #[inline(always)]
-    fn may_need_lvalue_leader_elision(&self) -> bool {
-        self.is_lvalue() || matches!(self, Value::List(_) | Value::Map(_) | Value::Leader(_))
-    }
-
-    /// creates owned copy of self which elides lvalues and leaders recursively
-    pub fn elide_lvalue_leader_rec(self) -> Value {
+    /// creates owned copy of self which elides lvalues and leaders recursively.
+    /// takes `&self` so that reading through a variable does not first copy the
+    /// wrapper it is about to discard
+    pub fn elide_lvalue_leader_rec(&self) -> Value {
         match self {
-            Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()).elide_lvalue_leader_rec(),
-            Value::WeakLvalue(vweak) => {
-                with_heap(|h| h.get(vweak.key()).clone()).elide_lvalue_leader_rec()
+            // scalars are by far the most common case and copy without touching
+            // the heap or the generic clone glue
+            Value::Nil => Value::Nil,
+            Value::Integer(n) => Value::Integer(*n),
+            Value::Float(f) => Value::Float(*f),
+            Value::Complex { re, im } => Value::Complex { re: *re, im: *im },
+            // the slot is read out before recursing: eliding a container
+            // allocates, and allocating re-borrows the heap
+            Value::Lvalue(reference) => read_slot(reference.key()).elide_lvalue_leader_rec(),
+            Value::WeakLvalue(reference) => read_slot(reference.key()).elide_lvalue_leader_rec(),
+            Value::Leader(leader) => {
+                read_slot(leader.leader_rc.key()).elide_lvalue_leader_rec()
             }
-            Value::Leader(ref leader) => {
-                with_heap(|h| h.get(leader.leader_rc.key()).clone()).elide_lvalue_leader_rec()
-            }
-            Value::List(mut list) => {
-                list.elements = list.elements.iter().map(elided_heap_ref_value).collect();
-                Value::List(list)
-            }
+            Value::List(list) => Value::List(List::new_with(
+                list.elements().iter().map(elided_heap_ref_value),
+            )),
             Value::Map(map) => {
                 let mut out = Map::new();
                 for key in &map.insertion_order {
@@ -95,7 +115,7 @@ impl Value {
                 }
                 Value::Map(out)
             }
-            other => other,
+            other => other.clone(),
         }
     }
 
@@ -105,6 +125,62 @@ impl Value {
             Value::Lvalue(vrc) => with_heap(|h| h.get(vrc.key()).clone()),
             Value::WeakLvalue(vweak) => with_heap(|h| h.get(vweak.key()).clone()),
             other => other,
+        }
+    }
+
+    /// inspect the value these wrapper layers resolve to without copying it out
+    /// of its heap slot. containers can be arbitrarily large, so read-only
+    /// operations on them (length, indexing) go through here rather than cloning
+    /// the container first.
+    ///
+    /// `inspect` runs while the heap is borrowed, so it must not allocate heap
+    /// slots; reading and cloning individual values is fine.
+    pub fn with_elided_cached_wrappers<R>(&self, inspect: impl FnOnce(&Value) -> R) -> R {
+        match self {
+            Value::Lvalue(reference) => {
+                with_heap(|heap| heap.get(reference.key()).with_elided_cached_wrappers(inspect))
+            }
+            Value::WeakLvalue(reference) => {
+                with_heap(|heap| heap.get(reference.key()).with_elided_cached_wrappers(inspect))
+            }
+            Value::Leader(leader) => with_heap(|heap| {
+                heap.get(leader.leader_rc.key())
+                    .with_elided_cached_wrappers(inspect)
+            }),
+            Value::InvokedFunction(invoked) => {
+                with_cached_value(&invoked.cache.0, self, inspect)
+            }
+            Value::InvokedOperator(invoked) => {
+                with_cached_value(&invoked.cache.cached_result, self, inspect)
+            }
+            concrete => inspect(concrete),
+        }
+    }
+
+    /// resolve wrapper layers (lvalues, leaders, already-cached invocations) around
+    /// a value without descending into container elements. callers that only need
+    /// to see the container itself should prefer this: the recursive variant
+    /// rebuilds every element slot, which makes operations like reading a length
+    /// cost as much as copying the whole container.
+    pub fn elide_cached_wrappers(self) -> Value {
+        let mut value = self.elide_lvalue();
+        loop {
+            value = match value {
+                Value::Leader(leader) => {
+                    with_heap(|h| h.get(leader.leader_rc.key()).clone()).elide_lvalue()
+                }
+                Value::InvokedFunction(invoked) => match clone_cached_value(&invoked.cache.0) {
+                    Some(cached) => cached.elide_lvalue(),
+                    None => return Value::InvokedFunction(invoked),
+                },
+                Value::InvokedOperator(invoked) => {
+                    match clone_cached_value(&invoked.cache.cached_result) {
+                        Some(cached) => cached.elide_lvalue(),
+                        None => return Value::InvokedOperator(invoked),
+                    }
+                }
+                other => return other,
+            };
         }
     }
 

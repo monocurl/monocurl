@@ -64,17 +64,7 @@ impl Executor {
         // mark no longer unplayed
 
         while let Some(&stack_idx) = self.state.execution_heads.first() {
-            let result = loop {
-                self.tick_yielder().await;
-
-                let r = self.execute_one(stack_idx).await;
-                match r {
-                    ExecSingle::Continue => {}
-                    other => break other,
-                }
-            };
-
-            match result {
+            match self.run_until_break(stack_idx).await {
                 ExecSingle::Play => {}
                 ExecSingle::EndOfHead => {}
                 ExecSingle::Error(e) => {

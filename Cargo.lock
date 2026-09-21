@@ -2623,6 +2623,7 @@ dependencies = [
 name = "geo"
 version = "0.1.0"
 dependencies = [
+ "rustc-hash 2.1.2",
  "wide",
 ]
 
@@ -4853,7 +4854,7 @@ dependencies = [
 
 [[package]]
 name = "monocurl"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "bytecode",
@@ -6627,6 +6628,7 @@ dependencies = [
  "image",
  "log",
  "naga",
+ "rustc-hash 2.1.2",
 ]
 
 [[package]]
@@ -6828,6 +6830,7 @@ name = "rust_scene"
 version = "0.1.0"
 dependencies = [
  "rust_scene_macros",
+ "trybuild",
 ]
 
 [[package]]
@@ -7011,6 +7014,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "scene_harness"
+version = "0.1.0"
+dependencies = [
+ "compiler",
+ "executor",
+ "geo",
+ "lexer",
+ "parser",
+ "renderer",
+ "smol",
+ "stdlib",
+ "structs",
 ]
 
 [[package]]
@@ -7923,6 +7941,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "target-triple"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3a6bfce3d99adfa72d24750a61f782f3036a81e7f86d8841ee1326deaebd171"
+
+[[package]]
 name = "tectonic"
 version = "0.16.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8778,6 +8802,21 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "trybuild"
+version = "1.0.120"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e605bf6b39357663d8ba4e984f8be8da8df6bb32e81031d6889024ea8fd68e4"
+dependencies = [
+ "glob",
+ "serde",
+ "serde_derive",
+ "serde_json",
+ "target-triple",
+ "termcolor",
+ "toml 1.1.2+spec-1.1.0",
+]
 
 [[package]]
 name = "ttf-parser"

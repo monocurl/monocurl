@@ -8,7 +8,7 @@ use crate::{
     },
 };
 
-use super::{ExecSingle, Executor};
+use super::{ExecSingle, Executor, ops::resolved_numeric};
 
 fn follow_heap_lvalues(mut key: HeapKey) -> (HeapKey, Value) {
     let mut value = with_heap(|h| h.get(key).clone());
@@ -17,6 +17,28 @@ fn follow_heap_lvalues(mut key: HeapKey) -> (HeapKey, Value) {
         value = with_heap(|h| h.get(key).clone());
     }
     (key, value)
+}
+
+/// walk lvalue indirection down to the slot that actually holds the value,
+/// without copying anything along the way
+fn follow_heap_lvalue_key(mut key: HeapKey) -> HeapKey {
+    while let Some(next_key) = with_heap(|heap| heap.get(key).as_lvalue_key()) {
+        key = next_key;
+    }
+    key
+}
+
+/// append to the list living in `key` in place. the element is allocated before
+/// the slot is borrowed, because allocating reborrows the heap
+fn append_to_list_slot(key: HeapKey, element: Value) -> Result<(), ExecutorError> {
+    let element = VRc::new(element);
+    with_heap_mut(|heap| match &mut *heap.get_mut(key) {
+        Value::List(list) => {
+            list.elements.push(element);
+            Ok(())
+        }
+        other => Err(ExecutorError::type_error("list", other.type_name())),
+    })
 }
 
 fn retained_lvalue(key: HeapKey) -> Value {
@@ -56,15 +78,21 @@ impl Executor {
             None => return ExecSingle::Error(ExecutorError::CannotAssignTo(lhs.type_name())),
         };
 
-        let (key, target) = follow_heap_lvalues(key);
+        // peek at the target's shape rather than copying it out: assigning to a
+        // list-valued variable would otherwise duplicate the whole list first
+        let key = follow_heap_lvalue_key(key);
+        let leader = with_heap(|heap| match &*heap.get(key) {
+            Value::Leader(leader) => Some((leader.leader_rc.key(), leader.kind)),
+            _ => None,
+        });
 
-        match target {
-            Value::Leader(leader) => {
+        match leader {
+            Some((leader_key, kind)) => {
                 let rhs = rhs.elide_lvalue_leader_rec();
-                if matches!(rhs, Value::Stateful(_)) && leader.kind != LeaderKind::Mesh {
+                if matches!(rhs, Value::Stateful(_)) && kind != LeaderKind::Mesh {
                     return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
-                heap_replace(leader.leader_rc.key(), rhs);
+                heap_replace(leader_key, rhs);
                 with_heap_mut(|h| {
                     if let Value::Leader(l) = &mut *h.get_mut(key) {
                         l.last_modified_stack = Some(stack_idx);
@@ -72,7 +100,7 @@ impl Executor {
                     }
                 });
             }
-            _ => {
+            None => {
                 if matches!(rhs, Value::Stateful(_)) {
                     return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
                 }
@@ -130,47 +158,49 @@ impl Executor {
         };
 
         let rhs = rhs.elide_lvalue_leader_rec();
-        let (key, base_val) = follow_heap_lvalues(key);
+        // appending to a plain list is the common case and must stay O(1): copying
+        // the list out of its slot to push one element would make building a list
+        // quadratic in its length
+        let key = follow_heap_lvalue_key(key);
+        let is_plain_list = with_heap(|heap| matches!(&*heap.get(key), Value::List(_)));
 
-        let appended_key = match base_val {
-            Value::List(mut list) => {
-                if matches!(rhs, Value::Stateful(_)) {
-                    return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
-                }
-                list.elements.push(VRc::new(rhs));
-                heap_replace(key, Value::List(list));
-                key
+        let appended_key = if is_plain_list {
+            if matches!(rhs, Value::Stateful(_)) {
+                return ExecSingle::Error(ExecutorError::stateful_requires_mesh_assignment());
             }
-            Value::Leader(leader) => {
-                let (inner_key, inner_val) = follow_heap_lvalues(leader.leader_rc.key());
-
-                if matches!(rhs, Value::Stateful(_)) || matches!(inner_val, Value::Stateful(_)) {
-                    let new_stateful = match lift_append_to_stateful(inner_val, rhs) {
-                        Ok(v) => v,
-                        Err(e) => return ExecSingle::Error(e),
-                    };
-                    heap_replace(inner_key, new_stateful);
-                } else {
-                    let Value::List(mut list) = inner_val else {
-                        return ExecSingle::Error(ExecutorError::type_error(
-                            "list",
-                            inner_val.type_name(),
-                        ));
-                    };
-                    list.elements.push(VRc::new(rhs));
-                    heap_replace(inner_key, Value::List(list));
-                }
-
-                with_heap_mut(|h| {
-                    if let Value::Leader(l) = &mut *h.get_mut(key) {
-                        l.last_modified_stack = Some(stack_idx);
-                        l.leader_version += 1;
-                    }
-                });
-
-                inner_key
+            if let Err(error) = append_to_list_slot(key, rhs) {
+                return ExecSingle::Error(error);
             }
-            _ => return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name())),
+            key
+        } else {
+            let base_val = with_heap(|heap| heap.get(key).clone());
+            let Value::Leader(leader) = base_val else {
+                return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name()));
+            };
+
+            let inner_key = follow_heap_lvalue_key(leader.leader_rc.key());
+            let inner_is_stateful =
+                with_heap(|heap| matches!(&*heap.get(inner_key), Value::Stateful(_)));
+
+            if matches!(rhs, Value::Stateful(_)) || inner_is_stateful {
+                let inner_val = with_heap(|heap| heap.get(inner_key).clone());
+                let new_stateful = match lift_append_to_stateful(inner_val, rhs) {
+                    Ok(v) => v,
+                    Err(e) => return ExecSingle::Error(e),
+                };
+                heap_replace(inner_key, new_stateful);
+            } else if let Err(error) = append_to_list_slot(inner_key, rhs) {
+                return ExecSingle::Error(error);
+            }
+
+            with_heap_mut(|h| {
+                if let Value::Leader(l) = &mut *h.get_mut(key) {
+                    l.last_modified_stack = Some(stack_idx);
+                    l.leader_version += 1;
+                }
+            });
+
+            inner_key
         };
 
         self.state
@@ -179,6 +209,9 @@ impl Executor {
         ExecSingle::Continue
     }
 
+    /// resolve wrappers around a subscript base or index without descending into
+    /// container elements: only the element that is actually selected needs to be
+    /// elided, and deep-eliding the whole container makes indexing O(n)
     async fn read_subscript_value(&mut self, value: Value) -> Result<Value, ExecutorError> {
         let mut value = value.elide_lvalue();
         loop {
@@ -186,8 +219,129 @@ impl Executor {
                 Value::Leader(ref leader) => with_heap(|h| h.get(leader.leader_rc.key()).clone()),
                 Value::InvokedFunction(ref inv) => InvokedFunction::value(inv, self).await?,
                 Value::InvokedOperator(ref inv) => InvokedOperator::value(inv, self).await?,
+                other @ (Value::List(_) | Value::Map(_)) => return Ok(other),
                 other => return Ok(other.elide_cached_wrappers_rec()),
             };
+        }
+    }
+
+    /// the shape iteration actually produces: a plain integer index into a plain
+    /// list. resolved without suspending, so generic `for` loops stay in the
+    /// synchronous run
+    pub(super) fn try_subscript_local(
+        &mut self,
+        stack_idx: usize,
+        stack_delta: i32,
+    ) -> Option<ExecSingle> {
+        let stack = self.state.stack(stack_idx);
+        let Value::Integer(index) = resolved_numeric(stack.read_at(-1))? else {
+            return None;
+        };
+        let index = index as usize;
+
+        let element = stack
+            .read_at(stack_delta)
+            .with_elided_cached_wrappers(|resolved| match resolved {
+                Value::List(list) => match list.elements().get(index) {
+                    Some(element) => Some(Ok(with_heap(|h| h.get(element.key()).clone()))),
+                    None => Some(Err(ExecutorError::IndexOutOfBounds {
+                        index,
+                        len: list.len(),
+                    })),
+                },
+                _ => None,
+            })?;
+
+        self.state.stack_mut(stack_idx).pop();
+        Some(match element {
+            Ok(element) => {
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(element.elide_cached_wrappers_rec());
+                ExecSingle::Continue
+            }
+            Err(error) => ExecSingle::Error(error),
+        })
+    }
+
+    /// read the container living at `stack_delta` without copying it out of its
+    /// slot, then push the element selected by the index on top of stack
+    pub(super) async fn exec_subscript_local(
+        &mut self,
+        stack_idx: usize,
+        stack_delta: i32,
+    ) -> ExecSingle {
+        let index = self.state.stack_mut(stack_idx).pop();
+        let index = match self.read_subscript_value(index).await {
+            Ok(value) => value.elide_cached_wrappers_rec(),
+            Err(error) => return ExecSingle::Error(error),
+        };
+
+        let Value::Integer(idx) = index else {
+            return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
+        };
+        let idx = idx as usize;
+
+        // the index has been popped, so the container sits one slot higher than
+        // the delta the compiler emitted
+        let container_delta = stack_delta + 1;
+        let element = self
+            .state
+            .stack(stack_idx)
+            .read_at(container_delta)
+            .with_elided_cached_wrappers(|resolved| match resolved {
+                Value::List(list) => match list.elements().get(idx) {
+                    Some(element) => Ok(Some(with_heap(|h| h.get(element.key()).clone()))),
+                    None => Err(ExecutorError::IndexOutOfBounds {
+                        index: idx,
+                        len: list.len(),
+                    }),
+                },
+                // maps, strings, and invocations that have not been evaluated yet
+                // fall back to the general path
+                _ => Ok(None),
+            });
+
+        match element {
+            Ok(Some(element)) => {
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(element.elide_cached_wrappers_rec());
+                ExecSingle::Continue
+            }
+            Ok(None) => {
+                let container = self.state.stack(stack_idx).read_at(container_delta).clone();
+                let stack = self.state.stack_mut(stack_idx);
+                stack.push(container);
+                stack.push(Value::Integer(idx as i64));
+                self.exec_subscript(stack_idx, false).await
+            }
+            Err(error) => ExecSingle::Error(error),
+        }
+    }
+
+    /// push the length of the container living at `stack_delta`, reading it in place
+    pub(super) fn exec_container_len(&mut self, stack_idx: usize, stack_delta: i32) -> ExecSingle {
+        let len = self
+            .state
+            .stack(stack_idx)
+            .read_at(stack_delta)
+            .with_elided_cached_wrappers(|resolved| match resolved {
+                Value::List(list) => Ok(list.len()),
+                Value::Map(_) => Err(ExecutorError::invalid_operation(
+                    "cannot iterate over a map directly; use map_items(map) to iterate [key, value] pairs",
+                )),
+                other => Err(ExecutorError::type_error("list", other.type_name())),
+            });
+
+        match len {
+            Ok(len) => {
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::Integer(len as i64));
+                ExecSingle::Continue
+            }
+            Err(error) => ExecSingle::Error(error),
         }
     }
 
@@ -312,7 +466,8 @@ impl Executor {
                         len: list.elements.len(),
                     });
                 }
-                let val = with_heap(|h| h.get(list.elements[idx].key()).clone());
+                let val = with_heap(|h| h.get(list.elements[idx].key()).clone())
+                    .elide_cached_wrappers_rec();
                 self.state.stack_mut(stack_idx).push(val);
             }
             Value::Map(map) => {
@@ -322,7 +477,7 @@ impl Executor {
                 };
                 let val = map
                     .get(&key_hash)
-                    .map(|k| with_heap(|h| h.get(k.key()).clone()))
+                    .map(|k| with_heap(|h| h.get(k.key()).clone()).elide_cached_wrappers_rec())
                     .unwrap_or(Value::Nil);
                 self.state.stack_mut(stack_idx).push(val);
             }

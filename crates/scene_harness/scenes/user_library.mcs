@@ -1,0 +1,21 @@
+# importing a user library sitting next to the scene
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import lib.helpers
+
+print double(21)
+print poly([1, 2, 3], 2)
+print map([1, 2, 3], double)
+
+mesh ring = scaled_circle(2)
+
+slide "Show"
+    play Set()
+
+slide "Grow"
+    ring = scaled_circle(3)
+    play Lerp(1)

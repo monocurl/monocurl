@@ -1,0 +1,5 @@
+error: default arguments are not supported: every operator/constructor parameter is required and positional. For defaults, use the struct-literal form instead, e.g. `mesh.with(Wobble { amount: 0.2, ..Default::default() })`.
+  --> tests/ui/default_argument_rejected.rs:11:43
+   |
+11 | fn wobble(target: MeshValue, amount: f64, #[default(10.0)] frequency: f64) -> MeshValue {
+   |                                           ^^^^^^^^^^^^^^^^

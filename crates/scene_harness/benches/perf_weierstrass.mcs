@@ -1,0 +1,36 @@
+# interpreter-bound: a Monocurl-level function evaluated once per sample
+# this is the canonical "the interpreter is too slow" scene
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let n = 50
+let samples = 1025
+
+let ws = |a, b, x| {
+    var sum = 0
+    for (i in range(0, n)) {
+        sum = sum + (a ^ i) * cos((b ^ i) * x * PI)
+    }
+    return sum
+}
+
+let Weierstrass = |a, b|
+    stroke{color: BLUE} ExplicitFunc(
+        |x| ws(a, b, x),
+        [-4, 4, samples]
+    )
+
+mesh w = Weierstrass(a: 0.5, b: 0.1)
+mesh axis =
+    axis_style{"x", -4, 4}
+    axis_style{"y", -4, 4}
+    Axis2d()
+
+slide "Weierstrass"
+    w.b = 4
+    play Lerp(1)

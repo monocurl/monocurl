@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: ['main']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-test
+
+      # the same set the release build needs; tectonic's ICU bridge and the
+      # gpui stack both fail to build without them
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfreetype6-dev \
+            libgraphite2-dev \
+            libpng-dev \
+            libvulkan-dev \
+            libx11-dev \
+            libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev \
+            libfontconfig1-dev \
+            libssl-dev \
+            libicu-dev \
+            pkg-config
+
+      - name: Build workspace
+        run: cargo build --workspace --all-targets
+
+      # MONOCURL_ASSETS_DIR must be absolute: cargo runs each test binary with
+      # its own package directory as the working directory, so a relative path
+      # resolves against the wrong root and the stdlib-loading tests all fail
+      # with NotFound
+      - name: Test
+        run: cargo test --workspace
+        env:
+          MONOCURL_ASSETS_DIR: ${{ github.workspace }}/assets

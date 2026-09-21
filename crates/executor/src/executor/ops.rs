@@ -27,7 +27,47 @@ pub enum BinOp {
 }
 
 impl Executor {
+    /// the overwhelmingly common case: comparing or combining two values that are
+    /// already concrete. handled without suspending so the interpreter's inner
+    /// loop does not have to poll a future for ordinary arithmetic
+    pub(super) fn try_binary_op(&mut self, stack_idx: usize, op: BinOp) -> Option<ExecSingle> {
+        let stack = self.state.stack(stack_idx);
+        let rhs = stack.read_at(-1);
+        let lhs = stack.read_at(-2);
+
+        if matches!(op, BinOp::Eq | BinOp::Ne) {
+            if matches!(lhs, Value::Stateful(_)) || matches!(rhs, Value::Stateful(_)) {
+                return None;
+            }
+            let equal = Value::values_equal(lhs, rhs);
+            let result = matches!(op, BinOp::Eq) == equal;
+
+            let stack = self.state.stack_mut(stack_idx);
+            stack.pop_n(2);
+            stack.push(Value::Integer(result as i64));
+            return Some(ExecSingle::Continue);
+        }
+
+        let lhs = resolved_numeric(lhs)?;
+        let rhs = resolved_numeric(rhs)?;
+        let value = eval_binary(&lhs, &rhs, op);
+
+        let stack = self.state.stack_mut(stack_idx);
+        stack.pop_n(2);
+        Some(match value {
+            Ok(value) => {
+                stack.push(value);
+                ExecSingle::Continue
+            }
+            Err(error) => ExecSingle::Error(error),
+        })
+    }
+
     pub(super) async fn exec_binary_op(&mut self, stack_idx: usize, op: BinOp) -> ExecSingle {
+        if let Some(result) = self.try_binary_op(stack_idx, op) {
+            return result;
+        }
+
         let stack = self.state.stack_mut(stack_idx);
         let rhs = stack.pop();
         let lhs = stack.pop();
@@ -36,29 +76,8 @@ impl Executor {
             return ExecSingle::Error(ExecutorError::stateful_binary_op());
         }
 
-        if matches!(op, BinOp::Eq | BinOp::Ne) {
-            let result = match op {
-                BinOp::Eq => Value::values_equal(&lhs, &rhs),
-                _ => !Value::values_equal(&lhs, &rhs),
-            };
-            self.state
-                .stack_mut(stack_idx)
-                .push(Value::Integer(result as i64));
-            return ExecSingle::Continue;
-        }
-
         let lhs = elide_lvalue_leader_shallow(lhs);
         let rhs = elide_lvalue_leader_shallow(rhs);
-
-        if is_plain_numeric(&lhs) && is_plain_numeric(&rhs) {
-            return match eval_binary(&lhs, &rhs, op) {
-                Ok(val) => {
-                    self.state.stack_mut(stack_idx).push(val);
-                    ExecSingle::Continue
-                }
-                Err(e) => ExecSingle::Error(e),
-            };
-        }
 
         let lhs = match lhs.elide_wrappers_rec(self).await {
             Ok(val) => val,
@@ -76,6 +95,33 @@ impl Executor {
             }
             Err(e) => ExecSingle::Error(e),
         }
+    }
+
+    /// sync fast path for unary minus on an already-concrete number
+    pub(super) fn try_negate(&mut self, stack_idx: usize) -> Option<ExecSingle> {
+        let value = match resolved_numeric(self.state.stack(stack_idx).read_at(-1))? {
+            Value::Integer(n) => Value::Integer(-n),
+            Value::Float(f) => Value::Float(-f),
+            Value::Complex { re, im } => Value::Complex { re: -re, im: -im },
+            _ => return None,
+        };
+
+        let stack = self.state.stack_mut(stack_idx);
+        stack.pop();
+        stack.push(value);
+        Some(ExecSingle::Continue)
+    }
+
+    /// sync fast path for logical negation of an already-concrete number
+    pub(super) fn try_not(&mut self, stack_idx: usize) -> Option<ExecSingle> {
+        let truthy = resolved_numeric(self.state.stack(stack_idx).read_at(-1))?
+            .check_truthy()
+            .ok()?;
+
+        let stack = self.state.stack_mut(stack_idx);
+        stack.pop();
+        stack.push(Value::Integer(!truthy as i64));
+        Some(ExecSingle::Continue)
     }
 
     pub(super) async fn exec_negate(&mut self, val: Value) -> Result<Value, ExecutorError> {
@@ -105,17 +151,30 @@ impl Executor {
     }
 }
 
-#[inline(always)]
-fn elide_lvalue_leader_shallow(value: Value) -> Value {
-    value.elide_lvalue().elide_leader()
+/// read through lvalue and leader indirection to a concrete number, without
+/// copying anything that is not a number. returns `None` for every other shape,
+/// which routes the caller to the general asynchronous path
+pub(super) fn resolved_numeric(value: &Value) -> Option<Value> {
+    match value {
+        // rebuilt rather than cloned: these payloads are Copy, and going through
+        // Value::clone means an out-of-line call with a jump table
+        Value::Integer(n) => Some(Value::Integer(*n)),
+        Value::Float(f) => Some(Value::Float(*f)),
+        Value::Complex { re, im } => Some(Value::Complex { re: *re, im: *im }),
+        Value::Lvalue(reference) => with_heap(|heap| resolved_numeric(&heap.get(reference.key()))),
+        Value::WeakLvalue(reference) => {
+            with_heap(|heap| resolved_numeric(&heap.get(reference.key())))
+        }
+        Value::Leader(leader) => {
+            with_heap(|heap| resolved_numeric(&heap.get(leader.leader_rc.key())))
+        }
+        _ => None,
+    }
 }
 
 #[inline(always)]
-fn is_plain_numeric(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::Integer(_) | Value::Float(_) | Value::Complex { .. }
-    )
+fn elide_lvalue_leader_shallow(value: Value) -> Value {
+    value.elide_lvalue().elide_leader()
 }
 
 /// promote a pair of values so mixed int/float/complex operations work.
@@ -145,6 +204,16 @@ fn promote_pair(lhs: Value, rhs: Value) -> (Value, Value) {
 }
 
 pub(crate) fn eval_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, ExecutorError> {
+    // matching numeric types need no promotion, so skip the copies it would take
+    if matches!(
+        (lhs, rhs),
+        (Value::Integer(_), Value::Integer(_))
+            | (Value::Float(_), Value::Float(_))
+            | (Value::Complex { .. }, Value::Complex { .. })
+    ) {
+        return eval_non_list_binary(lhs, rhs, op);
+    }
+
     match (lhs, rhs, op) {
         (Value::List(lhs_list), Value::List(rhs_list), BinOp::Add) => {
             return combine_lists(lhs_list, rhs_list, BinOp::Add);

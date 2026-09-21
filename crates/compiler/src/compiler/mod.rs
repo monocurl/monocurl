@@ -6,6 +6,7 @@ mod stateful;
 mod statements;
 #[cfg(test)]
 mod tests;
+mod unboxing;
 mod warnings;
 
 use std::collections::{HashMap, HashSet};
@@ -134,18 +135,39 @@ impl SymbolFunctionInfo {
     }
 }
 
+/// a `let`-bound lambda whose body is nothing but a native call over its own
+/// parameters, in order. `std.math`'s `cos`, `sqrt` and friends are all of this
+/// shape, and calling them through a real frame costs several instructions and a
+/// call setup for what is one native operation
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NativeAlias {
+    pub index: u16,
+    pub arg_count: u16,
+}
+
 #[derive(Clone, Debug)]
 pub struct Symbol {
     pub name: String,
+    pub declaration_span: Option<Span8>,
+    native_alias: Option<NativeAlias>,
     imported: bool,
     declared_in_stdlib: bool,
     stack_position: usize,
     preserve_lvalues_on_copy: bool,
+    /// lives directly in its stack entry rather than behind a heap slot; see
+    /// [`unboxing`] for when that is allowed
+    unboxed: bool,
     special_function: Option<SpecialFunction>,
     // how the symbol looks like to the current bundle
     // may appear as let, even though declared as var
     pub var_type: VariableType,
     pub function_info: SymbolFunctionInfo,
+}
+
+impl Symbol {
+    pub fn is_imported(&self) -> bool {
+        self.imported
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -185,6 +207,53 @@ struct CompilerFrame {
     stack_depth: usize,
     loop_contexts: Vec<LoopContext>,
     kind: FrameKind,
+}
+
+/// recognise `let f = |a, b| __monocurl__native__ g(a, b)`: a constant binding to
+/// a lambda that forwards its parameters, unchanged and in order, to one native
+fn native_alias(value: &Expression, var_type: VariableType) -> Option<NativeAlias> {
+    if var_type != VariableType::Let {
+        return None;
+    }
+    let Expression::LambdaDefinition(lambda) = value else {
+        return None;
+    };
+    if lambda
+        .args
+        .iter()
+        .any(|arg| arg.default_value.is_some() || arg.must_be_reference)
+    {
+        return None;
+    }
+
+    let LambdaBody::Inline(body) = &lambda.body.1 else {
+        return None;
+    };
+    let Expression::NativeInvocation(native) = &**body else {
+        return None;
+    };
+    if native.arguments.len() != lambda.args.len() {
+        return None;
+    }
+
+    let forwards_parameters = native
+        .arguments
+        .iter()
+        .zip(&lambda.args)
+        .all(|(argument, parameter)| match &argument.1 {
+            Expression::IdentifierReference(ir @ IdentifierReference::Value(_)) => {
+                ident_ref_name(ir) == parameter.identifier.1.0
+            }
+            _ => false,
+        });
+    if !forwards_parameters {
+        return None;
+    }
+
+    Some(NativeAlias {
+        index: registry().index_of(ident_ref_name(&native.function.1)) as u16,
+        arg_count: native.arguments.len() as u16,
+    })
 }
 
 fn ident_ref_name(ir: &IdentifierReference) -> &str {
@@ -227,6 +296,8 @@ struct Compiler {
     // of the current bundle
     bundle_root_import_span: Option<Span8>,
     deferred_expr_depth: usize,
+    /// which names the section being compiled must keep in heap slots
+    slot_requirements: unboxing::SlotRequirements,
 }
 
 impl Compiler {
@@ -251,6 +322,7 @@ impl Compiler {
             possible_cursor_identifiers: Vec::new(),
             references: Vec::new(),
             deferred_expr_depth: 0,
+            slot_requirements: unboxing::SlotRequirements::default(),
         }
     }
 
@@ -546,6 +618,10 @@ impl Compiler {
         bytecode.import_display_index = current_bundle.import_display_index;
         self.current_bundle.as_mut().unwrap().current_bytecode = Some(bytecode);
 
+        // covers the section's nested closures too, so one scan decides every
+        // declaration compiled below
+        self.slot_requirements = unboxing::scan(&section.body);
+
         // symbols declared here land in the current top scope (no push/pop)
         self.compile_statements(&section.body);
         if self.current_section().flags.is_init {
@@ -609,7 +685,10 @@ impl Compiler {
 
     fn patch_jump(&mut self, instr_idx: usize, target: u32) {
         match &mut self.current_section_mut().instructions[instr_idx] {
-            Instruction::Jump { to, .. } | Instruction::ConditionalJump { to, .. } => *to = target,
+            Instruction::Jump { to, .. }
+            | Instruction::ConditionalJump { to, .. }
+            | Instruction::JumpIfFalse { to, .. }
+            | Instruction::RangeLoopTest { to, .. } => *to = target,
             _ => panic!("patch_jump on non-jump instruction"),
         }
     }
@@ -746,6 +825,20 @@ impl Compiler {
         idx
     }
 
+    /// branch when the test is falsy; returns the instruction index to patch
+    fn emit_jump_if_false_patch(&mut self, span: Span8) -> usize {
+        let idx = self.instruction_pointer() as usize;
+        self.emit(
+            Instruction::JumpIfFalse {
+                section: self.section_index(),
+                to: 0,
+            },
+            span,
+        );
+        self.dec_stack(1);
+        idx
+    }
+
     fn emit_jump_to(&mut self, target: u32, span: Span8) {
         self.emit(
             Instruction::Jump {
@@ -783,9 +876,12 @@ impl Compiler {
             name.to_string(),
             Arc::new(Symbol {
                 name: name.to_string(),
+                declaration_span: None,
+                native_alias: None,
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                unboxed: false,
                 special_function: None,
                 var_type,
                 function_info,
@@ -802,14 +898,36 @@ impl Compiler {
         position: usize,
         preserve_lvalues_on_copy: bool,
     ) {
+        self.register_symbol_with_declaration(
+            name,
+            None,
+            var_type,
+            function_info,
+            position,
+            preserve_lvalues_on_copy,
+        );
+    }
+
+    fn register_symbol_with_declaration(
+        &mut self,
+        name: &str,
+        declaration_span: Option<Span8>,
+        var_type: VariableType,
+        function_info: SymbolFunctionInfo,
+        position: usize,
+        preserve_lvalues_on_copy: bool,
+    ) {
         let declared_in_stdlib = self.current_section().flags.is_stdlib;
         self.frame_mut().scopes.last_mut().unwrap().symbols.insert(
             name.to_string(),
             Arc::new(Symbol {
                 name: name.to_string(),
+                declaration_span,
+                native_alias: None,
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                unboxed: false,
                 special_function: None,
                 var_type,
                 function_info,
@@ -828,10 +946,13 @@ impl Compiler {
             symbol.name.clone(),
             Arc::new(Symbol {
                 name: symbol.name.clone(),
+                declaration_span: symbol.declaration_span.clone(),
+                native_alias: symbol.native_alias,
                 imported: false,
                 declared_in_stdlib: symbol.declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                unboxed: false,
                 special_function: symbol.special_function,
                 var_type: symbol.var_type,
                 function_info: symbol.function_info.clone(),
@@ -842,9 +963,11 @@ impl Compiler {
     fn define_declared_symbol(
         &mut self,
         name: &str,
+        declaration_span: Span8,
         var_type: VariableType,
         value: &Expression,
         preserve_lvalues_on_copy: bool,
+        unboxed: bool,
     ) {
         let position = self.stack_depth() - 1;
         let declared_in_stdlib = self.current_section().flags.is_stdlib;
@@ -859,15 +982,28 @@ impl Compiler {
             name.to_string(),
             Arc::new(Symbol {
                 name: name.to_string(),
+                declaration_span: Some(declaration_span),
+                native_alias: native_alias(value, var_type),
                 imported: false,
                 declared_in_stdlib,
                 stack_position: position,
                 preserve_lvalues_on_copy,
+                unboxed,
                 special_function,
                 var_type,
                 function_info: SymbolFunctionInfo::from(value),
             }),
         );
+    }
+
+    /// the native a call to `expr` can be lowered to directly, if any
+    fn native_alias_for_expr(&mut self, expr: &Expression) -> Option<NativeAlias> {
+        match expr {
+            Expression::IdentifierReference(ir) => self
+                .lookup(ident_ref_name(ir), None, None)
+                .and_then(|symbol| symbol.native_alias),
+            _ => None,
+        }
     }
 
     fn special_function_for_expr(&mut self, expr: &Expression) -> Option<SpecialFunction> {

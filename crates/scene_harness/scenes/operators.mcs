@@ -1,0 +1,32 @@
+# user defined operators and interpolation-friendly invocations
+
+import std.util
+import std.math
+
+let scale_by = operator |target, factor| {
+    let internal = |f| target * f
+    return [internal(1), internal(factor)]
+}
+
+let plain = scale_by{3} 4
+print plain
+
+let labeled = scale_by{factor: 3} 4
+print labeled
+
+var applied = scale_by{factor: 2} 10
+print applied
+applied.factor = 5
+print applied
+
+let offset = operator |target, delta = 1| [target, target + delta]
+print offset{} 10
+print offset{5} 10
+
+# operators compose right to left
+let composed = scale_by{2} offset{3} 10
+print composed
+
+print is_operator(scale_by)
+print is_function(|x| x)
+print is_operator(|x| x)

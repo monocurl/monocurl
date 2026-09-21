@@ -85,6 +85,38 @@ impl Executor {
     }
 
     #[inline]
+    /// a plain unlabeled call of a lambda with no default arguments is just a
+    /// frame setup, so it never has to suspend. anything else (stateful calls,
+    /// labeled calls, defaults to fill in) goes through the asynchronous path
+    pub(super) fn try_lambda_invoke(
+        &mut self,
+        stack_idx: usize,
+        stateful: bool,
+        labeled: bool,
+        num_args: u32,
+    ) -> Option<ExecSingle> {
+        if stateful || labeled {
+            return None;
+        }
+
+        let lambda = match self.state.stack(stack_idx).peek().clone().elide_lvalue() {
+            Value::Lambda(lambda) if lambda.defaults.is_empty() => lambda,
+            // type errors and default filling are reported by the general path
+            _ => return None,
+        };
+
+        if num_args != u32::from(lambda.required_args) {
+            return None;
+        }
+
+        self.state.stack_mut(stack_idx).pop();
+        if let Some(error) = self.ensure_non_stateful_lambda_args(stack_idx, num_args as usize) {
+            return Some(ExecSingle::Error(error));
+        }
+
+        Some(self.setup_lambda_call(stack_idx, num_args as usize, &lambda))
+    }
+
     pub(super) async fn exec_lambda_invoke(
         &mut self,
         stack_idx: usize,
@@ -430,11 +462,34 @@ impl Executor {
         func_index: u16,
         arg_count: u16,
     ) -> ExecSingle {
-        let func = self.native_funcs[func_index as usize];
-        match func(self, stack_idx).await {
+        let func = self.native_funcs[func_index as usize].call;
+        let result = func(self, stack_idx).await;
+        self.finish_native_invoke(stack_idx, arg_count, result)
+    }
+
+    /// natives that cannot suspend are called directly, with no future allocated
+    pub(super) fn try_native_invoke(
+        &mut self,
+        stack_idx: usize,
+        func_index: u16,
+        arg_count: u16,
+    ) -> Option<ExecSingle> {
+        let call = self.native_funcs[func_index as usize].call_sync?;
+        let result = call(self, stack_idx);
+        Some(self.finish_native_invoke(stack_idx, arg_count, result))
+    }
+
+    fn finish_native_invoke(
+        &mut self,
+        stack_idx: usize,
+        arg_count: u16,
+        result: Result<Value, ExecutorError>,
+    ) -> ExecSingle {
+        match result {
             Ok(val) => {
-                self.state.stack_mut(stack_idx).pop_n(arg_count as usize);
-                self.state.stack_mut(stack_idx).push(val);
+                let stack = self.state.stack_mut(stack_idx);
+                stack.pop_n(arg_count as usize);
+                stack.push(val);
                 ExecSingle::Continue
             }
             Err(e) => ExecSingle::Error(e),
@@ -485,14 +540,18 @@ impl Executor {
         {
             let stack = self.state.stack_mut(stack_idx);
             let arg_start = stack.stack_len() - pushed_args;
+            // only reference parameters need rewriting, and the argument is
+            // already sitting in the slot, so take it rather than copying it
             for arg_idx in 0..pushed_args {
+                if !lambda.arg_is_reference(arg_idx) {
+                    continue;
+                }
                 let slot_idx = arg_start + arg_idx;
-                let arg = stack.var_stack[slot_idx].clone();
-                stack.var_stack[slot_idx] =
-                    match prepare_lambda_argument(lambda, arg_idx, arg, true) {
-                        Ok(arg) => arg,
-                        Err(error) => return ExecSingle::Error(error),
-                    };
+                let arg = std::mem::replace(&mut stack.var_stack[slot_idx], Value::Nil);
+                stack.var_stack[slot_idx] = match wrap_reference_argument(arg, true) {
+                    Ok(arg) => arg,
+                    Err(error) => return ExecSingle::Error(error),
+                };
             }
 
             let missing = lambda.total_args().saturating_sub(pushed_args);
@@ -549,34 +608,30 @@ impl Executor {
                 stack.push(cap.clone());
             }
 
-            loop {
-                self.tick_yielder().await;
-
-                match self.execute_one(temp_idx).await {
-                    ExecSingle::Continue => {}
-                    ExecSingle::EndOfHead => {
-                        let result = if self.state.stack(temp_idx).stack_len() > 0 {
-                            self.state.stack_mut(temp_idx).pop()
-                        } else {
-                            Value::Nil
-                        };
-                        self.state.free_stack(temp_idx);
-                        self.state.last_stack_idx = trace_parent_idx
-                            .unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
-                        self.state.call_depth -= 1;
-                        return Ok(result);
-                    }
-                    ExecSingle::Play => {
-                        self.state.free_stack(temp_idx);
-                        self.state.call_depth -= 1;
-                        return Err(ExecutorError::PlayInLabeledInvocation);
-                    }
-                    ExecSingle::Error(e) => {
-                        self.state.free_stack(temp_idx);
-                        self.state.call_depth -= 1;
-                        return Err(e);
-                    }
+            match self.run_until_break(temp_idx).await {
+                ExecSingle::EndOfHead => {
+                    let result = if self.state.stack(temp_idx).stack_len() > 0 {
+                        self.state.stack_mut(temp_idx).pop()
+                    } else {
+                        Value::Nil
+                    };
+                    self.state.free_stack(temp_idx);
+                    self.state.last_stack_idx =
+                        trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
+                    self.state.call_depth -= 1;
+                    Ok(result)
                 }
+                ExecSingle::Play => {
+                    self.state.free_stack(temp_idx);
+                    self.state.call_depth -= 1;
+                    Err(ExecutorError::PlayInLabeledInvocation)
+                }
+                ExecSingle::Error(e) => {
+                    self.state.free_stack(temp_idx);
+                    self.state.call_depth -= 1;
+                    Err(e)
+                }
+                ExecSingle::Continue => unreachable!("run_until_break never returns Continue"),
             }
         })
     }
@@ -636,41 +691,36 @@ impl Executor {
                     return Err(e);
                 }
 
-                loop {
-                    self.tick_yielder().await;
-
-                    match self.execute_one(temp_idx).await {
-                        ExecSingle::Continue => {}
-                        ExecSingle::EndOfHead => {
-                            let raw = if self.state.stack(temp_idx).stack_len()
-                                > self.state.stack(temp_idx).retained_prefix_len
-                            {
-                                self.state.stack_mut(temp_idx).pop()
-                            } else {
-                                Value::Nil
-                            };
-                            let result = match self.materialize_cached_value(raw).await {
-                                Ok(result) => result,
-                                Err(e) => {
-                                    self.state.free_stack(temp_idx);
-                                    self.state.call_depth -= 1;
-                                    return Err(e);
-                                }
-                            };
-                            results.push(result);
-                            break;
-                        }
-                        ExecSingle::Play => {
-                            self.state.free_stack(temp_idx);
-                            self.state.call_depth -= 1;
-                            return Err(ExecutorError::PlayInLabeledInvocation);
-                        }
-                        ExecSingle::Error(e) => {
-                            self.state.free_stack(temp_idx);
-                            self.state.call_depth -= 1;
-                            return Err(e);
-                        }
+                match self.run_until_break(temp_idx).await {
+                    ExecSingle::EndOfHead => {
+                        let raw = if self.state.stack(temp_idx).stack_len()
+                            > self.state.stack(temp_idx).retained_prefix_len
+                        {
+                            self.state.stack_mut(temp_idx).pop()
+                        } else {
+                            Value::Nil
+                        };
+                        let result = match self.materialize_cached_value(raw).await {
+                            Ok(result) => result,
+                            Err(e) => {
+                                self.state.free_stack(temp_idx);
+                                self.state.call_depth -= 1;
+                                return Err(e);
+                            }
+                        };
+                        results.push(result);
                     }
+                    ExecSingle::Play => {
+                        self.state.free_stack(temp_idx);
+                        self.state.call_depth -= 1;
+                        return Err(ExecutorError::PlayInLabeledInvocation);
+                    }
+                    ExecSingle::Error(e) => {
+                        self.state.free_stack(temp_idx);
+                        self.state.call_depth -= 1;
+                        return Err(e);
+                    }
+                    ExecSingle::Continue => unreachable!("run_until_break never returns Continue"),
                 }
             }
 

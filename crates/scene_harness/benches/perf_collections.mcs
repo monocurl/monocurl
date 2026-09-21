@@ -1,0 +1,31 @@
+# interpreter-bound: container construction, copying, and higher order stdlib
+
+import std.util
+import std.math
+
+let base = range(0, 20000)
+
+print sum(map(base, |x| x * 2))
+print len(filter(base, |x| mod(x, 3) == 0))
+print reduce(base, 0, |acc, x| acc + x)
+
+var built = []
+for (i in range(0, 20000)) {
+    built .= i * i
+}
+print len(built)
+print built[19999]
+
+var nested = []
+for (i in range(0, 400)) {
+    var row = []
+    for (j in range(0, 50)) {
+        row .= i * j
+    }
+    nested .= row
+}
+print len(nested)
+print sum(map(nested, sum))
+
+let sorted = sort(map(range(0, 5000), |x| mod(x * 7919, 5000)))
+print [sorted[0], sorted[4999], len(sorted)]

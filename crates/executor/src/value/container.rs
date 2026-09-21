@@ -14,7 +14,7 @@ use super::Value;
 
 #[derive(Clone)]
 /// list whose elements are heap-allocated values accessed via owning heap refs.
-pub struct List(Box<ListBody>);
+pub struct List(ListBody);
 
 #[derive(Clone)]
 pub struct ListBody {
@@ -23,15 +23,15 @@ pub struct ListBody {
 
 impl List {
     pub fn new() -> Self {
-        Self(Box::new(ListBody {
+        Self(ListBody {
             elements: SmallVec::new(),
-        }))
+        })
     }
 
     pub fn new_with(elements: impl IntoIterator<Item = VRc>) -> Self {
-        Self(Box::new(ListBody {
+        Self(ListBody {
             elements: elements.into_iter().collect(),
-        }))
+        })
     }
 
     pub fn elements(&self) -> &[VRc] {

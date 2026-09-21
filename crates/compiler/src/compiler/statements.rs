@@ -98,6 +98,16 @@ impl Compiler {
         }
         let name = &d.pattern.1.as_identifier().unwrap().0;
         self.validate_declared_name(name, vt, span);
+        // every section of a bundle shares the top scope, and that scope is what
+        // gets exported, so a variable declared there can be written through by
+        // a later slide or another bundle that this section's scan never saw.
+        // only a nested scope is guaranteed to be fully described by it
+        let scoped_to_this_section = self.frames.len() > 1 || self.frame().scopes.len() > 1;
+        let unboxed = scoped_to_this_section
+            && matches!(vt, VariableType::Let | VariableType::Var)
+            && !self
+                .slot_requirements
+                .needs_slot(name, vt == VariableType::Var);
         match vt {
             VariableType::Mesh => {
                 let ni = self.intern_string(name);
@@ -107,7 +117,8 @@ impl Compiler {
                 let ni = self.intern_string(name);
                 self.emit(Instruction::ConvertParam { name_index: ni }, span.clone());
             }
-            VariableType::Let | VariableType::Var | VariableType::Reference => {
+            // a reference variable is the reference, so it always needs a slot
+            VariableType::Reference => {
                 self.emit(
                     Instruction::ConvertVar {
                         allow_stateful: false,
@@ -115,8 +126,20 @@ impl Compiler {
                     span.clone(),
                 );
             }
+            VariableType::Let | VariableType::Var => {
+                if unboxed {
+                    self.emit(Instruction::BindLocal, span.clone());
+                } else {
+                    self.emit(
+                        Instruction::ConvertVar {
+                            allow_stateful: false,
+                        },
+                        span.clone(),
+                    );
+                }
+            }
         }
-        self.define_declared_symbol(name, vt, &d.value.1, false);
+        self.define_declared_symbol(name, d.pattern.0.clone(), vt, &d.value.1, false, unboxed);
     }
 
     fn validate_declared_name(&mut self, name: &str, vt: VariableType, span: &Span8) {
@@ -204,8 +227,7 @@ impl Compiler {
     pub(super) fn compile_while(&mut self, w: &While, span: &Span8) {
         let loop_start = self.instruction_pointer();
         self.compile_val(&w.condition.1, &w.condition.0);
-        self.emit(Instruction::Not, w.condition.0.clone());
-        let exit_jump = self.emit_cond_jump_patch(w.condition.0.clone());
+        let exit_jump = self.emit_jump_if_false_patch(w.condition.0.clone());
 
         let loop_stack = self.stack_depth();
         self.frame_mut().loop_contexts.push(LoopContext {
@@ -277,25 +299,20 @@ impl Compiler {
         let loop_stack = self.stack_depth();
 
         // condition: idx < len(iter)
+        // the container is read in place on every step: copying it out would make
+        // iteration quadratic in the container's length
         let d = self.stack_delta(idx_pos);
-        self.emit_copy(d, span.clone());
+        self.emit_copy_ref(d, span.clone());
         let d = self.stack_delta(iter_pos);
-        self.emit_copy(d, container_span.clone());
-
-        let len_idx = registry().index_of("list_len") as u16;
-        self.emit(
-            Instruction::NativeInvoke {
-                index: len_idx,
-                arg_count: 1,
-            },
+        self.emit_push(
+            Instruction::ContainerLen { stack_delta: d },
             container_span.clone(),
         );
 
         self.emit(Instruction::Lt, span.clone());
         self.dec_stack(1);
 
-        self.emit(Instruction::Not, span.clone());
-        let exit_jump = self.emit_cond_jump_patch(span.clone()); // depth = loop_stack
+        let exit_jump = self.emit_jump_if_false_patch(span.clone()); // depth = loop_stack
 
         self.frame_mut().loop_contexts.push(LoopContext {
             continue_target: None, // patched below after increment is emitted
@@ -307,15 +324,13 @@ impl Compiler {
         // body scope with the for variable
         self.push_scope();
         self.compile_for_binding(&f.pattern, span, |compiler| {
-            let d = compiler.stack_delta(iter_pos);
-            compiler.emit_copy(d, container_span.clone());
             let d = compiler.stack_delta(idx_pos);
-            compiler.emit_copy(d, span.clone());
+            compiler.emit_copy_ref(d, span.clone());
+            let d = compiler.stack_delta(iter_pos);
             compiler.emit(
-                Instruction::Subscript { mutable: false },
+                Instruction::SubscriptLocal { stack_delta: d },
                 container_span.clone(),
             );
-            compiler.dec_stack(1);
         });
 
         self.compile_statements(&f.body.1);
@@ -362,13 +377,11 @@ impl Compiler {
         self.push_scope();
 
         self.compile_val(&start.1, &start.0);
+        // the bound and the counter are compiler-generated, cannot be named by
+        // the user, and are never taken as lvalues, so they stay plain stack
+        // values rather than heap slots. that also unboxes the loop variable,
+        // which names the counter's slot
         let current_pos = self.stack_depth() - 1;
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            start.0.clone(),
-        );
         self.define_symbol(
             "\x00range_current",
             VariableType::Var,
@@ -378,12 +391,6 @@ impl Compiler {
 
         self.compile_val(&stop.1, &stop.0);
         let stop_pos = self.stack_depth() - 1;
-        self.emit(
-            Instruction::ConvertVar {
-                allow_stateful: false,
-            },
-            stop.0.clone(),
-        );
         self.define_symbol(
             "\x00range_stop",
             VariableType::Let,
@@ -394,15 +401,29 @@ impl Compiler {
         let condition_ip = self.instruction_pointer();
         let loop_stack = self.stack_depth();
 
-        let d = self.stack_delta(current_pos);
-        self.emit_copy(d, start.0.clone());
-        let d = self.stack_delta(stop_pos);
-        self.emit_copy(d, stop.0.clone());
-        self.emit(Instruction::Lt, span.clone());
-        self.dec_stack(1);
+        let exit_jump = match i16::try_from(self.stack_delta(current_pos)) {
+            // the bound sits directly above the counter, so one delta locates both
+            Ok(current_delta) if stop_pos == current_pos + 1 => {
+                let idx = self.instruction_pointer() as usize;
+                self.emit(
+                    Instruction::RangeLoopTest { current_delta, to: 0 },
+                    span.clone(),
+                );
+                idx
+            }
+            // a frame deep enough to overflow the delta falls back to the
+            // unfused header
+            _ => {
+                let d = self.stack_delta(current_pos);
+                self.emit_copy(d, start.0.clone());
+                let d = self.stack_delta(stop_pos);
+                self.emit_copy(d, stop.0.clone());
+                self.emit(Instruction::Lt, span.clone());
+                self.dec_stack(1);
 
-        self.emit(Instruction::Not, span.clone());
-        let exit_jump = self.emit_cond_jump_patch(span.clone());
+                self.emit_jump_if_false_patch(span.clone())
+            }
+        };
 
         self.frame_mut().loop_contexts.push(LoopContext {
             continue_target: None,
@@ -412,10 +433,23 @@ impl Compiler {
         });
 
         self.push_scope();
-        self.compile_for_binding(&f.pattern, span, |compiler| {
-            let d = compiler.stack_delta(current_pos);
-            compiler.emit_copy(d, start.0.clone());
-        });
+        if let BindingPattern::Identifier(identifier) = &f.pattern.1 {
+            // the induction variable already lives in a slot, and a `let` binding
+            // can neither be assigned nor referenced, so name that slot instead of
+            // copying it into a fresh one on every iteration
+            self.register_symbol(
+                &identifier.0,
+                VariableType::Let,
+                SymbolFunctionInfo::None,
+                current_pos,
+                false,
+            );
+        } else {
+            self.compile_for_binding(&f.pattern, span, |compiler| {
+                let d = compiler.stack_delta(current_pos);
+                compiler.emit_copy(d, start.0.clone());
+            });
+        }
 
         self.compile_statements(&f.body.1);
         self.pop_scope(span.clone());
@@ -512,8 +546,7 @@ impl Compiler {
 
     pub(super) fn compile_if(&mut self, i: &If, span: &Span8) {
         self.compile_val(&i.condition.1, &i.condition.0);
-        self.emit(Instruction::Not, i.condition.0.clone());
-        let skip_if = self.emit_cond_jump_patch(i.condition.0.clone());
+        let skip_if = self.emit_jump_if_false_patch(i.condition.0.clone());
 
         self.push_scope();
         self.compile_statements(&i.if_block.1);

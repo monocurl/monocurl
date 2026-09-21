@@ -37,8 +37,9 @@ impl Compiler {
             };
             reference_args.push(arg.must_be_reference);
             arg_names.push(arg.identifier.1.0.clone());
-            self.register_symbol(
+            self.register_symbol_with_declaration(
                 &arg.identifier.1.0,
+                Some(arg.identifier.0.clone()),
                 vt,
                 SymbolFunctionInfo::None,
                 i,

@@ -14,7 +14,7 @@ use integration_tests::{
 };
 use parser::ast::SectionType;
 use stdlib::registry::registry;
-use structs::text::Span8;
+use structs::{assets::Assets, text::Span8};
 
 struct ExecResult {
     /// the value captured from the root execution head's TOS, if any

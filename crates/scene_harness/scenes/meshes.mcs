@@ -1,0 +1,39 @@
+# mesh construction and scene state without text rendering
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+mesh circle = stroke{BLUE, 2} Circle(radius: 1)
+mesh square = shift{2r} Square(1)
+mesh polygon = fill{color: RED} RegularPolygon(n: 6, circumradius: 0.8)
+
+print is_mesh(circle)
+print type_of(circle)
+
+slide "Appear"
+    play Set()
+    play Wait(0.5)
+
+slide "Grow"
+    circle.radius = 2
+    play Lerp(1)
+
+slide "Transform"
+    square = shift{3r} Square(2)
+    play Trans(1, [&square])
+
+slide "Fade"
+    polygon = fill{color: GREEN} RegularPolygon(n: 6, circumradius: 1.2)
+    play [Lerp(1, [&polygon]), Fade(0.5, [&circle])]
+
+slide "Retopologize"
+    polygon = fill{color: GREEN} RegularPolygon(n: 9, circumradius: 1.2)
+    play Trans(1, [&polygon])
+
+slide "Camera"
+    camera = Camera([0, 0, 6], [0, 0, 0], 1u)
+    play CameraLerp(&camera, 1)

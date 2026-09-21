@@ -1,10 +1,9 @@
-use std::collections::HashMap;
 
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
     mesh::DEFAULT_DOT_RADIUS,
-    mesh_build::SurfaceVertex,
+    mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
 use stdlib_macros::stdlib_func;
@@ -335,18 +334,9 @@ fn orient_contour_to_normal(contour: &mut [Float3], normal: Float3) {
     }
 }
 
-pub(super) fn vector_like_mesh(
-    tail: Float3,
-    delta: Float3,
-    normal: Float3,
-    path_arc: f64,
-) -> Result<Value, ExecutorError> {
-    vector_like_mesh_with_style(tail, delta, normal, path_arc, DEFAULT_VECTOR_LIKE_STYLE)
-}
-
 /// Default arrow geometry with user multipliers on the arrowhead length and
-/// width, and an optional tail arrowhead. `1.0`/`1.0`/`false` reproduces
-/// `vector_like_mesh` exactly.
+/// width, and an optional tail arrowhead. `1.0`/`1.0`/`false` reproduces the
+/// default style exactly.
 pub(super) fn vector_like_mesh_with_tip(
     tail: Float3,
     delta: Float3,
@@ -507,7 +497,7 @@ mod tests {
 
     use super::{
         ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH, closed_polyline, fan_tris, mesh_ref, open_polyline,
-        triangle_mesh, vector_like_mesh,
+        DEFAULT_VECTOR_LIKE_STYLE, triangle_mesh, vector_like_mesh_with_style,
     };
 
     fn mesh_y_radius(mesh: &geo::mesh::Mesh) -> f32 {
@@ -576,7 +566,14 @@ mod tests {
     #[test]
     fn vector_like_mesh_builds_connected_arrow_surface() {
         let Value::Mesh(mesh) =
-            vector_like_mesh(Float3::ZERO, Float3::new(1.0, 0.0, 0.0), Float3::Z, 0.0).unwrap()
+            vector_like_mesh_with_style(
+                Float3::ZERO,
+                Float3::new(1.0, 0.0, 0.0),
+                Float3::Z,
+                0.0,
+                DEFAULT_VECTOR_LIKE_STYLE,
+            )
+            .unwrap()
         else {
             panic!("expected mesh");
         };
@@ -590,7 +587,14 @@ mod tests {
     #[test]
     fn vector_like_mesh_supports_curved_arrow_paths() {
         let Value::Mesh(mesh) =
-            vector_like_mesh(Float3::ZERO, Float3::new(1.0, 0.0, 0.0), Float3::Z, 0.8).unwrap()
+            vector_like_mesh_with_style(
+                Float3::ZERO,
+                Float3::new(1.0, 0.0, 0.0),
+                Float3::Z,
+                0.8,
+                DEFAULT_VECTOR_LIKE_STYLE,
+            )
+            .unwrap()
         else {
             panic!("expected mesh");
         };
@@ -603,7 +607,7 @@ mod tests {
     #[test]
     fn vector_like_mesh_scales_down_for_short_arrows() {
         let Value::Mesh(mesh) =
-            vector_like_mesh(Float3::ZERO, Float3::new(0.05, 0.0, 0.0), Float3::Z, 0.0).unwrap()
+            vector_like_mesh_with_style(Float3::ZERO, Float3::new(0.05, 0.0, 0.0), Float3::Z, 0.0, DEFAULT_VECTOR_LIKE_STYLE).unwrap()
         else {
             panic!("expected mesh");
         };
@@ -617,7 +621,7 @@ mod tests {
 }
 
 #[stdlib_func]
-pub async fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let point = read_float3(executor, stack_idx, -1, "point")?;
     Ok(mesh_from_parts_with_dot_radius(
         vec![default_dot(point, Float3::Z)],
@@ -628,7 +632,7 @@ pub async fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 }
 
 #[stdlib_func]
-pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(3) as usize;
@@ -645,7 +649,7 @@ pub async fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let center = Float3::ZERO;
     let inner = crate::read_float(executor, stack_idx, -2, "inner")? as f32;
     let outer = crate::read_float(executor, stack_idx, -1, "outer")? as f32;
@@ -670,7 +674,7 @@ pub async fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let center = Float3::ZERO;
     let width = crate::read_float(executor, stack_idx, -1, "width")? as f32;
     let normal = Float3::Z;
@@ -687,7 +691,7 @@ pub async fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let center = Float3::ZERO;
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
@@ -704,7 +708,7 @@ pub async fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 }
 
 #[stdlib_func]
-pub async fn mk_regular_polygon(
+pub fn mk_regular_polygon(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -724,7 +728,7 @@ pub async fn mk_regular_polygon(
 }
 
 #[stdlib_func]
-pub async fn mk_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let vertices = read_float3_list(executor, stack_idx, -2, "vertices")?;
     ensure_limit("polygon vertices", vertices.len(), MAX_POLYGON_POINTS)?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
@@ -733,7 +737,7 @@ pub async fn mk_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn mk_polyline(
+pub fn mk_polyline(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -748,7 +752,7 @@ pub async fn mk_polyline(
 }
 
 #[stdlib_func]
-pub async fn mk_line(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_line(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let start = read_float3(executor, stack_idx, -3, "start")?;
     let end = read_float3(executor, stack_idx, -2, "end")?;
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
@@ -760,7 +764,7 @@ pub async fn mk_line(executor: &mut Executor, stack_idx: usize) -> Result<Value,
 }
 
 #[stdlib_func]
-pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let start = read_float3(executor, stack_idx, -7, "start")?;
     let end = read_float3(executor, stack_idx, -6, "end")?;
     let normal = read_float3(executor, stack_idx, -5, "normal")?;
@@ -780,7 +784,7 @@ pub async fn mk_arrow(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn mk_arc(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_arc(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -3, "radius")? as f32;
     let theta0 = crate::read_float(executor, stack_idx, -2, "theta0")? as f32;
@@ -803,7 +807,7 @@ pub async fn mk_arc(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 }
 
 #[stdlib_func]
-pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let start_center = read_float3(executor, stack_idx, -5, "start_center")?;
     let end_center = read_float3(executor, stack_idx, -4, "end_center")?;
     let start_radius = crate::read_float(executor, stack_idx, -3, "start_radius")? as f32;
@@ -856,7 +860,7 @@ pub async fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Val
 }
 
 #[stdlib_func]
-pub async fn mk_triangle(
+pub fn mk_triangle(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -868,7 +872,7 @@ pub async fn mk_triangle(
 }
 
 #[stdlib_func]
-pub async fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
     let depth = read_int(executor, stack_idx, -1, "sample_depth")?.max(0) as usize;
@@ -929,12 +933,12 @@ pub async fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         ]);
     }
 
-    let (lins, tris) = build_indexed_surface(&vertices, &faces, &HashMap::new());
+    let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
-pub async fn mk_rect_prism(
+pub fn mk_rect_prism(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -954,8 +958,8 @@ pub async fn mk_rect_prism(
         center + Float3::new(-hx, hy, hz),
     ];
     let faces = [
-        [0, 1, 2],
-        [0, 2, 3],
+        [0, 2, 1],
+        [0, 3, 2],
         [4, 5, 6],
         [4, 6, 7],
         [0, 1, 5],
@@ -972,7 +976,7 @@ pub async fn mk_rect_prism(
 }
 
 #[stdlib_func]
-pub async fn mk_cylinder(
+pub fn mk_cylinder(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -1027,7 +1031,7 @@ pub async fn mk_cylinder(
 }
 
 #[stdlib_func]
-pub async fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let apex = read_float3(executor, stack_idx, -4, "apex")?;
     let base = read_float3(executor, stack_idx, -3, "base")?;
     let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
@@ -1063,12 +1067,12 @@ pub async fn mk_cone(executor: &mut Executor, stack_idx: usize) -> Result<Value,
             uv: Float2::ZERO,
         })
         .collect();
-    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &HashMap::new());
+    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &BoundaryEdges::default());
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
-pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let major = crate::read_float(executor, stack_idx, -4, "major_radius")? as f32;
     let minor = crate::read_float(executor, stack_idx, -3, "minor_radius")? as f32;
     let major_samples = read_int(executor, stack_idx, -2, "major_samples")?.max(3) as usize;
@@ -1113,12 +1117,12 @@ pub async fn mk_torus(executor: &mut Executor, stack_idx: usize) -> Result<Value
             uv: Float2::ZERO,
         })
         .collect();
-    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &HashMap::new());
+    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &BoundaryEdges::default());
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
-pub async fn mk_plane(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_plane(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let dist = crate::read_float(executor, stack_idx, -3, "dist")? as f32;
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
@@ -1136,7 +1140,7 @@ pub async fn mk_plane(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn mk_bezier(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_bezier(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let control_points = read_float3_list(executor, stack_idx, -1, "control_points")?;
     if control_points.len() < 2 {
         return Ok(mesh_from_parts(vec![], vec![], vec![]));
@@ -1171,7 +1175,7 @@ pub async fn mk_bezier(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let tail = read_float3(executor, stack_idx, -6, "tail")?;
     let delta = read_float3(executor, stack_idx, -5, "delta")?;
     let normal = read_float3(executor, stack_idx, -4, "normal")?;
@@ -1190,7 +1194,7 @@ pub async fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Valu
 }
 
 #[stdlib_func]
-pub async fn mk_half_vector(
+pub fn mk_half_vector(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -1206,7 +1210,7 @@ pub async fn mk_half_vector(
 
 #[cfg(target_arch = "wasm32")]
 #[stdlib_func]
-pub async fn mk_image(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_image(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
     Err(ExecutorError::invalid_invocation(
         "Image(...) is not supported in the WebAssembly runtime yet",
     ))
@@ -1248,7 +1252,7 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
 
 #[cfg(target_arch = "wasm32")]
 #[stdlib_func]
-pub async fn mk_svg(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_svg(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
     Err(ExecutorError::invalid_invocation(
         "Svg(...) is not supported in the WebAssembly runtime yet",
     ))
@@ -1300,7 +1304,7 @@ pub async fn mk_tex(executor: &mut Executor, stack_idx: usize) -> Result<Value, 
 
 #[cfg(target_arch = "wasm32")]
 #[stdlib_func]
-pub async fn mk_typst(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_typst(_executor: &mut Executor, _stack_idx: usize) -> Result<Value, ExecutorError> {
     Err(ExecutorError::invalid_invocation(
         "Typst(...) is not supported in the WebAssembly runtime yet",
     ))
@@ -1452,7 +1456,7 @@ pub async fn mk_label(executor: &mut Executor, stack_idx: usize) -> Result<Value
 }
 
 #[stdlib_func]
-pub async fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn mk_number(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let value = crate::read_float(executor, stack_idx, -4, "value")?;
     let decimal_places = read_optional_decimal_places(executor, stack_idx, -3, "decimal_places")?;
     let include_sign = read_flag(executor, stack_idx, -2, "include_sign")?;

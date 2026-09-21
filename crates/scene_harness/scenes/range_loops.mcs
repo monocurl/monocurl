@@ -1,0 +1,65 @@
+# the range loop counter and bound are unboxed; these pin the semantics down
+
+import std.util
+import std.math
+
+# float bounds still advance correctly
+var float_steps = []
+for (i in range(0.5, 3.5)) {
+    float_steps .= i
+}
+print float_steps
+
+# a bound computed from an expression is evaluated once
+var counter = 0
+var limit_reads = []
+let limit = 4
+for (i in range(0, limit)) {
+    counter = counter + 1
+    limit_reads .= i
+}
+print [counter, limit_reads]
+
+# nested range loops each keep their own counter
+var grid = []
+for (i in range(0, 3)) {
+    for (j in range(0, 3)) {
+        if (j > i) {
+            grid .= [i, j]
+        }
+    }
+}
+print grid
+
+# an empty range runs zero times
+var never = []
+for (i in range(3, 3)) {
+    never .= i
+}
+print never
+
+# a descending range also runs zero times
+var descending = []
+for (i in range(3, 0)) {
+    descending .= i
+}
+print descending
+
+# closures made in the loop capture the counter's value at creation
+var captured = []
+for (i in range(0, 3)) {
+    captured .= |x| x * 10 + i
+}
+print map(captured, |f| f(1))
+
+# break leaves the counter alone for the enclosing scope
+var outer_seen = []
+for (i in range(0, 5)) {
+    for (j in range(0, 5)) {
+        if (j == 2) {
+            break
+        }
+    }
+    outer_seen .= i
+}
+print outer_seen

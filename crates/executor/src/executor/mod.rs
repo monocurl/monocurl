@@ -13,7 +13,7 @@ pub(crate) mod ops;
 use std::pin::Pin;
 use std::{future::Future, sync::Arc};
 
-use bytecode::Bytecode;
+use bytecode::{Bytecode, Instruction};
 use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
@@ -27,6 +27,18 @@ use self::memory::{EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD, PeriodicMemory
 pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
 
 pub type StdlibFunc = for<'a> fn(&'a mut Executor, usize) -> StdlibReturn<'a>;
+
+/// entry point for a native that never suspends
+pub type StdlibSyncFunc = fn(&mut Executor, usize) -> Result<Value, ExecutorError>;
+
+/// a native function as the executor sees it. `call_sync` is present whenever the
+/// native cannot suspend, which lets the interpreter run it without building a
+/// future at all
+#[derive(Clone, Copy)]
+pub struct NativeFunction {
+    pub call: StdlibFunc,
+    pub call_sync: Option<StdlibSyncFunc>,
+}
 
 enum SeekPrimitiveResult {
     Error(ExecutorError),
@@ -109,6 +121,24 @@ pub enum TextRenderQuality {
     High,
 }
 
+/// outcome of a run of instructions attempted without suspending
+pub(crate) enum SyncRun {
+    /// the instruction that was fetched needs the asynchronous path. it is
+    /// carried out so the caller does not have to rewind and re-decode it
+    Suspend {
+        section_idx: usize,
+        instr: Instruction,
+    },
+    /// execution produced a result other than `Continue`
+    Done(ExecSingle),
+    /// the run hit its instruction budget; the caller should yield and resume
+    BudgetExhausted,
+}
+
+/// how many instructions one synchronous run may execute before handing control
+/// back so the cooperative yielder can run
+pub(crate) const SYNC_RUN_BUDGET: u32 = 256;
+
 /// result of executing a single instruction
 pub(crate) enum ExecSingle {
     Continue,
@@ -120,7 +150,7 @@ pub(crate) enum ExecSingle {
 pub struct Executor {
     pub state: ExecutionState,
     pub(crate) bytecode: Bytecode,
-    pub(crate) native_funcs: Vec<StdlibFunc>,
+    pub(crate) native_funcs: Vec<NativeFunction>,
     pub(crate) cache: ExecutionCache,
     pub(crate) yielder: PeriodicYielder,
     aspect_ratio: f32,
@@ -137,7 +167,7 @@ fn normalize_aspect_ratio(aspect_ratio: f32) -> f32 {
 }
 
 impl Executor {
-    pub fn new(bytecode: Bytecode, native_funcs: Vec<StdlibFunc>) -> Self {
+    pub fn new(bytecode: Bytecode, native_funcs: Vec<NativeFunction>) -> Self {
         let cache = ExecutionCache::new(&bytecode);
         Self {
             state: ExecutionState::new(),
@@ -202,22 +232,63 @@ impl Executor {
         self.aspect_ratio
     }
 
+    /// fetch and advance past the next instruction
     #[inline(always)]
-    pub(crate) async fn execute_one(&mut self, stack_idx: usize) -> ExecSingle {
+    fn fetch(&mut self, stack_idx: usize) -> (usize, Instruction) {
+        let (section, offset) = self.state.stack(stack_idx).ip;
+        let section_idx = section as usize;
+        let instr = self.bytecode.sections[section_idx].instructions[offset as usize];
+        self.state.stack_mut(stack_idx).ip = (section, offset + 1);
+
+        (section_idx, instr)
+    }
+
+    /// run instructions until one needs to suspend, the budget runs out, or
+    /// execution produces a result. the great majority of instructions never
+    /// await, so this loop is what the interpreter spends its time in
+    #[inline(always)]
+    pub(crate) fn execute_sync_run(&mut self, stack_idx: usize, budget: u32) -> SyncRun {
         self.state.last_stack_idx = stack_idx;
 
-        if let Err(err) = self.memory_checker.tick() {
-            return ExecSingle::Error(err);
+        let mut remaining = budget;
+        let outcome = loop {
+            if remaining == 0 {
+                break SyncRun::BudgetExhausted;
+            }
+
+            let (section_idx, instr) = self.fetch(stack_idx);
+            match self.execute_instr_sync(section_idx, stack_idx, instr) {
+                Some(ExecSingle::Continue) => remaining -= 1,
+                Some(other) => break SyncRun::Done(other),
+                None => break SyncRun::Suspend { section_idx, instr },
+            }
+        };
+
+        // reported per run rather than per instruction: the check is periodic
+        // anyway, and the counter has no business in the inner loop
+        match self.memory_checker.tick_by(budget - remaining) {
+            Ok(()) => outcome,
+            Err(error) => SyncRun::Done(ExecSingle::Error(error)),
         }
-
-        let ip = self.state.stack(stack_idx).ip;
-        let section_idx = ip.0 as usize;
-        let instr_idx = ip.1 as usize;
-
-        let instr = self.bytecode.sections[section_idx].instructions[instr_idx];
-
-        self.state.stack_mut(stack_idx).ip = (section_idx as u16, (instr_idx + 1) as u32);
-
-        self.execute_instr(section_idx, stack_idx, instr).await
     }
+
+    /// drive one execution head until it produces something other than
+    /// `Continue`, staying in the synchronous run for as long as the instruction
+    /// stream allows and yielding cooperatively between runs
+    pub(crate) async fn run_until_break(&mut self, stack_idx: usize) -> ExecSingle {
+        loop {
+            match self.execute_sync_run(stack_idx, SYNC_RUN_BUDGET) {
+                SyncRun::Done(result) => return result,
+                SyncRun::BudgetExhausted => self.tick_yielder().await,
+                SyncRun::Suspend { section_idx, instr } => {
+                    self.tick_yielder().await;
+                    match self.execute_instr_async(section_idx, stack_idx, instr).await {
+                        ExecSingle::Continue => {}
+                        other => return other,
+                    }
+                }
+            }
+        }
+    }
+
 }

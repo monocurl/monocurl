@@ -198,7 +198,7 @@ pub async fn runtime_error(
 }
 
 #[stdlib_func]
-pub async fn type_of(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+pub fn type_of(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     Ok(Value::String(
         read_elided_value(executor, stack_idx, -1)
             .type_name()
@@ -313,7 +313,7 @@ pub async fn set_defaults(
 }
 
 #[stdlib_func]
-pub async fn get_defaults(
+pub fn get_defaults(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

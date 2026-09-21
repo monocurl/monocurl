@@ -1,0 +1,25 @@
+# interpreter-bound: vector arithmetic on short lists, which is how scenes that
+# sample a field spend their time
+
+import std.util
+import std.math
+
+let flow_at = |pos, src, swirl| {
+    let delta = pos - src
+    let d2 = max(0.12, dot(delta, delta))
+    let tangent = [-delta[1], delta[0], 0]
+    return 0.62 * delta * (1 / d2) + 0.42 * swirl * tangent
+}
+
+var accumulated = [0, 0, 0]
+for (i in range(0, 40000)) {
+    let pos = [i * 0.001, i * 0.002, 0]
+    accumulated = accumulated + flow_at(pos, [0.5, 0.5, 0], 0.3)
+}
+print [round(accumulated[0]), round(accumulated[1])]
+
+var chained = [1, 2, 3]
+for (i in range(0, 40000)) {
+    chained = (chained + [1, 1, 1]) * 0.5
+}
+print [round(chained[0] * 1000), round(chained[1] * 1000)]

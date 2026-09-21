@@ -1,0 +1,27 @@
+# interpreter-bound: raw Monocurl function call throughput
+
+import std.util
+import std.math
+
+let square = |x| x * x
+let add3 = |a, b, c| a + b + c
+
+var total = 0
+for (i in range(0, 20000)) {
+    total = total + square(i)
+}
+print total
+
+var nested = 0
+for (i in range(0, 8000)) {
+    nested = nested + add3(square(i), square(i + 1), square(i + 2))
+}
+print nested
+
+let fib = |self, n| {
+    if (n < 2) {
+        return n
+    }
+    return self(self, n - 1) + self(self, n - 2)
+}
+print fib(fib, 20)

@@ -5,3 +5,6 @@ edition.workspace = true
 
 [dependencies]
 rust_scene_macros.workspace = true
+
+[dev-dependencies]
+trybuild.workspace = true

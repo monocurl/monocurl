@@ -16,7 +16,7 @@ pub async fn tag_bend_embed(
 }
 
 #[stdlib_func]
-pub async fn mesh_lerp_value(
+pub fn mesh_lerp_value(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
@@ -27,7 +27,7 @@ pub async fn mesh_lerp_value(
 }
 
 #[stdlib_func]
-pub async fn bend_lerp_value(
+pub fn bend_lerp_value(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
