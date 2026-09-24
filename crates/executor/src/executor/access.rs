@@ -6,7 +6,8 @@ use crate::{
     state::LeaderKind,
     value::{
         Value, container::HashableKey, invoked_function::InvokedFunction,
-        invoked_operator::InvokedOperator, stateful::lift_append_to_stateful,
+        invoked_operator::{InvokedOperator, invalidate_invoked_operator_cache},
+        stateful::lift_append_to_stateful,
     },
 };
 
@@ -80,6 +81,8 @@ fn select_in_place(container: &Value, indices: &[Value]) -> Option<Result<Value,
 /// fresh nil slot. the container is edited in place, because copying it out to
 /// write one element would make every indexed write O(n)
 fn writable_element_slot(container_key: HeapKey, index: &Value) -> Result<HeapKey, ExecutorError> {
+    let container_key = writable_container_key(container_key);
+
     enum Position {
         Index(usize),
         Key(HashableKey),
@@ -128,6 +131,41 @@ fn writable_element_slot(container_key: HeapKey, index: &Value) -> Result<HeapKe
     Ok(replacement_key)
 }
 
+/// the slot that a write into the container living at `key` should edit. a live
+/// function is replaced by its result, since editing the result detaches it from
+/// the call, while a live operator is edited through its operand so that it keeps
+/// applying. anything that does not resolve to a list or map is left untouched
+/// for the caller to reject
+fn writable_container_key(key: HeapKey) -> HeapKey {
+    let key = follow_heap_lvalue_key(key);
+    let live = with_heap(|heap| match &*heap.get(key) {
+        Value::InvokedOperator(invoked) if resolves_to_container(&invoked.body.operand) => {
+            Some(Value::InvokedOperator(invoked.clone()))
+        }
+        live @ Value::InvokedFunction(_) if resolves_to_container(live) => Some(live.clone()),
+        _ => None,
+    });
+
+    match live {
+        Some(Value::InvokedOperator(mut invoked)) => {
+            invalidate_invoked_operator_cache(&invoked);
+            invoked.body.boxed_operand = true;
+            let operand_key = invoked.body.operand.make_mut_lvalue();
+            heap_replace(key, Value::InvokedOperator(invoked));
+            writable_container_key(operand_key)
+        }
+        Some(live) => {
+            heap_replace(key, live.elide_cached_wrappers());
+            key
+        }
+        None => key,
+    }
+}
+
+fn resolves_to_container(value: &Value) -> bool {
+    value.with_elided_cached_wrappers(|value| matches!(value, Value::List(_) | Value::Map(_)))
+}
+
 /// what the `len` native reports for a value it accepts
 fn plain_len(value: &Value) -> Option<usize> {
     match value {
@@ -145,6 +183,7 @@ fn retained_lvalue(key: HeapKey) -> Value {
 impl Executor {
     fn exec_assign_dfs(&mut self, lhs: Value, rhs: Value, stack_idx: usize) -> ExecSingle {
         if let Value::List(llhs) = &lhs {
+            let rhs = rhs.elide_cached_wrappers();
             return match &rhs {
                 Value::List(lrhs) if llhs.len() == lrhs.len() => {
                     for (lk, rk) in llhs.elements.iter().zip(lrhs.elements.iter()) {
@@ -258,7 +297,7 @@ impl Executor {
         // appending to a plain list is the common case and must stay O(1): copying
         // the list out of its slot to push one element would make building a list
         // quadratic in its length
-        let key = follow_heap_lvalue_key(key);
+        let key = writable_container_key(key);
         let is_plain_list = with_heap(|heap| matches!(&*heap.get(key), Value::List(_)));
 
         let appended_key = if is_plain_list {
@@ -275,7 +314,7 @@ impl Executor {
                 return ExecSingle::Error(ExecutorError::type_error("list", base_val.type_name()));
             };
 
-            let inner_key = follow_heap_lvalue_key(leader.leader_rc.key());
+            let inner_key = writable_container_key(leader.leader_rc.key());
             let inner_is_stateful =
                 with_heap(|heap| matches!(&*heap.get(inner_key), Value::Stateful(_)));
 

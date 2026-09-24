@@ -2155,3 +2155,98 @@ fn test_camera_stdlib_uses_look_at_surface() {
 }
 
 // -- stack overflow --
+
+// -- live call results used as plain values --
+// `sort` and `range` have default arguments, so their calls stay live function values
+
+#[test]
+fn test_append_assign_to_sorted_list() {
+    let r = run_with_stdlib(
+        "
+        var s = sort([3, 1, 2])
+        s .= 5
+        let result = s
+    ",
+        &["util"],
+    );
+    r.assert_int_list(&[1, 2, 3, 5]);
+}
+
+#[test]
+fn test_subscript_write_into_live_function_result() {
+    let r = run_with_stdlib(
+        "
+        var r = range(0, 3)
+        r[1] = 7
+        var nested = sort([[2, 1], [1, 2]])
+        nested[0] .= 3
+        let result = [r, nested[0]]
+    ",
+        &["util"],
+    );
+    r.assert_list_elements(&[[0, 7, 2].as_slice(), &[1, 2, 3]], |_, value, expected| {
+        let Value::List(list) = value else {
+            panic!("expected list, got {}", value.type_name());
+        };
+        let actual: Vec<_> = list
+            .elements()
+            .iter()
+            .map(|elem| match with_heap(|h| h.get(elem.key()).clone()) {
+                Value::Integer(n) => n,
+                other => panic!("expected int, got {}", other.type_name()),
+            })
+            .collect();
+        assert_eq!(actual, *expected);
+    });
+}
+
+#[test]
+fn test_subscript_of_call_result() {
+    let r = run_with_stdlib(
+        "
+        let sorted = sort([3, 1, 2])
+        let result = [sort([3, 1, 2])[0], [sorted][0][2], sorted[1]]
+    ",
+        &["util"],
+    );
+    r.assert_int_list(&[1, 3, 2]);
+}
+
+#[test]
+fn test_destructure_live_function_result() {
+    let r = run_with_stdlib(
+        "
+        let [a, b, c] = sort([3, 1, 2])
+        let result = [a, b, c]
+    ",
+        &["util"],
+    );
+    r.assert_int_list(&[1, 2, 3]);
+}
+
+#[test]
+fn test_transcript_shows_nested_live_function_results() {
+    let r = run_with_stdlib("print [sort([2, 1]), 3]", &["util"]);
+    r.assert_transcript(&["[[1, 2], 3]"]);
+}
+
+#[test]
+fn test_subscript_write_into_live_operator_edits_its_operand() {
+    let r = run("
+        let tail = operator |target, extra| [target, target .. extra]
+        var xs = tail{9} [1, 2]
+        xs[0] = 5
+        print xs
+    ");
+    r.assert_transcript(&["[5, 2, 9]"]);
+}
+
+#[test]
+fn test_append_assign_to_live_scalar_result_is_rejected() {
+    let r = run("
+        let f = |x, y = 1| x + y
+        var v = f(2)
+        v .= 3
+    ");
+    r.assert_error("expected list, got live function");
+}
