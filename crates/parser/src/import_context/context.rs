@@ -76,6 +76,15 @@ impl ParseImportContext {
         self.cached_parses.insert(path, (Arc::new(raw), artifacts));
     }
 
+    pub(crate) fn missing_import_hint(
+        &self,
+        working_directory: Option<&Path>,
+        relative_path: &Path,
+    ) -> Option<String> {
+        self.import_backend
+            .missing_import_hint(working_directory, relative_path)
+    }
+
     pub(crate) fn file_content(
         &self,
         working_directory: Option<&Path>,

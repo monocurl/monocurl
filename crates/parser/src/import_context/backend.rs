@@ -30,6 +30,15 @@ pub trait ImportBackend: Send {
         working_directory: Option<&Path>,
         relative_path: &Path,
     ) -> Option<ImportedFile>;
+
+    /// extra context appended to a failed import, such as the locations searched
+    fn missing_import_hint(
+        &self,
+        _working_directory: Option<&Path>,
+        _relative_path: &Path,
+    ) -> Option<String> {
+        None
+    }
 }
 
 pub type OpenDocumentRopes =
