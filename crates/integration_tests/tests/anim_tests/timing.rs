@@ -273,3 +273,51 @@ fn test_seek_past_end_clamps_to_last_event() {
 }
 
 // -- state variables (leaders) --
+
+#[test]
+fn test_seek_to_slide_start_leaves_zero_duration_set_pending() {
+    // a seek stops as soon as it reaches the target time, before stepping what it prepared
+    let r = run_anim_with_stdlib_at(
+        "
+        param x = 0
+        x = 10
+        play Set()
+        play Wait(1)
+    ",
+        0.0,
+    );
+    r.assert_ok();
+    r.param_leaders()[2].assert_current_int(0);
+}
+
+#[test]
+fn test_settled_slide_start_applies_zero_duration_set() {
+    let r = run_anim_with_stdlib_settled_at(
+        "
+        param x = 0
+        x = 10
+        play Set()
+        play Wait(1)
+    ",
+        0.0,
+    );
+    r.assert_ok();
+    r.param_leaders()[2].assert_current_int(10);
+}
+
+#[test]
+fn test_settled_instant_applies_set_after_finished_lerp() {
+    let r = run_anim_with_stdlib_settled_at(
+        "
+        param x = 0
+        x = 10
+        play Lerp(1)
+        x = 20
+        play Set()
+        play Wait(1)
+    ",
+        1.0,
+    );
+    r.assert_ok();
+    r.param_leaders()[2].assert_current_int(20);
+}

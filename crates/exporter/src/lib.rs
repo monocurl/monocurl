@@ -15,7 +15,7 @@ use compiler::{
     compiler::{CompileError, compile},
 };
 use executor::{
-    error::{RuntimeCallFrame, RuntimeError},
+    error::{ExecutorError, RuntimeCallFrame, RuntimeError},
     executor::{Executor, SeekOptions, SeekToResult, TextRenderQuality},
     time::Timestamp,
 };
@@ -1091,6 +1091,14 @@ async fn render_frame(
         root_text_rope,
     )
     .await?;
+    // a frame on an instant should show that instant's zero duration animations,
+    // e.g. a `play Set()` at slide time 0
+    if let Err(error) = executor
+        .settle_current_instant(SeekOptions::fast())
+        .await
+    {
+        bail!("{}", last_runtime_error_message(executor, root_text_rope, &error));
+    }
 
     let scene = executor
         .capture_stable_scene_snapshot()
@@ -1131,17 +1139,22 @@ async fn seek_internal_timestamp_with_options(
     match executor.seek_to_with_options(target, seek_options).await {
         SeekToResult::SeekedTo(timestamp) => Ok(timestamp),
         SeekToResult::Error(error) => {
-            let message = executor
-                .state
-                .errors
-                .last()
-                .map(|runtime_error| {
-                    format_runtime_error_message(executor, root_text_rope, runtime_error)
-                })
-                .unwrap_or_else(|| error.to_string());
-            bail!("{message}");
+            bail!("{}", last_runtime_error_message(executor, root_text_rope, &error))
         }
     }
+}
+
+fn last_runtime_error_message(
+    executor: &Executor,
+    root_text_rope: &Rope<TextAggregate>,
+    error: &ExecutorError,
+) -> String {
+    executor
+        .state
+        .errors
+        .last()
+        .map(|runtime_error| format_runtime_error_message(executor, root_text_rope, runtime_error))
+        .unwrap_or_else(|| error.to_string())
 }
 
 fn start_mp4_writer(
