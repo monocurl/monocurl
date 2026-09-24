@@ -157,7 +157,7 @@ mod tests {
 
     use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot};
     use geo::{
-        mesh::{Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
+        mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
         simd::{Float2, Float3, Float4},
     };
 
@@ -232,6 +232,38 @@ mod tests {
         assert!(
             red_pixels > 0,
             "expected standalone line render to produce visible red pixels"
+        );
+    }
+
+    #[test]
+    fn renders_standalone_dot_on_first_frame() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let mut mesh = flat_triangle_mesh(Float4::ZERO, 0);
+        mesh.tris.clear();
+        mesh.dots = vec![Dot {
+            pos: Float3::ZERO,
+            norm: Float3::Z,
+            col: Float4::new(1.0, 0.0, 0.0, 1.0),
+            inv: -1,
+            is_dom_sib: false,
+        }];
+        mesh.normalize_line_dot_topology();
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::new(mesh)],
+        };
+
+        // a fresh renderer has no cached dot index buffer yet
+        let image = renderer.render(&scene, RenderSize::new(128, 128)).unwrap();
+        let [b, g, r, a] = image.get_pixel(64, 64).0;
+
+        assert!(
+            a > 0 && r > 128 && g < 64 && b < 64,
+            "expected the dot to cover the center pixel on the first frame, got {:?}",
+            [b, g, r, a]
         );
     }
 
