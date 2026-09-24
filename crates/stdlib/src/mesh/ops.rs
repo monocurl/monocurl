@@ -1,4 +1,9 @@
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+};
 
 use executor::{
     camera::{CameraBasis, DEFAULT_CAMERA_FOV, initial_camera_snapshot, parse_camera_arg},
@@ -8,7 +13,7 @@ use executor::{
     value::Value,
 };
 use geo::{
-    mesh::{Lin, Mesh, make_mesh_mut},
+    mesh::{DEFAULT_DOT_RADIUS, Dot, Lin, Mesh, make_mesh_mut},
     mesh_build::{BoundaryEdge, BoundaryEdges, IndexedSurface, SurfaceVertex},
     simd::{Float3, Float4},
 };
@@ -829,12 +834,51 @@ pub async fn op_redot(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let color = read_float4(executor, stack_idx, -3, "color").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
+        add_line_vertex_dots(mesh);
         for dot in &mut mesh.dots {
             dot.col = dot.col.lerp(color, level);
         }
+        // topology dots are authored with radius 0, which would keep them hidden
+        let radius = mesh.uniform.dot_radius;
+        let visible = if radius > 0.0 { radius } else { DEFAULT_DOT_RADIUS };
+        mesh.uniform.dot_radius = radius + (visible - radius) * level;
     })
     .await?;
     Ok(tree.into_value())
+}
+
+/// give every line vertex a dot. endpoints already carry a topology dot, so only
+/// vertices joining two lines get a new standalone one, and a vertex that already
+/// has a standalone dot is left alone
+fn add_line_vertex_dots(mesh: &mut Mesh) {
+    let point_key = |pos: Float3| [pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits()];
+    let mut dotted: HashSet<_> = mesh
+        .dots
+        .iter()
+        .filter(|dot| dot.is_dom_sib && dot.inv >= 0)
+        .map(|dot| point_key(dot.pos))
+        .collect();
+
+    let vertex_dots: Vec<Dot> = mesh
+        .lins
+        .iter()
+        .filter(|lin| lin.is_dom_sib && lin.prev >= 0 && dotted.insert(point_key(lin.a.pos)))
+        .map(|lin| Dot {
+            pos: lin.a.pos,
+            norm: lin.norm,
+            col: lin.a.col,
+            inv: -1,
+            is_dom_sib: true,
+        })
+        .collect();
+    if vertex_dots.is_empty() {
+        return;
+    }
+
+    mesh.dots.extend(vertex_dots);
+    // pairs each new dot with its inverse sibling
+    mesh.normalize_line_dot_topology();
+    mesh.debug_assert_consistent_topology();
 }
 
 #[stdlib_func]
