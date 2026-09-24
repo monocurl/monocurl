@@ -139,11 +139,12 @@ impl Map {
         self.entries.is_empty()
     }
 
-    pub fn insert(&mut self, key: HashableKey, value: VRc) {
+    /// returns the value the key held before, if any
+    pub fn insert(&mut self, key: HashableKey, value: VRc) -> Option<VRc> {
         if !self.entries.contains_key(&key) {
             self.insertion_order.push(key.clone());
         }
-        self.entries.insert(key, value);
+        self.entries.insert(key, value)
     }
 
     pub fn get(&self, key: &HashableKey) -> Option<&VRc> {

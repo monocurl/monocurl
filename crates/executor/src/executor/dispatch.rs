@@ -405,11 +405,16 @@ impl Executor {
             Instruction::Not => return self.try_not(stack_idx),
 
             Instruction::Subscript { .. } => return None,
-            Instruction::SubscriptLocal { stack_delta } => {
-                return self.try_subscript_local(stack_idx, stack_delta);
+            Instruction::SubscriptLocal {
+                stack_delta, depth, ..
+            } => {
+                return self.try_subscript_local(stack_idx, stack_delta, depth);
             }
             Instruction::ContainerLen { stack_delta } => {
                 return Some(self.exec_container_len(stack_idx, stack_delta));
+            }
+            Instruction::LenLocal { stack_delta, .. } => {
+                return self.try_len_local(stack_idx, stack_delta);
             }
             Instruction::Attribute {
                 mutable,
@@ -592,8 +597,23 @@ impl Executor {
             Instruction::Subscript { mutable } => {
                 return self.exec_subscript(stack_idx, mutable).await;
             }
-            Instruction::SubscriptLocal { stack_delta } => {
-                return self.exec_subscript_local(stack_idx, stack_delta).await;
+            Instruction::SubscriptLocal {
+                stack_delta,
+                depth,
+                copy_mode,
+            } => {
+                return self
+                    .exec_subscript_local(stack_idx, stack_delta, depth, copy_mode)
+                    .await;
+            }
+
+            Instruction::LenLocal {
+                stack_delta,
+                copy_mode,
+            } => {
+                return self
+                    .exec_len_copied(stack_idx, stack_delta, copy_mode)
+                    .await;
             }
 
             Instruction::Add => return self.exec_binary_op(stack_idx, BinOp::Add).await,
@@ -616,7 +636,7 @@ impl Executor {
         ExecSingle::Continue
     }
 
-    async fn read_current_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
+    pub(super) async fn read_current_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
         match val.elide_lvalue_leader_rec() {
             Value::Stateful(stateful) => self.eval_stateful(&stateful).await,
             other => Ok(other),

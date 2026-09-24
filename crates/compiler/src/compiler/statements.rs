@@ -328,7 +328,11 @@ impl Compiler {
             compiler.emit_copy_ref(d, span.clone());
             let d = compiler.stack_delta(iter_pos);
             compiler.emit(
-                Instruction::SubscriptLocal { stack_delta: d },
+                Instruction::SubscriptLocal {
+                    stack_delta: d,
+                    depth: 1,
+                    copy_mode: CopyValueMode::Raw,
+                },
                 container_span.clone(),
             );
         });

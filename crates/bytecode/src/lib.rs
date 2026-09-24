@@ -172,17 +172,27 @@ pub enum Instruction {
     Subscript {
         mutable: bool,
     },
-    /// pops the index from the top of stack and reads the container held at
-    /// `stack_delta` in place, pushing the selected element. unlike a copy
-    /// followed by `Subscript` this never duplicates the container, which is what
-    /// keeps iteration linear
+    /// pops `depth` indices (outermost first, innermost on top) and reads
+    /// `container[i0][i1]...` in place from the container held at `stack_delta`,
+    /// pushing the selected element. unlike a copy followed by `Subscript` this
+    /// never duplicates the container, which is what keeps indexing O(1) and
+    /// iteration linear. `copy_mode` is how the container would have been
+    /// copied, for shapes that fall back to the general path
     SubscriptLocal {
         stack_delta: i32,
+        depth: u16,
+        copy_mode: CopyValueMode,
     },
     /// pushes the length of the container held at `stack_delta`, reading it in
     /// place
     ContainerLen {
         stack_delta: i32,
+    },
+    /// pushes `len(...)` of the container held at `stack_delta`, reading it in
+    /// place; `copy_mode` is how it would have been copied into the native
+    LenLocal {
+        stack_delta: i32,
+        copy_mode: CopyValueMode,
     },
     Attribute {
         mutable: bool,

@@ -77,6 +77,11 @@ impl ExecutionStack {
         &self.var_stack[idx]
     }
 
+    /// the top `n` entries, deepest first
+    pub fn top(&self, n: usize) -> &[Value] {
+        &self.var_stack[self.var_stack.len() - n..]
+    }
+
     pub fn stack_len(&self) -> usize {
         self.var_stack.len()
     }
