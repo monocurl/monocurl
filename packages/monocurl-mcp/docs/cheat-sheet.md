@@ -16,6 +16,14 @@ import std.anim
 import std.scene
 ```
 
+## Syntax Gotchas
+
+- Booleans use `and`, `or`, `not`; there is no `&&`, `||`, or `!`.
+- `/` always returns a float (`4 / 2` is `2.0`); use `//` for list indices.
+- Call labels name positional slots, not keywords: `f(a, c: 1)` binds `1` to
+  the second parameter.
+- String escapes use `%`, not `\`: `%n`, `%"`, `%%`.
+
 ## Common Mesh Constructors
 
 - Basic 2D: `Dot`, `Circle`, `Annulus`, `Square`, `Rect`, `RegularPolygon`,

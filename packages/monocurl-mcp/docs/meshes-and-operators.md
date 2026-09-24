@@ -13,6 +13,10 @@ let mesh_tree = [Circle(1), [Square(1), Circle(1)]]
 
 Treat mesh lists as "trees" of meshes.
 
+Keep consecutive `Polyline` vertices at least about `0.001` apart. Denser
+samples can render with missing segments, so resample long curves more
+coarsely rather than adding points.
+
 ## Tags And Filters
 
 Tags are stable identities attached to mesh leaves. Use `tag{...}` when later

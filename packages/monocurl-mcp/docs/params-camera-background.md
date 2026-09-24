@@ -93,6 +93,11 @@ animates the camera.
 `background` can be assigned and synchronized like any other scene leader, but
 camera motion should usually use `CameraLerp` rather than plain `Lerp`.
 
+`CameraLerp` interpolates between the start and end poses, not along a path, so
+a destination identical to the start does not move the camera at all. A full
+orbit ends where it began: split it into legs (for example three 120-degree
+`CameraLerp`s) so each leg has a distinct destination.
+
 ```monocurl
 mesh object = Circle(1)
 

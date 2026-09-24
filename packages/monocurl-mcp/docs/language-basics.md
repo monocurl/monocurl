@@ -62,6 +62,14 @@ for (x in [1, 2, 3]) {
 }
 ```
 
+Boolean operators are the keywords `and`, `or`, and `not`; `&&`, `||`, and
+`!` are not operators (`&` marks a reference argument). Comparisons return `1`
+or `0`.
+
+`/` always returns a float, even when the division is exact: `4 / 2` is `2.0`.
+List indices must be integers, so use `//` (floor division) when computing an
+index: `xs[len(xs) // 2]`, not `xs[len(xs) / 2]`.
+
 Prefer building data first, then turning it into mesh values. This keeps
 algorithm scenes readable.
 
@@ -164,6 +172,12 @@ slide "Labels"
     token.radius = 0.44
     play Lerp(0.9, [&token])
 ```
+
+Labels name the positional slot they are written in; they are not keyword
+arguments. Arguments always bind by position, so a label cannot skip ahead to a
+later parameter. `Vector(d, tail, tip_length: 0.8)` passes `0.8` as the third
+parameter, `normal`, and only calls it `tip_length`. To set a later parameter,
+pass every parameter before it, in order.
 
 In the example above, `ball.pos`, `ball.radius`, and `ball.col` are labels on
 the `Ball(...)` call. `token.delta` is the label on the `shift{...}` operator,
