@@ -2153,3 +2153,56 @@ fn test_concurrent_primitive_animation_lock_error() {
 }
 
 // -- multi-slide --
+
+#[test]
+fn test_lerp_interpolates_stateful_camera_transfer_arguments_while_camera_moves() {
+    let r = run_anim_impl(
+        &[(
+            "
+            mesh m = camera_transfer{camera, $camera} Circle(radius: 1)
+            play Set()
+
+            m.radius = 2
+            camera = Camera([1.5, 0.8, 4])
+            play [Lerp(1, [&m], linear), CameraLerp(&camera, 1)]
+        ",
+            SectionType::Slide,
+        )],
+        0,
+        0.5,
+        &stdlib_bundles(["anim", "color", "math", "mesh", "scene"]),
+    );
+    r.assert_ok();
+
+    let radius = r
+        .mesh_leader(0)
+        .current
+        .clone()
+        .attr_by_name("radius")
+        .expect("the follower should still be a live camera_transfer of Circle");
+    assert!(
+        matches!(radius, Value::Float(radius) if (radius - 1.5).abs() < 1e-9),
+        "expected radius 1.5 halfway, got {}",
+        value_summary(&radius)
+    );
+}
+
+#[test]
+fn test_lerp_interpolates_stateful_camera_transfer_arguments() {
+    let r = run_anim_impl(
+        &[(
+            "
+            mesh m = camera_transfer{camera, $camera} Circle(radius: 1)
+            play Set()
+
+            m.radius = 2
+            play Lerp(1)
+        ",
+            SectionType::Slide,
+        )],
+        0,
+        0.5,
+        &stdlib_bundles(["anim", "color", "math", "mesh", "scene"]),
+    );
+    r.assert_ok();
+}
