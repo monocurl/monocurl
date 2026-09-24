@@ -2250,3 +2250,75 @@ fn test_append_assign_to_live_scalar_result_is_rejected() {
     ");
     r.assert_error("expected list, got live function");
 }
+
+// -- dotted --
+
+/// positions of the dots the renderer draws: dominant siblings with some opacity
+fn visible_dot_positions(mesh: &geo::mesh::Mesh) -> Vec<[f32; 3]> {
+    let mut positions: Vec<[f32; 3]> = mesh
+        .dots
+        .iter()
+        .filter(|dot| dot.is_dom_sib && dot.col.w > 0.0)
+        .map(|dot| [dot.pos.x, dot.pos.y, dot.pos.z])
+        .collect();
+    positions.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    positions.dedup();
+    positions
+}
+
+#[test]
+fn test_dotted_shows_a_dot_at_every_polyline_vertex() {
+    let r = run_with_stdlib(
+        "
+        let result = dotted{[1, 0, 0, 1]} Polyline([[0, 0, 0], [1, 0, 0], [1, 1, 0], [2, 1, 0]])
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(r.value.as_ref().expect("expected mesh"), &mut meshes);
+
+    assert_eq!(meshes.len(), 1);
+    let mesh = &meshes[0];
+    assert!(mesh.has_consistent_topology());
+    assert_eq!(mesh.uniform.dot_radius, geo::mesh::DEFAULT_DOT_RADIUS);
+    assert_eq!(
+        visible_dot_positions(mesh),
+        vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [2.0, 1.0, 0.0]]
+    );
+}
+
+#[test]
+fn test_dotted_closed_loop_gets_one_dot_per_vertex() {
+    let r = run_with_stdlib(
+        "
+        let result = dotted{[1, 0, 0, 1]} dotted{[0, 0, 1, 1]} Circle(1, 6)
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(r.value.as_ref().expect("expected mesh"), &mut meshes);
+
+    let mesh = &meshes[0];
+    assert!(mesh.has_consistent_topology());
+    let dom_dots = mesh.dots.iter().filter(|dot| dot.is_dom_sib).count();
+    assert_eq!(dom_dots, 6, "applying dotted twice must not stack dots");
+    assert!(
+        mesh.dots
+            .iter()
+            .filter(|dot| dot.is_dom_sib)
+            .all(|dot| dot.col.x == 1.0 && dot.col.z == 0.0)
+    );
+}
+
+#[test]
+fn test_dotted_keeps_an_existing_dot_radius() {
+    let r = run_with_stdlib("let result = dotted{[1, 0, 0, 1]} Dot()", &["mesh"]);
+    r.assert_ok();
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(r.value.as_ref().expect("expected mesh"), &mut meshes);
+
+    assert_eq!(meshes[0].uniform.dot_radius, geo::mesh::DEFAULT_DOT_RADIUS);
+    assert_eq!(visible_dot_positions(&meshes[0]), vec![[0.0, 0.0, 0.0]]);
+}
