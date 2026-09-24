@@ -101,6 +101,11 @@ impl BladeRenderer {
             if let Some(path) = mesh.uniform.img.as_deref() {
                 self.ensure_texture(path, frame_index);
             }
+            // queued before the upload flush below, otherwise the first frame that
+            // uses a vertex count draws from an unfilled index buffer
+            if mesh_dot_radius_px(mesh, self.style, view.raster_scale) > f32::EPSILON {
+                let _ = self.ensure_dot_index_buffer(mesh.uniform.dot_vertex_count);
+            }
 
             items.push(MeshWorkItem {
                 key,
@@ -445,14 +450,6 @@ impl BladeRenderer {
     ) {
         if items.is_empty() && background.is_none() {
             return;
-        }
-
-        for item in items {
-            let dot_radius = mesh_dot_radius_px(item.mesh.as_ref(), self.style, view.raster_scale);
-            let dot_vertex_count = item.mesh.uniform.dot_vertex_count.max(3);
-            if dot_radius > f32::EPSILON {
-                let _ = self.ensure_dot_index_buffer(dot_vertex_count);
-            }
         }
 
         let target = self.target.as_ref().expect("target should exist");
