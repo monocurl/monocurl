@@ -120,9 +120,7 @@ let Line = |start = [0, 0, 0], end = [1, 0, 0], normal = 1b|
 ## A straight dashed line segment between two points.
 ## [description]
 ## Convenience for `dashed{lengths, offset} Line(start, end, normal)`. A scalar `lengths`
-## uses the same dash and gap length; a `[dash, gap]` pair sets them independently. The
-## result interpolates from a solid to a dashed line, so animating it dashes in --
-## a plain `dashed{...} Line(...)` renders dashed right away instead.
+## uses the same dash and gap length; a `[dash, gap]` pair sets them independently.
 ## [parameters]
 ## lengths: dash length or `[dash, gap]`
 ## offset: dash phase offset
@@ -143,8 +141,7 @@ let DashedLine = |start = [0, 0, 0], end = [1, 0, 0], lengths = [0.2, 0.1], offs
         dash = lengths
         gap = lengths
     }
-    let base = __monocurl__native__ mk_line(start, end, normal)
-    return [base, __monocurl__native__ op_dashed(base, dash, gap, offset, nil)]
+    return __monocurl__native__ op_dashed(__monocurl__native__ mk_line(start, end, normal), dash, gap, offset, nil)
 }
 
 ## [overview]
