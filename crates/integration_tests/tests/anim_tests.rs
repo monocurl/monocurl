@@ -6,7 +6,7 @@ use std::{cell::Cell, f64, path::PathBuf, sync::Arc};
 use executor::{
     camera::parse_camera_value,
     error::ExecutorError,
-    executor::{Executor, PlaybackAdvance, SeekToResult},
+    executor::{Executor, PlaybackAdvance, SeekOptions, SeekToResult},
     heap::{VRc, with_heap},
     state::LeaderKind,
     time::Timestamp,
@@ -585,6 +585,35 @@ fn run_anim_impl(
     collect_anim_result(executor, user_slide_count, runtime_errors)
 }
 
+/// seek, then complete the animations that end on the target instant, as export does
+fn run_anim_settled_impl(
+    slides: &[(&str, SectionType)],
+    target_slide: usize,
+    target_time: f64,
+    stdlib_bundles: &[Arc<SectionBundle>],
+) -> AnimResult {
+    let (mut executor, user_slide_count) = match build_anim_executor(slides, stdlib_bundles) {
+        Ok(data) => data,
+        Err(result) => return result,
+    };
+
+    let internal_target =
+        executor.user_to_internal_timestamp(user_timestamp(target_slide, target_time));
+
+    let mut runtime_errors: Vec<String> = Vec::new();
+    smol::block_on(async {
+        match executor.seek_to(internal_target).await {
+            SeekToResult::SeekedTo(_) => {}
+            SeekToResult::Error(e) => return runtime_errors.push(e.to_string()),
+        }
+        if let Err(e) = executor.settle_current_instant(SeekOptions::fast()).await {
+            runtime_errors.push(e.to_string());
+        }
+    });
+
+    collect_anim_result(executor, user_slide_count, runtime_errors)
+}
+
 fn run_anim_playback_impl(
     slides: &[(&str, SectionType)],
     start_slide: usize,
@@ -641,6 +670,15 @@ pub fn run_anim_with_stdlib(src: &str) -> AnimResult {
 /// run a single Slide section with `anim.mcl` stdlib imported, seek to a specific time.
 pub fn run_anim_with_stdlib_at(src: &str, time: f64) -> AnimResult {
     run_anim_impl(
+        &[(src, SectionType::Slide)],
+        0,
+        time,
+        &stdlib_bundles(["anim"]),
+    )
+}
+
+pub fn run_anim_with_stdlib_settled_at(src: &str, time: f64) -> AnimResult {
+    run_anim_settled_impl(
         &[(src, SectionType::Slide)],
         0,
         time,

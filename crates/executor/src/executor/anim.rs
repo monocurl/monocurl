@@ -371,6 +371,34 @@ impl Executor {
         }
     }
 
+    /// completes primitives that end exactly at the current time (a `Set`, or a `Lerp`
+    /// finishing on this instant) and the zero duration follow ups they unblock. a seek
+    /// stops as soon as it reaches its target time, so without this a frame sampled on
+    /// such an instant shows the state from just before it
+    pub async fn settle_current_instant(
+        &mut self,
+        options: SeekOptions,
+    ) -> Result<(), ExecutorError> {
+        loop {
+            let now = self.state.timestamp.time;
+            if !now.is_finite()
+                || !self
+                    .state
+                    .primitive_anims
+                    .iter()
+                    .any(|anim| anim.end_time <= now)
+            {
+                return Ok(());
+            }
+
+            self.step_primitive_anims(0.0, options, PlaybackCacheMode::Full)
+                .await?;
+            if let SeekPrimitiveResult::Error(error) = self.seek_primitive_anim().await {
+                return Err(error);
+            }
+        }
+    }
+
     async fn verify_scene_snapshot_after_seek_step(
         &mut self,
         options: SeekOptions,
