@@ -137,7 +137,7 @@ impl Executor {
             };
         }
 
-        match lhs {
+        match lhs.elide_cached_wrappers() {
             Value::List(mut list) => {
                 list.elements.push(VRc::new(rhs));
                 self.state.stack_mut(stack_idx).push(Value::List(list));

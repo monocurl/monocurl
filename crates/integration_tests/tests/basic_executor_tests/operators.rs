@@ -368,16 +368,57 @@ fn test_exec_native_lerp_labeled_function_preserves_label() {
     r.assert_float(2.0);
 }
 
+// differing unlabeled arguments used to be rejected, which made two calls such as
+// rgb(...) and rgb(...) impossible to interpolate. they now interpolate like labeled
+// ones (interpolation rule 3), so this lerps f(1.5, lbl: 15)
 #[test]
-fn test_exec_native_lerp_labeled_function_rejects_unlabeled_difference() {
+fn test_exec_native_lerp_labeled_function_lerps_unlabeled_difference() {
     let r = run_section(
         "
         let f = |x, y| x + y
-        let result = __monocurl__native__ lerp(f(1, lbl: 10), f(2, lbl: 20), 0.5)
+        let result = __monocurl__native__ lerp(f(1, lbl: 10), f(2, lbl: 20), 0.5) + 0
     ",
         SectionType::StandardLibrary,
     );
-    r.assert_error("unlabeled argument at index 0 differs");
+    r.assert_float(16.5);
+}
+
+#[test]
+fn test_exec_native_lerp_function_falls_back_to_results_for_unlerpable_argument() {
+    let r = run_section(
+        "
+        let f = |g, x = 0| g(x)
+        let result = __monocurl__native__ lerp(f(|x| 1), f(|x| 3), 0.5) + 0
+    ",
+        SectionType::StandardLibrary,
+    );
+    r.assert_float(2.0);
+}
+
+#[test]
+fn test_exec_native_lerp_operator_lerps_unlabeled_argument() {
+    let r = run_section(
+        "
+        let add = operator |target, amount| {
+            return [target, target + amount]
+        }
+        let result = __monocurl__native__ lerp(add{2} 10, add{4} 10, 0.5) + 0
+    ",
+        SectionType::StandardLibrary,
+    );
+    r.assert_float(13.0);
+}
+
+#[test]
+fn test_exec_keyframe_lerp_between_live_color_calls() {
+    let r = run_with_stdlib(
+        "
+        let pal = [0 -> rgb(0.1, 0.2, 0.9), 1 -> rgb(0.9, 0.2, 0.1)]
+        let result = keyframe_lerp(pal, 0.5)
+    ",
+        &["color", "math"],
+    );
+    r.assert_float_list_approx(&[0.5, 0.2, 0.5, 1.0], 1e-9);
 }
 
 #[test]

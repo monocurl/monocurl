@@ -372,3 +372,16 @@ fn test_map_in_operator_missing_key() {
     ");
     r.assert_int(0);
 }
+
+#[test]
+fn test_exec_append_to_live_function_result() {
+    // `range` has a default argument, so its call stays a live function value
+    let r = run_with_stdlib(
+        "
+        let xs = range(0, 3) .. 10
+        let result = xs[3]
+    ",
+        &["util"],
+    );
+    r.assert_int(10);
+}
