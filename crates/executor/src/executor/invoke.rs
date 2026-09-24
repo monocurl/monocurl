@@ -12,7 +12,7 @@ use crate::{
         invoked_operator::{InvokedOperator, extract_operator_result, make_invoked_operator},
         lambda::Lambda,
         stateful::{
-            StatefulNode, StatefulReadKind, collect_roots_from_value, make_stateful,
+            Stateful, StatefulNode, StatefulReadKind, collect_roots_from_value, make_stateful,
             value_into_stateful_node,
         },
     },
@@ -1053,6 +1053,119 @@ impl Executor {
                 }
             }
         })
+    }
+
+    /// the live call a stateful value currently stands for: its reactive reads are
+    /// resolved, but each call keeps its operand and arguments so that it can be
+    /// interpolated like any other live call. shapes other than calls evaluate as usual
+    pub(crate) fn stateful_as_live_call<'a>(
+        &'a mut self,
+        stateful: &'a Stateful,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
+    {
+        Box::pin(async move {
+            self.stateful_node_as_live_call(&stateful.body.root, stateful.cache.read_kind)
+                .await
+        })
+    }
+
+    fn stateful_node_as_live_call<'a>(
+        &'a mut self,
+        node: &'a StatefulNode,
+        read_kind: StatefulReadKind,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
+    {
+        Box::pin(async move {
+            match node {
+                StatefulNode::LabeledCall { func, args, labels } => {
+                    let func_val = self.eval_stateful_node(func, read_kind).await?;
+                    let Value::Lambda(lambda) = func_val.clone().elide_lvalue() else {
+                        return Err(ExecutorError::type_error("lambda", func_val.type_name()));
+                    };
+                    let arguments = self.stateful_slots_as_live_calls(args, read_kind).await?;
+
+                    let full_args = prepare_eager_call_args(arguments.iter().cloned(), &lambda)?;
+                    let trace_parent_idx = Some(self.state.last_stack_idx);
+                    let result = self
+                        .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
+                        .await?;
+                    let result = self.materialize_cached_value(result).await?;
+
+                    Ok(Value::InvokedFunction(make_invoked_function(
+                        func_val,
+                        arguments,
+                        labels.clone(),
+                        Some(result),
+                    )))
+                }
+                StatefulNode::LabeledOperatorCall {
+                    operator,
+                    operand,
+                    extra_args,
+                    labels,
+                } => {
+                    let operator_val = self.eval_stateful_node(operator, read_kind).await?;
+                    let Value::Operator(operator_inner) = operator_val.clone().elide_lvalue() else {
+                        return Err(ExecutorError::type_error(
+                            "operator",
+                            operator_val.type_name(),
+                        ));
+                    };
+                    let operand_val = self.stateful_slot_as_live_call(operand, read_kind).await?;
+                    let arguments = self
+                        .stateful_slots_as_live_calls(extra_args, read_kind)
+                        .await?;
+
+                    let full_args = prepare_eager_call_args(
+                        std::iter::once(operand_val.clone()).chain(arguments.iter().cloned()),
+                        &operator_inner.0,
+                    )?;
+                    let trace_parent_idx = Some(self.state.last_stack_idx);
+                    let raw = self
+                        .eagerly_invoke_lambda(&operator_inner.0, &full_args, trace_parent_idx)
+                        .await?;
+                    let (initial, modified) = extract_operator_result(raw)?;
+                    let initial = self.materialize_cached_value(initial).await?;
+                    let modified = self.materialize_cached_value(modified).await?;
+
+                    Ok(Value::InvokedOperator(make_invoked_operator(
+                        operator_val,
+                        operand_val,
+                        arguments,
+                        labels.clone(),
+                        initial,
+                        modified,
+                    )))
+                }
+                other => self.eval_stateful_node(other, read_kind).await,
+            }
+        })
+    }
+
+    async fn stateful_slot_as_live_call(
+        &mut self,
+        slot: &VRc,
+        read_kind: StatefulReadKind,
+    ) -> Result<Value, ExecutorError> {
+        match with_heap(|h| h.get(slot.key()).clone()).elide_lvalue() {
+            Value::Stateful(stateful) => {
+                self.stateful_node_as_live_call(&stateful.body.root, read_kind)
+                    .await
+            }
+            other => Ok(other),
+        }
+    }
+
+    async fn stateful_slots_as_live_calls(
+        &mut self,
+        slots: &[VRc],
+        read_kind: StatefulReadKind,
+    ) -> Result<SmallVec<[Value; 8]>, ExecutorError> {
+        let mut values = SmallVec::with_capacity(slots.len());
+        for slot in slots {
+            values.push(self.stateful_slot_as_live_call(slot, read_kind).await?);
+        }
+        Ok(values)
     }
 
     pub(crate) fn materialize_cached_value<'a>(

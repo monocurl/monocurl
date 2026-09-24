@@ -27,7 +27,8 @@ impl Executor {
     ///    operands and args, otherwise the deeper side pops one operator layer
     ///
     /// when an unlabeled argument cannot be interpolated in 3 or 4, both sides fall back to
-    /// their concrete values
+    /// their concrete values. a stateful value takes part as the live call it currently
+    /// stands for
     pub fn lerp<'a>(
         &'a mut self,
         a: Value,
@@ -39,6 +40,14 @@ impl Executor {
             let b = b.elide_lvalue();
             if Value::values_equal(&a, &b) {
                 return Ok(a);
+            }
+
+            // a stateful value interpolates as the live call it currently stands for,
+            // so its arguments blend instead of its two evaluated results
+            if matches!(a, Value::Stateful(_)) || matches!(b, Value::Stateful(_)) {
+                let a = self.as_live_call(a).await?;
+                let b = self.as_live_call(b).await?;
+                return self.lerp(a, b, t).await;
             }
 
             let a_operator_count = operator_count(&a);
@@ -80,6 +89,13 @@ impl Executor {
 
             lerp_numbers(a, b, t)
         })
+    }
+
+    async fn as_live_call(&mut self, value: Value) -> Result<Value, ExecutorError> {
+        match value {
+            Value::Stateful(stateful) => self.stateful_as_live_call(&stateful).await,
+            other => Ok(other),
+        }
     }
 
     fn lerp_invoked_functions<'a>(
