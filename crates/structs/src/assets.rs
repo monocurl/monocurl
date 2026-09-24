@@ -3,27 +3,32 @@ use std::path::{Path, PathBuf};
 
 pub struct Assets;
 impl Assets {
-    fn base_path() -> PathBuf {
-        if let Ok(assets_dir) = env::var("MONOCURL_ASSETS_DIR") {
-            let assets_dir = PathBuf::from(assets_dir);
-            if assets_dir.exists() {
-                return assets_dir;
-            }
-        }
+    pub const DIR_ENV_VAR: &'static str = "MONOCURL_ASSETS_DIR";
 
-        let exe_dir = env::current_exe()
+    /// assets directories in lookup order; the first that exists is used
+    pub fn candidate_dirs() -> Vec<PathBuf> {
+        let mut candidates: Vec<_> = env::var_os(Self::DIR_ENV_VAR)
+            .map(PathBuf::from)
+            .into_iter()
+            .collect();
+
+        if let Some(exe_dir) = env::current_exe()
             .ok()
-            .and_then(|exe| exe.parent().map(Path::to_path_buf));
-
-        if let Some(exe_dir) = exe_dir {
-            for candidate in installed_asset_candidates(&exe_dir) {
-                if candidate.exists() {
-                    return candidate;
-                }
-            }
+            .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        {
+            candidates.extend(installed_asset_candidates(&exe_dir));
+            candidates.extend(dev_build_asset_candidate(&exe_dir));
         }
 
-        PathBuf::from("assets")
+        candidates.push(PathBuf::from("assets"));
+        candidates
+    }
+
+    fn base_path() -> PathBuf {
+        Self::candidate_dirs()
+            .into_iter()
+            .find(|candidate| candidate.exists())
+            .unwrap_or_else(|| PathBuf::from("assets"))
     }
 
     pub fn asset(name: impl AsRef<Path>) -> PathBuf {
@@ -66,6 +71,14 @@ impl Assets {
     }
 }
 
+/// a cargo build lives in `<repo>/target/<profile>/`, next to the repo's `assets`
+fn dev_build_asset_candidate(exe_dir: &Path) -> Option<PathBuf> {
+    let target_dir = exe_dir
+        .parent()
+        .filter(|dir| dir.file_name().is_some_and(|name| name == "target"))?;
+    Some(target_dir.parent()?.join("assets"))
+}
+
 #[cfg(target_os = "macos")]
 fn installed_asset_candidates(exe_dir: &Path) -> Vec<PathBuf> {
     vec![exe_dir.join("..").join("Resources").join("assets")]
@@ -82,4 +95,20 @@ fn installed_asset_candidates(exe_dir: &Path) -> Vec<PathBuf> {
     }
 
     candidates
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::dev_build_asset_candidate;
+
+    #[test]
+    fn dev_build_candidate_points_at_repo_assets() {
+        assert_eq!(
+            dev_build_asset_candidate(Path::new("/repo/target/release")),
+            Some(PathBuf::from("/repo/assets"))
+        );
+        assert_eq!(dev_build_asset_candidate(Path::new("/usr/local/bin")), None);
+    }
 }

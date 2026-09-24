@@ -93,10 +93,14 @@ impl Parser {
             let Some(imported_file) =
                 external_context.file_content(file.path.parent(), &import_rel_path)
             else {
-                self.errors.push(Self::import_err(
-                    full_span.clone(),
-                    &format!("Cannot find module \"{}\"", import_rel_path.display()),
-                ));
+                let mut message = format!("Cannot find module \"{}\"", import_rel_path.display());
+                if let Some(hint) =
+                    external_context.missing_import_hint(file.path.parent(), &import_rel_path)
+                {
+                    message = format!("{message}. {hint}");
+                }
+                self.errors
+                    .push(Self::import_err(full_span.clone(), &message));
                 return Err(());
             };
             imports.push(imported_file.path.clone());
