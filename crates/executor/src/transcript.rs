@@ -84,8 +84,8 @@ impl Transcript {
 
 /// stringify a value for transcript display. fully resolves lvalues / leaders
 /// recursively (since reactive wrappers may not be evaluable here without an
-/// async executor); live function / operator / stateful values are shown as
-/// short placeholders.
+/// async executor); live calls show their cached result, and stateful values or
+/// calls that were never evaluated are shown as short placeholders.
 pub fn stringify_for_transcript(value: &Value) -> String {
     let mut out = String::new();
     write_value(value, &mut out, 0);
@@ -157,8 +157,13 @@ fn write_value(value: &Value, out: &mut String, depth: usize) {
             let inner = with_heap(|h| h.get(leader.leader_rc.key()).clone());
             write_value(&inner, out, depth + 1);
         }
-        Value::InvokedOperator(_) => out.push_str("<live operator>"),
-        Value::InvokedFunction(_) => out.push_str("<live function>"),
+        live @ (Value::InvokedOperator(_) | Value::InvokedFunction(_)) => {
+            match live.clone().elide_cached_wrappers() {
+                Value::InvokedOperator(_) => out.push_str("<live operator>"),
+                Value::InvokedFunction(_) => out.push_str("<live function>"),
+                result => write_value(&result, out, depth + 1),
+            }
+        }
         Value::Lvalue(rc) => {
             let inner = with_heap(|h| h.get(rc.key()).clone());
             write_value(&inner, out, depth + 1);
