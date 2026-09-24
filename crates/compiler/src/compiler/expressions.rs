@@ -339,10 +339,70 @@ impl Compiler {
     }
 
     pub(super) fn compile_subscript(&mut self, mutable: bool, s: &Subscript) {
+        if !mutable && self.compile_local_subscript(s) {
+            return;
+        }
+
         self.compile_expr(mutable, None, &s.base.1, &s.base.0);
         self.compile_val(&s.index.1, &s.index.0);
         self.emit(Instruction::Subscript { mutable }, s.base.0.clone());
         self.dec_stack(1);
+    }
+
+    /// reads `local[i][j]...` in place, so indexing never copies the container.
+    /// the indices are evaluated before the container is read, which is only
+    /// unobservable when they cannot write to it
+    fn compile_local_subscript(&mut self, s: &Subscript) -> bool {
+        let mut indices = vec![&s.index];
+        let mut base = &s.base;
+        while let Expression::Subscript(inner) = &*base.1 {
+            indices.push(&inner.index);
+            base = &inner.base;
+        }
+
+        let Ok(depth) = u16::try_from(indices.len()) else {
+            return false;
+        };
+        if !indices.iter().all(|index| cannot_write_locals(&index.1)) {
+            return false;
+        }
+        let Some(symbol) = self.in_place_local(&base.1, &base.0) else {
+            return false;
+        };
+
+        for index in indices.iter().rev() {
+            self.compile_val(&index.1, &index.0);
+        }
+        let stack_delta = self.stack_delta(symbol.stack_position);
+        self.emit_push(
+            Instruction::SubscriptLocal {
+                stack_delta,
+                depth,
+                copy_mode: symbol.copy_mode(),
+            },
+            s.base.0.clone(),
+        );
+        self.dec_stack(depth.into());
+        true
+    }
+
+    /// the symbol a bare identifier names, when it is a `let` or `var` that can be
+    /// read in place instead of copied out first
+    pub(super) fn in_place_local(&mut self, expr: &Expression, span: &Span8) -> Option<Arc<Symbol>> {
+        let Expression::IdentifierReference(ir @ IdentifierReference::Value(_)) = expr else {
+            return None;
+        };
+        let name = ident_ref_name(ir);
+        let symbol = self.lookup(name, None, None)?;
+        // a mesh or param can be written through a reference handed to a call,
+        // and a reference variable is read by deep copy
+        if !matches!(symbol.var_type, VariableType::Let | VariableType::Var) {
+            return None;
+        }
+        // the general path would have recorded this read for the editor's
+        // cross-references
+        self.lookup(name, Some(span.clone()), None);
+        Some(symbol)
     }
 
     pub(super) fn compile_property(&mut self, mutable: bool, p: &Property) {
@@ -478,6 +538,23 @@ impl Compiler {
             && let Some(alias) = self.native_alias_for_expr(&l.lambda.1)
             && u32::from(alias.arg_count) == num_args
         {
+            // `len(local)` reads the length in place rather than copying the
+            // container into the native's argument
+            if usize::from(alias.index) == registry().index_of("len")
+                && let [(_, arg)] = l.arguments.1.as_slice()
+                && let Some(symbol) = self.in_place_local(&arg.1, &arg.0)
+            {
+                let stack_delta = self.stack_delta(symbol.stack_position);
+                self.emit_push(
+                    Instruction::LenLocal {
+                        stack_delta,
+                        copy_mode: symbol.copy_mode(),
+                    },
+                    span.clone(),
+                );
+                return;
+            }
+
             for (_, arg) in &l.arguments.1 {
                 self.compile_val(&arg.1, &arg.0);
             }
@@ -592,4 +669,48 @@ impl Compiler {
         self.dec_stack(n.arguments.len());
         self.inc_stack();
     }
+}
+
+/// whether evaluating `expr` certainly leaves the current frame's `let`s and
+/// `var`s alone: only assignments and blocks write to them, since calls cannot
+/// capture a `var` and can only be handed references to meshes and params
+fn cannot_write_locals(expr: &Expression) -> bool {
+    match expr {
+        Expression::IdentifierReference(_) => true,
+        Expression::Literal(Literal::List(items)) => {
+            none_write_locals(items.iter().map(|item| &item.1))
+        }
+        Expression::Literal(Literal::Map(entries)) => none_write_locals(
+            entries
+                .iter()
+                .flat_map(|(key, value)| [&key.1, &value.1]),
+        ),
+        Expression::Literal(_) => true,
+        Expression::BinaryOperator(b) => {
+            !matches!(
+                b.op_type,
+                BinaryOperatorType::Assign | BinaryOperatorType::DotAssign
+            ) && none_write_locals([&*b.lhs.1, &*b.rhs.1])
+        }
+        Expression::UnaryPreOperator(u) => cannot_write_locals(&u.operand.1),
+        Expression::Subscript(s) => none_write_locals([&*s.base.1, &*s.index.1]),
+        Expression::Property(p) => cannot_write_locals(&p.base.1),
+        Expression::LambdaInvocation(l) => none_write_locals(
+            std::iter::once(&*l.lambda.1).chain(l.arguments.1.iter().map(|arg| &arg.1.1)),
+        ),
+        Expression::OperatorInvocation(o) => none_write_locals(
+            [&*o.operator.1, &*o.operand.1]
+                .into_iter()
+                .chain(o.arguments.1.iter().map(|arg| &arg.1.1)),
+        ),
+        Expression::NativeInvocation(n) => none_write_locals(n.arguments.iter().map(|arg| &arg.1)),
+        Expression::LambdaDefinition(_)
+        | Expression::OperationDefinition(_)
+        | Expression::Block(_)
+        | Expression::Anim(_) => false,
+    }
+}
+
+fn none_write_locals<'a>(exprs: impl IntoIterator<Item = &'a Expression>) -> bool {
+    exprs.into_iter().all(cannot_write_locals)
 }

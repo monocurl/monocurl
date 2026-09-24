@@ -783,6 +783,64 @@ mod test {
         );
     }
 
+    fn count_instructions(
+        section: &bytecode::SectionBytecode,
+        pred: impl Fn(&Instruction) -> bool,
+    ) -> usize {
+        section.instructions.iter().filter(|instr| pred(instr)).count()
+    }
+
+    #[test]
+    fn nested_local_subscripts_read_the_container_in_place() {
+        let result = compile_with_prelude(
+            "let len = |c| __monocurl__native__ len(c)",
+            "
+            let grid = [[1, 2], [3, 4]]
+            let y = grid[1][0]
+            let n = len(grid)
+        ",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        assert_eq!(
+            count_instructions(section, |instr| matches!(
+                instr,
+                Instruction::SubscriptLocal { depth: 2, .. }
+            )),
+            1
+        );
+        assert_eq!(
+            count_instructions(section, |instr| matches!(instr, Instruction::Subscript { .. })),
+            0,
+            "reading a local by index must not copy it first"
+        );
+        assert_eq!(
+            count_instructions(section, |instr| matches!(instr, Instruction::LenLocal { .. })),
+            1
+        );
+    }
+
+    #[test]
+    fn subscripts_whose_index_may_write_the_container_copy_it_first() {
+        let result = compile_src(
+            "
+            var xs = [1, 2]
+            let y = xs[block {
+                xs = [5]
+                _ = 0
+            }]
+        ",
+        );
+        no_errors(&result);
+
+        let section = root_slide_section(&result);
+        assert_eq!(
+            count_instructions(section, |instr| matches!(instr, Instruction::SubscriptLocal { .. })),
+            0
+        );
+    }
+
     #[test]
     fn test_mesh_declaration_allowed_in_user_library() {
         let result = compile_src_as_section("mesh x = 1", SectionType::UserLibrary);

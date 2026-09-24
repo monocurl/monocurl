@@ -168,6 +168,15 @@ impl Symbol {
     pub fn is_imported(&self) -> bool {
         self.imported
     }
+
+    /// how a plain read copies this symbol's value
+    fn copy_mode(&self) -> CopyValueMode {
+        if self.preserve_lvalues_on_copy {
+            CopyValueMode::Raw
+        } else {
+            CopyValueMode::Read
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

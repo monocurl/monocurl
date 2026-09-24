@@ -385,3 +385,99 @@ fn test_exec_append_to_live_function_result() {
     );
     r.assert_int(10);
 }
+
+// -- collections: in-place indexing --
+
+#[test]
+fn test_nested_subscript_of_local_reads_element() {
+    let r = run("
+        let grid = [[1, 2], [3, 4]]
+        let row = 1
+        let result = grid[row][0]
+    ");
+    r.assert_int(3);
+}
+
+#[test]
+fn test_map_subscript_of_local_reads_nested_value() {
+    let r = run("
+        let m = [\"a\" -> [1, 2]]
+        let result = m[\"a\"][1]
+    ");
+    r.assert_int(2);
+}
+
+#[test]
+fn test_map_subscript_of_local_missing_key_is_nil() {
+    let r = run("
+        let m = [\"a\" -> 1]
+        let result = m[\"b\"]
+    ");
+    r.assert_nil();
+}
+
+#[test]
+fn test_nested_subscript_out_of_bounds_reports_inner_length() {
+    let r = run("
+        let grid = [[1, 2], [3, 4]]
+        let result = grid[1][5]
+    ");
+    r.assert_error("index 5 out of bounds (len 2)");
+}
+
+#[test]
+fn test_element_read_from_local_is_detached_from_container() {
+    let r = run("
+        var grid = [[1, 2], [3, 4]]
+        var row = grid[0]
+        row[0] = 9
+        let result = [grid[0][0], row[0]]
+    ");
+    r.assert_int_list(&[1, 9]);
+}
+
+#[test]
+fn test_indexed_write_does_not_leak_into_copies() {
+    let r = run("
+        var grid = [[1, 2], [3, 4]]
+        let before = grid
+        grid[0][1] = 9
+        let result = [before[0][1], grid[0][1]]
+    ");
+    r.assert_int_list(&[2, 9]);
+}
+
+#[test]
+fn test_map_write_does_not_leak_into_copies() {
+    let r = run_with_stdlib(
+        "
+        var m = [\"a\" -> 1]
+        let before = m
+        m[\"a\"] = 2
+        m[\"b\"] = 3
+        let result = [before[\"a\"], m[\"a\"], m[\"b\"], len(before), len(m)]
+    ",
+        &["util"],
+    );
+    r.assert_int_list(&[1, 2, 3, 1, 2]);
+}
+
+#[test]
+fn test_len_of_local_counts_lists_maps_and_strings() {
+    let r = run_with_stdlib(
+        "
+        let xs = [1, 2, 3]
+        let m = [\"a\" -> 1]
+        let s = \"hello\"
+        let result = [len(xs), len(m), len(s)]
+    ",
+        &["util"],
+    );
+    r.assert_int_list(&[3, 1, 5]);
+}
+
+#[test]
+fn test_len_of_local_rejects_numbers() {
+    let r = run_with_stdlib("let x = 4\nlet result = len(x)", &["util"]);
+    r.assert_error("list / map / string");
+}

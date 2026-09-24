@@ -1,6 +1,8 @@
+use bytecode::CopyValueMode;
+
 use crate::{
     error::ExecutorError,
-    heap::{HeapKey, VRc, VWeak, heap_replace, with_heap, with_heap_mut},
+    heap::{HeapKey, VRc, VWeak, heap_ref_count, heap_replace, with_heap, with_heap_mut},
     state::LeaderKind,
     value::{
         Value, container::HashableKey, invoked_function::InvokedFunction,
@@ -8,16 +10,7 @@ use crate::{
     },
 };
 
-use super::{ExecSingle, Executor, ops::resolved_numeric};
-
-fn follow_heap_lvalues(mut key: HeapKey) -> (HeapKey, Value) {
-    let mut value = with_heap(|h| h.get(key).clone());
-    while let Some(next_key) = value.as_lvalue_key() {
-        key = next_key;
-        value = with_heap(|h| h.get(key).clone());
-    }
-    (key, value)
-}
+use super::{ExecSingle, Executor};
 
 /// walk lvalue indirection down to the slot that actually holds the value,
 /// without copying anything along the way
@@ -39,6 +32,110 @@ fn append_to_list_slot(key: HeapKey, element: Value) -> Result<(), ExecutorError
         }
         other => Err(ExecutorError::type_error("list", other.type_name())),
     })
+}
+
+/// select `container[i0][i1]...` without copying any level along the way.
+/// `None` for anything but plain integer indices into lists and hashable keys
+/// into maps, so the general path can resolve it or raise the error it always has.
+///
+/// runs under a heap borrow, so the element is only cloned shallowly here and
+/// the caller elides it once the borrow is released
+fn select_in_place(container: &Value, indices: &[Value]) -> Option<Result<Value, ExecutorError>> {
+    let (index, rest) = indices.split_first()?;
+    container.with_elided_cached_wrappers(|resolved| {
+        let slot = match (resolved, index) {
+            (Value::List(list), Value::Integer(index)) => {
+                let index = *index as usize;
+                match list.elements().get(index) {
+                    Some(slot) => slot.key(),
+                    None => {
+                        return Some(Err(ExecutorError::IndexOutOfBounds {
+                            index,
+                            len: list.len(),
+                        }));
+                    }
+                }
+            }
+            (Value::Map(map), key) => match map.get(&HashableKey::try_from_value(key).ok()?) {
+                Some(slot) => slot.key(),
+                None if rest.is_empty() => return Some(Ok(Value::Nil)),
+                None => return None,
+            },
+            _ => return None,
+        };
+
+        with_heap(|heap| {
+            let element = heap.get(slot);
+            if rest.is_empty() {
+                Some(Ok(element.clone()))
+            } else {
+                select_in_place(&element, rest)
+            }
+        })
+    })
+}
+
+/// the slot holding `container[index]`, ready to be written through: a slot
+/// shared with another value is detached first, and a missing map key gets a
+/// fresh nil slot. the container is edited in place, because copying it out to
+/// write one element would make every indexed write O(n)
+fn writable_element_slot(container_key: HeapKey, index: &Value) -> Result<HeapKey, ExecutorError> {
+    enum Position {
+        Index(usize),
+        Key(HashableKey),
+    }
+
+    let (position, slot) = with_heap(|heap| match &*heap.get(container_key) {
+        Value::List(list) => {
+            let Value::Integer(i) = index else {
+                return Err(ExecutorError::type_error("int", index.type_name()));
+            };
+            let i = *i as usize;
+            let slot = list
+                .elements()
+                .get(i)
+                .ok_or(ExecutorError::IndexOutOfBounds {
+                    index: i,
+                    len: list.len(),
+                })?;
+            Ok((Position::Index(i), Some(slot.key())))
+        }
+        Value::Map(map) => {
+            let key = HashableKey::try_from_value(index)?;
+            let slot = map.get(&key).map(VRc::key);
+            Ok((Position::Key(key), slot))
+        }
+        other => Err(ExecutorError::CannotSubscript(other.type_name())),
+    })?;
+
+    // allocating reborrows the heap, so the replacement is built before the
+    // container is borrowed mutably
+    let replacement = match slot {
+        Some(slot) if heap_ref_count(slot) == 1 => return Ok(slot),
+        Some(slot) => VRc::new(with_heap(|heap| heap.get(slot).clone())),
+        None => VRc::new(Value::Nil),
+    };
+    let replacement_key = replacement.key();
+
+    // dropped once the borrow is released, since releasing it can free slots
+    let _displaced = with_heap_mut(|heap| match (&mut *heap.get_mut(container_key), position) {
+        (Value::List(list), Position::Index(i)) => {
+            Some(std::mem::replace(&mut list.elements[i], replacement))
+        }
+        (Value::Map(map), Position::Key(key)) => map.insert(key, replacement),
+        _ => unreachable!("container changed shape while detaching an element"),
+    });
+    Ok(replacement_key)
+}
+
+/// what the `len` native reports for a value it accepts
+fn plain_len(value: &Value) -> Option<usize> {
+    match value {
+        Value::List(list) => Some(list.len()),
+        Value::Map(map) => Some(map.len()),
+        Value::String(s) => Some(s.chars().count()),
+        _ => None,
+    }
 }
 
 fn retained_lvalue(key: HeapKey) -> Value {
@@ -225,99 +322,94 @@ impl Executor {
         }
     }
 
-    /// the shape iteration actually produces: a plain integer index into a plain
-    /// list. resolved without suspending, so generic `for` loops stay in the
-    /// synchronous run
+    /// the shapes indexing actually produces: plain integer or key indices into
+    /// plain lists and maps. resolved without suspending, so loops that index
+    /// stay in the synchronous run
     pub(super) fn try_subscript_local(
         &mut self,
         stack_idx: usize,
         stack_delta: i32,
+        depth: u16,
     ) -> Option<ExecSingle> {
+        let depth = usize::from(depth);
         let stack = self.state.stack(stack_idx);
-        let Value::Integer(index) = resolved_numeric(stack.read_at(-1))? else {
-            return None;
-        };
-        let index = index as usize;
+        let selected = select_in_place(stack.read_at(stack_delta), stack.top(depth))?;
 
-        let element = stack
-            .read_at(stack_delta)
-            .with_elided_cached_wrappers(|resolved| match resolved {
-                Value::List(list) => match list.elements().get(index) {
-                    Some(element) => Some(Ok(with_heap(|h| h.get(element.key()).clone()))),
-                    None => Some(Err(ExecutorError::IndexOutOfBounds {
-                        index,
-                        len: list.len(),
-                    })),
-                },
-                _ => None,
-            })?;
-
-        self.state.stack_mut(stack_idx).pop();
-        Some(match element {
+        let stack = self.state.stack_mut(stack_idx);
+        stack.pop_n(depth);
+        Some(match selected {
             Ok(element) => {
-                self.state
-                    .stack_mut(stack_idx)
-                    .push(element.elide_cached_wrappers_rec());
+                stack.push(element.elide_cached_wrappers_rec());
                 ExecSingle::Continue
             }
             Err(error) => ExecSingle::Error(error),
         })
     }
 
-    /// read the container living at `stack_delta` without copying it out of its
-    /// slot, then push the element selected by the index on top of stack
+    /// pop `depth` indices and push `container[i0][i1]...`, reading the container
+    /// living at `stack_delta` in place rather than copying it
     pub(super) async fn exec_subscript_local(
         &mut self,
         stack_idx: usize,
         stack_delta: i32,
+        depth: u16,
+        copy_mode: CopyValueMode,
     ) -> ExecSingle {
-        let index = self.state.stack_mut(stack_idx).pop();
-        let index = match self.read_subscript_value(index).await {
-            Ok(value) => value.elide_cached_wrappers_rec(),
-            Err(error) => return ExecSingle::Error(error),
-        };
+        let depth = usize::from(depth);
+        let mut indices: Vec<Value> = (0..depth)
+            .map(|_| self.state.stack_mut(stack_idx).pop())
+            .collect();
+        indices.reverse();
+        for index in &mut indices {
+            let raw = std::mem::replace(index, Value::Nil);
+            *index = match self.read_subscript_value(raw).await {
+                Ok(value) => value.elide_cached_wrappers_rec(),
+                Err(error) => return ExecSingle::Error(error),
+            };
+        }
 
-        let Value::Integer(idx) = index else {
-            return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
-        };
-        let idx = idx as usize;
-
-        // the index has been popped, so the container sits one slot higher than
-        // the delta the compiler emitted
-        let container_delta = stack_delta + 1;
-        let element = self
-            .state
-            .stack(stack_idx)
-            .read_at(container_delta)
-            .with_elided_cached_wrappers(|resolved| match resolved {
-                Value::List(list) => match list.elements().get(idx) {
-                    Some(element) => Ok(Some(with_heap(|h| h.get(element.key()).clone()))),
-                    None => Err(ExecutorError::IndexOutOfBounds {
-                        index: idx,
-                        len: list.len(),
-                    }),
-                },
-                // maps, strings, and invocations that have not been evaluated yet
-                // fall back to the general path
-                _ => Ok(None),
-            });
-
-        match element {
-            Ok(Some(element)) => {
+        // the indices have been popped, so the container sits that much higher
+        // than the delta the compiler emitted
+        let container_delta = stack_delta + depth as i32;
+        let container = self.state.stack(stack_idx).read_at(container_delta);
+        match select_in_place(container, &indices) {
+            Some(Ok(element)) => {
                 self.state
                     .stack_mut(stack_idx)
                     .push(element.elide_cached_wrappers_rec());
                 ExecSingle::Continue
             }
-            Ok(None) => {
-                let container = self.state.stack(stack_idx).read_at(container_delta).clone();
-                let stack = self.state.stack_mut(stack_idx);
-                stack.push(container);
-                stack.push(Value::Integer(idx as i64));
-                self.exec_subscript(stack_idx, false).await
+            Some(Err(error)) => ExecSingle::Error(error),
+            None => {
+                self.exec_subscript_copied(stack_idx, container_delta, copy_mode, indices)
+                    .await
             }
-            Err(error) => ExecSingle::Error(error),
         }
+    }
+
+    /// the general path for everything [`select_in_place`] declines: copy the
+    /// container out the way a plain read would, then subscript level by level
+    async fn exec_subscript_copied(
+        &mut self,
+        stack_idx: usize,
+        container_delta: i32,
+        copy_mode: CopyValueMode,
+        indices: Vec<Value>,
+    ) -> ExecSingle {
+        let container = match self.copy_local(stack_idx, container_delta, copy_mode).await {
+            Ok(container) => container,
+            Err(error) => return ExecSingle::Error(error),
+        };
+
+        self.state.stack_mut(stack_idx).push(container);
+        for index in indices {
+            self.state.stack_mut(stack_idx).push(index);
+            match self.exec_subscript(stack_idx, false).await {
+                ExecSingle::Continue => {}
+                other => return other,
+            }
+        }
+        ExecSingle::Continue
     }
 
     /// push the length of the container living at `stack_delta`, reading it in place
@@ -345,6 +437,64 @@ impl Executor {
         }
     }
 
+    /// `len(...)` of the container living at `stack_delta`, read in place
+    pub(super) fn try_len_local(&mut self, stack_idx: usize, stack_delta: i32) -> Option<ExecSingle> {
+        let len = self
+            .state
+            .stack(stack_idx)
+            .read_at(stack_delta)
+            .with_elided_cached_wrappers(plain_len)?;
+        self.state
+            .stack_mut(stack_idx)
+            .push(Value::Integer(len as i64));
+        Some(ExecSingle::Continue)
+    }
+
+    /// the general path for what [`Self::try_len_local`] declines: the length of
+    /// the copy the `len` native would have been handed
+    pub(super) async fn exec_len_copied(
+        &mut self,
+        stack_idx: usize,
+        stack_delta: i32,
+        copy_mode: CopyValueMode,
+    ) -> ExecSingle {
+        let container = match self.copy_local(stack_idx, stack_delta, copy_mode).await {
+            Ok(container) => container.elide_cached_wrappers(),
+            Err(error) => return ExecSingle::Error(error),
+        };
+        match plain_len(&container) {
+            Some(len) => {
+                self.state
+                    .stack_mut(stack_idx)
+                    .push(Value::Integer(len as i64));
+                ExecSingle::Continue
+            }
+            None => ExecSingle::Error(ExecutorError::type_error(
+                "list / map / string",
+                container.type_name(),
+            )),
+        }
+    }
+
+    /// copy the value living at `stack_delta` out the way a plain read of it would
+    async fn copy_local(
+        &mut self,
+        stack_idx: usize,
+        stack_delta: i32,
+        copy_mode: CopyValueMode,
+    ) -> Result<Value, ExecutorError> {
+        let value = self.state.stack(stack_idx).read_at(stack_delta).clone();
+        let value = match copy_mode {
+            CopyValueMode::Read => self.read_current_value(value).await?,
+            CopyValueMode::Reference => value.force_elide_lvalue(),
+            CopyValueMode::Raw => value,
+        };
+        match value {
+            Value::Stateful(_) => Err(ExecutorError::direct_stateful_copy()),
+            value => Ok(value),
+        }
+    }
+
     pub(super) async fn exec_subscript(&mut self, stack_idx: usize, mutable: bool) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
         let index = stack.pop();
@@ -365,74 +515,30 @@ impl Executor {
         base: Value,
         index: Value,
     ) -> ExecSingle {
-        let base_key = match base.as_lvalue_key() {
-            Some(k) => k,
-            None => {
-                return ExecSingle::Error(ExecutorError::CannotSubscript(base.type_name()));
-            }
+        let Some(base_key) = base.as_lvalue_key() else {
+            return ExecSingle::Error(ExecutorError::CannotSubscript(base.type_name()));
         };
 
-        let (base_key, base_val) = follow_heap_lvalues(base_key);
-        if let Value::Leader(_) = &base_val {
-            with_heap_mut(|h| {
-                if let Value::Leader(l) = &mut *h.get_mut(base_key) {
-                    l.last_modified_stack = Some(stack_idx);
-                    l.leader_version += 1;
-                }
-            });
-        }
-
-        match base_val {
-            Value::List(mut list) => {
-                let Value::Integer(idx) = index else {
-                    return ExecSingle::Error(ExecutorError::type_error("int", index.type_name()));
-                };
-                let idx = idx as usize;
-                if idx >= list.elements.len() {
-                    return ExecSingle::Error(ExecutorError::IndexOutOfBounds {
-                        index: idx,
-                        len: list.elements.len(),
-                    });
-                }
-
-                let key = list.elements[idx].make_mut();
-                heap_replace(base_key, Value::List(list));
-
-                self.state.stack_mut(stack_idx).push(retained_lvalue(key));
-            }
-            Value::Map(mut map) => {
-                let key_hash = match HashableKey::try_from_value(&index) {
-                    Ok(k) => k,
-                    Err(e) => return ExecSingle::Error(e),
-                };
-
-                let key = {
-                    match map.get_mut(&key_hash) {
-                        Some(value_ref) => value_ref.make_mut(),
-                        None => {
-                            let new_ref = VRc::new(Value::Nil);
-                            let key = new_ref.key();
-                            map.insert(key_hash, new_ref);
-                            key
-                        }
-                    }
-                };
-                heap_replace(base_key, Value::Map(map));
-                self.state.stack_mut(stack_idx).push(retained_lvalue(key));
-            }
+        let base_key = follow_heap_lvalue_key(base_key);
+        let leader_key = with_heap_mut(|heap| match &mut *heap.get_mut(base_key) {
             Value::Leader(leader) => {
-                return self.exec_mutable_subscript(
-                    stack_idx,
-                    Value::Lvalue(leader.leader_rc.clone()),
-                    index,
-                );
+                leader.last_modified_stack = Some(stack_idx);
+                leader.leader_version += 1;
+                Some(leader.leader_rc.key())
             }
-            _ => {
-                return ExecSingle::Error(ExecutorError::CannotSubscript(base_val.type_name()));
-            }
+            _ => None,
+        });
+        if let Some(leader_key) = leader_key {
+            return self.exec_mutable_subscript(stack_idx, retained_lvalue(leader_key), index);
         }
 
-        ExecSingle::Continue
+        match writable_element_slot(base_key, &index) {
+            Ok(key) => {
+                self.state.stack_mut(stack_idx).push(retained_lvalue(key));
+                ExecSingle::Continue
+            }
+            Err(error) => ExecSingle::Error(error),
+        }
     }
 
     async fn exec_read_subscript(
