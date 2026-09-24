@@ -101,6 +101,19 @@ fn test_dashed_line_scalar_lengths() {
 }
 
 #[test]
+fn test_dashed_line_has_no_solid_underlay() {
+    let r = run_with_stdlib(
+        "
+        let d = DashedLine([0, 0, 0], [2, 0, 0], [0.2, 0.1])
+        let e = dashed{[0.2, 0.1]} Line([0, 0, 0], [2, 0, 0])
+        let result = len(mesh_edge_set(d)) == len(mesh_edge_set(e))
+    ",
+        &["mesh", "util"],
+    );
+    r.assert_int(1);
+}
+
+#[test]
 fn test_number_line_labels_every_tick_by_default() {
     let r = run_with_stdlib(
         "
