@@ -936,6 +936,24 @@ fn test_lerp_rate_lambda_shapes_progression() {
 }
 
 #[test]
+fn test_lerp_rate_returning_live_function_call() {
+    // `ease_out` has a default argument, so the rate returns a live function call
+    let r = run_anim_with_stdlib_at(
+        "
+        param x = 0
+        x = 10
+        play Lerp(2, [&x], |t| ease_out(t, 1))
+    ",
+        1.0,
+    );
+    r.assert_ok();
+    let params = r.param_leaders();
+    params[2]
+        .assert_target_int(10)
+        .assert_current_float(5.0, 1e-9);
+}
+
+#[test]
 fn test_lerp_custom_lerp_lambda_shapes_value_interpolation() {
     let r = run_anim_with_stdlib_at(
         "

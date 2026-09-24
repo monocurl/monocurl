@@ -461,7 +461,7 @@ impl Executor {
             )
             .await?;
 
-        match raw.elide_lvalue() {
+        match raw.elide_cached_wrappers() {
             Value::Float(t) => Ok(t),
             Value::Integer(t) => Ok(t as f64),
             other => Err(ExecutorError::type_error_for(
@@ -931,7 +931,7 @@ impl Executor {
 }
 
 fn unpack_embed_triplet(raw: Value) -> Result<(Value, Value, Value), ExecutorError> {
-    let list = match raw.elide_lvalue() {
+    let list = match raw.elide_cached_wrappers() {
         Value::List(list) => list,
         other => {
             return Err(ExecutorError::type_error_for(
