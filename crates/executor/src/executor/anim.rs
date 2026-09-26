@@ -142,42 +142,44 @@ impl Executor {
             self.note_current_timestamp_in_cache();
         }
 
-        let mut finished_indices = Vec::new();
-        let mut in_progress = Vec::new();
-        for (i, baked) in self.state.primitive_anims.iter().enumerate() {
-            if self.state.timestamp.time >= baked.end_time {
-                finished_indices.push(i);
-            } else {
-                let t = if baked.end_time > baked.start_time {
-                    (self.state.timestamp.time - baked.start_time)
-                        / (baked.end_time - baked.start_time)
-                } else {
+        let now = self.state.timestamp.time;
+        let mut steps = self
+            .state
+            .primitive_anims
+            .iter()
+            .map(|baked| {
+                let finished = now >= baked.end_time;
+                let t = if finished {
                     1.0
+                } else {
+                    (now - baked.start_time) / (baked.end_time - baked.start_time)
                 };
-                in_progress.push((baked.clone(), t));
-            }
-        }
+                (baked.clone(), t, finished)
+            })
+            .collect::<Vec<_>>();
+        // live values read the followers of other leaders, so they interpolate only
+        // once every other follower has reached this instant
+        steps.sort_by_key(|(baked, _, finished)| (reads_live_followers(baked), *finished));
 
-        for (baked, t) in &in_progress {
-            self.state.last_stack_idx = baked.parent_stack_idx;
-            if let Err(err) = self.apply_primitive_anim_step(baked, *t, options).await {
-                let runtime_error = self.build_runtime_error(err.clone());
-                self.state.error(runtime_error);
-                return Err(err);
+        for (baked, t, finished) in steps {
+            if finished {
+                self.state
+                    .primitive_anims
+                    .retain(|active| active.anim_id != baked.anim_id);
             }
-        }
-
-        for &i in finished_indices.iter().rev() {
-            let baked = self.state.primitive_anims.remove(i);
             self.state.last_stack_idx = baked.parent_stack_idx;
-            if let Err(err) = self.apply_primitive_anim_step(&baked, 1.0, options).await {
+            let result = self.apply_primitive_anim_step(&baked, t, options).await;
+            if finished {
                 self.release_primitive_anim_locks(&baked);
+            }
+            if let Err(err) = result {
                 let runtime_error = self.build_runtime_error(err.clone());
                 self.state.error(runtime_error);
                 return Err(err);
             }
-            self.release_primitive_anim_locks(&baked);
-            self.resume_parent_after_anim(baked.parent_stack_idx);
+            if finished {
+                self.resume_parent_after_anim(baked.parent_stack_idx);
+            }
         }
 
         Ok(())
@@ -1039,4 +1041,13 @@ fn replace_follower_value(leader_cell: &VRc, value: Value) {
             l.follower_version += 1;
         }
     });
+}
+
+fn reads_live_followers(baked: &BakedPrimitiveAnim) -> bool {
+    matches!(baked.anim, PrimitiveAnim::Lerp(_))
+        && baked
+            .embedded_starts
+            .iter()
+            .chain(&baked.embedded_ends)
+            .any(|value| matches!(value, Value::Stateful(_)))
 }

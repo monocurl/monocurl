@@ -2206,3 +2206,56 @@ fn test_lerp_interpolates_stateful_camera_transfer_arguments() {
     );
     r.assert_ok();
 }
+
+#[test]
+fn test_lerped_camera_transfer_follows_the_current_camera() {
+    let sections = [(
+        "
+        mesh lerped = camera_transfer{camera, $camera} shift{2r} Circle(radius: 1)
+        mesh still = camera_transfer{camera, $camera} shift{2r} Circle(radius: 2)
+        play Set()
+
+        lerped.radius = 2
+        camera = Camera([3, 1, 2])
+        play [Lerp(1, [&lerped], linear), CameraLerp(&camera, 1)]
+    ",
+        SectionType::Slide,
+    )];
+    let (mut executor, _) = match build_anim_executor(
+        &sections,
+        &stdlib_bundles(["anim", "color", "math", "mesh", "scene"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("executor should build, got errors: {:?}", result.errors),
+    };
+
+    let (lerped, still) = smol::block_on(async {
+        let ts = executor.user_to_internal_timestamp(user_timestamp(0, 0.5));
+        if let SeekToResult::Error(e) = executor.seek_to(ts).await {
+            panic!("seek failed: {e}");
+        }
+        let mut centers = Vec::new();
+        for entry in executor.state.leaders.clone() {
+            if entry.kind != LeaderKind::Mesh {
+                continue;
+            }
+            let Value::Leader(leader) = with_heap(|h| h.get(entry.leader_cell.key()).clone())
+            else {
+                panic!("mesh leader entry is not a Leader value");
+            };
+            let current = with_heap(|h| h.get(leader.follower_rc.key()).clone())
+                .elide_wrappers_rec(&mut executor)
+                .await
+                .expect("mesh leader wrapper elision should succeed");
+            centers.push(value_tree_box_center(&current));
+        }
+        (centers[0], centers[1])
+    });
+
+    // the radius only changes the circle's extent, so mid lerp its center must
+    // track the live camera exactly as the untouched follower does
+    assert!(
+        (lerped - still).len() < 1e-3,
+        "lerped camera_transfer lags the live camera: {lerped:?} vs {still:?}"
+    );
+}

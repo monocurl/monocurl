@@ -93,10 +93,22 @@ animates the camera.
 `background` can be assigned and synchronized like any other scene leader, but
 camera motion should usually use `CameraLerp` rather than plain `Lerp`.
 
-`CameraLerp` interpolates between the start and end poses, not along a path, so
-a destination identical to the start does not move the camera at all. A full
-orbit ends where it began: split it into legs (for example three 120-degree
-`CameraLerp`s) so each leg has a distinct destination.
+`CameraLerp` interpolates between the start and end poses, not along a path: the
+position moves in a straight line, so a destination identical to the start does
+not move the camera at all. For an orbit, do not chain `CameraLerp` legs; each
+leg cuts a chord, so the camera dips toward the target mid-leg and the scene
+visibly pulses. Instead make the camera a labeled live call and `Lerp` its
+angle, which reruns the call every frame and follows the true arc:
+
+```monocurl
+let orbit_camera = |angle| Camera(6 * [sin(angle), 0.5, cos(angle)])
+
+camera = orbit_camera(angle: 0)
+
+slide
+    camera.angle = TAU
+    play Lerp(10, [&camera], linear)
+```
 
 ```monocurl
 mesh object = Circle(1)
