@@ -10,7 +10,8 @@ use libtess2::{TessellationOptions, WindingRule};
 use tiny_skia_path::{Path, PathSegment, Point};
 use usvg::{FillRule, Node, Paint, Path as SvgPath, Tree};
 
-pub(crate) const DEFAULT_TEXT_STROKE_RADIUS: f32 = 0.55;
+// thin outline so `Write` has a stroke to trace; wider values make small text look bold
+pub(crate) const DEFAULT_TEXT_STROKE_RADIUS: f32 = 0.25;
 const NORMAL_CURVE_SAMPLE_SPACING: f32 = 24.0;
 const HIGH_QUALITY_CURVE_SAMPLE_SPACING: f32 = 12.0;
 pub(crate) const MIN_CURVE_SAMPLES: usize = 4;
