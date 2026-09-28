@@ -38,7 +38,7 @@ import std.scene
 - Graphs and fields: `Axis1d`, `Axis2d`, `Axis3d`, `PolarAxis`, `ColorGrid`,
   `LineGrid`, `Field`, `ParametricFunc`, `ExplicitFunc`, `ExplicitFunc2d`,
   `ImplicitFunc2d`, `ExplicitFuncDiff`.
-- Media: `Image`.
+- Media and per-pixel colour: `Image`, `Shader` (a `(x, y) -> RGBA` function rendered as a texture).
 
 ## Common Mesh Operators
 

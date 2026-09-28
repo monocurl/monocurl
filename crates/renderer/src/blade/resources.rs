@@ -1,8 +1,11 @@
-use std::{path::Path, sync::Weak};
+use std::{
+    path::{Path, PathBuf},
+    sync::Weak,
+};
 
 use anyhow::{Context as _, Result};
 use blade_graphics as gpu;
-use geo::mesh::Mesh;
+use geo::mesh::{Mesh, TextureSource};
 use image::RgbaImage;
 
 use crate::RenderSize;
@@ -43,6 +46,23 @@ pub(super) struct IndexedBuffer {
 pub(super) struct CachedTexture {
     pub(super) texture: gpu::Texture,
     pub(super) view: gpu::TextureView,
+}
+
+/// how the texture cache tells textures apart: files by path, scene-produced
+/// pixel textures by their identity
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) enum TextureKey {
+    File(PathBuf),
+    Pixels(u64),
+}
+
+impl TextureKey {
+    pub(super) fn of(source: &TextureSource) -> Self {
+        match source {
+            TextureSource::File(path) => TextureKey::File(path.clone()),
+            TextureSource::Pixels(pixels) => TextureKey::Pixels(pixels.id()),
+        }
+    }
 }
 
 pub(super) struct TextureCacheEntry {

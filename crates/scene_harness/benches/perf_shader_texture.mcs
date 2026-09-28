@@ -1,0 +1,42 @@
+# the pixel shader bench again, but as a Shader texture instead of a vertex per
+# sample: the same escape-time loop per pixel, uploaded as an image
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let iterations = 12
+
+let escape = |cx, cy, zoom| {
+    var zx = 0.0
+    var zy = 0.0
+    var i = 0
+    while (i < iterations and zx * zx + zy * zy < 4) {
+        let nx = zx * zx - zy * zy + cx * zoom
+        zy = 2 * zx * zy + cy * zoom
+        zx = nx
+        i = i + 1
+    }
+    return i / iterations
+}
+
+let Plasma = |zoom, phase|
+    Shader(
+        |x, y| block {
+            let z = 0.35 * escape(x - 0.5, y, zoom) + 0.05 * sin(3 * x + phase)
+            return [0.5 + 0.5 * sin(z * 9 + phase), z * 2, 1 - z * 2, 1]
+        },
+        [-2.2, 1.2],
+        [-1.4, 1.4],
+        320
+    )
+
+mesh surface = Plasma(zoom: 1, phase: 0)
+
+slide "Shader"
+    surface.zoom = 1.6
+    surface.phase = 3
+    play Lerp(1)

@@ -57,6 +57,57 @@ pub struct Tri {
     pub is_dom_sib: bool,
 }
 
+/// where a mesh's texture comes from: an image file the renderer loads, or
+/// pixels produced by the scene itself (a `Shader` mesh). pixel textures are
+/// compared by identity, so two frames of an animated shader are different
+/// textures and a re-run that yields the same `Arc` is the same one
+#[derive(Debug, Clone, PartialEq)]
+pub enum TextureSource {
+    File(PathBuf),
+    Pixels(Arc<PixelTexture>),
+}
+
+impl From<PathBuf> for TextureSource {
+    fn from(path: PathBuf) -> Self {
+        TextureSource::File(path)
+    }
+}
+
+/// an RGBA8 image held in memory, rows top to bottom like a decoded image
+/// file so the same UV conventions apply
+#[derive(Debug)]
+pub struct PixelTexture {
+    id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+static PIXEL_TEXTURE_IDS: AtomicU64 = AtomicU64::new(1);
+
+impl PixelTexture {
+    pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Self {
+        debug_assert_eq!(rgba.len(), width as usize * height as usize * 4);
+        Self {
+            id: PIXEL_TEXTURE_IDS.fetch_add(1, Ordering::Relaxed),
+            width,
+            height,
+            rgba,
+        }
+    }
+
+    /// process-unique, so renderers can key their caches on it
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+impl PartialEq for PixelTexture {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Uniforms {
     pub alpha: f64,
@@ -66,7 +117,7 @@ pub struct Uniforms {
     pub dot_vertex_count: u16,
     pub smooth: bool,
     pub gloss: f32,
-    pub img: Option<PathBuf>,
+    pub img: Option<TextureSource>,
     pub z_index: i32,
 }
 

@@ -943,7 +943,7 @@ pub async fn op_retextured(
     let image = resolve_file_path(executor, stack_idx, &image)?;
     let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        mesh.uniform.img = Some(image.clone());
+        mesh.uniform.img = Some(geo::mesh::TextureSource::File(image.clone()));
     })
     .await?;
     Ok(tree.into_value())

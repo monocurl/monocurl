@@ -2,10 +2,11 @@
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
-    mesh::DEFAULT_DOT_RADIUS,
+    mesh::{DEFAULT_DOT_RADIUS, PixelTexture, TextureSource},
     mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
+use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
@@ -1246,7 +1247,105 @@ pub async fn mk_image(executor: &mut Executor, stack_idx: usize) -> Result<Value
         tri.b.col = Float4::ONE;
         tri.c.col = Float4::ONE;
     }
-    mesh.uniform.img = Some(image);
+    mesh.uniform.img = Some(TextureSource::File(image));
+    Ok(Value::Mesh(std::sync::Arc::new(mesh)))
+}
+
+/// pixels a shader may produce per mesh; enough for a full-frame texture and
+/// small enough that a typo in the resolution cannot exhaust memory
+const MAX_SHADER_PIXELS: usize = 1 << 23;
+
+#[stdlib_func]
+pub async fn mk_shader(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
+    let color_at = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-6)
+        .clone()
+        .elide_lvalue();
+    let x_min = crate::read_float(executor, stack_idx, -5, "x_min")? as f32;
+    let x_max = crate::read_float(executor, stack_idx, -4, "x_max")? as f32;
+    let y_min = crate::read_float(executor, stack_idx, -3, "y_min")? as f32;
+    let y_max = crate::read_float(executor, stack_idx, -2, "y_max")? as f32;
+    let resolution = read_int(executor, stack_idx, -1, "resolution")?;
+    if resolution < 1 {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "resolution",
+            message: "shader resolution must be at least 1 pixel",
+        });
+    }
+    let width = (x_max - x_min).abs();
+    let height = (y_max - y_min).abs();
+    if !(width > 0.0 && height > 0.0) || !width.is_finite() || !height.is_finite() {
+        return Err(ExecutorError::InvalidArgument {
+            arg: "x_min_max",
+            message: "shader domain must have positive width and height",
+        });
+    }
+    // the resolution counts pixels along the longer edge; the other edge
+    // follows the domain's aspect so pixels stay square
+    let (columns, rows) = if width >= height {
+        let columns = resolution as usize;
+        (columns, ((columns as f32 * height / width).round() as usize).max(1))
+    } else {
+        let rows = resolution as usize;
+        (((rows as f32 * width / height).round() as usize).max(1), rows)
+    };
+    ensure_limit("shader pixels", columns.saturating_mul(rows), MAX_SHADER_PIXELS)?;
+
+    // rows run top to bottom, as in an image file, so the same UV flip as
+    // `Image` applies below
+    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(columns * rows);
+    for row in 0..rows {
+        let y = y_max - height * (row as f32 + 0.5) / rows as f32;
+        for column in 0..columns {
+            let x = x_min + width * (column as f32 + 0.5) / columns as f32;
+            args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
+        }
+    }
+    let colors = invoke_callable_many_mapped(
+        executor,
+        &color_at,
+        &args,
+        "color_at",
+        float4_from_kernel,
+        |value| float4_from_value(value, "color_at"),
+    )
+    .await?;
+    let mut rgba = Vec::with_capacity(colors.len() * 4);
+    for color in colors {
+        for channel in [color.x, color.y, color.z, color.w] {
+            rgba.push((channel.clamp(0.0, 1.0) * 255.0).round() as u8);
+        }
+    }
+    let texture = PixelTexture::new(columns as u32, rows as u32, rgba);
+
+    let center = Float3::new((x_min + x_max) / 2.0, (y_min + y_max) / 2.0, 0.0);
+    let normal = Float3::Z;
+    let (x, y, _) = polygon_basis(normal);
+    let corners = [
+        center - x * (width / 2.0) - y * (height / 2.0),
+        center + x * (width / 2.0) - y * (height / 2.0),
+        center + x * (width / 2.0) + y * (height / 2.0),
+        center - x * (width / 2.0) + y * (height / 2.0),
+    ];
+    let (lins, tris) = tessellate_planar_loops(&[corners.to_vec()], normal)?;
+    let mut mesh = match mesh_from_parts(vec![], lins, tris) {
+        Value::Mesh(mesh) => (*mesh).clone(),
+        _ => unreachable!(),
+    };
+    set_triangle_uv_rect(&mut mesh, corners[0], corners[2], x, y);
+    for tri in &mut mesh.tris {
+        tri.a.uv.y = 1.0 - tri.a.uv.y;
+        tri.b.uv.y = 1.0 - tri.b.uv.y;
+        tri.c.uv.y = 1.0 - tri.c.uv.y;
+        tri.a.col = Float4::ONE;
+        tri.b.col = Float4::ONE;
+        tri.c.col = Float4::ONE;
+    }
+    // the outline of a picture is not part of the picture
+    mesh.lins.clear();
+    mesh.uniform.img = Some(TextureSource::Pixels(std::sync::Arc::new(texture)));
     Ok(Value::Mesh(std::sync::Arc::new(mesh)))
 }
 

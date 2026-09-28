@@ -431,3 +431,27 @@ fn returning_a_capture_or_argument_survives_repeated_calls() {
         Expect::Kernels,
     );
 }
+
+#[test]
+fn shader_pixels_come_from_the_kernel_tier() {
+    check(
+        "
+        let escape = |cx, cy| {
+            var zx = 0.0
+            var zy = 0.0
+            var i = 0
+            while (i < 8 and zx * zx + zy * zy < 4) {
+                let nx = zx * zx - zy * zy + cx
+                zy = 2 * zx * zy + cy
+                zx = nx
+                i = i + 1
+            }
+            return i / 8
+        }
+        mesh plasma = Shader(|x, y| [escape(x, y), 0.5 + 0.5 * sin(3 * x), 0.5 + 0.5 * cos(2 * y), 1], [-2, 1], [-1, 1], 48)
+        mesh flat = Shader(|x, y| [1, 0, 0, 1])
+        print [plasma, flat]
+        ",
+        Expect::Kernels,
+    );
+}

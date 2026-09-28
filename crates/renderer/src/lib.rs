@@ -157,7 +157,7 @@ mod tests {
 
     use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot};
     use geo::{
-        mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
+        mesh::{Dot, Lin, LinVertex, Mesh, PixelTexture, TextureSource, Tri, TriVertex, Uniforms},
         simd::{Float2, Float3, Float4},
     };
 
@@ -450,6 +450,78 @@ mod tests {
             tag: Vec::new(),
             version: Mesh::fresh_version(),
         }
+    }
+
+    #[test]
+    fn pixel_textures_are_sampled_onto_meshes() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        // top-left red, top-right green, bottom-left blue, bottom-right white
+        let pixels = PixelTexture::new(
+            2,
+            2,
+            vec![
+                255, 0, 0, 255, 0, 255, 0, 255, //
+                0, 0, 255, 255, 255, 255, 255, 255,
+            ],
+        );
+        let mut mesh = textured_quad_mesh();
+        mesh.uniform.img = Some(TextureSource::Pixels(Arc::new(pixels)));
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![Arc::new(mesh)],
+        };
+        let size = RenderSize::new(128, 128);
+
+        let image = renderer.render(&scene, size).unwrap();
+
+        let sample = |world: Float3| {
+            let (x, y) = screen_point(world, size);
+            let [b, g, r, _] = image.get_pixel(x as u32, y as u32).0;
+            (r, g, b)
+        };
+        let dominant = |(r, g, b): (u8, u8, u8)| {
+            if r > 128 && g > 128 && b > 128 {
+                "white"
+            } else if r > g && r > b {
+                "red"
+            } else if g > r && g > b {
+                "green"
+            } else {
+                "blue"
+            }
+        };
+        assert_eq!(dominant(sample(Float3::new(-0.5, 0.5, 0.0))), "red");
+        assert_eq!(dominant(sample(Float3::new(0.5, 0.5, 0.0))), "green");
+        assert_eq!(dominant(sample(Float3::new(-0.5, -0.5, 0.0))), "blue");
+        assert_eq!(dominant(sample(Float3::new(0.5, -0.5, 0.0))), "white");
+    }
+
+    /// a unit square with the UV convention `Image` and `Shader` use: row 0 of
+    /// the texture along the top edge
+    fn textured_quad_mesh() -> Mesh {
+        let vertex = |x: f32, y: f32| TriVertex {
+            pos: Float3::new(x, y, 0.0),
+            col: Float4::ONE,
+            uv: Float2::new((x + 1.0) / 2.0, 1.0 - (y + 1.0) / 2.0),
+        };
+        let tri = |a: TriVertex, b: TriVertex, c: TriVertex| Tri {
+            a,
+            b,
+            c,
+            ab: -1,
+            bc: -1,
+            ca: -1,
+            is_dom_sib: false,
+        };
+        let mut mesh = flat_triangle_mesh(Float4::ONE, 0);
+        mesh.tris = vec![
+            tri(vertex(-1.0, -1.0), vertex(1.0, -1.0), vertex(1.0, 1.0)),
+            tri(vertex(-1.0, -1.0), vertex(1.0, 1.0), vertex(-1.0, 1.0)),
+        ];
+        mesh
     }
 
     fn count_red_pixels(image: &image::RgbaImage) -> usize {
