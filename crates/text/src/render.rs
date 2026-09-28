@@ -531,6 +531,20 @@ fn svg_mesh_options(resources_dir: Option<PathBuf>) -> usvg::Options<'static> {
     }
 }
 
+/// load the system font database on a background thread so the first text
+/// with a system font does not stall a frame on the scan (a few hundred
+/// milliseconds on a typical machine); callers that need it before then
+/// block on the same initialisation
+pub fn warm_system_fonts() {
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::Builder::new()
+        .name("monocurl-fonts".into())
+        .spawn(|| {
+            system_font_db();
+        })
+        .ok();
+}
+
 fn system_font_db() -> &'static Arc<FontDatabase> {
     static DB: OnceLock<Arc<FontDatabase>> = OnceLock::new();
     DB.get_or_init(|| {
@@ -1045,8 +1059,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn typst_math_text_tags_are_recovered_and_preserve_layout() {
-        let tagged =
-            render_typst(r"$\tag1{a^2} + \tag2{b^2} = \tag3{c^2}$", 1.0).unwrap();
+        let tagged = render_typst(r"$\tag1{a^2} + \tag2{b^2} = \tag3{c^2}$", 1.0).unwrap();
         let plain = render_typst("$a^2 + b^2 = c^2$", 1.0).unwrap();
 
         for tag in [vec![1], vec![2], vec![3]] {

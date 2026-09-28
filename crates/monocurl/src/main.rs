@@ -115,6 +115,7 @@ impl MonocurlLauncher {
         if let Err(error) = text::clean_stale_file_cache() {
             log::warn!("unable to clean stale LaTeX SVG cache: {error:#}");
         }
+        text::warm_system_fonts();
     }
 
     fn setup_fonts(cx: &mut App) {

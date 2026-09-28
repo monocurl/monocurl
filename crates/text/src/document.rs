@@ -177,9 +177,10 @@ pub(crate) fn apply_typst_text_tag_markers(source: &str, spans: &[TaggedSpan]) -
         spans.iter().map(|span| {
             let tag = span.tag[0].clamp(0, u8::MAX as isize);
             let (open, close) = match typst_math_context(source, span.range.start) {
-                TypstMathContext::Markup => {
-                    (format!("#text(fill: rgb({tag}, 255, 255))["), "]".to_owned())
-                }
+                TypstMathContext::Markup => (
+                    format!("#text(fill: rgb({tag}, 255, 255))["),
+                    "]".to_owned(),
+                ),
                 TypstMathContext::Inline => (
                     format!("#text(fill: rgb({tag}, 255, 255))[$"),
                     "$]".to_owned(),
@@ -510,8 +511,8 @@ fn text_tag_marker_open(tag: isize) -> String {
 mod tests {
     use super::{
         LatexDocumentStyle, TaggedSource, TaggedSpan, apply_text_tag_markers,
-        apply_typst_text_tag_markers, build_latex_document, build_tex_document, build_text_document,
-        parse_text_tags,
+        apply_typst_text_tag_markers, build_latex_document, build_tex_document,
+        build_text_document, parse_text_tags,
     };
 
     #[test]
