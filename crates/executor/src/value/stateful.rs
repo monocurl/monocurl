@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use smallvec::SmallVec;
+use super::Labels;
 
 use crate::{
     error::ExecutorError,
@@ -29,13 +29,13 @@ pub enum StatefulNode {
         func: Box<StatefulNode>,
         /// owning refs to slots holding the arg values
         args: Vec<VRc>,
-        labels: SmallVec<[(usize, String); 4]>,
+        labels: Labels,
     },
     LabeledOperatorCall {
         operator: Box<StatefulNode>,
         operand: VRc,
         extra_args: Vec<VRc>,
-        labels: SmallVec<[(usize, String); 4]>,
+        labels: Labels,
     },
 }
 

@@ -587,9 +587,10 @@ mod test {
 
     fn calls_native(section: &bytecode::SectionBytecode, name: &str) -> bool {
         let index = registry().index_of(name) as u16;
-        section.instructions.iter().any(|instr| {
-            matches!(instr, Instruction::NativeInvoke { index: i, .. } if *i == index)
-        })
+        section
+            .instructions
+            .iter()
+            .any(|instr| matches!(instr, Instruction::NativeInvoke { index: i, .. } if *i == index))
     }
 
     fn invokes_lambda(section: &bytecode::SectionBytecode) -> bool {
@@ -787,7 +788,11 @@ mod test {
         section: &bytecode::SectionBytecode,
         pred: impl Fn(&Instruction) -> bool,
     ) -> usize {
-        section.instructions.iter().filter(|instr| pred(instr)).count()
+        section
+            .instructions
+            .iter()
+            .filter(|instr| pred(instr))
+            .count()
     }
 
     #[test]
@@ -811,12 +816,18 @@ mod test {
             1
         );
         assert_eq!(
-            count_instructions(section, |instr| matches!(instr, Instruction::Subscript { .. })),
+            count_instructions(section, |instr| matches!(
+                instr,
+                Instruction::Subscript { .. }
+            )),
             0,
             "reading a local by index must not copy it first"
         );
         assert_eq!(
-            count_instructions(section, |instr| matches!(instr, Instruction::LenLocal { .. })),
+            count_instructions(section, |instr| matches!(
+                instr,
+                Instruction::LenLocal { .. }
+            )),
             1
         );
     }
@@ -836,7 +847,10 @@ mod test {
 
         let section = root_slide_section(&result);
         assert_eq!(
-            count_instructions(section, |instr| matches!(instr, Instruction::SubscriptLocal { .. })),
+            count_instructions(section, |instr| matches!(
+                instr,
+                Instruction::SubscriptLocal { .. }
+            )),
             0
         );
     }
@@ -1204,7 +1218,10 @@ mod test {
             .filter(|instr| matches!(instr, Instruction::ConvertVar { .. }))
             .count();
         // the two top-level `let f` / `let g`, plus `acc`
-        assert_eq!(conversions, 3, "only `acc` should be promoted inside a body");
+        assert_eq!(
+            conversions, 3,
+            "only `acc` should be promoted inside a body"
+        );
         assert_eq!(
             sec.instructions
                 .iter()

@@ -2,6 +2,8 @@ use std::{cell::Cell, future::Future, pin::Pin};
 
 use smallvec::SmallVec;
 
+use super::Labels;
+
 use crate::{
     error::ExecutorError,
     executor::{Executor, fill_defaults, prepare_eager_call_args},
@@ -15,7 +17,7 @@ pub struct InvokedFunctionBody {
     pub lambda: Box<Value>,
     pub arguments: Vec<Value>,
     pub boxed_arguments: SmallVec<[bool; 8]>,
-    pub labels: SmallVec<[(usize, String); 4]>,
+    pub labels: Labels,
 }
 
 pub struct InvFuncCache(pub Cell<Option<Box<Value>>>);
@@ -34,7 +36,7 @@ pub type InvokedFunction = RcCached<InvokedFunctionBody, InvFuncCache>;
 pub fn make_invoked_function(
     lambda: Value,
     arguments: SmallVec<[Value; 8]>,
-    labels: SmallVec<[(usize, String); 4]>,
+    labels: Labels,
     cached_result: Option<Value>,
 ) -> InvokedFunction {
     let mut boxed_arguments = SmallVec::with_capacity(arguments.len());

@@ -65,9 +65,7 @@ impl Executor {
             }
             Instruction::PushString { index } => {
                 let s = self.bytecode.sections[section_idx].string_pool[index as usize].clone();
-                self.state
-                    .stack_mut(stack_idx)
-                    .push(Value::String(s.into()));
+                self.state.stack_mut(stack_idx).push(Value::String(s));
             }
             Instruction::PushEmptyMap => {
                 self.state.stack_mut(stack_idx).push(Value::Map(Map::new()));
@@ -126,7 +124,7 @@ impl Executor {
                 let name =
                     self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
                 self.state
-                    .promote_to_leader(stack_idx, LeaderKind::Mesh, name);
+                    .promote_to_leader(stack_idx, LeaderKind::Mesh, name.to_string());
             }
             Instruction::ConvertParam { name_index } => {
                 if matches!(
@@ -140,7 +138,7 @@ impl Executor {
                 let name =
                     self.bytecode.sections[section_idx].string_pool[name_index as usize].clone();
                 self.state
-                    .promote_to_leader(stack_idx, LeaderKind::Param, name);
+                    .promote_to_leader(stack_idx, LeaderKind::Param, name.to_string());
             }
 
             Instruction::PushDeepCopy { stack_delta } => {
@@ -178,9 +176,7 @@ impl Executor {
                         .stack(stack_idx)
                         .read_at(stack_delta)
                         .force_elide_lvalue(),
-                    CopyValueMode::Raw => {
-                        self.state.stack(stack_idx).read_at(stack_delta).clone()
-                    }
+                    CopyValueMode::Raw => self.state.stack(stack_idx).read_at(stack_delta).clone(),
                 };
 
                 if let Value::Stateful(_) = copied {
@@ -199,7 +195,11 @@ impl Executor {
                 // the pushed reference is non-owning, so only an ephemeral needs a
                 // retain; taking one unconditionally meant a retain and a release
                 // per push for nothing
-                let Some(key) = self.state.stack(stack_idx).read_at(stack_delta).as_lvalue_key()
+                let Some(key) = self
+                    .state
+                    .stack(stack_idx)
+                    .read_at(stack_delta)
+                    .as_lvalue_key()
                 else {
                     panic!("PushLvalue: not an lvalue at delta {stack_delta}");
                 };
@@ -534,7 +534,8 @@ impl Executor {
                     Err(error) => return ExecSingle::Error(error),
                 }
             }
-            Instruction::ConditionalJump { section, to } | Instruction::JumpIfFalse { section, to } => {
+            Instruction::ConditionalJump { section, to }
+            | Instruction::JumpIfFalse { section, to } => {
                 let jump_when = matches!(instr, Instruction::ConditionalJump { .. });
                 let val = self.state.stack_mut(stack_idx).pop();
                 let val = match val.elide_wrappers_rec(self).await {

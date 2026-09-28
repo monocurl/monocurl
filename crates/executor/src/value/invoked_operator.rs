@@ -2,6 +2,8 @@ use std::{cell::Cell, future::Future, pin::Pin};
 
 use smallvec::SmallVec;
 
+use super::Labels;
+
 use crate::{
     error::ExecutorError,
     executor::{Executor, fill_defaults, prepare_eager_call_args},
@@ -17,7 +19,7 @@ pub struct InvokedOperatorBody {
     pub boxed_operand: bool,
     pub arguments: Vec<Value>,
     pub boxed_arguments: SmallVec<[bool; 8]>,
-    pub labels: SmallVec<[(usize, String); 4]>,
+    pub labels: Labels,
 }
 
 pub struct InvOpCache {
@@ -50,7 +52,7 @@ pub fn make_invoked_operator(
     operator: Value,
     operand: Value,
     arguments: SmallVec<[Value; 8]>,
-    labels: SmallVec<[(usize, String); 4]>,
+    labels: Labels,
     initial: Value,
     modified: Value,
 ) -> InvokedOperator {

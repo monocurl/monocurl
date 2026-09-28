@@ -5,7 +5,7 @@ use crate::{
     heap::{VRc, with_heap},
     state::MAX_CALL_DEPTH,
     value::{
-        Value,
+        Labels, Value,
         anim_block::AnimBlock,
         invoked_function::make_invoked_function,
         invoked_operator::{extract_operator_result, make_invoked_operator},
@@ -587,11 +587,7 @@ impl Executor {
     }
 
     #[inline]
-    fn drain_labels(
-        &mut self,
-        stack_idx: usize,
-        section_idx: usize,
-    ) -> SmallVec<[(usize, String); 4]> {
+    fn drain_labels(&mut self, stack_idx: usize, section_idx: usize) -> Labels {
         let label_indices: SmallVec<[u32; 8]> = self
             .state
             .stack_mut(stack_idx)

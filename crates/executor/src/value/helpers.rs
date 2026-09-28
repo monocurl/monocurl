@@ -1,6 +1,5 @@
 use std::cell::Cell;
 
-
 use crate::{
     error::ExecutorError,
     executor::Executor,
@@ -107,9 +106,7 @@ impl Value {
             // allocates, and allocating re-borrows the heap
             Value::Lvalue(reference) => read_slot(reference.key()).elide_lvalue_leader_rec(),
             Value::WeakLvalue(reference) => read_slot(reference.key()).elide_lvalue_leader_rec(),
-            Value::Leader(leader) => {
-                read_slot(leader.leader_rc.key()).elide_lvalue_leader_rec()
-            }
+            Value::Leader(leader) => read_slot(leader.leader_rc.key()).elide_lvalue_leader_rec(),
             Value::List(list) => Value::List(List::new_with(
                 list.elements().iter().map(elided_heap_ref_value),
             )),
@@ -145,19 +142,19 @@ impl Value {
     /// slots; reading and cloning individual values is fine.
     pub fn with_elided_cached_wrappers<R>(&self, inspect: impl FnOnce(&Value) -> R) -> R {
         match self {
-            Value::Lvalue(reference) => {
-                with_heap(|heap| heap.get(reference.key()).with_elided_cached_wrappers(inspect))
-            }
-            Value::WeakLvalue(reference) => {
-                with_heap(|heap| heap.get(reference.key()).with_elided_cached_wrappers(inspect))
-            }
+            Value::Lvalue(reference) => with_heap(|heap| {
+                heap.get(reference.key())
+                    .with_elided_cached_wrappers(inspect)
+            }),
+            Value::WeakLvalue(reference) => with_heap(|heap| {
+                heap.get(reference.key())
+                    .with_elided_cached_wrappers(inspect)
+            }),
             Value::Leader(leader) => with_heap(|heap| {
                 heap.get(leader.leader_rc.key())
                     .with_elided_cached_wrappers(inspect)
             }),
-            Value::InvokedFunction(invoked) => {
-                with_cached_value(&invoked.cache.0, self, inspect)
-            }
+            Value::InvokedFunction(invoked) => with_cached_value(&invoked.cache.0, self, inspect),
             Value::InvokedOperator(invoked) => {
                 with_cached_value(&invoked.cache.cached_result, self, inspect)
             }
@@ -588,13 +585,13 @@ fn mutate_stateful_attr(
 }
 
 fn labeled_argument_index(
-    labels: &smallvec::SmallVec<[(usize, String); 4]>,
+    labels: &super::Labels,
     attr_name: &str,
     arg_len: usize,
 ) -> Option<usize> {
-    labels
-        .iter()
-        .find_map(|(arg_idx, label)| (*arg_idx < arg_len && label == attr_name).then_some(*arg_idx))
+    labels.iter().find_map(|(arg_idx, label)| {
+        (*arg_idx < arg_len && &**label == attr_name).then_some(*arg_idx)
+    })
 }
 
 fn set_argument(
