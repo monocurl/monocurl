@@ -120,6 +120,7 @@ impl Executor {
 
         self.bytecode = bytecode;
         self.kernels.reset(self.bytecode.sections.clone());
+        self.bytecode_generation = super::next_bytecode_generation();
         self.cache
             .entries
             .resize_with(self.bytecode.sections.len(), || None);

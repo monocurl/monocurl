@@ -1246,32 +1246,33 @@ pub async fn mk_shader(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         MAX_SHADER_PIXELS,
     )?;
 
-    // rows run top to bottom, as in an image file, so the same UV flip as
-    // `Image` applies below
-    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(columns * rows);
-    for row in 0..rows {
-        let y = y_max - height * (row as f32 + 0.5) / rows as f32;
-        for column in 0..columns {
-            let x = x_min + width * (column as f32 + 0.5) / columns as f32;
-            args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
-        }
-    }
-    let colors = invoke_callable_many_mapped(
-        executor,
+    let cache_key = super::shader_cache::key(
+        executor.bytecode_generation(),
         &color_at,
-        &args,
-        "color_at",
-        float4_from_kernel,
-        |value| float4_from_value(value, "color_at"),
-    )
-    .await?;
-    let mut rgba = Vec::with_capacity(colors.len() * 4);
-    for color in colors {
-        for channel in [color.x, color.y, color.z, color.w] {
-            rgba.push((channel.clamp(0.0, 1.0) * 255.0).round() as u8);
+        &[
+            u64::from(x_min.to_bits()),
+            u64::from(x_max.to_bits()),
+            u64::from(y_min.to_bits()),
+            u64::from(y_max.to_bits()),
+            columns as u64,
+            rows as u64,
+        ],
+    );
+    let texture = match cache_key.as_ref().and_then(super::shader_cache::get) {
+        Some(texture) => texture,
+        None => {
+            let texture = std::sync::Arc::new(
+                shade(
+                    executor, &color_at, x_min, y_max, width, height, columns, rows,
+                )
+                .await?,
+            );
+            if let Some(key) = cache_key {
+                super::shader_cache::insert(key, std::sync::Arc::clone(&texture));
+            }
+            texture
         }
-    }
-    let texture = PixelTexture::new(columns as u32, rows as u32, rgba);
+    };
 
     let center = Float3::new((x_min + x_max) / 2.0, (y_min + y_max) / 2.0, 0.0);
     let normal = Float3::Z;
@@ -1298,8 +1299,47 @@ pub async fn mk_shader(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     }
     // the outline of a picture is not part of the picture
     mesh.lins.clear();
-    mesh.uniform.img = Some(TextureSource::Pixels(std::sync::Arc::new(texture)));
+    mesh.uniform.img = Some(TextureSource::Pixels(texture));
     Ok(Value::Mesh(std::sync::Arc::new(mesh)))
+}
+
+/// sample `color_at` at every pixel centre of the domain; rows run top to
+/// bottom, as in an image file, so the same UV flip as `Image` applies
+#[allow(clippy::too_many_arguments)]
+async fn shade(
+    executor: &mut Executor,
+    color_at: &Value,
+    x_min: f32,
+    y_max: f32,
+    width: f32,
+    height: f32,
+    columns: usize,
+    rows: usize,
+) -> Result<PixelTexture, ExecutorError> {
+    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(columns * rows);
+    for row in 0..rows {
+        let y = y_max - height * (row as f32 + 0.5) / rows as f32;
+        for column in 0..columns {
+            let x = x_min + width * (column as f32 + 0.5) / columns as f32;
+            args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
+        }
+    }
+    let colors = invoke_callable_many_mapped(
+        executor,
+        color_at,
+        &args,
+        "color_at",
+        float4_from_kernel,
+        |value| float4_from_value(value, "color_at"),
+    )
+    .await?;
+    let mut rgba = Vec::with_capacity(colors.len() * 4);
+    for color in colors {
+        for channel in [color.x, color.y, color.z, color.w] {
+            rgba.push((channel.clamp(0.0, 1.0) * 255.0).round() as u8);
+        }
+    }
+    Ok(PixelTexture::new(columns as u32, rows as u32, rgba))
 }
 
 #[cfg(target_arch = "wasm32")]

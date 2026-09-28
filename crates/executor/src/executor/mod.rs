@@ -8,10 +8,10 @@ mod anim;
 mod cacheing;
 mod eager;
 mod invoke;
-mod materialize;
-mod stateful_eval;
 mod lerp;
+mod materialize;
 pub(crate) mod ops;
+mod stateful_eval;
 
 use std::pin::Pin;
 use std::{future::Future, sync::Arc};
@@ -160,6 +160,9 @@ pub struct Executor {
     pub(crate) native_funcs: Vec<NativeFunction>,
     pub(crate) cache: ExecutionCache,
     pub(crate) kernels: KernelTier,
+    /// unique across executors and bumped whenever the bytecode changes, for
+    /// caches keyed by instruction pointers that live outside the executor
+    bytecode_generation: u64,
     pub(crate) yielder: PeriodicYielder,
     aspect_ratio: f32,
     text_render_quality: TextRenderQuality,
@@ -188,6 +191,7 @@ impl Executor {
             native_funcs,
             cache,
             kernels,
+            bytecode_generation: next_bytecode_generation(),
             yielder: PeriodicYielder::default(),
             aspect_ratio: 16.0 / 9.0,
             text_render_quality: TextRenderQuality::Normal,
@@ -296,7 +300,10 @@ impl Executor {
                 SyncRun::BudgetExhausted => self.tick_yielder().await,
                 SyncRun::Suspend { section_idx, instr } => {
                     self.tick_yielder().await;
-                    match self.execute_instr_async(section_idx, stack_idx, instr).await {
+                    match self
+                        .execute_instr_async(section_idx, stack_idx, instr)
+                        .await
+                    {
                         ExecSingle::Continue => {}
                         other => return other,
                     }
@@ -304,5 +311,19 @@ impl Executor {
             }
         }
     }
+}
 
+/// generations are drawn from one process-wide counter so two executors
+/// never share one, even at the same instruction pointers
+pub(crate) fn next_bytecode_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+impl Executor {
+    /// changes whenever the bytecode does; anything keyed by an instruction
+    /// pointer is only valid within one generation
+    pub fn bytecode_generation(&self) -> u64 {
+        self.bytecode_generation
+    }
 }

@@ -5,7 +5,9 @@ use crate::{
     heap::{HeapKey, VRc, VWeak, heap_ref_count, heap_replace, with_heap, with_heap_mut},
     state::LeaderKind,
     value::{
-        Value, container::HashableKey, invoked_function::InvokedFunction,
+        Value,
+        container::HashableKey,
+        invoked_function::InvokedFunction,
         invoked_operator::{InvokedOperator, invalidate_invoked_operator_cache},
         stateful::lift_append_to_stateful,
     },
@@ -477,7 +479,11 @@ impl Executor {
     }
 
     /// `len(...)` of the container living at `stack_delta`, read in place
-    pub(super) fn try_len_local(&mut self, stack_idx: usize, stack_delta: i32) -> Option<ExecSingle> {
+    pub(super) fn try_len_local(
+        &mut self,
+        stack_idx: usize,
+        stack_delta: i32,
+    ) -> Option<ExecSingle> {
         let len = self
             .state
             .stack(stack_idx)
