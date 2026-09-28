@@ -5,7 +5,10 @@
 //! is simply re-run by the interpreter, which produces the authoritative error
 //! with its span and call stack
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use smallvec::SmallVec;
 
@@ -22,16 +25,21 @@ pub enum Fault {
     Arity,
     Depth,
     Budget,
+    /// another call of the same batch faulted, so this one is pointless
+    Aborted,
     LengthMismatch,
 }
 
 /// nesting the register machine allows before handing the call back to the
 /// interpreter, which enforces the real limit
-const MAX_DEPTH: u32 = 512;
+pub(super) const MAX_DEPTH: u32 = 512;
 
 /// operations one call may execute before the tier gives up on it. a call
 /// this long belongs in the interpreter, where it yields cooperatively
 pub const CALL_OP_BUDGET: u64 = 1 << 26;
+
+/// ops between looks at the abort flag
+pub(super) const ABORT_CHECK_MASK: u64 = (1 << 16) - 1;
 
 pub struct Vm {
     regs: Vec<KVal>,
@@ -41,6 +49,9 @@ pub struct Vm {
     /// arguments and captures are never written by a body, so a run of calls
     /// to one closure only has to rewrite the arguments
     warm_entry: Option<ClosureId>,
+    /// raised by whoever shares this flag (the other workers of a batch) to
+    /// stop a call early instead of letting it run out its budget
+    abort: Option<Arc<AtomicBool>>,
 }
 
 impl Default for Vm {
@@ -56,6 +67,14 @@ impl Vm {
             depth: 0,
             budget: CALL_OP_BUDGET,
             warm_entry: None,
+            abort: None,
+        }
+    }
+
+    pub fn with_abort(abort: Arc<AtomicBool>) -> Self {
+        Self {
+            abort: Some(abort),
+            ..Self::new()
         }
     }
 
@@ -175,8 +194,17 @@ impl Vm {
             let op = ops[pc];
             pc += 1;
             self.budget -= 1;
-            if self.budget == 0 {
-                return Err(Fault::Budget);
+            if self.budget & ABORT_CHECK_MASK == 0 {
+                if self.budget == 0 {
+                    return Err(Fault::Budget);
+                }
+                if self
+                    .abort
+                    .as_ref()
+                    .is_some_and(|abort| abort.load(Ordering::Relaxed))
+                {
+                    return Err(Fault::Aborted);
+                }
             }
 
             match op {
@@ -291,7 +319,7 @@ impl Vm {
     }
 }
 
-fn truthy(value: &KVal) -> Result<bool, Fault> {
+pub(super) fn truthy(value: &KVal) -> Result<bool, Fault> {
     match value {
         KVal::Int(n) => Ok(*n != 0),
         KVal::Float(f) => Ok(*f != 0.0),
@@ -299,7 +327,7 @@ fn truthy(value: &KVal) -> Result<bool, Fault> {
     }
 }
 
-fn negate(value: &KVal) -> Result<KVal, Fault> {
+pub(super) fn negate(value: &KVal) -> Result<KVal, Fault> {
     Ok(match value {
         KVal::Int(n) => KVal::Int(n.wrapping_neg()),
         KVal::Float(f) => KVal::Float(-f),
@@ -564,5 +592,51 @@ pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> 
             _ => Err(Fault::Type),
         },
         Fallthrough => Err(Fault::Type),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::ir::Kernel;
+
+    fn endless_loop() -> ClosureArena {
+        let mut arena = ClosureArena::default();
+        arena.push(KClosure {
+            ip: Default::default(),
+            kernel: Arc::new(Kernel {
+                ip: Default::default(),
+                required_args: 0,
+                total_args: 0,
+                capture_count: 0,
+                frame_size: 0,
+                ops: Box::new([KOp::Jump { to: 0 }]),
+            }),
+            captures: Box::new([]),
+            defaults: Box::new([]),
+        });
+        arena
+    }
+
+    #[test]
+    fn an_endless_loop_runs_out_of_budget() {
+        let arena = endless_loop();
+        let mut vm = Vm::new();
+        assert!(matches!(
+            vm.call(&arena, ClosureId(0), &[]),
+            Err(Fault::Budget)
+        ));
+    }
+
+    #[test]
+    fn a_raised_abort_flag_stops_a_call_early() {
+        let arena = endless_loop();
+        let abort = Arc::new(AtomicBool::new(false));
+        let mut vm = Vm::with_abort(Arc::clone(&abort));
+        let started = std::time::Instant::now();
+        let worker = std::thread::spawn(move || vm.call(&arena, ClosureId(0), &[]));
+        abort.store(true, Ordering::Relaxed);
+        assert!(matches!(worker.join().unwrap(), Err(Fault::Aborted)));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 }

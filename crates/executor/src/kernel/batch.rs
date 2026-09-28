@@ -1,7 +1,15 @@
 //! running a batch of calls: arguments laid flat, a serial probe, then the
 //! worker pool once the batch has shown itself to be long
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
+
+use smallvec::SmallVec;
 
 use crate::{
     executor::Executor,
@@ -11,8 +19,11 @@ use crate::{
 use super::{
     KernelMode,
     convert::Converter,
+    lanes::{LANES, LVm},
     pool,
     run::{Fault, Vm},
+    typed::{SpecId, TypedProgram},
+    typed_run::TVm,
     value::{ClosureArena, ClosureId, KVal},
 };
 
@@ -47,36 +58,175 @@ impl BatchArgs {
     }
 }
 
+/// how one batch runs: which specialisation it has, if any, whether the
+/// lane machine is on, and whether every result is cross-checked
+#[derive(Clone)]
+struct Plan {
+    typed: Option<Arc<(TypedProgram, SpecId)>>,
+    lanes: bool,
+    verify: bool,
+}
+
+/// the machines one batch runs on: the lane machine for groups of typed
+/// calls, the typed one for the rest and for lanes that fault, the dynamic
+/// one for calls the typed machines decline or fault
+struct Machines<'a> {
+    arena: &'a ClosureArena,
+    entry: ClosureId,
+    plan: &'a Plan,
+    vm: Vm,
+    tvm: TVm,
+    lvm: LVm,
+    typed_calls: usize,
+    lane_calls: usize,
+}
+
+impl<'a> Machines<'a> {
+    fn new(
+        arena: &'a ClosureArena,
+        entry: ClosureId,
+        plan: &'a Plan,
+        abort: Option<&Arc<AtomicBool>>,
+    ) -> Self {
+        let (vm, tvm, lvm) = match abort {
+            Some(abort) => (
+                Vm::with_abort(Arc::clone(abort)),
+                TVm::with_abort(Arc::clone(abort)),
+                LVm::with_abort(Arc::clone(abort)),
+            ),
+            None => (Vm::new(), TVm::new(), LVm::new()),
+        };
+        Self {
+            arena,
+            entry,
+            plan,
+            vm,
+            tvm,
+            lvm,
+            typed_calls: 0,
+            lane_calls: 0,
+        }
+    }
+
+    /// run the calls `range` of `args`, appending their results
+    fn run(
+        &mut self,
+        args: &BatchArgs,
+        range: std::ops::Range<usize>,
+        results: &mut Vec<KVal>,
+    ) -> Result<(), Fault> {
+        let Some(typed) = self.plan.typed.as_deref().filter(|_| self.plan.lanes) else {
+            for index in range {
+                results.push(self.call(args.call(index))?);
+            }
+            return Ok(());
+        };
+        let (program, spec) = typed;
+        let mut index = range.start;
+        while index < range.end {
+            let group_end = (index + LANES).min(range.end);
+            let group: SmallVec<[&[KVal]; LANES]> =
+                (index..group_end).map(|i| args.call(i)).collect();
+            let accepted = group_end - index > 1
+                && group
+                    .iter()
+                    .all(|call| TVm::accepts(program.spec(*spec), call));
+            if accepted {
+                match self.lvm.call(program, self.arena, *spec, &group) {
+                    Ok(lane_results) => {
+                        self.lane_calls += group.len();
+                        self.typed_calls += group.len();
+                        if self.plan.verify {
+                            for (call, result) in group.iter().zip(&lane_results) {
+                                let dynamic = self.vm.call(self.arena, self.entry, call)?;
+                                assert!(
+                                    KVal::strictly_equal(result, &dynamic),
+                                    "lane machine disagrees with the dynamic machine: {result:?} vs {dynamic:?}"
+                                );
+                            }
+                        }
+                        results.extend(lane_results);
+                        index = group_end;
+                        continue;
+                    }
+                    Err(fault @ (Fault::Budget | Fault::Aborted)) => return Err(fault),
+                    // one lane faulted; each call finds out on its own
+                    Err(_) => {}
+                }
+            }
+            for call in group {
+                results.push(self.call(call)?);
+            }
+            index = group_end;
+        }
+        Ok(())
+    }
+
+    fn call(&mut self, args: &[KVal]) -> Result<KVal, Fault> {
+        let Some((program, spec)) = self.plan.typed.as_deref() else {
+            return self.vm.call(self.arena, self.entry, args);
+        };
+        if !TVm::accepts(program.spec(*spec), args) {
+            return self.vm.call(self.arena, self.entry, args);
+        }
+        match self.tvm.call(program, self.arena, *spec, args) {
+            Ok(typed) => {
+                self.typed_calls += 1;
+                if self.plan.verify {
+                    let dynamic = self.vm.call(self.arena, self.entry, args)?;
+                    assert!(
+                        KVal::strictly_equal(&typed, &dynamic),
+                        "typed kernel disagrees with the dynamic machine: {typed:?} vs {dynamic:?}"
+                    );
+                }
+                Ok(typed)
+            }
+            // these say nothing about the call itself
+            Err(fault @ (Fault::Budget | Fault::Aborted)) => Err(fault),
+            // a typed fault is either a real error or a shape the typed
+            // machine does not handle; the dynamic one decides which
+            Err(_) => self.vm.call(self.arena, self.entry, args),
+        }
+    }
+}
+
+/// counts of how a range of calls ran
+#[derive(Clone, Copy, Default)]
+struct Ran {
+    typed: usize,
+    lanes: usize,
+    parallel: bool,
+}
+
 /// run the calls `range` of `args`, serially at first and on the worker pool
 /// once the batch has shown itself to be long. the first fault aborts the
-/// batch: the interpreter will find the same error. the flag says whether
-/// worker threads were used
+/// batch: the interpreter will find the same error
 fn run_batch(
     arena: &Arc<ClosureArena>,
     entry: ClosureId,
+    plan: &Plan,
     args: &Arc<BatchArgs>,
     range: std::ops::Range<usize>,
-) -> Result<(Vec<KVal>, bool), Fault> {
+) -> Result<(Vec<KVal>, Ran), Fault> {
     let mut results = Vec::with_capacity(range.len());
-    let mut vm = Vm::new();
+    let mut machines = Machines::new(arena, entry, plan, None);
+    let mut ran = Ran::default();
 
     let probe = range.start + range.len().min(PARALLEL_PROBE_CALLS);
     let started = Stopwatch::start();
-    for index in range.start..probe {
-        results.push(vm.call(arena, entry, args.call(index))?);
-    }
+    machines.run(args, range.start..probe, &mut results)?;
     let remaining = probe..range.end;
-    if remaining.is_empty() {
-        return Ok((results, false));
-    }
-
     let projected = started.elapsed() * (range.len() / (probe - range.start)) as u32;
     let threads = worker_threads();
-    if threads <= 1 || remaining.len() < PARALLEL_MIN_CALLS || projected < PARALLEL_MIN_PROJECTED {
-        for index in remaining {
-            results.push(vm.call(arena, entry, args.call(index))?);
-        }
-        return Ok((results, false));
+    if remaining.is_empty()
+        || threads <= 1
+        || remaining.len() < PARALLEL_MIN_CALLS
+        || projected < PARALLEL_MIN_PROJECTED
+    {
+        machines.run(args, remaining, &mut results)?;
+        ran.typed = machines.typed_calls;
+        ran.lanes = machines.lane_calls;
+        return Ok((results, ran));
     }
 
     let pool = pool::pool(threads);
@@ -84,20 +234,38 @@ fn run_batch(
     let chunk_len = remaining.len().div_ceil(chunks);
     let arena = Arc::clone(arena);
     let args = Arc::clone(args);
+    let plan = plan.clone();
+    // the first fault raises the flag and every other worker stops at its
+    // next look, so an endless loop in user code costs one budget, not one
+    // per call
+    let aborted = Arc::new(AtomicBool::new(false));
     let outcomes = pool.run(chunks, move |chunk| {
         let start = remaining.start + chunk * chunk_len;
-        let end = (start + chunk_len).min(remaining.end);
-        let mut vm = Vm::new();
-        (start..end.max(start))
-            .map(|index| vm.call(&arena, entry, args.call(index)))
-            .collect::<Result<Vec<KVal>, Fault>>()
+        let end = (start + chunk_len).min(remaining.end).max(start);
+        let mut machines = Machines::new(&arena, entry, &plan, Some(&aborted));
+        let mut results = Vec::with_capacity(end - start);
+        let outcome = if aborted.load(Ordering::Relaxed) {
+            Err(Fault::Aborted)
+        } else {
+            machines.run(&args, start..end, &mut results)
+        };
+        if outcome.is_err() {
+            aborted.store(true, Ordering::Relaxed);
+        }
+        outcome.map(|()| (results, machines.typed_calls, machines.lane_calls))
     });
+    ran.typed = machines.typed_calls;
+    ran.lanes = machines.lane_calls;
+    ran.parallel = true;
     for outcome in outcomes {
         // a worker that never reported back has panicked; the interpreter
         // owns this batch then
-        results.extend(outcome.ok_or(Fault::Type)??);
+        let (chunk_results, typed, lanes) = outcome.ok_or(Fault::Type)??;
+        results.extend(chunk_results);
+        ran.typed += typed;
+        ran.lanes += lanes;
     }
-    Ok((results, true))
+    Ok((results, ran))
 }
 
 /// wall-clock measurement that degrades to zero on wasm, where `Instant` is
@@ -208,20 +376,52 @@ impl Executor {
 
         tier.stats.batches += 1;
         tier.stats.calls += call_count;
+        // the batch's first call decides the classes the kernels are
+        // specialised to; calls with other classes run dynamically
+        let typed = (tier.typed && call_count > 0)
+            .then(|| TypedProgram::specialise(&arena, entry, batch.call(0)))
+            .flatten()
+            .map(Arc::new);
+        if tier.typed && typed.is_none() {
+            tier.stats.typed_declined += 1;
+        }
+        if super::tier::dump_kernels() {
+            match &typed {
+                Some(typed) => {
+                    for (id, spec) in typed.0.specs.iter().enumerate() {
+                        eprintln!(
+                            "typed spec {id} of closure {:?} for {:?} -> {:?}, {} registers",
+                            spec.closure, spec.sig, spec.ret, spec.frame_size
+                        );
+                        for (index, op) in spec.ops.iter().enumerate() {
+                            eprintln!("{index:6}  {op:?}");
+                        }
+                    }
+                }
+                None => eprintln!("typed specialisation declined for {:?}", lambda.ip),
+            }
+        }
+        let plan = Plan {
+            typed,
+            lanes: tier.lanes,
+            verify: tier.mode == KernelMode::Verify,
+        };
         let mut was_parallel = false;
         let mut results = Vec::with_capacity(call_count);
         let mut chunk_start = 0;
         while chunk_start < call_count {
             let chunk_end = (chunk_start + CHUNK_CALLS).min(call_count);
             let run_started = Stopwatch::start();
-            let outcome = run_batch(&arena, entry, &batch, chunk_start..chunk_end);
+            let outcome = run_batch(&arena, entry, &plan, &batch, chunk_start..chunk_end);
             chunk_start = chunk_end;
             let run_elapsed = run_started.elapsed();
             let tier = &mut self.kernels;
             tier.stats.run_elapsed += run_elapsed;
             match outcome {
-                Ok((chunk_results, parallel)) => {
-                    was_parallel |= parallel;
+                Ok((chunk_results, ran)) => {
+                    was_parallel |= ran.parallel;
+                    tier.stats.typed_calls += ran.typed;
+                    tier.stats.lane_calls += ran.lanes;
                     results.extend(chunk_results);
                 }
                 Err(_) => {

@@ -23,6 +23,7 @@ struct Outcome {
     errors: Vec<String>,
     kernel_calls: usize,
     single_calls: usize,
+    typed_calls: usize,
     faults: usize,
 }
 
@@ -41,6 +42,7 @@ fn run(body: &str, mode: KernelMode) -> Outcome {
         errors: run.runtime_errors,
         kernel_calls: run.kernel_stats.calls,
         single_calls: run.kernel_stats.single_calls,
+        typed_calls: run.kernel_stats.typed_calls,
         faults: run.kernel_stats.faults,
     }
 }
@@ -50,6 +52,8 @@ fn run(body: &str, mode: KernelMode) -> Outcome {
 enum Expect {
     /// at least one batch runs as a kernel and none faults
     Kernels,
+    /// like `Kernels`, and the batch ran on the typed machine
+    Typed,
     /// at least one interpreted call ran as a kernel on its own
     SingleCalls,
     /// the tier runs and then hands the batch back
@@ -73,6 +77,10 @@ fn check(body: &str, expect: Expect) {
     match expect {
         Expect::Kernels => {
             assert!(on.kernel_calls > 0, "no kernel ran for:\n{body}");
+            assert_eq!(on.faults, 0, "a kernel faulted for:\n{body}");
+        }
+        Expect::Typed => {
+            assert!(on.typed_calls > 0, "no typed kernel ran for:\n{body}");
             assert_eq!(on.faults, 0, "a kernel faulted for:\n{body}");
         }
         Expect::SingleCalls => {
@@ -507,5 +515,97 @@ fn block_expressions_are_translated_inline() {
         print w
         ",
         Expect::Kernels,
+    );
+}
+
+#[test]
+fn shader_pixels_run_on_the_typed_machine() {
+    check(
+        "
+        let iterations = 6
+        let escape = |cx, cy, zoom| {
+            var zx = 0.0
+            var zy = 0.0
+            var i = 0
+            while (i < iterations and zx * zx + zy * zy < 4) {
+                let nx = zx * zx - zy * zy + cx * zoom
+                zy = 2 * zx * zy + cy * zoom
+                zx = nx
+                i = i + 1
+            }
+            return i / iterations
+        }
+        mesh plasma = Shader(
+            |x, y| block {
+                let z = 0.35 * escape(x - 0.5, y, 1.3) + 0.05 * sin(3 * x)
+                return [0.5 + 0.5 * sin(z * 9), z * 2, 1 - z * 2, 1]
+            },
+            [-1, 1],
+            [-1, 1],
+            24
+        )
+        print plasma
+        ",
+        Expect::Typed,
+    );
+}
+
+#[test]
+fn typed_kernels_keep_int_and_float_results_apart() {
+    check(
+        "
+        let f = |x, k| [x * 2, x * 2.0, x / 2, x // 2, k // 2, -k // 2, k ^ 2, 2 ^ k, x ^ k,
+                        sign(x * 0.0), floor(x * 1.5), round(x / 3), min(k, 3), max(x, 2.5),
+                        abs(-k), mod(k, 3), mod(x * 0.5, 2), k < 2, x <= 2, k == 2, x != 2.0,
+                        not k, to_int(x * 1.7), to_float(k), trunc(-x * 0.7), arctan2(x, k)]
+        mesh curve = ExplicitFunc(|x| sum(f(x, 3)) + sum(f(x * 2, 5)), [-2, 2, 129])
+        print curve
+        ",
+        Expect::Typed,
+    );
+}
+
+#[test]
+fn a_variable_that_changes_class_stays_dynamic() {
+    check(
+        "
+        let g = |x| {
+            var acc = 0
+            for (i in range(0, 4)) {
+                acc = acc + x * 0.5
+            }
+            return acc
+        }
+        mesh curve = ExplicitFunc(|x| g(x), [-2, 2, 129])
+        print curve
+        ",
+        Expect::Kernels,
+    );
+}
+
+#[test]
+fn typed_calls_fill_defaults_and_return_mixed_classes() {
+    check(
+        "
+        let pick = |x, k = 2, s = 0.5| {
+            if (x < 0) { return k }
+            return x * s
+        }
+        let h = |x| pick(x) + pick(x, 3) + pick(x, 3, 0.25)
+        mesh curve = ExplicitFunc(|x| h(x), [-2, 2, 129])
+        print curve
+        ",
+        Expect::Typed,
+    );
+}
+
+#[test]
+fn typed_division_by_zero_reaches_the_interpreter_error() {
+    check(
+        "
+        mesh curve = ExplicitFunc(|x| 1 / (x - 1), [0, 2, 5])
+        print curve
+        ",
+        Expect::Fault,
     );
 }

@@ -13,15 +13,26 @@
 //! the tier is speculative and never the source of truth: anything it cannot
 //! model faults, and a fault hands the whole batch back to the interpreter,
 //! which produces the real result or the real error. `KernelMode::Verify`
-//! runs both and compares, which is how the tier is tested
+//! runs both and compares, which is how the tier is tested.
+//!
+//! batches get a third engine on top: `typed` specialises the kernels a batch
+//! reaches to the classes of its arguments (int, float, boxed) so scalar
+//! arithmetic runs on machine words (`typed_run`); a body it cannot type, or a
+//! call whose arguments differ from the batch's first, runs on the dynamic
+//! machine instead. verify mode runs both machines and compares them too.
+//! typed batches run `lanes::LANES` calls per op dispatch on the lane
+//! machine (`lanes`), whose scalar ops are arrays the compiler vectorises
 
 mod batch;
 pub mod compile;
 pub mod convert;
 pub mod ir;
+pub mod lanes;
 pub mod pool;
 pub mod run;
 mod tier;
+pub mod typed;
+pub mod typed_run;
 pub mod value;
 
 use crate::{heap::with_heap, value::Value};

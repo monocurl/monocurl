@@ -73,8 +73,11 @@ struct Translator<'a> {
     ops: Vec<KOp>,
     pending: Vec<Pending>,
     op_index_of_pc: Vec<u32>,
-    /// the op index the last `Move` from a push landed at, for the peephole
-    last_push_move: Option<usize>,
+    /// per op, whether it is the `Move` of a push (a candidate for folding
+    /// into the op that consumes the temporary)
+    push_moves: Vec<bool>,
+    /// per op, the pc it was emitted for
+    pc_of_op: Vec<u32>,
     /// the pc the op currently being emitted belongs to
     current_pc: u32,
     own_section: u16,
@@ -172,7 +175,8 @@ impl<'a> Translator<'a> {
             ops: Vec::new(),
             pending: Vec::new(),
             op_index_of_pc: vec![u32::MAX; len],
-            last_push_move: None,
+            push_moves: Vec::new(),
+            pc_of_op: Vec::new(),
             current_pc: start,
             own_section,
             base,
@@ -260,7 +264,6 @@ impl<'a> Translator<'a> {
                 if let Some(next) = self.op_index_of_pc.get_mut(index + 1) {
                     *next = self.ops.len() as u32;
                 }
-                self.last_push_move = None;
                 continue;
             }
             if self.fold_store(pc, instr, &emitted) {
@@ -274,9 +277,7 @@ impl<'a> Translator<'a> {
                 Instruction::PushCopy { .. } | Instruction::PushDeepCopy { .. }
             ) && self.ops.len() == before + 1
             {
-                self.last_push_move = Some(before);
-            } else {
-                self.last_push_move = None;
+                self.push_moves[before] = true;
             }
             match flow {
                 Flow::Jump(to) | Flow::Branch(to) => self.pending.push(Pending {
@@ -327,6 +328,8 @@ impl<'a> Translator<'a> {
                 };
             }
             self.ops.push(op);
+            self.push_moves.push(false);
+            self.pc_of_op.push(self.current_pc);
         }
         self.max_register = self.max_register.max(block.max_register);
     }
@@ -381,22 +384,62 @@ impl<'a> Translator<'a> {
         Ok(())
     }
 
-    /// append an op, folding the copy the stack discipline forced before it:
-    /// `Move t <- s; Op(.., t, ..)` becomes `Op(.., s, ..)` when the op consumes
-    /// the temporary, which is exactly when nothing else can read it again
+    /// append an op, folding the copies the stack discipline forced before
+    /// it: `Move t <- s; ...; Op(.., t, ..)` becomes `Op(.., s, ..)` when the
+    /// op consumes the temporary (its result lands at or below it, so nothing
+    /// can read it again), the ops in between neither touch `t` nor write `s`,
+    /// and no jump lands in between
     fn push_op(&mut self, mut op: KOp) {
-        let at_jump_target = self.is_jump_target[(self.current_pc - self.start) as usize];
-        if let Some(move_index) = self.last_push_move.take()
-            && !at_jump_target
-            && move_index + 1 == self.ops.len()
-            && let KOp::Move { dst: temp, src } = self.ops[move_index]
-            && reads_register(&op, temp)
-            && op_dst(&op).is_some_and(|dst| dst <= temp)
-        {
+        // the register the op consumes is judged once: for a branch or a
+        // return it is the operand itself, which a fold rewrites
+        let consumed = op_dst(&op);
+        while let Some(index) = consumed.and_then(|dst| self.foldable_push_move(&op, dst)) {
+            let KOp::Move { dst: temp, src } = self.ops[index] else {
+                unreachable!("only moves are push moves");
+            };
             replace_reads(&mut op, temp, src);
-            self.ops.pop();
+            self.ops.remove(index);
+            self.push_moves.remove(index);
+            self.pc_of_op.remove(index);
+            for start in &mut self.op_index_of_pc {
+                if *start != u32::MAX && *start as usize > index {
+                    *start -= 1;
+                }
+            }
         }
         self.ops.push(op);
+        self.push_moves.push(false);
+        self.pc_of_op.push(self.current_pc);
+    }
+
+    fn foldable_push_move(&self, op: &KOp, dst: Reg) -> Option<usize> {
+        if self.is_jump_target[(self.current_pc - self.start) as usize] {
+            return None;
+        }
+        let window = self.ops.len().saturating_sub(FOLD_WINDOW)..self.ops.len();
+        for index in window.rev() {
+            let KOp::Move { dst: temp, src } = self.ops[index] else {
+                continue;
+            };
+            if !self.push_moves[index] || !reads_register(op, temp) {
+                continue;
+            }
+            if dst > temp {
+                return None;
+            }
+            let transparent = self.ops[index + 1..].iter().all(|between| {
+                !reads_register(between, temp)
+                    && !writes_register(between, temp)
+                    && !writes_register(between, src)
+                    && !is_control_flow(between)
+            });
+            // instructions that emit no ops still have their own pc, and a
+            // jump landing on one of them would skip the move
+            let no_landing = (self.pc_of_op[index] + 1..=self.current_pc)
+                .all(|pc| !self.is_jump_target[(pc - self.start) as usize]);
+            return (transparent && no_landing).then_some(index);
+        }
+        None
     }
 
     /// `Op -> t; StoreLocal t -> local; Pop` becomes `Op -> local`. the value
@@ -428,7 +471,11 @@ impl<'a> Translator<'a> {
         if op_dst(last) != Some(*temp) || !retarget(last, *local) {
             return false;
         }
-        self.last_push_move = None;
+        // the op now stores into the local; it is no push, whatever it was
+        *self
+            .push_moves
+            .last_mut()
+            .expect("an op was just retargeted") = false;
         true
     }
 
@@ -820,6 +867,54 @@ impl<'a> Translator<'a> {
             return Err(Reject::JumpOutOfBody);
         }
         Ok(Flow::Next)
+    }
+}
+
+/// how far back the peephole looks for the push it can fold
+const FOLD_WINDOW: usize = 8;
+
+fn is_control_flow(op: &KOp) -> bool {
+    matches!(
+        op,
+        KOp::Jump { .. }
+            | KOp::JumpIf { .. }
+            | KOp::JumpIfNot { .. }
+            | KOp::RangeTest { .. }
+            | KOp::Return { .. }
+    )
+}
+
+/// whether `op` writes `reg`, including the argument registers a call
+/// clobbers
+fn writes_register(op: &KOp, reg: Reg) -> bool {
+    match *op {
+        KOp::Nil { dst }
+        | KOp::Int { dst, .. }
+        | KOp::Float { dst, .. }
+        | KOp::Move { dst, .. }
+        | KOp::Bin { dst, .. }
+        | KOp::Neg { dst, .. }
+        | KOp::Not { dst, .. }
+        | KOp::EmptyList { dst }
+        | KOp::Index { dst, .. }
+        | KOp::Len { dst, .. } => dst == reg,
+        KOp::Inc { reg: r } => r == reg,
+        KOp::Append { list, .. } => list == reg,
+        KOp::Call {
+            arg_start,
+            arg_count,
+            ..
+        }
+        | KOp::Native {
+            arg_start,
+            arg_count,
+            ..
+        } => (arg_start..arg_start + arg_count).contains(&reg),
+        KOp::Jump { .. }
+        | KOp::JumpIf { .. }
+        | KOp::JumpIfNot { .. }
+        | KOp::RangeTest { .. }
+        | KOp::Return { .. } => false,
     }
 }
 

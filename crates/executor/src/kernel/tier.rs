@@ -52,6 +52,12 @@ impl KernelMode {
 
 pub(crate) struct KernelTier {
     pub(crate) mode: KernelMode,
+    /// whether batches try the typed machine first; `MONOCURL_TYPED_KERNELS=0`
+    /// turns it off for bisecting
+    pub(super) typed: bool,
+    /// whether typed batches run several calls per op on the lane machine;
+    /// `MONOCURL_KERNEL_LANES=0` turns it off
+    pub(super) lanes: bool,
     /// compiled bodies by entry point; `None` records a body the translator
     /// rejected so it is not retried
     kernels: HashMap<InstructionPointer, Option<Arc<Kernel>>>,
@@ -78,6 +84,12 @@ pub struct KernelStats {
     pub calls: usize,
     /// interpreted calls that ran as a kernel on their own
     pub single_calls: usize,
+    /// batch calls that ran on the typed machine
+    pub typed_calls: usize,
+    /// batch calls that ran on the lane machine (a subset of `typed_calls`)
+    pub lane_calls: usize,
+    /// batches whose entry point could not be typed
+    pub typed_declined: usize,
     pub parallel_batches: usize,
     pub faults: usize,
     pub rejected_bodies: usize,
@@ -85,6 +97,19 @@ pub struct KernelStats {
     pub elapsed: Duration,
     /// the part of `elapsed` spent running kernels
     pub run_elapsed: Duration,
+}
+
+fn typed_kernels_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| env_switch("MONOCURL_TYPED_KERNELS"))
+}
+
+/// an environment switch that is on unless set to `0`, `off` or `false`
+fn env_switch(name: &str) -> bool {
+    !matches!(
+        std::env::var(name).as_deref(),
+        Ok("0") | Ok("off") | Ok("false")
+    )
 }
 
 impl KernelTier {
@@ -95,6 +120,8 @@ impl KernelTier {
     ) -> Self {
         Self {
             mode,
+            typed: typed_kernels_enabled(),
+            lanes: env_switch("MONOCURL_KERNEL_LANES"),
             kernels: HashMap::new(),
             disabled: FxHashSet::default(),
             sections,
@@ -173,7 +200,7 @@ impl KernelTier {
 
 /// `MONOCURL_KERNEL_DUMP=1` prints every body the translator sees, compiled or
 /// rejected, to stderr
-fn dump_kernels() -> bool {
+pub(super) fn dump_kernels() -> bool {
     static DUMP: OnceLock<bool> = OnceLock::new();
     *DUMP.get_or_init(|| std::env::var_os("MONOCURL_KERNEL_DUMP").is_some())
 }

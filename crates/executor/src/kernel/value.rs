@@ -109,4 +109,26 @@ impl KVal {
     }
 }
 
+impl KVal {
+    /// equality that distinguishes `1` from `1.0` and compares floats by
+    /// bits, for checking one engine against another
+    pub fn strictly_equal(a: &KVal, b: &KVal) -> bool {
+        match (a, b) {
+            (KVal::Nil, KVal::Nil) | (KVal::Opaque, KVal::Opaque) => true,
+            (KVal::Int(x), KVal::Int(y)) => x == y,
+            (KVal::Float(x), KVal::Float(y)) => {
+                x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan())
+            }
+            (KVal::List(x), KVal::List(y)) => {
+                x.len() == y.len()
+                    && x.iter()
+                        .zip(y.iter())
+                        .all(|(a, b)| KVal::strictly_equal(a, b))
+            }
+            (KVal::Closure(x), KVal::Closure(y)) => x == y,
+            _ => false,
+        }
+    }
+}
+
 const _: () = assert!(std::mem::size_of::<KVal>() <= 24);
