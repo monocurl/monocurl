@@ -75,8 +75,7 @@ fn run_batch(
 
     let projected = started.elapsed() * (range.len() / (probe - range.start)) as u32;
     let threads = worker_threads();
-    if threads <= 1 || remaining.len() < PARALLEL_MIN_CALLS || projected < PARALLEL_MIN_PROJECTED
-    {
+    if threads <= 1 || remaining.len() < PARALLEL_MIN_CALLS || projected < PARALLEL_MIN_PROJECTED {
         for index in remaining {
             results.push(vm.call(arena, entry, args.call(index))?);
         }

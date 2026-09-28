@@ -85,7 +85,10 @@ impl Vm {
         if self.warm_entry != Some(entry) {
             self.regs.clear();
             self.regs.resize(frame_size, KVal::Nil);
-            for (slot, capture) in self.regs[args.len()..].iter_mut().zip(closure.captures.iter()) {
+            for (slot, capture) in self.regs[args.len()..]
+                .iter_mut()
+                .zip(closure.captures.iter())
+            {
                 *slot = capture.clone();
             }
             self.warm_entry = Some(entry);
@@ -128,7 +131,8 @@ impl Vm {
             return Err(Fault::Depth);
         }
 
-        self.regs.resize(base + kernel.frame_size as usize, KVal::Nil);
+        self.regs
+            .resize(base + kernel.frame_size as usize, KVal::Nil);
         fill(&mut self.regs);
         let frame = &mut self.regs[base..];
         let default_start = closure.defaults.len().saturating_sub(total - provided);
@@ -149,7 +153,12 @@ impl Vm {
         result
     }
 
-    fn run(&mut self, arena: &ClosureArena, closure: &KClosure, base: usize) -> Result<KVal, Fault> {
+    fn run(
+        &mut self,
+        arena: &ClosureArena,
+        closure: &KClosure,
+        base: usize,
+    ) -> Result<KVal, Fault> {
         let ops = &closure.kernel.ops;
         // registers below this hold arguments and captures, which outlive the
         // call when the frame stays warm, so a return must copy them out
@@ -346,14 +355,18 @@ pub fn binary(arena: &ClosureArena, op: BinKind, a: &KVal, b: &KVal) -> Result<K
                 .collect::<Result<KList, _>>()?;
             Ok(KVal::List(Arc::new(combined)))
         }
-        (KVal::List(list), scalar, BinKind::Mul | BinKind::Div) if !matches!(scalar, KVal::List(_)) => {
+        (KVal::List(list), scalar, BinKind::Mul | BinKind::Div)
+            if !matches!(scalar, KVal::List(_)) =>
+        {
             let applied = list
                 .iter()
                 .map(|element| binary(arena, op, element, scalar))
                 .collect::<Result<KList, _>>()?;
             Ok(KVal::List(Arc::new(applied)))
         }
-        (scalar, KVal::List(list), BinKind::Mul | BinKind::Div) if !matches!(scalar, KVal::List(_)) => {
+        (scalar, KVal::List(list), BinKind::Mul | BinKind::Div)
+            if !matches!(scalar, KVal::List(_)) =>
+        {
             let applied = list
                 .iter()
                 .map(|element| binary(arena, op, scalar, element))

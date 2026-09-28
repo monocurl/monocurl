@@ -71,7 +71,6 @@ impl Val {
             other => other,
         }
     }
-
 }
 
 /// transcript rendering, mirroring what `print` shows
@@ -136,7 +135,6 @@ fn reject<T>(reason: &'static str) -> Eval<T> {
 fn division_by_zero<T>() -> Eval<T> {
     error("division by zero")
 }
-
 
 /// evaluate `program`; `Err` carries the reason it was rejected
 pub fn evaluate(program: &Program) -> Result<Outcome, &'static str> {

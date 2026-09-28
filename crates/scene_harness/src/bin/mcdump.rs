@@ -40,7 +40,10 @@ fn main() {
         }
         println!(
             "== section {index} {:?} (library={}, init={}, root={}) ==",
-            section.name, section.flags.is_library, section.flags.is_init, section.flags.is_root_module
+            section.name,
+            section.flags.is_library,
+            section.flags.is_init,
+            section.flags.is_root_module
         );
         for (offset, instr) in section.instructions.iter().enumerate() {
             let span = &section.annotations[offset].source_loc;

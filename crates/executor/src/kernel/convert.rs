@@ -81,9 +81,7 @@ impl<'a> Converter<'a> {
                     .collect();
                 KVal::List(Arc::new(elements))
             }
-            Value::Lvalue(reference) => {
-                with_heap(|heap| self.convert(&heap.get(reference.key())))
-            }
+            Value::Lvalue(reference) => with_heap(|heap| self.convert(&heap.get(reference.key()))),
             Value::WeakLvalue(reference) => {
                 with_heap(|heap| self.convert(&heap.get(reference.key())))
             }

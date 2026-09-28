@@ -66,8 +66,8 @@ impl KernelIntrinsic {
     pub fn arity(self) -> usize {
         use KernelIntrinsic::*;
         match self {
-            Sqrt | Cbrt | Exp | Ln | Sin | Cos | Tan | Asin | Acos | Atan | Sinh | Cosh
-            | Tanh | Abs | Sign | Floor | Ceil | Round | Trunc | Len | ToInt | ToFloat => 1,
+            Sqrt | Cbrt | Exp | Ln | Sin | Cos | Tan | Asin | Acos | Atan | Sinh | Cosh | Tanh
+            | Abs | Sign | Floor | Ceil | Round | Trunc | Len | ToInt | ToFloat => 1,
             Pow | Atan2 | Mod | Min | Max | Dot | Cross => 2,
             Fallthrough => 0,
         }
@@ -76,29 +76,86 @@ impl KernelIntrinsic {
 
 #[derive(Clone, Copy, Debug)]
 pub enum KOp {
-    Nil { dst: Reg },
-    Int { dst: Reg, value: i64 },
-    Float { dst: Reg, value: f64 },
-    Move { dst: Reg, src: Reg },
-    Bin { op: BinKind, dst: Reg, a: Reg, b: Reg },
-    Neg { dst: Reg, src: Reg },
-    Not { dst: Reg, src: Reg },
-    Jump { to: u32 },
-    JumpIf { cond: Reg, to: u32 },
-    JumpIfNot { cond: Reg, to: u32 },
+    Nil {
+        dst: Reg,
+    },
+    Int {
+        dst: Reg,
+        value: i64,
+    },
+    Float {
+        dst: Reg,
+        value: f64,
+    },
+    Move {
+        dst: Reg,
+        src: Reg,
+    },
+    Bin {
+        op: BinKind,
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+    },
+    Neg {
+        dst: Reg,
+        src: Reg,
+    },
+    Not {
+        dst: Reg,
+        src: Reg,
+    },
+    Jump {
+        to: u32,
+    },
+    JumpIf {
+        cond: Reg,
+        to: u32,
+    },
+    JumpIfNot {
+        cond: Reg,
+        to: u32,
+    },
     /// leaves the loop when `regs[current] < regs[current + 1]` no longer holds
-    RangeTest { current: Reg, to: u32 },
-    Inc { reg: Reg },
-    EmptyList { dst: Reg },
+    RangeTest {
+        current: Reg,
+        to: u32,
+    },
+    Inc {
+        reg: Reg,
+    },
+    EmptyList {
+        dst: Reg,
+    },
     /// `regs[list]` gains `regs[value]` as its last element
-    Append { list: Reg, value: Reg },
-    Index { dst: Reg, list: Reg, index: Reg },
-    Len { dst: Reg, src: Reg },
+    Append {
+        list: Reg,
+        value: Reg,
+    },
+    Index {
+        dst: Reg,
+        list: Reg,
+        index: Reg,
+    },
+    Len {
+        dst: Reg,
+        src: Reg,
+    },
     /// arguments sit in `arg_start..arg_start + arg_count`; the result replaces
     /// the first of them, which is where the interpreter leaves it too
-    Call { callee: Reg, arg_start: Reg, arg_count: u16 },
-    Native { intrinsic: KernelIntrinsic, arg_start: Reg, arg_count: u16 },
-    Return { src: Reg },
+    Call {
+        callee: Reg,
+        arg_start: Reg,
+        arg_count: u16,
+    },
+    Native {
+        intrinsic: KernelIntrinsic,
+        arg_start: Reg,
+        arg_count: u16,
+    },
+    Return {
+        src: Reg,
+    },
 }
 
 #[derive(Debug)]

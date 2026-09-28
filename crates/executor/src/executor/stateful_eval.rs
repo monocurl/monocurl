@@ -206,7 +206,8 @@ impl Executor {
                     labels,
                 } => {
                     let operator_val = self.eval_stateful_node(operator, read_kind).await?;
-                    let Value::Operator(operator_inner) = operator_val.clone().elide_lvalue() else {
+                    let Value::Operator(operator_inner) = operator_val.clone().elide_lvalue()
+                    else {
                         return Err(ExecutorError::type_error(
                             "operator",
                             operator_val.type_name(),

@@ -103,9 +103,7 @@ impl KVal {
                 }
                 true
             }
-            (KVal::Closure(x), KVal::Closure(y)) => {
-                x == y || arena.get(*x).ip == arena.get(*y).ip
-            }
+            (KVal::Closure(x), KVal::Closure(y)) => x == y || arena.get(*x).ip == arena.get(*y).ip,
             _ => false,
         })
     }

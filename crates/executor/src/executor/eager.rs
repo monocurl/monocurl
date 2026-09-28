@@ -163,7 +163,9 @@ impl Executor {
                 for (index, (kernel, interpreter)) in results.iter().zip(interpreted).enumerate() {
                     let kernel = kernel_value_to_value(kernel);
                     assert!(
-                        kernel.as_ref().is_some_and(|kernel| strictly_equal(kernel, interpreter)),
+                        kernel
+                            .as_ref()
+                            .is_some_and(|kernel| strictly_equal(kernel, interpreter)),
                         "kernel tier disagrees with the interpreter on call {index} of lambda at {:?}:\n  kernel:      {}\n  interpreter: {}",
                         lambda.ip,
                         kernel

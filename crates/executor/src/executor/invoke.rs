@@ -10,7 +10,9 @@ use crate::{
         invoked_function::make_invoked_function,
         invoked_operator::{extract_operator_result, make_invoked_operator},
         lambda::Lambda,
-        stateful::{StatefulNode, collect_roots_from_value, make_stateful, value_into_stateful_node},
+        stateful::{
+            StatefulNode, collect_roots_from_value, make_stateful, value_into_stateful_node,
+        },
     },
 };
 use smallvec::SmallVec;
@@ -695,7 +697,4 @@ pub(super) fn prepare_lambda_argument(
 // stateful evaluation
 // ---------------------------------------------------------------------------
 
-impl Executor {
-
-}
-
+impl Executor {}

@@ -19,7 +19,6 @@ use bytecode::{Instruction, SectionBytecode};
 use crate::executor::NativeFunction;
 use crate::value::InstructionPointer;
 
-
 use super::ir::{BinKind, KOp, Kernel, KernelIntrinsic, Reg};
 
 /// why a lambda body stays in the interpreter
@@ -270,8 +269,10 @@ impl<'a> Translator<'a> {
             for op in emitted {
                 self.push_op(op);
             }
-            if matches!(instr, Instruction::PushCopy { .. } | Instruction::PushDeepCopy { .. })
-                && self.ops.len() == before + 1
+            if matches!(
+                instr,
+                Instruction::PushCopy { .. } | Instruction::PushDeepCopy { .. }
+            ) && self.ops.len() == before + 1
             {
                 self.last_push_move = Some(before);
             } else {
@@ -405,7 +406,13 @@ impl<'a> Translator<'a> {
         if !matches!(instr, Instruction::StoreLocal { .. }) {
             return false;
         }
-        let [KOp::Move { dst: local, src: temp }] = emitted else {
+        let [
+            KOp::Move {
+                dst: local,
+                src: temp,
+            },
+        ] = emitted
+        else {
             return false;
         };
         let pops_next = matches!(
@@ -727,7 +734,8 @@ impl<'a> Translator<'a> {
                 Self::pop(stack, index_count)?;
                 stack.push(Slot::Val);
             }
-            Instruction::ContainerLen { stack_delta } | Instruction::LenLocal { stack_delta, .. } => {
+            Instruction::ContainerLen { stack_delta }
+            | Instruction::LenLocal { stack_delta, .. } => {
                 let src = self.resolve(stack, Self::position(stack, stack_delta)?);
                 out.push(KOp::Len { dst: depth, src });
                 stack.push(Slot::Val);
@@ -813,16 +821,16 @@ impl<'a> Translator<'a> {
         }
         Ok(Flow::Next)
     }
-
 }
 
 fn reads_register(op: &KOp, reg: Reg) -> bool {
     match *op {
         KOp::Nil { .. } | KOp::Int { .. } | KOp::Float { .. } | KOp::EmptyList { .. } => false,
         KOp::Jump { .. } => false,
-        KOp::Move { src, .. } | KOp::Neg { src, .. } | KOp::Not { src, .. } | KOp::Len { src, .. } => {
-            src == reg
-        }
+        KOp::Move { src, .. }
+        | KOp::Neg { src, .. }
+        | KOp::Not { src, .. }
+        | KOp::Len { src, .. } => src == reg,
         KOp::Bin { a, b, .. } => a == reg || b == reg,
         KOp::JumpIf { cond, .. } | KOp::JumpIfNot { cond, .. } => cond == reg,
         KOp::RangeTest { current, .. } => current == reg || current + 1 == reg,
@@ -899,9 +907,10 @@ fn replace_reads(op: &mut KOp, from: Reg, to: Reg) {
         }
     };
     match op {
-        KOp::Move { src, .. } | KOp::Neg { src, .. } | KOp::Not { src, .. } | KOp::Len { src, .. } => {
-            swap(src)
-        }
+        KOp::Move { src, .. }
+        | KOp::Neg { src, .. }
+        | KOp::Not { src, .. }
+        | KOp::Len { src, .. } => swap(src),
         KOp::Bin { a, b, .. } => {
             swap(a);
             swap(b);

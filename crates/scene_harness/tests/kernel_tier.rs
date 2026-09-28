@@ -76,7 +76,10 @@ fn check(body: &str, expect: Expect) {
             assert_eq!(on.faults, 0, "a kernel faulted for:\n{body}");
         }
         Expect::SingleCalls => {
-            assert!(on.single_calls > 0, "no single call ran as a kernel for:\n{body}");
+            assert!(
+                on.single_calls > 0,
+                "no single call ran as a kernel for:\n{body}"
+            );
             assert_eq!(on.faults, 0, "a kernel faulted for:\n{body}");
         }
         Expect::Fault => assert!(on.faults > 0, "no kernel faulted for:\n{body}"),

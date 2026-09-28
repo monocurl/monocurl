@@ -26,12 +26,12 @@ pub mod value;
 
 use crate::{heap::with_heap, value::Value};
 
+pub(crate) use self::batch::BatchOutcome;
 pub use self::convert::to_value as kernel_value_to_value;
 pub use self::ir::KernelIntrinsic;
-pub use self::value::KVal;
-pub(crate) use self::batch::BatchOutcome;
-pub use self::tier::{KernelMode, KernelStats};
 pub(crate) use self::tier::KernelTier;
+pub use self::tier::{KernelMode, KernelStats};
+pub use self::value::KVal;
 
 /// equality that distinguishes `1` from `1.0`, which `values_equal` does not:
 /// the tier must reproduce the interpreter's result types exactly
@@ -42,7 +42,9 @@ pub fn strictly_equal(a: &Value, b: &Value) -> bool {
     ) {
         (Value::Nil, Value::Nil) => true,
         (Value::Integer(x), Value::Integer(y)) => x == y,
-        (Value::Float(x), Value::Float(y)) => x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan()),
+        (Value::Float(x), Value::Float(y)) => {
+            x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan())
+        }
         (Value::List(x), Value::List(y)) => {
             x.len() == y.len()
                 && x.elements().iter().zip(y.elements()).all(|(a, b)| {
