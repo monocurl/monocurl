@@ -1,0 +1,24 @@
+# transcript
+"field with one column"
+"field with two columns"
+
+# runtime errors
+type error: expected lambda, got int
+type error: expected lambda, got int
+
+# end timestamp
+(none)
+
+# timeline
+slide 1 @ 0.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! type error: expected lambda, got int
+slide 1 @ 0.35
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! type error: expected lambda, got int
+slide 1 @ 0.80
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! type error: expected lambda, got int
+slide 1 @ 1.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! type error: expected lambda, got int

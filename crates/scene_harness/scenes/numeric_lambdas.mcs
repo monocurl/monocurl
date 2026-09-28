@@ -1,0 +1,89 @@
+# pure numeric lambdas sampled by mesh constructors: the shapes a compiled
+# kernel tier takes over. every lambda is also called directly so a wrong value
+# shows up in the transcript, not only in the mesh aggregates
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let scale = 0.5
+let bump = |x| scale * x * x
+
+# loop accumulator over a captured lambda, int/float mixing, ^, //, mod, and/or
+let wave = |x| {
+    var total = 0
+    for (k in range(1, 4)) {
+        total = total + sin(k * x) / k
+    }
+    if (x < 0 and mod(floor(x * 4), 2) == 0) {
+        return total + bump(x)
+    }
+    if (x > 1.5 or x == 0) {
+        return total - 1
+    }
+    return total - (x ^ 2) // 1 * 0.25
+}
+print map([-1.5, -0.3, 0, 0.7, 1.2, 2], wave)
+
+# while loop with an int counter and an early return from inside the loop
+let collatz_steps = |seed| {
+    var n = seed
+    var steps = 0
+    while (n != 1) {
+        if (steps >= 40) {
+            return -1
+        }
+        if (mod(n, 2) == 0) {
+            n = n // 2
+        } else {
+            n = 3 * n + 1
+        }
+        steps = steps + 1
+    }
+    return steps
+}
+print map(range(1, 10), collatz_steps)
+let step_curve = |x| collatz_steps(floor(abs(x) * 3) + 1) / 20
+
+# a lambda returning a list, used by a parametric curve
+let rose = |t| {
+    let r = cos(3 * t)
+    return [r * cos(t), r * sin(t), 0]
+}
+print [rose(0), rose(PI / 6), rose(1)]
+
+# surface: nested helper calls, comparisons as ints, int results from floor
+let terrain = |x, y| {
+    let ridge = max(0, 1 - abs(x + y))
+    let cell = mod(floor(x * 2) + floor(y * 2), 2)
+    return 0.3 * ridge + 0.1 * cell + 0.05 * (x > y)
+}
+print [terrain(0, 0), terrain(0.3, -0.6), terrain(-0.9, 0.2), terrain(1, 1)]
+
+# field: mesh per grid point, position and index both used numerically
+let arrow_tip = |p, idx| {
+    let [i, j] = idx
+    let lift = 0.05 * mod(i + 2 * j, 3)
+    return p + [0.1 * cos(i), 0.1 * sin(j), lift]
+}
+print [arrow_tip([0, 0, 0], [0, 0]), arrow_tip([1, -1, 0], [2, 3])]
+
+let shear = |p| [p[0] + 0.25 * p[1], p[1], p[2] + 0.1 * p[0] * p[1]]
+print [shear([1, 2, 0]), shear([-0.5, 0.5, 1])]
+# color_map hands the callback each vertex position and wants an RGBA back
+let warm = |p| [clamp(0, 0.5 + p[0], 1), 0.5 * (p[1] > 0), mod(floor(p[0] * 4), 2), 1]
+print [warm([0.25, 0.5, 0]), warm([-0.25, -0.1, 0])]
+
+mesh curve = stroke{BLUE} ExplicitFunc(wave, [-2, 2, 41])
+mesh steps = stroke{RED} ExplicitFunc(step_curve, [-1, 1, 25])
+mesh petals = stroke{GREEN} ParametricFunc(rose, [0, PI, 60])
+mesh land = ExplicitFunc2d(terrain, [-1, 1, 9], [-1, 1, 9])
+mesh dots = Field(|p, idx| Dot(arrow_tip(p, idx)), [-1, 1, 3], [-1, 1, 3], |pos| pos[0] + pos[1] > -1.5)
+mesh sheared = point_map{shear} Rect([1, 1])
+mesh tinted = color_map{warm} fill{[0.2, 0.4, 0.6, 1]} Rect([0.5, 0.5])
+
+slide "Sampled"
+    play Set()
