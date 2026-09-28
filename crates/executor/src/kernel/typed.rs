@@ -513,6 +513,12 @@ fn specialise_body(
 
     let scratch = kernel.frame_size;
     let mut emitted = Emitted::default();
+    // the entry edge has no op to carry conversions: a register the first
+    // op's merge boxes is boxed up front (never the case for a lambda, whose
+    // arguments and captures are never written, but cheap to keep true)
+    if let Some(first) = &states[0] {
+        emitted.ops.extend(boxing_ops(&entry, first));
+    }
     let mut starts = Vec::with_capacity(ops.len() + 1);
     // edges whose jump lands where a scalar register has become boxed go
     // through a trampoline that boxes it first
