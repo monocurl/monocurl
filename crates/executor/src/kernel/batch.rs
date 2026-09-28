@@ -1,10 +1,7 @@
 //! running a batch of calls: arguments laid flat, a serial probe, then the
 //! worker pool once the batch has shown itself to be long
 
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     executor::Executor,
@@ -139,6 +136,8 @@ fn worker_threads() -> usize {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn worker_threads() -> usize {
+    use std::sync::OnceLock;
+
     static THREADS: OnceLock<usize> = OnceLock::new();
     *THREADS.get_or_init(|| {
         // `MONOCURL_KERNEL_THREADS` pins the count, for benchmarking the

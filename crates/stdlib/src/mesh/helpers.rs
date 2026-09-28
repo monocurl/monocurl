@@ -1777,7 +1777,6 @@ pub(super) fn ray_triangle_intersection(
     (t >= 0.0).then_some(t)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn set_triangle_uv_rect(
     mesh: &mut Mesh,
     min: Float3,
