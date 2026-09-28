@@ -127,6 +127,17 @@ pub fn build_indexed_surface(
     faces: &[[usize; 3]],
     boundary_edges: &BoundaryEdges,
 ) -> (Vec<Lin>, Vec<Tri>) {
+    build_indexed_surface_with(vertices, faces, |a, b| boundary_edges.get(&(a, b)).copied())
+}
+
+/// `build_indexed_surface` with the boundary edge of `(a, b)` answered by a
+/// function, for callers that would otherwise build a map saying the same
+/// thing for every edge
+pub fn build_indexed_surface_with(
+    vertices: &[SurfaceVertex],
+    faces: &[[usize; 3]],
+    edge_for: impl Fn(usize, usize) -> Option<BoundaryEdge>,
+) -> (Vec<Lin>, Vec<Tri>) {
     let (mut tris, edge_map) = build_surface_tris(vertices, faces);
 
     let mut boundary_items = Vec::new();
@@ -140,14 +151,11 @@ pub fn build_indexed_surface(
     let mut lins = Vec::with_capacity(boundary_items.len());
     let mut line_edges = Vec::with_capacity(boundary_items.len());
     for (tri_idx, edge_idx, a, b) in boundary_items {
-        let template = boundary_edges
-            .get(&(a, b))
-            .copied()
-            .unwrap_or(BoundaryEdge {
-                a_col: vertices[a].col,
-                b_col: vertices[b].col,
-                norm: Float3::ZERO,
-            });
+        let template = edge_for(a, b).unwrap_or(BoundaryEdge {
+            a_col: vertices[a].col,
+            b_col: vertices[b].col,
+            norm: Float3::ZERO,
+        });
         let line_idx = lins.len();
         let mut edge = line(
             vertices[a].pos,

@@ -13,7 +13,7 @@ use std::{cell::RefCell, collections::VecDeque, mem::size_of};
 use executor::error::ExecutorError;
 use geo::{
     mesh::{Lin, Tri},
-    mesh_build::{self, BoundaryEdge, BoundaryEdges, SurfaceVertex},
+    mesh_build::{self, BoundaryEdge, SurfaceVertex},
     simd::{Float2, Float3},
 };
 use libtess2::{TessellationOptions, WindingRule};
@@ -235,11 +235,6 @@ fn tessellate_uncached(
         b_col: default_ink(),
         norm: normal,
     };
-    let boundary_edges: BoundaryEdges = faces
-        .iter()
-        .flat_map(|face| [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])])
-        .map(|key| (key, edge))
-        .collect();
     let surface_vertices: Vec<_> = vertices
         .into_iter()
         .map(|pos| SurfaceVertex {
@@ -249,7 +244,7 @@ fn tessellate_uncached(
         })
         .collect();
     let (lins, tris) =
-        mesh_build::build_indexed_surface(&surface_vertices, &faces, &boundary_edges);
+        mesh_build::build_indexed_surface_with(&surface_vertices, &faces, |_, _| Some(edge));
     Ok(Surface { lins, tris })
 }
 
