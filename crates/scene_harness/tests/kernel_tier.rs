@@ -468,3 +468,41 @@ fn closures_created_inside_a_sampled_lambda_fall_back() {
         Expect::Fault,
     );
 }
+
+#[test]
+fn block_expressions_are_translated_inline() {
+    check(
+        "
+        let classify = |x, y| block {
+            let z = x * 2 + y
+            if (z > 3) { return [z, 1] }
+            let w = block {
+                var acc = 0
+                for (i in range(0, 4)) { acc = acc + i * z }
+                return acc
+            }
+            return [z, w]
+        }
+        let accumulate = |n| {
+            var out = []
+            let pushed = block {
+                out .= n
+                out .= n * 2
+                return len(out)
+            }
+            return [out, pushed]
+        }
+        let nested = |x| block {
+            let inner = block {
+                let deeper = block { return x + 1 }
+                return deeper * 2
+            }
+            return inner - x
+        }
+        mesh field = Field(|pos, idx| block { print [classify(pos[0], pos[1]), accumulate(idx[0]), nested(idx[1])] }, [-1, 1, 4], [-1, 1, 3])
+        mesh w = ExplicitFunc(|x| block { let s = sin(x); return s * s }, [0, 1, 33])
+        print w
+        ",
+        Expect::Kernels,
+    );
+}

@@ -5,12 +5,20 @@
 //! translation walks the body once to establish those depths (rejecting any
 //! instruction the tier does not model, and any merge where two paths disagree
 //! on the stack shape) and once more to emit ops. a small peephole folds the
-//! copies the stack discipline forces around every operation
+//! copies the stack discipline forces around every operation.
+//!
+//! a `block { ... }` expression compiles to a zero-argument closure that is
+//! created and called on the spot. its body is translated inline: the
+//! captures already sit in the registers the closure would copy them into,
+//! so the block's registers are simply offset by where its captures start,
+//! and its `return` becomes a move into the result register plus a jump to
+//! the end of the block
 
 use bytecode::{Instruction, SectionBytecode};
 
 use crate::executor::NativeFunction;
 use crate::value::InstructionPointer;
+
 
 use super::ir::{BinKind, KOp, Kernel, KernelIntrinsic, Reg};
 
@@ -71,6 +79,24 @@ struct Translator<'a> {
     /// the pc the op currently being emitted belongs to
     current_pc: u32,
     own_section: u16,
+    /// the absolute register of stack position 0; nonzero for an inline block
+    base: Reg,
+    /// for an inline block, the register its value is returned into
+    result: Option<Reg>,
+    /// op indices of the jumps a block's returns leave for its end
+    exits: Vec<usize>,
+    /// inline blocks compiled during dataflow, by the pc of their `MakeLambda`
+    inlined: std::collections::HashMap<u32, InlinedBlock>,
+    /// one past the highest register any op of this body or its blocks touches
+    max_register: usize,
+}
+
+/// a translated `block { ... }` ready to splice into its parent
+struct InlinedBlock {
+    ops: Vec<KOp>,
+    /// indices into `ops` of jumps that leave the block
+    exits: Vec<usize>,
+    max_register: usize,
 }
 
 pub fn compile(
@@ -81,44 +107,15 @@ pub fn compile(
     if shape.has_reference_args {
         return Err(Reject::ReferenceArgs);
     }
-    let start = shape.ip.1;
-    let end = match section.instructions.get(start.wrapping_sub(1) as usize) {
-        Some(Instruction::Jump { section: s, to })
-            if *s == shape.ip.0 && *to > start && *to as usize <= section.instructions.len() =>
-        {
-            *to
-        }
-        _ => return Err(Reject::NoBodyBounds),
-    };
-    let len = (end - start) as usize;
-
-    let mut translator = Translator {
-        section,
-        natives,
-        start,
-        end,
-        stacks: vec![None; len],
-        is_jump_target: vec![false; len],
-        ops: Vec::new(),
-        pending: Vec::new(),
-        op_index_of_pc: vec![u32::MAX; len],
-        last_push_move: None,
-        current_pc: start,
-        own_section: shape.ip.0,
-    };
+    let (start, end) = body_bounds(section, shape.ip)?;
+    let mut translator = Translator::new(section, natives, shape.ip.0, start, end, 0, None);
 
     let entry: Stack = vec![Slot::Val; shape.total_args as usize + shape.capture_count as usize];
     translator.dataflow(entry)?;
     translator.emit()?;
 
-    let frame_size = translator
-        .stacks
-        .iter()
-        .flatten()
-        .map(Vec::len)
-        .max()
-        .unwrap_or(0);
-    let frame_size = Reg::try_from(frame_size).map_err(|_| Reject::TooManyRegisters)?;
+    let frame_size =
+        Reg::try_from(translator.max_register).map_err(|_| Reject::TooManyRegisters)?;
 
     Ok(Kernel {
         ip: shape.ip,
@@ -130,14 +127,72 @@ pub fn compile(
     })
 }
 
+/// the instruction range of the body starting at `ip`: the compiler places a
+/// jump over every closure body just before it
+fn body_bounds(section: &SectionBytecode, ip: InstructionPointer) -> Result<(u32, u32), Reject> {
+    let start = ip.1;
+    match section.instructions.get(start.wrapping_sub(1) as usize) {
+        Some(Instruction::Jump { section: s, to })
+            if *s == ip.0 && *to > start && *to as usize <= section.instructions.len() =>
+        {
+            Ok((start, *to))
+        }
+        _ => Err(Reject::NoBodyBounds),
+    }
+}
+
 enum Flow {
     Next,
+    /// the instruction and the one after it were translated together
+    SkipNext,
     Jump(u32),
     Branch(u32),
     Stop,
+    /// a block's `return`: the last emitted op jumps to the block's end
+    BlockExit,
 }
 
-impl Translator<'_> {
+impl<'a> Translator<'a> {
+    fn new(
+        section: &'a SectionBytecode,
+        natives: &'a [NativeFunction],
+        own_section: u16,
+        start: u32,
+        end: u32,
+        base: Reg,
+        result: Option<Reg>,
+    ) -> Self {
+        let len = (end - start) as usize;
+        Self {
+            section,
+            natives,
+            start,
+            end,
+            stacks: vec![None; len],
+            is_jump_target: vec![false; len],
+            ops: Vec::new(),
+            pending: Vec::new(),
+            op_index_of_pc: vec![u32::MAX; len],
+            last_push_move: None,
+            current_pc: start,
+            own_section,
+            base,
+            result,
+            exits: Vec::new(),
+            inlined: std::collections::HashMap::new(),
+            max_register: base as usize,
+        }
+    }
+
+    /// the absolute register of abstract stack position `position`
+    fn abs(&self, position: usize) -> Reg {
+        self.base + position as Reg
+    }
+
+    fn note_depth(&mut self, stack: &Stack) {
+        self.max_register = self.max_register.max(self.base as usize + stack.len());
+    }
+
     fn dataflow(&mut self, entry: Stack) -> Result<(), Reject> {
         let mut worklist = vec![self.start];
         self.stacks[0] = Some(entry);
@@ -147,24 +202,30 @@ impl Translator<'_> {
                 .clone()
                 .expect("worklist entries have a recorded stack");
             let instr = self.section.instructions[pc as usize];
+            self.note_depth(&stack);
             let mut sink = Vec::new();
             let flow = self.step(pc, instr, &mut stack, &mut sink)?;
+            self.note_depth(&stack);
 
             let mut successors: Vec<u32> = Vec::new();
+            let fallthrough = match flow {
+                Flow::SkipNext => pc + 2,
+                _ => pc + 1,
+            };
             match flow {
-                Flow::Next => successors.push(pc + 1),
+                Flow::Next | Flow::SkipNext => successors.push(fallthrough),
                 Flow::Jump(to) => successors.push(to),
                 Flow::Branch(to) => {
-                    successors.push(pc + 1);
+                    successors.push(fallthrough);
                     successors.push(to);
                 }
-                Flow::Stop => {}
+                Flow::Stop | Flow::BlockExit => {}
             }
             for successor in successors {
                 if successor >= self.end || successor < self.start {
                     return Err(Reject::JumpOutOfBody);
                 }
-                if successor != pc + 1 {
+                if successor != fallthrough {
                     self.is_jump_target[(successor - self.start) as usize] = true;
                 }
                 let slot = &mut self.stacks[(successor - self.start) as usize];
@@ -193,6 +254,16 @@ impl Translator<'_> {
             let before = self.ops.len();
             let mut emitted = Vec::new();
             let flow = self.step(pc, instr, &mut stack, &mut emitted)?;
+            if matches!(flow, Flow::SkipNext) {
+                // an inline block: its ops were translated during dataflow
+                // and carry their own peephole, so they splice in verbatim
+                self.splice_block(pc);
+                if let Some(next) = self.op_index_of_pc.get_mut(index + 1) {
+                    *next = self.ops.len() as u32;
+                }
+                self.last_push_move = None;
+                continue;
+            }
             if self.fold_store(pc, instr, &emitted) {
                 emitted.clear();
             }
@@ -211,7 +282,8 @@ impl Translator<'_> {
                     op_index: self.ops.len() - 1,
                     target_pc: to,
                 }),
-                Flow::Next | Flow::Stop => {}
+                Flow::BlockExit => self.exits.push(self.ops.len() - 1),
+                Flow::Next | Flow::SkipNext | Flow::Stop => {}
             }
         }
 
@@ -226,6 +298,85 @@ impl Translator<'_> {
                 other => unreachable!("{other:?} carries no jump target"),
             }
         }
+        Ok(())
+    }
+
+    /// append a compiled inline block's ops, rebasing its jumps and pointing
+    /// its exits just past the block
+    fn splice_block(&mut self, pc: u32) {
+        let block = self
+            .inlined
+            .remove(&pc)
+            .expect("inline blocks are compiled during dataflow");
+        let splice_base = self.ops.len() as u32;
+        let block_end = splice_base + block.ops.len() as u32;
+        for (index, mut op) in block.ops.into_iter().enumerate() {
+            let target = match &mut op {
+                KOp::Jump { to }
+                | KOp::JumpIf { to, .. }
+                | KOp::JumpIfNot { to, .. }
+                | KOp::RangeTest { to, .. } => Some(to),
+                _ => None,
+            };
+            if let Some(to) = target {
+                *to = if block.exits.contains(&index) {
+                    block_end
+                } else {
+                    *to + splice_base
+                };
+            }
+            self.ops.push(op);
+        }
+        self.max_register = self.max_register.max(block.max_register);
+    }
+
+    /// translate the `block { ... }` whose closure is made at `pc` and called by
+    /// the next instruction, given the parent's stack at that point
+    fn inline_block(
+        &mut self,
+        pc: u32,
+        capture_count: usize,
+        prototype_index: u32,
+        stack: &Stack,
+    ) -> Result<(), Reject> {
+        let proto = &self.section.lambda_prototypes[prototype_index as usize];
+        if proto.required_args != 0
+            || proto.default_arg_count != 0
+            || proto.section != self.own_section
+        {
+            return Err(Reject::Unsupported("closure creation"));
+        }
+        if stack.len() < capture_count {
+            return Err(Reject::StackUnderflow);
+        }
+        if self.inlined.contains_key(&pc) {
+            return Ok(());
+        }
+        let (start, end) = body_bounds(self.section, (proto.section, proto.ip))?;
+        let first_capture = stack.len() - capture_count;
+        let base = self.abs(first_capture);
+        let mut child = Translator::new(
+            self.section,
+            self.natives,
+            self.own_section,
+            start,
+            end,
+            base,
+            Some(base),
+        );
+        // the block's captures are the parent's top slots, references included,
+        // so a `var` captured by lvalue is written through to its register
+        let entry: Stack = stack[first_capture..].to_vec();
+        child.dataflow(entry)?;
+        child.emit()?;
+        self.inlined.insert(
+            pc,
+            InlinedBlock {
+                ops: child.ops,
+                exits: child.exits,
+                max_register: child.max_register,
+            },
+        );
         Ok(())
     }
 
@@ -274,9 +425,9 @@ impl Translator<'_> {
         true
     }
 
-    fn resolve(stack: &Stack, position: usize) -> Reg {
+    fn resolve(&self, stack: &Stack, position: usize) -> Reg {
         match stack[position] {
-            Slot::Val => position as Reg,
+            Slot::Val => self.abs(position),
             Slot::Ref(reg) => reg,
         }
     }
@@ -300,15 +451,17 @@ impl Translator<'_> {
     /// apply one instruction to the abstract stack, emitting its ops. jump
     /// targets are left as bytecode offsets
     fn step(
-        &self,
+        &mut self,
         pc: u32,
         instr: Instruction,
         stack: &mut Stack,
         out: &mut Vec<KOp>,
     ) -> Result<Flow, Reject> {
-        let depth = stack.len() as Reg;
-        let jump_within = |to: u32, section: u16| -> Result<u32, Reject> {
-            if section != self.section_index() || to < self.start || to >= self.end {
+        // `depth` is the absolute register a pushed value lands in
+        let depth = self.abs(stack.len());
+        let (own_section, start, end) = (self.own_section, self.start, self.end);
+        let jump_within = move |to: u32, section: u16| -> Result<u32, Reject> {
+            if section != own_section || to < start || to >= end {
                 return Err(Reject::JumpOutOfBody);
             }
             Ok(to)
@@ -350,12 +503,12 @@ impl Translator<'_> {
             Instruction::SyncAllLeaders => return Err(Reject::Unsupported("leader")),
 
             Instruction::StoreLocal { stack_delta } => {
-                let target = Self::resolve(stack, Self::position(stack, stack_delta)?);
-                let src = Self::resolve(stack, Self::position(stack, -1)?);
+                let target = self.resolve(stack, Self::position(stack, stack_delta)?);
+                let src = self.resolve(stack, Self::position(stack, -1)?);
                 out.push(KOp::Move { dst: target, src });
             }
             Instruction::PushDeepCopy { stack_delta } => {
-                let src = Self::resolve(stack, Self::position(stack, stack_delta)?);
+                let src = self.resolve(stack, Self::position(stack, stack_delta)?);
                 out.push(KOp::Move { dst: depth, src });
                 stack.push(Slot::Val);
             }
@@ -364,25 +517,50 @@ impl Translator<'_> {
                 pop_tos,
                 ..
             } => {
-                let src = Self::resolve(stack, Self::position(stack, stack_delta)?);
+                let src = self.resolve(stack, Self::position(stack, stack_delta)?);
                 if pop_tos {
                     Self::pop(stack, 1)?;
                 }
-                let dst = stack.len() as Reg;
+                let dst = self.abs(stack.len());
                 out.push(KOp::Move { dst, src });
                 stack.push(Slot::Val);
             }
             Instruction::PushLvalue { stack_delta, .. } => {
-                let target = Self::resolve(stack, Self::position(stack, stack_delta)?);
+                let target = self.resolve(stack, Self::position(stack, stack_delta)?);
                 stack.push(Slot::Ref(target));
             }
             Instruction::PushStateful { .. } => return Err(Reject::Unsupported("stateful")),
             Instruction::BufferLabelOrAttribute { .. } => {
                 return Err(Reject::Unsupported("labels"));
             }
-            Instruction::MakeLambda { .. }
-            | Instruction::MakeAnim { .. }
-            | Instruction::MakeOperator => return Err(Reject::Unsupported("closure creation")),
+            Instruction::MakeLambda {
+                capture_count,
+                prototype_index,
+            } => {
+                // only a block: a closure made and called on the spot
+                let called_at_once = matches!(
+                    self.section.instructions.get(pc as usize + 1),
+                    Some(Instruction::LambdaInvoke {
+                        stateful: false,
+                        labeled: false,
+                        num_args: 0,
+                    })
+                );
+                if !called_at_once || pc + 1 >= self.end {
+                    return Err(Reject::Unsupported("closure creation"));
+                }
+                let capture_count = capture_count as usize;
+                self.inline_block(pc, capture_count, prototype_index, stack)?;
+                Self::pop(stack, capture_count)?;
+                stack.push(Slot::Val);
+                if pc + 2 >= self.end {
+                    return Err(Reject::JumpOutOfBody);
+                }
+                return Ok(Flow::SkipNext);
+            }
+            Instruction::MakeAnim { .. } | Instruction::MakeOperator => {
+                return Err(Reject::Unsupported("closure creation"));
+            }
             Instruction::OperatorInvoke { .. } | Instruction::ConvertToLiveOperator => {
                 return Err(Reject::Unsupported("operator"));
             }
@@ -405,8 +583,8 @@ impl Translator<'_> {
                     return Err(Reject::Unsupported("reference argument"));
                 }
                 out.push(KOp::Call {
-                    callee: callee_pos as Reg,
-                    arg_start: arg_start as Reg,
+                    callee: self.abs(callee_pos),
+                    arg_start: self.abs(arg_start),
                     arg_count: num_args as u16,
                 });
                 Self::pop(stack, arg_count + 1)?;
@@ -420,20 +598,20 @@ impl Translator<'_> {
             }
             Instruction::ConditionalJump { section, to } => {
                 let to = jump_within(to, section)?;
-                let cond = Self::resolve(stack, Self::position(stack, -1)?);
+                let cond = self.resolve(stack, Self::position(stack, -1)?);
                 Self::pop(stack, 1)?;
                 out.push(KOp::JumpIf { cond, to });
                 return Ok(Flow::Branch(to));
             }
             Instruction::JumpIfFalse { section, to } => {
                 let to = jump_within(to, section)?;
-                let cond = Self::resolve(stack, Self::position(stack, -1)?);
+                let cond = self.resolve(stack, Self::position(stack, -1)?);
                 Self::pop(stack, 1)?;
                 out.push(KOp::JumpIfNot { cond, to });
                 return Ok(Flow::Branch(to));
             }
             Instruction::RangeLoopTest { current_delta, to } => {
-                let to = jump_within(to, self.section_index())?;
+                let to = jump_within(to, own_section)?;
                 let current = Self::position(stack, i32::from(current_delta))?;
                 if current + 1 >= stack.len()
                     || stack[current] != Slot::Val
@@ -442,13 +620,18 @@ impl Translator<'_> {
                     return Err(Reject::Unsupported("range loop shape"));
                 }
                 out.push(KOp::RangeTest {
-                    current: current as Reg,
+                    current: self.abs(current),
                     to,
                 });
                 return Ok(Flow::Branch(to));
             }
             Instruction::Return { .. } => {
-                let src = Self::resolve(stack, Self::position(stack, -1)?);
+                let src = self.resolve(stack, Self::position(stack, -1)?);
+                if let Some(result) = self.result {
+                    out.push(KOp::Move { dst: result, src });
+                    out.push(KOp::Jump { to: u32::MAX });
+                    return Ok(Flow::BlockExit);
+                }
                 out.push(KOp::Return { src });
                 return Ok(Flow::Stop);
             }
@@ -470,7 +653,7 @@ impl Translator<'_> {
                 }
                 out.push(KOp::Native {
                     intrinsic,
-                    arg_start: arg_start as Reg,
+                    arg_start: self.abs(arg_start),
                     arg_count: arg_count as u16,
                 });
                 Self::pop(stack, arg_count)?;
@@ -483,14 +666,14 @@ impl Translator<'_> {
                 }
             }
             Instruction::IncrementByOne { stack_delta } => {
-                let reg = Self::resolve(stack, Self::position(stack, stack_delta)?);
+                let reg = self.resolve(stack, Self::position(stack, stack_delta)?);
                 out.push(KOp::Inc { reg });
             }
             Instruction::Play | Instruction::Observe => {
                 return Err(Reject::Unsupported("side effect"));
             }
             Instruction::Negate => {
-                let src = Self::resolve(stack, Self::position(stack, -1)?);
+                let src = self.resolve(stack, Self::position(stack, -1)?);
                 out.push(KOp::Neg {
                     dst: depth - 1,
                     src,
@@ -499,7 +682,7 @@ impl Translator<'_> {
                 stack.push(Slot::Val);
             }
             Instruction::Not => {
-                let src = Self::resolve(stack, Self::position(stack, -1)?);
+                let src = self.resolve(stack, Self::position(stack, -1)?);
                 out.push(KOp::Not {
                     dst: depth - 1,
                     src,
@@ -511,8 +694,8 @@ impl Translator<'_> {
                 if mutable {
                     return Err(Reject::Unsupported("element write"));
                 }
-                let list = Self::resolve(stack, Self::position(stack, -2)?);
-                let index = Self::resolve(stack, Self::position(stack, -1)?);
+                let list = self.resolve(stack, Self::position(stack, -2)?);
+                let index = self.resolve(stack, Self::position(stack, -1)?);
                 out.push(KOp::Index {
                     dst: depth - 2,
                     list,
@@ -530,13 +713,14 @@ impl Translator<'_> {
                 if index_count == 0 || stack.len() < index_count {
                     return Err(Reject::StackUnderflow);
                 }
-                let list = Self::resolve(stack, Self::position(stack, stack_delta)?);
+                let list = self.resolve(stack, Self::position(stack, stack_delta)?);
                 let first = stack.len() - index_count;
+                let dst = self.abs(first);
                 for (offset, position) in (first..stack.len()).enumerate() {
-                    let index = Self::resolve(stack, position);
+                    let index = self.resolve(stack, position);
                     out.push(KOp::Index {
-                        dst: first as Reg,
-                        list: if offset == 0 { list } else { first as Reg },
+                        dst,
+                        list: if offset == 0 { list } else { dst },
                         index,
                     });
                 }
@@ -544,7 +728,7 @@ impl Translator<'_> {
                 stack.push(Slot::Val);
             }
             Instruction::ContainerLen { stack_delta } | Instruction::LenLocal { stack_delta, .. } => {
-                let src = Self::resolve(stack, Self::position(stack, stack_delta)?);
+                let src = self.resolve(stack, Self::position(stack, stack_delta)?);
                 out.push(KOp::Len { dst: depth, src });
                 stack.push(Slot::Val);
             }
@@ -578,8 +762,8 @@ impl Translator<'_> {
                     Instruction::IntDiv => BinKind::IntDiv,
                     _ => BinKind::In,
                 };
-                let a = Self::resolve(stack, Self::position(stack, -2)?);
-                let b = Self::resolve(stack, Self::position(stack, -1)?);
+                let a = self.resolve(stack, Self::position(stack, -2)?);
+                let b = self.resolve(stack, Self::position(stack, -1)?);
                 out.push(KOp::Bin {
                     op,
                     dst: depth - 2,
@@ -593,7 +777,7 @@ impl Translator<'_> {
                 let Slot::Ref(target) = stack[Self::position(stack, -2)?] else {
                     return Err(Reject::Unsupported("assignment target"));
                 };
-                let src = Self::resolve(stack, Self::position(stack, -1)?);
+                let src = self.resolve(stack, Self::position(stack, -1)?);
                 out.push(KOp::Move { dst: target, src });
                 Self::pop(stack, 2)?;
                 stack.push(Slot::Ref(target));
@@ -602,7 +786,7 @@ impl Translator<'_> {
                 let Slot::Ref(target) = stack[Self::position(stack, -2)?] else {
                     return Err(Reject::Unsupported("append target"));
                 };
-                let value = Self::resolve(stack, Self::position(stack, -1)?);
+                let value = self.resolve(stack, Self::position(stack, -1)?);
                 out.push(KOp::Append {
                     list: target,
                     value,
@@ -611,9 +795,9 @@ impl Translator<'_> {
                 stack.push(Slot::Ref(target));
             }
             Instruction::Append => {
-                let list = Self::resolve(stack, Self::position(stack, -2)?);
-                let value = Self::resolve(stack, Self::position(stack, -1)?);
-                if list != depth - 2 {
+                let list = self.resolve(stack, Self::position(stack, -2)?);
+                let value = self.resolve(stack, Self::position(stack, -1)?);
+                if list != self.abs(stack.len() - 2) {
                     // appending through a reference copies first in the
                     // interpreter; keep that shape out of the tier
                     return Err(Reject::Unsupported("append through reference"));
@@ -630,9 +814,6 @@ impl Translator<'_> {
         Ok(Flow::Next)
     }
 
-    fn section_index(&self) -> u16 {
-        self.own_section
-    }
 }
 
 fn reads_register(op: &KOp, reg: Reg) -> bool {
