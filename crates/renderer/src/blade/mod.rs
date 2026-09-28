@@ -15,7 +15,7 @@ use crate::RenderStyle;
 use self::{
     pipelines::Pipelines,
     resources::{
-        CachedMesh, CachedTexture, IndexedBuffer, OffscreenTarget, PendingBufferUpload,
+        BufferPool, CachedMesh, CachedTexture, IndexedBuffer, OffscreenTarget, PendingBufferUpload,
         PendingTextureUpload, TextureCacheEntry, TextureKey,
     },
 };
@@ -42,6 +42,7 @@ pub(crate) struct BladeRenderer {
     dot_index_buffers: HashMap<u16, IndexedBuffer>,
     target: Option<OffscreenTarget>,
     mesh_cache: HashMap<usize, CachedMesh>,
+    buffer_pool: BufferPool,
     texture_cache: HashMap<TextureKey, TextureCacheEntry>,
     pending_buffer_uploads: Vec<PendingBufferUpload>,
     pending_texture_uploads: Vec<PendingTextureUpload>,

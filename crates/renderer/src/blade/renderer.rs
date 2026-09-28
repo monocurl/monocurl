@@ -71,6 +71,7 @@ impl BladeRenderer {
             dot_index_buffers: std::collections::HashMap::new(),
             target: None,
             mesh_cache: std::collections::HashMap::new(),
+            buffer_pool: Default::default(),
             texture_cache: std::collections::HashMap::new(),
             pending_buffer_uploads: Vec::new(),
             pending_texture_uploads: Vec::new(),
@@ -296,7 +297,7 @@ impl BladeRenderer {
             }
         }
         if let Some(stale) = self.mesh_cache.remove(&key) {
-            stale.destroy(&self.gpu);
+            stale.release(&self.gpu, &mut self.buffer_pool);
         }
 
         let triangles =
@@ -368,11 +369,7 @@ impl BladeRenderer {
         }
 
         let size = std::mem::size_of_val(data) as u64;
-        let buffer = self.gpu.create_buffer(gpu::BufferDesc {
-            name,
-            size,
-            memory: gpu::Memory::Device,
-        });
+        let (buffer, capacity) = self.buffer_pool.acquire(&self.gpu, name, size);
         let src = self.upload_belt.alloc_pod(data, &self.gpu);
         self.pending_buffer_uploads.push(PendingBufferUpload {
             src,
@@ -383,6 +380,7 @@ impl BladeRenderer {
         Some(BufferWithCount {
             buffer,
             count: data.len() as u32,
+            capacity,
         })
     }
 
@@ -647,7 +645,7 @@ impl BladeRenderer {
             .collect::<Vec<_>>();
         for key in stale_meshes {
             if let Some(mesh) = self.mesh_cache.remove(&key) {
-                mesh.destroy(&self.gpu);
+                mesh.release(&self.gpu, &mut self.buffer_pool);
             }
         }
 
@@ -669,8 +667,9 @@ impl BladeRenderer {
 
     fn destroy(&mut self) {
         for (_, mesh) in self.mesh_cache.drain() {
-            mesh.destroy(&self.gpu);
+            mesh.release(&self.gpu, &mut self.buffer_pool);
         }
+        self.buffer_pool.destroy(&self.gpu);
         for (_, entry) in self.texture_cache.drain() {
             if let Some(texture) = entry.texture {
                 destroy_texture(&self.gpu, texture);

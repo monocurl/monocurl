@@ -36,6 +36,75 @@ pub(super) struct CachedMesh {
 pub(super) struct BufferWithCount {
     pub(super) buffer: gpu::Buffer,
     pub(super) count: u32,
+    /// bytes the buffer can hold; buffers are pooled by this
+    pub(super) capacity: u64,
+}
+
+/// pooled bytes beyond which released buffers are destroyed instead
+const MAX_POOLED_BYTES: u64 = 64 << 20;
+
+/// smallest pooled buffer; smaller requests round up to it
+const MIN_BUFFER_BYTES: u64 = 256;
+
+/// vertex buffers of meshes that left the cache, kept for the meshes that
+/// replace them: an animated scene rebuilds hundreds of meshes per frame and
+/// creating a device buffer is a kernel round trip each, so buffers are
+/// handed on by size class instead
+#[derive(Default)]
+pub(super) struct BufferPool {
+    /// free buffers by power-of-two size class
+    free: Vec<Vec<gpu::Buffer>>,
+    bytes: u64,
+}
+
+impl BufferPool {
+    fn class(size: u64) -> usize {
+        (size
+            .max(MIN_BUFFER_BYTES)
+            .next_power_of_two()
+            .trailing_zeros()) as usize
+    }
+
+    /// a buffer of at least `size` bytes, from the pool when one is free
+    pub(super) fn acquire(
+        &mut self,
+        gpu: &gpu::Context,
+        name: &'static str,
+        size: u64,
+    ) -> (gpu::Buffer, u64) {
+        let class = Self::class(size);
+        let capacity = 1u64 << class;
+        if let Some(buffer) = self.free.get_mut(class).and_then(Vec::pop) {
+            self.bytes -= capacity;
+            return (buffer, capacity);
+        }
+        let buffer = gpu.create_buffer(gpu::BufferDesc {
+            name,
+            size: capacity,
+            memory: gpu::Memory::Device,
+        });
+        (buffer, capacity)
+    }
+
+    pub(super) fn release(&mut self, gpu: &gpu::Context, buffer: BufferWithCount) {
+        if self.bytes + buffer.capacity > MAX_POOLED_BYTES {
+            gpu.destroy_buffer(buffer.buffer);
+            return;
+        }
+        let class = Self::class(buffer.capacity);
+        if self.free.len() <= class {
+            self.free.resize_with(class + 1, Vec::new);
+        }
+        self.free[class].push(buffer.buffer);
+        self.bytes += buffer.capacity;
+    }
+
+    pub(super) fn destroy(&mut self, gpu: &gpu::Context) {
+        for buffer in self.free.drain(..).flatten() {
+            gpu.destroy_buffer(buffer);
+        }
+        self.bytes = 0;
+    }
 }
 
 pub(super) struct IndexedBuffer {
@@ -84,15 +153,13 @@ pub(super) struct PendingTextureUpload {
 }
 
 impl CachedMesh {
-    pub(super) fn destroy(self, gpu: &gpu::Context) {
-        if let Some(buffer) = self.triangles {
-            gpu.destroy_buffer(buffer.buffer);
-        }
-        if let Some(buffer) = self.lines {
-            gpu.destroy_buffer(buffer.buffer);
-        }
-        if let Some(buffer) = self.dots {
-            gpu.destroy_buffer(buffer.buffer);
+    /// hand the mesh's buffers to the pool for the next mesh that needs them
+    pub(super) fn release(self, gpu: &gpu::Context, pool: &mut BufferPool) {
+        for buffer in [self.triangles, self.lines, self.dots]
+            .into_iter()
+            .flatten()
+        {
+            pool.release(gpu, buffer);
         }
     }
 }
