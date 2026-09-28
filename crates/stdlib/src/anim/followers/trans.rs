@@ -156,10 +156,7 @@ async fn tag_trans_embed_impl(
 }
 
 #[stdlib_func]
-pub fn trans_lerp_value(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub fn trans_lerp_value(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let start = executor.state.stack(stack_idx).read_at(-5).clone();
     let end = executor.state.stack(stack_idx).read_at(-4).clone();
     let state = executor.state.stack(stack_idx).read_at(-3).clone();
@@ -2855,7 +2852,7 @@ mod tests {
         simd::{Float3, Float4},
     };
 
-    use crate::mesh::helpers::tessellate_planar_loops;
+    use crate::mesh::tessellation::tessellate_planar_loops;
 
     use super::{
         ClosedContour, TagTransMap, TagTransMapEntry, Value, append_closed_contour,

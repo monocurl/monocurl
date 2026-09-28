@@ -4,3 +4,4 @@ pub(crate) mod helpers;
 mod implicit2d;
 mod ops;
 mod queries;
+pub(crate) mod tessellation;

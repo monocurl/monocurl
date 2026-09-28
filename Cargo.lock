@@ -7563,6 +7563,7 @@ dependencies = [
  "geo",
  "inventory",
  "libtess2",
+ "rustc-hash 2.1.2",
  "smallvec",
  "stdlib-macros",
  "text",

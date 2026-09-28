@@ -9,5 +9,6 @@ geo.workspace = true
 inventory.workspace = true
 text.workspace = true
 libtess2.workspace = true
+rustc-hash.workspace = true
 smallvec.workspace = true
 stdlib-macros.workspace = true

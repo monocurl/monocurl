@@ -1,4 +1,3 @@
-
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
@@ -10,6 +9,7 @@ use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
+use super::tessellation::{polygon_surface, rect_surface, tessellate_planar_loops};
 
 const MAX_POLYGON_POINTS: usize = 1 << 13;
 const MAX_CURVE_SAMPLES: usize = 1 << 14;
@@ -497,8 +497,8 @@ mod tests {
     use geo::simd::Float3;
 
     use super::{
-        ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH, closed_polyline, fan_tris, mesh_ref, open_polyline,
-        DEFAULT_VECTOR_LIKE_STYLE, triangle_mesh, vector_like_mesh_with_style,
+        ARROW_MAX_HEAD_HALF_WIDTH_OVER_LENGTH, DEFAULT_VECTOR_LIKE_STYLE, closed_polyline,
+        fan_tris, mesh_ref, open_polyline, triangle_mesh, vector_like_mesh_with_style,
     };
 
     fn mesh_y_radius(mesh: &geo::mesh::Mesh) -> f32 {
@@ -566,16 +566,14 @@ mod tests {
 
     #[test]
     fn vector_like_mesh_builds_connected_arrow_surface() {
-        let Value::Mesh(mesh) =
-            vector_like_mesh_with_style(
-                Float3::ZERO,
-                Float3::new(1.0, 0.0, 0.0),
-                Float3::Z,
-                0.0,
-                DEFAULT_VECTOR_LIKE_STYLE,
-            )
-            .unwrap()
-        else {
+        let Value::Mesh(mesh) = vector_like_mesh_with_style(
+            Float3::ZERO,
+            Float3::new(1.0, 0.0, 0.0),
+            Float3::Z,
+            0.0,
+            DEFAULT_VECTOR_LIKE_STYLE,
+        )
+        .unwrap() else {
             panic!("expected mesh");
         };
 
@@ -587,16 +585,14 @@ mod tests {
 
     #[test]
     fn vector_like_mesh_supports_curved_arrow_paths() {
-        let Value::Mesh(mesh) =
-            vector_like_mesh_with_style(
-                Float3::ZERO,
-                Float3::new(1.0, 0.0, 0.0),
-                Float3::Z,
-                0.8,
-                DEFAULT_VECTOR_LIKE_STYLE,
-            )
-            .unwrap()
-        else {
+        let Value::Mesh(mesh) = vector_like_mesh_with_style(
+            Float3::ZERO,
+            Float3::new(1.0, 0.0, 0.0),
+            Float3::Z,
+            0.8,
+            DEFAULT_VECTOR_LIKE_STYLE,
+        )
+        .unwrap() else {
             panic!("expected mesh");
         };
 
@@ -607,9 +603,14 @@ mod tests {
 
     #[test]
     fn vector_like_mesh_scales_down_for_short_arrows() {
-        let Value::Mesh(mesh) =
-            vector_like_mesh_with_style(Float3::ZERO, Float3::new(0.05, 0.0, 0.0), Float3::Z, 0.0, DEFAULT_VECTOR_LIKE_STYLE).unwrap()
-        else {
+        let Value::Mesh(mesh) = vector_like_mesh_with_style(
+            Float3::ZERO,
+            Float3::new(0.05, 0.0, 0.0),
+            Float3::Z,
+            0.0,
+            DEFAULT_VECTOR_LIKE_STYLE,
+        )
+        .unwrap() else {
             panic!("expected mesh");
         };
 
@@ -634,18 +635,10 @@ pub fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, Execut
 
 #[stdlib_func]
 pub fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(3) as usize;
     ensure_limit("circle samples", samples, MAX_POLYGON_POINTS)?;
-    let (x, y, normal) = polygon_basis(Float3::Z);
-    let points: Vec<_> = (0..samples)
-        .map(|i| {
-            let theta = std::f32::consts::TAU * i as f32 / samples as f32;
-            center + x * (radius * theta.cos()) + y * (radius * theta.sin())
-        })
-        .collect();
-    let (lins, tris) = tessellate_planar_loops(&[points], normal)?;
+    let (lins, tris) = polygon_surface(radius, samples)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -676,35 +669,16 @@ pub fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 
 #[stdlib_func]
 pub fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = Float3::ZERO;
     let width = crate::read_float(executor, stack_idx, -1, "width")? as f32;
-    let normal = Float3::Z;
-    let half = width / 2.0;
-    let (x, y, _) = polygon_basis(normal);
-    let corners = vec![
-        center - x * half - y * half,
-        center + x * half - y * half,
-        center + x * half + y * half,
-        center - x * half + y * half,
-    ];
-    let (lins, tris) = tessellate_planar_loops(&[corners], normal)?;
+    let (lins, tris) = rect_surface(width, width)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
 #[stdlib_func]
 pub fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    let center = Float3::ZERO;
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
-    let normal = Float3::Z;
-    let (x, y, _) = polygon_basis(normal);
-    let corners = vec![
-        center - x * (width / 2.0) - y * (height / 2.0),
-        center + x * (width / 2.0) - y * (height / 2.0),
-        center + x * (width / 2.0) + y * (height / 2.0),
-        center - x * (width / 2.0) + y * (height / 2.0),
-    ];
-    let (lins, tris) = tessellate_planar_loops(&[corners], normal)?;
+    let (lins, tris) = rect_surface(width, height)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -713,18 +687,10 @@ pub fn mk_regular_polygon(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
-    let center = Float3::ZERO;
     let n = read_int(executor, stack_idx, -2, "n")?.max(3) as usize;
     ensure_limit("regular polygon sides", n, MAX_POLYGON_POINTS)?;
     let radius = crate::read_float(executor, stack_idx, -1, "circumradius")? as f32;
-    let (x, y, normal) = polygon_basis(Float3::Z);
-    let points: Vec<_> = (0..n)
-        .map(|i| {
-            let theta = std::f32::consts::TAU * i as f32 / n as f32;
-            center + x * (radius * theta.cos()) + y * (radius * theta.sin())
-        })
-        .collect();
-    let (lins, tris) = tessellate_planar_loops(&[points], normal)?;
+    let (lins, tris) = polygon_surface(radius, n)?;
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 
@@ -738,10 +704,7 @@ pub fn mk_polygon(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 }
 
 #[stdlib_func]
-pub fn mk_polyline(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub fn mk_polyline(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let vertices = read_float3_list(executor, stack_idx, -2, "vertices")?;
     ensure_limit("polyline vertices", vertices.len(), MAX_CURVE_SAMPLES)?;
     let normal = read_float3(executor, stack_idx, -1, "normal_hint")?;
@@ -861,10 +824,7 @@ pub fn mk_capsule(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 }
 
 #[stdlib_func]
-pub fn mk_triangle(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub fn mk_triangle(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let p = read_float3(executor, stack_idx, -4, "p")?;
     let q = read_float3(executor, stack_idx, -3, "q")?;
     let r = read_float3(executor, stack_idx, -2, "r")?;
@@ -939,10 +899,7 @@ pub fn mk_sphere(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
 }
 
 #[stdlib_func]
-pub fn mk_rect_prism(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub fn mk_rect_prism(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let center = Float3::ZERO;
     let dims = read_float3(executor, stack_idx, -1, "dimensions")?;
     let hx = dims.x / 2.0;
@@ -977,10 +934,7 @@ pub fn mk_rect_prism(
 }
 
 #[stdlib_func]
-pub fn mk_cylinder(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub fn mk_cylinder(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let center = Float3::ZERO;
     let radius = crate::read_float(executor, stack_idx, -4, "radius")? as f32;
     let height = crate::read_float(executor, stack_idx, -3, "height")? as f32;
@@ -1183,22 +1137,11 @@ pub fn mk_vector(executor: &mut Executor, stack_idx: usize) -> Result<Value, Exe
     let tip_len = read_nonnegative_float(executor, stack_idx, -3, "tip_length")?;
     let tip_width = read_nonnegative_float(executor, stack_idx, -2, "tip_width")?;
     let double_headed = read_flag(executor, stack_idx, -1, "double_headed")?;
-    vector_like_mesh_with_tip(
-        tail,
-        delta,
-        normal,
-        0.0,
-        tip_len,
-        tip_width,
-        double_headed,
-    )
+    vector_like_mesh_with_tip(tail, delta, normal, 0.0, tip_len, tip_width, double_headed)
 }
 
 #[stdlib_func]
-pub fn mk_half_vector(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub fn mk_half_vector(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let tail = read_float3(executor, stack_idx, -3, "tail")?;
     let delta = read_float3(executor, stack_idx, -2, "delta")?;
     let normal = read_float3(executor, stack_idx, -1, "normal")?;
@@ -1286,12 +1229,22 @@ pub async fn mk_shader(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     // follows the domain's aspect so pixels stay square
     let (columns, rows) = if width >= height {
         let columns = resolution as usize;
-        (columns, ((columns as f32 * height / width).round() as usize).max(1))
+        (
+            columns,
+            ((columns as f32 * height / width).round() as usize).max(1),
+        )
     } else {
         let rows = resolution as usize;
-        (((rows as f32 * width / height).round() as usize).max(1), rows)
+        (
+            ((rows as f32 * width / height).round() as usize).max(1),
+            rows,
+        )
     };
-    ensure_limit("shader pixels", columns.saturating_mul(rows), MAX_SHADER_PIXELS)?;
+    ensure_limit(
+        "shader pixels",
+        columns.saturating_mul(rows),
+        MAX_SHADER_PIXELS,
+    )?;
 
     // rows run top to bottom, as in an image file, so the same UV flip as
     // `Image` applies below

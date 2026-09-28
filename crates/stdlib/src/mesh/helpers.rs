@@ -10,6 +10,7 @@ use std::{
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+use super::tessellation::tessellate_planar_loops_with_options;
 use executor::{
     error::ExecutorError,
     executor::Executor,
@@ -19,14 +20,15 @@ use executor::{
 };
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms, make_mesh_mut},
-    mesh_build::{self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceVertex},
+    mesh_build::{
+        self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceVertex,
+    },
     simd::{Float2, Float3, Float4},
 };
-use libtess2::{TessellationOptions, WindingRule};
 
 const NORMAL_EPSILON: f32 = 1e-6;
 
-fn default_ink() -> Float4 {
+pub(super) fn default_ink() -> Float4 {
     Float4::new(0.0, 0.0, 0.0, 1.0)
 }
 
@@ -974,117 +976,11 @@ pub(super) fn mesh_to_indexed_lines(mesh: &Mesh) -> IndexedLineMesh {
     IndexedLineMesh { vertices, segments }
 }
 
-pub(crate) fn tessellate_planar_loops(
-    contours: &[Vec<Float3>],
-    normal: Float3,
-) -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError> {
-    tessellate_planar_loops_with_options(contours, normal, false)
-}
-
-fn tessellate_planar_loops_with_options(
-    contours: &[Vec<Float3>],
-    normal: Float3,
-    normalize_input: bool,
-) -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError> {
-    let contours: Vec<_> = contours
-        .iter()
-        .filter(|contour| contour.len() >= 3)
-        .cloned()
-        .collect();
-    if contours.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-    let normal = resolve_planar_normal(&contours, normal);
-
-    let mut source_boundary_edges = BoundaryEdges::default();
-    let mut source_offset = 0usize;
-    for contour in &contours {
-        for i in 0..contour.len() {
-            let a = source_offset + i;
-            let b = source_offset + (i + 1) % contour.len();
-            let edge = BoundaryEdge {
-                a_col: default_ink(),
-                b_col: default_ink(),
-                norm: normal,
-            };
-            source_boundary_edges.insert((a, b), edge);
-            source_boundary_edges.insert(
-                (b, a),
-                BoundaryEdge {
-                    a_col: edge.b_col,
-                    b_col: edge.a_col,
-                    norm: edge.norm,
-                },
-            );
-        }
-        source_offset += contour.len();
-    }
-
-    let tess = libtess2::triangulate(
-        contours.iter().map(Vec::as_slice),
-        TessellationOptions {
-            winding_rule: WindingRule::NonZero,
-            normal: Some(normal),
-            constrained_delaunay: true,
-            reverse_contours: false,
-            normalize_input,
-        },
-    )
-    .map_err(|error| {
-        ExecutorError::invalid_operation(format!("failed to tessellate polygon: {error}"))
-    })?;
-
-    let surface_vertices: Vec<_> = tess
-        .vertices
-        .iter()
-        .copied()
-        .map(|pos| SurfaceVertex {
-            pos,
-            col: default_ink(),
-            uv: Float2::ZERO,
-        })
-        .collect();
-
-    let mut boundary_edges = BoundaryEdges::default();
-    for face in &tess.triangles {
-        for (a, b) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])].into_iter() {
-            let edge = match (tess.source_vertex_indices[a], tess.source_vertex_indices[b]) {
-                (Some(source_a), Some(source_b)) => source_boundary_edges
-                    .get(&(source_a, source_b))
-                    .copied()
-                    .unwrap_or(BoundaryEdge {
-                        a_col: default_ink(),
-                        b_col: default_ink(),
-                        norm: normal,
-                    }),
-                _ => BoundaryEdge {
-                    a_col: default_ink(),
-                    b_col: default_ink(),
-                    norm: normal,
-                },
-            };
-            boundary_edges.insert((a, b), edge);
-        }
-    }
-
-    Ok(build_indexed_surface(
-        &surface_vertices,
-        &tess.triangles,
-        &boundary_edges,
-    ))
-}
-
-fn resolve_planar_normal(contours: &[Vec<Float3>], requested: Float3) -> Float3 {
-    normalize_nonzero(requested)
-        .or_else(|| contour_area_normal(contours))
-        .unwrap_or(Float3::Z)
-}
-
 fn first_nonzero_line_normal(lines: &[Lin]) -> Option<Float3> {
     lines.iter().find_map(|line| normalize_nonzero(line.norm))
 }
 
-fn contour_area_normal(contours: &[Vec<Float3>]) -> Option<Float3> {
+pub(super) fn contour_area_normal(contours: &[Vec<Float3>]) -> Option<Float3> {
     let normal =
         contours
             .iter()
@@ -1097,7 +993,7 @@ fn contour_area_normal(contours: &[Vec<Float3>]) -> Option<Float3> {
     normalize_nonzero(normal)
 }
 
-fn normalize_nonzero(vec: Float3) -> Option<Float3> {
+pub(super) fn normalize_nonzero(vec: Float3) -> Option<Float3> {
     let len = vec.len();
     (len > NORMAL_EPSILON).then_some(vec / len)
 }
@@ -1804,8 +1700,9 @@ mod tests {
 
     use super::{
         mesh_from_parts, mesh_position_groups, mesh_ref, mesh_to_indexed_lines, polygon_basis,
-        push_closed_polyline, tessellate_planar_loops, uprank_mesh,
+        push_closed_polyline, uprank_mesh,
     };
+    use crate::mesh::tessellation::tessellate_planar_loops;
 
     fn mesh_from_contours(contours: &[Vec<Float3>]) -> Mesh {
         let mut lins = Vec::new();

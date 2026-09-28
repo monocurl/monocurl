@@ -11,6 +11,7 @@ fn main() {
         .include(&source_dir)
         .include(&include_dir)
         .warnings(false)
+        .define("NDEBUG", None)
         .file(source_dir.join("bucketalloc.c"))
         .file(source_dir.join("dict.c"))
         .file(source_dir.join("geom.c"))
