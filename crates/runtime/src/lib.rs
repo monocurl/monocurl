@@ -782,7 +782,7 @@ fn mesh_attributes_from_runtime(leader_index: usize, value: Value) -> Vec<MeshAt
             .iter()
             .filter_map(|(arg_idx, name)| {
                 let value = inv.body.arguments.get(*arg_idx)?.clone();
-                mesh_labeled_attribute_snapshot(leader_index, name.clone(), value)
+                mesh_labeled_attribute_snapshot(leader_index, name.to_string(), value)
             })
             .collect(),
         Value::InvokedOperator(inv) => {
@@ -792,7 +792,7 @@ fn mesh_attributes_from_runtime(leader_index: usize, value: Value) -> Vec<MeshAt
                     continue;
                 };
                 if let Some(attribute) =
-                    mesh_labeled_attribute_snapshot(leader_index, name.clone(), value)
+                    mesh_labeled_attribute_snapshot(leader_index, name.to_string(), value)
                 {
                     attributes.push(attribute);
                 }
