@@ -1,12 +1,16 @@
 //! compact, deterministic renderings of executor values, used as golden output
-//! for the scene corpus. meshes are fingerprinted rather than dumped so the
-//! expectations stay readable while still failing on geometry changes.
+//! for the scene corpus. meshes are reduced to exact topology counts plus
+//! fixed-precision aggregates (bounding box, centroid, mean vertex colours) so
+//! the expectations stay readable and can be compared within a tolerance.
 
 use executor::{
     heap::with_heap,
     value::{Value, container::HashableKey},
 };
-use geo::mesh::Mesh;
+use geo::{
+    mesh::Mesh,
+    simd::{Float3, Float4},
+};
 
 const MAX_LIST_ENTRIES: usize = 8;
 const MAX_MAP_ENTRIES: usize = 6;
@@ -18,50 +22,119 @@ fn round(value: f64) -> f64 {
     if scaled == 0.0 { 0.0 } else { scaled }
 }
 
-fn fold(accumulator: &mut u64, value: f32) {
-    *accumulator = accumulator
-        .rotate_left(7)
-        .wrapping_add(round(value as f64).to_bits())
-        .wrapping_mul(0x9E37_79B9_7F4A_7C15);
-}
-
 pub fn mesh_summary(mesh: &Mesh) -> String {
-    format!(
-        "dots={}, lins={}, tris={}, tag={:?}, fp={:016x}",
+    let mut out = format!(
+        "dots={}, lins={}, tris={}, tag={:?}",
         mesh.dots.len(),
         mesh.lins.len(),
         mesh.tris.len(),
         mesh.tag,
-        mesh_fingerprint(mesh),
-    )
+    );
+    if let Some(geometry) = geometry_summary(mesh) {
+        out.push_str(", ");
+        out.push_str(&geometry);
+    }
+    out
 }
 
-/// order-sensitive fingerprint of a mesh's geometry and vertex colours
-fn mesh_fingerprint(mesh: &Mesh) -> u64 {
-    let mut accumulator = 0xcbf2_9ce4_8422_2325u64;
-    for dot in &mesh.dots {
-        for component in [dot.pos.x, dot.pos.y, dot.pos.z] {
-            fold(&mut accumulator, component);
+/// tolerant geometry statistics: aggregates average out per-coordinate float
+/// noise, so they can be compared within an epsilon across platforms
+fn geometry_summary(mesh: &Mesh) -> Option<String> {
+    let positions: Vec<Float3> = mesh
+        .dots
+        .iter()
+        .map(|dot| dot.pos)
+        .chain(mesh.lins.iter().flat_map(|lin| [lin.a.pos, lin.b.pos]))
+        .chain(
+            mesh.tris
+                .iter()
+                .flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]),
+        )
+        .collect();
+    if positions.is_empty() {
+        return None;
+    }
+
+    let (min, max) = positions.iter().fold(
+        ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
+        |(min, max), pos| {
+            let pos = components3(*pos);
+            (
+                std::array::from_fn(|i| min[i].min(pos[i])),
+                std::array::from_fn(|i| max[i].max(pos[i])),
+            )
+        },
+    );
+
+    let mut out = format!(
+        "box={}..{}, mid={}",
+        tuple(&min),
+        tuple(&max),
+        tuple(&mean(positions.iter().map(|pos| components3(*pos)))),
+    );
+    let colours = [
+        (
+            "dot_col",
+            mean(mesh.dots.iter().map(|dot| components4(dot.col))),
+        ),
+        (
+            "lin_col",
+            mean(
+                mesh.lins
+                    .iter()
+                    .flat_map(|lin| [lin.a.col, lin.b.col])
+                    .map(components4),
+            ),
+        ),
+        (
+            "tri_col",
+            mean(
+                mesh.tris
+                    .iter()
+                    .flat_map(|tri| [tri.a.col, tri.b.col, tri.c.col])
+                    .map(components4),
+            ),
+        ),
+    ];
+    for (label, colour) in colours {
+        if !colour.is_empty() {
+            out.push_str(&format!(", {label}={}", tuple(&colour)));
         }
     }
-    for lin in &mesh.lins {
-        for vertex in [lin.a, lin.b] {
-            for component in [vertex.pos.x, vertex.pos.y, vertex.pos.z] {
-                fold(&mut accumulator, component);
-            }
-        }
+    Some(out)
+}
+
+fn components3(value: Float3) -> [f64; 3] {
+    [value.x, value.y, value.z].map(f64::from)
+}
+
+fn components4(value: Float4) -> [f64; 4] {
+    [value.x, value.y, value.z, value.w].map(f64::from)
+}
+
+/// componentwise mean, empty when there is nothing to average
+fn mean<const N: usize>(values: impl Iterator<Item = [f64; N]>) -> Vec<f64> {
+    let (count, sum) = values.fold((0usize, [0.0; N]), |(count, sum), value| {
+        (count + 1, std::array::from_fn(|i| sum[i] + value[i]))
+    });
+    if count == 0 {
+        return Vec::new();
     }
-    for tri in &mesh.tris {
-        for vertex in [tri.a, tri.b, tri.c] {
-            for component in [vertex.pos.x, vertex.pos.y, vertex.pos.z] {
-                fold(&mut accumulator, component);
-            }
-            for component in [vertex.col.x, vertex.col.y, vertex.col.z, vertex.col.w] {
-                fold(&mut accumulator, component);
-            }
-        }
+    sum.iter().map(|total| total / count as f64).collect()
+}
+
+fn tuple(values: &[f64]) -> String {
+    let entries: Vec<_> = values.iter().map(|&value| fixed(value)).collect();
+    format!("({})", entries.join(", "))
+}
+
+/// fixed precision, with negative zero folded into zero
+fn fixed(value: f64) -> String {
+    let text = format!("{value:.3}");
+    match text.strip_prefix('-') {
+        Some(rest) if rest.bytes().all(|b| b == b'0' || b == b'.') => rest.to_string(),
+        _ => text,
     }
-    accumulator
 }
 
 fn key_summary(key: &HashableKey) -> String {
@@ -97,9 +170,7 @@ fn summary_at(value: &Value, depth: usize) -> String {
                 .elements()
                 .iter()
                 .take(MAX_LIST_ENTRIES)
-                .map(|element| {
-                    summary_at(&with_heap(|h| h.get(element.key()).clone()), depth - 1)
-                })
+                .map(|element| summary_at(&with_heap(|h| h.get(element.key()).clone()), depth - 1))
                 .collect();
             let ellipsis = if list.len() > MAX_LIST_ENTRIES {
                 ", .."
@@ -146,4 +217,3 @@ fn summary_at(value: &Value, depth: usize) -> String {
         Value::InvokedOperator(_) => "live operator".into(),
     }
 }
-
