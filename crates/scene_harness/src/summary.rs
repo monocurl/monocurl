@@ -38,9 +38,12 @@ pub fn mesh_summary(mesh: &Mesh) -> String {
 }
 
 /// tolerant geometry statistics: aggregates average out per-coordinate float
-/// noise, so they can be compared within an epsilon across platforms
+/// noise, so they can be compared within an epsilon across platforms. triangle
+/// statistics are area weighted, because the same region can be triangulated
+/// differently on another platform (libtess2's sweep makes different but
+/// equally valid choices) and a plain vertex mean would move with it
 fn geometry_summary(mesh: &Mesh) -> Option<String> {
-    let positions: Vec<Float3> = mesh
+    let positions: Vec<[f64; 3]> = mesh
         .dots
         .iter()
         .map(|dot| dot.pos)
@@ -50,6 +53,7 @@ fn geometry_summary(mesh: &Mesh) -> Option<String> {
                 .iter()
                 .flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos]),
         )
+        .map(components3)
         .collect();
     if positions.is_empty() {
         return None;
@@ -58,20 +62,35 @@ fn geometry_summary(mesh: &Mesh) -> Option<String> {
     let (min, max) = positions.iter().fold(
         ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]),
         |(min, max), pos| {
-            let pos = components3(*pos);
             (
                 std::array::from_fn(|i| min[i].min(pos[i])),
                 std::array::from_fn(|i| max[i].max(pos[i])),
             )
         },
     );
+    let mut out = format!("box={}..{}", tuple(&min), tuple(&max));
 
-    let mut out = format!(
-        "box={}..{}, mid={}",
-        tuple(&min),
-        tuple(&max),
-        tuple(&mean(positions.iter().map(|pos| components3(*pos)))),
-    );
+    let point_positions = mesh
+        .dots
+        .iter()
+        .map(|dot| dot.pos)
+        .chain(mesh.lins.iter().flat_map(|lin| [lin.a.pos, lin.b.pos]))
+        .map(components3);
+    let mid = mean(point_positions);
+    if !mid.is_empty() {
+        out.push_str(&format!(", mid={}", tuple(&mid)));
+    }
+
+    if !mesh.tris.is_empty() {
+        let (area, centroid, colour) = weighted_triangle_stats(mesh);
+        out.push_str(&format!(
+            ", area={:.3}, tri_mid={}, tri_col={}",
+            area,
+            tuple(&centroid),
+            tuple(&colour)
+        ));
+    }
+
     let colours = [
         (
             "dot_col",
@@ -86,15 +105,6 @@ fn geometry_summary(mesh: &Mesh) -> Option<String> {
                     .map(components4),
             ),
         ),
-        (
-            "tri_col",
-            mean(
-                mesh.tris
-                    .iter()
-                    .flat_map(|tri| [tri.a.col, tri.b.col, tri.c.col])
-                    .map(components4),
-            ),
-        ),
     ];
     for (label, colour) in colours {
         if !colour.is_empty() {
@@ -102,6 +112,54 @@ fn geometry_summary(mesh: &Mesh) -> Option<String> {
         }
     }
     Some(out)
+}
+
+/// total area, area-weighted centroid and area-weighted mean colour of the
+/// triangles. a mesh whose triangles are all degenerate falls back to plain
+/// vertex means, which are then well defined anyway
+fn weighted_triangle_stats(mesh: &Mesh) -> (f64, Vec<f64>, Vec<f64>) {
+    let mut total = 0.0;
+    let mut centroid = [0.0; 3];
+    let mut colour = [0.0; 4];
+    for tri in &mesh.tris {
+        let [a, b, c] = [tri.a.pos, tri.b.pos, tri.c.pos].map(components3);
+        let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+        let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        let cross = [
+            ab[1] * ac[2] - ab[2] * ac[1],
+            ab[2] * ac[0] - ab[0] * ac[2],
+            ab[0] * ac[1] - ab[1] * ac[0],
+        ];
+        let area = 0.5 * (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+        total += area;
+        for i in 0..3 {
+            centroid[i] += area * (a[i] + b[i] + c[i]) / 3.0;
+        }
+        let cols = [tri.a.col, tri.b.col, tri.c.col].map(components4);
+        for i in 0..4 {
+            colour[i] += area * (cols[0][i] + cols[1][i] + cols[2][i]) / 3.0;
+        }
+    }
+    if total > 0.0 {
+        return (
+            total,
+            centroid.iter().map(|v| v / total).collect(),
+            colour.iter().map(|v| v / total).collect(),
+        );
+    }
+    let vertex_mid = mean(
+        mesh.tris
+            .iter()
+            .flat_map(|tri| [tri.a.pos, tri.b.pos, tri.c.pos])
+            .map(components3),
+    );
+    let vertex_col = mean(
+        mesh.tris
+            .iter()
+            .flat_map(|tri| [tri.a.col, tri.b.col, tri.c.col])
+            .map(components4),
+    );
+    (0.0, vertex_mid, vertex_col)
 }
 
 fn components3(value: Float3) -> [f64; 3] {
