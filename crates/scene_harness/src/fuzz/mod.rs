@@ -2,17 +2,25 @@
 //! the language. `gen` builds random programs as an ast, `reference` evaluates
 //! that ast directly from the language semantics, and `check_seed` runs the
 //! printed source through the real pipeline and compares the two transcripts.
+//!
+//! batch mode (`check_batch_seed`) also samples the program's lambdas through
+//! the constructors the kernel tier runs as batches (`ExplicitFunc`, `Shader`,
+//! `point_map`, ..) and runs the scene with the tier off, on and verifying, so
+//! the dynamic, typed and lane machines are compared with the interpreter.
 
 pub mod r#gen;
 pub mod reference;
 
 use std::{fmt::Write, path::Path, rc::Rc};
 
-use executor::executor::SeekOptions;
+use executor::{
+    executor::SeekOptions,
+    kernel::{KernelMode, KernelStats},
+};
 
-use crate::{corpus_dir, run_scene};
+use crate::{corpus_dir, run_scene_with_kernels};
 
-pub use r#gen::{Generated, generate};
+pub use r#gen::{Generated, generate, generate_batches};
 pub use reference::{Outcome, evaluate};
 
 #[derive(Clone, Debug)]
@@ -164,14 +172,32 @@ pub struct Program {
     pub stmts: Vec<Stmt>,
     /// generated in the mode that deliberately triggers a runtime error
     pub expects_error: bool,
+    /// source lines after `stmts` that sample its lambdas through batch
+    /// constructors; the reference does not model them
+    pub batches: Vec<String>,
 }
 
 impl Program {
     pub fn source(&self) -> String {
-        let mut out = String::from("import std.util\nimport std.math\n\n");
+        let mut out = String::from("import std.util\nimport std.math\n");
+        if !self.batches.is_empty() {
+            out.push_str("import std.mesh\n");
+        }
+        out.push('\n');
         write_block(&mut out, &self.stmts, 0);
+        for line in &self.batches {
+            out.push_str(line);
+            out.push('\n');
+        }
         out
     }
+}
+
+/// `expr` as source, on one line unless it holds a block lambda
+pub fn expr_source(expr: &Expr) -> String {
+    let mut out = String::new();
+    write_expr(&mut out, expr, 0);
+    out
 }
 
 fn indent(out: &mut String, level: usize) {
@@ -412,22 +438,71 @@ fn lines_agree(expected: &str, actual: &str) -> bool {
 
 /// run a program through lex -> parse -> compile -> execute
 pub fn execute_source(source: &str) -> Outcome {
+    execute_with_kernels(source, None).outcome
+}
+
+/// one run of the real pipeline
+pub struct Run {
+    pub outcome: Outcome,
+    pub stats: KernelStats,
+    /// the executor panicked; in verify mode this is an engine disagreement
+    pub panic: Option<String>,
+}
+
+/// stack for the thread each run gets; the main thread's size, with room to spare
+const RUN_STACK_BYTES: usize = 64 << 20;
+
+/// run a program with the kernel tier pinned to `mode` (`None` leaves the
+/// environment's choice). each run gets a fresh thread and so a fresh
+/// thread-local heap: slots one run leaks would otherwise be copied by every
+/// later run's heap snapshots, and a long campaign slows to a crawl
+pub fn execute_with_kernels(source: &str, mode: Option<KernelMode>) -> Run {
+    let source = source.to_owned();
+    std::thread::Builder::new()
+        .stack_size(RUN_STACK_BYTES)
+        .spawn(move || execute_here(&source, mode))
+        .expect("spawn a fuzz run thread")
+        .join()
+        .expect("fuzz runs catch their own panics")
+}
+
+fn execute_here(source: &str, mode: Option<KernelMode>) -> Run {
     let path = corpus_dir().join("fuzz.mcs");
-    let run =
-        std::panic::catch_unwind(|| run_scene(source, Path::new(&path), SeekOptions::strict()));
+    let run = std::panic::catch_unwind(|| {
+        run_scene_with_kernels(source, Path::new(&path), SeekOptions::strict(), mode)
+    });
     match run {
-        Ok(Ok(run)) => Outcome {
-            transcript: run.transcript,
-            error: run.runtime_errors.into_iter().next(),
+        Ok(Ok(run)) => Run {
+            outcome: Outcome {
+                transcript: run.transcript,
+                error: run.runtime_errors.into_iter().next(),
+            },
+            stats: run.kernel_stats,
+            panic: None,
         },
-        Ok(Err(error)) => Outcome {
-            transcript: Vec::new(),
-            error: Some(format!("<pipeline> {error}")),
+        Ok(Err(error)) => Run {
+            outcome: Outcome {
+                transcript: Vec::new(),
+                error: Some(format!("<pipeline> {error}")),
+            },
+            stats: KernelStats::default(),
+            panic: None,
         },
-        Err(_) => Outcome {
-            transcript: Vec::new(),
-            error: Some("<executor panicked>".into()),
-        },
+        Err(payload) => {
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "<non-string panic>".into());
+            Run {
+                outcome: Outcome {
+                    transcript: Vec::new(),
+                    error: Some("<executor panicked>".into()),
+                },
+                stats: KernelStats::default(),
+                panic: Some(message),
+            }
+        }
     }
 }
 
@@ -442,5 +517,106 @@ pub fn check_seed(seed: u64) -> Case {
         source,
         expected: generated.expected,
         actual,
+    }
+}
+
+/// keep every batch on the calling thread. a worker's panic is swallowed and
+/// the batch handed back to the interpreter, which would hide verify mode's
+/// disagreements. call before any executor runs
+pub fn use_serial_kernels() {
+    // SAFETY: called before any worker threads touch the environment
+    unsafe { std::env::set_var("MONOCURL_KERNEL_THREADS", "1") };
+}
+
+/// a batch-mode program run with the kernel tier off, on and verifying
+pub struct BatchCase {
+    pub seed: u64,
+    pub discarded: Vec<&'static str>,
+    pub source: String,
+    /// the reference's view of the statements before the batch section
+    pub expected: Outcome,
+    pub off: Run,
+    pub on: Run,
+    pub verify: Run,
+}
+
+impl BatchCase {
+    /// everything that went wrong, empty when the case agrees
+    pub fn problems(&self) -> Vec<String> {
+        let mut problems = Vec::new();
+        for (label, run) in [
+            ("off", &self.off),
+            ("on", &self.on),
+            ("verify", &self.verify),
+        ] {
+            if let Some(message) = &run.panic {
+                problems.push(format!("kernels {label} panicked: {message}"));
+            }
+        }
+        if self.on.outcome != self.off.outcome {
+            problems.push("kernels on changes the transcript or error".into());
+        }
+        if self.verify.panic.is_none() && self.verify.outcome != self.off.outcome {
+            problems.push("kernels verify changes the transcript or error".into());
+        }
+        // the batch section only appends, so the reference's transcript is a
+        // prefix of the interpreter's. an error is the batch section's own
+        // once every reference line is out
+        let off = &self.off.outcome.transcript;
+        let prefix_agrees = off.len() >= self.expected.transcript.len()
+            && self
+                .expected
+                .transcript
+                .iter()
+                .zip(off)
+                .all(|(expected, actual)| lines_agree(expected, actual));
+        if self.off.panic.is_none() && !prefix_agrees {
+            problems.push("the interpreter disagrees with the reference".into());
+        }
+        problems
+    }
+
+    pub fn matches(&self) -> bool {
+        self.problems().is_empty()
+    }
+
+    pub fn report(&self) -> String {
+        let mut out = String::new();
+        let _ = writeln!(out, "batch fuzz mismatch for seed {}", self.seed);
+        let _ = writeln!(
+            out,
+            "reproduce with: mcfuzz --batches --seed {} --print",
+            self.seed
+        );
+        for problem in self.problems() {
+            let _ = writeln!(out, "  {problem}");
+        }
+        let _ = writeln!(out, "--- source ---\n{}", self.source);
+        let _ = writeln!(
+            out,
+            "--- reference (before the batches) ---\n{}",
+            self.expected
+        );
+        let _ = writeln!(out, "--- kernels off ---\n{}", self.off.outcome);
+        let _ = writeln!(out, "--- kernels on ---\n{}", self.on.outcome);
+        let _ = writeln!(out, "--- kernels verify ---\n{}", self.verify.outcome);
+        out
+    }
+}
+
+/// generate the batch-mode program for `seed` and run it under every kernel mode
+pub fn check_batch_seed(seed: u64) -> BatchCase {
+    let generated = generate_batches(seed);
+    let source = generated.program.source();
+    let [off, on, verify] = [KernelMode::Off, KernelMode::On, KernelMode::Verify]
+        .map(|mode| execute_with_kernels(&source, Some(mode)));
+    BatchCase {
+        seed,
+        discarded: generated.discarded,
+        source,
+        expected: generated.expected,
+        off,
+        on,
+        verify,
     }
 }

@@ -35,11 +35,29 @@ pub struct LiveCall {
     /// the lambda and its full argument list (defaults filled in); `None` for
     /// stdlib calls, which the fuzzer never interpolates
     call: Option<(Rc<Closure>, Vec<Val>)>,
+    /// returned out of another lambda; a kernel single call of that lambda
+    /// drops the wrapper (FUZZ_FINDINGS.md #5)
+    escaped: bool,
 }
 
 impl LiveCall {
     fn wrap(value: Val, call: Option<(Rc<Closure>, Vec<Val>)>) -> Val {
-        Val::Live(Rc::new(Self { value, call }))
+        Val::Live(Rc::new(Self {
+            value,
+            call,
+            escaped: false,
+        }))
+    }
+
+    fn escape(value: Val) -> Val {
+        match value {
+            Val::Live(live) if !live.escaped => Val::Live(Rc::new(Self {
+                value: live.value.clone(),
+                call: live.call.clone(),
+                escaped: true,
+            })),
+            other => other,
+        }
     }
 }
 
@@ -377,6 +395,7 @@ impl Interpreter {
         self.depth -= 1;
 
         let (value, full_args) = result?;
+        let value = LiveCall::escape(value);
         Ok(match required < params.len() {
             true => LiveCall::wrap(value, Some((closure.clone(), full_args))),
             false => value,
@@ -420,6 +439,9 @@ impl Interpreter {
         }
         if a_args.iter().zip(b_args).all(|(x, y)| equal(x, y)) {
             return Ok(a.clone());
+        }
+        if a_live.escaped || b_live.escaped {
+            return reject("FUZZ_FINDINGS.md #5");
         }
         match a_args
             .iter()
