@@ -51,6 +51,9 @@ pub enum KernelMode {
     Off,
     /// batches of pure numeric calls run as kernels
     On,
+    /// batches only; interpreted single calls stay in the interpreter. for
+    /// bisecting a disagreement between the two paths
+    Batches,
     /// kernels run and the interpreter runs too; a disagreement panics. for
     /// tests, since it costs more than either engine alone
     Verify,
@@ -64,6 +67,7 @@ impl KernelMode {
         *MODE.get_or_init(|| match std::env::var("MONOCURL_KERNELS").as_deref() {
             Ok("0") | Ok("off") | Ok("false") => KernelMode::Off,
             Ok("verify") => KernelMode::Verify,
+            Ok("batch") | Ok("batches") => KernelMode::Batches,
             _ => KernelMode::On,
         })
     }

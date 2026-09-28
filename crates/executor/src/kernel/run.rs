@@ -379,7 +379,7 @@ fn int_binary(op: BinKind, a: i64, b: i64) -> Result<KVal, Fault> {
             if b == 0 {
                 return Err(Fault::DivisionByZero);
             }
-            KVal::Int(a.wrapping_div(b))
+            KVal::Int(crate::executor::ops::floor_div(a, b))
         }
         BinKind::Power => KVal::Float((a as f64).powf(b as f64)),
         BinKind::Lt => KVal::Int((a < b) as i64),
@@ -418,6 +418,11 @@ fn float_binary(op: BinKind, a: f64, b: f64) -> Result<KVal, Fault> {
         BinKind::Ne => KVal::Int((a != b) as i64),
         BinKind::In => return Err(Fault::Type),
     })
+}
+
+/// `sign` of a float: `signum` would call every zero a one
+pub fn float_sign(x: f64) -> f64 {
+    if x == 0.0 { 0.0 } else { x.signum() }
 }
 
 fn as_f64(value: &KVal) -> Result<f64, Fault> {
@@ -480,7 +485,7 @@ pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> 
         },
         Sign => match &args[0] {
             KVal::Int(n) => Ok(KVal::Int(n.signum())),
-            KVal::Float(f) => Ok(KVal::Float(f.signum())),
+            KVal::Float(f) => Ok(KVal::Float(float_sign(*f))),
             _ => Err(Fault::Type),
         },
         Floor => to_int(f64::floor),
@@ -515,7 +520,9 @@ pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> 
             if u.len() != v.len() {
                 return Err(Fault::LengthMismatch);
             }
-            Ok(KVal::Float(u.iter().zip(v.iter()).map(|(a, b)| a * b).sum()))
+            Ok(KVal::Float(
+                u.iter().zip(v.iter()).fold(0.0, |acc, (a, b)| acc + a * b),
+            ))
         }
         Cross => {
             let u = float_list(&args[0])?;

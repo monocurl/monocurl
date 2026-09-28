@@ -39,7 +39,16 @@ impl Executor {
             if matches!(lhs, Value::Stateful(_)) || matches!(rhs, Value::Stateful(_)) {
                 return None;
             }
-            let equal = Value::values_equal(lhs, rhs);
+            // a live call that has already run compares as its result, and the
+            // elements of a list are read the same way
+            let equal = lhs.with_elided_cached_wrappers(|lhs| {
+                rhs.with_elided_cached_wrappers(|rhs| {
+                    Value::values_equal(
+                        &lhs.clone().elide_cached_wrappers_rec(),
+                        &rhs.clone().elide_cached_wrappers_rec(),
+                    )
+                })
+            });
             let result = matches!(op, BinOp::Eq) == equal;
 
             let stack = self.state.stack_mut(stack_idx);
@@ -252,7 +261,7 @@ fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, Ex
             if *b == 0 {
                 Err(ExecutorError::DivisionByZero)
             } else {
-                Ok(Value::Integer(a / b))
+                Ok(Value::Integer(floor_div(*a, *b)))
             }
         }
         (Value::Integer(a), Value::Integer(b), BinOp::Power) => {
@@ -305,8 +314,8 @@ fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, Ex
         // in operator: resolved rhs must be a list or map
         (_, Value::List(list), BinOp::In) => {
             let found = list.elements.iter().any(|key| {
-                let elem = with_heap(|h| h.get(key.key()).clone());
-                Value::values_equal(lhs, &elem)
+                let elem = with_heap(|h| h.get(key.key()).clone()).elide_cached_wrappers_rec();
+                lhs.with_elided_cached_wrappers(|lhs| Value::values_equal(lhs, &elem))
             });
             Ok(Value::Integer(found as i64))
         }
@@ -323,11 +332,22 @@ fn eval_non_list_binary(lhs: &Value, rhs: &Value, op: BinOp) -> Result<Value, Ex
     }
 }
 
+/// `//` rounds towards negative infinity for ints as it does for floats; the
+/// wrapping forms keep `i64::MIN // -1` from panicking, matching `*`
+pub(crate) fn floor_div(a: i64, b: i64) -> i64 {
+    let quotient = a.wrapping_div(b);
+    if a.wrapping_rem(b) != 0 && (a < 0) != (b < 0) {
+        quotient.wrapping_sub(1)
+    } else {
+        quotient
+    }
+}
+
 fn negate_list(list: &List) -> Result<Value, ExecutorError> {
     let mut elements = Vec::with_capacity(list.elements.len());
 
     for (idx, key) in list.elements.iter().enumerate() {
-        let value = with_heap(|h| h.get(key.key()).clone());
+        let value = with_heap(|h| h.get(key.key()).clone()).elide_cached_wrappers_rec();
         let negated = match value {
             Value::Integer(n) => Value::Integer(-n),
             Value::Float(f) => Value::Float(-f),
@@ -360,8 +380,8 @@ fn combine_lists(lhs: &List, rhs: &List, op: BinOp) -> Result<Value, ExecutorErr
 
     let mut elements = Vec::with_capacity(lhs.len());
     for (idx, (lhs_key, rhs_key)) in lhs.elements.iter().zip(rhs.elements.iter()).enumerate() {
-        let lhs_val = with_heap(|h| h.get(lhs_key.key()).clone());
-        let rhs_val = with_heap(|h| h.get(rhs_key.key()).clone());
+        let lhs_val = with_heap(|h| h.get(lhs_key.key()).clone()).elide_cached_wrappers_rec();
+        let rhs_val = with_heap(|h| h.get(rhs_key.key()).clone()).elide_cached_wrappers_rec();
         let combined = match (lhs_val, rhs_val) {
             (Value::List(lhs_inner), Value::List(rhs_inner)) => {
                 combine_lists(&lhs_inner, &rhs_inner, op)
@@ -385,7 +405,7 @@ fn apply_list_scalar(
     let mut elements = Vec::with_capacity(list.len());
 
     for (idx, key) in list.elements.iter().enumerate() {
-        let elem_value = with_heap(|h| h.get(key.key()).clone());
+        let elem_value = with_heap(|h| h.get(key.key()).clone()).elide_cached_wrappers_rec();
         let applied = match elem_value {
             Value::List(inner) => apply_list_scalar(&inner, scalar, op, scalar_on_lhs)
                 .map_err(|err| list_index_err(op.name(), idx, err))?,

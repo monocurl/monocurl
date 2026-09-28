@@ -120,7 +120,10 @@ fn test_image_relative_path_resolves_against_scene_file() {
         panic!("expected mesh value");
     };
     let expected = scene_path.parent().unwrap().join("textures/foo.png");
-    assert_eq!(mesh.uniform.img.as_ref(), Some(&expected));
+    assert_eq!(
+        mesh.uniform.img.as_ref(),
+        Some(&geo::mesh::TextureSource::File(expected))
+    );
     assert!(
         mesh.tris.iter().all(|tri| {
             tri.a.col == Float4::ONE && tri.b.col == Float4::ONE && tri.c.col == Float4::ONE
@@ -176,7 +179,10 @@ fn test_textured_relative_path_resolves_against_scene_file() {
         panic!("expected mesh value");
     };
     let expected = scene_path.parent().unwrap().join("textures/foo.png");
-    assert_eq!(mesh.uniform.img.as_ref(), Some(&expected));
+    assert_eq!(
+        mesh.uniform.img.as_ref(),
+        Some(&geo::mesh::TextureSource::File(expected))
+    );
 }
 
 #[test]

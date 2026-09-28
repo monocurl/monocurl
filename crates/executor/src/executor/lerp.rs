@@ -41,6 +41,17 @@ impl Executor {
             if Value::values_equal(&a, &b) {
                 return Ok(a);
             }
+            // a finished live call next to a plain value compares as its
+            // result; two live calls keep their arguments so they can blend
+            let a_live = matches!(a, Value::InvokedFunction(_) | Value::InvokedOperator(_));
+            let b_live = matches!(b, Value::InvokedFunction(_) | Value::InvokedOperator(_));
+            if a_live != b_live {
+                let a_plain = a.clone().elide_cached_wrappers_rec();
+                let b_plain = b.clone().elide_cached_wrappers_rec();
+                if Value::values_equal(&a_plain, &b_plain) {
+                    return Ok(a_plain);
+                }
+            }
 
             // a stateful value interpolates as the live call it currently stands for,
             // so its arguments blend instead of its two evaluated results

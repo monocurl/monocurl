@@ -138,7 +138,7 @@ fn sampled_surface_with_colour_callback() {
 fn int_and_float_results_keep_their_types() {
     check(
         "
-        let f = |x| [x * 2, x * 2.0, x / 2, x // 2, -x // 2, floor(x * 1.5), round(x / 3),
+        let f = |x| [x * 2, x * 2.0, x / 2, x // 2, -x // 2, -7 // 2, 7 // -2, x // -2, sign(x * 0.0), sign(-x * 0.0), floor(x * 1.5), round(x / 3),
                      min(x, 3), max(x, 2.5), abs(-x), sign(x - 2), mod(x, 3), mod(-x, 3),
                      mod(x * 0.5, 2), x ^ 2, 2 ^ x, x < 2, x <= 2, x == 2, x != 2.0,
                      not x, to_int(x * 1.7), to_float(x), trunc(-x * 0.7), ceil(x * 0.3)]
@@ -181,7 +181,8 @@ fn recursion_closures_and_defaults() {
         let scale = |k| |x| x * k
         let triple = scale(3)
         let with_default = |x, y = 10, z = 0.5| x + y * z
-        let f = |x| [fib(fib, 8), triple(x), with_default(x), with_default(x, 2), with_default(x, 2, 0.25)]
+        let f = |x| [fib(fib, 8), triple(x), with_default(x), with_default(x, 2), with_default(x, 2, 0.25),
+                     with_default(x) == x + 5, [with_default(x)] * 2, abs(with_default(x))]
         mesh w = ExplicitFunc(|x| f(x)[1] + f(x)[0], [0, 1, 65])
         mesh field = Field(|pos, idx| block { print f(pos[0]) }, [0, 1, 4], [0, 1, 1])
         print w
@@ -453,5 +454,17 @@ fn shader_pixels_come_from_the_kernel_tier() {
         print [plasma, flat]
         ",
         Expect::Kernels,
+    );
+}
+
+#[test]
+fn closures_created_inside_a_sampled_lambda_fall_back() {
+    check(
+        "
+        let scale = |k| |x| x * k
+        mesh w = ExplicitFunc(|x| scale(2)(x) + scale(x)(3), [0, 1, 17])
+        print w
+        ",
+        Expect::Fault,
     );
 }

@@ -101,7 +101,13 @@ impl Executor {
             return None;
         }
 
-        let lambda = match self.state.stack(stack_idx).peek().clone().elide_lvalue() {
+        let lambda = match self
+            .state
+            .stack(stack_idx)
+            .peek()
+            .clone()
+            .elide_cached_wrappers()
+        {
             Value::Lambda(lambda) if lambda.defaults.is_empty() => lambda,
             // type errors and default filling are reported by the general path
             _ => return None,
@@ -132,7 +138,7 @@ impl Executor {
     ) -> ExecSingle {
         let stack = self.state.stack_mut(stack_idx);
 
-        let lambda_val = stack.pop().elide_lvalue();
+        let lambda_val = stack.pop().elide_cached_wrappers();
         let lambda = match lambda_val {
             Value::Lambda(ref rc) => rc.clone(),
             _ => {

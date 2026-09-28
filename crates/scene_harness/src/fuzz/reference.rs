@@ -24,10 +24,8 @@ pub enum Val {
     Lambda(Rc<Closure>),
     /// the result of calling a lambda that has default parameters. such a
     /// result remembers its call, so `lerp` between two calls of the same
-    /// lambda interpolates their arguments; otherwise it is just the wrapped
-    /// value. the executor forgets to unwrap it in a few places
-    /// (FUZZ_FINDINGS.md #3), so the reference tracks where these flow and
-    /// rejects programs that hand one to an affected operation
+    /// lambda interpolates their arguments; everywhere else it is just the
+    /// wrapped value
     Live(Rc<LiveCall>),
 }
 
@@ -74,13 +72,6 @@ impl Val {
         }
     }
 
-    fn has_live(&self) -> bool {
-        match self {
-            Self::Live(_) => true,
-            Self::List(items) => items.iter().any(Val::has_live),
-            _ => false,
-        }
-    }
 }
 
 /// transcript rendering, mirroring what `print` shows
@@ -146,14 +137,6 @@ fn division_by_zero<T>() -> Eval<T> {
     error("division by zero")
 }
 
-const LIVE_FINDING: &str = "finding #3: live call result";
-
-fn no_live(value: &Val) -> Eval<()> {
-    match value.has_live() {
-        true => reject(LIVE_FINDING),
-        false => Ok(()),
-    }
-}
 
 /// evaluate `program`; `Err` carries the reason it was rejected
 pub fn evaluate(program: &Program) -> Result<Outcome, &'static str> {
@@ -310,8 +293,6 @@ impl Interpreter {
             },
             Expr::Binary(op @ (BinOp::Eq | BinOp::Ne), lhs, rhs) => {
                 let (lhs, rhs) = (self.eval(lhs)?, self.eval(rhs)?);
-                no_live(&lhs)?;
-                no_live(&rhs)?;
                 Val::Int(i64::from(equal(&lhs, &rhs) == (*op == BinOp::Eq)))
             }
             Expr::Binary(op, lhs, rhs) => {
@@ -359,9 +340,8 @@ impl Interpreter {
     }
 
     fn call(&mut self, callee: &Val, args: Vec<Val>) -> Eval<Val> {
-        let closure = match callee {
+        let closure = match callee.peel() {
             Val::Lambda(closure) => closure,
-            Val::Live(_) => return reject(LIVE_FINDING),
             other => {
                 return error(format!(
                     "type error: expected lambda, got {}",
@@ -440,9 +420,6 @@ impl Interpreter {
         if !Rc::ptr_eq(&closure.lambda, &b_closure.lambda) {
             return blend(a.peel(), b.peel(), t);
         }
-        if a_args.iter().chain(b_args).any(Val::has_live) {
-            return reject(LIVE_FINDING);
-        }
         if a_args.iter().zip(b_args).all(|(x, y)| equal(x, y)) {
             return Ok(a.clone());
         }
@@ -453,8 +430,9 @@ impl Interpreter {
             .collect::<Eval<Option<Vec<_>>>>()?
         {
             Some(args) => self.call(&Val::Lambda(closure.clone()), args),
-            // an argument that cannot be interpolated falls back to the results
-            None => blend(a.peel(), b.peel(), t),
+            // an argument that cannot be interpolated falls back to the
+            // results, which keep the equal-endpoints rule
+            None => lerp(a.peel(), b.peel(), t),
         }
     }
 }
@@ -497,19 +475,15 @@ fn native_call(native: Native, args: &[Val]) -> Eval<Val> {
         Native::Ln => Val::Float(float(0)?.ln()),
         Native::Sqrt => Val::Float(float(0)?.sqrt()),
         Native::Arctan2 => Val::Float(float(0)?.atan2(float(1)?)),
-        Native::Abs => match &args[0] {
+        Native::Abs => match args[0].peel() {
             Val::Int(n) => Val::Int(n.abs()),
             Val::Float(x) => Val::Float(x.abs()),
-            Val::Live(_) => return reject(LIVE_FINDING),
             other => return error(type_error("number", other, "x")),
         },
-        Native::Sign => match &args[0] {
+        Native::Sign => match args[0].peel() {
             Val::Int(n) => Val::Int(n.signum()),
-            // FUZZ_FINDINGS.md #2: the executor reports sign(0.0) as 1.0 (and
-            // sign(-0.0) as -1.0); the documented result is 0
-            Val::Float(x) if *x == 0.0 => return reject("finding #2: sign of zero"),
+            Val::Float(x) if *x == 0.0 => Val::Float(0.0),
             Val::Float(x) => Val::Float(x.signum()),
-            Val::Live(_) => return reject(LIVE_FINDING),
             other => return error(type_error("number", other, "x")),
         },
         Native::Floor => to_int(float(0)?.floor())?,
@@ -632,8 +606,6 @@ fn dot(u: &Val, v: &Val) -> Eval<Val> {
 fn lerp(a: &Val, b: &Val, t: f64) -> Eval<Val> {
     let (plain_a, plain_b) = (a.peel(), b.peel());
     if equal(plain_a, plain_b) {
-        no_live(a)?;
-        no_live(b)?;
         return Ok(plain_a.clone());
     }
     blend(plain_a, plain_b, t)
@@ -705,8 +677,7 @@ fn negate(value: &Val) -> Eval<Val> {
             items
                 .iter()
                 .enumerate()
-                .map(|(i, item)| match item {
-                    Val::Live(_) => reject(LIVE_FINDING),
+                .map(|(i, item)| match item.peel() {
                     Val::Lambda(_) => error(format!(
                         "cannot negate list element [{i}]: cannot negate lambda"
                     )),
@@ -736,12 +707,10 @@ fn binary(op: BinOp, lhs: &Val, rhs: &Val) -> Eval<Val> {
     Ok(value)
 }
 
-/// list elements are not unwrapped by the executor's elementwise operators
+/// a list element as the executor's elementwise operators read it: through
+/// any live-call wrapper
 fn element(value: &Val) -> Eval<&Val> {
-    match value {
-        Val::Live(_) => reject(LIVE_FINDING),
-        plain => Ok(plain),
-    }
+    Ok(value.peel())
 }
 
 fn binary_unchecked(op: BinOp, lhs: &Val, rhs: &Val) -> Eval<Val> {
@@ -784,12 +753,8 @@ fn binary_unchecked(op: BinOp, lhs: &Val, rhs: &Val) -> Eval<Val> {
             BinOp::Div if *b == 0 => return division_by_zero(),
             BinOp::Div => Float(*a as f64 / *b as f64),
             BinOp::IntDiv if *b == 0 => return division_by_zero(),
-            // FUZZ_FINDINGS.md #1: the executor truncates int // int towards
-            // zero while float // floors; skip the cases where the two differ
-            BinOp::IntDiv if a % b != 0 && (*a < 0) != (*b < 0) => {
-                return reject("finding #1: int floor division");
-            }
-            BinOp::IntDiv => Int(a / b),
+            // floor division, like the float form
+            BinOp::IntDiv => Int(a.div_euclid(*b) - i64::from(*b < 0 && a.rem_euclid(*b) != 0)),
             BinOp::Pow => Float((*a as f64).powf(*b as f64)),
             BinOp::Lt => Int(i64::from(a < b)),
             BinOp::Le => Int(i64::from(a <= b)),

@@ -483,13 +483,14 @@ fn test_live_function_structural_inequality() {
 }
 
 #[test]
-fn test_live_function_not_equal_to_primitive() {
-    // a live function invocation is structurally different from a plain integer
+fn test_live_function_equals_its_result() {
+    // a live function that has already run compares as the value it stands
+    // for, the same way printing or arithmetic reads it
     let r = run("
         let f = |x, y| x + y
-        let result = f(lhs: 8, rhs: 4) == 12
+        let result = [f(lhs: 8, rhs: 4) == 12, f(lhs: 8, rhs: 4) != 12, 12 == f(lhs: 8, rhs: 4)]
     ");
-    r.assert_int(0);
+    r.assert_int_list(&[1, 0, 1]);
 }
 
 #[test]
