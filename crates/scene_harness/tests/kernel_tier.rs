@@ -609,3 +609,24 @@ fn typed_division_by_zero_reaches_the_interpreter_error() {
         Expect::Fault,
     );
 }
+
+#[test]
+fn single_calls_keep_results_of_default_taking_helpers_live() {
+    // lerp of two live calls interpolates their arguments, so g(1) and g(3)
+    // must come back as the live f(1, 3) and f(3, 3), not as plain numbers
+    check(
+        "
+        let f = |x, k = 2| x * x * k
+        let g = |x| f(x, 3)
+        let h = |x| block {
+            var acc = 0
+            for (i in range(0, 4)) { acc = acc + i }
+            return f(x + acc, 1)
+        }
+        print lerp(g(1), g(3), 0.5)
+        print lerp(h(1), h(3), 0.5)
+        print g(2) * 2
+        ",
+        Expect::Any,
+    );
+}

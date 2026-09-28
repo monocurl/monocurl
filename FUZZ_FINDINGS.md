@@ -15,6 +15,8 @@ finding too.
 
 ## Open
 
+## Fixed
+
 5. A kernel single call drops the "live function" wrapper of a result it
    returns from a lambda with default parameters, so `lerp` of two such
    results interpolates the values instead of the arguments. Only
@@ -33,7 +35,10 @@ finding too.
    before the rejection). The reference rejects a `lerp` of call results that
    were returned out of another lambda.
 
-## Fixed
+   Fixed: the single-call path now declines when any closure the call can
+   reach fills default arguments, so such results stay in the interpreter
+   and keep their wrapper. The reference no longer rejects these programs.
+
 
 1. `//` on two ints truncated towards zero while the float form floors
    (`-7 // 2` gave `-3`). `ops.rs` now floors both, as does the kernel tier.

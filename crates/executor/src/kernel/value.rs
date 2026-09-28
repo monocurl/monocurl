@@ -61,6 +61,15 @@ impl ClosureArena {
         &self.closures[id.0 as usize]
     }
 
+    /// whether any placed closure fills default arguments; a call to one is
+    /// a live value in the interpreter, so a single call whose result may be
+    /// such a value must not run here
+    pub fn any_defaults(&self) -> bool {
+        self.closures
+            .iter()
+            .any(|closure| !closure.defaults.is_empty())
+    }
+
     pub fn clear(&mut self) {
         self.closures.clear();
     }

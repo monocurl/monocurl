@@ -248,6 +248,13 @@ impl Executor {
             tier.arena = arena;
             return None;
         };
+        // the interpreter keeps a call to a lambda with defaults as a live
+        // value whose arguments lerp; the machine would hand back its plain
+        // result, which the caller could tell apart
+        if converter.arena().any_defaults() {
+            tier.arena = arena;
+            return None;
+        }
         let args: Vec<KVal> = {
             let stack = self.state.stack(stack_idx);
             stack
