@@ -17,6 +17,7 @@
 pub mod compile;
 pub mod convert;
 pub mod ir;
+pub mod pool;
 pub mod run;
 pub mod value;
 
@@ -34,12 +35,14 @@ use crate::{
 };
 
 pub use self::ir::KernelIntrinsic;
+pub use self::convert::to_value as kernel_value_to_value;
+pub use self::value::KVal;
 use self::{
     compile::{LambdaShape, Reject},
     convert::Converter,
     ir::Kernel,
     run::{Fault, Vm},
-    value::{ClosureArena, ClosureId, KVal},
+    value::{ClosureArena, ClosureId},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -195,59 +198,77 @@ impl KernelTier {
     }
 }
 
-/// run every call in `args` against `closure`, serially at first and on
-/// worker threads once the batch has shown itself to be long. the first fault
-/// aborts the batch: the interpreter will find the same error. the flag says
-/// whether worker threads were used
+/// the calls of one batch: every argument list laid flat with a fixed stride,
+/// so a batch of thousands of calls is one allocation, shared with the workers
+struct BatchArgs {
+    values: Vec<KVal>,
+    arity: usize,
+}
+
+impl BatchArgs {
+    fn len(&self) -> usize {
+        if self.arity == 0 {
+            self.values.len()
+        } else {
+            self.values.len() / self.arity
+        }
+    }
+
+    fn call(&self, index: usize) -> &[KVal] {
+        &self.values[index * self.arity..(index + 1) * self.arity]
+    }
+}
+
+/// run the calls `range` of `args`, serially at first and on the worker pool
+/// once the batch has shown itself to be long. the first fault aborts the
+/// batch: the interpreter will find the same error. the flag says whether
+/// worker threads were used
 fn run_batch(
-    arena: &ClosureArena,
+    arena: &Arc<ClosureArena>,
     entry: ClosureId,
-    args: &[Box<[KVal]>],
+    args: &Arc<BatchArgs>,
+    range: std::ops::Range<usize>,
 ) -> Result<(Vec<KVal>, bool), Fault> {
-    let mut results = Vec::with_capacity(args.len());
+    let mut results = Vec::with_capacity(range.len());
     let mut vm = Vm::new();
 
-    let probe = args.len().min(PARALLEL_PROBE_CALLS);
+    let probe = range.start + range.len().min(PARALLEL_PROBE_CALLS);
     let started = Stopwatch::start();
-    for call in &args[..probe] {
-        results.push(vm.call(arena, entry, call)?);
+    for index in range.start..probe {
+        results.push(vm.call(arena, entry, args.call(index))?);
     }
-    let remaining = &args[probe..];
+    let remaining = probe..range.end;
     if remaining.is_empty() {
         return Ok((results, false));
     }
 
-    let projected = started.elapsed() * (args.len() / probe) as u32;
+    let projected = started.elapsed() * (range.len() / (probe - range.start)) as u32;
     let threads = worker_threads();
     if threads <= 1 || remaining.len() < PARALLEL_MIN_CALLS || projected < PARALLEL_MIN_PROJECTED
     {
-        for call in remaining {
-            results.push(vm.call(arena, entry, call)?);
+        for index in remaining {
+            results.push(vm.call(arena, entry, args.call(index))?);
         }
         return Ok((results, false));
     }
 
-    let chunk = remaining.len().div_ceil(threads);
-    let outcomes: Vec<Result<Vec<KVal>, Fault>> = std::thread::scope(|scope| {
-        let handles: Vec<_> = remaining
-            .chunks(chunk)
-            .map(|chunk| {
-                scope.spawn(move || {
-                    let mut vm = Vm::new();
-                    chunk
-                        .iter()
-                        .map(|call| vm.call(arena, entry, call))
-                        .collect()
-                })
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|handle| handle.join().expect("kernel worker panicked"))
-            .collect()
+    let pool = pool::pool(threads);
+    let chunks = pool.chunk_count();
+    let chunk_len = remaining.len().div_ceil(chunks);
+    let arena = Arc::clone(arena);
+    let args = Arc::clone(args);
+    let outcomes = pool.run(chunks, move |chunk| {
+        let start = remaining.start + chunk * chunk_len;
+        let end = (start + chunk_len).min(remaining.end);
+        let mut vm = Vm::new();
+        (start..end.max(start))
+            .map(|index| vm.call(&arena, entry, args.call(index)))
+            .collect::<Result<Vec<KVal>, Fault>>()
     });
     for outcome in outcomes {
-        results.extend(outcome?);
+        // a worker that never reported back has panicked; the interpreter
+        // owns this batch then
+        results.extend(outcome.ok_or(Fault::Type)??);
     }
     Ok((results, true))
 }
@@ -313,7 +334,9 @@ fn worker_threads() -> usize {
 }
 
 pub(crate) enum BatchOutcome {
-    Results(Vec<Value>),
+    /// one raw result per call; callers read what they need straight off the
+    /// kernel values and only go through the heap for shapes they do not know
+    Results(Vec<KVal>),
     /// the tier declined or faulted; the interpreter takes the batch
     Interpreter,
 }
@@ -341,27 +364,30 @@ impl Executor {
         let Some(entry) = converter.place(lambda) else {
             return BatchOutcome::Interpreter;
         };
-        let converted: Vec<Box<[KVal]>> = args
-            .iter()
-            .map(|call| {
-                let mut prepared: Vec<KVal> =
-                    call.as_ref().iter().map(|arg| converter.convert(arg)).collect();
-                // defaults are filled here so every call has the full arity
-                let defaults = arena_defaults(&converter, entry);
-                let missing = (lambda.total_args() - prepared.len()).min(defaults.len());
-                prepared.extend(defaults[defaults.len() - missing..].iter().cloned());
-                prepared.into_boxed_slice()
-            })
-            .collect();
+        let arity = lambda.total_args();
+        let mut values = Vec::with_capacity(args.len() * arity);
+        for call in args {
+            let provided = call.as_ref();
+            values.extend(provided.iter().map(|arg| converter.convert(arg)));
+            // defaults are filled here so every call has the full arity
+            let defaults = arena_defaults(&converter, entry);
+            let missing = (arity - provided.len()).min(defaults.len());
+            values.extend(defaults[defaults.len() - missing..].iter().cloned());
+        }
+        let arena = Arc::new(arena);
+        let batch = Arc::new(BatchArgs { values, arity });
+        let call_count = batch.len();
 
         tier.stats.batches += 1;
-        tier.stats.calls += converted.len();
+        tier.stats.calls += call_count;
         let mut was_parallel = false;
-        let mut results = Vec::with_capacity(converted.len());
-        let mut chunks = converted.chunks(CHUNK_CALLS).peekable();
-        while let Some(chunk) = chunks.next() {
+        let mut results = Vec::with_capacity(call_count);
+        let mut chunk_start = 0;
+        while chunk_start < call_count {
+            let chunk_end = (chunk_start + CHUNK_CALLS).min(call_count);
             let run_started = Stopwatch::start();
-            let outcome = run_batch(&arena, entry, chunk);
+            let outcome = run_batch(&arena, entry, &batch, chunk_start..chunk_end);
+            chunk_start = chunk_end;
             let run_elapsed = run_started.elapsed();
             let tier = &mut self.kernels;
             tier.stats.run_elapsed += run_elapsed;
@@ -376,7 +402,7 @@ impl Executor {
                     return BatchOutcome::Interpreter;
                 }
             }
-            if chunks.peek().is_some() && run_elapsed >= YIELD_AFTER {
+            if chunk_start < call_count && run_elapsed >= YIELD_AFTER {
                 structs::futures::yield_now().await;
             }
         }
@@ -384,16 +410,14 @@ impl Executor {
         if was_parallel {
             tier.stats.parallel_batches += 1;
         }
-
-        let values: Option<Vec<Value>> = results.iter().map(convert::to_value).collect();
         tier.stats.elapsed += started.elapsed();
-        match values {
-            Some(values) => BatchOutcome::Results(values),
-            None => {
-                tier.disabled.insert(lambda.ip);
-                BatchOutcome::Interpreter
-            }
-        }
+        BatchOutcome::Results(results)
+    }
+
+    /// a batch result the tier could not bring back onto the heap; the entry
+    /// point is handed to the interpreter for good
+    pub(crate) fn kernel_result_unconvertible(&mut self, lambda: &Lambda) {
+        self.kernels.disabled.insert(lambda.ip);
     }
 
     /// try to run one interpreted call of `lambda` (its `num_args` arguments

@@ -1021,11 +1021,15 @@ pub async fn op_point_map(
                         .iter()
                         .map(|pos| smallvec![point_value(*pos)])
                         .collect::<Vec<SmallVec<[Value; 2]>>>();
-                    let mapped = invoke_callable_many(executor, func, &args, "f")
-                        .await?
-                        .into_iter()
-                        .map(|value| float3_from_value(value, "f"))
-                        .collect::<Result<Vec<_>, _>>()?;
+                    let mapped = invoke_callable_many_mapped(
+                        executor,
+                        func,
+                        &args,
+                        "f",
+                        float3_from_kernel,
+                        |value| float3_from_value(value, "f"),
+                    )
+                    .await?;
                     let mesh = make_mesh_mut(arc);
                     let mut mapped_iter = mapped.into_iter();
                     for dot in &mut mesh.dots {
@@ -1122,11 +1126,15 @@ pub async fn op_color_map(
                         .iter()
                         .map(|pos| smallvec![point_value(*pos)])
                         .collect::<Vec<SmallVec<[Value; 2]>>>();
-                    let mapped = invoke_callable_many(executor, func, &args, "f")
-                        .await?
-                        .into_iter()
-                        .map(|value| float4_from_value(value, "f"))
-                        .collect::<Result<Vec<_>, _>>()?;
+                    let mapped = invoke_callable_many_mapped(
+                        executor,
+                        func,
+                        &args,
+                        "f",
+                        float4_from_kernel,
+                        |value| float4_from_value(value, "f"),
+                    )
+                    .await?;
                     let mesh = make_mesh_mut(arc);
                     let mut mapped_iter = mapped.into_iter();
                     for dot in &mut mesh.dots {
@@ -1213,11 +1221,15 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                         .iter()
                         .map(|pos| smallvec![point_value(*pos)])
                         .collect::<Vec<SmallVec<[Value; 2]>>>();
-                    let mapped = invoke_callable_many(executor, func, &args, "f")
-                        .await?
-                        .into_iter()
-                        .map(|value| float2_from_value(value, "f"))
-                        .collect::<Result<Vec<_>, _>>()?;
+                    let mapped = invoke_callable_many_mapped(
+                        executor,
+                        func,
+                        &args,
+                        "f",
+                        float2_from_kernel,
+                        |value| float2_from_value(value, "f"),
+                    )
+                    .await?;
                     let mesh = make_mesh_mut(arc);
                     let mut mapped_iter = mapped.into_iter();
                     for tri in &mut mesh.tris {

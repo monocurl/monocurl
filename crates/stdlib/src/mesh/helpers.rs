@@ -14,6 +14,7 @@ use executor::{
     error::ExecutorError,
     executor::Executor,
     heap::{VRc, with_heap},
+    kernel::KVal,
     value::{Value, container::List, lambda::Lambda},
 };
 use geo::{
@@ -1527,6 +1528,71 @@ pub(super) async fn invoke_callable(
         }
     };
     raw.elide_wrappers_rec(executor).await
+}
+
+/// `invoke_callable_many` for callers that reduce every result to a `T`; see
+/// `Executor::eagerly_invoke_lambda_many_mapped`
+pub(super) async fn invoke_callable_many_mapped<A, T>(
+    executor: &mut Executor,
+    callable: &Value,
+    args: &[A],
+    name: &'static str,
+    from_kernel: impl Fn(&KVal) -> Option<T>,
+    from_value: impl Fn(Value) -> Result<T, ExecutorError>,
+) -> Result<Vec<T>, ExecutorError>
+where
+    A: AsRef<[Value]>,
+{
+    let lambda = match callable.clone().elide_lvalue() {
+        Value::Lambda(lambda) => lambda,
+        Value::Operator(operator) => operator.0,
+        other => {
+            return Err(ExecutorError::type_error_for(
+                "lambda / operator",
+                other.type_name(),
+                name,
+            ));
+        }
+    };
+    executor
+        .eagerly_invoke_lambda_many_mapped(&lambda, args, None, from_kernel, from_value)
+        .await
+}
+
+fn kernel_f32(value: &KVal) -> Option<f32> {
+    match value {
+        KVal::Int(n) => Some(*n as f32),
+        KVal::Float(f) => Some(*f as f32),
+        _ => None,
+    }
+}
+
+fn kernel_components<const N: usize>(value: &KVal) -> Option<[f32; N]> {
+    let KVal::List(list) = value else { return None };
+    if list.len() != N {
+        return None;
+    }
+    let mut out = [0.0; N];
+    for (slot, element) in out.iter_mut().zip(list.iter()) {
+        *slot = kernel_f32(element)?;
+    }
+    Some(out)
+}
+
+pub(super) fn float2_from_kernel(value: &KVal) -> Option<Float2> {
+    kernel_components::<2>(value).map(Float2::from_array)
+}
+
+pub(super) fn float3_from_kernel(value: &KVal) -> Option<Float3> {
+    kernel_components::<3>(value).map(Float3::from_array)
+}
+
+pub(super) fn float4_from_kernel(value: &KVal) -> Option<Float4> {
+    kernel_components::<4>(value).map(Float4::from_array)
+}
+
+pub(super) fn f32_from_kernel(value: &KVal) -> Option<f32> {
+    kernel_f32(value)
 }
 
 pub(super) async fn invoke_callable_many<A>(

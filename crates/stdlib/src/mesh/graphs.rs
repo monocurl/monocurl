@@ -1,6 +1,8 @@
 
 use executor::executor::TextRenderQuality;
-use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
+use executor::{
+    error::ExecutorError, executor::Executor, heap::with_heap, kernel::KVal, value::Value,
+};
 use geo::{
     mesh::Mesh,
     mesh_build::{BoundaryEdges, SurfaceVertex},
@@ -136,6 +138,16 @@ fn segmented_open_polyline(points: &[Option<Float3>], normal: Float3) -> Vec<geo
 
 /// Read a scalar `y = f(x)` sample. `nil` or a non-finite number is a domain
 /// gap (`Ok(None)`); a wrong type is still an error.
+/// `explicit_sample_y` read straight off a kernel result
+fn explicit_sample_y_from_kernel(value: &KVal) -> Option<Option<f32>> {
+    match value {
+        KVal::Nil => Some(None),
+        KVal::Int(v) => Some(Some(*v as f32)),
+        KVal::Float(v) => Some(v.is_finite().then_some(*v as f32)),
+        _ => None,
+    }
+}
+
 fn explicit_sample_y(value: Value, name: &'static str) -> Result<Option<f32>, ExecutorError> {
     match value.elide_cached_wrappers_rec() {
         Value::Nil => Ok(None),
@@ -1922,11 +1934,20 @@ pub async fn mk_explicit(
         xs.push(x);
         args.push(smallvec![Value::Float(x)]);
     }
-    let values = invoke_callable_many(executor, &f, &args, "f").await?;
-    let mut points = Vec::with_capacity(samples);
-    for (x, value) in xs.into_iter().zip(values) {
-        points.push(explicit_sample_y(value, "f")?.map(|y| Float3::new(x as f32, y, 0.0)));
-    }
+    let ys = invoke_callable_many_mapped(
+        executor,
+        &f,
+        &args,
+        "f",
+        explicit_sample_y_from_kernel,
+        |value| explicit_sample_y(value, "f"),
+    )
+    .await?;
+    let points = xs
+        .into_iter()
+        .zip(ys)
+        .map(|(x, y)| y.map(|y| Float3::new(x as f32, y, 0.0)))
+        .collect::<Vec<_>>();
     Ok(mesh_from_parts(
         vec![],
         segmented_open_polyline(&points, Float3::Z),
@@ -1975,19 +1996,19 @@ pub async fn mk_explicit2d(
             args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
         }
     }
-    let values = invoke_callable_many(executor, &f, &args, "f").await?;
-    for ((ix, iy, x, y), value) in coords.into_iter().zip(values) {
-        let z = match value {
-            Value::Float(v) => v as f32,
-            Value::Integer(v) => v as f32,
-            other => {
-                return Err(ExecutorError::type_error_for(
-                    "float",
-                    other.type_name(),
-                    "f",
-                ));
-            }
-        };
+    let values = invoke_callable_many_mapped(executor, &f, &args, "f", f32_from_kernel, |value| {
+        match value {
+            Value::Float(v) => Ok(v as f32),
+            Value::Integer(v) => Ok(v as f32),
+            other => Err(ExecutorError::type_error_for(
+                "float",
+                other.type_name(),
+                "f",
+            )),
+        }
+    })
+    .await?;
+    for ((ix, iy, x, y), z) in coords.into_iter().zip(values) {
         grid[ix][iy] = Float3::new(x, y, z);
     }
     let index = |ix: usize, iy: usize| ix * (ny + 1) + iy;
@@ -2010,11 +2031,15 @@ pub async fn mk_explicit2d(
                 ]
             })
             .collect();
-        invoke_callable_many(executor, cb, &color_args, "color_at")
-            .await?
-            .into_iter()
-            .map(|v| float4_from_value(v, "color_at"))
-            .collect::<Result<_, _>>()?
+        invoke_callable_many_mapped(
+            executor,
+            cb,
+            &color_args,
+            "color_at",
+            float4_from_kernel,
+            |value| float4_from_value(value, "color_at"),
+        )
+        .await?
     } else {
         vec![Float4::new(0.0, 0.0, 0.0, 1.0); vertices.len()]
     };

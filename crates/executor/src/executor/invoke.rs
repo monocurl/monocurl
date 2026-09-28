@@ -21,7 +21,7 @@ use crate::{
 use smallvec::SmallVec;
 
 use super::{ExecSingle, Executor};
-use crate::kernel::{BatchOutcome, KernelMode, strictly_equal};
+use crate::kernel::{BatchOutcome, KVal, KernelMode, kernel_value_to_value, strictly_equal};
 
 impl Executor {
     #[inline]
@@ -650,6 +650,34 @@ impl Executor {
     where
         A: AsRef<[Value]> + 'a,
     {
+        self.eagerly_invoke_lambda_many_mapped(
+            lambda,
+            args,
+            trace_parent_idx,
+            kernel_value_to_value,
+            Ok,
+        )
+    }
+
+    /// `eagerly_invoke_lambda_many` for callers that immediately reduce each
+    /// result to some `T`: `from_kernel` reads it straight off a kernel value
+    /// (returning `None` for shapes it does not handle, which then take the
+    /// heap route), and `from_value` reads it from an interpreter value. this
+    /// spares sampled constructors a heap allocation per result
+    pub fn eagerly_invoke_lambda_many_mapped<'a, A, T, K, V>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        args: &'a [A],
+        trace_parent_idx: Option<usize>,
+        from_kernel: K,
+        from_value: V,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<T>, ExecutorError>> + 'a>>
+    where
+        A: AsRef<[Value]> + 'a,
+        T: 'a,
+        K: Fn(&KVal) -> Option<T> + 'a,
+        V: Fn(Value) -> Result<T, ExecutorError> + 'a,
+    {
         Box::pin(async move {
             if args.is_empty() {
                 return Ok(Vec::new());
@@ -664,9 +692,28 @@ impl Executor {
             if self.kernel_mode() != KernelMode::Verify
                 && let Some(results) = kernel_results
             {
+                let mut mapped = Vec::with_capacity(results.len());
+                for result in &results {
+                    let item = match from_kernel(result) {
+                        Some(item) => item,
+                        None => match kernel_value_to_value(result) {
+                            Some(value) => from_value(value)?,
+                            None => {
+                                self.kernel_result_unconvertible(lambda);
+                                return self
+                                    .interpret_lambda_many(lambda, args, trace_parent_idx)
+                                    .await?
+                                    .into_iter()
+                                    .map(&from_value)
+                                    .collect();
+                            }
+                        },
+                    };
+                    mapped.push(item);
+                }
                 self.state.last_stack_idx =
                     trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
-                return Ok(results);
+                return Ok(mapped);
             }
             let interpreted = self
                 .interpret_lambda_many(lambda, args, trace_parent_idx)
@@ -678,16 +725,20 @@ impl Executor {
                     )
                 });
                 for (index, (kernel, interpreter)) in results.iter().zip(interpreted).enumerate() {
+                    let kernel = kernel_value_to_value(kernel);
                     assert!(
-                        strictly_equal(kernel, interpreter),
+                        kernel.as_ref().is_some_and(|kernel| strictly_equal(kernel, interpreter)),
                         "kernel tier disagrees with the interpreter on call {index} of lambda at {:?}:\n  kernel:      {}\n  interpreter: {}",
                         lambda.ip,
-                        crate::transcript::stringify_for_transcript(kernel),
+                        kernel
+                            .as_ref()
+                            .map(crate::transcript::stringify_for_transcript)
+                            .unwrap_or_else(|| "<unconvertible>".to_string()),
                         crate::transcript::stringify_for_transcript(interpreter),
                     );
                 }
             }
-            interpreted
+            interpreted?.into_iter().map(&from_value).collect()
         })
     }
 

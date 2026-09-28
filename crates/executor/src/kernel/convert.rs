@@ -102,7 +102,7 @@ impl<'a> Converter<'a> {
 /// bring a kernel result back onto the heap. closures and opaque values have
 /// no faithful interpreter form here, so a result holding one is declined and
 /// the call is re-run by the interpreter
-pub(crate) fn to_value(value: &KVal) -> Option<Value> {
+pub fn to_value(value: &KVal) -> Option<Value> {
     Some(match value {
         KVal::Nil => Value::Nil,
         KVal::Int(n) => Value::Integer(*n),
