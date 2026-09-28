@@ -38,6 +38,10 @@ pub(super) const MAX_DEPTH: u32 = 512;
 /// this long belongs in the interpreter, where it yields cooperatively
 pub const CALL_OP_BUDGET: u64 = 1 << 26;
 
+/// a region's budget: a loop the interpreter would take seconds over is
+/// exactly what it is for, so it may run longer before giving up
+pub const REGION_OP_BUDGET: u64 = 1 << 29;
+
 /// ops between looks at the abort flag
 pub(super) const ABORT_CHECK_MASK: u64 = (1 << 16) - 1;
 
@@ -126,6 +130,25 @@ impl Vm {
             self.warm_entry = None;
         }
         result
+    }
+
+    /// run a region kernel over `frame`, the interpreted frame's stack laid
+    /// out as registers; the frame comes back with the region's writes
+    pub fn run_region(
+        &mut self,
+        arena: &ClosureArena,
+        region: ClosureId,
+        mut frame: Vec<KVal>,
+    ) -> Result<Vec<KVal>, Fault> {
+        let closure = arena.get(region);
+        frame.resize(closure.kernel.frame_size as usize, KVal::Nil);
+        self.regs = frame;
+        self.warm_entry = None;
+        self.budget = REGION_OP_BUDGET;
+        self.depth = 1;
+        let outcome = self.run(arena, closure, 0);
+        self.depth = 0;
+        outcome.map(|_| std::mem::take(&mut self.regs))
     }
 
     /// lay out a frame for `closure` at `base`, which must be the end of the
@@ -307,6 +330,7 @@ impl Vm {
                     let value = native(intrinsic, &self.regs[start..start + arg_count as usize])?;
                     reg!(arg_start) = value;
                 }
+                KOp::Exit => return Ok(KVal::Nil),
                 KOp::Return { src } => {
                     return Ok(if src < entry_end {
                         reg!(src).clone()

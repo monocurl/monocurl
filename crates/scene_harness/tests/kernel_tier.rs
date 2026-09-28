@@ -24,6 +24,7 @@ struct Outcome {
     kernel_calls: usize,
     single_calls: usize,
     typed_calls: usize,
+    regions: usize,
     faults: usize,
 }
 
@@ -43,6 +44,7 @@ fn run(body: &str, mode: KernelMode) -> Outcome {
         kernel_calls: run.kernel_stats.calls,
         single_calls: run.kernel_stats.single_calls,
         typed_calls: run.kernel_stats.typed_calls,
+        regions: run.kernel_stats.regions,
         faults: run.kernel_stats.faults,
     }
 }
@@ -54,6 +56,8 @@ enum Expect {
     Kernels,
     /// like `Kernels`, and the batch ran on the typed machine
     Typed,
+    /// at least one loop of an interpreted frame ran as a region kernel
+    Regions,
     /// at least one interpreted call ran as a kernel on its own
     SingleCalls,
     /// the tier runs and then hands the batch back
@@ -82,6 +86,12 @@ fn check(body: &str, expect: Expect) {
         Expect::Typed => {
             assert!(on.typed_calls > 0, "no typed kernel ran for:\n{body}");
             assert_eq!(on.faults, 0, "a kernel faulted for:\n{body}");
+        }
+        Expect::Regions => {
+            assert!(
+                on.regions > 0,
+                "no loop ran as a region kernel for:\n{body}"
+            );
         }
         Expect::SingleCalls => {
             assert!(
@@ -626,6 +636,126 @@ fn single_calls_keep_results_of_default_taking_helpers_live() {
         print lerp(g(1), g(3), 0.5)
         print lerp(h(1), h(3), 0.5)
         print g(2) * 2
+        ",
+        Expect::Any,
+    );
+}
+
+#[test]
+fn top_level_range_loops_run_as_regions() {
+    check(
+        "
+        var accumulator = 0.0
+        for (i in range(0, 5000)) {
+            accumulator = accumulator + i * 0.5 - 1.0
+        }
+        print accumulator
+        var total = 0
+        for (i in range(0, 5000)) {
+            total = total + i
+        }
+        print [total, accumulator]
+        ",
+        Expect::Regions,
+    );
+}
+
+#[test]
+fn while_and_list_loops_run_as_regions() {
+    check(
+        "
+        var t = 0
+        var i = 0
+        while (i < 300) {
+            t = t + i * i
+            i = i + 1
+        }
+        for (x in [1.5, 2, 3]) {
+            t = t + x
+        }
+        var points = []
+        for (k in range(0, 200)) {
+            points .= [cos(k * 0.1), sin(k * 0.1), 0]
+        }
+        print [t, i, len(points), points[199]]
+        ",
+        Expect::Regions,
+    );
+}
+
+#[test]
+fn nested_loops_over_lists_run_as_regions() {
+    check(
+        "
+        var chained = [1, 2, 3]
+        for (i in range(0, 300)) {
+            chained = (chained + [1, 1, 1]) * 0.5
+        }
+        var nested = []
+        for (i in range(0, 40)) {
+            var row = []
+            for (j in range(0, 30)) {
+                row .= i * j
+            }
+            nested .= row
+        }
+        print [round(chained[0] * 1000), len(nested), nested[39][29], sum(map(nested, sum))]
+        ",
+        Expect::Regions,
+    );
+}
+
+#[test]
+fn loops_touching_meshes_or_printing_stay_in_the_interpreter() {
+    check(
+        "
+        mesh dots = []
+        var count = 0
+        for (i in range(0, 5)) {
+            dots .= center{[i * 0.2, 0, 0]} Dot()
+            count = count + 1
+        }
+        for (i in range(0, 3)) {
+            print i
+        }
+        var acc = 0
+        for (i in range(0, 50)) {
+            acc = acc + 1 / (i - 25)
+        }
+        print [count, len(dots), acc]
+        ",
+        Expect::Any,
+    );
+}
+
+#[test]
+fn a_loop_that_errors_reports_the_interpreter_error() {
+    check(
+        "
+        var acc = 0
+        for (i in range(0, 50)) {
+            acc = acc + 1 / (i - 25)
+        }
+        print acc
+        ",
+        Expect::Any,
+    );
+}
+
+#[test]
+fn region_results_feed_lerps_and_later_code() {
+    check(
+        "
+        let f = |x, k = 2| x * k
+        var xs = []
+        for (i in range(0, 20)) {
+            xs .= f(i)
+        }
+        var s = 0
+        for (v in xs) {
+            s = s + v
+        }
+        print [s, lerp(f(1), f(3), 0.5)]
         ",
         Expect::Any,
     );

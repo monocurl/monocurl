@@ -780,6 +780,7 @@ fn transfer(
             ret = Some(read(&state, src)?);
             successors.clear();
         }
+        KOp::Exit => return None,
     }
     Some(Step {
         out: state,
@@ -1010,6 +1011,7 @@ fn emit(
                 }
             }
         }
+        KOp::Exit => return None,
         KOp::Return { src } => TOp::Return {
             src: opnd(state, src)?,
         },

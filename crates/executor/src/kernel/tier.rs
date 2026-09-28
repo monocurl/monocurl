@@ -8,18 +8,20 @@ use std::{
 };
 
 use rustc_hash::FxHashSet;
+use smallvec::SmallVec;
 
 use crate::{
     executor::{ExecSingle, Executor, NativeFunction},
+    heap::with_heap,
     value::{InstructionPointer, Value, lambda::Lambda},
 };
 
 use super::{
-    compile::{self, LambdaShape, Reject},
-    convert::{self, Converter},
+    compile::{self, LambdaShape, RegionShape, Reject},
+    convert::{self, Converter, to_value},
     ir::Kernel,
     run::Vm,
-    value::{ClosureArena, KVal},
+    value::{ClosureArena, KClosure, KVal},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +68,10 @@ pub(crate) struct KernelTier {
     /// bytecode will change before it is worth retrying, or the body touches
     /// something the tier does not model
     pub(super) disabled: FxHashSet<InstructionPointer>,
+    /// loop regions of interpreted frames, by section, the pc of the backward
+    /// jump that closes the loop, and the stack depth they were compiled for
+    regions: HashMap<(u16, u32, usize), Option<Arc<RegionKernel>>>,
+    disabled_regions: FxHashSet<(u16, u32, usize)>,
     /// the bytecode and natives kernels are compiled against; refreshed by the
     /// executor whenever they change
     sections: Vec<Arc<bytecode::SectionBytecode>>,
@@ -93,6 +99,9 @@ pub struct KernelStats {
     pub parallel_batches: usize,
     pub faults: usize,
     pub rejected_bodies: usize,
+    /// loops of interpreted frames that ran as a region kernel
+    pub regions: usize,
+    pub region_faults: usize,
     /// time spent in the tier, conversion included
     pub elapsed: Duration,
     /// the part of `elapsed` spent running kernels
@@ -124,6 +133,8 @@ impl KernelTier {
             lanes: env_switch("MONOCURL_KERNEL_LANES"),
             kernels: HashMap::new(),
             disabled: FxHashSet::default(),
+            regions: HashMap::new(),
+            disabled_regions: FxHashSet::default(),
             sections,
             natives,
             stats: KernelStats::default(),
@@ -137,6 +148,8 @@ impl KernelTier {
         self.sections = sections;
         self.kernels.clear();
         self.disabled.clear();
+        self.regions.clear();
+        self.disabled_regions.clear();
     }
 
     pub(crate) fn stats(&self) -> KernelStats {
@@ -195,6 +208,168 @@ impl KernelTier {
             has_reference_args: lambda.reference_args.iter().any(|reference| *reference),
         };
         compile::compile(section, &shape, &self.natives).map(|_| ())
+    }
+}
+
+/// a compiled loop region which stack positions it exchanges with the
+/// interpreted frame
+pub(super) struct RegionKernel {
+    kernel: Arc<Kernel>,
+    exit: u32,
+    touched: Vec<u16>,
+    written: Vec<u16>,
+}
+
+impl KernelTier {
+    fn region_for(&mut self, key: (u16, u32, usize), start: u32) -> Option<Arc<RegionKernel>> {
+        if let Some(cached) = self.regions.get(&key) {
+            return cached.clone();
+        }
+        let (section_index, jump_pc, entry_depth) = key;
+        let compiled = self
+            .sections
+            .get(section_index as usize)
+            .and_then(|section| {
+                let shape = RegionShape {
+                    section: section_index,
+                    start,
+                    end: jump_pc + 1,
+                    entry_depth,
+                };
+                let compiled = compile::compile_region(section, &shape, &self.natives);
+                if dump_kernels() {
+                    match &compiled {
+                        Ok(kernel) => {
+                            eprintln!(
+                                "region {:?}..{}: {} registers",
+                                kernel.ip, shape.end, kernel.frame_size
+                            );
+                            for (index, op) in kernel.ops.iter().enumerate() {
+                                eprintln!("  {index:4}  {op:?}");
+                            }
+                        }
+                        Err(reject) => {
+                            eprintln!("region ({section_index}, {start}): rejected, {reject:?}")
+                        }
+                    }
+                }
+                let kernel = compiled.ok()?;
+                let registers = compile::region_registers(&kernel, entry_depth);
+                Some(Arc::new(RegionKernel {
+                    kernel: Arc::new(kernel),
+                    exit: jump_pc + 1,
+                    touched: registers.touched,
+                    written: registers.written,
+                }))
+            });
+        self.regions.insert(key, compiled.clone());
+        compiled
+    }
+}
+
+/// whether a stack slot's value can be given to a region and, when written,
+/// taken back: leaders, references and stateful values have interpreter-side
+/// meaning a plain value would lose
+fn plain_slot(value: &Value) -> bool {
+    !matches!(
+        value,
+        Value::Leader(_) | Value::Lvalue(_) | Value::WeakLvalue(_) | Value::Stateful(_)
+    )
+}
+
+impl Executor {
+    /// run the loop closed by the backward jump at `jump_pc` (to `start`) as a
+    /// kernel over the frame's stack. on success the stack holds the loop's
+    /// results and the head is at the loop's exit; otherwise nothing changed
+    /// and the interpreter runs the loop itself
+    pub(crate) fn try_region(
+        &mut self,
+        stack_idx: usize,
+        section_idx: usize,
+        jump_pc: u32,
+        start: u32,
+    ) -> bool {
+        let tier = &mut self.kernels;
+        if tier.mode != KernelMode::On {
+            return false;
+        }
+        let depth = self.state.stack(stack_idx).var_stack.len();
+        let key = (section_idx as u16, jump_pc, depth);
+        if tier.disabled_regions.contains(&key) {
+            return false;
+        }
+        let Some(region) = tier.region_for(key, start) else {
+            return false;
+        };
+
+        let mut arena = std::mem::take(&mut tier.arena);
+        arena.clear();
+        let mut frame = vec![KVal::Nil; depth];
+        let mut lvalues: SmallVec<[(u16, crate::heap::HeapKey); 8]> = SmallVec::new();
+        let mut converter = Converter::new(tier, &mut arena);
+        let stack = &self.state.stack(stack_idx).var_stack;
+        for &reg in &region.touched {
+            let slot = &stack[reg as usize];
+            let writes = region.written.contains(&reg);
+            match slot {
+                Value::Lvalue(reference) => {
+                    let inner = with_heap(|heap| heap.get(reference.key()).clone());
+                    if writes && !plain_slot(&inner) {
+                        self.kernels.arena = arena;
+                        return false;
+                    }
+                    frame[reg as usize] = converter.convert(&inner);
+                    lvalues.push((reg, reference.key()));
+                }
+                other => {
+                    if writes && !plain_slot(other) {
+                        self.kernels.arena = arena;
+                        return false;
+                    }
+                    frame[reg as usize] = converter.convert(other);
+                }
+            }
+        }
+        let entry = arena.push(KClosure {
+            ip: region.kernel.ip,
+            kernel: Arc::clone(&region.kernel),
+            captures: Box::new([]),
+            defaults: Box::new([]),
+        });
+
+        let tier = &mut self.kernels;
+        let outcome = tier.vm.run_region(&arena, entry, frame);
+        tier.arena = arena;
+        let results = match outcome {
+            Ok(frame) => frame,
+            Err(_) => {
+                tier.stats.region_faults += 1;
+                tier.disabled_regions.insert(key);
+                return false;
+            }
+        };
+        // every written slot must come back onto the heap, or none does and
+        // the interpreter runs the loop from the state it left
+        let Some(values) = region
+            .written
+            .iter()
+            .map(|&reg| to_value(&results[reg as usize]).map(|value| (reg, value)))
+            .collect::<Option<Vec<_>>>()
+        else {
+            tier.stats.region_faults += 1;
+            tier.disabled_regions.insert(key);
+            return false;
+        };
+        tier.stats.regions += 1;
+        let stack = self.state.stack_mut(stack_idx);
+        for (reg, value) in values {
+            match lvalues.iter().find(|(written, _)| *written == reg) {
+                Some(&(_, key)) => crate::heap::heap_replace(key, value),
+                None => stack.var_stack[reg as usize] = value,
+            }
+        }
+        stack.ip = (section_idx as u16, region.exit);
+        true
     }
 }
 

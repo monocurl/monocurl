@@ -73,17 +73,30 @@ impl<'a> Converter<'a> {
             Value::Nil => KVal::Nil,
             Value::Integer(n) => KVal::Int(*n),
             Value::Float(f) => KVal::Float(*f),
+            // elements are cloned out before converting them: converting a
+            // live wrapper materialises it, which allocates on the heap, and
+            // the heap cannot be borrowed while that happens
             Value::List(list) => {
-                let elements = list
-                    .elements()
-                    .iter()
-                    .map(|key| with_heap(|heap| self.convert(&heap.get(key.key()))))
-                    .collect();
-                KVal::List(Arc::new(elements))
+                let elements: Vec<Value> = with_heap(|heap| {
+                    list.elements()
+                        .iter()
+                        .map(|key| heap.get(key.key()).clone())
+                        .collect()
+                });
+                KVal::List(Arc::new(
+                    elements
+                        .iter()
+                        .map(|element| self.convert(element))
+                        .collect(),
+                ))
             }
-            Value::Lvalue(reference) => with_heap(|heap| self.convert(&heap.get(reference.key()))),
+            Value::Lvalue(reference) => {
+                let inner = with_heap(|heap| heap.get(reference.key()).clone());
+                self.convert(&inner)
+            }
             Value::WeakLvalue(reference) => {
-                with_heap(|heap| self.convert(&heap.get(reference.key())))
+                let inner = with_heap(|heap| heap.get(reference.key()).clone());
+                self.convert(&inner)
             }
             Value::Lambda(lambda) => self.place(lambda).map_or(KVal::Opaque, KVal::Closure),
             Value::InvokedFunction(_) | Value::InvokedOperator(_) => {

@@ -47,6 +47,21 @@ pub struct LambdaShape {
     pub has_reference_args: bool,
 }
 
+/// a loop of an interpreted frame: the instructions from the loop head to
+/// the backward jump that closes it, over a stack `entry_depth` deep
+pub struct RegionShape {
+    pub section: u16,
+    pub start: u32,
+    pub end: u32,
+    pub entry_depth: usize,
+}
+
+/// the registers a region touches below its entry depth, and those it writes
+pub struct RegionRegisters {
+    pub touched: Vec<Reg>,
+    pub written: Vec<Reg>,
+}
+
 /// what an abstract stack position holds: a value in its own register, or a
 /// reference the compiler pushed to write through to another register
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,6 +104,9 @@ struct Translator<'a> {
     exits: Vec<usize>,
     /// inline blocks compiled during dataflow, by the pc of their `MakeLambda`
     inlined: std::collections::HashMap<u32, InlinedBlock>,
+    /// a region: a jump to `end` leaves the kernel rather than being out of
+    /// bounds
+    allow_exit_jumps: bool,
     /// one past the highest register any op of this body or its blocks touches
     max_register: usize,
 }
@@ -129,6 +147,71 @@ pub fn compile(
     })
 }
 
+/// translate a loop region of an interpreted frame. registers are the frame's
+/// stack positions, so the caller lays the stack out as the entry frame and
+/// reads the written registers back when the region exits
+pub fn compile_region(
+    section: &SectionBytecode,
+    shape: &RegionShape,
+    natives: &[NativeFunction],
+) -> Result<Kernel, Reject> {
+    let mut translator = Translator::new(
+        section,
+        natives,
+        shape.section,
+        shape.start,
+        shape.end,
+        0,
+        None,
+    );
+    translator.allow_exit_jumps = true;
+    translator.dataflow(vec![Slot::Val; shape.entry_depth])?;
+    translator.emit()?;
+
+    let exit = translator.ops.len() as u32;
+    for index in std::mem::take(&mut translator.exits) {
+        set_jump_target(&mut translator.ops[index], exit);
+    }
+    translator.ops.push(KOp::Exit);
+    let frame_size =
+        Reg::try_from(translator.max_register).map_err(|_| Reject::TooManyRegisters)?;
+
+    Ok(Kernel {
+        ip: (shape.section, shape.start),
+        required_args: 0,
+        total_args: 0,
+        capture_count: 0,
+        frame_size,
+        ops: translator.ops.into_boxed_slice(),
+    })
+}
+
+/// which of the first `entry_depth` registers a region reads or writes
+pub fn region_registers(kernel: &Kernel, entry_depth: usize) -> RegionRegisters {
+    let mut touched = Vec::new();
+    let mut written = Vec::new();
+    for reg in 0..entry_depth as Reg {
+        let writes = kernel.ops.iter().any(|op| writes_register(op, reg));
+        if writes {
+            written.push(reg);
+        }
+        if writes || kernel.ops.iter().any(|op| reads_register(op, reg)) {
+            touched.push(reg);
+        }
+    }
+    RegionRegisters { touched, written }
+}
+
+fn set_jump_target(op: &mut KOp, target: u32) {
+    match op {
+        KOp::Jump { to }
+        | KOp::JumpIf { to, .. }
+        | KOp::JumpIfNot { to, .. }
+        | KOp::RangeTest { to, .. } => *to = target,
+        other => unreachable!("{other:?} carries no jump target"),
+    }
+}
+
 /// the instruction range of the body starting at `ip`: the compiler places a
 /// jump over every closure body just before it
 fn body_bounds(section: &SectionBytecode, ip: InstructionPointer) -> Result<(u32, u32), Reject> {
@@ -150,8 +233,11 @@ enum Flow {
     Jump(u32),
     Branch(u32),
     Stop,
-    /// a block's `return`: the last emitted op jumps to the block's end
+    /// a block's `return` or a region's exit jump: the last emitted op jumps
+    /// to the end
     BlockExit,
+    /// a branch whose taken edge leaves the region; the fallthrough continues
+    BranchExit,
 }
 
 impl<'a> Translator<'a> {
@@ -183,6 +269,7 @@ impl<'a> Translator<'a> {
             result,
             exits: Vec::new(),
             inlined: std::collections::HashMap::new(),
+            allow_exit_jumps: false,
             max_register: base as usize,
         }
     }
@@ -216,7 +303,7 @@ impl<'a> Translator<'a> {
                 _ => pc + 1,
             };
             match flow {
-                Flow::Next | Flow::SkipNext => successors.push(fallthrough),
+                Flow::Next | Flow::SkipNext | Flow::BranchExit => successors.push(fallthrough),
                 Flow::Jump(to) => successors.push(to),
                 Flow::Branch(to) => {
                     successors.push(fallthrough);
@@ -284,7 +371,7 @@ impl<'a> Translator<'a> {
                     op_index: self.ops.len() - 1,
                     target_pc: to,
                 }),
-                Flow::BlockExit => self.exits.push(self.ops.len() - 1),
+                Flow::BlockExit | Flow::BranchExit => self.exits.push(self.ops.len() - 1),
                 Flow::Next | Flow::SkipNext | Flow::Stop => {}
             }
         }
@@ -520,6 +607,10 @@ impl<'a> Translator<'a> {
             }
             Ok(to)
         };
+        // a jump to the end of a region leaves it; the target is patched in
+        // once the exit op exists
+        let exits = self.allow_exit_jumps;
+        let leaves = move |to: u32, section: u16| exits && section == own_section && to == end;
 
         match instr {
             Instruction::PushNil => {
@@ -646,26 +737,43 @@ impl<'a> Translator<'a> {
             }
 
             Instruction::Jump { section, to } => {
+                if leaves(to, section) {
+                    out.push(KOp::Jump { to: u32::MAX });
+                    return Ok(Flow::BlockExit);
+                }
                 let to = jump_within(to, section)?;
                 out.push(KOp::Jump { to });
                 return Ok(Flow::Jump(to));
             }
             Instruction::ConditionalJump { section, to } => {
-                let to = jump_within(to, section)?;
                 let cond = self.resolve(stack, Self::position(stack, -1)?);
                 Self::pop(stack, 1)?;
+                if leaves(to, section) {
+                    out.push(KOp::JumpIf { cond, to: u32::MAX });
+                    return Ok(Flow::BranchExit);
+                }
+                let to = jump_within(to, section)?;
                 out.push(KOp::JumpIf { cond, to });
                 return Ok(Flow::Branch(to));
             }
             Instruction::JumpIfFalse { section, to } => {
-                let to = jump_within(to, section)?;
                 let cond = self.resolve(stack, Self::position(stack, -1)?);
                 Self::pop(stack, 1)?;
+                if leaves(to, section) {
+                    out.push(KOp::JumpIfNot { cond, to: u32::MAX });
+                    return Ok(Flow::BranchExit);
+                }
+                let to = jump_within(to, section)?;
                 out.push(KOp::JumpIfNot { cond, to });
                 return Ok(Flow::Branch(to));
             }
             Instruction::RangeLoopTest { current_delta, to } => {
-                let to = jump_within(to, own_section)?;
+                let exit = leaves(to, own_section);
+                let to = if exit {
+                    u32::MAX
+                } else {
+                    jump_within(to, own_section)?
+                };
                 let current = Self::position(stack, i32::from(current_delta))?;
                 if current + 1 >= stack.len()
                     || stack[current] != Slot::Val
@@ -677,7 +785,11 @@ impl<'a> Translator<'a> {
                     current: self.abs(current),
                     to,
                 });
-                return Ok(Flow::Branch(to));
+                return Ok(if exit {
+                    Flow::BranchExit
+                } else {
+                    Flow::Branch(to)
+                });
             }
             Instruction::Return { .. } => {
                 let src = self.resolve(stack, Self::position(stack, -1)?);
@@ -685,6 +797,11 @@ impl<'a> Translator<'a> {
                     out.push(KOp::Move { dst: result, src });
                     out.push(KOp::Jump { to: u32::MAX });
                     return Ok(Flow::BlockExit);
+                }
+                // a region has no frame to return from: the loop's function
+                // does, and only the interpreter can leave it
+                if self.allow_exit_jumps {
+                    return Err(Reject::Unsupported("return in region"));
                 }
                 out.push(KOp::Return { src });
                 return Ok(Flow::Stop);
@@ -881,6 +998,7 @@ fn is_control_flow(op: &KOp) -> bool {
             | KOp::JumpIfNot { .. }
             | KOp::RangeTest { .. }
             | KOp::Return { .. }
+            | KOp::Exit
     )
 }
 
@@ -914,7 +1032,8 @@ fn writes_register(op: &KOp, reg: Reg) -> bool {
         | KOp::JumpIf { .. }
         | KOp::JumpIfNot { .. }
         | KOp::RangeTest { .. }
-        | KOp::Return { .. } => false,
+        | KOp::Return { .. }
+        | KOp::Exit => false,
     }
 }
 
@@ -943,6 +1062,7 @@ fn reads_register(op: &KOp, reg: Reg) -> bool {
             ..
         } => (arg_start..arg_start + arg_count).contains(&reg),
         KOp::Return { src } => src == reg,
+        KOp::Exit => false,
     }
 }
 
@@ -970,6 +1090,7 @@ fn op_dst(op: &KOp) -> Option<Reg> {
         KOp::Inc { .. }
         | KOp::RangeTest { .. }
         | KOp::Jump { .. }
+        | KOp::Exit
         | KOp::Call { .. }
         | KOp::Native { .. } => None,
     }

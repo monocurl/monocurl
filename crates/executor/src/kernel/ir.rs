@@ -156,6 +156,8 @@ pub enum KOp {
     Return {
         src: Reg,
     },
+    /// the end of a region kernel: the frame is the result
+    Exit,
 }
 
 #[derive(Debug)]

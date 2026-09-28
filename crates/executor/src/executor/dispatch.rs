@@ -303,6 +303,15 @@ impl Executor {
             }
 
             Instruction::Jump { section, to } => {
+                // a backward jump closes a loop; the rest of the loop may run
+                // as one kernel over this frame
+                let jump_pc = self.state.stack(stack_idx).ip.1 - 1;
+                if section as usize == section_idx
+                    && to <= jump_pc
+                    && self.try_region(stack_idx, section_idx, jump_pc, to)
+                {
+                    return Some(ExecSingle::Continue);
+                }
                 self.state.stack_mut(stack_idx).ip = (section, to);
             }
             Instruction::ConditionalJump { section, to } => {
