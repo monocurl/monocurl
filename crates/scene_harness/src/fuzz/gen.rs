@@ -9,7 +9,7 @@
 
 use std::rc::Rc;
 
-use super::{BinOp, Body, Expr, Lambda, Native, Param, Program, Stmt, reference};
+use super::{BinOp, Body, Expr, Lambda, Native, Param, Program, Stmt, expr_source, reference};
 
 const MAX_ATTEMPTS: u64 = 2_000;
 
@@ -73,11 +73,23 @@ pub struct Generated {
 /// the program for `seed` and its reference outcome. one seed in five asks for
 /// a program that ends in a runtime error, which both sides must then agree on
 pub fn generate(seed: u64) -> Generated {
-    let expects_error = seed % 5 == 4;
+    generate_with(seed, false)
+}
+
+/// like `generate`, but the program ends by sampling its lambdas through
+/// batch constructors, and never asks for an error: a fault would stop the
+/// program before its batches
+pub fn generate_batches(seed: u64) -> Generated {
+    generate_with(seed, true)
+}
+
+fn generate_with(seed: u64, batches: bool) -> Generated {
+    let expects_error = !batches && seed % 5 == 4;
     let mut discarded = Vec::new();
     for attempt in 0..MAX_ATTEMPTS {
-        let mut rng = Rng::new(seed.wrapping_mul(0x1000_0000_01B3) ^ attempt);
-        let program = Generator::new(&mut rng, expects_error).program();
+        let mut rng =
+            Rng::new(seed.wrapping_mul(0x1000_0000_01B3) ^ attempt ^ (u64::from(batches) << 40));
+        let program = Generator::new(&mut rng, expects_error, batches).program();
         match reference::evaluate(&program) {
             Ok(expected) if expected.error.is_some() == expects_error => {
                 return Generated {
@@ -149,10 +161,12 @@ struct Generator<'a> {
     names: usize,
     /// statements left before the deliberate fault, in error mode
     fault_in: Option<usize>,
+    /// end with a batch section
+    batches: bool,
 }
 
 impl<'a> Generator<'a> {
-    fn new(rng: &'a mut Rng, expects_error: bool) -> Self {
+    fn new(rng: &'a mut Rng, expects_error: bool, batches: bool) -> Self {
         let fault_in = expects_error.then(|| rng.below(14));
         Self {
             rng,
@@ -162,16 +176,27 @@ impl<'a> Generator<'a> {
             loops: 0,
             names: 0,
             fault_in,
+            batches,
         }
     }
 
     fn program(mut self) -> Program {
         let count = 4 + self.rng.below(9);
         let mut stmts = self.stmts(count);
+        let mut batches = Vec::new();
+        if self.batches {
+            let samplers = 1 + self.rng.below(3);
+            for _ in 0..samplers {
+                let (setup, lines) = self.batch();
+                stmts.extend(setup);
+                batches.extend(lines);
+            }
+        }
         stmts.extend(self.final_prints());
         Program {
             stmts,
             expects_error: self.fault_in.is_some(),
+            batches,
         }
     }
 
@@ -244,6 +269,9 @@ impl<'a> Generator<'a> {
 
         let top_level = self.floors.is_empty();
         let nesting = self.loops + self.floors.len();
+        // a lambda created inside a lambda keeps the kernel tier out, so batch
+        // mode makes them rare there
+        let closures = if self.batches && !top_level { 4 } else { 1 };
         let accumulators = self.assignable(|ty| matches!(ty, Ty::Num(_))).len();
         let lists = self.assignable(|ty| matches!(ty, Ty::Seq)).len();
         let vectors = self
@@ -251,18 +279,26 @@ impl<'a> Generator<'a> {
             .len();
 
         let weights = [
-            14,                                        // let value
-            10,                                        // var
-            if self.floors.len() < 2 { 8 } else { 0 }, // let lambda
-            if self.floors.len() < 2 { 3 } else { 0 }, // recursive lambda
-            if accumulators > 0 { 14 } else { 0 },     // accumulate
-            if lists > 0 { 6 } else { 0 },             // append
-            if vectors > 0 { 4 } else { 0 },           // indexed store
-            if nesting < 3 { 8 } else { 0 },           // if
-            if nesting < 3 { 5 } else { 0 },           // while
-            if nesting < 3 { 7 } else { 0 },           // for range
-            if nesting < 3 { 5 } else { 0 },           // for in
-            if top_level { 7 } else { 0 },             // print
+            14, // let value
+            10, // var
+            if self.floors.len() < 2 {
+                8 / closures
+            } else {
+                0
+            }, // let lambda
+            if self.floors.len() < 2 {
+                3 / closures
+            } else {
+                0
+            }, // recursive lambda
+            if accumulators > 0 { 14 } else { 0 }, // accumulate
+            if lists > 0 { 6 } else { 0 }, // append
+            if vectors > 0 { 4 } else { 0 }, // indexed store
+            if nesting < 3 { 8 } else { 0 }, // if
+            if nesting < 3 { 5 } else { 0 }, // while
+            if nesting < 3 { 7 } else { 0 }, // for range
+            if nesting < 3 { 5 } else { 0 }, // for in
+            if top_level { 7 } else { 0 }, // print
         ];
         match self.rng.weighted(&weights) {
             0 => {
@@ -313,6 +349,14 @@ impl<'a> Generator<'a> {
             10 => vec![self.for_in()],
             _ => vec![Stmt::Print(self.printable())],
         }
+    }
+
+    /// in batch mode, whether to steer away from a native the kernel tier
+    /// does not model (`lerp`, `range` as a value) inside a lambda. usually
+    /// yes, so most sampled bodies compile, but not always, so the fallback
+    /// stays covered
+    fn kernel_hostile(&mut self) -> bool {
+        self.batches && !self.floors.is_empty() && self.rng.chance(80)
     }
 
     fn value_ty(&mut self) -> Ty {
@@ -549,6 +593,247 @@ impl<'a> Generator<'a> {
             prints.push(Stmt::Print(call));
         }
         prints
+    }
+
+    // ---- batch constructors ----
+
+    /// one sampler: a `let` binding the sampled lambda and prints of it at
+    /// points the constructor also samples (both checked by the reference),
+    /// and the source lines that run it as a batch
+    fn batch(&mut self) -> (Vec<Stmt>, Vec<String>) {
+        let kind = *self.rng.pick(&Sampling::ALL);
+        let (params, ret) = kind.shape();
+        let targets: Vec<(Rc<str>, Rc<Sig>)> = self
+            .visible()
+            .filter_map(|binding| match &binding.ty {
+                Ty::Func(sig) => Some((binding.name.clone(), sig.clone())),
+                _ => None,
+            })
+            .collect();
+        let target =
+            (!targets.is_empty() && self.rng.chance(85)).then(|| self.rng.pick(&targets).clone());
+        let sampler = self.sampler(&params, &ret, target);
+
+        let name = self.name("w");
+        let mut setup = vec![Stmt::Let(name.clone(), sampler.clone())];
+        self.bind(
+            name.clone(),
+            Ty::Func(Rc::new(Sig {
+                params: params.clone(),
+                required: params.len(),
+                ret: ret.clone(),
+                recursive: None,
+            })),
+            false,
+        );
+        let domain = kind.domain(self.rng);
+        for _ in 0..1 + self.rng.below(2) {
+            let args = domain.probe(self.rng);
+            setup.push(Stmt::Print(Expr::Call(
+                Box::new(Expr::Name(name.clone())),
+                args,
+            )));
+        }
+
+        // an expression body can stand inline in the constructor call
+        let inline =
+            matches!(&sampler, Expr::Lambda(lambda) if matches!(lambda.body, Body::Expr(_)));
+        let callee = if inline && self.rng.chance(40) {
+            expr_source(&sampler)
+        } else {
+            name.to_string()
+        };
+        let mesh = self.name("g");
+        let mut lines = vec![format!(
+            "mesh {mesh} = {}",
+            domain.constructor(&callee, self.rng)
+        )];
+        lines.push(format!("print {mesh}"));
+        // colours only reach the transcript through verify mode, but geometry
+        // can be read back
+        match &domain {
+            Domain::Line { .. } | Domain::Grid { colored: false, .. } | Domain::Points { .. } => {
+                lines.push(format!(
+                    "print [mesh_center({mesh}), mesh_width({mesh}), mesh_height({mesh})]"
+                ));
+            }
+            _ => {}
+        }
+        if let Domain::Points { grid: false, .. } = domain {
+            lines.push(format!("print mesh_vertex_set({mesh})"));
+        }
+        // a field prints each sample through the interpreter, whose calls the
+        // tier may take one at a time
+        if let (Domain::Line { lo, hi, .. }, true) = (&domain, self.rng.chance(30)) {
+            let field = self.name("g");
+            lines.push(format!(
+                "mesh {field} = Field(|pos, idx| block {{ print {name}(pos[0]) }}, [{lo}, {hi}, 5], [0, 1, 1])"
+            ));
+        }
+        (setup, lines)
+    }
+
+    /// a lambda over the constructor's sample arguments, usually built around
+    /// a call to `target` so the batch reaches the program's own lambdas
+    fn sampler(&mut self, params: &[Ty], ret: &Ty, target: Option<(Rc<str>, Rc<Sig>)>) -> Expr {
+        let mark = self.bindings.len();
+        self.floors.push(mark);
+        self.returns.push(ret.clone());
+        let saved_loops = std::mem::take(&mut self.loops);
+
+        let params: Vec<Param> = params
+            .iter()
+            .map(|ty| {
+                let name = self.name("s");
+                self.bind(name.clone(), ty.clone(), false);
+                Param {
+                    name,
+                    default: None,
+                }
+            })
+            .collect();
+        let block = self.rng.chance(50);
+        let mut stmts = if block {
+            let count = 1 + self.rng.below(3);
+            self.stmts(count)
+        } else {
+            Vec::new()
+        };
+        let core = target.map(|(name, sig)| self.focused_call(&name, &sig));
+        let value = self.sample_value(ret, core);
+        let body = if block {
+            stmts.push(Stmt::Return(value));
+            Body::Block(stmts)
+        } else {
+            Body::Expr(value)
+        };
+
+        self.loops = saved_loops;
+        self.returns.pop();
+        self.floors.pop();
+        self.bindings.truncate(mark);
+        Expr::Lambda(Rc::new(Lambda { params, body }))
+    }
+
+    /// the sample arguments as scalars: float params and the components of
+    /// list params
+    fn sample_scalars(&self) -> Vec<Expr> {
+        self.bindings[self.floor()..]
+            .iter()
+            .filter(|binding| binding.name.starts_with('s'))
+            .flat_map(|binding| match binding.ty {
+                Ty::Vec(n) => (0..n)
+                    .map(|i| {
+                        Expr::Index(
+                            Box::new(Expr::Name(binding.name.clone())),
+                            Box::new(Expr::Int(i as i64)),
+                        )
+                    })
+                    .collect(),
+                _ => vec![Expr::Name(binding.name.clone())],
+            })
+            .collect()
+    }
+
+    /// a number (or a list of numbers) that depends on the sample arguments
+    fn sample_arg(&mut self, ty: &Ty) -> Expr {
+        let scalars = self.sample_scalars();
+        let scalar = |this: &mut Self| this.rng.pick(&scalars).clone();
+        match ty {
+            Ty::Num(Num::Int) => match self.rng.below(4) {
+                0 => self.literal(Num::Int),
+                1 | 2 => {
+                    let scaled = binary(BinOp::Mul, scalar(self), Expr::Int(self.rng.int(1, 4)));
+                    let native = *self.rng.pick(&[Native::Floor, Native::Round, Native::Ceil]);
+                    Expr::Native(native, vec![scaled])
+                }
+                _ => self.num(Num::Int, 1),
+            },
+            Ty::Num(_) => match self.rng.below(7) {
+                0..=2 => scalar(self),
+                3 => {
+                    let op = *self.rng.pick(&[BinOp::Mul, BinOp::Add, BinOp::Sub]);
+                    binary(op, scalar(self), self.literal(Num::Any))
+                }
+                4 => self.literal(Num::Any),
+                _ => self.num(Num::Any, 1),
+            },
+            Ty::Vec(n) if self.rng.chance(60) => {
+                Expr::List((0..*n).map(|_| self.sample_arg(&ANY)).collect())
+            }
+            other => self.expr(other, 1),
+        }
+    }
+
+    /// a call to `name` fed from the sample arguments, reduced to a number
+    fn focused_call(&mut self, name: &Rc<str>, sig: &Sig) -> Expr {
+        let callee = Expr::Name(name.clone());
+        let args = match sig.recursive {
+            Some(max_depth) => {
+                let mut args = vec![callee.clone(), Expr::Int(self.rng.int(0, max_depth))];
+                args.extend(sig.params[1..].iter().map(|ty| self.sample_arg(ty)));
+                args
+            }
+            None => {
+                let count = self.rng.int(sig.required as i64, sig.params.len() as i64) as usize;
+                sig.params[..count]
+                    .iter()
+                    .map(|ty| self.sample_arg(ty))
+                    .collect()
+            }
+        };
+        let call = Expr::Call(Box::new(callee), args);
+        match &sig.ret {
+            Ty::Vec(n) => {
+                let index = self.index(*n, 1);
+                Expr::Index(Box::new(call), Box::new(index))
+            }
+            Ty::Func(inner) => {
+                let args = inner.params.iter().map(|ty| self.sample_arg(ty)).collect();
+                Expr::Call(Box::new(call), args)
+            }
+            _ => call,
+        }
+    }
+
+    /// a value of type `ret` built around `core`
+    fn sample_value(&mut self, ret: &Ty, core: Option<Expr>) -> Expr {
+        match ret {
+            Ty::Vec(n) => {
+                let slot = self.rng.below(*n);
+                let mut core = core;
+                let items = (0..*n)
+                    .map(|i| match if i == slot { core.take() } else { None } {
+                        Some(core) => self.sample_number(Some(core)),
+                        None if self.rng.chance(40) => self.sample_arg(&ANY),
+                        None => self.sample_number(None),
+                    })
+                    .collect();
+                Expr::List(items)
+            }
+            _ => self.sample_number(core),
+        }
+    }
+
+    fn sample_number(&mut self, core: Option<Expr>) -> Expr {
+        let Some(core) = core else {
+            return self.num(Num::Any, 3);
+        };
+        match self.rng.below(5) {
+            0 | 1 => core,
+            2 => {
+                let op =
+                    *self
+                        .rng
+                        .pick(&[BinOp::Add, BinOp::Sub, BinOp::Mul, BinOp::And, BinOp::Or]);
+                binary(op, core, self.num(Num::Any, 1))
+            }
+            3 => {
+                let native = *self.rng.pick(&[Native::Min, Native::Max]);
+                Expr::Native(native, vec![core, self.sample_arg(&ANY)])
+            }
+            _ => Expr::Native(Native::Sin, vec![core]),
+        }
     }
 
     // ---- deliberate faults ----
@@ -1009,6 +1294,7 @@ impl<'a> Generator<'a> {
                     let high = self.num(Num::Any, d);
                     Expr::Native(Native::Clamp, vec![low, x, high])
                 }
+                11 if self.kernel_hostile() => self.num(Num::Any, depth),
                 11 => {
                     let t = if self.rng.chance(50) {
                         self.literal(Num::Float)
@@ -1203,12 +1489,12 @@ impl<'a> Generator<'a> {
         let names = self.candidates(&Ty::Seq);
         match self.rng.below(10) {
             0..=4 if !names.is_empty() => Expr::Name(self.rng.pick(&names).clone()),
-            0..=5 => {
+            0..=5 if !self.kernel_hostile() => {
                 let start = self.rng.int(-2, 3);
                 let stop = start + self.rng.int(1, 6);
                 Expr::Native(Native::Range, vec![Expr::Int(start), Expr::Int(stop)])
             }
-            6..=7 => {
+            0..=7 => {
                 let n = 1 + self.rng.below(5);
                 Expr::List((0..n).map(|_| self.num(Num::Any, depth.min(1))).collect())
             }
@@ -1303,5 +1589,184 @@ fn names_in(expr: &Expr, names: &mut Vec<Rc<str>>) {
             names_in(callee, names);
             args.iter().for_each(|arg| names_in(arg, names));
         }
+    }
+}
+
+/// the batch constructors a sampler is written for
+#[derive(Clone, Copy, Debug)]
+enum Sampling {
+    Explicit,
+    Explicit2d,
+    SurfaceColor,
+    Shader,
+    PointMap,
+    ColorMap,
+}
+
+impl Sampling {
+    const ALL: [Self; 6] = [
+        Self::Explicit,
+        Self::Explicit2d,
+        Self::SurfaceColor,
+        Self::Shader,
+        Self::PointMap,
+        Self::ColorMap,
+    ];
+
+    /// the sampled lambda's parameter and return types
+    fn shape(self) -> (Vec<Ty>, Ty) {
+        match self {
+            Self::Explicit => (vec![FLOAT], ANY),
+            Self::Explicit2d => (vec![FLOAT; 2], ANY),
+            Self::SurfaceColor => (vec![FLOAT; 3], Ty::Vec(4)),
+            Self::Shader => (vec![FLOAT; 2], Ty::Vec(4)),
+            Self::PointMap => (vec![Ty::Vec(3)], Ty::Vec(3)),
+            // colours are mapped from positions
+            Self::ColorMap => (vec![Ty::Vec(3)], Ty::Vec(4)),
+        }
+    }
+
+    /// dyadic domains, so every sample point is an exact float the probes
+    /// can name
+    fn domain(self, rng: &mut Rng) -> Domain {
+        match self {
+            Self::Explicit => {
+                let (lo, hi) = *rng.pick(&[(-2, 2), (-1, 1), (0, 4), (-3, 1)]);
+                Domain::Line {
+                    lo,
+                    hi,
+                    samples: *rng.pick(&[5, 9, 17, 33, 65]),
+                }
+            }
+            Self::Explicit2d | Self::SurfaceColor => Domain::Grid {
+                samples: [*rng.pick(&[3, 5, 9]), *rng.pick(&[3, 5, 9])],
+                colored: matches!(self, Self::SurfaceColor),
+            },
+            Self::Shader => Domain::Pixels {
+                wide: rng.chance(50),
+                resolution: *rng.pick(&[2, 4, 8, 16]),
+            },
+            Self::PointMap => Domain::Points {
+                size: *rng.pick(&[[2, 1], [1, 1], [4, 2]]),
+                grid: rng.chance(30),
+            },
+            Self::ColorMap => Domain::Colors {
+                grid: rng.chance(30),
+            },
+        }
+    }
+}
+
+/// where a constructor samples its lambda
+enum Domain {
+    Line {
+        lo: i64,
+        hi: i64,
+        samples: i64,
+    },
+    /// `ExplicitFunc2d` over `[-1, 1]` squared; `colored` samples the colour
+    /// callback, with a fixed surface
+    Grid {
+        samples: [i64; 2],
+        colored: bool,
+    },
+    Pixels {
+        wide: bool,
+        resolution: i64,
+    },
+    Points {
+        size: [i64; 2],
+        grid: bool,
+    },
+    Colors {
+        grid: bool,
+    },
+}
+
+fn float_list(values: &[f64]) -> Expr {
+    Expr::List(values.iter().copied().map(Expr::Float).collect())
+}
+
+impl Domain {
+    /// arguments the constructor passes on some call
+    fn probe(&self, rng: &mut Rng) -> Vec<Expr> {
+        let along = |rng: &mut Rng, lo: f64, hi: f64, samples: i64| {
+            lo + (hi - lo) * rng.int(0, samples - 1) as f64 / (samples - 1) as f64
+        };
+        match *self {
+            Self::Line { lo, hi, samples } => {
+                vec![Expr::Float(along(rng, lo as f64, hi as f64, samples))]
+            }
+            Self::Grid { samples, colored } => {
+                let x = along(rng, -1.0, 1.0, samples[0]);
+                let y = along(rng, -1.0, 1.0, samples[1]);
+                let mut args = vec![Expr::Float(x), Expr::Float(y)];
+                if colored {
+                    args.push(Expr::Float(0.5 * (x * x + y * y)));
+                }
+                args
+            }
+            Self::Pixels { wide, resolution } => {
+                let (columns, rows) = if wide {
+                    (resolution, (resolution / 2).max(1))
+                } else {
+                    (resolution, resolution)
+                };
+                let width = if wide { 4.0 } else { 2.0 };
+                let column = rng.int(0, columns - 1) as f64;
+                let row = rng.int(0, rows - 1) as f64;
+                vec![
+                    Expr::Float(-width / 2.0 + width * (column + 0.5) / columns as f64),
+                    Expr::Float(1.0 - 2.0 * (row + 0.5) / rows as f64),
+                ]
+            }
+            Self::Points { size, .. } => corner(rng, size),
+            Self::Colors { .. } => corner(rng, [2, 1]),
+        }
+    }
+
+    fn constructor(&self, callee: &str, rng: &mut Rng) -> String {
+        match *self {
+            Self::Line { lo, hi, samples } => match rng.below(6) {
+                0 => format!("ExplicitFunc({callee}, [{lo}, {hi}, {samples}], 1)"),
+                1 => format!(
+                    "ExplicitFunc({callee}, [{lo}.0, {hi}.0, {samples}], 0, [0.2, 0.6, 0.9, 0.4])"
+                ),
+                _ => format!("ExplicitFunc({callee}, [{lo}, {hi}, {samples}])"),
+            },
+            Self::Grid {
+                samples: [nx, ny],
+                colored: false,
+            } => format!("ExplicitFunc2d({callee}, [-1, 1, {nx}], [-1, 1, {ny}])"),
+            Self::Grid {
+                samples: [nx, ny],
+                colored: true,
+            } => format!(
+                "ExplicitFunc2d(|x, y| 0.5 * (x * x + y * y), [-1, 1, {nx}], [-1, 1, {ny}], {callee})"
+            ),
+            Self::Pixels { wide, resolution } => {
+                let x = if wide { "[-2, 2]" } else { "[-1, 1]" };
+                format!("Shader({callee}, {x}, [-1, 1], {resolution})")
+            }
+            Self::Points { size: [w, h], grid } => {
+                format!("point_map{{{callee}}} {}", target_mesh(grid, w, h))
+            }
+            Self::Colors { grid } => format!("color_map{{{callee}}} {}", target_mesh(grid, 2, 1)),
+        }
+    }
+}
+
+/// a corner of the `Rect` of `size`, one of the points a map samples
+fn corner(rng: &mut Rng, size: [i64; 2]) -> Vec<Expr> {
+    let x = size[0] as f64 / 2.0 * if rng.chance(50) { 1.0 } else { -1.0 };
+    let y = size[1] as f64 / 2.0 * if rng.chance(50) { 1.0 } else { -1.0 };
+    vec![float_list(&[x, y, 0.0])]
+}
+
+fn target_mesh(grid: bool, w: i64, h: i64) -> String {
+    if grid {
+        "LineGrid([-1, 1, 5], [-1, 1, 3], 1)".into()
+    } else {
+        format!("Rect([{w}, {h}])")
     }
 }

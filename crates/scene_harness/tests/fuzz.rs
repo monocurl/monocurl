@@ -1,9 +1,14 @@
 //! differential fuzzing of the executor against the reference evaluator in
 //! `scene_harness::fuzz`. runs `MONOCURL_FUZZ_CASES` consecutive seeds (default
 //! 300) from a fixed base, plus pinned regression seeds. reproduce a failure
-//! with `mcfuzz --seed N --print`.
+//! with `mcfuzz --seed N --print`. batch mode runs `MONOCURL_FUZZ_BATCH_CASES`
+//! seeds (default 600, about 12s in release) with the kernel tier off, on and
+//! verifying; reproduce with `mcfuzz --batches --seed N --print`.
 
-use scene_harness::{fuzz::check_seed, use_repo_assets};
+use scene_harness::{
+    fuzz::{check_batch_seed, check_seed, use_serial_kernels},
+    use_repo_assets,
+};
 
 const BASE_SEED: u64 = 0x5eed_0000;
 
@@ -39,4 +44,23 @@ fn generated_programs_agree_with_reference() {
 #[test]
 fn pinned_seeds_agree_with_reference() {
     check(PINNED_SEEDS.iter().copied());
+}
+
+const BATCH_BASE_SEED: u64 = 0xba7c_0000;
+
+#[test]
+fn batch_programs_agree_across_kernel_modes() {
+    use_repo_assets();
+    use_serial_kernels();
+    let cases = std::env::var("MONOCURL_FUZZ_BATCH_CASES")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(600u64);
+    let failures: Vec<String> = (BATCH_BASE_SEED..BATCH_BASE_SEED + cases)
+        .map(check_batch_seed)
+        .filter(|case| !case.matches())
+        .map(|case| case.report())
+        .take(3)
+        .collect();
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }

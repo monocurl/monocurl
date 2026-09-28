@@ -6,9 +6,32 @@ that reach it (search `fuzz/reference.rs` for the finding number) so the fuzzer
 keeps passing and still covers everything else. When you fix one, delete its
 rejection, move it to the fixed list below and run `mcfuzz --count 20000`.
 
+`mcfuzz --batches` also samples each program's lambdas through the batch
+constructors (`ExplicitFunc`, `ExplicitFunc2d`, `Shader`, `point_map`,
+`color_map`) and runs it with the kernel tier off, on and in verify mode. A
+verify panic names the kernel engines that disagree (dynamic, typed or lane
+machine, or the tier against the interpreter); an off/on difference is a
+finding too.
+
 ## Open
 
-None.
+5. A kernel single call drops the "live function" wrapper of a result it
+   returns from a lambda with default parameters, so `lerp` of two such
+   results interpolates the values instead of the arguments. Only
+   `KernelMode::On` takes single calls (verify mode leaves them in the
+   interpreter), so this is the single-call path of the dynamic register
+   machine (`KernelTier` / `try_kernel_call`) against the interpreter:
+
+   ```
+   let f = |x, k = 2| x * x * k
+   let g = |x| f(x, 3)
+   print lerp(g(1), g(3), 0.5)
+   ```
+
+   prints `12.0` with the tier off (`f(2, 3)`) and `15.0` with it on
+   (`lerp(3, 27, 0.5)`). Batch seed 33589 (`mcfuzz --batches --seed 33589`
+   before the rejection). The reference rejects a `lerp` of call results that
+   were returned out of another lambda.
 
 ## Fixed
 
