@@ -215,21 +215,49 @@ pub async fn sort(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
         keyed.push((value, sort_key));
     }
 
-    for i in 1..keyed.len() {
-        let mut j = i;
-        while j > 0 {
-            let ordering = compare_values(&keyed[j - 1].1, &keyed[j].1)?;
-            if ordering != Ordering::Greater {
-                break;
-            }
-            keyed.swap(j - 1, j);
-            j -= 1;
-        }
-    }
-
+    let sorted = try_sort_by(keyed, |a, b| compare_values(&a.1, &b.1))?;
     Ok(super::helpers::list_from(
-        keyed.into_iter().map(|(value, _)| value),
+        sorted.into_iter().map(|(value, _)| value),
     ))
+}
+
+/// a stable merge sort whose comparison can fail (values of different kinds
+/// do not compare); the standard sort cannot carry the error out, and an
+/// insertion sort took a quarter of a second on five thousand elements
+fn try_sort_by<T, E>(
+    items: Vec<T>,
+    mut compare: impl FnMut(&T, &T) -> Result<Ordering, E>,
+) -> Result<Vec<T>, E> {
+    let mut order: Vec<usize> = (0..items.len()).collect();
+    let mut scratch = vec![0usize; items.len()];
+    let mut width = 1;
+    while width < items.len() {
+        for start in (0..items.len()).step_by(2 * width) {
+            let middle = (start + width).min(items.len());
+            let end = (start + 2 * width).min(items.len());
+            let (mut left, mut right) = (start, middle);
+            for slot in &mut scratch[start..end] {
+                let take_left = right >= end
+                    || (left < middle
+                        && compare(&items[order[left]], &items[order[right]])?
+                            != Ordering::Greater);
+                *slot = if take_left {
+                    left += 1;
+                    order[left - 1]
+                } else {
+                    right += 1;
+                    order[right - 1]
+                };
+            }
+        }
+        std::mem::swap(&mut order, &mut scratch);
+        width *= 2;
+    }
+    let mut items: Vec<Option<T>> = items.into_iter().map(Some).collect();
+    Ok(order
+        .into_iter()
+        .map(|index| items[index].take().expect("each index is taken once"))
+        .collect())
 }
 
 #[stdlib_func]
@@ -288,10 +316,7 @@ pub fn drop(executor: &mut Executor, stack_idx: usize) -> Result<Value, Executor
 }
 
 #[stdlib_func]
-pub fn list_subset(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub fn list_subset(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let src = read_rc_list(executor, stack_idx, -2, "src")?;
     let indexes = read_rc_list(executor, stack_idx, -1, "indexes")?;
 
@@ -414,5 +439,40 @@ mod tests {
     fn range_accepts_finite_positive_and_negative_steps() {
         assert!(validate_range_arguments(0.0, 10.0, 1.0).is_ok());
         assert!(validate_range_arguments(10.0, 0.0, -1.0).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod sort_tests {
+    use std::cmp::Ordering;
+
+    use super::try_sort_by;
+
+    #[test]
+    fn merge_sort_is_stable_and_carries_errors_out() {
+        let items: Vec<(i32, usize)> = [3, 1, 2, 1, 3, 0, 2, 1]
+            .into_iter()
+            .enumerate()
+            .map(|(index, key)| (key, index))
+            .collect();
+        let sorted = try_sort_by(items.clone(), |a, b| Ok::<_, ()>(a.0.cmp(&b.0))).unwrap();
+        let keys: Vec<i32> = sorted.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys, vec![0, 1, 1, 1, 2, 2, 3, 3]);
+        let ones: Vec<usize> = sorted
+            .iter()
+            .filter(|(key, _)| *key == 1)
+            .map(|(_, index)| *index)
+            .collect();
+        assert_eq!(ones, vec![1, 3, 7]);
+        assert!(
+            try_sort_by(items, |a, b| (a.0 != 2 && b.0 != 2)
+                .then(|| a.0.cmp(&b.0))
+                .ok_or("two"))
+            .is_err()
+        );
+        assert_eq!(
+            try_sort_by(Vec::<i32>::new(), |a, b| Ok::<_, ()>(a.cmp(b))).unwrap(),
+            Vec::<i32>::new()
+        );
     }
 }
