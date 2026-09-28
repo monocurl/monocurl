@@ -14,6 +14,24 @@ pub async fn op_point_map(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
+    let (key, hit) = crate::mesh::result_cache::lookup(
+        executor,
+        stack_idx,
+        4,
+        crate::mesh::constructors::CACHE_TAG_POINT_MAP,
+    );
+    if let Some(value) = hit {
+        return Ok(value);
+    }
+    let value = op_point_map_uncached(executor, stack_idx).await?;
+    crate::mesh::result_cache::remember(key, &value);
+    Ok(value)
+}
+
+async fn op_point_map_uncached(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     fn recurse<'a>(
         executor: &'a mut Executor,
         tree: &'a mut MeshTree,
@@ -116,6 +134,24 @@ pub async fn op_point_map(
 
 #[stdlib_func]
 pub async fn op_color_map(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let (key, hit) = crate::mesh::result_cache::lookup(
+        executor,
+        stack_idx,
+        4,
+        crate::mesh::constructors::CACHE_TAG_COLOR_MAP,
+    );
+    if let Some(value) = hit {
+        return Ok(value);
+    }
+    let value = op_color_map_uncached(executor, stack_idx).await?;
+    crate::mesh::result_cache::remember(key, &value);
+    Ok(value)
+}
+
+async fn op_color_map_uncached(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

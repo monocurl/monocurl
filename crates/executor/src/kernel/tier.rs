@@ -478,4 +478,10 @@ impl Executor {
     pub fn kernel_reject_reason(&self, lambda: &Lambda) -> Result<(), Reject> {
         self.kernels.reject_reason(lambda)
     }
+
+    /// whether the tier can compile `lambda`, which means its body reads
+    /// nothing but its arguments and captures: a result cache can key on it
+    pub fn lambda_is_pure(&mut self, lambda: &Lambda) -> bool {
+        self.kernels.kernel_for(lambda).is_some()
+    }
 }

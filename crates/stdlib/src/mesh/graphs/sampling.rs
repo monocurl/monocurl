@@ -105,6 +105,24 @@ pub async fn mk_parametric(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
+    let (key, hit) = crate::mesh::result_cache::lookup(
+        executor,
+        stack_idx,
+        4,
+        crate::mesh::constructors::CACHE_TAG_PARAMETRIC,
+    );
+    if let Some(value) = hit {
+        return Ok(value);
+    }
+    let value = mk_parametric_uncached(executor, stack_idx).await?;
+    crate::mesh::result_cache::remember(key, &value);
+    Ok(value)
+}
+
+async fn mk_parametric_uncached(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let f = executor
         .state
         .stack(stack_idx)
@@ -149,6 +167,24 @@ pub async fn mk_explicit(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {
+    let (key, hit) = crate::mesh::result_cache::lookup(
+        executor,
+        stack_idx,
+        4,
+        crate::mesh::constructors::CACHE_TAG_EXPLICIT,
+    );
+    if let Some(value) = hit {
+        return Ok(value);
+    }
+    let value = mk_explicit_uncached(executor, stack_idx).await?;
+    crate::mesh::result_cache::remember(key, &value);
+    Ok(value)
+}
+
+async fn mk_explicit_uncached(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
     let f = executor
         .state
         .stack(stack_idx)
@@ -189,6 +225,24 @@ pub async fn mk_explicit(
 
 #[stdlib_func]
 pub async fn mk_explicit2d(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let (key, hit) = crate::mesh::result_cache::lookup(
+        executor,
+        stack_idx,
+        8,
+        crate::mesh::constructors::CACHE_TAG_EXPLICIT2D,
+    );
+    if let Some(value) = hit {
+        return Ok(value);
+    }
+    let value = mk_explicit2d_uncached(executor, stack_idx).await?;
+    crate::mesh::result_cache::remember(key, &value);
+    Ok(value)
+}
+
+async fn mk_explicit2d_uncached(
     executor: &mut Executor,
     stack_idx: usize,
 ) -> Result<Value, ExecutorError> {

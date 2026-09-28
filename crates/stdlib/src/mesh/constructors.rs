@@ -12,6 +12,14 @@ use super::helpers::*;
 use super::tessellation::{polygon_surface, rect_surface, tessellate_planar_loops};
 
 const MAX_POLYGON_POINTS: usize = 1 << 13;
+
+/// tags telling the result cache's natives apart
+pub(super) const CACHE_TAG_SHADER: u64 = 1;
+pub(super) const CACHE_TAG_EXPLICIT: u64 = 2;
+pub(super) const CACHE_TAG_PARAMETRIC: u64 = 3;
+pub(super) const CACHE_TAG_EXPLICIT2D: u64 = 4;
+pub(super) const CACHE_TAG_POINT_MAP: u64 = 5;
+pub(super) const CACHE_TAG_COLOR_MAP: u64 = 6;
 const MAX_CURVE_SAMPLES: usize = 1 << 14;
 const MAX_GRID_CELLS: usize = 1 << 16;
 const MAX_SURFACE_TRIANGLES: usize = 1 << 17;
@@ -1246,21 +1254,10 @@ pub async fn mk_shader(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         MAX_SHADER_PIXELS,
     )?;
 
-    let cache_key = super::shader_cache::key(
-        executor.bytecode_generation(),
-        &color_at,
-        &[
-            u64::from(x_min.to_bits()),
-            u64::from(x_max.to_bits()),
-            u64::from(y_min.to_bits()),
-            u64::from(y_max.to_bits()),
-            columns as u64,
-            rows as u64,
-        ],
-    );
-    let texture = match cache_key.as_ref().and_then(super::shader_cache::get) {
-        Some(texture) => texture,
-        None => {
+    let cache_key = super::result_cache::key(executor, stack_idx, 6, CACHE_TAG_SHADER);
+    let texture = match cache_key.as_ref().and_then(super::result_cache::get) {
+        Some(super::result_cache::Cached::Texture(texture)) => texture,
+        _ => {
             let texture = std::sync::Arc::new(
                 shade(
                     executor, &color_at, x_min, y_max, width, height, columns, rows,
@@ -1268,7 +1265,10 @@ pub async fn mk_shader(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                 .await?,
             );
             if let Some(key) = cache_key {
-                super::shader_cache::insert(key, std::sync::Arc::clone(&texture));
+                super::result_cache::insert(
+                    key,
+                    super::result_cache::Cached::Texture(std::sync::Arc::clone(&texture)),
+                );
             }
             texture
         }
