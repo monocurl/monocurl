@@ -20,6 +20,7 @@ use parser::{import_context::ParseImportContext, parser::Parser};
 use stdlib::registry::registry;
 use structs::rope::Rope;
 
+pub mod fuzz;
 pub mod summary;
 
 use crate::summary::{mesh_summary, value_summary};

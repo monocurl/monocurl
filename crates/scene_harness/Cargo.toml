@@ -25,3 +25,11 @@ path = "src/bin/mcbench.rs"
 [[bin]]
 name = "mcrender"
 path = "src/bin/mcrender.rs"
+
+[[test]]
+name = "fuzz"
+path = "tests/fuzz.rs"
+
+[[bin]]
+name = "mcfuzz"
+path = "src/bin/mcfuzz.rs"
