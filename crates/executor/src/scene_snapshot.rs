@@ -125,6 +125,13 @@ async fn scene_meshes(executor: &mut Executor) -> Result<Vec<Arc<Mesh>>, SceneSn
         .collect::<Vec<_>>();
 
     for (name, follower_value) in leaders {
+        // a live call whose result is not cached would be recomputed by every
+        // frame that looks at it, so its result is written back to the slot
+        // before the frame reads it
+        executor
+            .warm_live_wrappers_in_slot(follower_value)
+            .await
+            .map_err(scene_snapshot_error)?;
         let follower = with_heap(|h| h.get(follower_value).clone());
         collect_scene_meshes(executor, follower, &name, &mut meshes).await?;
     }

@@ -1,5 +1,5 @@
 mod equality;
-mod helpers;
+pub(crate) mod helpers;
 
 pub mod anim_block;
 pub mod container;

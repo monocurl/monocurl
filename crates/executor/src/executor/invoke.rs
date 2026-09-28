@@ -2,7 +2,8 @@ use std::rc::Rc;
 
 use crate::{
     error::ExecutorError,
-    heap::{VRc, heap_replace, with_heap},
+    heap::{HeapKey, VRc, heap_replace, with_heap},
+    value::helpers::has_cached_value,
     state::MAX_CALL_DEPTH,
     value::{
         Value,
@@ -20,6 +21,7 @@ use crate::{
 use smallvec::SmallVec;
 
 use super::{ExecSingle, Executor};
+use crate::kernel::{BatchOutcome, KernelMode, strictly_equal};
 
 impl Executor {
     #[inline]
@@ -112,6 +114,9 @@ impl Executor {
         self.state.stack_mut(stack_idx).pop();
         if let Some(error) = self.ensure_non_stateful_lambda_args(stack_idx, num_args as usize) {
             return Some(ExecSingle::Error(error));
+        }
+        if let Some(result) = self.try_kernel_call(stack_idx, &lambda, num_args as usize) {
+            return Some(result);
         }
 
         Some(self.setup_lambda_call(stack_idx, num_args as usize, &lambda))
@@ -652,6 +657,51 @@ impl Executor {
             for call_args in args {
                 validate_eager_arg_count(call_args.as_ref().len(), lambda)?;
             }
+            let kernel_results = match self.kernel_batch(lambda, args).await {
+                BatchOutcome::Results(results) => Some(results),
+                BatchOutcome::Interpreter => None,
+            };
+            if self.kernel_mode() != KernelMode::Verify
+                && let Some(results) = kernel_results
+            {
+                self.state.last_stack_idx =
+                    trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
+                return Ok(results);
+            }
+            let interpreted = self
+                .interpret_lambda_many(lambda, args, trace_parent_idx)
+                .await;
+            if let Some(results) = kernel_results {
+                let interpreted = interpreted.as_ref().unwrap_or_else(|error| {
+                    panic!(
+                        "kernel tier produced results for a batch the interpreter rejects: {error}"
+                    )
+                });
+                for (index, (kernel, interpreter)) in results.iter().zip(interpreted).enumerate() {
+                    assert!(
+                        strictly_equal(kernel, interpreter),
+                        "kernel tier disagrees with the interpreter on call {index} of lambda at {:?}:\n  kernel:      {}\n  interpreter: {}",
+                        lambda.ip,
+                        crate::transcript::stringify_for_transcript(kernel),
+                        crate::transcript::stringify_for_transcript(interpreter),
+                    );
+                }
+            }
+            interpreted
+        })
+    }
+
+    /// the interpreter's batch path: one reusable frame, reseeded per call
+    fn interpret_lambda_many<'a, A>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        args: &'a [A],
+        trace_parent_idx: Option<usize>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Value>, ExecutorError>> + 'a>>
+    where
+        A: AsRef<[Value]> + 'a,
+    {
+        Box::pin(async move {
             if self.state.call_depth >= MAX_CALL_DEPTH {
                 self.state.last_stack_idx =
                     trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
@@ -1166,6 +1216,47 @@ impl Executor {
             values.push(self.stateful_slot_as_live_call(slot, read_kind).await?);
         }
         Ok(values)
+    }
+
+    /// evaluate every live function or operator reachable from the slot at
+    /// `key` whose cache is empty, and store the evaluated wrapper back so the
+    /// result survives in the heap. mesh followers are read by every frame as
+    /// fresh clones, and a clone of an unfilled wrapper recomputes from
+    /// scratch; without this an idle frame costs as much as a changing one
+    pub(crate) fn warm_live_wrappers_in_slot<'a>(
+        &'a mut self,
+        key: HeapKey,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ExecutorError>> + 'a>> {
+        Box::pin(async move {
+            let value = with_heap(|h| h.get(key).clone());
+            match value {
+                Value::InvokedFunction(inv) => {
+                    if !has_cached_value(&inv.cache.0) {
+                        InvokedFunction::value(&inv, self).await?;
+                        heap_replace(key, Value::InvokedFunction(inv));
+                    }
+                }
+                Value::InvokedOperator(inv) => {
+                    if !has_cached_value(&inv.cache.cached_result) {
+                        InvokedOperator::value(&inv, self).await?;
+                        heap_replace(key, Value::InvokedOperator(inv));
+                    }
+                }
+                Value::List(list) => {
+                    for element in list.elements() {
+                        self.warm_live_wrappers_in_slot(element.key()).await?;
+                    }
+                }
+                Value::Lvalue(reference) => {
+                    self.warm_live_wrappers_in_slot(reference.key()).await?;
+                }
+                Value::WeakLvalue(reference) => {
+                    self.warm_live_wrappers_in_slot(reference.key()).await?;
+                }
+                _ => {}
+            }
+            Ok(())
+        })
     }
 
     pub(crate) fn materialize_cached_value<'a>(

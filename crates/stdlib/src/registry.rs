@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use executor::executor::{NativeFunction, StdlibFunc, StdlibSyncFunc};
+use executor::{
+    executor::{NativeFunction, StdlibFunc, StdlibSyncFunc},
+    kernel::KernelIntrinsic,
+};
 
 pub struct FunctionEntry {
     pub name: &'static str,
@@ -44,6 +47,7 @@ impl Registry {
             .map(|entry| NativeFunction {
                 call: entry.func,
                 call_sync: entry.sync_func,
+                intrinsic: kernel_intrinsic(entry.name),
             })
             .collect()
     }
@@ -61,4 +65,44 @@ static REGISTRY: OnceLock<Registry> = OnceLock::new();
 
 pub fn registry() -> &'static Registry {
     REGISTRY.get_or_init(Registry::build)
+}
+
+/// the natives the kernel tier evaluates itself. each entry must match the
+/// stdlib function of that name exactly, argument handling included; the
+/// `kernel_tier` scene tests cross-check them against the interpreter
+fn kernel_intrinsic(name: &str) -> Option<KernelIntrinsic> {
+    use KernelIntrinsic::*;
+    Some(match name {
+        "sqrt" => Sqrt,
+        "cbrt" => Cbrt,
+        "exp" => Exp,
+        "ln" => Ln,
+        "sin" => Sin,
+        "cos" => Cos,
+        "tan" => Tan,
+        "arcsin" => Asin,
+        "arccos" => Acos,
+        "arctan" => Atan,
+        "sinh" => Sinh,
+        "cosh" => Cosh,
+        "tanh" => Tanh,
+        "pow" => Pow,
+        "arctan2" => Atan2,
+        "abs" => Abs,
+        "sign" => Sign,
+        "floor" => Floor,
+        "ceil" => Ceil,
+        "round" => Round,
+        "trunc" => Trunc,
+        "mod_func" => Mod,
+        "min" => Min,
+        "max" => Max,
+        "dot" => Dot,
+        "cross" => Cross,
+        "len" | "list_len" => Len,
+        "to_int" => ToInt,
+        "to_float" => ToFloat,
+        "lambda_fallthrough_error" => Fallthrough,
+        _ => return None,
+    })
 }

@@ -17,6 +17,7 @@ use bytecode::{Bytecode, Instruction};
 use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
+use crate::kernel::{KernelIntrinsic, KernelMode, KernelTier};
 use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
@@ -38,6 +39,9 @@ pub type StdlibSyncFunc = fn(&mut Executor, usize) -> Result<Value, ExecutorErro
 pub struct NativeFunction {
     pub call: StdlibFunc,
     pub call_sync: Option<StdlibSyncFunc>,
+    /// present when the kernel tier evaluates this native itself; see
+    /// `crate::kernel`
+    pub intrinsic: Option<KernelIntrinsic>,
 }
 
 enum SeekPrimitiveResult {
@@ -152,6 +156,7 @@ pub struct Executor {
     pub(crate) bytecode: Bytecode,
     pub(crate) native_funcs: Vec<NativeFunction>,
     pub(crate) cache: ExecutionCache,
+    pub(crate) kernels: KernelTier,
     pub(crate) yielder: PeriodicYielder,
     aspect_ratio: f32,
     text_render_quality: TextRenderQuality,
@@ -169,11 +174,17 @@ fn normalize_aspect_ratio(aspect_ratio: f32) -> f32 {
 impl Executor {
     pub fn new(bytecode: Bytecode, native_funcs: Vec<NativeFunction>) -> Self {
         let cache = ExecutionCache::new(&bytecode);
+        let kernels = KernelTier::new(
+            KernelMode::from_env(),
+            bytecode.sections.clone(),
+            native_funcs.clone(),
+        );
         Self {
             state: ExecutionState::new(),
             bytecode,
             native_funcs,
             cache,
+            kernels,
             yielder: PeriodicYielder::default(),
             aspect_ratio: 16.0 / 9.0,
             text_render_quality: TextRenderQuality::Normal,

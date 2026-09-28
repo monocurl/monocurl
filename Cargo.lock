@@ -2159,6 +2159,7 @@ version = "0.1.0"
 dependencies = [
  "bytecode",
  "geo",
+ "rustc-hash 2.1.2",
  "smallvec",
  "structs",
 ]

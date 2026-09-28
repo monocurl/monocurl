@@ -25,3 +25,7 @@ path = "src/bin/mcbench.rs"
 [[bin]]
 name = "mcrender"
 path = "src/bin/mcrender.rs"
+
+[[bin]]
+name = "mcdump"
+path = "src/bin/mcdump.rs"

@@ -1,0 +1,41 @@
+# interpreter-bound: a Monocurl-level function evaluated once per vertex of a
+# dense surface, both for its height and for its colour. this is the
+# "run a function on every pixel" workload the kernel tier exists for
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let iterations = 12
+
+# an escape-time fractal: a loop with an early exit per sample
+let escape = |cx, cy, zoom| {
+    var zx = 0.0
+    var zy = 0.0
+    var i = 0
+    while (i < iterations and zx * zx + zy * zy < 4) {
+        let nx = zx * zx - zy * zy + cx * zoom
+        zy = 2 * zx * zy + cy * zoom
+        zx = nx
+        i = i + 1
+    }
+    return i / iterations
+}
+
+let Shader = |zoom, phase|
+    ExplicitFunc2d(
+        |x, y| 0.35 * escape(x - 0.5, y, zoom) + 0.05 * sin(3 * x + phase),
+        [-2.2, 1.2, 160],
+        [-1.4, 1.4, 90],
+        |x, y, z| [0.5 + 0.5 * sin(z * 9 + phase), z * 2, 1 - z * 2, 1]
+    )
+
+mesh surface = Shader(zoom: 1, phase: 0)
+
+slide "Shader"
+    surface.zoom = 1.6
+    surface.phase = 3
+    play Lerp(1)

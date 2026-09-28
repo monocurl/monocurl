@@ -60,11 +60,19 @@ fn with_cached_value<R>(
     result
 }
 
-fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
+pub(crate) fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
     let cached = cell.take();
     let cloned = cached.as_ref().map(|value| (**value).clone());
     cell.set(cached);
     cloned
+}
+
+/// whether a live wrapper's cache currently holds a result
+pub(crate) fn has_cached_value(cell: &Cell<Option<Box<Value>>>) -> bool {
+    let cached = cell.take();
+    let present = cached.is_some();
+    cell.set(cached);
+    present
 }
 
 /// detaches for the same reason [`elided_heap_ref_value`] does

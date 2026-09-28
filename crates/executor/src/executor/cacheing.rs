@@ -119,6 +119,7 @@ impl Executor {
         }
 
         self.bytecode = bytecode;
+        self.kernels.reset(self.bytecode.sections.clone());
         self.cache
             .entries
             .resize_with(self.bytecode.sections.len(), || None);

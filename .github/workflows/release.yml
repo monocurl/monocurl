@@ -5,8 +5,51 @@ on:
     tags: ['v*']
 
 jobs:
+  # nothing ships unless the full test gate passes, including the kernel
+  # tier cross-check; see ci.yml for why each step exists
+  test:
+    name: Test gate
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-test
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfreetype6-dev \
+            libgraphite2-dev \
+            libpng-dev \
+            libvulkan-dev \
+            libx11-dev \
+            libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev \
+            libwayland-dev \
+            libfontconfig1-dev \
+            libssl-dev \
+            libicu-dev \
+            pkg-config
+
+      - name: Test
+        run: cargo test --workspace
+        env:
+          MONOCURL_ASSETS_DIR: ${{ github.workspace }}/assets
+
+      - name: Test with the kernel tier cross-checked
+        run: cargo test -p scene_harness -p integration_tests -p stdlib
+        env:
+          MONOCURL_ASSETS_DIR: ${{ github.workspace }}/assets
+          MONOCURL_KERNELS: verify
+
   build-macos:
     name: macOS (${{ matrix.target }})
+    needs: [test]
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -117,6 +160,7 @@ jobs:
 
   build-linux:
     name: Linux (${{ matrix.target }})
+    needs: [test]
     runs-on: ubuntu-22.04
     strategy:
       matrix:
@@ -179,6 +223,7 @@ jobs:
 
   build-windows:
     name: Windows (${{ matrix.target }})
+    needs: [test]
     runs-on: windows-latest
     environment: release-signing
     permissions:
