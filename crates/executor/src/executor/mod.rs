@@ -6,7 +6,10 @@ mod runtime_error;
 mod access;
 mod anim;
 mod cacheing;
+mod eager;
 mod invoke;
+mod materialize;
+mod stateful_eval;
 mod lerp;
 pub(crate) mod ops;
 
@@ -22,7 +25,7 @@ use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
 pub use self::cacheing::LiveCheckpoint;
-pub(crate) use self::invoke::{fill_defaults, prepare_eager_call_args};
+pub(crate) use self::eager::{fill_defaults, prepare_eager_call_args};
 use self::memory::{EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker};
 
 pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
