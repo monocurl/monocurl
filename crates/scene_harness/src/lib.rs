@@ -71,6 +71,12 @@ pub struct TimelineSample {
 /// where along each slide the timeline is sampled. the endpoints catch the
 /// snapped keyframes, the interior points catch interpolation
 const SAMPLE_FRACTIONS: [f64; 4] = [0.0, 0.35, 0.8, 1.0];
+/// a scene that says `# corpus: endpoints only` is sampled at slide boundaries
+/// alone. a topology-changing animation such as `Trans` picks its vertex
+/// matching from a tessellation that differs between platforms, so its
+/// intermediate geometry is legitimately not portable while its endpoints are
+const ENDPOINT_FRACTIONS: [f64; 2] = [0.0, 1.0];
+const ENDPOINTS_ONLY_DIRECTIVE: &str = "# corpus: endpoints only";
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SceneTimings {
@@ -167,13 +173,18 @@ pub fn sample_timeline(
 ) -> Result<Vec<TimelineSample>, SceneError> {
     let (mut executor, _) = prepare(source, path)?;
     let mut samples = Vec::new();
+    let fractions: &[f64] = if source.lines().any(|line| line.trim() == ENDPOINTS_ONLY_DIRECTIVE) {
+        &ENDPOINT_FRACTIONS
+    } else {
+        &SAMPLE_FRACTIONS
+    };
 
     smol::block_on(async {
         let durations = resolve_slide_durations(&mut executor).await;
 
         // real slides are 1-based in user timestamps; slide 0 is the init section
         for (slide, duration) in durations.iter().copied().enumerate() {
-            for fraction in SAMPLE_FRACTIONS {
+            for &fraction in fractions {
                 let time = if fraction >= 1.0 {
                     f64::INFINITY
                 } else {

@@ -30,10 +30,6 @@ slide "Fade"
     polygon = fill{color: GREEN} RegularPolygon(n: 6, circumradius: 1.2)
     play [Lerp(1, [&polygon]), Fade(0.5, [&circle])]
 
-slide "Retopologize"
-    polygon = fill{color: GREEN} RegularPolygon(n: 9, circumradius: 1.2)
-    play Trans(1, [&polygon])
-
 slide "Camera"
     camera = Camera([0, 0, 6], [0, 0, 0], 1u)
     play CameraLerp(&camera, 1)

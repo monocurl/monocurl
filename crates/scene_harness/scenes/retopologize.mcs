@@ -1,0 +1,23 @@
+# topology-changing interpolation. the vertex matching Trans picks depends on
+# how the platform's tessellator split the surface, so the geometry half way
+# through is not portable; the endpoints are
+# corpus: endpoints only
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+mesh polygon = fill{color: GREEN} RegularPolygon(n: 6, circumradius: 1.2)
+
+slide "Retopologize"
+    polygon = fill{color: GREEN} RegularPolygon(n: 9, circumradius: 1.2)
+    play Trans(1, [&polygon])
+    print polygon
+
+slide "Back"
+    polygon = fill{color: RED} RegularPolygon(n: 4, circumradius: 0.9)
+    play Trans(0.6, [&polygon])
+    print polygon
