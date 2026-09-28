@@ -93,3 +93,21 @@ iteration, truthiness, printing, and most natives unwrap it.
 
 Fuzzer seed: 16 (`2 * [.., f(9.959), ..]` where `f` has a default parameter).
 
+## 4. `sum` of a list of lists fails
+
+Not found by the fuzzer (its lists hold numbers) but while writing the
+`list_math.mcs` corpus scene. `std.util` documents `sum` as working
+"element-wise for lists", with `sum(points) / len(points)` as its example, but
+it folds `+` from the integer `0`, and `0 + [..]` is not defined.
+
+```monocurl
+import std.util
+print sum([[1, 2], [3, 4]])
+```
+
+- expected: `[4, 6]`
+- actual: runtime error `unsupported binary op + on int and list`
+
+A fix belongs in `assets/std/std/util.mcl` (start from the first element when
+the list is non-empty). Related, smaller: `dot([], [])` prints `-0.0`, because
+Rust's float `Sum` starts from `-0.0`.

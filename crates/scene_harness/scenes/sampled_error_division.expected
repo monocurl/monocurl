@@ -1,0 +1,24 @@
+# transcript
+[-0.027777777777777776, -1.0, 1.0]
+"first 36 samples fine"
+
+# runtime errors
+division by zero
+division by zero
+
+# end timestamp
+(none)
+
+# timeline
+slide 1 @ 0.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! division by zero
+slide 1 @ 0.35
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! division by zero
+slide 1 @ 0.80
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! division by zero
+slide 1 @ 1.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! division by zero
