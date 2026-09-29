@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 rustc-hash.workspace = true
+smallvec.workspace = true
 wide.workspace = true

@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use crate::{
     mesh::{Lin, LinVertex, Tri, TriVertex},
@@ -9,7 +10,10 @@ use crate::{
 
 // keys are vertex-index pairs from our own meshes, so a fast non-cryptographic
 // hash is appropriate; the default SipHash showed up clearly when tessellating
-type BoundaryEdgeMap = FxHashMap<(usize, usize), Vec<(usize, usize)>>;
+/// unmatched directed edges by endpoints; one or two per edge on any
+/// sensible surface, so they stay inline rather than costing an allocation
+/// per edge of every surface built per frame
+type BoundaryEdgeMap = FxHashMap<(usize, usize), SmallVec<[(usize, usize); 2]>>;
 
 /// per-edge templates for the boundary lines a surface produces, keyed by the
 /// vertex indices of the edge. `BoundaryEdges::default()` means "no templates"
@@ -239,7 +243,8 @@ fn build_surface_tris(
         })
         .collect();
 
-    let mut edge_map = BoundaryEdgeMap::default();
+    let mut edge_map =
+        BoundaryEdgeMap::with_capacity_and_hasher(faces.len() * 3, Default::default());
     for (tri_idx, face) in faces.iter().enumerate() {
         for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
             .into_iter()
