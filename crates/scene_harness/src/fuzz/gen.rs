@@ -277,6 +277,7 @@ impl<'a> Generator<'a> {
         let vectors = self
             .assignable(|ty| matches!(ty, Ty::Vec(_) | Ty::Seq))
             .len();
+        let matrices = self.assignable(|ty| matches!(ty, Ty::Mat(..))).len();
 
         let weights = [
             14, // let value
@@ -299,6 +300,8 @@ impl<'a> Generator<'a> {
             if nesting < 3 { 7 } else { 0 }, // for range
             if nesting < 3 { 5 } else { 0 }, // for in
             if top_level { 7 } else { 0 }, // print
+            if matrices > 0 { 4 } else { 0 }, // nested store
+            if vectors > 0 { 4 } else { 0 }, // copy then write
         ];
         match self.rng.weighted(&weights) {
             0 => {
@@ -309,10 +312,11 @@ impl<'a> Generator<'a> {
                 vec![Stmt::Let(name, value)]
             }
             1 => {
-                let ty = match self.rng.below(10) {
+                let ty = match self.rng.below(12) {
                     0..=5 => Ty::Num(*self.rng.pick(&[Num::Int, Num::Float, Num::Any])),
                     6..=8 => Ty::Seq,
-                    _ => Ty::Vec(2 + self.rng.below(2)),
+                    9..=10 => Ty::Vec(2 + self.rng.below(2)),
+                    _ => Ty::Mat(2, 2 + self.rng.below(2)),
                 };
                 let value = self.expr(&ty, 2);
                 let name = self.name(prefix(&ty));
@@ -341,14 +345,57 @@ impl<'a> Generator<'a> {
                     .pick(&self.assignable(|ty| matches!(ty, Ty::Vec(_) | Ty::Seq)))
                     .clone();
                 let index = self.index_into(&name, &ty);
-                vec![Stmt::AssignIndex(name, index, self.expr(&ANY, 2))]
+                // a list assigned into one of its own elements must copy, not
+                // alias: the executor shares element storage between copies.
+                // never inside a loop, where the nesting would grow without
+                // bound and the executor crawl through gigantic values
+                let value = if matches!(ty, Ty::Seq) && self.loops == 0 && self.rng.chance(15) {
+                    Expr::Name(name.clone())
+                } else {
+                    self.expr(&ANY, 2)
+                };
+                vec![Stmt::AssignIndex(name, index, value)]
             }
             7 => vec![self.if_chain()],
             8 => self.while_loop(),
             9 => vec![self.for_range()],
             10 => vec![self.for_in()],
-            _ => vec![Stmt::Print(self.printable())],
+            11 => vec![Stmt::Print(self.printable())],
+            12 => {
+                let (name, ty) = self
+                    .rng
+                    .pick(&self.assignable(|ty| matches!(ty, Ty::Mat(..))))
+                    .clone();
+                let Ty::Mat(rows, columns) = ty else { unreachable!() };
+                let row = self.index(rows, 1);
+                let column = self.index(columns, 1);
+                let value = self.num(Num::Any, 2);
+                vec![Stmt::AssignNested(name, row, column, value)]
+            }
+            _ => self.copy_then_write(),
         }
+    }
+
+    /// `var copy = x` followed by a write into `x`: a copy must not see the
+    /// write, however the executor shares storage underneath
+    fn copy_then_write(&mut self) -> Vec<Stmt> {
+        let (name, ty) = self
+            .rng
+            .pick(&self.assignable(|ty| matches!(ty, Ty::Vec(_) | Ty::Seq)))
+            .clone();
+        let copy = self.name(prefix(&ty));
+        self.bind(copy.clone(), ty.clone(), true);
+        let index = self.index_into(&name, &ty);
+        let value = self.expr(&ANY, 2);
+        let written = if self.rng.chance(50) {
+            name.clone()
+        } else {
+            copy.clone()
+        };
+        vec![
+            Stmt::Var(copy, Expr::Name(name)),
+            Stmt::AssignIndex(written, index, value),
+        ]
     }
 
     /// in batch mode, whether to steer away from a native the kernel tier

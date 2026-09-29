@@ -76,6 +76,19 @@ impl Val {
 /// transcript rendering, mirroring what `print` shows
 impl fmt::Display for Val {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.write(f, 0)
+    }
+}
+
+/// the transcript elides values nested deeper than this, as the executor's
+/// `stringify_for_transcript` does
+const MAX_PRINT_DEPTH: usize = 6;
+
+impl Val {
+    fn write(&self, f: &mut fmt::Formatter<'_>, depth: usize) -> fmt::Result {
+        if depth > MAX_PRINT_DEPTH {
+            return f.write_str("...");
+        }
         match self {
             Self::Int(n) => write!(f, "{n}"),
             Self::Float(x) if x.fract() == 0.0 => write!(f, "{x:.1}"),
@@ -86,12 +99,12 @@ impl fmt::Display for Val {
                     if i > 0 {
                         f.write_str(", ")?;
                     }
-                    write!(f, "{item}")?;
+                    item.write(f, depth + 1)?;
                 }
                 f.write_str("]")
             }
             Self::Lambda(_) => f.write_str("<lambda>"),
-            Self::Live(live) => write!(f, "{}", live.value),
+            Self::Live(live) => live.value.write(f, depth),
         }
     }
 }
@@ -220,6 +233,23 @@ impl Interpreter {
                 let items = self.list_slot(name)?;
                 let position = list_position(index.peel(), items.len())?;
                 items[position] = value;
+            }
+            Stmt::AssignNested(name, row, column, value) => {
+                let row = self.eval(row)?;
+                let column = self.eval(column)?;
+                let value = self.eval(value)?;
+                let rows = self.list_slot(name)?;
+                let row = list_position(row.peel(), rows.len())?;
+                let mut slot = &mut rows[row];
+                while let Val::Live(live) = slot {
+                    slot = &mut Rc::make_mut(live).value;
+                }
+                let Val::List(items) = slot else {
+                    return reject("nested list edit on a non-list");
+                };
+                let items = Rc::make_mut(items);
+                let column = list_position(column.peel(), items.len())?;
+                items[column] = value;
             }
             Stmt::Append(name, value) => {
                 let value = self.eval(value)?;
@@ -519,14 +549,19 @@ fn native_call(native: Native, args: &[Val]) -> Eval<Val> {
                 ));
             }
         },
-        // std.util: sum folds `+` from the integer 0
+        // std.util: sum folds `+` from the first element
         Native::Sum => {
             let Val::List(items) = args[0].peel() else {
                 return reject("sum of a non-list");
             };
-            items.iter().try_fold(Val::Int(0), |total, item| {
-                binary(BinOp::Add, &total, item.peel())
-            })?
+            // std.util starts from the first element, which decides the operand
+            // order in a type error's message
+            match items.split_first() {
+                None => Val::Int(0),
+                Some((first, rest)) => rest.iter().try_fold(first.peel().clone(), |total, item| {
+                    binary(BinOp::Add, &total, item.peel())
+                })?,
+            }
         }
         // std.util: range = |start, stop, step = 1|, so its result is live too
         Native::Range => {
@@ -584,15 +619,17 @@ fn to_int(x: f64) -> Eval<Val> {
     Ok(Val::Int(x as i64))
 }
 
-fn numbers(value: &Val) -> Eval<Vec<f64>> {
+/// the numbers of the list argument called `name`, whose type errors the
+/// stdlib reports under that name
+fn numbers(value: &Val, name: &str) -> Eval<Vec<f64>> {
     match value.peel() {
-        Val::List(items) => items.iter().map(|item| number(item.peel(), "v")).collect(),
-        other => error(type_error("list", other, "u")),
+        Val::List(items) => items.iter().map(|item| number(item.peel(), name)).collect(),
+        other => error(type_error("list", other, name)),
     }
 }
 
 fn dot(u: &Val, v: &Val) -> Eval<Val> {
-    let (u, v) = (numbers(u)?, numbers(v)?);
+    let (u, v) = (numbers(u, "u")?, numbers(v, "v")?);
     if u.len() != v.len() {
         return error(length_mismatch("dot", u.len(), v.len()));
     }

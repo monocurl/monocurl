@@ -159,6 +159,8 @@ pub enum Stmt {
     Var(Rc<str>, Expr),
     Assign(Rc<str>, Expr),
     AssignIndex(Rc<str>, Expr, Expr),
+    /// `name[row][column] = value`, a write two levels down
+    AssignNested(Rc<str>, Expr, Expr, Expr),
     Append(Rc<str>, Expr),
     If(Vec<(Expr, Vec<Stmt>)>, Option<Vec<Stmt>>),
     While(Expr, Vec<Stmt>),
@@ -235,6 +237,14 @@ fn write_stmt(out: &mut String, stmt: &Stmt, level: usize) {
         Stmt::AssignIndex(name, index, value) => {
             let _ = write!(out, "{name}[");
             write_expr(out, index, level);
+            out.push_str("] = ");
+            write_expr(out, value, level);
+        }
+        Stmt::AssignNested(name, row, column, value) => {
+            let _ = write!(out, "{name}[");
+            write_expr(out, row, level);
+            out.push_str("][");
+            write_expr(out, column, level);
             out.push_str("] = ");
             write_expr(out, value, level);
         }
