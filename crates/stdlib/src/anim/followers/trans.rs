@@ -16,7 +16,6 @@ use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
     simd::{Float2, Float3, Float4},
 };
-use rustc_hash::FxHashMap;
 use stdlib_macros::stdlib_func;
 
 use crate::mesh::helpers::{
@@ -2730,31 +2729,43 @@ fn planar_mesh_patharc_lerp(
 
 /// tessellating the boundary drops coincident points and adds intersection
 /// points, so the tessellated lines cannot be paired with the template's by
-/// index. an endpoint that still sits exactly on a template endpoint takes its
-/// colour from a lookup; only the rest search the template's lines
+/// index; libtess2 also returns its vertices with rounding error. both run
+/// along the same loops, so an endpoint is looked for near the template
+/// endpoint the previous one matched, then anywhere, and only a genuinely new
+/// point (an intersection) searches the template's lines
 fn color_boundary_lines_from_template(lins: &mut [Lin], template: &Mesh, fallback: Float4) {
-    let endpoint_colors: FxHashMap<[u32; 3], Float4> = template
+    let endpoints: Vec<(Float3, Float4)> = template
         .lins
         .iter()
         .filter(|line| line.is_dom_sib)
         .flat_map(|line| [(line.a.pos, line.a.col), (line.b.pos, line.b.col)])
-        .map(|(pos, col)| (position_bits(pos), col))
         .collect();
-    let color_at = |point: Float3| {
-        endpoint_colors
-            .get(&position_bits(point))
-            .copied()
-            .or_else(|| boundary_color_at(template, point))
-            .unwrap_or(fallback)
+    let extent = endpoints
+        .iter()
+        .flat_map(|(pos, _)| [pos.x.abs(), pos.y.abs(), pos.z.abs()])
+        .fold(1e-3_f32, f32::max);
+    let tolerance_sq = (1e-5_f32 * extent).powi(2);
+    const WINDOW: usize = 12;
+
+    let mut cursor = 0_usize;
+    let mut color_at = |point: Float3| {
+        let near = |index: &usize| (endpoints[*index].0 - point).len_sq() <= tolerance_sq;
+        let mut window = cursor.saturating_sub(2)..(cursor + WINDOW).min(endpoints.len());
+        let found = window
+            .find(near)
+            .or_else(|| (0..endpoints.len()).find(near));
+        match found {
+            Some(index) => {
+                cursor = index;
+                endpoints[index].1
+            }
+            None => boundary_color_at(template, point).unwrap_or(fallback),
+        }
     };
     for line in lins {
         line.a.col = color_at(line.a.pos);
         line.b.col = color_at(line.b.pos);
     }
-}
-
-fn position_bits(pos: Float3) -> [u32; 3] {
-    [pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits()]
 }
 
 fn boundary_color_at(mesh: &Mesh, point: Float3) -> Option<Float4> {
