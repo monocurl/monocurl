@@ -65,10 +65,10 @@ impl Executor {
         &mut self,
         val: Value,
     ) -> Result<Value, ExecutorError> {
-        if with_heap(|heap| is_materialized(heap, &val)) {
-            return Ok(val);
+        match materialize_sync(val) {
+            Ok(value) => Ok(value),
+            Err(val) => self.materialize_cached_value_slow(val).await,
         }
-        self.materialize_cached_value_slow(val).await
     }
 
     fn materialize_cached_value_slow<'a>(
@@ -131,6 +131,42 @@ impl Executor {
 
     pub(super) async fn resolve_live_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
         self.materialize_cached_value(val).await
+    }
+}
+
+/// materialise without evaluating anything: heap references are read through
+/// and a live wrapper whose cache is filled stands for its cached value, which
+/// is stored fully materialised. `Err` hands back the value untouched when
+/// something under it would have to run
+fn materialize_sync(value: Value) -> Result<Value, Value> {
+    if with_heap(|heap| is_materialized(heap, &value)) {
+        return Ok(value);
+    }
+    match &value {
+        Value::Lvalue(reference) => {
+            materialize_sync(with_heap(|h| h.get(reference.key()).clone())).map_err(|_| value)
+        }
+        Value::WeakLvalue(reference) => {
+            materialize_sync(with_heap(|h| h.get(reference.key()).clone())).map_err(|_| value)
+        }
+        Value::Leader(leader) => {
+            materialize_sync(with_heap(|h| h.get(leader.leader_rc.key()).clone()))
+                .map_err(|_| value)
+        }
+        Value::InvokedFunction(inv) => inv.cache.0.cloned().ok_or(value),
+        Value::InvokedOperator(inv) => inv.cache.cached_result.cloned().ok_or(value),
+        Value::List(list) => {
+            let mut elements = Vec::with_capacity(list.len());
+            for value_ref in list.elements() {
+                let element = with_heap(|h| h.get(value_ref.key()).clone());
+                match materialize_sync(element) {
+                    Ok(element) => elements.push(VRc::new(element)),
+                    Err(_) => return Err(value),
+                }
+            }
+            Ok(Value::List(List::new_with(elements)))
+        }
+        _ => Err(value),
     }
 }
 
