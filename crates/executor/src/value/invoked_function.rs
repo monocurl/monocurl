@@ -80,7 +80,7 @@ impl InvokedFunction {
                 let prepared_args = prepare_eager_call_args(full_args, &lambda)?;
                 let trace_parent_idx = Some(executor.state.last_stack_idx);
                 let raw = executor
-                    .eagerly_invoke_lambda(&lambda, &prepared_args, trace_parent_idx)
+                    .eagerly_invoke_lambda(&lambda, prepared_args, trace_parent_idx)
                     .await?;
                 executor.materialize_cached_value(raw).await?
             };

@@ -18,10 +18,13 @@ use super::{
 
 impl Executor {
     #[inline]
+    /// arguments are taken by value: they are pushed straight into the new
+    /// frame, and a live call's lists and meshes would otherwise be copied a
+    /// second time on the way in
     pub(crate) fn eagerly_invoke_lambda<'a>(
         &'a mut self,
         lambda: &'a Lambda,
-        args: &'a [Value],
+        args: SmallVec<[Value; 4]>,
         trace_parent_idx: Option<usize>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
@@ -42,9 +45,8 @@ impl Executor {
                     ExecutorError::TooManyActiveAnimations
                 })?;
             let stack = self.state.stack_mut(temp_idx);
-            for arg in args {
-                stack.push(arg.clone());
-            }
+            stack.var_stack.reserve(args.len() + lambda.captures.len());
+            stack.var_stack.extend(args);
             for cap in &lambda.captures {
                 stack.push(cap.clone());
             }
@@ -279,7 +281,7 @@ impl Executor {
     {
         Box::pin(async move {
             let full_args = prepare_eager_call_args(args, lambda)?;
-            self.eagerly_invoke_lambda(lambda, &full_args, None).await
+            self.eagerly_invoke_lambda(lambda, full_args, None).await
         })
     }
 

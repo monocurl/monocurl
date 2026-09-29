@@ -111,7 +111,7 @@ impl Executor {
                     let full_args = prepare_eager_call_args(evaled, &lambda)?;
                     let trace_parent_idx = Some(self.state.last_stack_idx);
                     let result = self
-                        .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
+                        .eagerly_invoke_lambda(&lambda, full_args, trace_parent_idx)
                         .await?;
                     self.resolve_live_value(result).await
                 }
@@ -153,7 +153,7 @@ impl Executor {
                     let full_args = prepare_eager_call_args(evaled, &operator_inner.0)?;
                     let trace_parent_idx = Some(self.state.last_stack_idx);
                     let raw = self
-                        .eagerly_invoke_lambda(&operator_inner.0, &full_args, trace_parent_idx)
+                        .eagerly_invoke_lambda(&operator_inner.0, full_args, trace_parent_idx)
                         .await?;
                     let (_, modified) = extract_operator_result(raw)?;
                     self.resolve_live_value(modified).await
@@ -194,7 +194,7 @@ impl Executor {
                     let full_args = prepare_eager_call_args(arguments.iter().cloned(), &lambda)?;
                     let trace_parent_idx = Some(self.state.last_stack_idx);
                     let result = self
-                        .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
+                        .eagerly_invoke_lambda(&lambda, full_args, trace_parent_idx)
                         .await?;
                     let result = self.materialize_cached_value(result).await?;
 
@@ -230,7 +230,7 @@ impl Executor {
                     )?;
                     let trace_parent_idx = Some(self.state.last_stack_idx);
                     let raw = self
-                        .eagerly_invoke_lambda(&operator_inner.0, &full_args, trace_parent_idx)
+                        .eagerly_invoke_lambda(&operator_inner.0, full_args, trace_parent_idx)
                         .await?;
                     let (initial, modified) = extract_operator_result(raw)?;
                     let initial = self.materialize_cached_value(initial).await?;

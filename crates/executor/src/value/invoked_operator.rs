@@ -112,7 +112,7 @@ impl InvokedOperator {
                 let trace_parent_idx = Some(executor.state.last_stack_idx);
 
                 let raw = executor
-                    .eagerly_invoke_lambda(&operator.0, &prepared_args, trace_parent_idx)
+                    .eagerly_invoke_lambda(&operator.0, prepared_args, trace_parent_idx)
                     .await?;
                 let (initial, modified) = extract_operator_result(raw)?;
                 let initial = executor.materialize_cached_value(initial).await?;

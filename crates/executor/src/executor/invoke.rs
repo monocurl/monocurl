@@ -241,7 +241,7 @@ impl Executor {
             let full_args = fill_defaults(args, &lambda);
 
             match self
-                .eagerly_invoke_lambda(&lambda, &prepared_args, Some(stack_idx))
+                .eagerly_invoke_lambda(&lambda, prepared_args, Some(stack_idx))
                 .await
             {
                 Ok(result_val) => {
@@ -385,7 +385,7 @@ impl Executor {
                 };
 
             match self
-                .eagerly_invoke_lambda(&operator.0, &prepared_args, Some(stack_idx))
+                .eagerly_invoke_lambda(&operator.0, prepared_args, Some(stack_idx))
                 .await
             {
                 Ok(raw) => match extract_operator_result(raw) {
@@ -432,7 +432,7 @@ impl Executor {
                 };
 
             match self
-                .eagerly_invoke_lambda(&operator.0, &prepared_args, Some(stack_idx))
+                .eagerly_invoke_lambda(&operator.0, prepared_args, Some(stack_idx))
                 .await
             {
                 Ok(raw) => match extract_operator_result(raw) {
