@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
     mesh::{DEFAULT_DOT_RADIUS, Dot, Mesh},
-    simd::Float3,
+    simd::{Float3, Float4},
 };
 use stdlib_macros::stdlib_func;
 
@@ -156,7 +156,39 @@ fn op_refill_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Va
     Some(Ok(tree.into_value()))
 }
 
-#[stdlib_func]
+fn op_redot_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -4)?;
+    if !has_no_tag_filter(executor, stack_idx, -2) {
+        return None;
+    }
+    let level = match read_level(executor, stack_idx, -1, "level") {
+        Ok(level) => level,
+        Err(error) => return Some(Err(error)),
+    };
+    if level > 0.0 {
+        let color = try_read_float4_arg(executor, stack_idx, -3)?;
+        tree.for_each_mut(&mut |mesh| redot_mesh(mesh, color, level));
+    }
+    Some(Ok(tree.into_value()))
+}
+
+/// what `dot{}` does to one mesh: every line endpoint gets a dot, dots take
+/// the colour, and topology dots (authored with radius 0) become visible
+fn redot_mesh(mesh: &mut Mesh, color: Float4, level: f32) {
+    add_line_vertex_dots(mesh);
+    for dot in &mut mesh.dots {
+        dot.col = dot.col.lerp(color, level);
+    }
+    let radius = mesh.uniform.dot_radius;
+    let visible = if radius > 0.0 {
+        radius
+    } else {
+        DEFAULT_DOT_RADIUS
+    };
+    mesh.uniform.dot_radius = radius + (visible - radius) * level;
+}
+
+#[stdlib_func(sync = op_redot_sync)]
 pub async fn op_redot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
     let level = read_level(executor, stack_idx, -1, "level")?;
@@ -166,18 +198,7 @@ pub async fn op_redot(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let color = read_float4(executor, stack_idx, -3, "color").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        add_line_vertex_dots(mesh);
-        for dot in &mut mesh.dots {
-            dot.col = dot.col.lerp(color, level);
-        }
-        // topology dots are authored with radius 0, which would keep them hidden
-        let radius = mesh.uniform.dot_radius;
-        let visible = if radius > 0.0 {
-            radius
-        } else {
-            DEFAULT_DOT_RADIUS
-        };
-        mesh.uniform.dot_radius = radius + (visible - radius) * level;
+        redot_mesh(mesh, color, level)
     })
     .await?;
     Ok(tree.into_value())
@@ -217,7 +238,23 @@ fn add_line_vertex_dots(mesh: &mut Mesh) {
     mesh.debug_assert_consistent_topology();
 }
 
-#[stdlib_func]
+fn op_recolor_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -4)?;
+    if !has_no_tag_filter(executor, stack_idx, -2) {
+        return None;
+    }
+    let level = match read_level(executor, stack_idx, -1, "level") {
+        Ok(level) => level,
+        Err(error) => return Some(Err(error)),
+    };
+    if level > 0.0 {
+        let color = try_read_float4_arg(executor, stack_idx, -3)?;
+        tree.for_each_mut(&mut |mesh| recolor_mesh(mesh, color, level));
+    }
+    Some(Ok(tree.into_value()))
+}
+
+#[stdlib_func(sync = op_recolor_sync)]
 pub async fn op_recolor(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
     let level = read_level(executor, stack_idx, -1, "level")?;
@@ -282,7 +319,22 @@ pub async fn op_retextured(
     Ok(tree.into_value())
 }
 
-#[stdlib_func]
+fn op_with_zindex_sync(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -3)?;
+    if !has_no_tag_filter(executor, stack_idx, -1) {
+        return None;
+    }
+    Some((|| {
+        let z_index = read_int(executor, stack_idx, -2, "z_index")?;
+        tree.for_each_mut(&mut |mesh| mesh.uniform.z_index = z_index as i32);
+        Ok(tree.into_value())
+    })())
+}
+
+#[stdlib_func(sync = op_with_zindex_sync)]
 pub async fn op_with_zindex(
     executor: &mut Executor,
     stack_idx: usize,
@@ -297,7 +349,19 @@ pub async fn op_with_zindex(
     Ok(tree.into_value())
 }
 
-#[stdlib_func]
+fn op_gloss_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -3)?;
+    if !has_no_tag_filter(executor, stack_idx, -1) {
+        return None;
+    }
+    Some((|| {
+        let gloss = crate::read_float(executor, stack_idx, -2, "gloss")? as f32;
+        tree.for_each_mut(&mut |mesh| mesh.uniform.gloss = gloss.max(0.0));
+        Ok(tree.into_value())
+    })())
+}
+
+#[stdlib_func(sync = op_gloss_sync)]
 pub async fn op_gloss(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let gloss = crate::read_float(executor, stack_idx, -2, "gloss")? as f32;

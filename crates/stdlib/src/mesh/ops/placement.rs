@@ -170,7 +170,24 @@ fn op_shift_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Val
     })())
 }
 
-#[stdlib_func]
+fn op_scale_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -3)?;
+    if !has_no_tag_filter(executor, stack_idx, -1) {
+        return None;
+    }
+    Some((|| {
+        let factor = read_scale_factor(executor, stack_idx, -2, "factor")?;
+        if (factor - Float3::splat(1.0)).len_sq() > 1e-12 {
+            let center = tree_center(&tree).unwrap_or(Float3::ZERO);
+            tree.for_each_mut(&mut |mesh| {
+                transform_mesh_positions(mesh, |p| center + (p - center) * factor)
+            });
+        }
+        Ok(tree.into_value())
+    })())
+}
+
+#[stdlib_func(sync = op_scale_sync)]
 pub async fn op_scale(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let factor = read_scale_factor(executor, stack_idx, -2, "factor")?;
@@ -188,7 +205,49 @@ pub async fn op_scale(executor: &mut Executor, stack_idx: usize) -> Result<Value
     Ok(tree.into_value())
 }
 
-#[stdlib_func]
+fn op_rotate_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -5)?;
+    if !has_no_tag_filter(executor, stack_idx, -1) {
+        return None;
+    }
+    let pivot = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-2)
+        .clone()
+        .elide_cached_wrappers_rec();
+    if !matches!(pivot, Value::Nil | Value::List(_)) {
+        return None;
+    }
+    Some((|| {
+        let angle = crate::read_float(executor, stack_idx, -4, "radians")? as f32;
+        if angle.abs() <= 1e-12 {
+            return Ok(tree.into_value());
+        }
+        let axis = read_float3(executor, stack_idx, -3, "axis")?;
+        let axis = if axis.len_sq() <= 1e-12 {
+            Float3::Z
+        } else {
+            axis.normalize()
+        };
+        let pivot = match pivot {
+            Value::Nil => tree_center(&tree).unwrap_or(Float3::ZERO),
+            value => float3_from_value(value, "pivot")?,
+        };
+        tree.for_each_mut(&mut |mesh| {
+            transform_mesh_positions(mesh, |p| pivot + rotate_about_axis(p - pivot, axis, angle));
+            for dot in &mut mesh.dots {
+                dot.norm = rotate_about_axis(dot.norm, axis, angle);
+            }
+            for lin in &mut mesh.lins {
+                lin.norm = rotate_about_axis(lin.norm, axis, angle);
+            }
+        });
+        Ok(tree.into_value())
+    })())
+}
+
+#[stdlib_func(sync = op_rotate_sync)]
 pub async fn op_rotate(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -5, "target").await?;
     let angle = crate::read_float(executor, stack_idx, -4, "radians")? as f32;
