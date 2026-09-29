@@ -409,6 +409,21 @@ impl TVm {
                     self.store(base, arg_start, ret, result)?;
                 }
                 TOp::DynBin { op, dst, a, b, ret } => {
+                    // a boxed list updated in place: the register is taken
+                    // out so the machine holds the only reference
+                    if let Opnd::B(lhs) = a
+                        && lhs == dst
+                        && !matches!(b, Opnd::B(other) if other == lhs)
+                        && matches!(boxed!(lhs), KVal::List(_))
+                    {
+                        let mut value = std::mem::replace(&mut boxed!(lhs), KVal::Nil);
+                        let rhs = self.load(base, b);
+                        if !run::binary_in_place(arena, op, &mut value, &rhs)? {
+                            value = run::binary(arena, op, &value, &rhs)?;
+                        }
+                        self.store(base, dst, ret, value)?;
+                        continue;
+                    }
                     let value = run::binary(arena, op, &self.load(base, a), &self.load(base, b))?;
                     self.store(base, dst, ret, value)?;
                 }

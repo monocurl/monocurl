@@ -239,6 +239,18 @@ impl Vm {
                     reg!(dst) = value;
                 }
                 KOp::Bin { op, dst, a, b } => {
+                    // `v = v + w` on a list nobody else holds updates it in
+                    // place instead of allocating the result
+                    if dst == a && a != b && matches!(reg!(a), KVal::List(_)) {
+                        let rhs = reg!(b).clone();
+                        let lhs = &mut reg!(a);
+                        if binary_in_place(arena, op, lhs, &rhs)? {
+                            continue;
+                        }
+                        let value = binary(arena, op, lhs, &rhs)?;
+                        reg!(dst) = value;
+                        continue;
+                    }
                     let value = binary(arena, op, &reg!(a), &reg!(b))?;
                     reg!(dst) = value;
                 }
@@ -363,6 +375,41 @@ pub(super) fn negate(value: &KVal) -> Result<KVal, Fault> {
 }
 
 /// the same promotion and result types as `eval_binary`
+/// `lhs = lhs op rhs` written into `lhs` when it is a list held nowhere
+/// else and the op is one that maps over its elements; `false` when the
+/// general path has to run instead. same results as `binary`
+pub fn binary_in_place(
+    arena: &ClosureArena,
+    op: BinKind,
+    lhs: &mut KVal,
+    rhs: &KVal,
+) -> Result<bool, Fault> {
+    let KVal::List(list) = lhs else {
+        return Ok(false);
+    };
+    let Some(elements) = Arc::get_mut(list) else {
+        return Ok(false);
+    };
+    match (op, rhs) {
+        (BinKind::Add | BinKind::Sub, KVal::List(other)) => {
+            if elements.len() != other.len() {
+                return Err(Fault::LengthMismatch);
+            }
+            for (element, term) in elements.iter_mut().zip(other.iter()) {
+                *element = binary(arena, op, element, term)?;
+            }
+            Ok(true)
+        }
+        (BinKind::Mul | BinKind::Div, scalar) if !matches!(scalar, KVal::List(_)) => {
+            for element in elements.iter_mut() {
+                *element = binary(arena, op, element, scalar)?;
+            }
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
 pub fn binary(arena: &ClosureArena, op: BinKind, a: &KVal, b: &KVal) -> Result<KVal, Fault> {
     match (a, b) {
         (KVal::Int(x), KVal::Int(y)) => return int_binary(op, *x, *y),
