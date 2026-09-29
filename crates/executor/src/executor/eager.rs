@@ -56,7 +56,7 @@ impl Executor {
                     } else {
                         Value::Nil
                     };
-                    self.state.free_stack(temp_idx);
+                    self.state.recycle_stack(temp_idx);
                     self.state.last_stack_idx =
                         trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
                     self.state.call_depth -= 1;
@@ -263,7 +263,7 @@ impl Executor {
                 }
             }
 
-            self.state.free_stack(temp_idx);
+            self.state.recycle_stack(temp_idx);
             self.state.last_stack_idx =
                 trace_parent_idx.unwrap_or(crate::state::ExecutionState::ROOT_STACK_IDX);
             self.state.call_depth -= 1;
