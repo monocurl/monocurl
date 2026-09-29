@@ -248,7 +248,8 @@ mod tests {
             col: Float4::new(1.0, 0.0, 0.0, 1.0),
             inv: -1,
             is_dom_sib: false,
-        }];
+        }]
+        .into();
         mesh.normalize_line_dot_topology();
         let scene = SceneRenderData {
             background: BackgroundSnapshot::default(),
@@ -413,8 +414,8 @@ mod tests {
 
     fn flat_triangle_mesh(color: Float4, z_index: i32) -> Mesh {
         Mesh {
-            dots: Vec::new(),
-            lins: Vec::new(),
+            dots: Default::default(),
+            lins: Default::default(),
             tris: vec![Tri {
                 a: TriVertex {
                     pos: Float3::new(-1.0, -1.0, 0.0),
@@ -435,7 +436,8 @@ mod tests {
                 bc: -1,
                 ca: -1,
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             uniform: Uniforms {
                 alpha: 1.0,
                 stroke_miter_radius_scale: geo::mesh::DEFAULT_STROKE_MITER_RADIUS_SCALE,
@@ -520,7 +522,8 @@ mod tests {
         mesh.tris = vec![
             tri(vertex(-1.0, -1.0), vertex(1.0, -1.0), vertex(1.0, 1.0)),
             tri(vertex(-1.0, -1.0), vertex(1.0, 1.0), vertex(-1.0, 1.0)),
-        ];
+        ]
+        .into();
         mesh
     }
 
@@ -552,7 +555,7 @@ mod tests {
 
     fn line_mesh(color: Float4) -> Mesh {
         Mesh {
-            dots: Vec::new(),
+            dots: Default::default(),
             lins: vec![Lin {
                 a: LinVertex {
                     pos: Float3::new(-0.5, 0.0, 0.0),
@@ -567,8 +570,9 @@ mod tests {
                 next: -1,
                 inv: -1,
                 is_dom_sib: true,
-            }],
-            tris: Vec::new(),
+            }]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms {
                 stroke_radius: 24.0,
                 ..Uniforms::default()
@@ -581,7 +585,7 @@ mod tests {
     fn elbow_line_mesh(linked: bool, color: Float4) -> Mesh {
         let (first_next, second_prev) = if linked { (1, 0) } else { (-1, -1) };
         Mesh {
-            dots: Vec::new(),
+            dots: Default::default(),
             lins: vec![
                 Lin {
                     a: LinVertex {
@@ -613,8 +617,9 @@ mod tests {
                     inv: -1,
                     is_dom_sib: true,
                 },
-            ],
-            tris: Vec::new(),
+            ]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms {
                 stroke_radius: 24.0,
                 ..Uniforms::default()
@@ -626,7 +631,7 @@ mod tests {
 
     fn stroked_triangle_mesh(fill: Float4, stroke: Float4) -> Mesh {
         Mesh {
-            dots: Vec::new(),
+            dots: Default::default(),
             lins: vec![
                 Lin {
                     a: LinVertex {
@@ -673,7 +678,8 @@ mod tests {
                     inv: -1,
                     is_dom_sib: true,
                 },
-            ],
+            ]
+            .into(),
             tris: vec![Tri {
                 a: TriVertex {
                     pos: Float3::new(-0.5, -0.5, 0.0),
@@ -694,7 +700,8 @@ mod tests {
                 bc: -3,
                 ca: -4,
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),

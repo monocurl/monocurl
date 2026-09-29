@@ -316,7 +316,7 @@ pub(super) fn subdivide_line_mesh(mesh: &mut Mesh, factor: usize) {
         }
     }
 
-    mesh.lins = lins;
+    mesh.lins = lins.into();
 }
 
 #[stdlib_func]
@@ -336,8 +336,8 @@ pub async fn op_subdivide(
             }
             let (lins, tris) =
                 build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
-            mesh.lins = lins;
-            mesh.tris = tris;
+            mesh.lins = lins.into();
+            mesh.tris = tris.into();
         } else if !mesh.lins.is_empty() && factor > 1 {
             subdivide_line_mesh(mesh, factor);
         }
@@ -364,8 +364,8 @@ pub async fn op_tesselated(
             }
             let (lins, tris) =
                 build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
-            mesh.lins = lins;
-            mesh.tris = tris;
+            mesh.lins = lins.into();
+            mesh.tris = tris.into();
         }
         mesh.debug_assert_consistent_topology();
     })
@@ -422,8 +422,8 @@ pub async fn op_extrude(executor: &mut Executor, stack_idx: usize) -> Result<Val
         }
 
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
-        mesh.lins = lins;
-        mesh.tris = tris;
+        mesh.lins = lins.into();
+        mesh.tris = tris.into();
         mesh.debug_assert_consistent_topology();
     })
     .await?;
@@ -494,8 +494,8 @@ pub async fn op_revolve(executor: &mut Executor, stack_idx: usize) -> Result<Val
         }
 
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
-        mesh.lins = lins;
-        mesh.tris = tris;
+        mesh.lins = lins.into();
+        mesh.tris = tris.into();
         mesh.debug_assert_consistent_topology();
     })
     .await?;

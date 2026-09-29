@@ -402,9 +402,9 @@ mod tests {
 
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         let mesh = Mesh {
-            dots: Vec::new(),
-            lins,
-            tris,
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: Default::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -448,9 +448,9 @@ mod tests {
 
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         let mesh = Mesh {
-            dots: Vec::new(),
-            lins,
-            tris,
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: Default::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),

@@ -344,9 +344,9 @@ fn filled_contours(
 ) -> Result<Mesh> {
     let (lins, tris) = tessellate_planar_loops(contours, Float3::Z, color, even_odd)?;
     let mesh = Mesh {
-        dots: Vec::new(),
-        lins,
-        tris,
+        dots: Default::default(),
+        lins: lins.into(),
+        tris: tris.into(),
         uniform: Uniforms {
             stroke_radius: DEFAULT_TEXT_STROKE_RADIUS,
             ..Uniforms::default()

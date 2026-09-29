@@ -69,9 +69,9 @@ fn append_mesh_into(out: &mut Mesh, mesh: &Mesh) {
     let line_delta = out.lins.len();
     let tri_delta = out.tris.len();
 
-    let mut dots = mesh.dots.clone();
-    let mut lins = mesh.lins.clone();
-    let mut tris = mesh.tris.clone();
+    let mut dots = mesh.dots.to_vec();
+    let mut lins = mesh.lins.to_vec();
+    let mut tris = mesh.tris.to_vec();
 
     shift_dot_refs(&mut dots, dot_delta, line_delta);
     shift_line_refs(&mut lins, dot_delta, line_delta, tri_delta);
@@ -581,9 +581,9 @@ mod tests {
         let p1 = Float3::X;
         let p2 = Float3::new(2.0, 0.0, 0.0);
         let mut mesh = Mesh {
-            dots: vec![],
-            lins: vec![poly_line(p0, p1, -1, 1), poly_line(p1, p2, 0, -1)],
-            tris: vec![],
+            dots: Default::default(),
+            lins: vec![poly_line(p0, p1, -1, 1), poly_line(p1, p2, 0, -1)].into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -607,9 +607,10 @@ mod tests {
                 col: Float4::ONE,
                 inv: -1,
                 is_dom_sib: true,
-            }],
-            lins: vec![],
-            tris: vec![],
+            }]
+            .into(),
+            lins: Default::default(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -621,7 +622,7 @@ mod tests {
     #[test]
     fn append_mesh_remaps_negative_dot_inverse_refs() {
         let mut out = Mesh {
-            dots: vec![],
+            dots: Default::default(),
             lins: vec![Lin {
                 a: LinVertex {
                     pos: Float3::new(-1.0, 0.0, 0.0),
@@ -636,8 +637,9 @@ mod tests {
                 next: -1,
                 inv: -1,
                 is_dom_sib: true,
-            }],
-            tris: vec![],
+            }]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -649,7 +651,8 @@ mod tests {
                 col: Float4::ONE,
                 inv: mesh_ref(0),
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             lins: vec![Lin {
                 a: LinVertex {
                     pos: Float3::ZERO,
@@ -664,8 +667,9 @@ mod tests {
                 next: -1,
                 inv: -1,
                 is_dom_sib: true,
-            }],
-            tris: vec![],
+            }]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),

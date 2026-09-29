@@ -1072,8 +1072,8 @@ pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
         .or_else(|| contour_area_normal(&contours))
         .unwrap_or(Float3::Z);
     let (lins, tris) = tessellate_planar_loops_with_options(&contours, normal, true)?;
-    out.lins = lins;
-    out.tris = tris;
+    out.lins = lins.into();
+    out.tris = tris.into();
     out.debug_assert_consistent_topology();
     Ok(Some(out))
 }
@@ -1093,9 +1093,9 @@ pub(super) fn mesh_from_parts_with_dot_radius(
         ..Uniforms::default()
     };
     let mut mesh = Mesh {
-        dots,
-        lins,
-        tris,
+        dots: dots.into(),
+        lins: lins.into(),
+        tris: tris.into(),
         uniform,
         tag: vec![],
         version: Mesh::fresh_version(),
@@ -1711,9 +1711,9 @@ mod tests {
         }
 
         Mesh {
-            dots: Vec::new(),
-            lins,
-            tris: Vec::new(),
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -1747,7 +1747,8 @@ mod tests {
                 col: Float4::ONE,
                 inv: mesh_ref(0),
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             lins: vec![Lin {
                 a: LinVertex {
                     pos: Float3::ZERO,
@@ -1762,8 +1763,9 @@ mod tests {
                 next: -1,
                 inv: -1,
                 is_dom_sib: true,
-            }],
-            tris: Vec::new(),
+            }]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),

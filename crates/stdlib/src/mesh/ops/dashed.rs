@@ -148,9 +148,9 @@ pub(super) fn dashed_mesh(mesh: &Mesh, dash_length: f32, gap_length: f32, offset
         }
 
         let dashed = Mesh {
-            dots: Vec::new(),
-            lins: dashed_lins,
-            tris: Vec::new(),
+            dots: Default::default(),
+            lins: dashed_lins.into(),
+            tris: Default::default(),
             uniform: mesh.uniform.clone(),
             tag: mesh.tag.clone(),
             version: Mesh::fresh_version(),
@@ -175,9 +175,9 @@ pub(super) fn dashed_mesh(mesh: &Mesh, dash_length: f32, gap_length: f32, offset
 
     if !dashed_lins.is_empty() {
         let mut dashed = Mesh {
-            dots: Vec::new(),
-            lins: dashed_lins,
-            tris: Vec::new(),
+            dots: Default::default(),
+            lins: dashed_lins.into(),
+            tris: Default::default(),
             uniform: mesh.uniform.clone(),
             tag: mesh.tag.clone(),
             version: Mesh::fresh_version(),

@@ -547,7 +547,7 @@ pub async fn mk_explicit_diff(
 
     let make_tagged_mesh = |lins, tris, tag: Vec<isize>| {
         let mesh = geo::mesh::Mesh {
-            dots: vec![],
+            dots: Default::default(),
             lins,
             tris,
             uniform: geo::mesh::Uniforms::default(),
@@ -558,8 +558,8 @@ pub async fn mk_explicit_diff(
         Value::Mesh(std::sync::Arc::new(mesh))
     };
 
-    let pos_val = make_tagged_mesh(pos_lins, pos_tris, tag0);
-    let neg_val = make_tagged_mesh(neg_lins, neg_tris, tag1);
+    let pos_val = make_tagged_mesh(pos_lins.into(), pos_tris.into(), tag0);
+    let neg_val = make_tagged_mesh(neg_lins.into(), neg_tris.into(), tag1);
 
     let upper_opt: Vec<Option<Float3>> = upper
         .iter()

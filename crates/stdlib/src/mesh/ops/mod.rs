@@ -210,9 +210,9 @@ mod tests {
         let (lins, tris) =
             build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
         let mesh = Mesh {
-            dots: vec![],
-            lins,
-            tris,
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -225,13 +225,14 @@ mod tests {
     #[test]
     fn subdivide_lines_remaps_endpoint_dot_backrefs() {
         let mut mesh = Mesh {
-            dots: vec![],
+            dots: Default::default(),
             lins: vec![default_lin(
                 Float3::new(-2.0, -2.0, 0.0),
                 Float3::new(-1.0, -2.0, 0.0),
                 Float3::Z,
-            )],
-            tris: vec![],
+            )]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -276,9 +277,9 @@ mod tests {
         let faces = vec![[0, 1, 3], [0, 3, 2]];
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         let mesh = Mesh {
-            dots: vec![],
-            lins,
-            tris,
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -298,7 +299,8 @@ mod tests {
                 col: start,
                 inv: -1,
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             lins: vec![Lin {
                 a: LinVertex {
                     pos: Float3::ZERO,
@@ -313,7 +315,8 @@ mod tests {
                 next: -1,
                 inv: -1,
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             tris: vec![Tri {
                 a: TriVertex {
                     pos: Float3::ZERO,
@@ -334,7 +337,8 @@ mod tests {
                 bc: -1,
                 ca: -1,
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -361,9 +365,9 @@ mod tests {
 
         let dashed = dashed_lines(&[first, second], 1.5, 0.5, 0.0);
         let mesh = Mesh {
-            dots: vec![],
-            lins: dashed.clone(),
-            tris: vec![],
+            dots: Default::default(),
+            lins: dashed.clone().into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -418,9 +422,9 @@ mod tests {
         let (lins, tris) =
             build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
         let mesh = Mesh {
-            dots: vec![],
-            lins,
-            tris,
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: Uniforms::default(),
             tag: vec![7],
             version: Mesh::fresh_version(),

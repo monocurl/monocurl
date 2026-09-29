@@ -268,8 +268,8 @@ mod tests {
     #[test]
     fn line_vertices_prefer_dominant_sibling_orientation() {
         let mesh = Mesh {
-            dots: Vec::new(),
-            tris: Vec::new(),
+            dots: Default::default(),
+            tris: Default::default(),
             lins: vec![
                 test_line(
                     Float3::new(0.0, 0.0, 0.0),
@@ -289,7 +289,8 @@ mod tests {
                     true,
                     1.0,
                 ),
-            ],
+            ]
+            .into(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -307,8 +308,8 @@ mod tests {
     #[test]
     fn line_vertices_skip_non_dominant_inverse_pairs() {
         let mesh = Mesh {
-            dots: Vec::new(),
-            tris: Vec::new(),
+            dots: Default::default(),
+            tris: Default::default(),
             lins: vec![
                 test_line(
                     Float3::new(0.0, 0.0, 0.0),
@@ -328,7 +329,8 @@ mod tests {
                     false,
                     1.0,
                 ),
-            ],
+            ]
+            .into(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -340,8 +342,8 @@ mod tests {
     #[test]
     fn line_vertices_do_not_fall_back_to_non_dominant_visible_inverse() {
         let mesh = Mesh {
-            dots: Vec::new(),
-            tris: Vec::new(),
+            dots: Default::default(),
+            tris: Default::default(),
             lins: vec![
                 test_line(
                     Float3::new(0.0, 0.0, 0.0),
@@ -361,7 +363,8 @@ mod tests {
                     false,
                     1.0,
                 ),
-            ],
+            ]
+            .into(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -373,8 +376,8 @@ mod tests {
     #[test]
     fn line_vertices_keep_butt_caps_without_explicit_neighbors() {
         let mesh = Mesh {
-            dots: Vec::new(),
-            tris: Vec::new(),
+            dots: Default::default(),
+            tris: Default::default(),
             lins: vec![
                 test_line(
                     Float3::new(0.0, 0.0, 0.0),
@@ -394,7 +397,8 @@ mod tests {
                     true,
                     1.0,
                 ),
-            ],
+            ]
+            .into(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -408,8 +412,8 @@ mod tests {
     #[test]
     fn line_vertices_reverse_second_half_tangents() {
         let mesh = Mesh {
-            dots: Vec::new(),
-            tris: Vec::new(),
+            dots: Default::default(),
+            tris: Default::default(),
             lins: vec![
                 test_line(
                     Float3::new(0.0, 0.0, 0.0),
@@ -429,7 +433,8 @@ mod tests {
                     true,
                     1.0,
                 ),
-            ],
+            ]
+            .into(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -503,9 +508,9 @@ mod tests {
 
     fn test_mesh_with_uniform(uniform: Uniforms) -> Mesh {
         Mesh {
-            dots: Vec::new(),
-            tris: Vec::new(),
-            lins: Vec::new(),
+            dots: Default::default(),
+            tris: Default::default(),
+            lins: Default::default(),
             uniform,
             tag: Vec::new(),
             version: Mesh::fresh_version(),
