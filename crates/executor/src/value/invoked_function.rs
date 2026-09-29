@@ -1,4 +1,4 @@
-use std::{cell::Cell, future::Future, pin::Pin};
+use std::{future::Future, pin::Pin};
 
 use smallvec::SmallVec;
 
@@ -10,7 +10,7 @@ use crate::{
     value::Value,
 };
 
-use super::rc_cached::RcCached;
+use super::rc_cached::{CacheCell, RcCached};
 
 #[derive(Clone)]
 pub struct InvokedFunctionBody {
@@ -20,16 +20,8 @@ pub struct InvokedFunctionBody {
     pub labels: Labels,
 }
 
-pub struct InvFuncCache(pub Cell<Option<Box<Value>>>);
-
-impl Clone for InvFuncCache {
-    fn clone(&self) -> Self {
-        let cached = self.0.take();
-        let cloned = cached.as_ref().map(|v| Box::new((**v).clone()));
-        self.0.set(cached);
-        InvFuncCache(Cell::new(cloned))
-    }
-}
+#[derive(Clone)]
+pub struct InvFuncCache(pub CacheCell);
 
 pub type InvokedFunction = RcCached<InvokedFunctionBody, InvFuncCache>;
 
@@ -48,7 +40,7 @@ pub fn make_invoked_function(
             boxed_arguments,
             labels,
         },
-        InvFuncCache(Cell::new(cached_result.map(Box::new))),
+        InvFuncCache(CacheCell::new(cached_result)),
     )
 }
 
@@ -68,32 +60,31 @@ impl InvokedFunction {
         executor: &'a mut Executor,
     ) -> Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>> {
         Box::pin(async move {
-            let cached = this.cache.0.take();
-            let result = match cached {
-                Some(result) => *result,
-                None => {
-                    let lambda = match this.body.lambda.as_ref().clone().elide_lvalue() {
-                        Value::Lambda(lambda) => lambda,
-                        other => {
-                            return Err(ExecutorError::type_error("lambda", other.type_name()));
-                        }
-                    };
+            if let Some(cached) = this.cache.0.cloned() {
+                return Ok(cached);
+            }
+            let result = {
+                let lambda = match this.body.lambda.as_ref().clone().elide_lvalue() {
+                    Value::Lambda(lambda) => lambda,
+                    other => {
+                        return Err(ExecutorError::type_error("lambda", other.type_name()));
+                    }
+                };
 
-                    let full_args = fill_defaults(
-                        (0..this.body.arguments.len())
-                            .map(|arg_idx| normalize_argument(&this.body, arg_idx))
-                            .collect(),
-                        &lambda,
-                    );
-                    let prepared_args = prepare_eager_call_args(full_args, &lambda)?;
-                    let trace_parent_idx = Some(executor.state.last_stack_idx);
-                    let raw = executor
-                        .eagerly_invoke_lambda(&lambda, &prepared_args, trace_parent_idx)
-                        .await?;
-                    executor.materialize_cached_value(raw).await?
-                }
+                let full_args = fill_defaults(
+                    (0..this.body.arguments.len())
+                        .map(|arg_idx| normalize_argument(&this.body, arg_idx))
+                        .collect(),
+                    &lambda,
+                );
+                let prepared_args = prepare_eager_call_args(full_args, &lambda)?;
+                let trace_parent_idx = Some(executor.state.last_stack_idx);
+                let raw = executor
+                    .eagerly_invoke_lambda(&lambda, &prepared_args, trace_parent_idx)
+                    .await?;
+                executor.materialize_cached_value(raw).await?
             };
-            this.cache.0.set(Some(Box::new(result.clone())));
+            this.cache.0.fill(result.clone());
             Ok(result)
         })
     }

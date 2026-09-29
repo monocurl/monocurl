@@ -323,6 +323,8 @@ impl ExecutionState {
         };
         self.alive_stack_count -= 1;
         self.execution_stacks[idx] = ExecutionStackSlot::Ghost(ghost);
+        // an assignment that failed part way leaves its write path pinned
+        crate::heap::heap_unpin(idx);
     }
 
     #[inline]

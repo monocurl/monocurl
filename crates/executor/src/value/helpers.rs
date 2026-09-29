@@ -1,9 +1,7 @@
-use std::cell::Cell;
-
 use crate::{
     error::ExecutorError,
     executor::Executor,
-    heap::{HeapKey, VRc, heap_replace, with_heap, with_heap_mut},
+    heap::{HeapKey, VRc, VirtualHeap, heap_replace, with_heap, with_heap_mut, with_heap_pins},
 };
 
 use super::{
@@ -11,6 +9,7 @@ use super::{
     container::{List, Map},
     invoked_function::InvokedFunction,
     invoked_operator::InvokedOperator,
+    rc_cached::CacheCell,
     stateful::{Stateful, StatefulNode, reset_stateful_cache, to_follower_stateful},
 };
 
@@ -31,53 +30,101 @@ impl AttrMutation {
     }
 }
 
-/// eliding is also what detaches a copy: every element gets a fresh slot, so a
-/// later in-place write through one copy is invisible through the other. sharing
-/// slots that look like they need no elision would alias the two, and for a
-/// self-assignment such as `x[0] = x` it makes the list reference itself
 fn read_slot(key: HeapKey) -> Value {
     with_heap(|heap| heap.get(key).clone())
 }
 
+/// copies of a container share its element slots: writes go through
+/// `writable_element_slot`, which detaches a slot with more than one holder
+/// before editing it, so one copy never sees another's writes. a slot holding a
+/// wrapper is copied instead so that the copy reads the same as the original
+/// does now, and a pinned slot lies on the path to a write in progress, where
+/// sharing it could make the value being written contain its own destination
+type Pins = [(usize, HeapKey)];
+
+fn pinned(pins: &Pins, key: HeapKey) -> bool {
+    pins.iter().any(|(_, pinned)| *pinned == key)
+}
+
+fn shareable_slot(heap: &VirtualHeap, pins: &Pins, key: HeapKey) -> bool {
+    !matches!(
+        &*heap.get(key),
+        Value::Lvalue(_) | Value::WeakLvalue(_) | Value::Leader(_)
+    ) && !pinned(pins, key)
+}
+
+/// like [`shareable_slot`], but a live wrapper whose cache holds a result is
+/// copied too, so that reading through it yields the cached value as before
+fn shareable_cached_slot(heap: &VirtualHeap, pins: &Pins, key: HeapKey) -> bool {
+    let plain = match &*heap.get(key) {
+        Value::Lvalue(_) | Value::WeakLvalue(_) | Value::Leader(_) => false,
+        Value::InvokedFunction(invoked) => !has_cached_value(&invoked.cache.0),
+        Value::InvokedOperator(invoked) => !has_cached_value(&invoked.cache.cached_result),
+        _ => true,
+    };
+    plain && !pinned(pins, key)
+}
+
+/// the common case of copying a list: every element can be shared, so the copy
+/// is a clone of the element handles under a single heap borrow
+fn shared_list(heap: &VirtualHeap, pins: &Pins, list: &List) -> Option<Value> {
+    list.elements()
+        .iter()
+        .all(|element| shareable_slot(heap, pins, element.key()))
+        .then(|| Value::List(list.clone()))
+}
+
 fn elided_heap_ref_value(value_ref: &VRc) -> VRc {
-    VRc::new(read_slot(value_ref.key()).elide_lvalue_leader_rec())
+    let key = value_ref.key();
+    if with_heap_pins(|heap, pins| shareable_slot(heap, pins, key)) {
+        return value_ref.clone();
+    }
+    VRc::new(read_slot(key).elide_lvalue_leader_rec())
+}
+
+/// the elided value of the slot at `key`, without copying the slot's value out
+/// first when it can simply be shared
+fn elide_slot(key: HeapKey) -> Value {
+    let shared = with_heap_pins(|heap, pins| match &*heap.get(key) {
+        scalar @ (Value::Nil | Value::Integer(_) | Value::Float(_) | Value::Complex { .. }) => {
+            Some(scalar.clone())
+        }
+        Value::List(list) => shared_list(heap, pins, list),
+        _ => None,
+    });
+    shared.unwrap_or_else(|| read_slot(key).elide_lvalue_leader_rec())
 }
 
 /// borrow a wrapper's cached value in place; falls back to the wrapper itself
 /// when nothing has been cached yet
 fn with_cached_value<R>(
-    cell: &Cell<Option<Box<Value>>>,
+    cell: &CacheCell,
     fallback: &Value,
     inspect: impl FnOnce(&Value) -> R,
 ) -> R {
-    let cached = cell.take();
-    let result = match &cached {
+    cell.with(|cached| match cached {
         Some(value) => value.with_elided_cached_wrappers(inspect),
         None => inspect(fallback),
-    };
-    cell.set(cached);
-    result
+    })
 }
 
-pub(crate) fn clone_cached_value(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
-    let cached = cell.take();
-    let cloned = cached.as_ref().map(|value| (**value).clone());
-    cell.set(cached);
-    cloned
+pub(crate) fn clone_cached_value(cell: &CacheCell) -> Option<Value> {
+    cell.cloned()
 }
 
 /// whether a live wrapper's cache currently holds a result
-pub(crate) fn has_cached_value(cell: &Cell<Option<Box<Value>>>) -> bool {
-    let cached = cell.take();
-    let present = cached.is_some();
-    cell.set(cached);
-    present
+pub(crate) fn has_cached_value(cell: &CacheCell) -> bool {
+    cell.is_filled()
 }
 
-/// detaches for the same reason [`elided_heap_ref_value`] does
-fn cached_elided_heap_ref_value(value_ref: &VRc) -> VRc {
-    let value = with_heap(|heap| heap.get(value_ref.key()).clone()).elide_cached_wrappers_rec();
-    VRc::new(value)
+/// shares for the same reason [`elided_heap_ref_value`] does. takes the slot by
+/// value, since the caller owns the container the slot came from
+fn cached_elided_heap_ref_value(value_ref: VRc) -> VRc {
+    let key = value_ref.key();
+    if with_heap_pins(|heap, pins| shareable_cached_slot(heap, pins, key)) {
+        return value_ref;
+    }
+    VRc::new(read_slot(key).elide_cached_wrappers_rec())
 }
 
 impl Value {
@@ -102,14 +149,15 @@ impl Value {
             Value::Integer(n) => Value::Integer(*n),
             Value::Float(f) => Value::Float(*f),
             Value::Complex { re, im } => Value::Complex { re: *re, im: *im },
-            // the slot is read out before recursing: eliding a container
-            // allocates, and allocating re-borrows the heap
-            Value::Lvalue(reference) => read_slot(reference.key()).elide_lvalue_leader_rec(),
-            Value::WeakLvalue(reference) => read_slot(reference.key()).elide_lvalue_leader_rec(),
-            Value::Leader(leader) => read_slot(leader.leader_rc.key()).elide_lvalue_leader_rec(),
-            Value::List(list) => Value::List(List::new_with(
-                list.elements().iter().map(elided_heap_ref_value),
-            )),
+            Value::Lvalue(reference) => elide_slot(reference.key()),
+            Value::WeakLvalue(reference) => elide_slot(reference.key()),
+            Value::Leader(leader) => elide_slot(leader.leader_rc.key()),
+            Value::List(list) => with_heap_pins(|heap, pins| shared_list(heap, pins, list))
+                .unwrap_or_else(|| {
+                    Value::List(List::new_with(
+                        list.elements().iter().map(elided_heap_ref_value),
+                    ))
+                }),
             Value::Map(map) => {
                 let mut out = Map::new();
                 for key in &map.insertion_order {
@@ -202,11 +250,17 @@ impl Value {
                 .map(Value::elide_cached_wrappers_rec)
                 .unwrap_or(Value::InvokedOperator(inv)),
             Value::List(mut list) => {
-                list.elements = list
-                    .elements
-                    .iter()
-                    .map(cached_elided_heap_ref_value)
-                    .collect();
+                let all_shareable = with_heap_pins(|heap, pins| {
+                    list.elements()
+                        .iter()
+                        .all(|element| shareable_cached_slot(heap, pins, element.key()))
+                });
+                if !all_shareable {
+                    list.elements = std::mem::take(&mut list.elements)
+                        .into_iter()
+                        .map(cached_elided_heap_ref_value)
+                        .collect();
+                }
                 Value::List(list)
             }
             Value::Map(map) => {
@@ -215,7 +269,7 @@ impl Value {
                     let value_ref = map
                         .get(key)
                         .expect("map insertion order points to missing entry");
-                    out.insert(key.clone(), cached_elided_heap_ref_value(value_ref));
+                    out.insert(key.clone(), cached_elided_heap_ref_value(value_ref.clone()));
                 }
                 Value::Map(out)
             }

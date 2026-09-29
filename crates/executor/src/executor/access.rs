@@ -2,7 +2,10 @@ use bytecode::CopyValueMode;
 
 use crate::{
     error::ExecutorError,
-    heap::{HeapKey, VRc, VWeak, heap_ref_count, heap_replace, with_heap, with_heap_mut},
+    heap::{
+        HeapKey, VRc, VWeak, heap_pin, heap_ref_count, heap_replace, heap_unpin, with_heap,
+        with_heap_mut,
+    },
     state::LeaderKind,
     value::{
         Value,
@@ -254,6 +257,8 @@ impl Executor {
         let rhs = stack.pop().elide_lvalue_leader_rec();
         let lhs = stack.pop();
         let assigned = lhs.clone();
+        // the value is built, so the slots it must not share can be released
+        heap_unpin(stack_idx);
 
         let ret = self.exec_assign_dfs(lhs, rhs, stack_idx);
         self.state.stack_mut(stack_idx).push(assigned);
@@ -296,6 +301,7 @@ impl Executor {
         };
 
         let rhs = rhs.elide_lvalue_leader_rec();
+        heap_unpin(stack_idx);
         // appending to a plain list is the common case and must stay O(1): copying
         // the list out of its slot to push one element would make building a list
         // quadratic in its length
@@ -564,7 +570,10 @@ impl Executor {
             return ExecSingle::Error(ExecutorError::CannotSubscript(base.type_name()));
         };
 
+        // every slot on the path to the target stays pinned until the write
+        // lands, so a copy taken for the value cannot share any of them
         let base_key = follow_heap_lvalue_key(base_key);
+        heap_pin(stack_idx, base_key);
         let leader_key = with_heap_mut(|heap| match &mut *heap.get_mut(base_key) {
             Value::Leader(leader) => {
                 leader.last_modified_stack = Some(stack_idx);
@@ -579,6 +588,7 @@ impl Executor {
 
         match writable_element_slot(base_key, &index) {
             Ok(key) => {
+                heap_pin(stack_idx, key);
                 self.state.stack_mut(stack_idx).push(retained_lvalue(key));
                 ExecSingle::Continue
             }
@@ -666,9 +676,13 @@ impl Executor {
             let Some(base_key) = base.as_lvalue_key() else {
                 return ExecSingle::Error(ExecutorError::CannotAttribute(base.type_name()));
             };
+            heap_pin(stack_idx, base_key);
 
             match Value::attr_lvalue_by_name_in_heap(base_key, &attr_name, Some(stack_idx)) {
-                Ok(key) => self.state.stack_mut(stack_idx).push(retained_lvalue(key)),
+                Ok(key) => {
+                    heap_pin(stack_idx, key);
+                    self.state.stack_mut(stack_idx).push(retained_lvalue(key))
+                }
                 Err(error) => return ExecSingle::Error(error),
             }
         } else {

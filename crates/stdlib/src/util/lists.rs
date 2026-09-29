@@ -444,8 +444,6 @@ mod tests {
 
 #[cfg(test)]
 mod sort_tests {
-    use std::cmp::Ordering;
-
     use super::try_sort_by;
 
     #[test]

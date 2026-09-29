@@ -24,14 +24,20 @@ impl Executor {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
         Box::pin(async move {
-            if let Some(cached) = crate::value::stateful::stateful_cache_valid(stateful) {
+            if let Some(cached) =
+                crate::value::stateful::stateful_cache_valid(stateful, override_read_kind)
+            {
                 return Ok(cached);
             }
             let result = self
                 .eval_stateful_node(&stateful.body.root, override_read_kind)
                 .await?;
             let result = self.materialize_cached_value(result).await?;
-            crate::value::stateful::stateful_update_cache(stateful, result.clone());
+            crate::value::stateful::stateful_update_cache(
+                stateful,
+                override_read_kind,
+                result.clone(),
+            );
             Ok(result)
         })
     }

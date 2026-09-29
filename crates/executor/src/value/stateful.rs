@@ -48,7 +48,10 @@ pub struct StatefulBody {
 
 pub struct StatefulCache {
     pub read_kind: StatefulReadKind,
-    pub cached: RefCell<Option<(Vec<u64>, Box<Value>)>>,
+    /// the kind the cached value was read with, the root versions it saw, and
+    /// the value. copies share this cache, so a read with another kind than
+    /// the cache's own must record which kind it was for
+    pub cached: RefCell<Option<(StatefulReadKind, Vec<u64>, Box<Value>)>>,
 }
 
 impl Clone for StatefulCache {
@@ -99,52 +102,41 @@ pub fn to_follower_stateful(s: &Stateful) -> Stateful {
     )
 }
 
-pub fn stateful_cache_valid(s: &Stateful) -> Option<Value> {
+/// the cached value of `s` read as `read_kind`, if it was read that way and no
+/// root changed since
+pub fn stateful_cache_valid(s: &Stateful, read_kind: StatefulReadKind) -> Option<Value> {
     let borrow = s.cache.cached.borrow();
-    let (versions, val) = borrow.as_ref()?;
+    let (cached_kind, versions, val) = borrow.as_ref()?;
+    if *cached_kind != read_kind {
+        return None;
+    }
     let still_valid = s
         .body
         .roots
         .iter()
         .zip(versions.iter())
-        .all(|(&key, &cached_ver)| {
-            with_heap(|h| {
-                if let Value::Leader(leader) = &*h.get(key) {
-                    match s.cache.read_kind {
-                        StatefulReadKind::Leader => leader.leader_version == cached_ver,
-                        StatefulReadKind::Follower => leader.follower_version == cached_ver,
-                    }
-                } else {
-                    false
-                }
-            })
-        });
-    if still_valid {
-        Some(*val.clone())
-    } else {
-        None
-    }
+        .all(|(&key, &cached_ver)| root_version(key, read_kind) == cached_ver);
+    still_valid.then(|| *val.clone())
 }
 
-pub fn stateful_update_cache(s: &Stateful, val: Value) {
-    let versions: Vec<u64> = s
+pub fn stateful_update_cache(s: &Stateful, read_kind: StatefulReadKind, val: Value) {
+    let versions = s
         .body
         .roots
         .iter()
-        .map(|&key| {
-            with_heap(|h| {
-                if let Value::Leader(leader) = &*h.get(key) {
-                    match s.cache.read_kind {
-                        StatefulReadKind::Leader => leader.leader_version,
-                        StatefulReadKind::Follower => leader.follower_version,
-                    }
-                } else {
-                    0
-                }
-            })
-        })
+        .map(|&key| root_version(key, read_kind))
         .collect();
-    *s.cache.cached.borrow_mut() = Some((versions, Box::new(val)));
+    *s.cache.cached.borrow_mut() = Some((read_kind, versions, Box::new(val)));
+}
+
+fn root_version(key: HeapKey, read_kind: StatefulReadKind) -> u64 {
+    with_heap(|h| match &*h.get(key) {
+        Value::Leader(leader) => match read_kind {
+            StatefulReadKind::Leader => leader.leader_version,
+            StatefulReadKind::Follower => leader.follower_version,
+        },
+        _ => 0,
+    })
 }
 
 pub fn reset_stateful_cache(s: &Stateful) {

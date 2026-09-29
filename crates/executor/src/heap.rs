@@ -1,6 +1,9 @@
 use std::{
+    any::Any,
     cell::{Cell, Ref, RefCell, RefMut},
+    collections::HashMap,
     mem::ManuallyDrop,
+    rc::Rc,
 };
 
 use crate::value::Value;
@@ -15,6 +18,14 @@ struct HeapCell {
     /// when set, VRc::clone and VRc::drop skip refcount changes.
     /// also checked by heap_release to prevent snapshot drops from corrupting live heap.
     inhibit: Cell<bool>,
+    /// slots on the path to an element that is about to be written, tagged by
+    /// the stack writing it. a copy made while a slot is pinned must not share
+    /// it, or the value written could contain its own destination
+    pins: RefCell<Vec<(usize, HeapKey)>>,
+    /// while a snapshot is taken or restored: the copy made of each shared
+    /// live value, by the address of the original, so that the snapshot keeps
+    /// the sharing structure of the world it copies
+    snapshot_copies: RefCell<Option<HashMap<usize, Rc<dyn Any>>>>,
 }
 
 thread_local! {
@@ -24,6 +35,8 @@ thread_local! {
         HeapCell {
             heap: RefCell::new(VirtualHeap::new()),
             inhibit: Cell::new(false),
+            pins: RefCell::new(Vec::new()),
+            snapshot_copies: RefCell::new(None),
         }
     };
 }
@@ -263,6 +276,26 @@ pub fn heap_ref_count(key: HeapKey) -> u32 {
     HEAP.with(|cell| cell.heap.borrow().ref_counts[key as usize].get())
 }
 
+/// keep `key` out of shared copies until `stack_idx` finishes its write
+pub fn heap_pin(stack_idx: usize, key: HeapKey) {
+    HEAP.with(|cell| cell.pins.borrow_mut().push((stack_idx, key)));
+}
+
+pub fn heap_unpin(stack_idx: usize) {
+    HEAP.with(|cell| {
+        let mut pins = cell.pins.borrow_mut();
+        if !pins.is_empty() {
+            pins.retain(|(stack, _)| *stack != stack_idx);
+        }
+    });
+}
+
+/// borrow the heap together with the pinned slots, for copies deciding what
+/// they may share
+pub fn with_heap_pins<R>(f: impl FnOnce(&VirtualHeap, &[(usize, HeapKey)]) -> R) -> R {
+    HEAP.with(|cell| f(&cell.heap.borrow(), &cell.pins.borrow()))
+}
+
 pub fn with_heap<R>(f: impl FnOnce(&VirtualHeap) -> R) -> R {
     HEAP.with(|cell| f(&cell.heap.borrow()))
 }
@@ -292,17 +325,57 @@ pub fn raw_clone<T: Clone>(val: &T) -> T {
     with_inhibit(|| val.clone())
 }
 
+/// whether refcounting is inhibited right now, i.e. a snapshot is being taken,
+/// restored or dropped
+pub fn refcounting_inhibited() -> bool {
+    HEAP.try_with(|cell| cell.inhibit.get()).unwrap_or(false)
+}
+
+/// the snapshot's copy of the shared value at `original`, made by `copy` the
+/// first time the value is met within the current snapshot. the heap's slots
+/// count a shared value's references once, so its copies must stay shared too
+/// or the restored heap would release them once each
+pub fn snapshot_copy<T: 'static>(original: *const T, copy: impl FnOnce() -> Rc<T>) -> Rc<T> {
+    let key = original as usize;
+    let found = HEAP.try_with(|cell| {
+        cell.snapshot_copies
+            .borrow()
+            .as_ref()
+            .and_then(|copies| copies.get(&key))
+            .and_then(|copied| Rc::clone(copied).downcast::<T>().ok())
+    });
+    if let Ok(Some(copied)) = found {
+        return copied;
+    }
+    let copied = copy();
+    let _ = HEAP.try_with(|cell| {
+        if let Some(copies) = cell.snapshot_copies.borrow_mut().as_mut() {
+            copies.insert(key, Rc::clone(&copied) as Rc<dyn Any>);
+        }
+    });
+    copied
+}
+
 /// run `f` with refcount inhibited; restores prior inhibit state on return.
 /// use this when dropping values that were snapshotted without refcount tracking.
+/// one call is one snapshot: everything copied inside it keeps its sharing
 pub fn with_inhibit<R>(f: impl FnOnce() -> R) -> R {
     let prev = HEAP.try_with(|cell| {
         let prev = cell.inhibit.get();
         cell.inhibit.set(true);
+        if !prev {
+            *cell.snapshot_copies.borrow_mut() = Some(HashMap::new());
+        }
         prev
     });
     let r = f();
     if let Ok(prev) = prev {
-        let _ = HEAP.try_with(|cell| cell.inhibit.set(prev));
+        let _ = HEAP.try_with(|cell| {
+            cell.inhibit.set(prev);
+            if !prev {
+                cell.snapshot_copies.borrow_mut().take();
+            }
+        });
     }
     r
 }

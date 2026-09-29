@@ -31,6 +31,30 @@ impl CacheEntry {
     }
 }
 
+/// state and heap copied as one snapshot, so that a live value they both
+/// hold stays one value in the copy
+fn snapshot_world(
+    state: &ExecutionState,
+) -> (
+    RawHeapSnapshot<ExecutionState>,
+    RawHeapSnapshot<VirtualHeap>,
+) {
+    with_inhibit(|| (RawHeapSnapshot::new(state), snapshot_heap()))
+}
+
+fn restore_world(
+    state: &mut ExecutionState,
+    state_after: &RawHeapSnapshot<ExecutionState>,
+    heap_snap: &RawHeapSnapshot<VirtualHeap>,
+) {
+    with_inhibit(|| {
+        let new_state = state_after.raw_clone();
+        restore_heap(heap_snap);
+        let old_state = std::mem::replace(state, new_state);
+        drop(old_state);
+    });
+}
+
 pub(crate) struct ExecutionCache {
     // entries[i] = state right after finishing the ith section in bytecode
     entries: Vec<Option<CacheEntry>>,
@@ -76,12 +100,11 @@ impl Executor {
             .rev()
             .find_map(|(_, entry)| {
                 let entry = entry.as_ref()?;
-                (entry.state_after.as_ref().timestamp <= target)
-                    .then(|| (entry.state_after.clone(), entry.heap_snap.clone()))
+                (entry.state_after.as_ref().timestamp <= target).then_some(entry)
             });
 
-        if let Some((state_after, heap_snap)) = latest {
-            self.restore_cached_state(&state_after, &heap_snap);
+        if let Some(entry) = latest {
+            restore_world(&mut self.state, &entry.state_after, &entry.heap_snap);
         } else {
             self.state = ExecutionState::new();
         }
@@ -94,12 +117,7 @@ impl Executor {
         state_after: &RawHeapSnapshot<ExecutionState>,
         heap_snap: &RawHeapSnapshot<VirtualHeap>,
     ) {
-        with_inhibit(|| {
-            let new_state = state_after.raw_clone();
-            restore_heap(heap_snap);
-            let old_state = std::mem::replace(&mut self.state, new_state);
-            drop(old_state);
-        });
+        restore_world(&mut self.state, state_after, heap_snap);
     }
 
     pub fn update_bytecode(&mut self, bytecode: Bytecode) {
@@ -142,9 +160,7 @@ impl Executor {
                 match latest {
                     Some(j) => {
                         let entry = self.cache.entries[j].as_ref().unwrap();
-                        let state_after = entry.state_after.clone();
-                        let heap_snap = entry.heap_snap.clone();
-                        self.restore_cached_state(&state_after, &heap_snap);
+                        restore_world(&mut self.state, &entry.state_after, &entry.heap_snap);
                     }
                     None => self.state = ExecutionState::new(),
                 };
@@ -168,10 +184,11 @@ impl Executor {
 
     /// capture the current live executor position as a standalone checkpoint.
     pub fn capture_live_checkpoint(&self) -> LiveCheckpoint {
+        let (state_after, heap_snap) = snapshot_world(&self.state);
         LiveCheckpoint {
             timestamp: self.state.timestamp,
-            state_after: RawHeapSnapshot::new(&self.state),
-            heap_snap: snapshot_heap(),
+            state_after,
+            heap_snap,
         }
     }
 
@@ -217,8 +234,7 @@ impl Executor {
     }
 
     fn save_cache_with_duration(&mut self, slide_duration: f64) {
-        let heap_snap = snapshot_heap();
-        let state_after = RawHeapSnapshot::new(&self.state);
+        let (state_after, heap_snap) = snapshot_world(&self.state);
         self.cache.entries[self.state.timestamp.slide] = Some(CacheEntry {
             state_after,
             heap_snap,
@@ -273,10 +289,10 @@ mod tests {
 
     use bytecode::{Bytecode, SectionBytecode, SectionFlags};
 
-    use super::{CacheEntry, ExecutionCache};
+    use super::{CacheEntry, ExecutionCache, snapshot_world};
     use crate::{
         executor::Executor,
-        heap::{RawHeapSnapshot, VRc, heap_replace, snapshot_heap, with_heap},
+        heap::{VRc, heap_replace, with_heap},
         state::{ExecutionState, LeaderKind},
         time::Timestamp,
         value::{Value, container::List},
@@ -384,9 +400,10 @@ mod tests {
 
         let mut cached_state = ExecutionState::new();
         cached_state.timestamp = Timestamp::new(1, 1.0);
+        let (state_after, heap_snap) = snapshot_world(&cached_state);
         executor.cache.entries[1] = Some(CacheEntry {
-            state_after: RawHeapSnapshot::new(&cached_state),
-            heap_snap: snapshot_heap(),
+            state_after,
+            heap_snap,
             slide_duration: 1.0,
         });
 

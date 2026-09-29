@@ -1,7 +1,7 @@
 // animation test framework and tests
 // covers: slide durations, leader values, multi-slide scenes, stdlib usage
 
-use std::{cell::Cell, f64, path::PathBuf, sync::Arc};
+use std::{f64, path::PathBuf, sync::Arc};
 
 use executor::{
     camera::parse_camera_value,
@@ -271,13 +271,6 @@ fn leader_kind_name(kind: LeaderKind) -> &'static str {
 }
 
 fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
-    fn clone_cached(cell: &Cell<Option<Box<Value>>>) -> Option<Value> {
-        let cached = cell.take();
-        let cloned = cached.as_ref().map(|value| (**value).clone());
-        cell.set(cached);
-        cloned
-    }
-
     match value {
         Value::Mesh(mesh) => out.push(Value::Mesh(mesh.clone())),
         Value::List(list) => {
@@ -287,12 +280,12 @@ fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
             }
         }
         Value::InvokedOperator(inv) => {
-            if let Some(value) = clone_cached(&inv.cache.cached_result) {
+            if let Some(value) = inv.cache.cached_result.cloned() {
                 mesh_tree_leaves(&value, out);
             }
         }
         Value::InvokedFunction(inv) => {
-            if let Some(value) = clone_cached(&inv.cache.0) {
+            if let Some(value) = inv.cache.0.cloned() {
                 mesh_tree_leaves(&value, out);
             }
         }
@@ -309,7 +302,7 @@ fn mesh_tree_leaves(value: &Value, out: &mut Vec<Value>) {
             mesh_tree_leaves(&value, out);
         }
         Value::Stateful(stateful) => {
-            if let Some(value) = stateful_cache_valid(stateful) {
+            if let Some(value) = stateful_cache_valid(stateful, stateful.cache.read_kind) {
                 mesh_tree_leaves(&value, out);
             }
         }
