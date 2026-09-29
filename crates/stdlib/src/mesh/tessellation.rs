@@ -26,7 +26,7 @@ const MAX_BYTES: usize = 32 << 20;
 
 /// single loops up to this size go through the in-crate triangulator, whose
 /// simplicity check is quadratic
-const FAST_PATH_MAX_POINTS: usize = 64;
+const FAST_PATH_MAX_POINTS: usize = 16;
 
 /// libtess2 results kept for reuse on later frames of a morphing outline
 const REUSE_ENTRIES: usize = 64;
