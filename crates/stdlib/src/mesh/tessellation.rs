@@ -28,8 +28,10 @@ const MAX_BYTES: usize = 32 << 20;
 /// simplicity check is quadratic
 const FAST_PATH_MAX_POINTS: usize = 16;
 
-/// libtess2 results kept for reuse on later frames of a morphing outline
-const REUSE_ENTRIES: usize = 64;
+/// libtess2 results kept for reuse on later frames of a morphing outline. a
+/// text morph moves every glyph at once, so the ring must hold more outlines
+/// than a frame has glyphs or it forgets them all before the next frame
+const REUSE_ENTRIES: usize = 1024;
 
 #[derive(Clone)]
 pub(super) struct Surface {
@@ -328,6 +330,7 @@ fn triangulate_loops(
     if let Some(faces) = reused {
         return Ok((points(), faces));
     }
+
 
     let tess = tessellate_with_libtess(contours, normal, normalize_input)?;
     let Some(faces) = faces_in_source_order(&tess, projected.len()) else {

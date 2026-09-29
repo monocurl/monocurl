@@ -16,6 +16,7 @@ use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
     simd::{Float2, Float3, Float4},
 };
+use rustc_hash::FxHashMap;
 use stdlib_macros::stdlib_func;
 
 use crate::mesh::helpers::{
@@ -2727,11 +2728,33 @@ fn planar_mesh_patharc_lerp(
     Ok(mesh)
 }
 
+/// tessellating the boundary drops coincident points and adds intersection
+/// points, so the tessellated lines cannot be paired with the template's by
+/// index. an endpoint that still sits exactly on a template endpoint takes its
+/// colour from a lookup; only the rest search the template's lines
 fn color_boundary_lines_from_template(lins: &mut [Lin], template: &Mesh, fallback: Float4) {
+    let endpoint_colors: FxHashMap<[u32; 3], Float4> = template
+        .lins
+        .iter()
+        .filter(|line| line.is_dom_sib)
+        .flat_map(|line| [(line.a.pos, line.a.col), (line.b.pos, line.b.col)])
+        .map(|(pos, col)| (position_bits(pos), col))
+        .collect();
+    let color_at = |point: Float3| {
+        endpoint_colors
+            .get(&position_bits(point))
+            .copied()
+            .or_else(|| boundary_color_at(template, point))
+            .unwrap_or(fallback)
+    };
     for line in lins {
-        line.a.col = boundary_color_at(template, line.a.pos).unwrap_or(fallback);
-        line.b.col = boundary_color_at(template, line.b.pos).unwrap_or(fallback);
+        line.a.col = color_at(line.a.pos);
+        line.b.col = color_at(line.b.pos);
     }
+}
+
+fn position_bits(pos: Float3) -> [u32; 3] {
+    [pos.x.to_bits(), pos.y.to_bits(), pos.z.to_bits()]
 }
 
 fn boundary_color_at(mesh: &Mesh, point: Float3) -> Option<Float4> {
