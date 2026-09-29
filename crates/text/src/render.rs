@@ -503,12 +503,42 @@ fn escape_xml_attr(source: &str) -> String {
 }
 
 fn font_svg_options(font: &str) -> Result<(usvg::Options<'static>, String)> {
+    let (db, font_family) = font_database(font)?;
     let mut options = usvg::Options::default();
-    let mut db = system_font_db().as_ref().clone();
-    let font_family = resolve_font_family(font, &mut db)?;
     options.font_family = font_family.clone();
-    options.fontdb = Arc::new(db);
+    options.fontdb = db;
     Ok((options, font_family))
+}
+
+/// the font database a text in `font` renders with: the shared system
+/// database for a family name, or the system database plus that file for a
+/// path, loaded once per path. cloning the system database per text was a
+/// visible share of every new string
+fn font_database(font: &str) -> Result<(Arc<FontDatabase>, String)> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+
+        static FILE_FONTS: OnceLock<Mutex<HashMap<PathBuf, (Arc<FontDatabase>, String)>>> =
+            OnceLock::new();
+
+        let path = Path::new(font);
+        if path.exists() {
+            let mut loaded = FILE_FONTS
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap();
+            if let Some((db, family)) = loaded.get(path) {
+                return Ok((Arc::clone(db), family.clone()));
+            }
+            let mut db = system_font_db().as_ref().clone();
+            let family = resolve_font_family(font, &mut db)?;
+            let db = Arc::new(db);
+            loaded.insert(path.to_path_buf(), (Arc::clone(&db), family.clone()));
+            return Ok((db, family));
+        }
+    }
+    Ok((system_font_db().clone(), font.to_owned()))
 }
 
 fn svg_mesh_options(resources_dir: Option<PathBuf>) -> usvg::Options<'static> {
