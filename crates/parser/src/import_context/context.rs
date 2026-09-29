@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     ops::Range,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use lexer::{lexer::Lexer, token::Token};
@@ -21,6 +21,16 @@ pub struct ParseImportContext {
     pub root_file_path: PathBuf,
     pub import_backend: Box<dyn ImportBackend + Send>,
     pub cached_parses: CachedParse,
+    /// imported files already lexed, by path, with the text they were lexed
+    /// from: an edit anywhere re-parses the whole import graph, and lexing
+    /// the standard library again on every keystroke was most of that
+    lexed: Mutex<HashMap<PathBuf, LexedFile>>,
+}
+
+struct LexedFile {
+    content: String,
+    tokens: Vec<(Token, Range<usize>)>,
+    text_rope: Rope<TextAggregate>,
 }
 
 pub(crate) struct FileResult {
@@ -42,6 +52,7 @@ impl ParseImportContext {
             root_file_path,
             import_backend: Box::<FilesystemImportBackend>::default(),
             cached_parses: HashMap::new(),
+            lexed: Mutex::new(HashMap::new()),
         }
     }
 
@@ -57,10 +68,12 @@ impl ParseImportContext {
             root_file_path,
             import_backend: Box::new(import_backend),
             cached_parses: HashMap::new(),
+            lexed: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn reset(&mut self) {
+        self.lexed.lock().unwrap().clear();
         self.root_file_path = PathBuf::new();
         self.import_backend = Box::<FilesystemImportBackend>::default();
         self.cached_parses.clear();
@@ -96,9 +109,26 @@ impl ParseImportContext {
 
         let (tokens, text_rope) = match imported.content {
             ImportedFileContent::Text(content) => {
-                let text_rope = Rope::from_text(&content);
-                let filtered = Lexer::new(content.chars());
-                (flatten_lex_stream(filtered).collect(), text_rope)
+                let mut lexed = self.lexed.lock().unwrap();
+                match lexed.get(&imported.path) {
+                    Some(file) if file.content == content => {
+                        (file.tokens.clone(), file.text_rope.clone())
+                    }
+                    _ => {
+                        let text_rope = Rope::from_text(&content);
+                        let filtered = Lexer::new(content.chars());
+                        let tokens: Vec<_> = flatten_lex_stream(filtered).collect();
+                        lexed.insert(
+                            imported.path.clone(),
+                            LexedFile {
+                                content,
+                                tokens: tokens.clone(),
+                                text_rope: text_rope.clone(),
+                            },
+                        );
+                        (tokens, text_rope)
+                    }
+                }
             }
             ImportedFileContent::Ropes {
                 lex_rope,
