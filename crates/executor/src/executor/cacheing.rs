@@ -416,6 +416,91 @@ mod tests {
         assert!(executor.cache.entries[2].is_none());
     }
 
+    /// a live wrapper is one `Rc` shared by every copy of it. a snapshot must
+    /// copy it once for both the state and the heap, and the copy must not
+    /// share the live cache, or a value cached after the snapshot (which the
+    /// snapshot's slots know nothing about) comes back on restore
+    #[test]
+    fn rebase_keeps_shared_live_wrappers_private_to_the_snapshot() {
+        use crate::value::{
+            Labels, container::List, invoked_function::make_invoked_function, lambda::Lambda,
+        };
+
+        let bytecode = bytecode_with_sections(&[
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: true,
+                is_root_module: true,
+            },
+            SectionFlags {
+                is_stdlib: false,
+                is_library: false,
+                is_init: false,
+                is_root_module: true,
+            },
+        ]);
+        let mut executor = Executor::new(bytecode, Vec::new());
+        executor.state.timestamp = Timestamp::new(1, 0.0);
+
+        let lambda = Value::Lambda(std::rc::Rc::new(Lambda {
+            ip: (1, 0),
+            captures: Default::default(),
+            required_args: 1,
+            defaults: Default::default(),
+            reference_args: vec![false],
+            arg_names: vec!["x".to_string()],
+        }));
+        let live = Value::InvokedFunction(make_invoked_function(
+            lambda,
+            smallvec::smallvec![Value::Integer(1)],
+            Labels::new(),
+            None,
+        ));
+        // the heap slot and the stack copy share one wrapper
+        let root = ExecutionState::ROOT_STACK_IDX;
+        executor.state.stack_mut(root).push(live.clone());
+        executor.state.promote_to_var(root);
+        executor.state.stack_mut(root).push(live);
+        let slot_key = executor
+            .state
+            .stack(root)
+            .read_at(-2)
+            .as_lvalue_key()
+            .unwrap();
+        executor.save_cache();
+
+        // a result cached after the snapshot lives in a slot the snapshot
+        // does not count
+        let Value::InvokedFunction(shared) = executor.state.stack(root).peek().clone() else {
+            panic!("expected the live function on the stack");
+        };
+        shared.cache.0.fill(Value::List(List::new_with(vec![VRc::new(
+            Value::Integer(7),
+        )])));
+        // nothing outside the state and the heap may hold a live value across
+        // a restore: the world it belongs to is discarded wholesale
+        drop(shared);
+        executor.state.timestamp = Timestamp::new(1, 1.0);
+
+        executor.rebase_at_cache_point(Timestamp::new(1, 0.0));
+
+        let Value::InvokedFunction(restored) = with_heap(|h| h.get(slot_key).clone()) else {
+            panic!("expected the live function in its slot after restore");
+        };
+        assert!(
+            restored.cache.0.cloned().is_none(),
+            "the restored wrapper must not see a result cached after the snapshot"
+        );
+        drop(restored);
+
+        // every slot the restored world holds is counted exactly once: tearing
+        // it all down frees everything and frees nothing twice
+        executor.clear_cache();
+        executor.state = ExecutionState::new();
+        with_heap(|h| assert_eq!(h.live_slot_count(), 0));
+    }
+
     #[test]
     fn rebase_restores_cached_plain_list_without_aliasing() {
         let bytecode = bytecode_with_sections(&[
