@@ -1,0 +1,29 @@
+# many small objects through an operator chain: the per-object cost of the
+# live operator protocol plus one mesh copy per operator
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let Dots = |n, t| block {
+    for (i in range(0, n)) {
+        let a = i * 0.1 + t
+        let r = 1 + i * 0.004
+        . center{[cos(a) * r, sin(a) * r, 0]}
+          fill{alpha{0.6} BLUE}
+          stroke{BLACK, 1}
+          Circle(0.05)
+    }
+}
+
+mesh dots = Dots(n: 400, t: 0)
+
+slide "Build"
+    play Set()
+
+slide "Swirl"
+    dots.t = 3
+    play Lerp(3)
