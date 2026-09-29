@@ -254,7 +254,28 @@ fn tessellate_uncached(
 /// same vertices, so libtess2 is skipped
 struct ReusableFaces {
     loop_lens: Vec<usize>,
+    /// the first points of the outline it was made for; a morphing outline
+    /// stays near them between frames, another outline with the same loop
+    /// sizes does not, so the orientation check runs on one candidate
+    sample: [[f64; 2]; SAMPLE_POINTS],
     faces: Vec<[usize; 3]>,
+}
+
+const SAMPLE_POINTS: usize = 8;
+
+fn sample_points(points: &[[f64; 2]]) -> [[f64; 2]; SAMPLE_POINTS] {
+    let mut sample = [[0.0; 2]; SAMPLE_POINTS];
+    for (slot, point) in sample.iter_mut().zip(points) {
+        *slot = *point;
+    }
+    sample
+}
+
+fn sample_distance(a: &[[f64; 2]; SAMPLE_POINTS], b: &[[f64; 2]; SAMPLE_POINTS]) -> f64 {
+    a.iter()
+        .zip(b)
+        .map(|(p, q)| (p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2))
+        .sum()
 }
 
 thread_local! {
@@ -283,13 +304,23 @@ fn triangulate_loops(
     }
 
     let loop_lens: Vec<usize> = contours.iter().map(Vec::len).collect();
+    let sample = sample_points(&projected);
     let reused = REUSABLE.with(|reusable| {
         let mut reusable = reusable.borrow_mut();
-        let index = reusable.iter().position(|entry| {
-            entry.loop_lens == loop_lens && faces_keep_orientation(&projected, &entry.faces)
-        })?;
-        // most recently useful goes to the front
-        let entry = reusable.remove(index)?;
+        // the nearest outline of the same loop sizes is the one to try;
+        // checking every candidate made a text morph twice as slow
+        let (index, _) = reusable
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.loop_lens == loop_lens)
+            .map(|(index, entry)| (index, sample_distance(&entry.sample, &sample)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))?;
+        if !faces_keep_orientation(&projected, &reusable[index].faces) {
+            return None;
+        }
+        // most recently useful goes to the front, tracking the outline
+        let mut entry = reusable.remove(index)?;
+        entry.sample = sample;
         let faces = entry.faces.clone();
         reusable.push_front(entry);
         Some(faces)
@@ -306,6 +337,7 @@ fn triangulate_loops(
         let mut reusable = reusable.borrow_mut();
         reusable.push_front(ReusableFaces {
             loop_lens,
+            sample,
             faces: faces.clone(),
         });
         reusable.truncate(REUSE_ENTRIES);
