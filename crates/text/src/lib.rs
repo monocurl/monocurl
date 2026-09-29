@@ -28,7 +28,7 @@ pub use render::{
     render_svg_with_quality_and_resources_dir, render_tex, render_tex_marked,
     render_tex_marked_with_quality, render_tex_with_quality, render_text, render_text_with_font,
     render_text_with_font_and_quality, render_text_with_quality, render_typst,
-    render_typst_with_quality, warm_system_fonts,
+    render_typst_with_quality, ensure_system_fonts, warm_system_fonts,
 };
 pub use types::{
     LatexBackendConfig, RenderQuality, RenderedOutput, SystemBackendConfig, SystemBackendStatus,

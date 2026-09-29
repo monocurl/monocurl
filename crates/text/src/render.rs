@@ -535,6 +535,13 @@ fn svg_mesh_options(resources_dir: Option<PathBuf>) -> usvg::Options<'static> {
 /// with a system font does not stall a frame on the scan (a few hundred
 /// milliseconds on a typical machine); callers that need it before then
 /// block on the same initialisation
+/// load the system font database now, blocking; benchmarks call this so
+/// the scan is not counted against the first text frame
+pub fn ensure_system_fonts() {
+    #[cfg(not(target_arch = "wasm32"))]
+    system_font_db();
+}
+
 pub fn warm_system_fonts() {
     #[cfg(not(target_arch = "wasm32"))]
     std::thread::Builder::new()
