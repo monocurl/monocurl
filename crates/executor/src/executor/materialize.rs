@@ -57,7 +57,21 @@ impl Executor {
         })
     }
 
-    pub(crate) fn materialize_cached_value<'a>(
+    /// a value that is already concrete comes back as it is, without boxing a
+    /// future for it: most results of a live call are meshes and lists of
+    /// meshes, and boxing per node made a deep mesh tree spend its frame in
+    /// the allocator
+    pub(crate) async fn materialize_cached_value(
+        &mut self,
+        val: Value,
+    ) -> Result<Value, ExecutorError> {
+        if with_heap(|heap| is_materialized(heap, &val)) {
+            return Ok(val);
+        }
+        self.materialize_cached_value_slow(val).await
+    }
+
+    fn materialize_cached_value_slow<'a>(
         &'a mut self,
         val: Value,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
@@ -66,27 +80,27 @@ impl Executor {
             match val {
                 Value::Lvalue(vrc) => {
                     let inner = with_heap(|h| h.get(vrc.key()).clone());
-                    self.materialize_cached_value(inner).await
+                    self.materialize_cached_value_slow(inner).await
                 }
                 Value::WeakLvalue(vweak) => {
                     let inner = with_heap(|h| h.get(vweak.key()).clone());
-                    self.materialize_cached_value(inner).await
+                    self.materialize_cached_value_slow(inner).await
                 }
                 Value::Leader(leader) => {
                     let inner = with_heap(|h| h.get(leader.leader_rc.key()).clone());
-                    self.materialize_cached_value(inner).await
+                    self.materialize_cached_value_slow(inner).await
                 }
                 Value::InvokedFunction(inv) => {
                     let inner = InvokedFunction::value(&inv, self).await?;
-                    self.materialize_cached_value(inner).await
+                    self.materialize_cached_value_slow(inner).await
                 }
                 Value::InvokedOperator(inv) => {
                     let inner = InvokedOperator::value(&inv, self).await?;
-                    self.materialize_cached_value(inner).await
+                    self.materialize_cached_value_slow(inner).await
                 }
                 Value::Stateful(stateful) => {
                     let inner = self.eval_stateful(&stateful).await?;
-                    self.materialize_cached_value(inner).await
+                    self.materialize_cached_value_slow(inner).await
                 }
                 Value::List(list) => {
                     let mut elements = Vec::with_capacity(list.len());
@@ -117,5 +131,28 @@ impl Executor {
 
     pub(super) async fn resolve_live_value(&mut self, val: Value) -> Result<Value, ExecutorError> {
         self.materialize_cached_value(val).await
+    }
+}
+
+/// whether nothing under `value` is a wrapper that materialising would read
+/// through. runs under a heap borrow, so it neither allocates nor evaluates
+fn is_materialized(heap: &crate::heap::VirtualHeap, value: &Value) -> bool {
+    match value {
+        Value::Lvalue(_)
+        | Value::WeakLvalue(_)
+        | Value::Leader(_)
+        | Value::InvokedFunction(_)
+        | Value::InvokedOperator(_)
+        | Value::Stateful(_) => false,
+        Value::List(list) => list
+            .elements()
+            .iter()
+            .all(|element| is_materialized(heap, &heap.get(element.key()))),
+        Value::Map(map) => map
+            .insertion_order
+            .iter()
+            .filter_map(|key| map.get(key))
+            .all(|element| is_materialized(heap, &heap.get(element.key()))),
+        _ => true,
     }
 }
