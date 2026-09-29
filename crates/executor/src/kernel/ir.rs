@@ -91,11 +91,20 @@ pub enum KOp {
         dst: Reg,
         src: Reg,
     },
+    /// a move of a register that is dead afterwards: the value changes hands
+    /// instead of being copied, so a list moves on with a single holder and
+    /// the next arithmetic on it can update it in place
+    Take {
+        dst: Reg,
+        src: Reg,
+    },
     Bin {
         op: BinKind,
         dst: Reg,
         a: Reg,
         b: Reg,
+        /// `a` is dead after this op, so its value may be consumed
+        take: bool,
     },
     Neg {
         dst: Reg,

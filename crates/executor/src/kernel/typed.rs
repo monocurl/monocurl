@@ -694,8 +694,10 @@ fn transfer(
         KOp::Nil { dst } => state[dst as usize] = Class::Boxed,
         KOp::Int { dst, .. } => state[dst as usize] = Class::Int,
         KOp::Float { dst, .. } => state[dst as usize] = Class::Float,
-        KOp::Move { dst, src } => state[dst as usize] = read(&state, src)?,
-        KOp::Bin { op, dst, a, b } => {
+        KOp::Move { dst, src } | KOp::Take { dst, src } => {
+            state[dst as usize] = read(&state, src)?
+        }
+        KOp::Bin { op, dst, a, b, .. } => {
             state[dst as usize] = bin_class(op, read(&state, a)?, read(&state, b)?)
         }
         KOp::Neg { dst, src } => {
@@ -857,14 +859,14 @@ fn emit(
         KOp::Nil { dst } => TOp::Nil { dst },
         KOp::Int { dst, value } => TOp::IConst { dst, value },
         KOp::Float { dst, value } => TOp::FConst { dst, value },
-        KOp::Move { dst, src } => match read(state, src)? {
+        KOp::Move { dst, src } | KOp::Take { dst, src } => match read(state, src)? {
             Class::Int | Class::Float => TOp::MoveS { dst, src },
             Class::Boxed => TOp::MoveB { dst, src },
             // the value is static; nothing to copy
             Class::Closure(_) => TOp::Nop,
             Class::Unset => return None,
         },
-        KOp::Bin { op, dst, a, b } => {
+        KOp::Bin { op, dst, a, b, .. } => {
             let (ca, cb) = (read(state, a)?, read(state, b)?);
             match (ca, cb) {
                 (Class::Int, Class::Int) => match op {

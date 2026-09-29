@@ -130,12 +130,14 @@ pub fn compile(
     let (start, end) = body_bounds(section, shape.ip)?;
     let mut translator = Translator::new(section, natives, shape.ip.0, start, end, 0, None);
 
-    let entry: Stack = vec![Slot::Val; shape.total_args as usize + shape.capture_count as usize];
+    let entry_len = shape.total_args as usize + shape.capture_count as usize;
+    let entry: Stack = vec![Slot::Val; entry_len];
     translator.dataflow(entry)?;
     translator.emit()?;
 
     let frame_size =
         Reg::try_from(translator.max_register).map_err(|_| Reject::TooManyRegisters)?;
+    mark_last_uses(&mut translator.ops, entry_len as Reg, frame_size as usize);
 
     Ok(Kernel {
         ip: shape.ip,
@@ -175,6 +177,7 @@ pub fn compile_region(
     translator.ops.push(KOp::Exit);
     let frame_size =
         Reg::try_from(translator.max_register).map_err(|_| Reject::TooManyRegisters)?;
+    mark_last_uses(&mut translator.ops, shape.entry_depth as Reg, frame_size as usize);
 
     Ok(Kernel {
         ip: (shape.section, shape.start),
@@ -200,6 +203,108 @@ pub fn region_registers(kernel: &Kernel, entry_depth: usize) -> RegionRegisters 
         }
     }
     RegionRegisters { touched, written }
+}
+
+/// mark the ops whose operand dies with them, so that the machine may consume
+/// the operand instead of copying it: a list temporary then keeps a single
+/// holder and the arithmetic on it updates it in place. registers below
+/// `first_temp` hold arguments, captures or an interpreted frame's slots,
+/// which outlive the kernel, so they are never consumed. a backward liveness
+/// pass over the ops, to a fixpoint because of loops
+fn mark_last_uses(ops: &mut [KOp], first_temp: Reg, register_count: usize) {
+    let words = register_count.div_ceil(64).max(1);
+    let bit = |reg: Reg| (reg as usize / 64, 1u64 << (reg as usize % 64));
+    let mut uses = vec![vec![0u64; words]; ops.len()];
+    let mut defs = vec![vec![0u64; words]; ops.len()];
+    for (index, op) in ops.iter().enumerate() {
+        for reg in 0..register_count as Reg {
+            let (word, mask) = bit(reg);
+            if reads_register(op, reg) {
+                uses[index][word] |= mask;
+            }
+            if writes_register(op, reg) {
+                defs[index][word] |= mask;
+            }
+        }
+        // a region hands its frame back to the interpreter, which may read
+        // any of it
+        if matches!(op, KOp::Exit) {
+            uses[index].iter_mut().for_each(|word| *word = u64::MAX);
+        }
+    }
+    let successors = |index: usize| -> [Option<usize>; 2] {
+        match ops[index] {
+            KOp::Jump { to } => [Some(to as usize), None],
+            KOp::JumpIf { to, .. } | KOp::JumpIfNot { to, .. } | KOp::RangeTest { to, .. } => {
+                [Some(index + 1), Some(to as usize)]
+            }
+            KOp::Return { .. } | KOp::Exit => [None, None],
+            _ => [Some(index + 1), None],
+        }
+    };
+
+    let mut live_in = vec![vec![0u64; words]; ops.len()];
+    let mut live_out = vec![vec![0u64; words]; ops.len()];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for index in (0..ops.len()).rev() {
+            let mut out = vec![0u64; words];
+            for successor in successors(index).into_iter().flatten() {
+                if successor < ops.len() {
+                    for (word, incoming) in out.iter_mut().zip(&live_in[successor]) {
+                        *word |= incoming;
+                    }
+                }
+            }
+            let entering: Vec<u64> = (0..words)
+                .map(|word| uses[index][word] | (out[word] & !defs[index][word]))
+                .collect();
+            if entering != live_in[index] {
+                live_in[index] = entering;
+                changed = true;
+            }
+            live_out[index] = out;
+        }
+    }
+
+    let dead_after = |index: usize, reg: Reg| {
+        let (word, mask) = bit(reg);
+        reg >= first_temp && live_out[index][word] & mask == 0
+    };
+    for index in 0..ops.len() {
+        match ops[index] {
+            KOp::Bin {
+                op,
+                dst,
+                a,
+                b,
+                take: false,
+            } if a != b => {
+                if dead_after(index, a) {
+                    ops[index] = KOp::Bin {
+                        op,
+                        dst,
+                        a,
+                        b,
+                        take: true,
+                    };
+                } else if matches!(op, BinKind::Add | BinKind::Mul) && dead_after(index, b) {
+                    ops[index] = KOp::Bin {
+                        op,
+                        dst,
+                        a: b,
+                        b: a,
+                        take: true,
+                    };
+                }
+            }
+            KOp::Move { dst, src } if dst != src && dead_after(index, src) => {
+                ops[index] = KOp::Take { dst, src };
+            }
+            _ => {}
+        }
+    }
 }
 
 fn set_jump_target(op: &mut KOp, target: u32) {
@@ -941,6 +1046,7 @@ impl<'a> Translator<'a> {
                     dst: depth - 2,
                     a,
                     b,
+                    take: false,
                 });
                 Self::pop(stack, 2)?;
                 stack.push(Slot::Val);
@@ -1010,6 +1116,7 @@ fn writes_register(op: &KOp, reg: Reg) -> bool {
         | KOp::Int { dst, .. }
         | KOp::Float { dst, .. }
         | KOp::Move { dst, .. }
+        | KOp::Take { dst, .. }
         | KOp::Bin { dst, .. }
         | KOp::Neg { dst, .. }
         | KOp::Not { dst, .. }
@@ -1042,6 +1149,7 @@ fn reads_register(op: &KOp, reg: Reg) -> bool {
         KOp::Nil { .. } | KOp::Int { .. } | KOp::Float { .. } | KOp::EmptyList { .. } => false,
         KOp::Jump { .. } => false,
         KOp::Move { src, .. }
+        | KOp::Take { src, .. }
         | KOp::Neg { src, .. }
         | KOp::Not { src, .. }
         | KOp::Len { src, .. } => src == reg,
@@ -1075,6 +1183,7 @@ fn op_dst(op: &KOp) -> Option<Reg> {
         | KOp::Int { dst, .. }
         | KOp::Float { dst, .. }
         | KOp::Move { dst, .. }
+        | KOp::Take { dst, .. }
         | KOp::Bin { dst, .. }
         | KOp::Neg { dst, .. }
         | KOp::Not { dst, .. }
@@ -1103,6 +1212,7 @@ fn retarget(op: &mut KOp, to: Reg) -> bool {
         | KOp::Int { dst, .. }
         | KOp::Float { dst, .. }
         | KOp::Move { dst, .. }
+        | KOp::Take { dst, .. }
         | KOp::Bin { dst, .. }
         | KOp::Neg { dst, .. }
         | KOp::Not { dst, .. }
@@ -1124,6 +1234,7 @@ fn replace_reads(op: &mut KOp, from: Reg, to: Reg) {
     };
     match op {
         KOp::Move { src, .. }
+        | KOp::Take { src, .. }
         | KOp::Neg { src, .. }
         | KOp::Not { src, .. }
         | KOp::Len { src, .. } => swap(src),

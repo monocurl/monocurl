@@ -238,17 +238,27 @@ impl Vm {
                     let value = reg!(src).clone();
                     reg!(dst) = value;
                 }
-                KOp::Bin { op, dst, a, b } => {
-                    // `v = v + w` on a list nobody else holds updates it in
-                    // place instead of allocating the result
-                    if dst == a && a != b && matches!(reg!(a), KVal::List(_)) {
+                KOp::Take { dst, src } => {
+                    let value = std::mem::replace(&mut reg!(src), KVal::Nil);
+                    reg!(dst) = value;
+                }
+                KOp::Bin {
+                    op,
+                    dst,
+                    a,
+                    b,
+                    take,
+                } => {
+                    // `v = v + w` on a list nobody else holds, or on a list
+                    // temporary that dies here, updates it in place instead of
+                    // allocating the result
+                    if (dst == a || take) && a != b && matches!(reg!(a), KVal::List(_)) {
                         let rhs = reg!(b).clone();
-                        let lhs = &mut reg!(a);
-                        if binary_in_place(arena, op, lhs, &rhs)? {
-                            continue;
+                        let mut lhs = std::mem::replace(&mut reg!(a), KVal::Nil);
+                        if !binary_in_place(arena, op, &mut lhs, &rhs)? {
+                            lhs = binary(arena, op, &lhs, &rhs)?;
                         }
-                        let value = binary(arena, op, lhs, &rhs)?;
-                        reg!(dst) = value;
+                        reg!(dst) = lhs;
                         continue;
                     }
                     let value = binary(arena, op, &reg!(a), &reg!(b))?;
