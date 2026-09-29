@@ -11,7 +11,7 @@ use crate::mesh::helpers::*;
 
 use super::*;
 
-#[stdlib_func]
+#[stdlib_func(sync = op_fade_sync)]
 pub async fn op_fade(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let alpha = crate::read_float(executor, stack_idx, -2, "opacity")?;
@@ -26,7 +26,21 @@ pub async fn op_fade(executor: &mut Executor, stack_idx: usize) -> Result<Value,
     Ok(tree.into_value())
 }
 
-#[stdlib_func]
+fn op_fade_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -3)?;
+    if !has_no_tag_filter(executor, stack_idx, -1) {
+        return None;
+    }
+    Some((|| {
+        let alpha = crate::read_float(executor, stack_idx, -2, "opacity")?;
+        if (alpha - 1.0).abs() > 1e-12 {
+            tree.for_each_mut(&mut |mesh| mesh.uniform.alpha *= alpha);
+        }
+        Ok(tree.into_value())
+    })())
+}
+
+#[stdlib_func(sync = op_restroke_sync)]
 pub async fn op_restroke(
     executor: &mut Executor,
     stack_idx: usize,
@@ -62,7 +76,45 @@ pub async fn op_restroke(
     Ok(tree.into_value())
 }
 
-#[stdlib_func]
+fn op_restroke_sync(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -5)?;
+    let color = try_read_float4_arg(executor, stack_idx, -4)?;
+    if !has_no_tag_filter(executor, stack_idx, -2) {
+        return None;
+    }
+    let width = executor
+        .state
+        .stack(stack_idx)
+        .read_at(-3)
+        .clone()
+        .elide_cached_wrappers_rec();
+    let stroke_radius = match width {
+        Value::Nil => None,
+        Value::Integer(value) => Some((value as f32).max(0.0)),
+        Value::Float(value) => Some((value as f32).max(0.0)),
+        _ => return None,
+    };
+    Some((|| {
+        let level = read_level(executor, stack_idx, -1, "level")?;
+        if let Some(radius) = stroke_radius {
+            tree.for_each_mut(&mut |mesh| mesh.uniform.stroke_radius = radius);
+        }
+        if level > 0.0 {
+            tree.for_each_mut(&mut |mesh| {
+                for lin in &mut mesh.lins {
+                    lin.a.col = lin.a.col.lerp(color, level);
+                    lin.b.col = lin.b.col.lerp(color, level);
+                }
+            });
+        }
+        Ok(tree.into_value())
+    })())
+}
+
+#[stdlib_func(sync = op_refill_sync)]
 pub async fn op_refill(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -4, "target").await?;
     let level = read_level(executor, stack_idx, -1, "level")?;
@@ -80,6 +132,28 @@ pub async fn op_refill(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     })
     .await?;
     Ok(tree.into_value())
+}
+
+fn op_refill_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -4)?;
+    if !has_no_tag_filter(executor, stack_idx, -2) {
+        return None;
+    }
+    let level = match read_level(executor, stack_idx, -1, "level") {
+        Ok(level) => level,
+        Err(error) => return Some(Err(error)),
+    };
+    if level > 0.0 {
+        let color = try_read_float4_arg(executor, stack_idx, -3)?;
+        tree.for_each_mut(&mut |mesh| {
+            for tri in &mut mesh.tris {
+                tri.a.col = tri.a.col.lerp(color, level);
+                tri.b.col = tri.b.col.lerp(color, level);
+                tri.c.col = tri.c.col.lerp(color, level);
+            }
+        });
+    }
+    Some(Ok(tree.into_value()))
 }
 
 #[stdlib_func]

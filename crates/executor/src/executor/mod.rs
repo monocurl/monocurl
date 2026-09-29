@@ -32,12 +32,13 @@ pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorEr
 
 pub type StdlibFunc = for<'a> fn(&'a mut Executor, usize) -> StdlibReturn<'a>;
 
-/// entry point for a native that never suspends
-pub type StdlibSyncFunc = fn(&mut Executor, usize) -> Result<Value, ExecutorError>;
+/// entry point for a native call that may not need to suspend: `None` declines
+/// (some argument still needs evaluating) and the call goes through `call`
+pub type StdlibSyncFunc = fn(&mut Executor, usize) -> Option<Result<Value, ExecutorError>>;
 
 /// a native function as the executor sees it. `call_sync` is present whenever the
-/// native cannot suspend, which lets the interpreter run it without building a
-/// future at all
+/// native cannot suspend, or offers an attempt for the common case where it need
+/// not, which lets the interpreter run it without building a future at all
 #[derive(Clone, Copy)]
 pub struct NativeFunction {
     pub call: StdlibFunc,

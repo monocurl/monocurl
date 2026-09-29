@@ -9,8 +9,8 @@ use executor::{
 pub struct FunctionEntry {
     pub name: &'static str,
     pub func: StdlibFunc,
-    /// present when the native never suspends, letting the interpreter call it
-    /// without allocating and polling a future
+    /// present for synchronous natives and async natives with a fast attempt;
+    /// an attempt can decline when evaluating arguments requires suspension
     pub sync_func: Option<StdlibSyncFunc>,
 }
 

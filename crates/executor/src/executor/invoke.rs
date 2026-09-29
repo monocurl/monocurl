@@ -477,7 +477,7 @@ impl Executor {
         self.finish_native_invoke(stack_idx, arg_count, result)
     }
 
-    /// natives that cannot suspend are called directly, with no future allocated
+    /// call a native directly when its synchronous entry can handle the arguments
     pub(super) fn try_native_invoke(
         &mut self,
         stack_idx: usize,
@@ -485,7 +485,7 @@ impl Executor {
         arg_count: u16,
     ) -> Option<ExecSingle> {
         let call = self.native_funcs[func_index as usize].call_sync?;
-        let result = call(self, stack_idx);
+        let result = call(self, stack_idx)?;
         Some(self.finish_native_invoke(stack_idx, arg_count, result))
     }
 

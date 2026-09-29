@@ -141,7 +141,7 @@ fn camera_oriented_basis(camera: CameraBasis) -> (Float3, Float3, Float3) {
     (x_unit, y_unit, z_unit)
 }
 
-#[stdlib_func]
+#[stdlib_func(sync = op_shift_sync)]
 pub async fn op_shift(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
     let delta = read_float3(executor, stack_idx, -2, "delta")?;
@@ -154,6 +154,20 @@ pub async fn op_shift(executor: &mut Executor, stack_idx: usize) -> Result<Value
     })
     .await?;
     Ok(tree.into_value())
+}
+
+fn op_shift_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -3)?;
+    if !has_no_tag_filter(executor, stack_idx, -1) {
+        return None;
+    }
+    Some((|| {
+        let delta = read_float3(executor, stack_idx, -2, "delta")?;
+        if delta.len_sq() > 1e-12 {
+            tree.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |p| p + delta));
+        }
+        Ok(tree.into_value())
+    })())
 }
 
 #[stdlib_func]
@@ -288,7 +302,7 @@ pub async fn op_orient_to_camera(
     Ok(tree.into_value())
 }
 
-#[stdlib_func]
+#[stdlib_func(sync = op_centered_sync)]
 pub async fn op_centered(
     executor: &mut Executor,
     stack_idx: usize,
@@ -309,6 +323,27 @@ pub async fn op_centered(
     })
     .await?;
     Ok(tree.into_value())
+}
+
+fn op_centered_sync(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -4)?;
+    if !has_no_tag_filter(executor, stack_idx, -2) {
+        return None;
+    }
+    Some((|| {
+        let level = read_level(executor, stack_idx, -1, "level")?;
+        if level > 0.0 {
+            let at = read_float3(executor, stack_idx, -3, "at")?;
+            if let Some(center) = tree_center(&tree) {
+                let delta = (at - center) * level;
+                tree.for_each_mut(&mut |mesh| transform_mesh_positions(mesh, |p| p + delta));
+            }
+        }
+        Ok(tree.into_value())
+    })())
 }
 
 #[stdlib_func]

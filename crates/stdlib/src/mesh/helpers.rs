@@ -117,6 +117,68 @@ impl MeshTree {
     }
 }
 
+/// only the already-evaluated mesh shape can take a native's synchronous path
+pub(super) fn try_read_mesh_tree_arg(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+) -> Option<MeshTree> {
+    fn concrete_tree(value: Value) -> Option<MeshTree> {
+        match value.elide_cached_wrappers_rec() {
+            Value::Mesh(mesh) => Some(MeshTree::Mesh(mesh)),
+            Value::List(list) => list
+                .elements()
+                .iter()
+                .map(|element| concrete_tree(with_heap(|heap| heap.get(element.key()).clone())))
+                .collect::<Option<Vec<_>>>()
+                .map(MeshTree::List),
+            _ => None,
+        }
+    }
+
+    concrete_tree(executor.state.stack(stack_idx).read_at(index).clone())
+}
+
+pub(super) fn has_no_tag_filter(executor: &Executor, stack_idx: usize, index: i32) -> bool {
+    matches!(
+        executor
+            .state
+            .stack(stack_idx)
+            .read_at(index)
+            .clone()
+            .elide_cached_wrappers_rec(),
+        Value::Nil
+    )
+}
+
+pub(super) fn try_read_float4_arg(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+) -> Option<Float4> {
+    let value = executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_cached_wrappers_rec();
+    let Value::List(list) = value else {
+        return None;
+    };
+    let [a, b, c, d] = list.elements() else {
+        return None;
+    };
+    let components = [a, b, c, d].map(|element| {
+        match with_heap(|heap| heap.get(element.key()).clone()).elide_cached_wrappers_rec() {
+            Value::Integer(value) => Some(value as f32),
+            Value::Float(value) => Some(value as f32),
+            _ => None,
+        }
+    });
+    let [a, b, c, d] = components;
+    Some(Float4::new(a?, b?, c?, d?))
+}
+
 pub(super) struct MeshTreeIter<'a> {
     stack: Vec<&'a MeshTree>,
 }
