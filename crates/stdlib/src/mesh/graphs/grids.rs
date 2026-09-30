@@ -144,12 +144,11 @@ async fn sample_colors(
     color_at: &Value,
     samples: &[(Float3, [usize; 2])],
 ) -> Result<Vec<Float4>, ExecutorError> {
-    invoke_callable_many_input(
+    invoke_callable_many_flat(
         executor,
         color_at,
         BatchInput::IndexedPoints(samples),
         "color_at",
-        float4_from_kernel,
         |value| float4_from_value(value, "color_at"),
     )
     .await

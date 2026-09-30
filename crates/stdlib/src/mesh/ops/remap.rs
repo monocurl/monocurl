@@ -69,12 +69,11 @@ async fn op_point_map_uncached(
                         }
                         positions
                     };
-                    let mapped = invoke_callable_many_input(
+                    let mapped = invoke_callable_many_flat(
                         executor,
                         func,
                         BatchInput::Points(&positions),
                         "f",
-                        float3_from_kernel,
                         |value| float3_from_value(value, "f"),
                     )
                     .await?;
@@ -188,12 +187,11 @@ async fn op_color_map_uncached(
                         }
                         positions
                     };
-                    let mapped = invoke_callable_many_input(
+                    let mapped = invoke_callable_many_flat(
                         executor,
                         func,
                         BatchInput::Points(&positions),
                         "f",
-                        float4_from_kernel,
                         |value| float4_from_value(value, "f"),
                     )
                     .await?;
@@ -279,12 +277,11 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                         }
                         positions
                     };
-                    let mapped = invoke_callable_many_input(
+                    let mapped = invoke_callable_many_flat(
                         executor,
                         func,
                         BatchInput::Points(&positions),
                         "f",
-                        float2_from_kernel,
                         |value| float2_from_value(value, "f"),
                     )
                     .await?;
