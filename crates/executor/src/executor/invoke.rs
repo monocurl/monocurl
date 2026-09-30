@@ -17,10 +17,7 @@ use crate::{
 };
 use smallvec::SmallVec;
 
-use super::{
-    ExecSingle, Executor,
-    eager::{fill_defaults, prepare_eager_call_args},
-};
+use super::{ExecSingle, Executor, eager::fill_defaults};
 
 impl Executor {
     #[inline]
@@ -233,18 +230,15 @@ impl Executor {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let args: SmallVec<[Value; 8]> = stack.var_stack.drain(stack_len - n..).collect();
+            let mut args = Vec::with_capacity(lambda.total_args());
+            args.extend(stack.var_stack.drain(stack_len - n..));
 
-            let prepared_args = match prepare_eager_call_args(args.iter().cloned(), &lambda) {
-                Ok(args) => args,
-                Err(error) => return ExecSingle::Error(error),
-            };
+            let result = self
+                .eagerly_invoke_lambda_cloning(&lambda, args.iter(), Some(stack_idx))
+                .await;
             let full_args = fill_defaults(args, &lambda);
 
-            match self
-                .eagerly_invoke_lambda(&lambda, prepared_args, Some(stack_idx))
-                .await
-            {
+            match result {
                 Ok(result_val) => {
                     let result_val = match self.materialize_cached_value(result_val).await {
                         Ok(value) => value,
@@ -371,20 +365,16 @@ impl Executor {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let args: SmallVec<[Value; 8]> = stack.var_stack.drain(stack_len - n..).collect();
+            let args: Vec<Value> = stack.var_stack.drain(stack_len - n..).collect();
             let operand = stack.pop();
             let labels = self.drain_labels(stack_idx, section_idx);
 
-            let prepared_args = match prepare_eager_call_args(
-                std::iter::once(operand.clone()).chain(args.iter().cloned()),
-                &operator.0,
-            ) {
-                Ok(args) => args,
-                Err(error) => return ExecSingle::Error(error),
-            };
-
             match self
-                .eagerly_invoke_lambda(&operator.0, prepared_args, Some(stack_idx))
+                .eagerly_invoke_lambda_cloning(
+                    &operator.0,
+                    std::iter::once(&operand).chain(&args),
+                    Some(stack_idx),
+                )
                 .await
             {
                 Ok(raw) => match extract_operator_result(raw) {
@@ -418,19 +408,15 @@ impl Executor {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let args: SmallVec<[Value; 8]> = stack.var_stack.drain(stack_len - n..).collect();
+            let args: Vec<Value> = stack.var_stack.drain(stack_len - n..).collect();
             let operand = stack.pop();
 
-            let prepared_args = match prepare_eager_call_args(
-                std::iter::once(operand.clone()).chain(args.iter().cloned()),
-                &operator.0,
-            ) {
-                Ok(args) => args,
-                Err(error) => return ExecSingle::Error(error),
-            };
-
             match self
-                .eagerly_invoke_lambda(&operator.0, prepared_args, Some(stack_idx))
+                .eagerly_invoke_lambda_cloning(
+                    &operator.0,
+                    std::iter::once(&operand).chain(&args),
+                    Some(stack_idx),
+                )
                 .await
             {
                 Ok(raw) => match extract_operator_result(raw) {

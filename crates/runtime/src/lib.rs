@@ -1314,7 +1314,7 @@ mod tests {
     fn mesh_attribute_snapshot_is_flat_and_filters_unsupported_values() {
         let value = Value::InvokedFunction(make_invoked_function(
             Value::Nil,
-            smallvec::smallvec![Value::Float(1.5), Value::String("not a control".into())],
+            vec![Value::Float(1.5), Value::String("not a control".into())],
             smallvec::smallvec![(0, "radius".into()), (1, "label".into())],
             Some(Value::Nil),
         ));

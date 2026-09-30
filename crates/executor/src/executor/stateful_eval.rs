@@ -191,16 +191,15 @@ impl Executor {
                     };
                     let arguments = self.stateful_slots_as_live_calls(args, read_kind).await?;
 
-                    let full_args = prepare_eager_call_args(arguments.iter().cloned(), &lambda)?;
                     let trace_parent_idx = Some(self.state.last_stack_idx);
                     let result = self
-                        .eagerly_invoke_lambda(&lambda, full_args, trace_parent_idx)
+                        .eagerly_invoke_lambda_cloning(&lambda, arguments.iter(), trace_parent_idx)
                         .await?;
                     let result = self.materialize_cached_value(result).await?;
 
                     Ok(Value::InvokedFunction(make_invoked_function(
                         func_val,
-                        arguments,
+                        arguments.into_vec(),
                         labels.clone(),
                         Some(result),
                     )))
@@ -224,13 +223,13 @@ impl Executor {
                         .stateful_slots_as_live_calls(extra_args, read_kind)
                         .await?;
 
-                    let full_args = prepare_eager_call_args(
-                        std::iter::once(operand_val.clone()).chain(arguments.iter().cloned()),
-                        &operator_inner.0,
-                    )?;
                     let trace_parent_idx = Some(self.state.last_stack_idx);
                     let raw = self
-                        .eagerly_invoke_lambda(&operator_inner.0, full_args, trace_parent_idx)
+                        .eagerly_invoke_lambda_cloning(
+                            &operator_inner.0,
+                            std::iter::once(&operand_val).chain(&arguments),
+                            trace_parent_idx,
+                        )
                         .await?;
                     let (initial, modified) = extract_operator_result(raw)?;
                     let initial = self.materialize_cached_value(initial).await?;
@@ -239,7 +238,7 @@ impl Executor {
                     Ok(Value::InvokedOperator(make_invoked_operator(
                         operator_val,
                         operand_val,
-                        arguments,
+                        arguments.into_vec(),
                         labels.clone(),
                         initial,
                         modified,

@@ -147,16 +147,15 @@ impl Executor {
                 Value::Lambda(rc) => rc,
                 other => return Err(ExecutorError::type_error("lambda", other.type_name())),
             };
-            let full_args = prepare_eager_call_args(lerped_args.iter().cloned(), &lambda)?;
             let trace_parent_idx = Some(self.state.last_stack_idx);
             let result = self
-                .eagerly_invoke_lambda(&lambda, full_args, trace_parent_idx)
+                .eagerly_invoke_lambda_cloning(&lambda, lerped_args.iter(), trace_parent_idx)
                 .await?;
             let result = self.materialize_cached_value(result).await?;
 
             Ok(Some(Value::InvokedFunction(make_invoked_function(
                 lambda_val,
-                lerped_args,
+                lerped_args.into_vec(),
                 labels,
                 Some(result),
             ))))
@@ -255,14 +254,14 @@ impl Executor {
                 other => return Err(ExecutorError::type_error("operator", other.type_name())),
             };
 
-            let full_args = prepare_eager_call_args(
-                std::iter::once(lerped_operand.clone()).chain(lerped_args.iter().cloned()),
-                &operator.0,
-            )?;
             let trace_parent_idx = Some(self.state.last_stack_idx);
 
             let raw = self
-                .eagerly_invoke_lambda(&operator.0, full_args, trace_parent_idx)
+                .eagerly_invoke_lambda_cloning(
+                    &operator.0,
+                    std::iter::once(&lerped_operand).chain(&lerped_args),
+                    trace_parent_idx,
+                )
                 .await?;
             let (initial, modified) = extract_operator_result(raw)?;
             let initial = self.materialize_cached_value(initial).await?;
@@ -271,7 +270,7 @@ impl Executor {
             Ok(Some(Value::InvokedOperator(make_invoked_operator(
                 operator_value,
                 lerped_operand,
-                lerped_args,
+                lerped_args.into_vec(),
                 a_inv.body.labels.clone(),
                 initial,
                 modified,
