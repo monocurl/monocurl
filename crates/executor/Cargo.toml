@@ -4,7 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [features]
-default = []
+default = ["jit"]
+# native code for scalar typed kernels; never built on wasm32
+jit = [
+  "dep:cranelift-codegen",
+  "dep:cranelift-frontend",
+  "dep:cranelift-jit",
+  "dep:cranelift-module",
+  "dep:cranelift-native",
+]
 capture_tos = []
 test_heap_tracking = []
 
@@ -14,3 +22,10 @@ geo.workspace = true
 smallvec.workspace = true
 rustc-hash.workspace = true
 structs.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cranelift-codegen = { workspace = true, optional = true }
+cranelift-frontend = { workspace = true, optional = true }
+cranelift-jit = { workspace = true, optional = true }
+cranelift-module = { workspace = true, optional = true }
+cranelift-native = { workspace = true, optional = true }

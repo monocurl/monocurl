@@ -21,12 +21,20 @@
 //! call whose arguments differ from the batch's first, runs on the dynamic
 //! machine instead. verify mode runs both machines and compares them too.
 //! typed batches run `lanes::LANES` calls per op dispatch on the lane
-//! machine (`lanes`), whose scalar ops are arrays the compiler vectorises
+//! machine (`lanes`), whose scalar ops are arrays the compiler vectorises.
+//! on native targets a typed kernel whose registers are all ints and floats
+//! is compiled to machine code instead (`jit`), which runs a call with no
+//! dispatch at all
 
 mod batch;
 pub mod compile;
 pub mod convert;
 pub mod ir;
+#[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
+pub mod jit;
+#[cfg(not(all(feature = "jit", not(target_arch = "wasm32"))))]
+#[path = "jit_off.rs"]
+pub mod jit;
 pub mod lanes;
 pub mod pool;
 pub mod run;

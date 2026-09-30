@@ -20,6 +20,7 @@ use super::{
     compile::{self, LambdaShape, RegionShape, Reject},
     convert::{self, Converter, to_value},
     ir::Kernel,
+    jit,
     run::Vm,
     value::{ClosureArena, KClosure, KVal},
 };
@@ -60,6 +61,9 @@ pub(crate) struct KernelTier {
     /// whether typed batches run several calls per op on the lane machine;
     /// `MONOCURL_KERNEL_LANES=0` turns it off
     pub(super) lanes: bool,
+    /// native code for scalar typed kernels; `MONOCURL_KERNEL_JIT=0` turns it
+    /// off
+    pub(super) jit: jit::JitCache,
     /// compiled bodies by entry point; `None` records a body the translator
     /// rejected so it is not retried
     kernels: HashMap<InstructionPointer, Option<Arc<Kernel>>>,
@@ -94,6 +98,11 @@ pub struct KernelStats {
     pub typed_calls: usize,
     /// batch calls that ran on the lane machine (a subset of `typed_calls`)
     pub lane_calls: usize,
+    /// batch calls that ran as native code (a subset of `typed_calls`)
+    pub jit_calls: usize,
+    /// typed kernels compiled to native code, and the time that took
+    pub jit_compiles: usize,
+    pub jit_compile_elapsed: Duration,
     /// batches whose entry point could not be typed
     pub typed_declined: usize,
     pub parallel_batches: usize,
@@ -131,6 +140,7 @@ impl KernelTier {
             mode,
             typed: typed_kernels_enabled(),
             lanes: env_switch("MONOCURL_KERNEL_LANES"),
+            jit: jit::JitCache::new(jit::enabled_by_env()),
             kernels: HashMap::new(),
             disabled: FxHashSet::default(),
             regions: HashMap::new(),
