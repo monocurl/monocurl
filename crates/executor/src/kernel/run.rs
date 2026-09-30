@@ -486,7 +486,7 @@ pub fn binary(arena: &ClosureArena, op: BinKind, a: &KVal, b: &KVal) -> Result<K
     }
 }
 
-fn int_binary(op: BinKind, a: i64, b: i64) -> Result<KVal, Fault> {
+pub(super) fn int_binary(op: BinKind, a: i64, b: i64) -> Result<KVal, Fault> {
     Ok(match op {
         BinKind::Add => KVal::Int(a.wrapping_add(b)),
         BinKind::Sub => KVal::Int(a.wrapping_sub(b)),
@@ -514,7 +514,7 @@ fn int_binary(op: BinKind, a: i64, b: i64) -> Result<KVal, Fault> {
     })
 }
 
-fn float_binary(op: BinKind, a: f64, b: f64) -> Result<KVal, Fault> {
+pub(super) fn float_binary(op: BinKind, a: f64, b: f64) -> Result<KVal, Fault> {
     Ok(match op {
         BinKind::Add => KVal::Float(a + b),
         BinKind::Sub => KVal::Float(a - b),

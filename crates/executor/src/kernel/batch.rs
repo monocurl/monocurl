@@ -19,6 +19,7 @@ use crate::{
 use super::{
     KernelMode,
     convert::Converter,
+    jit::{JitEntry, JitVm},
     lanes::{LANES, LVm},
     pool,
     run::{Fault, Vm},
@@ -58,18 +59,20 @@ impl BatchArgs {
     }
 }
 
-/// how one batch runs: which specialisation it has, if any, whether the
-/// lane machine is on, and whether every result is cross-checked
+/// how one batch runs: which specialisation it has, if any, its native code,
+/// whether the lane machine is on, and whether every result is cross-checked
 #[derive(Clone)]
 struct Plan {
     typed: Option<Arc<(TypedProgram, SpecId)>>,
+    jit: Option<Arc<JitEntry>>,
     lanes: bool,
     verify: bool,
 }
 
-/// the machines one batch runs on: the lane machine for groups of typed
-/// calls, the typed one for the rest and for lanes that fault, the dynamic
-/// one for calls the typed machines decline or fault
+/// the machines one batch runs on: native code for typed calls when the
+/// specialisation compiled, else the lane machine for groups of typed calls;
+/// the typed one for the rest and for calls those fault, the dynamic one for
+/// calls the typed machines decline or fault
 struct Machines<'a> {
     arena: &'a ClosureArena,
     entry: ClosureId,
@@ -77,8 +80,10 @@ struct Machines<'a> {
     vm: Vm,
     tvm: TVm,
     lvm: LVm,
+    jit: Option<JitVm>,
     typed_calls: usize,
     lane_calls: usize,
+    jit_calls: usize,
 }
 
 impl<'a> Machines<'a> {
@@ -96,6 +101,18 @@ impl<'a> Machines<'a> {
             ),
             None => (Vm::new(), TVm::new(), LVm::new()),
         };
+        let jit = plan
+            .typed
+            .as_deref()
+            .zip(plan.jit.as_ref())
+            .map(|((program, spec), jit)| {
+                JitVm::new(
+                    Arc::clone(jit),
+                    program.spec(*spec),
+                    arena,
+                    abort.map(Arc::clone),
+                )
+            });
         Self {
             arena,
             entry,
@@ -103,8 +120,10 @@ impl<'a> Machines<'a> {
             vm,
             tvm,
             lvm,
+            jit,
             typed_calls: 0,
             lane_calls: 0,
+            jit_calls: 0,
         }
     }
 
@@ -115,6 +134,12 @@ impl<'a> Machines<'a> {
         range: std::ops::Range<usize>,
         results: &mut Vec<KVal>,
     ) -> Result<(), Fault> {
+        if self.jit.is_some() {
+            for index in range {
+                results.push(self.jit_call(args.call(index))?);
+            }
+            return Ok(());
+        }
         let Some(typed) = self.plan.typed.as_deref().filter(|_| self.plan.lanes) else {
             for index in range {
                 results.push(self.call(args.call(index))?);
@@ -162,6 +187,34 @@ impl<'a> Machines<'a> {
         Ok(())
     }
 
+    /// one call as native code, falling back to the typed machine when its
+    /// classes differ or it faults
+    fn jit_call(&mut self, args: &[KVal]) -> Result<KVal, Fault> {
+        let (Some((program, spec)), Some(jit)) = (self.plan.typed.as_deref(), &mut self.jit) else {
+            return self.call(args);
+        };
+        let spec = program.spec(*spec);
+        if !TVm::accepts(spec, args) {
+            return self.call(args);
+        }
+        match jit.call(spec, args) {
+            Ok(native) => {
+                self.jit_calls += 1;
+                self.typed_calls += 1;
+                if self.plan.verify {
+                    let dynamic = self.vm.call(self.arena, self.entry, args)?;
+                    assert!(
+                        KVal::strictly_equal(&native, &dynamic),
+                        "native kernel disagrees with the dynamic machine: {native:?} vs {dynamic:?}"
+                    );
+                }
+                Ok(native)
+            }
+            Err(fault @ (Fault::Budget | Fault::Aborted)) => Err(fault),
+            Err(_) => self.call(args),
+        }
+    }
+
     fn call(&mut self, args: &[KVal]) -> Result<KVal, Fault> {
         let Some((program, spec)) = self.plan.typed.as_deref() else {
             return self.vm.call(self.arena, self.entry, args);
@@ -195,6 +248,7 @@ impl<'a> Machines<'a> {
 struct Ran {
     typed: usize,
     lanes: usize,
+    jit: usize,
     parallel: bool,
 }
 
@@ -226,6 +280,7 @@ fn run_batch(
         machines.run(args, remaining, &mut results)?;
         ran.typed = machines.typed_calls;
         ran.lanes = machines.lane_calls;
+        ran.jit = machines.jit_calls;
         return Ok((results, ran));
     }
 
@@ -252,18 +307,28 @@ fn run_batch(
         if outcome.is_err() {
             aborted.store(true, Ordering::Relaxed);
         }
-        outcome.map(|()| (results, machines.typed_calls, machines.lane_calls))
+        outcome.map(|()| {
+            let counts = Ran {
+                typed: machines.typed_calls,
+                lanes: machines.lane_calls,
+                jit: machines.jit_calls,
+                parallel: true,
+            };
+            (results, counts)
+        })
     });
     ran.typed = machines.typed_calls;
     ran.lanes = machines.lane_calls;
+    ran.jit = machines.jit_calls;
     ran.parallel = true;
     for outcome in outcomes {
         // a worker that never reported back has panicked; the interpreter
         // owns this batch then
-        let (chunk_results, typed, lanes) = outcome.ok_or(Fault::Type)??;
+        let (chunk_results, counts) = outcome.ok_or(Fault::Type)??;
         results.extend(chunk_results);
-        ran.typed += typed;
-        ran.lanes += lanes;
+        ran.typed += counts.typed;
+        ran.lanes += counts.lanes;
+        ran.jit += counts.jit;
     }
     Ok((results, ran))
 }
@@ -401,8 +466,12 @@ impl Executor {
                 None => eprintln!("typed specialisation declined for {:?}", lambda.ip),
             }
         }
+        let jit = typed
+            .as_deref()
+            .and_then(|(program, spec)| tier.jit.prepare(program.spec(*spec), &mut tier.stats));
         let plan = Plan {
             typed,
+            jit,
             lanes: tier.lanes,
             verify: tier.mode == KernelMode::Verify,
         };
@@ -422,6 +491,7 @@ impl Executor {
                     was_parallel |= ran.parallel;
                     tier.stats.typed_calls += ran.typed;
                     tier.stats.lane_calls += ran.lanes;
+                    tier.stats.jit_calls += ran.jit;
                     results.extend(chunk_results);
                 }
                 Err(_) => {

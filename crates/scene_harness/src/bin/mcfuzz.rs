@@ -120,6 +120,7 @@ fn run_batches(first: u64, count: u64, print: bool, stats: bool, keep_going: boo
         totals.single_calls += on.single_calls;
         totals.typed_calls += on.typed_calls;
         totals.lane_calls += on.lane_calls;
+        totals.jit_calls += on.jit_calls;
         totals.typed_declined += on.typed_declined;
         totals.faults += on.faults;
         totals.rejected_bodies += on.rejected_bodies;
@@ -132,12 +133,13 @@ fn run_batches(first: u64, count: u64, print: bool, stats: bool, keep_going: boo
     println!("{agreeing} of {count} batch cases agree ({errors} ending in a runtime error)");
     if stats {
         println!(
-            "kernels on: {} batches, {} calls ({} typed, {} on lanes), {} single calls, \
+            "kernels on: {} batches, {} calls ({} typed, {} on lanes, {} native), {} single calls, \
              {} typed declines, {} faults, {} rejected bodies; {typed_cases} cases ran typed",
             totals.batches,
             totals.calls,
             totals.typed_calls,
             totals.lane_calls,
+            totals.jit_calls,
             totals.single_calls,
             totals.typed_declined,
             totals.faults,

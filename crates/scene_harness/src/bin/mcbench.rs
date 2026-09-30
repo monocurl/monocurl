@@ -90,13 +90,16 @@ fn parse_args() -> Args {
 
 fn print_kernel_stats(stats: &KernelStats) {
     println!(
-        "    kernels: {} batches ({} parallel, {} untyped), {} calls ({} typed, {} in lanes), {} single calls, {} regions ({} faulted), {} faults, {} rejected bodies, {:.2} ms ({:.2} ms running)",
+        "    kernels: {} batches ({} parallel, {} untyped), {} calls ({} typed, {} in lanes, {} native), {} jit compiles ({:.2} ms), {} single calls, {} regions ({} faulted), {} faults, {} rejected bodies, {:.2} ms ({:.2} ms running)",
         stats.batches,
         stats.parallel_batches,
         stats.typed_declined,
         stats.calls,
         stats.typed_calls,
         stats.lane_calls,
+        stats.jit_calls,
+        stats.jit_compiles,
+        millis(stats.jit_compile_elapsed),
         stats.single_calls,
         stats.regions,
         stats.region_faults,
