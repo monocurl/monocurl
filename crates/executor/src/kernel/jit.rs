@@ -9,10 +9,16 @@
 //! modulo, powers, min/max, sign, the transcendental functions) calls an
 //! `extern "C"` shim running the same rust expression or the same `run.rs`
 //! helper the typed machine runs, so results and faults cannot diverge.
-//! the one boxed shape it models is a list of scalars built and returned by
-//! the body (a colour, a point), which lives in the frame. a spec with a boxed
-//! argument or capture, any other boxed op, or a call the specialiser did not
-//! inline is declined and stays with the typed and lane machines.
+//! two boxed shapes are modelled. a list of scalars built and returned by the
+//! body (a colour, a point) lives in the frame, one area per site, and a
+//! register holding one is its length and site, so the lists of several
+//! branches can merge into the register returned. a number, a boxed register
+//! that only ever holds an int or a float (`var sum = 0` accumulating floats,
+//! where the specialiser boxes at the merge), is a value word plus a kind word,
+//! and the dynamic ops on it branch on the kinds the way `run::binary` does, so
+//! an int stays an int until a float reaches it. a spec with a boxed argument or
+//! capture, any other boxed read, or a call the specialiser did not inline is
+//! declined and stays with the typed and lane machines.
 //!
 //! compiled code is cached by the spec's shape: its entry classes and ops with
 //! every float constant replaced by a slot of the frame. the code is a pure
@@ -27,8 +33,8 @@ use std::{
 
 use cranelift_codegen::{
     ir::{
-        AbiParam, Block, InstBuilder, MemFlagsData, StackSlotData, StackSlotKind, UserFuncName,
-        Value, condcodes::FloatCC, condcodes::IntCC, types,
+        AbiParam, Block, InstBuilder, MemFlagsData, StackSlot, StackSlotData, StackSlotKind,
+        UserFuncName, Value, condcodes::FloatCC, condcodes::IntCC, types,
     },
     isa::OwnedTargetIsa,
     settings::{self, Configurable},
@@ -40,8 +46,9 @@ use rustc_hash::FxHashMap;
 
 use super::{
     KernelStats,
-    ir::{BinKind, Reg},
+    ir::{BinKind, KernelIntrinsic, Reg},
     run::{self, CALL_OP_BUDGET, Fault},
+    tier::dump_kernels,
     typed::{Class, Opnd, Spec, TOp},
     value::{ClosureArena, KVal},
 };
@@ -58,14 +65,13 @@ const LIST_CAP: usize = 16;
 /// lists a body may build: one per `EmptyList` op, none of them in a loop
 const LIST_SITES: usize = 4;
 
-/// where things live in the frame, in words: the registers, then the result,
-/// its kind, the returned list's length, each list's elements and element
+/// where things live in the frame, in words: the registers, then the result
+/// (a returned list's length), its kind, each list's elements and element
 /// kinds, and the float constants
 #[derive(Clone, Copy)]
 struct Layout {
     result: usize,
     kind: usize,
-    count: usize,
     items: usize,
     consts: usize,
 }
@@ -76,9 +82,8 @@ impl Layout {
         Self {
             result,
             kind: result + 1,
-            count: result + 2,
-            items: result + 3,
-            consts: result + 3 + 2 * LIST_CAP * LIST_SITES,
+            items: result + 2,
+            consts: result + 2 + 2 * LIST_CAP * LIST_SITES,
         }
     }
 
@@ -218,6 +223,56 @@ extern "C" fn shim_float_atan2(a: f64, b: f64) -> f64 {
     a.atan2(b)
 }
 
+const INTRINSICS: [KernelIntrinsic; 29] = {
+    use KernelIntrinsic::*;
+    [
+        Sqrt, Cbrt, Exp, Ln, Sin, Cos, Tan, Asin, Acos, Atan, Sinh, Cosh, Tanh, Pow, Atan2, Abs,
+        Sign, Floor, Ceil, Round, Trunc, Mod, Min, Max, Dot, Cross, Len, ToInt, ToFloat,
+    ]
+};
+
+fn intrinsic_code(intrinsic: KernelIntrinsic) -> Option<u64> {
+    INTRINSICS
+        .iter()
+        .position(|&known| known == intrinsic)
+        .map(|code| code as u64)
+}
+
+/// a number as the frame holds it: its word and its kind
+fn number(word: u64, kind: u64) -> KVal {
+    match kind as i64 {
+        KIND_INT => KVal::Int(word as i64),
+        _ => KVal::Float(f64::from_bits(word)),
+    }
+}
+
+/// an intrinsic on numbers whose kinds are only known at run time; `out`
+/// takes the result's word and kind, and a result that is not a number
+/// faults so the call reruns on the typed machine
+extern "C" fn shim_native(
+    code: u32,
+    arity: u32,
+    a: u64,
+    a_kind: u64,
+    b: u64,
+    b_kind: u64,
+    out: *mut u64,
+) -> i32 {
+    let args = [number(a, a_kind), number(b, b_kind)];
+    let (value, kind) = match run::native(INTRINSICS[code as usize], &args[..arity as usize]) {
+        Ok(KVal::Int(n)) => (n as u64, KIND_INT),
+        Ok(KVal::Float(f)) => (f.to_bits(), KIND_FLOAT),
+        Ok(_) => return fault_code(Fault::Type),
+        Err(fault) => return fault_code(fault),
+    };
+    // safety: `out` is the generated code's own two word stack slot
+    unsafe {
+        *out = value;
+        *out.add(1) = kind as u64;
+    }
+    0
+}
+
 #[derive(Clone, Copy)]
 enum Shim {
     IntBinary,
@@ -230,10 +285,11 @@ enum Shim {
     FloatMax,
     FloatPow,
     FloatAtan2,
+    Native,
 }
 
 impl Shim {
-    const ALL: [Shim; 10] = [
+    const ALL: [Shim; 11] = [
         Shim::IntBinary,
         Shim::FloatBinary,
         Shim::Unary,
@@ -244,6 +300,7 @@ impl Shim {
         Shim::FloatMax,
         Shim::FloatPow,
         Shim::FloatAtan2,
+        Shim::Native,
     ];
 
     fn name(self) -> &'static str {
@@ -258,6 +315,7 @@ impl Shim {
             Shim::FloatMax => "mc_float_max",
             Shim::FloatPow => "mc_float_pow",
             Shim::FloatAtan2 => "mc_float_atan2",
+            Shim::Native => "mc_native",
         }
     }
 
@@ -273,6 +331,7 @@ impl Shim {
             Shim::FloatMax => shim_float_max as *const u8,
             Shim::FloatPow => shim_float_pow as *const u8,
             Shim::FloatAtan2 => shim_float_atan2 as *const u8,
+            Shim::Native => shim_native as *const u8,
         }
     }
 
@@ -290,6 +349,7 @@ impl Shim {
             Shim::FloatMin | Shim::FloatMax | Shim::FloatPow | Shim::FloatAtan2 => {
                 (vec![F64, F64], F64)
             }
+            Shim::Native => (vec![I32, I32, I64, I64, I64, I64, ptr], I32),
         }
     }
 }
@@ -309,6 +369,15 @@ fn class_code(class: Class) -> Option<u64> {
     }
 }
 
+fn ret_code(class: Class) -> Option<u64> {
+    match class {
+        Class::Int => Some(1),
+        Class::Float => Some(2),
+        Class::Boxed => Some(3),
+        Class::Unset | Class::Closure(_) => None,
+    }
+}
+
 fn opnd_code(opnd: Opnd) -> Option<u64> {
     match opnd {
         Opnd::I(reg) => Some(reg as u64),
@@ -322,14 +391,16 @@ fn opnd_code(opnd: Opnd) -> Option<u64> {
 /// int constants are part of the code (they are loop bounds and small
 /// literals, and fold into the instructions using them); float constants are
 /// read from the frame, so a changed literal or captured time reuses the code
-fn shape(spec: &Spec) -> Option<Shape> {
+fn shape(spec: &Spec) -> Result<Shape, &'static str> {
     let mut key = Vec::with_capacity(spec.ops.len() * 4 + spec.entry.len() + 2);
     let mut consts = Vec::new();
     key.push(spec.frame_size as u64);
     key.push(spec.entry.len() as u64);
     for class in &spec.entry {
-        key.push(class_code(*class)?);
+        key.push(class_code(*class).ok_or("a boxed argument or capture")?);
     }
+    let opnd = |opnd| opnd_code(opnd).ok_or("a closure operand");
+    let ret = |class| ret_code(class).ok_or("a closure result");
     macro_rules! enc {
         ($tag:expr $(, $field:expr)*) => {
             key.extend([$tag as u64 $(, $field as u64)*])
@@ -382,31 +453,52 @@ fn shape(spec: &Spec) -> Option<Shape> {
             TOp::FMax { dst, a, b } => enc!(39, dst, a, b),
             TOp::FPow { dst, a, b } => enc!(40, dst, a, b),
             TOp::FAtan2 { dst, a, b } => enc!(41, dst, a, b),
-            TOp::Return { src } => enc!(42, opnd_code(src)?),
-            TOp::BoxI { reg } | TOp::BoxF { reg } | TOp::BoxC { reg, .. } => enc!(43, reg),
+            TOp::Return { src } => enc!(42, opnd(src)?),
+            TOp::BoxI { reg } => enc!(43, reg),
             TOp::Nil { dst } => enc!(44, dst),
             TOp::EmptyList { dst } => enc!(45, dst),
-            TOp::Append { list, value } => match value {
-                Opnd::I(_) | Opnd::F(_) => enc!(46, list, opnd_code(value)?),
-                Opnd::B(_) | Opnd::C(_) => return None,
-            },
+            TOp::Append { list, value } => enc!(46, list, opnd(value)?),
             TOp::MoveB { dst, src } => enc!(47, dst, src),
-            TOp::Call { .. }
-            | TOp::DynBin { .. }
-            | TOp::DynNeg { .. }
-            | TOp::DynNot { .. }
-            | TOp::DynJumpIf { .. }
-            | TOp::DynRangeTest { .. }
-            | TOp::DynInc { .. }
-            | TOp::Index { .. }
-            | TOp::Len { .. }
-            | TOp::DynNative { .. }
-            | TOp::Capture { .. }
-            | TOp::Default { .. }
-            | TOp::BoxInto { .. } => return None,
+            TOp::DynBin {
+                op,
+                dst,
+                a,
+                b,
+                ret: class,
+            } => {
+                enc!(48, bin_code(op), dst, opnd(a)?, opnd(b)?, ret(class)?)
+            }
+            TOp::DynNeg { dst, src } => enc!(49, dst, opnd(src)?),
+            TOp::DynNot { dst, src } => enc!(50, dst, opnd(src)?),
+            TOp::DynJumpIf { cond, negate, to } => enc!(51, opnd(cond)?, negate, to),
+            TOp::DynRangeTest { current, stop, to } => {
+                enc!(52, opnd(current)?, opnd(stop)?, to)
+            }
+            TOp::DynInc { reg } => enc!(53, reg),
+            TOp::BoxInto { dst, src } => enc!(54, dst, opnd(src)?),
+            TOp::DynNative {
+                intrinsic,
+                dst,
+                args,
+                arity,
+                ret: class,
+            } => {
+                let native = intrinsic_code(intrinsic).ok_or("an unmodelled native")?;
+                enc!(55, native, dst, arity, opnd(args[0])?, ret(class)?);
+                if arity > 1 {
+                    enc!(opnd(args[1])?);
+                }
+            }
+            TOp::BoxF { reg } => enc!(56, reg),
+            TOp::BoxC { reg, .. } => enc!(57, reg),
+            // a boxed value the body never reads (`analyse` checks)
+            TOp::Capture { dst, .. } | TOp::Default { dst, .. } => enc!(58, dst),
+            TOp::Call { .. } => return Err("a call that was not inlined"),
+            TOp::Index { .. } => return Err("an index"),
+            TOp::Len { .. } => return Err("a len"),
         }
     }
-    Some(Shape {
+    Ok(Shape {
         key: key.into_boxed_slice(),
         consts,
     })
@@ -422,20 +514,45 @@ enum Word {
     Mixed,
 }
 
-/// what a register of the boxed file holds at one point. the only boxed values
-/// the jit models are lists of scalars a body builds and returns, each living
-/// in the frame; scalars boxed at a merge are dead in a body with no boxed
-/// ops, so boxing them is a no-op as long as nothing reads them back
+/// what a register of the boxed file holds at one point. the boxed values the
+/// jit models are numbers and lists of scalars a body builds and returns, each
+/// list living in the frame. native code holds either as a word and a kind
+/// word: a number's value and kind, or a list's length and site
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Boxed {
     Nothing,
     /// the list built at a site, still growing
     List(u8),
-    /// a list after a copy of it was taken: appending would have to copy it,
-    /// so it may only be returned
+    /// a list from one of a set of sites, a bit each, after a copy of it was
+    /// taken or where lists of several sites merge: appending would have to
+    /// copy it, so it may only be copied and returned
     Shared(u8),
+    /// an int or a float, which of the two known only at run time
+    Num,
     /// anything else, which nothing may read
     Opaque,
+}
+
+impl Boxed {
+    fn sites(self) -> Option<u8> {
+        match self {
+            Boxed::List(site) => Some(1 << site),
+            Boxed::Shared(sites) => Some(sites),
+            _ => None,
+        }
+    }
+
+    fn join(self, other: Boxed) -> Boxed {
+        match (self, other) {
+            (a, b) if a == b => a,
+            // the path that never wrote it would read undefined words
+            (Boxed::Nothing, _) | (_, Boxed::Nothing) => Boxed::Opaque,
+            (a, b) => match a.sites().zip(b.sites()) {
+                Some((a, b)) => Boxed::Shared(a | b),
+                None => Boxed::Opaque,
+            },
+        }
+    }
 }
 
 macro_rules! join_impl {
@@ -452,7 +569,6 @@ macro_rules! join_impl {
     };
 }
 join_impl!(Word, Nothing, Mixed);
-join_impl!(Boxed, Nothing, Opaque);
 
 /// the register an op writes in the word file and what it writes there
 fn writes(op: &TOp, words: &[Word]) -> Option<(Reg, Word)> {
@@ -498,6 +614,27 @@ fn writes(op: &TOp, words: &[Word]) -> Option<(Reg, Word)> {
             _ => (dst, Word::Int),
         },
         TOp::MoveS { dst, src } => (dst, *words.get(src as usize)?),
+        TOp::DynNot { dst, .. }
+        | TOp::DynBin {
+            dst,
+            ret: Class::Int,
+            ..
+        }
+        | TOp::DynNative {
+            dst,
+            ret: Class::Int,
+            ..
+        } => (dst, Word::Int),
+        TOp::DynBin {
+            dst,
+            ret: Class::Float,
+            ..
+        }
+        | TOp::DynNative {
+            dst,
+            ret: Class::Float,
+            ..
+        } => (dst, Word::Float),
         _ => return None,
     })
 }
@@ -510,12 +647,17 @@ fn successors(op: &TOp, pc: u32) -> impl Iterator<Item = u32> {
         | TOp::JumpIfF { to, .. }
         | TOp::JumpIfNotF { to, .. }
         | TOp::RangeTestI { to, .. }
-        | TOp::RangeTestF { to, .. } => (Some(pc + 1), Some(to)),
+        | TOp::RangeTestF { to, .. }
+        | TOp::DynJumpIf { to, .. }
+        | TOp::DynRangeTest { to, .. } => (Some(pc + 1), Some(to)),
         TOp::Return { .. }
         | TOp::IBin {
             op: BinKind::In, ..
         }
         | TOp::FBin {
+            op: BinKind::In, ..
+        }
+        | TOp::DynBin {
             op: BinKind::In, ..
         } => (None, None),
         _ => (Some(pc + 1), None),
@@ -547,44 +689,140 @@ impl State {
     }
 }
 
-/// the effect of `op` on the boxed file, and the list site it touches;
-/// `None` when it reads a boxed value the jit does not model
-fn step_boxed(op: &TOp, pc: usize, sites: &[usize], boxed: &mut [Boxed]) -> Option<Option<u8>> {
-    let slot = |reg: Reg| reg as usize;
-    let list = |boxed: &[Boxed], reg: Reg| match boxed.get(slot(reg))? {
-        Boxed::List(site) | Boxed::Shared(site) => Some(*site),
-        _ => None,
+/// why the jit leaves a spec to the typed machine
+type Decline = &'static str;
+
+const OUTSIDE: Decline = "a register outside the frame";
+
+/// the effect of `op` on the boxed file, and the site of the list it builds if
+/// it builds one; an error when it reads a boxed value the jit does not model
+fn step_boxed(
+    op: &TOp,
+    pc: usize,
+    site_pcs: &[usize],
+    boxed: &mut [Boxed],
+) -> Result<Option<u8>, Decline> {
+    let at = |boxed: &[Boxed], reg: Reg| boxed.get(reg as usize).copied().ok_or(OUTSIDE);
+    let numeric = |boxed: &[Boxed], opnd: Opnd| match opnd {
+        Opnd::I(_) | Opnd::F(_) => Ok(()),
+        Opnd::B(reg) => match at(boxed, reg)? {
+            Boxed::Num => Ok(()),
+            Boxed::List(_) | Boxed::Shared(_) => Err("a list read as a number"),
+            _ => Err("a boxed read it does not model"),
+        },
+        Opnd::C(_) => Err("a closure operand"),
     };
-    Some(match *op {
-        TOp::BoxI { reg } | TOp::BoxF { reg } | TOp::BoxC { reg, .. } => {
-            *boxed.get_mut(slot(reg))? = Boxed::Opaque;
+    let set = |boxed: &mut [Boxed], reg: Reg, value: Boxed| {
+        *boxed.get_mut(reg as usize).ok_or(OUTSIDE)? = value;
+        Ok(())
+    };
+    // a copy of a boxed register: a number is copied, a list is shared
+    let copy = |boxed: &mut [Boxed], dst: Reg, src: Reg| {
+        let value = match at(boxed, src)? {
+            Boxed::Num => Boxed::Num,
+            held => {
+                let sites = held
+                    .sites()
+                    .ok_or("a copy of a boxed value it does not model")?;
+                // both now name the list: neither may grow it
+                for reg in boxed.iter_mut() {
+                    if let Boxed::List(site) = *reg
+                        && sites & 1 << site != 0
+                    {
+                        *reg = Boxed::Shared(1 << site);
+                    }
+                }
+                Boxed::Shared(sites)
+            }
+        };
+        set(boxed, dst, value)?;
+        Ok(None)
+    };
+    Ok(match *op {
+        TOp::BoxI { reg } | TOp::BoxF { reg } => {
+            set(boxed, reg, Boxed::Num)?;
             None
         }
-        TOp::Nil { dst } => {
-            *boxed.get_mut(slot(dst))? = Boxed::Opaque;
+        TOp::BoxC { reg: dst, .. }
+        | TOp::Nil { dst }
+        | TOp::Capture { dst, .. }
+        | TOp::Default { dst, .. } => {
+            set(boxed, dst, Boxed::Opaque)?;
             None
         }
         TOp::EmptyList { dst } => {
-            let site = sites.iter().position(|&at| at == pc)? as u8;
-            *boxed.get_mut(slot(dst))? = Boxed::List(site);
+            let site = site_pcs
+                .iter()
+                .position(|&at| at == pc)
+                .ok_or("a list site it did not count")? as u8;
+            set(boxed, dst, Boxed::List(site))?;
             Some(site)
         }
-        TOp::Append { list, .. } => match boxed.get(slot(list))? {
-            Boxed::List(site) => Some(*site),
-            _ => return None,
-        },
-        TOp::MoveB { dst, src } => {
-            let site = list(boxed, src)?;
-            // both now name the list: neither may grow it
-            for reg in boxed.iter_mut() {
-                if *reg == Boxed::List(site) {
-                    *reg = Boxed::Shared(site);
-                }
+        TOp::Append { list, value } => {
+            numeric(boxed, value).map_err(|_| "a list element that is not a number")?;
+            match at(boxed, list)? {
+                Boxed::List(site) => Some(site),
+                Boxed::Shared(_) => return Err("an append to a copied or merged list"),
+                _ => return Err("an append to a list it does not model"),
             }
-            *boxed.get_mut(slot(dst))? = Boxed::Shared(site);
-            Some(site)
         }
-        TOp::Return { src: Opnd::B(reg) } => Some(list(boxed, reg)?),
+        TOp::MoveB { dst, src } => copy(boxed, dst, src)?,
+        TOp::BoxInto { dst, src } => match src {
+            Opnd::B(src) => copy(boxed, dst, src)?,
+            Opnd::I(_) | Opnd::F(_) => {
+                set(boxed, dst, Boxed::Num)?;
+                None
+            }
+            Opnd::C(_) => return Err("a closure operand"),
+        },
+        TOp::Return { src: Opnd::B(reg) } => match at(boxed, reg)? {
+            Boxed::Num | Boxed::List(_) | Boxed::Shared(_) => None,
+            _ => return Err("a return of a boxed value it does not model"),
+        },
+        TOp::DynBin { dst, a, b, ret, .. } => {
+            numeric(boxed, a)?;
+            numeric(boxed, b)?;
+            if ret == Class::Boxed {
+                set(boxed, dst, Boxed::Num)?;
+            }
+            None
+        }
+        TOp::DynNeg { dst, src } => {
+            numeric(boxed, src)?;
+            set(boxed, dst, Boxed::Num)?;
+            None
+        }
+        TOp::DynNot { src: cond, .. } | TOp::DynJumpIf { cond, .. } => {
+            numeric(boxed, cond)?;
+            None
+        }
+        TOp::DynRangeTest { current, stop, .. } => {
+            numeric(boxed, current)?;
+            numeric(boxed, stop)?;
+            None
+        }
+        TOp::DynInc { reg } => {
+            numeric(boxed, Opnd::B(reg))?;
+            None
+        }
+        TOp::DynNative {
+            dst,
+            args,
+            arity,
+            ret,
+            ..
+        } => {
+            for arg in &args[..arity as usize] {
+                numeric(boxed, *arg)?;
+            }
+            if ret == Class::Boxed {
+                set(boxed, dst, Boxed::Num)?;
+            }
+            None
+        }
+        TOp::Call { .. } => return Err("a call that was not inlined"),
+        TOp::Index { .. } => return Err("an index"),
+        TOp::Len { .. } => return Err("a len"),
         _ => None,
     })
 }
@@ -593,15 +831,16 @@ fn step_boxed(op: &TOp, pc: usize, sites: &[usize], boxed: &mut [Boxed]) -> Opti
 struct Facts {
     /// for a `MoveS`, whether it copies a float
     float_moves: Vec<bool>,
-    /// for an op on a list, the list's site
-    sites: Vec<u8>,
+    /// for an `EmptyList` or an `Append`, the site of its list
+    sites: Vec<Option<u8>>,
 }
 
-/// the facts codegen needs, checked along with every boxed read. `None` when
-/// a copy's source is not one class on every path, when a boxed value other
-/// than a list of scalars is read, or when a list could be built twice in one
-/// call (one list per site and call is what lets it live in the frame)
-fn analyse(spec: &Spec) -> Option<Facts> {
+/// the facts codegen needs, checked along with every boxed read. an error
+/// when a copy's source is not one class on every path, when a boxed value
+/// other than a list of scalars or a number is read, or when a list could be
+/// built twice in one call (one list per site and call is what lets it live in
+/// the frame)
+fn analyse(spec: &Spec) -> Result<Facts, Decline> {
     let ops = &spec.ops;
     let regs = spec.frame_size as usize;
     let mut entry = State {
@@ -618,8 +857,11 @@ fn analyse(spec: &Spec) -> Option<Facts> {
     let lists: Vec<usize> = (0..ops.len())
         .filter(|&pc| matches!(ops[pc], TOp::EmptyList { .. }))
         .collect();
-    if lists.len() > LIST_SITES || lists.iter().any(|&pc| reaches_itself(ops, pc as u32)) {
-        return None;
+    if lists.len() > LIST_SITES {
+        return Err("more list sites than it models");
+    }
+    if lists.iter().any(|&pc| reaches_itself(ops, pc as u32)) {
+        return Err("a list built in a loop");
     }
 
     let mut states: Vec<Option<State>> = vec![None; ops.len()];
@@ -629,10 +871,12 @@ fn analyse(spec: &Spec) -> Option<Facts> {
         worklist.push(0u32);
     }
     while let Some(pc) = worklist.pop() {
-        let mut state = states[pc as usize].clone()?;
+        let Some(mut state) = states[pc as usize].clone() else {
+            continue;
+        };
         let op = &ops[pc as usize];
         if let Some((reg, word)) = writes(op, &state.words) {
-            *state.words.get_mut(reg as usize)? = word;
+            *state.words.get_mut(reg as usize).ok_or(OUTSIDE)? = word;
         }
         step_boxed(op, pc as usize, &lists, &mut state.boxed)?;
         for succ in successors(op, pc) {
@@ -652,25 +896,25 @@ fn analyse(spec: &Spec) -> Option<Facts> {
     }
     let mut facts = Facts {
         float_moves: vec![false; ops.len()],
-        sites: vec![0; ops.len()],
+        sites: vec![None; ops.len()],
     };
     for (pc, op) in ops.iter().enumerate() {
         let Some(state) = &states[pc] else {
             continue;
         };
         if let TOp::MoveS { src, .. } = op {
-            facts.float_moves[pc] = match state.words.get(*src as usize)? {
+            facts.float_moves[pc] = match state.words.get(*src as usize).ok_or(OUTSIDE)? {
                 Word::Int => false,
                 Word::Float => true,
-                Word::Nothing | Word::Mixed => return None,
+                Word::Nothing | Word::Mixed => {
+                    return Err("a copy of a register not one class on every path");
+                }
             };
         }
         let mut boxed = state.boxed.clone();
-        if let Some(site) = step_boxed(op, pc, &lists, &mut boxed)? {
-            facts.sites[pc] = site;
-        }
+        facts.sites[pc] = step_boxed(op, pc, &lists, &mut boxed)?;
     }
-    Some(facts)
+    Ok(facts)
 }
 
 /// whether control can come back to `start` after leaving it
@@ -727,10 +971,12 @@ fn host_isa() -> Option<OwnedTargetIsa> {
     .clone()
 }
 
-/// the per-register variables, one for each class a register is used at
+/// the per-register variables, one for each class a register is used at, and
+/// a word and a kind for a number in the boxed file
 struct Registers {
     ints: Vec<Option<Variable>>,
     floats: Vec<Option<Variable>>,
+    nums: Vec<Option<(Variable, Variable)>>,
 }
 
 impl Registers {
@@ -762,10 +1008,148 @@ impl Registers {
         let var = self.var(builder, reg, true);
         builder.def_var(var, value);
     }
+
+    fn num_vars(&mut self, builder: &mut FunctionBuilder, reg: Reg) -> (Variable, Variable) {
+        *self.nums[reg as usize].get_or_insert_with(|| {
+            (
+                builder.declare_var(types::I64),
+                builder.declare_var(types::I64),
+            )
+        })
+    }
+
+    fn num(&mut self, builder: &mut FunctionBuilder, reg: Reg) -> (Value, Kind) {
+        let (word, kind) = self.num_vars(builder, reg);
+        (builder.use_var(word), Kind::Dyn(builder.use_var(kind)))
+    }
+
+    fn set_num(&mut self, builder: &mut FunctionBuilder, reg: Reg, (word, kind): (Value, Kind)) {
+        let vars = self.num_vars(builder, reg);
+        let kind = kind.value(builder);
+        builder.def_var(vars.0, word);
+        builder.def_var(vars.1, kind);
+    }
+
+    /// a number operand as a word and a kind: scalar registers have a kind
+    /// known at translation time
+    fn operand(&mut self, builder: &mut FunctionBuilder, opnd: Opnd) -> Option<(Value, Kind)> {
+        Some(match opnd {
+            Opnd::I(reg) => (self.int(builder, reg), Kind::Int),
+            Opnd::F(reg) => {
+                let x = self.float(builder, reg);
+                (bits(builder, x), Kind::Float)
+            }
+            Opnd::B(reg) => self.num(builder, reg),
+            Opnd::C(_) => return None,
+        })
+    }
 }
 
-fn compile(spec: &Spec) -> Option<Compiled> {
-    let facts = analyse(spec)?;
+/// the kind of a number: static for a scalar register, a kind word for a
+/// boxed one
+#[derive(Clone, Copy)]
+enum Kind {
+    Int,
+    Float,
+    Dyn(Value),
+}
+
+impl Kind {
+    fn of(float: bool) -> Self {
+        if float { Kind::Float } else { Kind::Int }
+    }
+
+    fn value(self, b: &mut FunctionBuilder) -> Value {
+        match self {
+            Kind::Int => b.ins().iconst(types::I64, KIND_INT),
+            Kind::Float => b.ins().iconst(types::I64, KIND_FLOAT),
+            Kind::Dyn(kind) => kind,
+        }
+    }
+
+    /// whether the number is an int, as a flag, or statically
+    fn is_int(self, b: &mut FunctionBuilder) -> Cond {
+        match self {
+            Kind::Int => Cond::Known(true),
+            Kind::Float => Cond::Known(false),
+            Kind::Dyn(kind) => Cond::Flag(b.ins().icmp_imm_s(IntCC::Equal, kind, KIND_INT)),
+        }
+    }
+}
+
+/// a condition known at translation time or computed at run time
+#[derive(Clone, Copy)]
+enum Cond {
+    Known(bool),
+    Flag(Value),
+}
+
+fn bits(b: &mut FunctionBuilder, x: Value) -> Value {
+    b.ins().bitcast(types::I64, MemFlagsData::new(), x)
+}
+
+fn from_bits(b: &mut FunctionBuilder, x: Value) -> Value {
+    b.ins().bitcast(types::F64, MemFlagsData::new(), x)
+}
+
+/// a number's value as a float, the promotion `run::binary` makes
+fn promoted(b: &mut FunctionBuilder, (x, kind): (Value, Kind)) -> Value {
+    match kind.is_int(b) {
+        Cond::Known(true) => b.ins().fcvt_from_sint(types::F64, x),
+        Cond::Known(false) => from_bits(b, x),
+        Cond::Flag(is_int) => {
+            let converted = b.ins().fcvt_from_sint(types::F64, x);
+            let float = from_bits(b, x);
+            b.ins().select(is_int, converted, float)
+        }
+    }
+}
+
+/// a value computed one way for an int and another for a float, which gets
+/// its word as a float
+fn by_kind(
+    b: &mut FunctionBuilder,
+    (x, kind): (Value, Kind),
+    int: impl FnOnce(&mut FunctionBuilder, Value) -> Value,
+    float: impl FnOnce(&mut FunctionBuilder, Value) -> Value,
+) -> Value {
+    match kind.is_int(b) {
+        Cond::Known(true) => int(b, x),
+        Cond::Known(false) => {
+            let x = from_bits(b, x);
+            float(b, x)
+        }
+        Cond::Flag(is_int) => {
+            let as_int = int(b, x);
+            let f = from_bits(b, x);
+            let as_float = float(b, f);
+            b.ins().select(is_int, as_int, as_float)
+        }
+    }
+}
+
+/// the fault blocks, one per fault code
+#[derive(Default)]
+struct Faults(FxHashMap<i32, Block>);
+
+impl Faults {
+    fn block(&mut self, b: &mut FunctionBuilder, fault: Fault) -> Block {
+        *self
+            .0
+            .entry(fault_code(fault))
+            .or_insert_with(|| b.create_block())
+    }
+
+    /// leave with `fault` when `cond` is set
+    fn guard(&mut self, b: &mut FunctionBuilder, cond: Value, fault: Fault) {
+        let fault = self.block(b, fault);
+        let ok = b.create_block();
+        b.ins().brif(cond, fault, &[], ok, &[]);
+        b.switch_to_block(ok);
+    }
+}
+
+fn compile(spec: &Spec, facts: &Facts) -> Option<Compiled> {
     let isa = host_isa()?;
     let mut jit = JITBuilder::with_isa(isa, default_libcall_names());
     for shim in Shim::ALL {
@@ -804,7 +1188,7 @@ fn compile(spec: &Spec) -> Option<Compiled> {
         }
         Codegen {
             spec,
-            facts: &facts,
+            facts,
             refs: refs.map(Option::unwrap),
             ptr,
         }
@@ -838,7 +1222,195 @@ struct BackEdge {
     weight: i64,
 }
 
+/// whether two numbers are both ints, the case `run::binary` keeps as ints
+fn both_ints(b: &mut FunctionBuilder, x: Kind, y: Kind) -> Cond {
+    match (x.is_int(b), y.is_int(b)) {
+        (Cond::Known(false), _) | (_, Cond::Known(false)) => Cond::Known(false),
+        (Cond::Known(true), other) | (other, Cond::Known(true)) => other,
+        (Cond::Flag(x), Cond::Flag(y)) => Cond::Flag(b.ins().band(x, y)),
+    }
+}
+
+/// a result as a number's word
+fn word_of(b: &mut FunctionBuilder, (value, float): (Value, bool)) -> Value {
+    if float { bits(b, value) } else { value }
+}
+
 impl Codegen<'_> {
+    fn pure(&self, b: &mut FunctionBuilder, shim: Shim, args: &[Value]) -> Value {
+        let call = b.ins().call(self.refs[shim as usize], args);
+        b.inst_results(call)[0]
+    }
+
+    /// a call to a shim that can fault: a fault leaves with its code, and the
+    /// result is read from the out slot
+    fn fallible(
+        &self,
+        b: &mut FunctionBuilder,
+        out: StackSlot,
+        shim: Shim,
+        args: &[Value],
+    ) -> Value {
+        let out_ptr = b.ins().stack_addr(self.ptr, out, 0);
+        let mut args = args.to_vec();
+        args.push(out_ptr);
+        let call = b.ins().call(self.refs[shim as usize], &args);
+        let code = b.inst_results(call)[0];
+        let ok = b.create_block();
+        let failed = b.create_block();
+        b.ins().brif(code, failed, &[], ok, &[]);
+        b.switch_to_block(failed);
+        b.ins().return_(&[code]);
+        b.switch_to_block(ok);
+        b.ins().stack_load(self.ptr, types::I64, out, 0)
+    }
+
+    /// `x op y` on ints as `run::int_binary` computes it: the result and
+    /// whether it is a float. `None` for `in`, which always faults
+    fn int_binary(
+        &self,
+        b: &mut FunctionBuilder,
+        faults: &mut Faults,
+        out: StackSlot,
+        op: BinKind,
+        x: Value,
+        y: Value,
+    ) -> Option<(Value, bool)> {
+        let compare = |b: &mut FunctionBuilder, cc| {
+            let cond = b.ins().icmp(cc, x, y);
+            b.ins().uextend(types::I64, cond)
+        };
+        Some(match op {
+            BinKind::Add => (b.ins().iadd(x, y), false),
+            BinKind::Sub => (b.ins().isub(x, y), false),
+            BinKind::Mul => (b.ins().imul(x, y), false),
+            BinKind::Div => {
+                let is_zero = b.ins().icmp_imm_s(IntCC::Equal, y, 0);
+                faults.guard(b, is_zero, Fault::DivisionByZero);
+                let fx = b.ins().fcvt_from_sint(types::F64, x);
+                let fy = b.ins().fcvt_from_sint(types::F64, y);
+                (b.ins().fdiv(fx, fy), true)
+            }
+            BinKind::IntDiv => {
+                let code = b.ins().iconst(types::I32, bin_code(op) as i64);
+                (self.fallible(b, out, Shim::IntBinary, &[code, x, y]), false)
+            }
+            BinKind::Power => {
+                // `(x as f64).powf(y as f64)`, which cannot fault
+                let fx = b.ins().fcvt_from_sint(types::F64, x);
+                let fy = b.ins().fcvt_from_sint(types::F64, y);
+                (self.pure(b, Shim::FloatPow, &[fx, fy]), true)
+            }
+            BinKind::Lt => (compare(b, IntCC::SignedLessThan), false),
+            BinKind::Le => (compare(b, IntCC::SignedLessThanOrEqual), false),
+            BinKind::Gt => (compare(b, IntCC::SignedGreaterThan), false),
+            BinKind::Ge => (compare(b, IntCC::SignedGreaterThanOrEqual), false),
+            BinKind::Eq => (compare(b, IntCC::Equal), false),
+            BinKind::Ne => (compare(b, IntCC::NotEqual), false),
+            BinKind::In => return None,
+        })
+    }
+
+    /// `x op y` on floats as `run::float_binary` computes it, like
+    /// `int_binary`
+    fn float_binary(
+        &self,
+        b: &mut FunctionBuilder,
+        faults: &mut Faults,
+        out: StackSlot,
+        op: BinKind,
+        x: Value,
+        y: Value,
+    ) -> Option<(Value, bool)> {
+        let compare = |b: &mut FunctionBuilder, cc| {
+            let cond = b.ins().fcmp(cc, x, y);
+            b.ins().uextend(types::I64, cond)
+        };
+        Some(match op {
+            BinKind::Add => (b.ins().fadd(x, y), true),
+            BinKind::Sub => (b.ins().fsub(x, y), true),
+            BinKind::Mul => (b.ins().fmul(x, y), true),
+            BinKind::Div => {
+                let zero = b.ins().f64const(0.0);
+                let is_zero = b.ins().fcmp(FloatCC::Equal, y, zero);
+                faults.guard(b, is_zero, Fault::DivisionByZero);
+                (b.ins().fdiv(x, y), true)
+            }
+            BinKind::IntDiv => {
+                let code = b.ins().iconst(types::I32, bin_code(op) as i64);
+                (
+                    self.fallible(b, out, Shim::FloatBinary, &[code, x, y]),
+                    false,
+                )
+            }
+            BinKind::Power => (self.pure(b, Shim::FloatPow, &[x, y]), true),
+            BinKind::Lt => (compare(b, FloatCC::LessThan), false),
+            BinKind::Le => (compare(b, FloatCC::LessThanOrEqual), false),
+            BinKind::Gt => (compare(b, FloatCC::GreaterThan), false),
+            BinKind::Ge => (compare(b, FloatCC::GreaterThanOrEqual), false),
+            BinKind::Eq => (compare(b, FloatCC::Equal), false),
+            BinKind::Ne => (compare(b, FloatCC::NotEqual), false),
+            BinKind::In => return None,
+        })
+    }
+
+    /// `x op y` on numbers as `run::binary` computes it: two ints take the int
+    /// path and anything else is promoted to floats, branching on the kinds
+    /// only where they are not known. the result is a word and its kind
+    fn number_binary(
+        &self,
+        b: &mut FunctionBuilder,
+        faults: &mut Faults,
+        out: StackSlot,
+        op: BinKind,
+        x: (Value, Kind),
+        y: (Value, Kind),
+    ) -> Option<(Value, Kind)> {
+        let ints = |b: &mut FunctionBuilder, faults: &mut Faults| {
+            let result = self.int_binary(b, faults, out, op, x.0, y.0)?;
+            Some((word_of(b, result), result.1))
+        };
+        let floats = |b: &mut FunctionBuilder, faults: &mut Faults| {
+            let (fx, fy) = (promoted(b, x), promoted(b, y));
+            let result = self.float_binary(b, faults, out, op, fx, fy)?;
+            Some((word_of(b, result), result.1))
+        };
+        Some(match both_ints(b, x.1, y.1) {
+            Cond::Known(true) => {
+                let (value, float) = ints(b, faults)?;
+                (value, Kind::of(float))
+            }
+            Cond::Known(false) => {
+                let (value, float) = floats(b, faults)?;
+                (value, Kind::of(float))
+            }
+            Cond::Flag(both) => {
+                let result = b.declare_var(types::I64);
+                let (int_block, float_block, join) =
+                    (b.create_block(), b.create_block(), b.create_block());
+                b.ins().brif(both, int_block, &[], float_block, &[]);
+                b.switch_to_block(int_block);
+                let (value, int_float) = ints(b, faults)?;
+                b.def_var(result, value);
+                b.ins().jump(join, &[]);
+                b.switch_to_block(float_block);
+                let (value, float_float) = floats(b, faults)?;
+                b.def_var(result, value);
+                b.ins().jump(join, &[]);
+                b.switch_to_block(join);
+                let value = b.use_var(result);
+                let kind = if int_float == float_float {
+                    Kind::of(int_float)
+                } else {
+                    let (int, float) = (Kind::of(int_float), Kind::of(float_float));
+                    let (int, float) = (int.value(b), float.value(b));
+                    Kind::Dyn(b.ins().select(both, int, float))
+                };
+                (value, kind)
+            }
+        })
+    }
+
     fn emit(&self, b: &mut FunctionBuilder) -> Option<()> {
         let ops = &self.spec.ops;
         let len = ops.len();
@@ -871,13 +1443,9 @@ impl Codegen<'_> {
         let mut regs = Registers {
             ints: vec![None; frame_size],
             floats: vec![None; frame_size],
+            nums: vec![None; frame_size],
         };
-        let mut faults: FxHashMap<i32, Block> = FxHashMap::default();
-        let mut fault_block = |b: &mut FunctionBuilder, fault: Fault| {
-            *faults
-                .entry(fault_code(fault))
-                .or_insert_with(|| b.create_block())
-        };
+        let mut faults = Faults::default();
         let mut back_edges: Vec<BackEdge> = Vec::new();
 
         // entry: the budget, the entry registers and the constants
@@ -912,9 +1480,8 @@ impl Codegen<'_> {
             next_const += 1;
             value
         };
-        let counts: [Variable; LIST_SITES] = std::array::from_fn(|_| b.declare_var(types::I64));
         let items = b.ins().iadd_imm_s(frame, word(layout.items) as i64);
-        let out = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 8, 3));
+        let out = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16, 3));
         b.ins().jump(blocks[0]?, &[]);
 
         let mut open = false;
@@ -975,37 +1542,20 @@ impl Codegen<'_> {
                     b.ins().uextend(types::I64, cond)
                 }};
             }
-            // a shim that can fault: its code is checked and the result read
-            // from the out slot
             macro_rules! fallible {
-                ($shim:expr, $args:expr) => {{
-                    let out_ptr = b.ins().stack_addr(self.ptr, out, 0);
-                    let mut args: Vec<Value> = $args.to_vec();
-                    args.push(out_ptr);
-                    let call = b.ins().call(self.refs[$shim as usize], &args);
-                    let code = b.inst_results(call)[0];
-                    let ok = b.create_block();
-                    let failed = b.create_block();
-                    b.ins().brif(code, failed, &[], ok, &[]);
-                    b.switch_to_block(failed);
-                    b.ins().return_(&[code]);
-                    b.switch_to_block(ok);
-                    b.ins().stack_load(self.ptr, types::I64, out, 0)
-                }};
+                ($shim:expr, $args:expr) => {
+                    self.fallible(b, out, $shim, &$args)
+                };
             }
             macro_rules! pure {
-                ($shim:expr, $args:expr) => {{
-                    let call = b.ins().call(self.refs[$shim as usize], &$args);
-                    b.inst_results(call)[0]
-                }};
+                ($shim:expr, $args:expr) => {
+                    self.pure(b, $shim, &$args)
+                };
             }
             macro_rules! guard_zero {
                 ($is_zero:expr) => {{
                     let is_zero = $is_zero;
-                    let fault = fault_block(b, Fault::DivisionByZero);
-                    let ok = b.create_block();
-                    b.ins().brif(is_zero, fault, &[], ok, &[]);
-                    b.switch_to_block(ok);
+                    faults.guard(b, is_zero, Fault::DivisionByZero);
                 }};
             }
             macro_rules! branch {
@@ -1021,39 +1571,203 @@ impl Codegen<'_> {
                 TOp::Nop => {}
                 TOp::IConst { dst, value } => set_int!(dst, b.ins().iconst(types::I64, value)),
                 TOp::FConst { dst, .. } => set_float!(dst, constant(b)),
-                // boxed scalars are never read back (`analyse` checks), and
-                // there is one list per call
-                TOp::BoxI { .. }
-                | TOp::BoxF { .. }
-                | TOp::BoxC { .. }
-                | TOp::Nil { .. }
-                | TOp::MoveB { .. } => {}
-                TOp::EmptyList { .. } => {
-                    let zero = b.ins().iconst(types::I64, 0);
-                    b.def_var(counts[self.facts.sites[pc] as usize], zero);
+                TOp::BoxI { reg } => {
+                    let x = int!(reg);
+                    regs.set_num(b, reg, (x, Kind::Int))
                 }
-                TOp::Append { value, .. } => {
-                    let site = self.facts.sites[pc];
-                    let count = counts[site as usize];
+                TOp::BoxF { reg } => {
+                    let x = float!(reg);
+                    let x = bits(b, x);
+                    regs.set_num(b, reg, (x, Kind::Float))
+                }
+                // boxed values nothing reads (`analyse` checks)
+                TOp::BoxC { .. } | TOp::Nil { .. } | TOp::Capture { .. } | TOp::Default { .. } => {}
+                // a copy of a list is its length and site, there being one
+                // list per site and call
+                TOp::MoveB { dst, src } => {
+                    let pair = regs.num(b, src);
+                    regs.set_num(b, dst, pair);
+                }
+                TOp::BoxInto { dst, src } => {
+                    let pair = regs.operand(b, src)?;
+                    regs.set_num(b, dst, pair);
+                }
+                TOp::DynBin {
+                    op: BinKind::In, ..
+                } => {
+                    let fault = faults.block(b, Fault::Type);
+                    b.ins().jump(fault, &[]);
+                    open = false;
+                }
+                TOp::DynBin {
+                    op,
+                    dst,
+                    a,
+                    b: rhs,
+                    ret,
+                } => {
+                    let x = regs.operand(b, a)?;
+                    let y = regs.operand(b, rhs)?;
+                    let (value, kind) = self.number_binary(b, &mut faults, out, op, x, y)?;
+                    match (ret, kind) {
+                        (Class::Boxed, _) => regs.set_num(b, dst, (value, kind)),
+                        (Class::Int, Kind::Int) => regs.set_int(b, dst, value),
+                        (Class::Float, Kind::Float) => {
+                            let value = from_bits(b, value);
+                            regs.set_float(b, dst, value)
+                        }
+                        _ => return None,
+                    }
+                }
+                TOp::DynNeg { dst, src } => {
+                    let (x, kind) = regs.operand(b, src)?;
+                    let negated = by_kind(
+                        b,
+                        (x, kind),
+                        |b, x| b.ins().ineg(x),
+                        |b, x| {
+                            let negated = b.ins().fneg(x);
+                            bits(b, negated)
+                        },
+                    );
+                    regs.set_num(b, dst, (negated, kind))
+                }
+                TOp::DynNot { dst, src } => {
+                    let number = regs.operand(b, src)?;
+                    let zero = by_kind(
+                        b,
+                        number,
+                        |b, x| b.ins().icmp_imm_s(IntCC::Equal, x, 0),
+                        |b, x| {
+                            let zero = b.ins().f64const(0.0);
+                            b.ins().fcmp(FloatCC::Equal, x, zero)
+                        },
+                    );
+                    set_int!(dst, flag!(zero))
+                }
+                TOp::DynJumpIf { cond, negate, to } => {
+                    // `truthy`, or its negation: a nan is truthy
+                    let (int_cc, float_cc) = if negate {
+                        (IntCC::Equal, FloatCC::Equal)
+                    } else {
+                        (IntCC::NotEqual, FloatCC::NotEqual)
+                    };
+                    let number = regs.operand(b, cond)?;
+                    branch!(
+                        by_kind(
+                            b,
+                            number,
+                            |b, x| b.ins().icmp_imm_s(int_cc, x, 0),
+                            |b, x| {
+                                let zero = b.ins().f64const(0.0);
+                                b.ins().fcmp(float_cc, x, zero)
+                            },
+                        ),
+                        to
+                    )
+                }
+                TOp::DynRangeTest { current, stop, to } => {
+                    // `!(current < stop)` as `run::binary` compares them
+                    let x = regs.operand(b, current)?;
+                    let y = regs.operand(b, stop)?;
+                    let both = both_ints(b, x.1, y.1);
+                    let int_done = |b: &mut FunctionBuilder| {
+                        b.ins().icmp(IntCC::SignedGreaterThanOrEqual, x.0, y.0)
+                    };
+                    let float_done = |b: &mut FunctionBuilder| {
+                        let (fx, fy) = (promoted(b, x), promoted(b, y));
+                        b.ins().fcmp(FloatCC::UnorderedOrGreaterThanOrEqual, fx, fy)
+                    };
+                    let done = match both {
+                        Cond::Known(true) => int_done(b),
+                        Cond::Known(false) => float_done(b),
+                        Cond::Flag(both) => {
+                            let (int, float) = (int_done(b), float_done(b));
+                            b.ins().select(both, int, float)
+                        }
+                    };
+                    branch!(done, to)
+                }
+                TOp::DynInc { reg } => {
+                    let (x, kind) = regs.num(b, reg);
+                    let incremented = by_kind(
+                        b,
+                        (x, kind),
+                        |b, x| b.ins().iadd_imm_s(x, 1),
+                        |b, x| {
+                            let one = b.ins().f64const(1.0);
+                            let sum = b.ins().fadd(x, one);
+                            bits(b, sum)
+                        },
+                    );
+                    regs.set_num(b, reg, (incremented, kind))
+                }
+                TOp::DynNative {
+                    intrinsic,
+                    dst,
+                    args,
+                    arity,
+                    ret,
+                } => {
+                    let code = b
+                        .ins()
+                        .iconst(types::I32, intrinsic_code(intrinsic)? as i64);
+                    let count = b.ins().iconst(types::I32, arity as i64);
+                    let (x, x_kind) = regs.operand(b, args[0])?;
+                    let (y, y_kind) = if arity > 1 {
+                        regs.operand(b, args[1])?
+                    } else {
+                        (b.ins().iconst(types::I64, 0), Kind::Int)
+                    };
+                    let (x_kind, y_kind) = (x_kind.value(b), y_kind.value(b));
+                    let value =
+                        self.fallible(b, out, Shim::Native, &[code, count, x, x_kind, y, y_kind]);
+                    let kind = b.ins().stack_load(self.ptr, types::I64, out, 8);
+                    let expected = match ret {
+                        Class::Boxed => {
+                            regs.set_num(b, dst, (value, Kind::Dyn(kind)));
+                            None
+                        }
+                        Class::Int => Some(KIND_INT),
+                        Class::Float => Some(KIND_FLOAT),
+                        Class::Unset | Class::Closure(_) => return None,
+                    };
+                    if let Some(expected) = expected {
+                        // the typed machine's `store` into a scalar register
+                        let wrong = b.ins().icmp_imm_s(IntCC::NotEqual, kind, expected);
+                        faults.guard(b, wrong, Fault::Type);
+                        if expected == KIND_INT {
+                            regs.set_int(b, dst, value)
+                        } else {
+                            let value = from_bits(b, value);
+                            regs.set_float(b, dst, value)
+                        }
+                    }
+                }
+                TOp::EmptyList { dst } => {
+                    let site = self.facts.sites[pc]?;
+                    let zero = b.ins().iconst(types::I64, 0);
+                    let kind = b.ins().iconst(types::I64, KIND_LIST + site as i64);
+                    regs.set_num(b, dst, (zero, Kind::Dyn(kind)));
+                }
+                TOp::Append { list, value } => {
+                    let site = self.facts.sites[pc]?;
+                    let (count, _) = regs.num_vars(b, list);
                     let n = b.use_var(count);
                     let full =
                         b.ins()
                             .icmp_imm_s(IntCC::SignedGreaterThanOrEqual, n, LIST_CAP as i64);
-                    let fault = fault_block(b, Fault::Type);
+                    let fault = faults.block(b, Fault::Type);
                     let room = b.create_block();
                     b.ins().brif(full, fault, &[], room, &[]);
                     b.switch_to_block(room);
-                    let (value, tag) = match value {
-                        Opnd::I(reg) => (int!(reg), KIND_INT),
-                        Opnd::F(reg) => (float!(reg), KIND_FLOAT),
-                        Opnd::B(_) | Opnd::C(_) => return None,
-                    };
+                    let (value, kind) = regs.operand(b, value)?;
                     let offset = b.ins().ishl_imm_s(n, 3);
                     let at = b.ins().iadd(items, offset);
                     let first = word(Layout::site(site));
                     b.ins().store(flags, value, at, first);
-                    let tag = b.ins().iconst(types::I64, tag);
-                    b.ins().store(flags, tag, at, first + word(LIST_CAP));
+                    let kind = kind.value(b);
+                    b.ins().store(flags, kind, at, first + word(LIST_CAP));
                     let n = b.ins().iadd_imm_s(n, 1);
                     b.def_var(count, n);
                 }
@@ -1082,42 +1796,11 @@ impl Codegen<'_> {
                 }),
                 TOp::IBin { op, dst, a, b: rhs } => {
                     let (x, y) = (int!(a), int!(rhs));
-                    let compare = |b: &mut FunctionBuilder, cc| {
-                        let cond = b.ins().icmp(cc, x, y);
-                        b.ins().uextend(types::I64, cond)
-                    };
-                    match op {
-                        BinKind::Add => set_int!(dst, b.ins().iadd(x, y)),
-                        BinKind::Sub => set_int!(dst, b.ins().isub(x, y)),
-                        BinKind::Mul => set_int!(dst, b.ins().imul(x, y)),
-                        BinKind::Div => {
-                            guard_zero!(b.ins().icmp_imm_s(IntCC::Equal, y, 0));
-                            let fx = b.ins().fcvt_from_sint(types::F64, x);
-                            let fy = b.ins().fcvt_from_sint(types::F64, y);
-                            set_float!(dst, b.ins().fdiv(fx, fy))
-                        }
-                        BinKind::IntDiv | BinKind::Power => {
-                            let code = b.ins().iconst(types::I32, bin_code(op) as i64);
-                            let result = fallible!(Shim::IntBinary, [code, x, y]);
-                            if op == BinKind::Power {
-                                set_float!(
-                                    dst,
-                                    b.ins().bitcast(types::F64, MemFlagsData::new(), result)
-                                )
-                            } else {
-                                set_int!(dst, result)
-                            }
-                        }
-                        BinKind::Lt => set_int!(dst, compare(b, IntCC::SignedLessThan)),
-                        BinKind::Le => set_int!(dst, compare(b, IntCC::SignedLessThanOrEqual)),
-                        BinKind::Gt => set_int!(dst, compare(b, IntCC::SignedGreaterThan)),
-                        BinKind::Ge => {
-                            set_int!(dst, compare(b, IntCC::SignedGreaterThanOrEqual))
-                        }
-                        BinKind::Eq => set_int!(dst, compare(b, IntCC::Equal)),
-                        BinKind::Ne => set_int!(dst, compare(b, IntCC::NotEqual)),
-                        BinKind::In => {
-                            let fault = fault_block(b, Fault::Type);
+                    match self.int_binary(b, &mut faults, out, op, x, y) {
+                        Some((value, true)) => regs.set_float(b, dst, value),
+                        Some((value, false)) => regs.set_int(b, dst, value),
+                        None => {
+                            let fault = faults.block(b, Fault::Type);
                             b.ins().jump(fault, &[]);
                             open = false;
                         }
@@ -1143,39 +1826,11 @@ impl Codegen<'_> {
                 }
                 TOp::FBin { op, dst, a, b: rhs } => {
                     let (x, y) = (float!(a), float!(rhs));
-                    let compare = |b: &mut FunctionBuilder, cc| {
-                        let cond = b.ins().fcmp(cc, x, y);
-                        b.ins().uextend(types::I64, cond)
-                    };
-                    match op {
-                        BinKind::Add => set_float!(dst, b.ins().fadd(x, y)),
-                        BinKind::Sub => set_float!(dst, b.ins().fsub(x, y)),
-                        BinKind::Mul => set_float!(dst, b.ins().fmul(x, y)),
-                        BinKind::Div => {
-                            let zero = b.ins().f64const(0.0);
-                            guard_zero!(b.ins().fcmp(FloatCC::Equal, y, zero));
-                            set_float!(dst, b.ins().fdiv(x, y))
-                        }
-                        BinKind::IntDiv | BinKind::Power => {
-                            let code = b.ins().iconst(types::I32, bin_code(op) as i64);
-                            let result = fallible!(Shim::FloatBinary, [code, x, y]);
-                            if op == BinKind::Power {
-                                set_float!(
-                                    dst,
-                                    b.ins().bitcast(types::F64, MemFlagsData::new(), result)
-                                )
-                            } else {
-                                set_int!(dst, result)
-                            }
-                        }
-                        BinKind::Lt => set_int!(dst, compare(b, FloatCC::LessThan)),
-                        BinKind::Le => set_int!(dst, compare(b, FloatCC::LessThanOrEqual)),
-                        BinKind::Gt => set_int!(dst, compare(b, FloatCC::GreaterThan)),
-                        BinKind::Ge => set_int!(dst, compare(b, FloatCC::GreaterThanOrEqual)),
-                        BinKind::Eq => set_int!(dst, compare(b, FloatCC::Equal)),
-                        BinKind::Ne => set_int!(dst, compare(b, FloatCC::NotEqual)),
-                        BinKind::In => {
-                            let fault = fault_block(b, Fault::Type);
+                    match self.float_binary(b, &mut faults, out, op, x, y) {
+                        Some((value, true)) => regs.set_float(b, dst, value),
+                        Some((value, false)) => regs.set_int(b, dst, value),
+                        None => {
+                            let fault = faults.block(b, Fault::Type);
                             b.ins().jump(fault, &[]);
                             open = false;
                         }
@@ -1328,18 +1983,9 @@ impl Codegen<'_> {
                     pure!(Shim::FloatAtan2, [x, y])
                 }),
                 TOp::Return { src } => {
-                    let (value, kind, slot) = match src {
-                        Opnd::I(reg) => (int!(reg), KIND_INT, layout.result),
-                        Opnd::F(reg) => (float!(reg), KIND_FLOAT, layout.result),
-                        Opnd::B(_) => {
-                            let site = self.facts.sites[pc];
-                            let count = b.use_var(counts[site as usize]);
-                            (count, KIND_LIST + site as i64, layout.count)
-                        }
-                        Opnd::C(_) => return None,
-                    };
-                    b.ins().store(flags, value, frame, word(slot));
-                    let kind = b.ins().iconst(types::I64, kind);
+                    let (value, kind) = regs.operand(b, src)?;
+                    let kind = kind.value(b);
+                    b.ins().store(flags, value, frame, word(layout.result));
                     b.ins().store(flags, kind, frame, word(layout.kind));
                     let ok = b.ins().iconst(types::I32, 0);
                     b.ins().return_(&[ok]);
@@ -1354,7 +2000,7 @@ impl Codegen<'_> {
             b.ins().jump(blocks[len]?, &[]);
         }
         b.switch_to_block(blocks[len]?);
-        let fault = fault_block(b, Fault::Type);
+        let fault = faults.block(b, Fault::Type);
         b.ins().jump(fault, &[]);
 
         for edge in back_edges {
@@ -1363,16 +2009,16 @@ impl Codegen<'_> {
             let left = b.ins().iadd_imm_s(left, -edge.weight);
             b.def_var(budget, left);
             let exhausted = b.ins().icmp_imm_s(IntCC::SignedLessThanOrEqual, left, 0);
-            let spent = fault_block(b, Fault::Budget);
+            let spent = faults.block(b, Fault::Budget);
             let running = b.create_block();
             b.ins().brif(exhausted, spent, &[], running, &[]);
             b.switch_to_block(running);
             let raised = b.ins().atomic_load(types::I8, flags, abort);
-            let aborted = fault_block(b, Fault::Aborted);
+            let aborted = faults.block(b, Fault::Aborted);
             b.ins()
                 .brif(raised, aborted, &[], blocks[edge.to as usize]?, &[]);
         }
-        for (code, block) in faults {
+        for (code, block) in faults.0 {
             b.switch_to_block(block);
             let code = b.ins().iconst(types::I32, code as i64);
             b.ins().return_(&[code]);
@@ -1407,7 +2053,13 @@ impl JitCache {
         if !self.enabled {
             return None;
         }
-        let shape = shape(spec)?;
+        let shape = shape(spec)
+            .inspect_err(|reason| {
+                if dump_kernels() {
+                    eprintln!("jit declined: {reason}");
+                }
+            })
+            .ok()?;
         let compiled = match self.compiled.get(&shape.key) {
             Some(cached) => cached.clone(),
             None => {
@@ -1415,7 +2067,15 @@ impl JitCache {
                     self.compiled.clear();
                 }
                 let started = Instant::now();
-                let compiled = compile(spec).map(Arc::new);
+                let compiled = analyse(spec)
+                    .and_then(|facts| compile(spec, &facts).ok_or("code generation failed"))
+                    .inspect_err(|reason| {
+                        if dump_kernels() {
+                            eprintln!("jit declined: {reason}");
+                        }
+                    })
+                    .ok()
+                    .map(Arc::new);
                 stats.jit_compile_elapsed += started.elapsed();
                 stats.jit_compiles += 1;
                 self.compiled.insert(shape.key, compiled.clone());
@@ -1501,7 +2161,7 @@ impl JitVm {
         Ok(match words[layout.kind] as i64 {
             kind @ KIND_LIST.. => {
                 let items = layout.items + Layout::site((kind - KIND_LIST) as u8);
-                let count = words[layout.count] as usize;
+                let count = words[layout.result] as usize;
                 KVal::list(
                     words[items..items + count]
                         .iter()
@@ -1544,6 +2204,7 @@ mod tests {
     use super::*;
     use crate::kernel::{
         ir::{KOp, Kernel, KernelIntrinsic},
+        run::Vm,
         typed::TypedProgram,
         typed_run::TVm,
         value::{ClosureId, KClosure},
@@ -1589,14 +2250,22 @@ mod tests {
     }
 
     impl Compiled {
-        /// the jit and the typed machine agree on every call
+        /// the jit, the typed machine and the dynamic machine agree on every
+        /// call
         fn agree(&self, calls: impl IntoIterator<Item = Vec<KVal>>) {
             let spec = self.program.spec(self.spec);
             let mut jit = JitVm::new(Arc::clone(&self.entry), spec, &self.arena, None);
             let mut tvm = TVm::new();
+            let mut vm = Vm::new();
             for args in calls {
                 let native = jit.call(spec, &args);
                 let typed = tvm.call(&self.program, &self.arena, self.spec, &args);
+                let dynamic = vm.call(&self.arena, spec.closure, &args);
+                match (&typed, &dynamic) {
+                    (Ok(a), Ok(b)) => assert!(KVal::strictly_equal(a, b), "{args:?}"),
+                    (Err(a), Err(b)) => assert_eq!(a, b, "{args:?}"),
+                    _ => panic!("{args:?}: typed {typed:?}, dynamic {dynamic:?}"),
+                }
                 match (&native, &typed) {
                     (Ok(a), Ok(b)) => assert!(
                         KVal::strictly_equal(a, b),
@@ -2018,5 +2687,353 @@ mod tests {
         assert_eq!(stats.jit_compiles, 1);
         assert!(KVal::strictly_equal(&results[0], &KVal::Float(3.0)));
         assert!(KVal::strictly_equal(&results[1], &KVal::Float(4.5)));
+    }
+
+    fn bin(op: BinKind, dst: u16, a: u16, b: u16) -> KOp {
+        KOp::Bin {
+            op,
+            dst,
+            a,
+            b,
+            take: false,
+        }
+    }
+
+    impl Compiled {
+        fn has_dynamic_ops(&self) -> bool {
+            self.program
+                .spec(self.spec)
+                .ops
+                .iter()
+                .any(|op| matches!(op, TOp::DynBin { .. }))
+        }
+
+        fn call(&self, args: &[KVal]) -> Result<KVal, Fault> {
+            let spec = self.program.spec(self.spec);
+            JitVm::new(Arc::clone(&self.entry), spec, &self.arena, None).call(spec, args)
+        }
+    }
+
+    /// `var sum = 0; for i in range(0, n) { if i < k { sum = sum * 3 + i }
+    /// else { sum = sum + x } }` over the arguments `n, k, x, d`, with the sum
+    /// in register 4 and the next op at 13: an int until the first float
+    fn mixed_sum() -> Vec<KOp> {
+        vec![
+            KOp::Int { dst: 4, value: 0 },
+            KOp::Int { dst: 5, value: 0 },
+            bin(BinKind::Lt, 6, 5, 0),
+            KOp::JumpIfNot { cond: 6, to: 13 },
+            bin(BinKind::Lt, 6, 5, 1),
+            KOp::JumpIfNot { cond: 6, to: 10 },
+            KOp::Int { dst: 7, value: 3 },
+            bin(BinKind::Mul, 4, 4, 7),
+            bin(BinKind::Add, 4, 4, 5),
+            KOp::Jump { to: 11 },
+            bin(BinKind::Add, 4, 4, 2),
+            KOp::Inc { reg: 5 },
+            KOp::Jump { to: 2 },
+        ]
+    }
+
+    fn mixed_calls(seed: u64, count: usize, max_n: i64) -> impl Iterator<Item = Vec<KVal>> {
+        samples(seed, count)
+            .zip(samples(seed + 100, count))
+            .map(move |((n, x), (k, _))| {
+                vec![
+                    KVal::Int(n.rem_euclid(max_n)),
+                    KVal::Int(k.rem_euclid(max_n + 2)),
+                    KVal::Float(x),
+                    KVal::Int(k % 4),
+                ]
+            })
+    }
+
+    fn mixed_sample() -> [KVal; 4] {
+        [KVal::Int(3), KVal::Int(1), KVal::Float(0.5), KVal::Int(2)]
+    }
+
+    #[test]
+    fn an_int_accumulator_promoted_by_a_float_compiles_and_keeps_its_kind() {
+        // sum = 0; i = 0; while i < n { sum = sum + x; i += 1 }; sum
+        let ops = vec![
+            KOp::Int { dst: 2, value: 0 },
+            KOp::Int { dst: 3, value: 0 },
+            bin(BinKind::Lt, 4, 3, 0),
+            KOp::JumpIfNot { cond: 4, to: 7 },
+            bin(BinKind::Add, 2, 2, 1),
+            KOp::Inc { reg: 3 },
+            KOp::Jump { to: 2 },
+            KOp::Return { src: 2 },
+        ];
+        let jit = compiled(2, 5, ops, &[KVal::Int(3), KVal::Float(0.5)]);
+        assert!(jit.has_dynamic_ops());
+        let zero = jit.call(&[KVal::Int(0), KVal::Float(0.5)]).unwrap();
+        assert!(KVal::strictly_equal(&zero, &KVal::Int(0)), "{zero:?}");
+        let two = jit.call(&[KVal::Int(2), KVal::Float(0.5)]).unwrap();
+        assert!(KVal::strictly_equal(&two, &KVal::Float(1.0)), "{two:?}");
+        jit.agree(samples(12, 500).map(|(n, x)| vec![KVal::Int(n.rem_euclid(40)), KVal::Float(x)]));
+    }
+
+    #[test]
+    fn a_boxed_int_stays_an_int_and_wraps_like_the_typed_machine() {
+        let mut ops = mixed_sum();
+        ops.push(KOp::Return { src: 4 });
+        let jit = compiled(4, 8, ops, &mixed_sample());
+        assert!(jit.has_dynamic_ops());
+        // k >= n keeps every step an int: 3^60 wraps
+        let all_ints = jit
+            .call(&[KVal::Int(60), KVal::Int(60), KVal::Float(0.5), KVal::Int(0)])
+            .unwrap();
+        let mut expected = 0i64;
+        for i in 0..60 {
+            expected = expected.wrapping_mul(3).wrapping_add(i);
+        }
+        assert!(KVal::strictly_equal(&all_ints, &KVal::Int(expected)));
+        jit.agree(mixed_calls(13, 1000, 70));
+    }
+
+    #[test]
+    fn arithmetic_and_division_by_zero_on_boxed_numbers_match() {
+        // (sum / d + sum // d + sum ^ d - sum) with d possibly zero, on an int
+        // sum and on a float one
+        let mut ops = mixed_sum();
+        ops.extend([
+            bin(BinKind::Div, 8, 4, 3),
+            bin(BinKind::IntDiv, 9, 4, 3),
+            bin(BinKind::Add, 8, 8, 9),
+            bin(BinKind::Power, 9, 4, 3),
+            bin(BinKind::Add, 8, 8, 9),
+            bin(BinKind::Sub, 8, 8, 4),
+            KOp::Return { src: 8 },
+        ]);
+        let jit = compiled(4, 10, ops, &mixed_sample());
+        assert!(jit.has_dynamic_ops());
+        let int_zero = [KVal::Int(3), KVal::Int(5), KVal::Float(0.5), KVal::Int(0)];
+        let float_zero = [KVal::Int(3), KVal::Int(0), KVal::Float(0.5), KVal::Int(0)];
+        for args in [int_zero, float_zero] {
+            assert_eq!(jit.call(&args).err(), Some(Fault::DivisionByZero));
+            jit.agree([args.to_vec()]);
+        }
+        jit.agree(mixed_calls(14, 1000, 12));
+    }
+
+    #[test]
+    fn comparisons_and_unary_ops_on_boxed_numbers_match() {
+        let mut ops = mixed_sum();
+        ops.extend([
+            bin(BinKind::Lt, 8, 4, 2),
+            bin(BinKind::Eq, 9, 4, 3),
+            bin(BinKind::Add, 8, 8, 9),
+            bin(BinKind::Ge, 9, 3, 4),
+            bin(BinKind::Add, 8, 8, 9),
+            KOp::Neg { dst: 9, src: 4 },
+            bin(BinKind::Add, 8, 8, 9),
+            KOp::Not { dst: 9, src: 4 },
+            bin(BinKind::Add, 8, 8, 9),
+            // 22: skip the 100 when the sum is truthy
+            KOp::JumpIf { cond: 4, to: 25 },
+            KOp::Int { dst: 9, value: 100 },
+            bin(BinKind::Add, 8, 8, 9),
+            bin(BinKind::Ne, 9, 4, 2),
+            bin(BinKind::Add, 8, 8, 9),
+            KOp::Move { dst: 9, src: 4 },
+            KOp::Native {
+                intrinsic: KernelIntrinsic::Abs,
+                arg_start: 9,
+                arg_count: 1,
+            },
+            bin(BinKind::Add, 8, 8, 9),
+            KOp::Move { dst: 9, src: 4 },
+            KOp::Native {
+                intrinsic: KernelIntrinsic::Floor,
+                arg_start: 9,
+                arg_count: 1,
+            },
+            bin(BinKind::Add, 8, 8, 9),
+            KOp::Move { dst: 9, src: 4 },
+            KOp::Move { dst: 10, src: 2 },
+            KOp::Native {
+                intrinsic: KernelIntrinsic::Min,
+                arg_start: 9,
+                arg_count: 2,
+            },
+            bin(BinKind::Add, 8, 8, 9),
+            KOp::Inc { reg: 4 },
+            bin(BinKind::Add, 8, 8, 4),
+            KOp::Return { src: 8 },
+        ]);
+        let jit = compiled(4, 11, ops, &mixed_sample());
+        let spec = jit.program.spec(jit.spec);
+        for dynamic in ["DynNeg", "DynNot", "DynJumpIf", "DynNative", "DynInc"] {
+            assert!(
+                spec.ops
+                    .iter()
+                    .any(|op| format!("{op:?}").starts_with(dynamic)),
+                "{dynamic}"
+            );
+        }
+        jit.agree(mixed_calls(15, 2000, 12));
+    }
+
+    #[test]
+    fn a_range_over_a_boxed_number_matches() {
+        // for j in range(sum, d) { total = total + k }
+        let mut ops = mixed_sum();
+        ops.extend([
+            KOp::Int { dst: 8, value: 0 },
+            KOp::Move { dst: 9, src: 4 },
+            KOp::Move { dst: 10, src: 3 },
+            // 16
+            KOp::RangeTest { current: 9, to: 20 },
+            bin(BinKind::Add, 8, 8, 1),
+            KOp::Inc { reg: 9 },
+            KOp::Jump { to: 16 },
+            KOp::Return { src: 8 },
+        ]);
+        let jit = compiled(4, 11, ops, &mixed_sample());
+        assert!(
+            jit.program
+                .spec(jit.spec)
+                .ops
+                .iter()
+                .any(|op| matches!(op, TOp::DynRangeTest { .. }))
+        );
+        jit.agree(mixed_calls(16, 1000, 6).map(|mut args| {
+            args[2] = KVal::Float(match &args[2] {
+                KVal::Float(x) if x.is_finite() => x.rem_euclid(6.0) - 3.0,
+                _ => 0.25,
+            });
+            let KVal::Int(k) = args[1] else {
+                unreachable!()
+            };
+            args[3] = KVal::Int(k * 7 - 20);
+            args
+        }));
+    }
+
+    #[test]
+    fn a_register_a_list_reaches_is_declined() {
+        // sum = 0; if n { sum = [] }; sum + x
+        let ops = vec![
+            KOp::Int { dst: 2, value: 0 },
+            KOp::JumpIfNot { cond: 0, to: 3 },
+            KOp::EmptyList { dst: 2 },
+            bin(BinKind::Add, 2, 2, 1),
+            KOp::Return { src: 2 },
+        ];
+        let (arena, id) = closure(2, 3, ops);
+        let (program, spec) =
+            TypedProgram::specialise(&arena, id, &[KVal::Int(1), KVal::Float(0.5)]).unwrap();
+        assert!(
+            program
+                .spec(spec)
+                .ops
+                .iter()
+                .any(|op| matches!(op, TOp::DynBin { .. }))
+        );
+        let mut cache = JitCache::new(true);
+        assert!(
+            cache
+                .prepare(program.spec(spec), &mut KernelStats::default())
+                .is_none()
+        );
+    }
+
+    /// `r = n > 0 ? [x; floats] : [n; ints]` then `ops` after the merge at
+    /// the op they return, over the arguments `n, x`: each branch builds its
+    /// list in a register of its own and moves it into register 4, or builds
+    /// it in register 4 directly
+    fn merged_lists(floats: usize, ints: usize, direct: bool, after: Vec<KOp>) -> Vec<KOp> {
+        let (a, b) = if direct { (4, 4) } else { (3, 5) };
+        let mut ops = vec![
+            KOp::Int { dst: 2, value: 0 },
+            bin(BinKind::Gt, 2, 0, 2),
+            KOp::JumpIfNot { cond: 2, to: 0 },
+            KOp::EmptyList { dst: a },
+        ];
+        ops.extend((0..floats).map(|_| KOp::Append { list: a, value: 1 }));
+        if !direct {
+            ops.push(KOp::Move { dst: 4, src: a });
+        }
+        let jump = ops.len();
+        ops.push(KOp::Jump { to: 0 });
+        ops[2] = KOp::JumpIfNot {
+            cond: 2,
+            to: ops.len() as u32,
+        };
+        ops.push(KOp::EmptyList { dst: b });
+        ops.extend((0..ints).map(|_| KOp::Append { list: b, value: 0 }));
+        if !direct {
+            ops.push(KOp::Move { dst: 4, src: b });
+        }
+        ops[jump] = KOp::Jump {
+            to: ops.len() as u32,
+        };
+        ops.extend(after);
+        ops
+    }
+
+    fn analysed(ops: Vec<KOp>) -> Result<(), Decline> {
+        let (arena, id) = closure(2, 7, ops);
+        let (program, spec) =
+            TypedProgram::specialise(&arena, id, &[KVal::Int(3), KVal::Float(0.5)]).unwrap();
+        analyse(program.spec(spec)).map(|_| ())
+    }
+
+    #[test]
+    fn lists_merged_from_two_branches_match_the_typed_machine() {
+        for (floats, ints) in [(3, 3), (4, 1), (0, 2), (LIST_CAP, 2)] {
+            for direct in [false, true] {
+                let ops = merged_lists(floats, ints, direct, vec![KOp::Return { src: 4 }]);
+                let jit = compiled(2, 7, ops, &[KVal::Int(3), KVal::Float(0.5)]);
+                jit.agree(samples(12, 100).map(|(n, x)| vec![KVal::Int(n), KVal::Float(x)]));
+            }
+        }
+    }
+
+    #[test]
+    fn a_merged_list_read_other_than_by_a_return_is_declined() {
+        let index = vec![
+            KOp::Int { dst: 6, value: 0 },
+            KOp::Index {
+                dst: 6,
+                list: 4,
+                index: 6,
+            },
+            KOp::Return { src: 6 },
+        ];
+        let append = vec![KOp::Append { list: 4, value: 0 }, KOp::Return { src: 4 }];
+        let add = vec![bin(BinKind::Add, 6, 4, 1), KOp::Return { src: 6 }];
+        for (after, reason) in [
+            (index, "an index"),
+            (append, "an append to a copied or merged list"),
+            (add, "a list read as a number"),
+        ] {
+            for direct in [false, true] {
+                assert_eq!(
+                    analysed(merged_lists(2, 2, direct, after.clone())),
+                    Err(reason)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_list_built_in_a_loop_is_declined() {
+        // i = 0; l = [0]; while i < n { l = [x, i]; i += 1 }; l
+        let ops = vec![
+            KOp::Int { dst: 2, value: 0 },
+            KOp::EmptyList { dst: 4 },
+            KOp::Append { list: 4, value: 2 },
+            bin(BinKind::Lt, 3, 2, 0),
+            KOp::JumpIfNot { cond: 3, to: 10 },
+            KOp::EmptyList { dst: 4 },
+            KOp::Append { list: 4, value: 1 },
+            KOp::Append { list: 4, value: 2 },
+            KOp::Inc { reg: 2 },
+            KOp::Jump { to: 3 },
+            KOp::Return { src: 4 },
+        ];
+        assert_eq!(analysed(ops), Err("a list built in a loop"));
     }
 }

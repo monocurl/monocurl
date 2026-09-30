@@ -6,7 +6,10 @@
 
 use std::path::Path;
 
-use executor::{executor::SeekOptions, kernel::KernelMode};
+use executor::{
+    executor::SeekOptions,
+    kernel::{KernelMode, jit},
+};
 use scene_harness::{run_scene_with_kernels, use_repo_assets};
 
 const PRELUDE: &str = "
@@ -24,6 +27,7 @@ struct Outcome {
     kernel_calls: usize,
     single_calls: usize,
     typed_calls: usize,
+    jit_calls: usize,
     regions: usize,
     faults: usize,
 }
@@ -44,6 +48,7 @@ fn run(body: &str, mode: KernelMode) -> Outcome {
         kernel_calls: run.kernel_stats.calls,
         single_calls: run.kernel_stats.single_calls,
         typed_calls: run.kernel_stats.typed_calls,
+        jit_calls: run.kernel_stats.jit_calls,
         regions: run.kernel_stats.regions,
         faults: run.kernel_stats.faults,
     }
@@ -56,6 +61,8 @@ enum Expect {
     Kernels,
     /// like `Kernels`, and the batch ran on the typed machine
     Typed,
+    /// like `Typed`, and as native code where the jit is on
+    Native,
     /// at least one loop of an interpreted frame ran as a region kernel
     Regions,
     /// at least one interpreted call ran as a kernel on its own
@@ -83,9 +90,12 @@ fn check(body: &str, expect: Expect) {
             assert!(on.kernel_calls > 0, "no kernel ran for:\n{body}");
             assert_eq!(on.faults, 0, "a kernel faulted for:\n{body}");
         }
-        Expect::Typed => {
+        Expect::Typed | Expect::Native => {
             assert!(on.typed_calls > 0, "no typed kernel ran for:\n{body}");
             assert_eq!(on.faults, 0, "a kernel faulted for:\n{body}");
+            if expect == Expect::Native && jit::enabled_by_env() {
+                assert!(on.jit_calls > 0, "no native kernel ran for:\n{body}");
+            }
         }
         Expect::Regions => {
             assert!(
@@ -557,6 +567,33 @@ fn shader_pixels_run_on_the_typed_machine() {
         print plasma
         ",
         Expect::Typed,
+    );
+}
+
+#[test]
+fn colours_returned_from_several_branches_run_as_native_code() {
+    check(
+        "
+        let shade = |z, phase| {
+            if (z >= 1) { return [0.05, 0.04, 0.09, 1] }
+            let w = 4.5 * sqrt(z) + phase
+            return [0.52 + 0.42 * sin(w), 0.5 + 0.4 * sin(w + 1.9), 0.55 + 0.4 * sin(w + 3.6), 1]
+        }
+        let pick = |x, y| {
+            var c = [1, 0, 0, 1]
+            if (x < y) {
+                c = [0.2, x * y, 0.5, 1]
+            } else if (x > 2 * y) {
+                c = [1, 1, 0, 1]
+            }
+            return c
+        }
+        mesh early = Shader(|x, y| shade(x * x + y * y, 0.3), [-1, 1], [-1, 1], 24)
+        mesh branches = Shader(|x, y| pick(x, y), [-1, 1], [-1, 1], 24)
+        print early
+        print branches
+        ",
+        Expect::Native,
     );
 }
 
