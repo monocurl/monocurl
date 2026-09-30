@@ -146,7 +146,9 @@ fn palette(map: &Map) -> Option<KPalette> {
                 HashableKey::Float(bits) => HashableKey::float_value(*bits),
                 HashableKey::String(_) | HashableKey::List(_) => return None,
             };
-            let value = with_heap(|heap| heap.get(value.key()).clone());
+            // named colors and `hex(...)` results reach the map as references
+            // and cached calls; read through them outside the heap borrow
+            let value = with_heap(|heap| heap.get(value.key()).clone()).elide_cached_wrappers_rec();
             Some((time, numeric(&value)?))
         })
         .collect::<Option<Vec<_>>>()?;
@@ -168,7 +170,10 @@ fn numeric(value: &Value) -> Option<KVal> {
                     .collect()
             });
             KVal::List(Arc::new(
-                elements.iter().map(numeric).collect::<Option<KList>>()?,
+                elements
+                    .into_iter()
+                    .map(|element| numeric(&element.elide_cached_wrappers_rec()))
+                    .collect::<Option<KList>>()?,
             ))
         }
         _ => return None,
