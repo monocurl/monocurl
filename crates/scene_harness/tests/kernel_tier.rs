@@ -823,7 +823,29 @@ fn keyframe_palettes_run_inside_typed_kernels() {
         print [grid, stepped, mapped, shaded]
         print [keyframe_lerp(keys, 0.5), keyframe_lerp(steps, 0), keyframe_lerp(steps, 1)]
         ",
-        Expect::Typed,
+        Expect::Native,
+    );
+    // the showcase surface: a point indexed and a palette looked up per vertex
+    check(
+        "
+        let keys = [0 -> BLUE, 0.35 -> TEAL, 0.6 -> YELLOW, 0.85 -> ORANGE, 1 -> RED]
+        let height = |x, y, freq, mix| {
+            let waves = sin(freq * x) * cos(freq * y)
+            let rings = cos(freq * 0.8 * sqrt(x * x + y * y))
+            return 0.3 * ((1 - mix) * waves + mix * rings)
+        }
+        let freq = 3
+        let mix = 0.25
+        mesh surface =
+            point_map{|p| [p[0], p[1], height(p[0], p[1], freq, mix)]}
+            ColorGrid(
+                |pos, idx| keyframe_lerp(keys, 0.5 + 1.6 * height(pos[0], pos[1], freq, mix)),
+                [-1, 1, 12],
+                [-1, 1, 9]
+            )
+        print surface
+        ",
+        Expect::Native,
     );
 }
 

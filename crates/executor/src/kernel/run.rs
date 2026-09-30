@@ -700,7 +700,7 @@ pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> 
 /// the stdlib's `keyframe_lerp` on a converted palette: clamped at both ends,
 /// the first window whose end reaches `t`, and the later keyframe of a window
 /// of zero length
-fn keyframe_lerp(palette: &KPalette, t: f64) -> Result<KVal, Fault> {
+pub(crate) fn keyframe_lerp(palette: &KPalette, t: f64) -> Result<KVal, Fault> {
     let keys = &palette.keys;
     let (first, last) = (&keys[0], &keys[keys.len() - 1]);
     if t <= first.0 {
