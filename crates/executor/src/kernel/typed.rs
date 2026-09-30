@@ -675,7 +675,7 @@ fn native_class(intrinsic: KernelIntrinsic, args: &[Class]) -> Class {
         },
         Mod | Min | Max => pair(),
         Dot => Class::Float,
-        Cross | Fallthrough => Class::Boxed,
+        Cross | KeyframeLerp | Fallthrough => Class::Boxed,
     }
 }
 
@@ -1303,6 +1303,6 @@ fn typed_native(
         ToInt => TOp::FTrunc { dst, src },
         ToFloat if args[0] == Class::Int => TOp::IToF { dst, src },
         ToFloat => TOp::MoveS { dst, src },
-        Dot | Cross | Len | Fallthrough => return None,
+        Dot | Cross | Len | KeyframeLerp | Fallthrough => return None,
     })
 }

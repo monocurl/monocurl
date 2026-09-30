@@ -102,6 +102,7 @@ fn kernel_intrinsic(name: &str) -> Option<KernelIntrinsic> {
         "len" | "list_len" => Len,
         "to_int" => ToInt,
         "to_float" => ToFloat,
+        "keyframe_lerp" => KeyframeLerp,
         "lambda_fallthrough_error" => Fallthrough,
         _ => return None,
     })
