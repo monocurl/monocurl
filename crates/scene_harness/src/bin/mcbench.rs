@@ -1,12 +1,13 @@
 //! headless benchmark driver for the Monocurl pipeline.
 //!
-//! usage: mcbench [--iterations N] [--warmup N] [--strict] [--transcript] [scene.mcs ...]
+//! usage: mcbench [--iterations N] [--warmup N] [--strict] [--transcript]
+//!                [--playback] [--edit] [--kernel-stats] [--trace-frames] [scene.mcs ...]
 //!
 //! with no scene arguments the shared corpus under crates/scene_harness/scenes is used.
 
 use std::{path::PathBuf, time::Duration};
 
-use executor::executor::SeekOptions;
+use executor::{executor::SeekOptions, kernel::KernelStats};
 use scene_harness::{
     SceneTimings, bench_scenes, corpus_scenes, measure_edit_cycle, measure_playback,
     run_scene_file, use_repo_assets,
@@ -20,6 +21,8 @@ struct Args {
     playback: bool,
     edit: bool,
     fps: u32,
+    kernel_stats: bool,
+    trace_frames: bool,
     scenes: Vec<PathBuf>,
 }
 
@@ -31,6 +34,8 @@ fn parse_args() -> Args {
     let mut playback = false;
     let mut edit = false;
     let mut fps = 60;
+    let mut kernel_stats = false;
+    let mut trace_frames = false;
     let mut scenes = Vec::new();
 
     let mut argv = std::env::args().skip(1);
@@ -53,6 +58,8 @@ fn parse_args() -> Args {
             "--transcript" => print_transcript = true,
             "--playback" => playback = true,
             "--edit" => edit = true,
+            "--kernel-stats" => kernel_stats = true,
+            "--trace-frames" => trace_frames = true,
             "--fps" => {
                 fps = argv
                     .next()
@@ -75,8 +82,29 @@ fn parse_args() -> Args {
         playback,
         edit,
         fps,
+        kernel_stats,
+        trace_frames,
         scenes,
     }
+}
+
+fn print_kernel_stats(stats: &KernelStats) {
+    println!(
+        "    kernels: {} batches ({} parallel, {} untyped), {} calls ({} typed, {} in lanes), {} single calls, {} regions ({} faulted), {} faults, {} rejected bodies, {:.2} ms ({:.2} ms running)",
+        stats.batches,
+        stats.parallel_batches,
+        stats.typed_declined,
+        stats.calls,
+        stats.typed_calls,
+        stats.lane_calls,
+        stats.single_calls,
+        stats.regions,
+        stats.region_faults,
+        stats.faults,
+        stats.rejected_bodies,
+        millis(stats.elapsed),
+        millis(stats.run_elapsed),
+    );
 }
 
 fn millis(duration: Duration) -> f64 {
@@ -151,6 +179,18 @@ fn run_playback(args: &Args) {
                     .collect::<Vec<_>>()
                     .join(", ");
                 println!("    slowest frames: {slowest}");
+                if args.kernel_stats {
+                    print_kernel_stats(&timings.kernel_stats);
+                }
+                if args.trace_frames {
+                    let trace = timings
+                        .frame_times
+                        .iter()
+                        .map(|elapsed| format!("{:.1}", millis(*elapsed)))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    println!("    frames ms: {trace}");
+                }
             }
             Err(error) => eprintln!("{name}: {error}"),
         }
@@ -190,10 +230,12 @@ fn main() {
 
         let mut best: Option<SceneTimings> = None;
         let mut last_transcript = Vec::new();
+        let mut last_kernel_stats = KernelStats::default();
         for _ in 0..args.iterations.max(1) {
             match run_scene_file(scene, args.options) {
                 Ok(run) => {
                     last_transcript = run.transcript;
+                    last_kernel_stats = run.kernel_stats;
                     if !run.runtime_errors.is_empty() {
                         eprintln!("{name}: runtime errors: {:?}", run.runtime_errors);
                     }
@@ -227,6 +269,9 @@ fn main() {
             for line in &last_transcript {
                 println!("    | {line}");
             }
+        }
+        if args.kernel_stats {
+            print_kernel_stats(&last_kernel_stats);
         }
     }
 

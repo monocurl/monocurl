@@ -199,6 +199,14 @@ pub struct ExecutionState {
     global_primitive_anim_counter: usize,
     pub alive_stack_count: usize,
     pub execution_stacks: Vec<ExecutionStackSlot>,
+    /// slots of eager calls that returned, ready to hold the next one. nothing
+    /// can reach them once the call is over, and a mesh tree makes thousands
+    /// of calls per frame, so without reuse the ghosts pile up for the whole
+    /// scene and into every snapshot of it
+    spare_stack_slots: Vec<usize>,
+    /// the value stacks those calls used, cleared but with their capacity,
+    /// so the next call does not grow one from empty
+    spare_var_stacks: Vec<Vec<Value>>,
     pub execution_heads: BTreeSet<usize>,
     pub primitive_anims: Vec<BakedPrimitiveAnim>,
 
@@ -233,6 +241,8 @@ impl ExecutionState {
             global_primitive_anim_counter: 0,
             alive_stack_count: 0,
             execution_stacks: Vec::new(),
+            spare_stack_slots: Vec::new(),
+            spare_var_stacks: Vec::new(),
             execution_heads: BTreeSet::new(),
             primitive_anims: Vec::new(),
             leaders: Vec::new(),
@@ -298,11 +308,35 @@ impl ExecutionState {
         }
 
         self.alive_stack_count += 1;
-        let stack = ExecutionStack::new(ip, parent_idx, trace_parent_idx);
+        let mut stack = ExecutionStack::new(ip, parent_idx, trace_parent_idx);
+        if let Some(var_stack) = self.spare_var_stacks.pop() {
+            stack.var_stack = var_stack;
+        }
+        if let Some(idx) = self.spare_stack_slots.pop() {
+            if let ExecutionStackSlot::Ghost(ghost) = &mut self.execution_stacks[idx] {
+                stack.call_stack = std::mem::take(&mut ghost.call_stack);
+                stack.call_stack.clear();
+            }
+            self.execution_stacks[idx] = ExecutionStackSlot::Alive(stack);
+            return Some(idx);
+        }
         let idx = self.execution_stacks.len();
         self.execution_stacks.push(ExecutionStackSlot::Alive(stack));
 
         Some(idx)
+    }
+
+    /// free an eager call's stack whose trace nobody will need again
+    pub fn recycle_stack(&mut self, idx: usize) {
+        if let ExecutionStackSlot::Alive(stack) = &mut self.execution_stacks[idx] {
+            let mut var_stack = std::mem::take(&mut stack.var_stack);
+            var_stack.clear();
+            if self.spare_var_stacks.len() < 64 {
+                self.spare_var_stacks.push(var_stack);
+            }
+        }
+        self.free_stack(idx);
+        self.spare_stack_slots.push(idx);
     }
 
     pub fn alloc_primitive_anim_id(&mut self) -> usize {
@@ -323,6 +357,8 @@ impl ExecutionState {
         };
         self.alive_stack_count -= 1;
         self.execution_stacks[idx] = ExecutionStackSlot::Ghost(ghost);
+        // an assignment that failed part way leaves its write path pinned
+        crate::heap::heap_unpin(idx);
     }
 
     #[inline]

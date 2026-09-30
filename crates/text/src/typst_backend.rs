@@ -92,7 +92,10 @@ impl FileResolver for CurrentSourceResolver {
 
     fn resolve_source(&self, id: FileId) -> FileResult<Cow<'_, Source>> {
         if id == self.main_id {
-            let text = CURRENT_SOURCE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+            let text = CURRENT_SOURCE
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
             Ok(Cow::Owned(Source::new(id, text)))
         } else {
             Err(FileError::NotFound(id_path(id)))
@@ -147,5 +150,9 @@ pub fn render_typst_svg(markup: &str) -> Result<String> {
         bail!("typst produced no pages");
     }
 
-    Ok(typst_svg::svg_merged(&doc, &SvgOptions::default(), Abs::zero()))
+    Ok(typst_svg::svg_merged(
+        &doc,
+        &SvgOptions::default(),
+        Abs::zero(),
+    ))
 }

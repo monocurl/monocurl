@@ -344,9 +344,9 @@ fn filled_contours(
 ) -> Result<Mesh> {
     let (lins, tris) = tessellate_planar_loops(contours, Float3::Z, color, even_odd)?;
     let mesh = Mesh {
-        dots: Vec::new(),
-        lins,
-        tris,
+        dots: Default::default(),
+        lins: lins.into(),
+        tris: tris.into(),
         uniform: Uniforms {
             stroke_radius: DEFAULT_TEXT_STROKE_RADIUS,
             ..Uniforms::default()
@@ -399,8 +399,11 @@ fn tessellate_planar_loops(
             uv: Float2::ZERO,
         })
         .collect();
-    let (mut lins, tris) =
-        mesh_build::build_indexed_surface(&vertices, &tess.triangles, &mesh_build::BoundaryEdges::default());
+    let (mut lins, tris) = mesh_build::build_indexed_surface(
+        &vertices,
+        &tess.triangles,
+        &mesh_build::BoundaryEdges::default(),
+    );
     for line in &mut lins {
         line.norm = normal;
     }

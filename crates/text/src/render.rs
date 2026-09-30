@@ -503,12 +503,42 @@ fn escape_xml_attr(source: &str) -> String {
 }
 
 fn font_svg_options(font: &str) -> Result<(usvg::Options<'static>, String)> {
+    let (db, font_family) = font_database(font)?;
     let mut options = usvg::Options::default();
-    let mut db = system_font_db().as_ref().clone();
-    let font_family = resolve_font_family(font, &mut db)?;
     options.font_family = font_family.clone();
-    options.fontdb = Arc::new(db);
+    options.fontdb = db;
     Ok((options, font_family))
+}
+
+/// the font database a text in `font` renders with: the shared system
+/// database for a family name, or the system database plus that file for a
+/// path, loaded once per path. cloning the system database per text was a
+/// visible share of every new string
+fn font_database(font: &str) -> Result<(Arc<FontDatabase>, String)> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+
+        static FILE_FONTS: OnceLock<Mutex<HashMap<PathBuf, (Arc<FontDatabase>, String)>>> =
+            OnceLock::new();
+
+        let path = Path::new(font);
+        if path.exists() {
+            let mut loaded = FILE_FONTS
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap();
+            if let Some((db, family)) = loaded.get(path) {
+                return Ok((Arc::clone(db), family.clone()));
+            }
+            let mut db = system_font_db().as_ref().clone();
+            let family = resolve_font_family(font, &mut db)?;
+            let db = Arc::new(db);
+            loaded.insert(path.to_path_buf(), (Arc::clone(&db), family.clone()));
+            return Ok((db, family));
+        }
+    }
+    Ok((system_font_db().clone(), font.to_owned()))
 }
 
 fn svg_mesh_options(resources_dir: Option<PathBuf>) -> usvg::Options<'static> {
@@ -529,6 +559,27 @@ fn svg_mesh_options(resources_dir: Option<PathBuf>) -> usvg::Options<'static> {
             ..usvg::Options::default()
         }
     }
+}
+
+/// load the system font database on a background thread so the first text
+/// with a system font does not stall a frame on the scan (a few hundred
+/// milliseconds on a typical machine); callers that need it before then
+/// block on the same initialisation
+/// load the system font database now, blocking; benchmarks call this so
+/// the scan is not counted against the first text frame
+pub fn ensure_system_fonts() {
+    #[cfg(not(target_arch = "wasm32"))]
+    system_font_db();
+}
+
+pub fn warm_system_fonts() {
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::Builder::new()
+        .name("monocurl-fonts".into())
+        .spawn(|| {
+            system_font_db();
+        })
+        .ok();
 }
 
 fn system_font_db() -> &'static Arc<FontDatabase> {
@@ -1045,8 +1096,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn typst_math_text_tags_are_recovered_and_preserve_layout() {
-        let tagged =
-            render_typst(r"$\tag1{a^2} + \tag2{b^2} = \tag3{c^2}$", 1.0).unwrap();
+        let tagged = render_typst(r"$\tag1{a^2} + \tag2{b^2} = \tag3{c^2}$", 1.0).unwrap();
         let plain = render_typst("$a^2 + b^2 = c^2$", 1.0).unwrap();
 
         for tag in [vec![1], vec![2], vec![3]] {

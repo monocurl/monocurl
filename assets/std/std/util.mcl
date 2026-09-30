@@ -185,8 +185,9 @@ let count = |v, predicate| {
 ## let centroid = sum(points) / len(points)
 ## ```
 let sum = |v| {
-    var s = 0
-    for (x in v) { s = s + x }
+    if (len(v) == 0) { return 0 }
+    var s = v[0]
+    for (i in range(1, len(v))) { s = s + v[i] }
     return s
 }
 

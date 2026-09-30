@@ -11,6 +11,7 @@ use compiler::{cache::CompilerCache, compiler::compile};
 use executor::{
     executor::{Executor, PlaybackAdvance, SeekOptions, SeekToResult},
     heap::with_heap,
+    kernel::{KernelMode, KernelStats},
     scene_snapshot::SceneSnapshot,
     state::LeaderKind,
     time::Timestamp,
@@ -20,6 +21,7 @@ use parser::{import_context::ParseImportContext, parser::Parser};
 use stdlib::registry::registry;
 use structs::rope::Rope;
 
+pub mod fuzz;
 pub mod summary;
 
 use crate::summary::{mesh_summary, value_summary};
@@ -52,6 +54,7 @@ pub struct SceneRun {
     pub runtime_errors: Vec<String>,
     pub end_timestamp: Option<(usize, f64)>,
     pub timings: SceneTimings,
+    pub kernel_stats: KernelStats,
 }
 
 /// the live scene state at one sampled point on the timeline
@@ -68,6 +71,12 @@ pub struct TimelineSample {
 /// where along each slide the timeline is sampled. the endpoints catch the
 /// snapped keyframes, the interior points catch interpolation
 const SAMPLE_FRACTIONS: [f64; 4] = [0.0, 0.35, 0.8, 1.0];
+/// a scene that says `# corpus: endpoints only` is sampled at slide boundaries
+/// alone. a topology-changing animation such as `Trans` picks its vertex
+/// matching from a tessellation that differs between platforms, so its
+/// intermediate geometry is legitimately not portable while its endpoints are
+const ENDPOINT_FRACTIONS: [f64; 2] = [0.0, 1.0];
+const ENDPOINTS_ONLY_DIRECTIVE: &str = "# corpus: endpoints only";
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SceneTimings {
@@ -149,6 +158,7 @@ pub fn execute(mut executor: Executor, options: SeekOptions) -> SceneRun {
         .iter_entries()
         .map(|entry| entry.text().to_string())
         .collect();
+    run.kernel_stats = executor.kernel_stats();
 
     run
 }
@@ -163,13 +173,18 @@ pub fn sample_timeline(
 ) -> Result<Vec<TimelineSample>, SceneError> {
     let (mut executor, _) = prepare(source, path)?;
     let mut samples = Vec::new();
+    let fractions: &[f64] = if source.lines().any(|line| line.trim() == ENDPOINTS_ONLY_DIRECTIVE) {
+        &ENDPOINT_FRACTIONS
+    } else {
+        &SAMPLE_FRACTIONS
+    };
 
     smol::block_on(async {
         let durations = resolve_slide_durations(&mut executor).await;
 
         // real slides are 1-based in user timestamps; slide 0 is the init section
         for (slide, duration) in durations.iter().copied().enumerate() {
-            for fraction in SAMPLE_FRACTIONS {
+            for &fraction in fractions {
                 let time = if fraction >= 1.0 {
                     f64::INFINITY
                 } else {
@@ -304,6 +319,10 @@ pub fn measure_edit_cycle(source: &str, path: &Path, edits: usize) -> EditTiming
 pub struct PlaybackTimings {
     pub frames: usize,
     pub total: Duration,
+    /// every frame's time in playback order, for tracing where a scene spends
+    /// its budget
+    pub frame_times: Vec<Duration>,
+    pub kernel_stats: KernelStats,
     pub worst: Duration,
     /// 95th percentile frame time: what a viewer perceives as stutter
     pub p95: Duration,
@@ -369,6 +388,8 @@ pub fn measure_playback(
     indexed_times.sort_unstable_by_key(|(_, elapsed)| std::cmp::Reverse(*elapsed));
     indexed_times.truncate(5);
     timings.slowest = indexed_times;
+    timings.frame_times = frame_times.clone();
+    timings.kernel_stats = executor.kernel_stats();
 
     frame_times.sort_unstable();
     timings.frames = frame_times.len();
@@ -411,7 +432,21 @@ pub fn run_scene_file(path: &Path, options: SeekOptions) -> Result<SceneRun, Sce
 }
 
 pub fn run_scene(source: &str, path: &Path, options: SeekOptions) -> Result<SceneRun, SceneError> {
-    let (executor, prepare_timings) = prepare(source, path)?;
+    run_scene_with_kernels(source, path, options, None)
+}
+
+/// `run_scene` with the executor's kernel tier pinned to `mode`, so a test can
+/// compare the interpreter and the tier on the same scene within one process
+pub fn run_scene_with_kernels(
+    source: &str,
+    path: &Path,
+    options: SeekOptions,
+    mode: Option<KernelMode>,
+) -> Result<SceneRun, SceneError> {
+    let (mut executor, prepare_timings) = prepare(source, path)?;
+    if let Some(mode) = mode {
+        executor.set_kernel_mode(mode);
+    }
     let mut run = execute(executor, options);
     run.timings.parse = prepare_timings.parse;
     run.timings.compile = prepare_timings.compile;

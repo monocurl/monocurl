@@ -1,0 +1,23 @@
+# transcript
+[[0, 0, 0], [0.5, 0.25, 0]]
+
+# runtime errors
+unsupported binary op + on string and float
+unsupported binary op + on string and float
+
+# end timestamp
+(none)
+
+# timeline
+slide 1 @ 0.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! unsupported binary op + on string and float
+slide 1 @ 0.35
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! unsupported binary op + on string and float
+slide 1 @ 0.80
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! unsupported binary op + on string and float
+slide 1 @ 1.00
+  camera pos [0.0, 0.0, 4.0] look_at [0.0, 0.0, 0.0]
+  !! unsupported binary op + on string and float

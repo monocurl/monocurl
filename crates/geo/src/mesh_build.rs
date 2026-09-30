@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use crate::{
     mesh::{Lin, LinVertex, Tri, TriVertex},
@@ -9,7 +10,10 @@ use crate::{
 
 // keys are vertex-index pairs from our own meshes, so a fast non-cryptographic
 // hash is appropriate; the default SipHash showed up clearly when tessellating
-type BoundaryEdgeMap = FxHashMap<(usize, usize), Vec<(usize, usize)>>;
+/// unmatched directed edges by endpoints; one or two per edge on any
+/// sensible surface, so they stay inline rather than costing an allocation
+/// per edge of every surface built per frame
+type BoundaryEdgeMap = FxHashMap<(usize, usize), SmallVec<[(usize, usize); 2]>>;
 
 /// per-edge templates for the boundary lines a surface produces, keyed by the
 /// vertex indices of the edge. `BoundaryEdges::default()` means "no templates"
@@ -127,6 +131,17 @@ pub fn build_indexed_surface(
     faces: &[[usize; 3]],
     boundary_edges: &BoundaryEdges,
 ) -> (Vec<Lin>, Vec<Tri>) {
+    build_indexed_surface_with(vertices, faces, |a, b| boundary_edges.get(&(a, b)).copied())
+}
+
+/// `build_indexed_surface` with the boundary edge of `(a, b)` answered by a
+/// function, for callers that would otherwise build a map saying the same
+/// thing for every edge
+pub fn build_indexed_surface_with(
+    vertices: &[SurfaceVertex],
+    faces: &[[usize; 3]],
+    edge_for: impl Fn(usize, usize) -> Option<BoundaryEdge>,
+) -> (Vec<Lin>, Vec<Tri>) {
     let (mut tris, edge_map) = build_surface_tris(vertices, faces);
 
     let mut boundary_items = Vec::new();
@@ -140,14 +155,11 @@ pub fn build_indexed_surface(
     let mut lins = Vec::with_capacity(boundary_items.len());
     let mut line_edges = Vec::with_capacity(boundary_items.len());
     for (tri_idx, edge_idx, a, b) in boundary_items {
-        let template = boundary_edges
-            .get(&(a, b))
-            .copied()
-            .unwrap_or(BoundaryEdge {
-                a_col: vertices[a].col,
-                b_col: vertices[b].col,
-                norm: Float3::ZERO,
-            });
+        let template = edge_for(a, b).unwrap_or(BoundaryEdge {
+            a_col: vertices[a].col,
+            b_col: vertices[b].col,
+            norm: Float3::ZERO,
+        });
         let line_idx = lins.len();
         let mut edge = line(
             vertices[a].pos,
@@ -231,7 +243,8 @@ fn build_surface_tris(
         })
         .collect();
 
-    let mut edge_map = BoundaryEdgeMap::default();
+    let mut edge_map =
+        BoundaryEdgeMap::with_capacity_and_hasher(faces.len() * 3, Default::default());
     for (tri_idx, face) in faces.iter().enumerate() {
         for (edge_idx, (a, b)) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])]
             .into_iter()
@@ -389,9 +402,9 @@ mod tests {
 
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         let mesh = Mesh {
-            dots: Vec::new(),
-            lins,
-            tris,
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: Default::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -435,9 +448,9 @@ mod tests {
 
         let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
         let mesh = Mesh {
-            dots: Vec::new(),
-            lins,
-            tris,
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: Default::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),

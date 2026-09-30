@@ -80,10 +80,16 @@ pub fn tanh(executor: &mut Executor, stack_idx: usize) -> Result<Value, Executor
 
 #[stdlib_func]
 pub fn abs(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    match executor.state.stack(stack_idx).read_at(-1) {
-        Value::Integer(n) => Ok(Value::Integer(n.abs())),
+    match executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_cached_wrappers_rec()
+    {
+        Value::Integer(n) => Ok(Value::Integer(n.wrapping_abs())),
         Value::Float(f) => Ok(Value::Float(f.abs())),
-        Value::Complex { re, im } => Ok(Value::Float(re.hypot(*im))),
+        Value::Complex { re, im } => Ok(Value::Float(re.hypot(im))),
         other => Err(ExecutorError::type_error_for(
             "number",
             other.type_name(),
@@ -94,9 +100,15 @@ pub fn abs(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorE
 
 #[stdlib_func]
 pub fn sign(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    match executor.state.stack(stack_idx).read_at(-1) {
+    match executor
+        .state
+        .stack(stack_idx)
+        .read_at(-1)
+        .clone()
+        .elide_cached_wrappers_rec()
+    {
         Value::Integer(n) => Ok(Value::Integer(n.signum())),
-        Value::Float(f) => Ok(Value::Float(f.signum())),
+        Value::Float(f) => Ok(Value::Float(executor::kernel::run::float_sign(f))),
         other => Err(ExecutorError::type_error_for(
             "number",
             other.type_name(),

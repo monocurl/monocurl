@@ -156,10 +156,7 @@ async fn tag_trans_embed_impl(
 }
 
 #[stdlib_func]
-pub fn trans_lerp_value(
-    executor: &mut Executor,
-    stack_idx: usize,
-) -> Result<Value, ExecutorError> {
+pub fn trans_lerp_value(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let start = executor.state.stack(stack_idx).read_at(-5).clone();
     let end = executor.state.stack(stack_idx).read_at(-4).clone();
     let state = executor.state.stack(stack_idx).read_at(-3).clone();
@@ -938,9 +935,9 @@ fn extract_component_mesh(
     }
 
     let component = Mesh {
-        dots,
-        lins,
-        tris,
+        dots: dots.into(),
+        lins: lins.into(),
+        tris: tris.into(),
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
         version: Mesh::fresh_version(),
@@ -1144,17 +1141,17 @@ fn prepare_planar_trans_mesh_pair(
     }
 
     let mut start_mesh = Mesh {
-        dots: Vec::new(),
-        lins: Vec::new(),
-        tris: Vec::new(),
+        dots: Default::default(),
+        lins: Default::default(),
+        tris: Default::default(),
         uniform: start.uniform.clone(),
         tag: start.tag.clone(),
         version: Mesh::fresh_version(),
     };
     let mut end_mesh = Mesh {
-        dots: Vec::new(),
-        lins: Vec::new(),
-        tris: Vec::new(),
+        dots: Default::default(),
+        lins: Default::default(),
+        tris: Default::default(),
         uniform: end.uniform.clone(),
         tag: end.tag.clone(),
         version: Mesh::fresh_version(),
@@ -1511,8 +1508,8 @@ fn conform_samples_to_template(
             build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
         let out = Mesh {
             dots,
-            lins,
-            tris,
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: uniform.clone(),
             tag: tag.to_vec(),
             version: Mesh::fresh_version(),
@@ -1696,8 +1693,8 @@ fn canonicalize_surface_template(mesh: &Mesh) -> Mesh {
         build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
     let out = Mesh {
         dots: mesh.dots.clone(),
-        lins,
-        tris,
+        lins: lins.into(),
+        tris: tris.into(),
         uniform: mesh.uniform.clone(),
         tag: mesh.tag.clone(),
         version: Mesh::fresh_version(),
@@ -2009,8 +2006,8 @@ fn conform_surface_to_template(source: &Mesh, template: &Mesh) -> Mesh {
         build_indexed_surface(&surface.vertices, &surface.faces, &surface.boundary_edges);
     let out = Mesh {
         dots,
-        lins,
-        tris,
+        lins: lins.into(),
+        tris: tris.into(),
         uniform: source.uniform.clone(),
         tag: source.tag.clone(),
         version: Mesh::fresh_version(),
@@ -2360,9 +2357,9 @@ fn mesh_from_ordered_path(path: &OrderedPath, uniform: &Uniforms, tag: &[isize])
     }
 
     let mut mesh = Mesh {
-        dots: Vec::new(),
-        lins,
-        tris: Vec::new(),
+        dots: Default::default(),
+        lins: lins.into(),
+        tris: Default::default(),
         uniform: uniform.clone(),
         tag: tag.to_vec(),
         version: Mesh::fresh_version(),
@@ -2719,7 +2716,7 @@ fn planar_mesh_patharc_lerp(
     }
 
     let mesh = Mesh {
-        dots: Vec::new(),
+        dots: Default::default(),
         lins,
         tris,
         uniform: boundary.uniform,
@@ -2730,10 +2727,44 @@ fn planar_mesh_patharc_lerp(
     Ok(mesh)
 }
 
+/// tessellating the boundary drops coincident points and adds intersection
+/// points, so the tessellated lines cannot be paired with the template's by
+/// index; libtess2 also returns its vertices with rounding error. both run
+/// along the same loops, so an endpoint is looked for near the template
+/// endpoint the previous one matched, then anywhere, and only a genuinely new
+/// point (an intersection) searches the template's lines
 fn color_boundary_lines_from_template(lins: &mut [Lin], template: &Mesh, fallback: Float4) {
+    let endpoints: Vec<(Float3, Float4)> = template
+        .lins
+        .iter()
+        .filter(|line| line.is_dom_sib)
+        .flat_map(|line| [(line.a.pos, line.a.col), (line.b.pos, line.b.col)])
+        .collect();
+    let extent = endpoints
+        .iter()
+        .flat_map(|(pos, _)| [pos.x.abs(), pos.y.abs(), pos.z.abs()])
+        .fold(1e-3_f32, f32::max);
+    let tolerance_sq = (1e-5_f32 * extent).powi(2);
+    const WINDOW: usize = 12;
+
+    let mut cursor = 0_usize;
+    let mut color_at = |point: Float3| {
+        let near = |index: &usize| (endpoints[*index].0 - point).len_sq() <= tolerance_sq;
+        let mut window = cursor.saturating_sub(2)..(cursor + WINDOW).min(endpoints.len());
+        let found = window
+            .find(near)
+            .or_else(|| (0..endpoints.len()).find(near));
+        match found {
+            Some(index) => {
+                cursor = index;
+                endpoints[index].1
+            }
+            None => boundary_color_at(template, point).unwrap_or(fallback),
+        }
+    };
     for line in lins {
-        line.a.col = boundary_color_at(template, line.a.pos).unwrap_or(fallback);
-        line.b.col = boundary_color_at(template, line.b.pos).unwrap_or(fallback);
+        line.a.col = color_at(line.a.pos);
+        line.b.col = color_at(line.b.pos);
     }
 }
 
@@ -2855,7 +2886,7 @@ mod tests {
         simd::{Float3, Float4},
     };
 
-    use crate::mesh::helpers::tessellate_planar_loops;
+    use crate::mesh::tessellation::tessellate_planar_loops;
 
     use super::{
         ClosedContour, TagTransMap, TagTransMapEntry, Value, append_closed_contour,
@@ -2886,9 +2917,9 @@ mod tests {
 
     fn tagged_mesh(tag: Vec<isize>) -> Arc<Mesh> {
         Arc::new(Mesh {
-            dots: vec![],
-            lins: vec![],
-            tris: vec![],
+            dots: Default::default(),
+            lins: Default::default(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag,
             version: Mesh::fresh_version(),
@@ -2923,9 +2954,9 @@ mod tests {
         let (lins, tris) =
             tessellate_planar_loops(contours, Float3::Z).expect("planar tessellation should work");
         Mesh {
-            dots: vec![],
-            lins,
-            tris,
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: tris.into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -3090,7 +3121,7 @@ mod tests {
     #[test]
     fn split_mesh_contours_splits_disconnected_line_components() {
         let mesh = Mesh {
-            dots: vec![],
+            dots: Default::default(),
             lins: vec![
                 line(Float3::ZERO, Float3::X, -1, 1),
                 line(Float3::X, Float3::new(2.0, 0.0, 0.0), 0, -1),
@@ -3106,8 +3137,9 @@ mod tests {
                     2,
                     -1,
                 ),
-            ],
-            tris: vec![],
+            ]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -3143,9 +3175,9 @@ mod tests {
         };
 
         let mut start = Mesh {
-            dots: vec![],
-            lins: vec![],
-            tris: vec![],
+            dots: Default::default(),
+            lins: Default::default(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -3154,9 +3186,9 @@ mod tests {
         append_closed_contour(&mut start, &large);
 
         let mut end = Mesh {
-            dots: vec![],
-            lins: vec![],
-            tris: vec![],
+            dots: Default::default(),
+            lins: Default::default(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -3210,9 +3242,9 @@ mod tests {
     #[test]
     fn prepare_planar_trans_mesh_pair_uses_target_fill_rgb_for_missing_start_fill() {
         let mut source = Mesh {
-            dots: vec![],
-            lins: vec![],
-            tris: vec![],
+            dots: Default::default(),
+            lins: Default::default(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -3257,9 +3289,9 @@ mod tests {
         set_fill_color(&mut surface, fill);
 
         let mut line = Mesh {
-            dots: vec![],
-            lins: vec![],
-            tris: vec![],
+            dots: Default::default(),
+            lins: Default::default(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -3446,8 +3478,8 @@ mod tests {
     #[test]
     fn prepare_trans_mesh_pair_keeps_larger_surface_topology() {
         let source = Mesh {
-            dots: vec![],
-            lins: vec![],
+            dots: Default::default(),
+            lins: Default::default(),
             tris: vec![tri(
                 Float3::new(0.0, 0.0, 0.0),
                 Float3::new(1.0, 0.0, 0.0),
@@ -3455,14 +3487,15 @@ mod tests {
                 -1,
                 -1,
                 -1,
-            )],
+            )]
+            .into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
         };
         let target = Mesh {
-            dots: vec![],
-            lins: vec![],
+            dots: Default::default(),
+            lins: Default::default(),
             tris: vec![
                 tri(
                     Float3::new(0.0, 0.0, 0.0),
@@ -3480,7 +3513,8 @@ mod tests {
                     -1,
                     -1,
                 ),
-            ],
+            ]
+            .into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -3566,9 +3600,9 @@ mod tests {
         triangle.b.col = Float4::ONE;
         triangle.c.col = Float4::ONE;
         let source = Mesh {
-            dots: vec![],
-            lins,
-            tris: vec![triangle],
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: vec![triangle].into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),

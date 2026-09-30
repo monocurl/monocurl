@@ -89,7 +89,12 @@ impl SettingsWindow {
         }
     }
 
-    fn language_button(&self, language: Language, active: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn language_button(
+        &self,
+        language: Language,
+        active: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = ThemeSettings::theme(cx);
         let bg = if active {
             theme.accent
@@ -103,7 +108,9 @@ impl SettingsWindow {
         };
 
         div()
-            .id(ElementId::Name(format!("settings-language-{}", language.code()).into()))
+            .id(ElementId::Name(
+                format!("settings-language-{}", language.code()).into(),
+            ))
             .px(px(12.0))
             .py(px(6.0))
             .rounded(px(5.0))
@@ -455,7 +462,9 @@ impl Render for SettingsWindow {
                                     .children(
                                         Language::ALL
                                             .into_iter()
-                                            .filter(|language| Localization::is_available(*language))
+                                            .filter(|language| {
+                                                Localization::is_available(*language)
+                                            })
                                             .map(|language| {
                                                 self.language_button(
                                                     language,

@@ -14,8 +14,8 @@
 use std::collections::HashSet;
 
 use parser::ast::{
-    BinaryOperator, BinaryOperatorType, BindingPattern, Expression, IdentifierReference, LambdaBody,
-    Literal, SpanTagged, Statement,
+    BinaryOperator, BinaryOperatorType, BindingPattern, Expression, IdentifierReference,
+    LambdaBody, Literal, SpanTagged, Statement,
 };
 
 use super::ident_ref_name;

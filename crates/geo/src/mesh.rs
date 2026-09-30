@@ -1,4 +1,6 @@
 use std::{
+    fmt,
+    ops::{Deref, DerefMut},
     path::PathBuf,
     sync::{
         Arc,
@@ -57,6 +59,57 @@ pub struct Tri {
     pub is_dom_sib: bool,
 }
 
+/// where a mesh's texture comes from: an image file the renderer loads, or
+/// pixels produced by the scene itself (a `Shader` mesh). pixel textures are
+/// compared by identity, so two frames of an animated shader are different
+/// textures and a re-run that yields the same `Arc` is the same one
+#[derive(Debug, Clone, PartialEq)]
+pub enum TextureSource {
+    File(PathBuf),
+    Pixels(Arc<PixelTexture>),
+}
+
+impl From<PathBuf> for TextureSource {
+    fn from(path: PathBuf) -> Self {
+        TextureSource::File(path)
+    }
+}
+
+/// an RGBA8 image held in memory, rows top to bottom like a decoded image
+/// file so the same UV conventions apply
+#[derive(Debug)]
+pub struct PixelTexture {
+    id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+static PIXEL_TEXTURE_IDS: AtomicU64 = AtomicU64::new(1);
+
+impl PixelTexture {
+    pub fn new(width: u32, height: u32, rgba: Vec<u8>) -> Self {
+        debug_assert_eq!(rgba.len(), width as usize * height as usize * 4);
+        Self {
+            id: PIXEL_TEXTURE_IDS.fetch_add(1, Ordering::Relaxed),
+            width,
+            height,
+            rgba,
+        }
+    }
+
+    /// process-unique, so renderers can key their caches on it
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+}
+
+impl PartialEq for PixelTexture {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Uniforms {
     pub alpha: f64,
@@ -66,7 +119,7 @@ pub struct Uniforms {
     pub dot_vertex_count: u16,
     pub smooth: bool,
     pub gloss: f32,
-    pub img: Option<PathBuf>,
+    pub img: Option<TextureSource>,
     pub z_index: i32,
 }
 
@@ -94,13 +147,85 @@ impl Default for Uniforms {
     }
 }
 
+/// a copy-on-write array: clones share storage, and mutable access detaches
+/// only this array, so editing one of a mesh's arrays leaves the others shared
+pub struct Shared<T>(Arc<Vec<T>>);
+
+impl<T: Clone> Shared<T> {
+    pub fn into_vec(self) -> Vec<T> {
+        Arc::try_unwrap(self.0).unwrap_or_else(|shared| (*shared).clone())
+    }
+}
+
+impl<T> Deref for Shared<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Vec<T> {
+        &self.0
+    }
+}
+
+impl<T: Clone> DerefMut for Shared<T> {
+    fn deref_mut(&mut self) -> &mut Vec<T> {
+        Arc::make_mut(&mut self.0)
+    }
+}
+
+impl<T> Clone for Shared<T> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<T> Default for Shared<T> {
+    fn default() -> Self {
+        Self(Arc::default())
+    }
+}
+
+impl<T: fmt::Debug> fmt::Debug for Shared<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl<T> From<Vec<T>> for Shared<T> {
+    fn from(vec: Vec<T>) -> Self {
+        Self(Arc::new(vec))
+    }
+}
+
+impl<T> FromIterator<T> for Shared<T> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        Vec::from_iter(iter).into()
+    }
+}
+
+impl<'a, T> IntoIterator for &'a Shared<T> {
+    type Item = &'a T;
+    type IntoIter = std::slice::Iter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a, T: Clone> IntoIterator for &'a mut Shared<T> {
+    type Item = &'a mut T;
+    type IntoIter = std::slice::IterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
 static NEXT_MESH_VERSION: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug)]
 pub struct Mesh {
-    pub dots: Vec<Dot>,
-    pub lins: Vec<Lin>,
-    pub tris: Vec<Tri>,
+    pub dots: Shared<Dot>,
+    pub lins: Shared<Lin>,
+    pub tris: Shared<Tri>,
 
     pub uniform: Uniforms,
 
@@ -122,18 +247,21 @@ impl Mesh {
     }
 
     pub fn normalize_line_dot_topology(&mut self) {
-        let original_line_count = self.lins.len();
+        // detach both arrays once rather than on every indexed write
+        let lins: &mut Vec<Lin> = &mut self.lins;
+        let dots: &mut Vec<Dot> = &mut self.dots;
+        let original_line_count = lins.len();
         let mut created_inverses = vec![None; original_line_count];
         for (line_idx, created_inverse) in created_inverses.iter_mut().enumerate() {
-            if self.lins[line_idx].inv != -1 {
+            if lins[line_idx].inv != -1 {
                 continue;
             }
 
-            self.lins[line_idx].is_dom_sib = true;
-            let source = self.lins[line_idx];
-            let inverse_idx = self.lins.len();
-            self.lins[line_idx].inv = inverse_idx as i32;
-            self.lins.push(Lin {
+            lins[line_idx].is_dom_sib = true;
+            let source = lins[line_idx];
+            let inverse_idx = lins.len();
+            lins[line_idx].inv = inverse_idx as i32;
+            lins.push(Lin {
                 a: source.b,
                 b: source.a,
                 norm: source.norm,
@@ -149,48 +277,47 @@ impl Mesh {
             let Some(inverse_idx) = inverse_idx else {
                 continue;
             };
-            let source = self.lins[line_idx];
-            self.lins[inverse_idx].prev = mirrored_line_ref(&self.lins, source.next);
-            self.lins[inverse_idx].next = mirrored_line_ref(&self.lins, source.prev);
+            let source = lins[line_idx];
+            lins[inverse_idx].prev = mirrored_line_ref(lins, source.next);
+            lins[inverse_idx].next = mirrored_line_ref(lins, source.prev);
         }
 
         let mut endpoint_dots = Vec::new();
-        for line_idx in 0..self.lins.len() {
-            let line = self.lins[line_idx];
+        for (line_idx, line) in lins.iter_mut().enumerate() {
             if line.prev == -1 {
-                let dot_idx = self.dots.len() + endpoint_dots.len();
+                let dot_idx = dots.len() + endpoint_dots.len();
                 endpoint_dots.push(endpoint_dot(
                     line.a.pos,
                     line.norm,
                     line_idx,
                     line.is_dom_sib,
                 ));
-                self.lins[line_idx].prev = encode_ref(dot_idx);
+                line.prev = encode_ref(dot_idx);
             }
             if line.next == -1 {
-                let dot_idx = self.dots.len() + endpoint_dots.len();
+                let dot_idx = dots.len() + endpoint_dots.len();
                 endpoint_dots.push(endpoint_dot(
                     line.b.pos,
                     line.norm,
                     line_idx,
                     line.is_dom_sib,
                 ));
-                self.lins[line_idx].next = encode_ref(dot_idx);
+                line.next = encode_ref(dot_idx);
             }
         }
-        self.dots.extend(endpoint_dots);
+        dots.extend(endpoint_dots);
 
-        let original_dot_count = self.dots.len();
+        let original_dot_count = dots.len();
         for dot_idx in 0..original_dot_count {
-            if self.dots[dot_idx].inv != -1 {
+            if dots[dot_idx].inv != -1 {
                 continue;
             }
 
-            self.dots[dot_idx].is_dom_sib = true;
-            let source = self.dots[dot_idx];
-            let inverse_idx = self.dots.len();
-            self.dots[dot_idx].inv = inverse_idx as i32;
-            self.dots.push(Dot {
+            dots[dot_idx].is_dom_sib = true;
+            let source = dots[dot_idx];
+            let inverse_idx = dots.len();
+            dots[dot_idx].inv = inverse_idx as i32;
+            dots.push(Dot {
                 pos: source.pos,
                 norm: source.norm,
                 col: source.col,
@@ -814,9 +941,9 @@ mod tests {
     #[test]
     fn standalone_open_line_can_omit_neighbors() {
         let mesh = Mesh {
-            dots: vec![],
-            lins: vec![line(Float3::ZERO, Float3::X, -1, -1, -1)],
-            tris: vec![],
+            dots: Default::default(),
+            lins: vec![line(Float3::ZERO, Float3::X, -1, -1, -1)].into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -830,13 +957,14 @@ mod tests {
         let q = Float3::X;
         let r = Float3::Y;
         let mesh = Mesh {
-            dots: vec![],
+            dots: Default::default(),
             lins: vec![
                 line(p, q, -1, 1, mesh_ref(0)),
                 line(q, r, 0, 2, mesh_ref(0)),
                 line(r, p, 1, -1, mesh_ref(0)),
-            ],
-            tris: vec![tri(p, q, r, mesh_ref(0), mesh_ref(1), mesh_ref(2))],
+            ]
+            .into(),
+            tris: vec![tri(p, q, r, mesh_ref(0), mesh_ref(1), mesh_ref(2))].into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -853,13 +981,14 @@ mod tests {
         let q = Float3::X;
         let r = Float3::Y;
         let mesh = Mesh {
-            dots: vec![],
+            dots: Default::default(),
             lins: vec![
                 line(p, q, 2, 1, mesh_ref(0)),
                 line(q, r, 0, 2, mesh_ref(0)),
                 line(r, p, 1, 0, mesh_ref(0)),
-            ],
-            tris: vec![tri(p, q, r, mesh_ref(0), mesh_ref(1), mesh_ref(2))],
+            ]
+            .into(),
+            tris: vec![tri(p, q, r, mesh_ref(0), mesh_ref(1), mesh_ref(2))].into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -870,9 +999,9 @@ mod tests {
     #[test]
     fn standalone_lines_must_be_dominant() {
         let mut mesh = Mesh {
-            dots: vec![],
-            lins: vec![line(Float3::ZERO, Float3::X, -1, -1, -1)],
-            tris: vec![],
+            dots: Default::default(),
+            lins: vec![line(Float3::ZERO, Float3::X, -1, -1, -1)].into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -888,12 +1017,13 @@ mod tests {
     #[test]
     fn inverse_line_pairs_require_exactly_one_dominant_sibling() {
         let mesh = Mesh {
-            dots: vec![],
+            dots: Default::default(),
             lins: vec![
                 line(Float3::ZERO, Float3::X, -1, -1, 1),
                 inverse_line(Float3::X, Float3::ZERO, -1, -1, 0),
-            ],
-            tris: vec![],
+            ]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -904,9 +1034,9 @@ mod tests {
     #[test]
     fn normalize_line_dot_topology_pairs_open_lines_and_endpoints() {
         let mut mesh = Mesh {
-            dots: vec![],
-            lins: vec![line(Float3::ZERO, Float3::X, -1, -1, -1)],
-            tris: vec![],
+            dots: Default::default(),
+            lins: vec![line(Float3::ZERO, Float3::X, -1, -1, -1)].into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -927,9 +1057,9 @@ mod tests {
     #[test]
     fn normalize_line_dot_topology_pairs_standalone_dots() {
         let mut mesh = Mesh {
-            dots: vec![dot(Float3::ZERO, -1)],
-            lins: vec![],
-            tris: vec![],
+            dots: vec![dot(Float3::ZERO, -1)].into(),
+            lins: Default::default(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -947,9 +1077,9 @@ mod tests {
     #[test]
     fn line_endpoint_dots_must_point_back() {
         let mesh = Mesh {
-            dots: vec![dot(Float3::ZERO, -1)],
-            lins: vec![line(Float3::ZERO, Float3::X, mesh_ref(0), -1, -1)],
-            tris: vec![],
+            dots: vec![dot(Float3::ZERO, -1)].into(),
+            lins: vec![line(Float3::ZERO, Float3::X, mesh_ref(0), -1, -1)].into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -963,9 +1093,9 @@ mod tests {
     #[test]
     fn dot_line_inverse_passes_when_line_points_back() {
         let mesh = Mesh {
-            dots: vec![dot(Float3::ZERO, mesh_ref(0))],
-            lins: vec![line(Float3::ZERO, Float3::X, mesh_ref(0), -1, -1)],
-            tris: vec![],
+            dots: vec![dot(Float3::ZERO, mesh_ref(0))].into(),
+            lins: vec![line(Float3::ZERO, Float3::X, mesh_ref(0), -1, -1)].into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),

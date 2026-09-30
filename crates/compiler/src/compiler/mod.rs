@@ -245,16 +245,17 @@ fn native_alias(value: &Expression, var_type: VariableType) -> Option<NativeAlia
         return None;
     }
 
-    let forwards_parameters = native
-        .arguments
-        .iter()
-        .zip(&lambda.args)
-        .all(|(argument, parameter)| match &argument.1 {
-            Expression::IdentifierReference(ir @ IdentifierReference::Value(_)) => {
-                ident_ref_name(ir) == parameter.identifier.1.0
-            }
-            _ => false,
-        });
+    let forwards_parameters =
+        native
+            .arguments
+            .iter()
+            .zip(&lambda.args)
+            .all(|(argument, parameter)| match &argument.1 {
+                Expression::IdentifierReference(ir @ IdentifierReference::Value(_)) => {
+                    ident_ref_name(ir) == parameter.identifier.1.0
+                }
+                _ => false,
+            });
     if !forwards_parameters {
         return None;
     }
@@ -1117,12 +1118,12 @@ impl Compiler {
             .current_section()
             .string_pool
             .iter()
-            .position(|x| x == val)
+            .position(|x| &**x == val)
         {
             return idx as u32;
         }
         let idx = self.current_section_mut().string_pool.len();
-        self.current_section_mut().string_pool.push(val.to_string());
+        self.current_section_mut().string_pool.push(val.into());
         idx as u32
     }
 

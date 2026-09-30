@@ -1,0 +1,67 @@
+# self-passing recursion, closures over closures, default arguments, and
+# lambdas returning lambdas, all inside lambdas that constructors sample
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+# recursion inside a sampled lambda: a truncated taylor series for sin
+let taylor = |self, x, term, k, depth| {
+    if (depth == 0) {
+        return term
+    }
+    let next = -term * x * x / ((2 * k) * (2 * k + 1))
+    return term + self(self, x, next, k + 1, depth - 1)
+}
+let approx_sin = |x| taylor(taylor, x, x, 1, 6)
+print [approx_sin(0), approx_sin(1), approx_sin(-2), sin(1)]
+
+# double recursion with an int base case
+let fib = |self, n| {
+    if (n < 2) {
+        return n
+    }
+    return self(self, n - 1) + self(self, n - 2)
+}
+let fib_curve = |x| fib(fib, floor(abs(x) * 4)) / 10
+print map([0, 0.5, 1, 1.5, 2], fib_curve)
+
+# closures over closures: each layer captures the one before
+let offset = 0.25
+let make_scaler = |k| |x| k * x + offset
+let make_pipeline = |k1, k2| {
+    let first = make_scaler(k1)
+    let second = make_scaler(k2)
+    return |x| second(first(x))
+}
+let pipeline = make_pipeline(2, -0.5)
+print [pipeline(0), pipeline(1), pipeline(-1.5)]
+
+# defaults inside sampled lambdas, both used and overridden
+let damped = |x, rate = 0.5, freq = 3| exp(-rate * abs(x)) * cos(freq * x)
+let damped_fast = |x| damped(x, 2)
+print [damped(0), damped(1), damped(1, 1), damped(1, 1, 1), damped_fast(1)]
+
+# a lambda returning a lambda, both levels sampled
+let family = |a| |x| a * x * x - 1
+let members = map([0.5, 1, 1.5], family)
+print map(members, |f| f(1))
+
+# higher-order: a sampled lambda that applies a lambda it was handed
+let twice = |f, x| f(f(x))
+let tent = |x| 1 - abs(x)
+print [twice(tent, 0.25), twice(pipeline, 0.5)]
+
+mesh series = stroke{BLUE} ExplicitFunc(approx_sin, [-3, 3, 31])
+mesh rabbits = stroke{RED} ExplicitFunc(fib_curve, [-2, 2, 17])
+mesh composed = stroke{GREEN} ExplicitFunc(pipeline, [-1, 1, 5])
+mesh decay = stroke{ORANGE} ExplicitFunc(damped_fast, [-2, 2, 21])
+mesh parabola = stroke{PURPLE} ExplicitFunc(family(0.75), [-1, 1, 9])
+mesh folded = stroke{TEAL} ExplicitFunc(|x| twice(tent, x), [-1, 1, 9])
+mesh surface = ExplicitFunc2d(|x, y| 0.1 * fib(fib, floor(abs(x + y) * 2)) - damped(y), [-1, 1, 5], [-1, 1, 5])
+
+slide "Sampled"
+    play Set()

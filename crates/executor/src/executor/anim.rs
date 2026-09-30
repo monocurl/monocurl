@@ -548,12 +548,12 @@ impl Executor {
         match callable.clone().elide_lvalue() {
             Value::Lambda(lambda) => {
                 let args = prepare_eager_call_args(materialized_args, &lambda)?;
-                self.eagerly_invoke_lambda(&lambda, &args, Some(parent_stack_idx))
+                self.eagerly_invoke_lambda(&lambda, args, Some(parent_stack_idx))
                     .await
             }
             Value::Operator(operator) => {
                 let args = prepare_eager_call_args(materialized_args, &operator.0)?;
-                self.eagerly_invoke_lambda(&operator.0, &args, Some(parent_stack_idx))
+                self.eagerly_invoke_lambda(&operator.0, args, Some(parent_stack_idx))
                     .await
             }
             other => Err(ExecutorError::type_error_for(

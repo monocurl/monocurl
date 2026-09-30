@@ -1,0 +1,19 @@
+# calling a non-lambda from inside a field callback, only for some grid cells
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let makers = [|p| Dot(p), 5]
+let pick = |p, idx| makers[min(idx[0], 1)](p)
+print "field with one column"
+mesh fine = Field(pick, [0, 0, 1], [-1, 1, 3])
+print "field with two columns"
+mesh broken = Field(pick, [-1, 1, 2], [-1, 1, 3])
+print "unreachable"
+
+slide "Never"
+    play Set()

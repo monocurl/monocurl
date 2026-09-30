@@ -20,7 +20,7 @@ pub fn dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorE
         });
     }
     Ok(Value::Float(
-        u.iter().zip(v.iter()).map(|(a, b)| a * b).sum(),
+        u.iter().zip(v.iter()).fold(0.0, |acc, (a, b)| acc + a * b),
     ))
 }
 

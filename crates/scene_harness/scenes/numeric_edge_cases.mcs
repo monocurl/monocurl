@@ -1,0 +1,54 @@
+# where ints and floats part ways. a typed kernel must reproduce every one of
+# these exactly, including which results stay ints
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+print [2 * 3, 2.0 * 3, 2 * 3.0, 6 - 6.0, 7 + 0]
+print [1 / 2, 4 / 2, 7 // 2, 7.5 // 2, 7 // 2.5, -7.0 // 2]
+# floor division on ints too, so these read -4
+print [-7 // 2, 7 // -2]
+print [mod(7, 3), mod(-7, 3), mod(7, -3), mod(-7.5, 2), mod(7.5, -2)]
+print [2 ^ 3, 2 ^ -1, 4 ^ 0.5, 0 ^ 0]
+print [0.1 + 0.2, 0.1 + 0.2 == 0.3, 1 - 0.9]
+
+print [floor(2.5), ceil(2.5), round(2.5), round(-2.5), trunc(-2.7), floor(-0.5)]
+print [floor(3), round(3.0) == 3, type_of(floor(2.5)), type_of(sqrt(4))]
+print [min(1, 2), min(1, 2.0), max(3, 2), max(3.0, 2), abs(-3), abs(-3.5)]
+print [sign(-4), sign(0), sign(2.5), clamp(0, 5, 3), clamp(0, -1.5, 3)]
+print [lerp(2, 4, 0.25), lerp(2, 2, 0.5), lerp(2.0, 2, 0.5), lerp(1, 3, 1)]
+
+print [1 < 2, 2 <= 1, 3 > 2.5, 2 >= 2.0, 1 == 1.0, 1 != 1.0, [1, 2] == [1.0, 2]]
+print [not 0, not 3, not 0.0, not -0.5]
+# and yields its rhs (or 0), or yields 1 (or its rhs)
+print [2 and 3, 0 and 3, 2.5 and 0.0, 2 or 3, 0 or 3.5, 0 or 0, 0.0 or 0]
+
+# short circuit: the right side must not run
+let noisy = |x| x / 0
+print [0 and noisy(1), 1 or noisy(1)]
+
+# how sample positions arrive: ExplicitFunc always passes floats, while
+# callbacks handed a point (point_map, color_map, Field) get integer-valued
+# coordinates as ints (float_to_value in stdlib/src/mesh/helpers.rs)
+let kinds = |x| {
+    if (type_of(x) == "int") {
+        return 0.5
+    }
+    return -0.5
+}
+print [kinds(1), kinds(1.0), kinds(0.5)]
+let halves = |x| x // 1 * 0.25 + (type_of(x) == "int") * 0.5
+print map([-1, -0.5, 0, 0.5, 1], halves)
+
+mesh kind_curve = stroke{BLUE} ExplicitFunc(kinds, [-2, 2, 9])
+mesh half_curve = stroke{RED} ExplicitFunc(halves, [-1, 1, 5])
+# the corners sit at integer coordinates, so every vertex lifts to z = 1 (floats
+# would put them at z = -1)
+mesh lifted = point_map{|p| [p[0], p[1], kinds(p[0]) + kinds(p[1])]} Rect([2, 2])
+
+slide "Types"
+    play Set()

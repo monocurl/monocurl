@@ -388,7 +388,11 @@ impl Compiler {
 
     /// the symbol a bare identifier names, when it is a `let` or `var` that can be
     /// read in place instead of copied out first
-    pub(super) fn in_place_local(&mut self, expr: &Expression, span: &Span8) -> Option<Arc<Symbol>> {
+    pub(super) fn in_place_local(
+        &mut self,
+        expr: &Expression,
+        span: &Span8,
+    ) -> Option<Arc<Symbol>> {
         let Expression::IdentifierReference(ir @ IdentifierReference::Value(_)) = expr else {
             return None;
         };
@@ -680,11 +684,9 @@ fn cannot_write_locals(expr: &Expression) -> bool {
         Expression::Literal(Literal::List(items)) => {
             none_write_locals(items.iter().map(|item| &item.1))
         }
-        Expression::Literal(Literal::Map(entries)) => none_write_locals(
-            entries
-                .iter()
-                .flat_map(|(key, value)| [&key.1, &value.1]),
-        ),
+        Expression::Literal(Literal::Map(entries)) => {
+            none_write_locals(entries.iter().flat_map(|(key, value)| [&key.1, &value.1]))
+        }
         Expression::Literal(_) => true,
         Expression::BinaryOperator(b) => {
             !matches!(

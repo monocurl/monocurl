@@ -392,6 +392,32 @@ let Image = |name, center = [0, 0, 0], size = [1, 1]| {
     return __monocurl__native__ mk_image(name, center, width, height)
 }
 
+## [options]
+## important: true
+## [overview]
+## Colour every pixel of a rectangle with a function, as a texture.
+## [description]
+## `color_at` receives the scene coordinates `(x, y)` of a pixel centre and returns an RGBA
+## colour. It is evaluated once per pixel and uploaded as a texture on a rectangle covering
+## the domain in the XY plane, so it costs no geometry however fine the resolution; use it
+## for plasma, fractals, heat maps and anything else that is "a colour at every point".
+## `resolution` counts pixels along the longer edge and the other edge follows the domain's
+## aspect ratio. Pure numeric callbacks run on the kernel tier across worker threads.
+## [parameters]
+## color_at: function `(x, y) -> RGBA`
+## x_min_max: `[x_min, x_max]`
+## y_min_max: `[y_min, y_max]`
+## resolution: pixels along the longer edge
+## [example]
+## ```mcl image
+## mesh plasma = Shader(|x, y| [0.5 + 0.5 * sin(3 * x), 0.5 + 0.5 * cos(3 * y), 0.5 + 0.5 * sin(x + y), 1], [-2, 2], [-1, 1], 320)
+## ```
+let Shader = |color_at, x_min_max = [-1, 1], y_min_max = [-1, 1], resolution = 256| {
+    let [x_min, x_max] = __monocurl__native__ expect_list("x_min_max", x_min_max, 2)
+    let [y_min, y_max] = __monocurl__native__ expect_list("y_min_max", y_min_max, 2)
+    return __monocurl__native__ mk_shader(color_at, x_min, x_max, y_min, y_max, resolution)
+}
+
 ## [overview]
 ## Import an SVG file into mesh geometry.
 ## [description]

@@ -1,0 +1,22 @@
+# a runtime error raised inside a lambda that a constructor samples many
+# times: the samples before the failing one are fine, the 37th divides by zero.
+# the reported message must be the plain error, not a batching artefact
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+# the 37th of 50 samples over [0, 49] is exactly 36.0
+let spike = |x| 1 / (x - 36)
+print [spike(0), spike(35), spike(37)]
+
+mesh ok = stroke{BLUE} ExplicitFunc(spike, [0, 35, 36])
+print "first 36 samples fine"
+mesh broken = stroke{RED} ExplicitFunc(spike, [0, 49, 50])
+print "unreachable"
+
+slide "Never"
+    play Set()

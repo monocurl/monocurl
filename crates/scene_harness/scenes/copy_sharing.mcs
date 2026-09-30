@@ -1,0 +1,133 @@
+# copies of containers may share storage underneath, so every way of writing
+# through one copy must stay invisible through the others, and a value assigned
+# into a container it was copied from must not turn into a cycle
+
+import std.util
+import std.math
+import std.mesh
+
+# writes through the original after a copy, at every depth
+var grid = [[1, 2], [3, 4]]
+var grid_copy = grid
+grid[0][1] = 20
+grid[1] = [30, 40]
+print grid
+print grid_copy
+grid_copy[0][0] = -1
+print grid
+print grid_copy
+
+# appending through either side
+var base = [[1], [2]]
+var snap = base
+base[0] .= 10
+snap[1] .= 20
+base .= [3]
+print base
+print snap
+
+# a chain of copies, each written once
+var first = [[0, 0], [0, 0]]
+var second = first
+var third = second
+first[0][0] = 1
+second[0][1] = 2
+third[1][0] = 3
+print first
+print second
+print third
+
+# arguments are copies: the callee's writes stay local, and its result built
+# from the argument stays independent of later writes by the caller
+let bump = |v| {
+    var local = v
+    local[0][0] = local[0][0] + 100
+    return [local, v]
+}
+var arg = [[1, 2], [3, 4]]
+var got = bump(arg)
+arg[0][0] = -5
+arg[1] .= 99
+print arg
+print got
+
+# self assignment through every level, then writing through the result
+var nest = [[1, 2], [3, 4]]
+nest[0] = nest
+print nest
+nest[0][1][0] = 7
+print nest
+nest[1] = nest[0]
+nest[1][0] = 8
+print nest
+nest[0] .= nest
+print nest
+
+# appending a container into itself
+var grow = [[1], [2]]
+grow[0] .= grow
+print grow
+grow .= grow
+grow[0][0] = 9
+print grow
+
+# swaps and destructuring from the same container
+var pair = [[1, 1], [2, 2]]
+[pair[0], pair[1]] = [pair[1], pair[0]]
+print pair
+pair[0][0] = 5
+print pair
+
+# maps holding lists
+var table = ["a" -> [1, 2], "b" -> [3]]
+var table_copy = table
+table["a"][0] = 10
+table_copy["b"] .= 30
+table["c"] = table_copy["a"]
+table["c"][1] = 20
+print table
+print table_copy
+
+# a scene level variable copied and written on both sides
+var scene_points = [[0, 0, 0], [1, 1, 1]]
+var local_points = scene_points
+scene_points[0][2] = 5
+local_points[1] = [9, 9, 9]
+print scene_points
+print local_points
+
+# lists built in loops from shared pieces
+var rows = []
+var seed = [0, 0]
+for (i in range(0, 3)) {
+    seed[0] = i
+    rows .= seed
+}
+seed[1] = 42
+rows[1][1] = 11
+print rows
+print seed
+
+# writes to elements that hold live values
+let Pt = |x, y| [x, y]
+var shapes = [Pt(x: 1, y: 2), Pt(x: 3, y: 4)]
+var shapes_copy = shapes
+shapes[0].x = 10
+shapes_copy[1].y = 40
+print shapes
+print shapes_copy
+print shapes[0].x
+
+# a live call compared with itself, and with a copy of itself, while the
+# comparison reads the same cached result from both sides
+let keep_live = |p, q = 0.5| q
+var live = keep_live(2)
+var live_copy = live
+print live == live
+print live == live_copy
+print [live] == [live_copy]
+let outer = |p, q = 0.5| {
+    if (q == q) { return 1 }
+    return 0
+}
+print outer(1, keep_live(2))

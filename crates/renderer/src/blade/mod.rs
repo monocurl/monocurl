@@ -4,7 +4,7 @@ mod renderer;
 mod resources;
 mod types;
 
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use blade_graphics as gpu;
 use blade_util::BufferBelt;
@@ -15,8 +15,8 @@ use crate::RenderStyle;
 use self::{
     pipelines::Pipelines,
     resources::{
-        CachedMesh, CachedTexture, IndexedBuffer, OffscreenTarget, PendingBufferUpload,
-        PendingTextureUpload, TextureCacheEntry,
+        BufferPool, CachedMesh, CachedTexture, IndexedBuffer, OffscreenTarget, PendingBufferUpload,
+        PendingTextureUpload, TextureCacheEntry, TextureKey,
     },
 };
 
@@ -42,7 +42,8 @@ pub(crate) struct BladeRenderer {
     dot_index_buffers: HashMap<u16, IndexedBuffer>,
     target: Option<OffscreenTarget>,
     mesh_cache: HashMap<usize, CachedMesh>,
-    texture_cache: HashMap<PathBuf, TextureCacheEntry>,
+    buffer_pool: BufferPool,
+    texture_cache: HashMap<TextureKey, TextureCacheEntry>,
     pending_buffer_uploads: Vec<PendingBufferUpload>,
     pending_texture_uploads: Vec<PendingTextureUpload>,
     style: RenderStyle,
@@ -55,6 +56,6 @@ struct MeshWorkItem {
     key: usize,
     order: usize,
     mesh: Arc<Mesh>,
-    texture_path: Option<PathBuf>,
+    texture: Option<TextureKey>,
     z_index: i32,
 }

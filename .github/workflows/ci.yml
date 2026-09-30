@@ -53,3 +53,18 @@ jobs:
         run: cargo test --workspace
         env:
           MONOCURL_ASSETS_DIR: ${{ github.workspace }}/assets
+
+      # the kernel tier is a second execution engine for numeric lambdas. in
+      # verify mode every batch it runs is also run by the interpreter and the
+      # two must agree exactly, so this pass turns the whole scene corpus and
+      # the integration suite into a differential test of the tier
+      - name: Test with the kernel tier cross-checked
+        run: cargo test -p scene_harness -p integration_tests -p stdlib
+        env:
+          MONOCURL_ASSETS_DIR: ${{ github.workspace }}/assets
+          MONOCURL_KERNELS: verify
+
+      - name: Benchmarks still run
+        run: cargo run --release -p scene_harness --bin mcbench -- --kernel-stats -n 1 --warmup 0
+        env:
+          MONOCURL_ASSETS_DIR: ${{ github.workspace }}/assets

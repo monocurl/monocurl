@@ -34,12 +34,78 @@ struct CacheKey {
 struct CacheEntry {
     meshes: Arc<Vec<Arc<Mesh>>>,
     span_mesh_indices: Arc<HashMap<String, Vec<usize>>>,
+    /// approximate size of the meshes, for the budget
+    bytes: usize,
+    /// last use, for eviction
+    stamp: u64,
 }
 
-static CACHE: OnceLock<Mutex<HashMap<CacheKey, CacheEntry>>> = OnceLock::new();
+/// rendered text kept in memory, least recently used first out. a scene that
+/// renders a changing string every frame would otherwise keep every string it
+/// ever showed
+#[derive(Default)]
+struct MemoryCache {
+    entries: HashMap<CacheKey, CacheEntry>,
+    bytes: usize,
+    next_stamp: u64,
+}
+
+/// mesh bytes the memory cache may hold before evicting down to half
+const MEMORY_CACHE_MAX_BYTES: usize = 128 << 20;
+
+impl MemoryCache {
+    fn get(&mut self, key: &CacheKey) -> Option<CacheEntry> {
+        let entry = self.entries.get_mut(key)?;
+        entry.stamp = self.next_stamp;
+        self.next_stamp += 1;
+        Some(entry.clone())
+    }
+
+    fn insert(&mut self, key: CacheKey, mut entry: CacheEntry) {
+        entry.stamp = self.next_stamp;
+        self.next_stamp += 1;
+        self.bytes += entry.bytes;
+        if let Some(previous) = self.entries.insert(key, entry) {
+            self.bytes -= previous.bytes;
+        }
+        if self.bytes > MEMORY_CACHE_MAX_BYTES {
+            self.evict_to(MEMORY_CACHE_MAX_BYTES / 2);
+        }
+    }
+
+    fn evict_to(&mut self, budget: usize) {
+        let mut by_age: Vec<(u64, CacheKey)> = self
+            .entries
+            .iter()
+            .map(|(key, entry)| (entry.stamp, key.clone()))
+            .collect();
+        by_age.sort_unstable_by_key(|(stamp, _)| *stamp);
+        for (_, key) in by_age {
+            if self.bytes <= budget {
+                break;
+            }
+            if let Some(entry) = self.entries.remove(&key) {
+                self.bytes -= entry.bytes;
+            }
+        }
+    }
+}
+
+fn mesh_bytes(meshes: &[Arc<Mesh>]) -> usize {
+    meshes
+        .iter()
+        .map(|mesh| {
+            mesh.tris.len() * std::mem::size_of::<geo::mesh::Tri>()
+                + mesh.lins.len() * std::mem::size_of::<geo::mesh::Lin>()
+                + mesh.dots.len() * std::mem::size_of::<geo::mesh::Dot>()
+        })
+        .sum()
+}
+
+static CACHE: OnceLock<Mutex<MemoryCache>> = OnceLock::new();
 
 pub(crate) fn clear_memory_cache() {
-    cache().lock().unwrap().clear();
+    *cache().lock().unwrap() = MemoryCache::default();
 }
 
 pub fn clean_stale_file_cache() -> Result<usize> {
@@ -68,7 +134,7 @@ where
         quality,
     };
 
-    if let Some(entry) = cache().lock().unwrap().get(&key).cloned() {
+    if let Some(entry) = cache().lock().unwrap().get(&key) {
         return Ok(RenderedOutput {
             meshes: entry.meshes.iter().cloned().collect(),
             span_mesh_indices: (*entry.span_mesh_indices).clone(),
@@ -76,9 +142,12 @@ where
     }
 
     let rendered = render(source)?;
+    let meshes: Vec<Arc<Mesh>> = rendered.meshes.into_iter().map(Arc::new).collect();
     let entry = CacheEntry {
-        meshes: Arc::new(rendered.meshes.into_iter().map(Arc::new).collect()),
+        bytes: mesh_bytes(&meshes),
+        meshes: Arc::new(meshes),
         span_mesh_indices: Arc::new(rendered.span_mesh_indices),
+        stamp: 0,
     };
 
     cache().lock().unwrap().insert(key, entry.clone());
@@ -279,8 +348,8 @@ fn write_latex_svg_file_cache(path: &Path, svg_source: &str) {
     }
 }
 
-fn cache() -> &'static Mutex<HashMap<CacheKey, CacheEntry>> {
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+fn cache() -> &'static Mutex<MemoryCache> {
+    CACHE.get_or_init(|| Mutex::new(MemoryCache::default()))
 }
 
 fn svg_import_options(
@@ -324,6 +393,35 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn memory_cache_evicts_least_recently_used_past_its_budget() {
+        let mut cache = MemoryCache::default();
+        let key = |i: u32| CacheKey {
+            backend: BackendKind::Latex,
+            backend_config: LatexBackendConfig::Bundled,
+            source: i.to_string(),
+            scale_bits: 0,
+            quality: RenderQuality::Normal,
+        };
+        let entry = |bytes: usize| CacheEntry {
+            meshes: Arc::new(Vec::new()),
+            span_mesh_indices: Arc::new(HashMap::new()),
+            bytes,
+            stamp: 0,
+        };
+        let chunk = MEMORY_CACHE_MAX_BYTES / 4;
+        for i in 0..4 {
+            cache.insert(key(i), entry(chunk));
+        }
+        // touching the oldest keeps it when the fifth entry forces eviction
+        assert!(cache.get(&key(0)).is_some());
+        cache.insert(key(4), entry(chunk));
+        assert!(cache.bytes <= MEMORY_CACHE_MAX_BYTES / 2);
+        assert!(cache.get(&key(0)).is_some());
+        assert!(cache.get(&key(1)).is_none());
+        assert!(cache.get(&key(4)).is_some());
     }
 
     #[test]

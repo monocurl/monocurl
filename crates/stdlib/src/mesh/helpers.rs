@@ -10,22 +10,25 @@ use std::{
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+use super::tessellation::tessellate_planar_loops_with_options;
 use executor::{
     error::ExecutorError,
     executor::Executor,
     heap::{VRc, with_heap},
+    kernel::KVal,
     value::{Value, container::List, lambda::Lambda},
 };
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms, make_mesh_mut},
-    mesh_build::{self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceVertex},
+    mesh_build::{
+        self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceVertex,
+    },
     simd::{Float2, Float3, Float4},
 };
-use libtess2::{TessellationOptions, WindingRule};
 
 const NORMAL_EPSILON: f32 = 1e-6;
 
-fn default_ink() -> Float4 {
+pub(super) fn default_ink() -> Float4 {
     Float4::new(0.0, 0.0, 0.0, 1.0)
 }
 
@@ -112,6 +115,68 @@ impl MeshTree {
             }
         }
     }
+}
+
+/// only the already-evaluated mesh shape can take a native's synchronous path
+pub(super) fn try_read_mesh_tree_arg(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+) -> Option<MeshTree> {
+    fn concrete_tree(value: Value) -> Option<MeshTree> {
+        match value.elide_cached_wrappers_rec() {
+            Value::Mesh(mesh) => Some(MeshTree::Mesh(mesh)),
+            Value::List(list) => list
+                .elements()
+                .iter()
+                .map(|element| concrete_tree(with_heap(|heap| heap.get(element.key()).clone())))
+                .collect::<Option<Vec<_>>>()
+                .map(MeshTree::List),
+            _ => None,
+        }
+    }
+
+    concrete_tree(executor.state.stack(stack_idx).read_at(index).clone())
+}
+
+pub(super) fn has_no_tag_filter(executor: &Executor, stack_idx: usize, index: i32) -> bool {
+    matches!(
+        executor
+            .state
+            .stack(stack_idx)
+            .read_at(index)
+            .clone()
+            .elide_cached_wrappers_rec(),
+        Value::Nil
+    )
+}
+
+pub(super) fn try_read_float4_arg(
+    executor: &Executor,
+    stack_idx: usize,
+    index: i32,
+) -> Option<Float4> {
+    let value = executor
+        .state
+        .stack(stack_idx)
+        .read_at(index)
+        .clone()
+        .elide_cached_wrappers_rec();
+    let Value::List(list) = value else {
+        return None;
+    };
+    let [a, b, c, d] = list.elements() else {
+        return None;
+    };
+    let components = [a, b, c, d].map(|element| {
+        match with_heap(|heap| heap.get(element.key()).clone()).elide_cached_wrappers_rec() {
+            Value::Integer(value) => Some(value as f32),
+            Value::Float(value) => Some(value as f32),
+            _ => None,
+        }
+    });
+    let [a, b, c, d] = components;
+    Some(Float4::new(a?, b?, c?, d?))
 }
 
 pub(super) struct MeshTreeIter<'a> {
@@ -973,117 +1038,11 @@ pub(super) fn mesh_to_indexed_lines(mesh: &Mesh) -> IndexedLineMesh {
     IndexedLineMesh { vertices, segments }
 }
 
-pub(crate) fn tessellate_planar_loops(
-    contours: &[Vec<Float3>],
-    normal: Float3,
-) -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError> {
-    tessellate_planar_loops_with_options(contours, normal, false)
-}
-
-fn tessellate_planar_loops_with_options(
-    contours: &[Vec<Float3>],
-    normal: Float3,
-    normalize_input: bool,
-) -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError> {
-    let contours: Vec<_> = contours
-        .iter()
-        .filter(|contour| contour.len() >= 3)
-        .cloned()
-        .collect();
-    if contours.is_empty() {
-        return Ok((Vec::new(), Vec::new()));
-    }
-    let normal = resolve_planar_normal(&contours, normal);
-
-    let mut source_boundary_edges = BoundaryEdges::default();
-    let mut source_offset = 0usize;
-    for contour in &contours {
-        for i in 0..contour.len() {
-            let a = source_offset + i;
-            let b = source_offset + (i + 1) % contour.len();
-            let edge = BoundaryEdge {
-                a_col: default_ink(),
-                b_col: default_ink(),
-                norm: normal,
-            };
-            source_boundary_edges.insert((a, b), edge);
-            source_boundary_edges.insert(
-                (b, a),
-                BoundaryEdge {
-                    a_col: edge.b_col,
-                    b_col: edge.a_col,
-                    norm: edge.norm,
-                },
-            );
-        }
-        source_offset += contour.len();
-    }
-
-    let tess = libtess2::triangulate(
-        contours.iter().map(Vec::as_slice),
-        TessellationOptions {
-            winding_rule: WindingRule::NonZero,
-            normal: Some(normal),
-            constrained_delaunay: true,
-            reverse_contours: false,
-            normalize_input,
-        },
-    )
-    .map_err(|error| {
-        ExecutorError::invalid_operation(format!("failed to tessellate polygon: {error}"))
-    })?;
-
-    let surface_vertices: Vec<_> = tess
-        .vertices
-        .iter()
-        .copied()
-        .map(|pos| SurfaceVertex {
-            pos,
-            col: default_ink(),
-            uv: Float2::ZERO,
-        })
-        .collect();
-
-    let mut boundary_edges = BoundaryEdges::default();
-    for face in &tess.triangles {
-        for (a, b) in [(face[0], face[1]), (face[1], face[2]), (face[2], face[0])].into_iter() {
-            let edge = match (tess.source_vertex_indices[a], tess.source_vertex_indices[b]) {
-                (Some(source_a), Some(source_b)) => source_boundary_edges
-                    .get(&(source_a, source_b))
-                    .copied()
-                    .unwrap_or(BoundaryEdge {
-                        a_col: default_ink(),
-                        b_col: default_ink(),
-                        norm: normal,
-                    }),
-                _ => BoundaryEdge {
-                    a_col: default_ink(),
-                    b_col: default_ink(),
-                    norm: normal,
-                },
-            };
-            boundary_edges.insert((a, b), edge);
-        }
-    }
-
-    Ok(build_indexed_surface(
-        &surface_vertices,
-        &tess.triangles,
-        &boundary_edges,
-    ))
-}
-
-fn resolve_planar_normal(contours: &[Vec<Float3>], requested: Float3) -> Float3 {
-    normalize_nonzero(requested)
-        .or_else(|| contour_area_normal(contours))
-        .unwrap_or(Float3::Z)
-}
-
 fn first_nonzero_line_normal(lines: &[Lin]) -> Option<Float3> {
     lines.iter().find_map(|line| normalize_nonzero(line.norm))
 }
 
-fn contour_area_normal(contours: &[Vec<Float3>]) -> Option<Float3> {
+pub(super) fn contour_area_normal(contours: &[Vec<Float3>]) -> Option<Float3> {
     let normal =
         contours
             .iter()
@@ -1096,7 +1055,7 @@ fn contour_area_normal(contours: &[Vec<Float3>]) -> Option<Float3> {
     normalize_nonzero(normal)
 }
 
-fn normalize_nonzero(vec: Float3) -> Option<Float3> {
+pub(super) fn normalize_nonzero(vec: Float3) -> Option<Float3> {
     let len = vec.len();
     (len > NORMAL_EPSILON).then_some(vec / len)
 }
@@ -1175,8 +1134,8 @@ pub(crate) fn uprank_mesh(mesh: &Mesh) -> Result<Option<Mesh>, ExecutorError> {
         .or_else(|| contour_area_normal(&contours))
         .unwrap_or(Float3::Z);
     let (lins, tris) = tessellate_planar_loops_with_options(&contours, normal, true)?;
-    out.lins = lins;
-    out.tris = tris;
+    out.lins = lins.into();
+    out.tris = tris.into();
     out.debug_assert_consistent_topology();
     Ok(Some(out))
 }
@@ -1196,9 +1155,9 @@ pub(super) fn mesh_from_parts_with_dot_radius(
         ..Uniforms::default()
     };
     let mut mesh = Mesh {
-        dots,
-        lins,
-        tris,
+        dots: dots.into(),
+        lins: lins.into(),
+        tris: tris.into(),
         uniform,
         tag: vec![],
         version: Mesh::fresh_version(),
@@ -1529,6 +1488,71 @@ pub(super) async fn invoke_callable(
     raw.elide_wrappers_rec(executor).await
 }
 
+/// `invoke_callable_many` for callers that reduce every result to a `T`; see
+/// `Executor::eagerly_invoke_lambda_many_mapped`
+pub(super) async fn invoke_callable_many_mapped<A, T>(
+    executor: &mut Executor,
+    callable: &Value,
+    args: &[A],
+    name: &'static str,
+    from_kernel: impl Fn(&KVal) -> Option<T>,
+    from_value: impl Fn(Value) -> Result<T, ExecutorError>,
+) -> Result<Vec<T>, ExecutorError>
+where
+    A: AsRef<[Value]>,
+{
+    let lambda = match callable.clone().elide_lvalue() {
+        Value::Lambda(lambda) => lambda,
+        Value::Operator(operator) => operator.0,
+        other => {
+            return Err(ExecutorError::type_error_for(
+                "lambda / operator",
+                other.type_name(),
+                name,
+            ));
+        }
+    };
+    executor
+        .eagerly_invoke_lambda_many_mapped(&lambda, args, None, from_kernel, from_value)
+        .await
+}
+
+fn kernel_f32(value: &KVal) -> Option<f32> {
+    match value {
+        KVal::Int(n) => Some(*n as f32),
+        KVal::Float(f) => Some(*f as f32),
+        _ => None,
+    }
+}
+
+fn kernel_components<const N: usize>(value: &KVal) -> Option<[f32; N]> {
+    let KVal::List(list) = value else { return None };
+    if list.len() != N {
+        return None;
+    }
+    let mut out = [0.0; N];
+    for (slot, element) in out.iter_mut().zip(list.iter()) {
+        *slot = kernel_f32(element)?;
+    }
+    Some(out)
+}
+
+pub(super) fn float2_from_kernel(value: &KVal) -> Option<Float2> {
+    kernel_components::<2>(value).map(Float2::from_array)
+}
+
+pub(super) fn float3_from_kernel(value: &KVal) -> Option<Float3> {
+    kernel_components::<3>(value).map(Float3::from_array)
+}
+
+pub(super) fn float4_from_kernel(value: &KVal) -> Option<Float4> {
+    kernel_components::<4>(value).map(Float4::from_array)
+}
+
+pub(super) fn f32_from_kernel(value: &KVal) -> Option<f32> {
+    kernel_f32(value)
+}
+
 pub(super) async fn invoke_callable_many<A>(
     executor: &mut Executor,
     callable: &Value,
@@ -1711,7 +1735,6 @@ pub(super) fn ray_triangle_intersection(
     (t >= 0.0).then_some(t)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn set_triangle_uv_rect(
     mesh: &mut Mesh,
     min: Float3,
@@ -1739,8 +1762,9 @@ mod tests {
 
     use super::{
         mesh_from_parts, mesh_position_groups, mesh_ref, mesh_to_indexed_lines, polygon_basis,
-        push_closed_polyline, tessellate_planar_loops, uprank_mesh,
+        push_closed_polyline, uprank_mesh,
     };
+    use crate::mesh::tessellation::tessellate_planar_loops;
 
     fn mesh_from_contours(contours: &[Vec<Float3>]) -> Mesh {
         let mut lins = Vec::new();
@@ -1749,9 +1773,9 @@ mod tests {
         }
 
         Mesh {
-            dots: Vec::new(),
-            lins,
-            tris: Vec::new(),
+            dots: Default::default(),
+            lins: lins.into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),
@@ -1785,7 +1809,8 @@ mod tests {
                 col: Float4::ONE,
                 inv: mesh_ref(0),
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             lins: vec![Lin {
                 a: LinVertex {
                     pos: Float3::ZERO,
@@ -1800,8 +1825,9 @@ mod tests {
                 next: -1,
                 inv: -1,
                 is_dom_sib: true,
-            }],
-            tris: Vec::new(),
+            }]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: Vec::new(),
             version: Mesh::fresh_version(),

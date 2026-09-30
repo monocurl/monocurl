@@ -2,6 +2,7 @@ pub mod camera;
 pub mod error;
 pub mod executor;
 pub mod heap;
+pub mod kernel;
 pub mod scene_snapshot;
 pub mod state;
 pub mod time;

@@ -1,0 +1,23 @@
+# a type error on `+` part-way through sampling a parametric curve
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let label = "t"
+let curve = |t| {
+    if (t > 0.5) {
+        return [t, label + t, 0]
+    }
+    return [t, t * t, 0]
+}
+print [curve(0), curve(0.5)]
+
+mesh broken = stroke{RED} ParametricFunc(curve, [0, 1, 20])
+print "unreachable"
+
+slide "Never"
+    play Set()

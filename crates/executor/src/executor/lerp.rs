@@ -7,7 +7,7 @@ use crate::{
     executor::prepare_eager_call_args,
     heap::with_heap,
     value::{
-        Value,
+        Labels, Value,
         container::{HashableKey, List, Map},
         invoked_function::{InvokedFunction, make_invoked_function},
         invoked_operator::{InvokedOperator, extract_operator_result, make_invoked_operator},
@@ -40,6 +40,17 @@ impl Executor {
             let b = b.elide_lvalue();
             if Value::values_equal(&a, &b) {
                 return Ok(a);
+            }
+            // a finished live call next to a plain value compares as its
+            // result; two live calls keep their arguments so they can blend
+            let a_live = matches!(a, Value::InvokedFunction(_) | Value::InvokedOperator(_));
+            let b_live = matches!(b, Value::InvokedFunction(_) | Value::InvokedOperator(_));
+            if a_live != b_live {
+                let a_plain = a.clone().elide_cached_wrappers_rec();
+                let b_plain = b.clone().elide_cached_wrappers_rec();
+                if Value::values_equal(&a_plain, &b_plain) {
+                    return Ok(a_plain);
+                }
             }
 
             // a stateful value interpolates as the live call it currently stands for,
@@ -139,7 +150,7 @@ impl Executor {
             let full_args = prepare_eager_call_args(lerped_args.iter().cloned(), &lambda)?;
             let trace_parent_idx = Some(self.state.last_stack_idx);
             let result = self
-                .eagerly_invoke_lambda(&lambda, &full_args, trace_parent_idx)
+                .eagerly_invoke_lambda(&lambda, full_args, trace_parent_idx)
                 .await?;
             let result = self.materialize_cached_value(result).await?;
 
@@ -158,12 +169,17 @@ impl Executor {
         &mut self,
         a_args: &[Value],
         b_args: &[Value],
-        labels: &SmallVec<[(usize, String); 4]>,
+        labels: &Labels,
         t: f64,
         kind: &str,
     ) -> Result<Option<SmallVec<[Value; 8]>>, ExecutorError> {
         let mut lerped_args = SmallVec::with_capacity(a_args.len());
-        for (index, (ai, bi)) in a_args.iter().cloned().zip(b_args.iter().cloned()).enumerate() {
+        for (index, (ai, bi)) in a_args
+            .iter()
+            .cloned()
+            .zip(b_args.iter().cloned())
+            .enumerate()
+        {
             if label_name_at(labels, index).is_some() {
                 lerped_args.push(self.lerp(ai, bi, t).await.map_err(|err| {
                     lerp_context(
@@ -246,7 +262,7 @@ impl Executor {
             let trace_parent_idx = Some(self.state.last_stack_idx);
 
             let raw = self
-                .eagerly_invoke_lambda(&operator.0, &full_args, trace_parent_idx)
+                .eagerly_invoke_lambda(&operator.0, full_args, trace_parent_idx)
                 .await?;
             let (initial, modified) = extract_operator_result(raw)?;
             let initial = self.materialize_cached_value(initial).await?;
@@ -310,7 +326,7 @@ impl Executor {
             let trace_parent_idx = Some(self.state.last_stack_idx);
 
             let raw = self
-                .eagerly_invoke_lambda(&operator.0, &full_args, trace_parent_idx)
+                .eagerly_invoke_lambda(&operator.0, full_args, trace_parent_idx)
                 .await?;
             let (embed0, embed1) = extract_operator_result(raw)?;
             self.lerp(embed0, embed1, t).await
@@ -485,17 +501,13 @@ fn format_hashable_key(key: &HashableKey) -> String {
     }
 }
 
-fn label_name_at(labels: &SmallVec<[(usize, String); 4]>, index: usize) -> Option<&str> {
+fn label_name_at(labels: &Labels, index: usize) -> Option<&str> {
     labels
         .iter()
-        .find_map(|(label_index, name)| (*label_index == index).then_some(name.as_str()))
+        .find_map(|(label_index, name)| (*label_index == index).then_some(&**name))
 }
 
-fn format_label_mismatch(
-    a_labels: &SmallVec<[(usize, String); 4]>,
-    b_labels: &SmallVec<[(usize, String); 4]>,
-    len: usize,
-) -> String {
+fn format_label_mismatch(a_labels: &Labels, b_labels: &Labels, len: usize) -> String {
     let mut mismatches = Vec::new();
     for index in 0..len {
         let a_label = label_name_at(a_labels, index);

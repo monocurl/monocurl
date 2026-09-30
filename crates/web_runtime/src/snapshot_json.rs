@@ -4,7 +4,7 @@ use executor::{
     transcript::{SectionTranscript, TranscriptEntry},
 };
 use geo::{
-    mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms},
+    mesh::{Dot, Lin, LinVertex, Mesh, TextureSource, Tri, TriVertex, Uniforms},
     simd::{Float2, Float3, Float4},
 };
 use serde::Serialize;
@@ -263,7 +263,36 @@ struct SerializableUniforms {
     gloss: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     image: Option<String>,
+    /// a scene-produced texture (`Shader`), as base64 RGBA8 rows top to bottom
+    #[serde(skip_serializing_if = "Option::is_none")]
+    image_pixels: Option<SerializablePixels>,
     z_index: i32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SerializablePixels {
+    width: u32,
+    height: u32,
+    rgba_base64: String,
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let mut block = [0u8; 3];
+        block[..chunk.len()].copy_from_slice(chunk);
+        let bits = u32::from_be_bytes([0, block[0], block[1], block[2]]);
+        for index in 0..4 {
+            if index <= chunk.len() {
+                out.push(TABLE[((bits >> (18 - 6 * index)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
 }
 
 impl From<&Uniforms> for SerializableUniforms {
@@ -276,10 +305,18 @@ impl From<&Uniforms> for SerializableUniforms {
             dot_vertex_count: uniforms.dot_vertex_count,
             smooth: uniforms.smooth,
             gloss: uniforms.gloss.into(),
-            image: uniforms
-                .img
-                .as_ref()
-                .map(|path| path.to_string_lossy().into_owned()),
+            image: match &uniforms.img {
+                Some(TextureSource::File(path)) => Some(path.to_string_lossy().into_owned()),
+                _ => None,
+            },
+            image_pixels: match &uniforms.img {
+                Some(TextureSource::Pixels(pixels)) => Some(SerializablePixels {
+                    width: pixels.width,
+                    height: pixels.height,
+                    rgba_base64: base64(&pixels.rgba),
+                }),
+                _ => None,
+            },
             z_index: uniforms.z_index,
         }
     }

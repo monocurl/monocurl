@@ -748,12 +748,13 @@ mod tests {
     #[test]
     fn write_mesh_preserves_authored_line_links() {
         let mesh = Mesh {
-            dots: vec![],
+            dots: Default::default(),
             lins: vec![
                 line(Float3::ZERO, Float3::X, -1, 1),
                 line(Float3::X, Float3::new(1.0, 1.0, 0.0), 0, -1),
-            ],
-            tris: vec![],
+            ]
+            .into(),
+            tris: Default::default(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),
@@ -776,11 +777,13 @@ mod tests {
                 col: Float4::ONE,
                 inv: -1,
                 is_dom_sib: false,
-            }],
+            }]
+            .into(),
             lins: vec![
                 line(Float3::ZERO, Float3::X, -1, 1),
                 line(Float3::X, Float3::new(2.0, 0.0, 0.0), 0, -1),
-            ],
+            ]
+            .into(),
             tris: vec![tri(
                 Float3::new(10.0, 0.0, 0.0),
                 Float3::new(11.0, 0.0, 0.0),
@@ -788,7 +791,8 @@ mod tests {
                 -1,
                 -1,
                 -1,
-            )],
+            )]
+            .into(),
             uniform: Uniforms::default(),
             tag: vec![],
             version: Mesh::fresh_version(),

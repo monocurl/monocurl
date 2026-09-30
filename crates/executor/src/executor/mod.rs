@@ -6,9 +6,12 @@ mod runtime_error;
 mod access;
 mod anim;
 mod cacheing;
+mod eager;
 mod invoke;
 mod lerp;
+mod materialize;
 pub(crate) mod ops;
+mod stateful_eval;
 
 use std::pin::Pin;
 use std::{future::Future, sync::Arc};
@@ -17,27 +20,32 @@ use bytecode::{Bytecode, Instruction};
 use structs::futures::PeriodicYielder;
 
 use crate::executor::cacheing::ExecutionCache;
+use crate::kernel::{KernelIntrinsic, KernelMode, KernelTier};
 use crate::time::Timestamp;
 use crate::{error::ExecutorError, state::ExecutionState, value::Value};
 
 pub use self::cacheing::LiveCheckpoint;
-pub(crate) use self::invoke::{fill_defaults, prepare_eager_call_args};
+pub(crate) use self::eager::{fill_defaults, prepare_eager_call_args};
 use self::memory::{EXECUTOR_HEAP_SLOT_LIMIT, MEMORY_CHECK_PERIOD, PeriodicMemoryChecker};
 
 pub type StdlibReturn<'a> = Pin<Box<dyn Future<Output = Result<Value, ExecutorError>> + 'a>>;
 
 pub type StdlibFunc = for<'a> fn(&'a mut Executor, usize) -> StdlibReturn<'a>;
 
-/// entry point for a native that never suspends
-pub type StdlibSyncFunc = fn(&mut Executor, usize) -> Result<Value, ExecutorError>;
+/// entry point for a native call that may not need to suspend: `None` declines
+/// (some argument still needs evaluating) and the call goes through `call`
+pub type StdlibSyncFunc = fn(&mut Executor, usize) -> Option<Result<Value, ExecutorError>>;
 
 /// a native function as the executor sees it. `call_sync` is present whenever the
-/// native cannot suspend, which lets the interpreter run it without building a
-/// future at all
+/// native cannot suspend, or offers an attempt for the common case where it need
+/// not, which lets the interpreter run it without building a future at all
 #[derive(Clone, Copy)]
 pub struct NativeFunction {
     pub call: StdlibFunc,
     pub call_sync: Option<StdlibSyncFunc>,
+    /// present when the kernel tier evaluates this native itself; see
+    /// `crate::kernel`
+    pub intrinsic: Option<KernelIntrinsic>,
 }
 
 enum SeekPrimitiveResult {
@@ -152,6 +160,10 @@ pub struct Executor {
     pub(crate) bytecode: Bytecode,
     pub(crate) native_funcs: Vec<NativeFunction>,
     pub(crate) cache: ExecutionCache,
+    pub(crate) kernels: KernelTier,
+    /// unique across executors and bumped whenever the bytecode changes, for
+    /// caches keyed by instruction pointers that live outside the executor
+    bytecode_generation: u64,
     pub(crate) yielder: PeriodicYielder,
     aspect_ratio: f32,
     text_render_quality: TextRenderQuality,
@@ -169,11 +181,18 @@ fn normalize_aspect_ratio(aspect_ratio: f32) -> f32 {
 impl Executor {
     pub fn new(bytecode: Bytecode, native_funcs: Vec<NativeFunction>) -> Self {
         let cache = ExecutionCache::new(&bytecode);
+        let kernels = KernelTier::new(
+            KernelMode::from_env(),
+            bytecode.sections.clone(),
+            native_funcs.clone(),
+        );
         Self {
             state: ExecutionState::new(),
             bytecode,
             native_funcs,
             cache,
+            kernels,
+            bytecode_generation: next_bytecode_generation(),
             yielder: PeriodicYielder::default(),
             aspect_ratio: 16.0 / 9.0,
             text_render_quality: TextRenderQuality::Normal,
@@ -282,7 +301,10 @@ impl Executor {
                 SyncRun::BudgetExhausted => self.tick_yielder().await,
                 SyncRun::Suspend { section_idx, instr } => {
                     self.tick_yielder().await;
-                    match self.execute_instr_async(section_idx, stack_idx, instr).await {
+                    match self
+                        .execute_instr_async(section_idx, stack_idx, instr)
+                        .await
+                    {
                         ExecSingle::Continue => {}
                         other => return other,
                     }
@@ -290,5 +312,19 @@ impl Executor {
             }
         }
     }
+}
 
+/// generations are drawn from one process-wide counter so two executors
+/// never share one, even at the same instruction pointers
+pub(crate) fn next_bytecode_generation() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+impl Executor {
+    /// changes whenever the bytecode does; anything keyed by an instruction
+    /// pointer is only valid within one generation
+    pub fn bytecode_generation(&self) -> u64 {
+        self.bytecode_generation
+    }
 }

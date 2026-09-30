@@ -1,0 +1,18 @@
+# out-of-range subscript on the 31st sample of a sampled lambda
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let table = [0.5, -0.25, 1]
+let lookup = |x| table[x // 10]
+print map([0, 9, 10, 29], lookup)
+
+mesh broken = stroke{RED} ExplicitFunc(lookup, [0, 49, 50])
+print "unreachable"
+
+slide "Never"
+    play Set()

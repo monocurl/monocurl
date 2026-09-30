@@ -245,7 +245,9 @@ pub struct SectionBytecode {
     pub annotations: Vec<InstructionAnnotation>,
     pub int_pool: Vec<i64>,
     pub float_pool: Vec<f64>,
-    pub string_pool: Vec<String>,
+    /// shared so that pushing a constant or naming an argument label costs a
+    /// reference count, not a copy
+    pub string_pool: Vec<Arc<str>>,
     pub lambda_prototypes: Vec<LambdaPrototype>,
     pub anim_prototypes: Vec<AnimPrototype>,
 }

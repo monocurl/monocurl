@@ -410,7 +410,10 @@ impl Compiler {
             Ok(current_delta) if stop_pos == current_pos + 1 => {
                 let idx = self.instruction_pointer() as usize;
                 self.emit(
-                    Instruction::RangeLoopTest { current_delta, to: 0 },
+                    Instruction::RangeLoopTest {
+                        current_delta,
+                        to: 0,
+                    },
                     span.clone(),
                 );
                 idx

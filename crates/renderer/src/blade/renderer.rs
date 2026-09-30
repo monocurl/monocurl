@@ -1,10 +1,11 @@
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow, ensure};
 use blade_graphics as gpu;
 use blade_util::BufferBeltDescriptor;
 use bytemuck::Pod;
 use executor::camera::CameraBasis;
+use geo::mesh::TextureSource;
 use image::RgbaImage;
 
 use crate::{RenderSize, RenderView, SceneRenderData};
@@ -19,8 +20,9 @@ use super::{
     pipelines::Pipelines,
     resources::{
         BufferWithCount, CachedMesh, CachedTexture, IndexedBuffer, OffscreenTarget,
-        PendingBufferUpload, PendingTextureUpload, TextureCacheEntry, choose_sample_count,
-        create_sampled_texture, destroy_offscreen_target, destroy_texture, extent, load_texture,
+        PendingBufferUpload, PendingTextureUpload, TextureCacheEntry, TextureKey,
+        choose_sample_count, create_sampled_texture, destroy_offscreen_target, destroy_texture,
+        extent, load_texture,
     },
     types::{
         BackgroundData, BackgroundParams, CameraParams, DotShaderParams, DotsData,
@@ -69,6 +71,7 @@ impl BladeRenderer {
             dot_index_buffers: std::collections::HashMap::new(),
             target: None,
             mesh_cache: std::collections::HashMap::new(),
+            buffer_pool: Default::default(),
             texture_cache: std::collections::HashMap::new(),
             pending_buffer_uploads: Vec::new(),
             pending_texture_uploads: Vec::new(),
@@ -98,8 +101,8 @@ impl BladeRenderer {
             }
 
             let key = self.ensure_mesh(mesh, frame_index);
-            if let Some(path) = mesh.uniform.img.as_deref() {
-                self.ensure_texture(path, frame_index);
+            if let Some(source) = mesh.uniform.img.as_ref() {
+                self.ensure_texture(source, frame_index);
             }
             // queued before the upload flush below, otherwise the first frame that
             // uses a vertex count draws from an unfilled index buffer
@@ -111,7 +114,7 @@ impl BladeRenderer {
                 key,
                 order,
                 mesh: Arc::clone(mesh),
-                texture_path: mesh.uniform.img.clone(),
+                texture: mesh.uniform.img.as_ref().map(TextureKey::of),
                 z_index: mesh.uniform.z_index,
             });
         }
@@ -294,7 +297,7 @@ impl BladeRenderer {
             }
         }
         if let Some(stale) = self.mesh_cache.remove(&key) {
-            stale.destroy(&self.gpu);
+            stale.release(&self.gpu, &mut self.buffer_pool);
         }
 
         let triangles =
@@ -316,25 +319,39 @@ impl BladeRenderer {
         key
     }
 
-    fn ensure_texture(&mut self, path: &Path, frame_index: u64) {
-        if let Some(entry) = self.texture_cache.get_mut(path) {
+    fn ensure_texture(&mut self, source: &TextureSource, frame_index: u64) {
+        let key = TextureKey::of(source);
+        if let Some(entry) = self.texture_cache.get_mut(&key) {
             entry.last_used_frame = frame_index;
             return;
         }
 
-        let texture = match load_texture(path) {
-            Ok(image) => self.create_texture_with_upload(path, &image),
-            Err(error) => {
-                log::warn!(
-                    "failed to load renderer texture {}: {error:#}",
-                    path.display()
-                );
-                None
-            }
+        let texture = match source {
+            TextureSource::File(path) => match load_texture(path) {
+                Ok(image) => self.create_texture_with_upload(
+                    &path.to_string_lossy(),
+                    image.width(),
+                    image.height(),
+                    image.as_raw(),
+                ),
+                Err(error) => {
+                    log::warn!(
+                        "failed to load renderer texture {}: {error:#}",
+                        path.display()
+                    );
+                    None
+                }
+            },
+            TextureSource::Pixels(pixels) => self.create_texture_with_upload(
+                "renderer-shader-texture",
+                pixels.width,
+                pixels.height,
+                &pixels.rgba,
+            ),
         };
 
         self.texture_cache.insert(
-            path.to_path_buf(),
+            key,
             TextureCacheEntry {
                 texture,
                 last_used_frame: frame_index,
@@ -352,11 +369,7 @@ impl BladeRenderer {
         }
 
         let size = std::mem::size_of_val(data) as u64;
-        let buffer = self.gpu.create_buffer(gpu::BufferDesc {
-            name,
-            size,
-            memory: gpu::Memory::Device,
-        });
+        let (buffer, capacity) = self.buffer_pool.acquire(&self.gpu, name, size);
         let src = self.upload_belt.alloc_pod(data, &self.gpu);
         self.pending_buffer_uploads.push(PendingBufferUpload {
             src,
@@ -367,6 +380,7 @@ impl BladeRenderer {
         Some(BufferWithCount {
             buffer,
             count: data.len() as u32,
+            capacity,
         })
     }
 
@@ -388,33 +402,30 @@ impl BladeRenderer {
         Some(())
     }
 
+    /// `rgba` is tightly packed RGBA8, rows top to bottom
     fn create_texture_with_upload(
         &mut self,
-        path: &Path,
-        image: &RgbaImage,
+        name: &str,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
     ) -> Option<CachedTexture> {
-        if image.width() == 0 || image.height() == 0 {
+        if width == 0 || height == 0 || rgba.len() != width as usize * height as usize * 4 {
             return None;
         }
 
-        let texture = create_sampled_texture(
-            &self.gpu,
-            path.to_string_lossy().as_ref(),
-            image.width(),
-            image.height(),
-            TEXTURE_FORMAT,
-        );
+        let texture = create_sampled_texture(&self.gpu, name, width, height, TEXTURE_FORMAT);
         self.command_encoder.init_texture(texture.texture);
 
-        let bytes_per_row = image.width() * 4;
-        let src = self.upload_belt.alloc_bytes(image.as_raw(), &self.gpu);
+        let bytes_per_row = width * 4;
+        let src = self.upload_belt.alloc_bytes(rgba, &self.gpu);
         self.pending_texture_uploads.push(PendingTextureUpload {
             src,
             dst: texture.texture,
             bytes_per_row,
             size: gpu::Extent {
-                width: image.width(),
-                height: image.height(),
+                width,
+                height,
                 depth: 1,
             },
         });
@@ -500,11 +511,11 @@ impl BladeRenderer {
 
             if let Some(triangles) = buffers.triangles.as_ref() {
                 let texture_view = item
-                    .texture_path
+                    .texture
                     .as_ref()
-                    .and_then(|path| {
+                    .and_then(|key| {
                         self.texture_cache
-                            .get(path)
+                            .get(key)
                             .and_then(|entry| entry.texture.as_ref())
                     })
                     .map_or(self.white_texture.view, |texture| texture.view);
@@ -634,7 +645,7 @@ impl BladeRenderer {
             .collect::<Vec<_>>();
         for key in stale_meshes {
             if let Some(mesh) = self.mesh_cache.remove(&key) {
-                mesh.destroy(&self.gpu);
+                mesh.release(&self.gpu, &mut self.buffer_pool);
             }
         }
 
@@ -656,8 +667,9 @@ impl BladeRenderer {
 
     fn destroy(&mut self) {
         for (_, mesh) in self.mesh_cache.drain() {
-            mesh.destroy(&self.gpu);
+            mesh.release(&self.gpu, &mut self.buffer_pool);
         }
+        self.buffer_pool.destroy(&self.gpu);
         for (_, entry) in self.texture_cache.drain() {
             if let Some(texture) = entry.texture {
                 destroy_texture(&self.gpu, texture);

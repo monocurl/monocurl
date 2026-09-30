@@ -123,6 +123,8 @@ export interface MeshUniforms {
   smooth: boolean;
   gloss: number;
   image?: string;
+  /** a scene-produced texture (`Shader`): RGBA8 rows top to bottom, base64 */
+  imagePixels?: { width: number; height: number; rgbaBase64: string };
   zIndex: number;
 }
 

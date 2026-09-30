@@ -1,5 +1,5 @@
 mod equality;
-mod helpers;
+pub(crate) mod helpers;
 
 pub mod anim_block;
 pub mod container;
@@ -32,6 +32,9 @@ use self::{
 /// (section_index, instruction_offset)
 pub type InstructionPointer = (u16, u32);
 
+/// the labelled arguments of a call: argument index and label name
+pub type Labels = smallvec::SmallVec<[(usize, Arc<str>); 4]>;
+
 #[derive(Clone)]
 pub enum Value {
     Nil,
@@ -63,7 +66,6 @@ pub enum Value {
     /// non-owning lvalue reference — pushed via PushLvalue.
     WeakLvalue(VWeak),
 }
-
 
 #[cfg(test)]
 mod layout {
