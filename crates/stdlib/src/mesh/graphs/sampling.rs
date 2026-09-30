@@ -341,7 +341,7 @@ async fn mk_explicit2d_uncached(
             .iter()
             .flat_map(|p| p.to_array().map(f64::from))
             .collect();
-        invoke_callable_many_input(
+        invoke_callable_many_flat(
             executor,
             cb,
             BatchInput::Floats {
@@ -349,7 +349,6 @@ async fn mk_explicit2d_uncached(
                 arity: 3,
             },
             "color_at",
-            float4_from_kernel,
             |value| float4_from_value(value, "color_at"),
         )
         .await?

@@ -1419,7 +1419,7 @@ async fn shade(
             args.extend([x as f64, y as f64]);
         }
     }
-    let colors = invoke_callable_many_input(
+    let colors = invoke_callable_many_flat(
         executor,
         color_at,
         BatchInput::Floats {
@@ -1427,7 +1427,6 @@ async fn shade(
             arity: 2,
         },
         "color_at",
-        float4_from_kernel,
         |value| float4_from_value(value, "color_at"),
     )
     .await?;

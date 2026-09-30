@@ -25,7 +25,8 @@
 //! on native targets a typed kernel whose registers are all ints and floats
 //! is compiled to machine code instead (`jit`), which runs a call with no
 //! dispatch at all. samplers can hand a batch its arguments as plain numbers
-//! (`input`), which native code reads without any `KVal` or heap value
+//! (`input`), which native code reads without any `KVal` or heap value, and
+//! ask for results as numbers (`output`), which native code writes the same way
 
 mod batch;
 pub mod compile;
@@ -38,6 +39,7 @@ pub mod jit;
 #[path = "jit_off.rs"]
 pub mod jit;
 pub mod lanes;
+mod output;
 pub mod pool;
 pub mod run;
 mod tier;
@@ -52,6 +54,8 @@ pub use self::convert::to_value as kernel_value_to_value;
 pub use self::input::BatchInput;
 pub(crate) use self::input::{Calls, NumArgs};
 pub use self::ir::KernelIntrinsic;
+pub(crate) use self::output::Output;
+pub use self::output::{FLAT_MAX, FlatOutput};
 pub(crate) use self::tier::KernelTier;
 pub use self::tier::{KernelMode, KernelStats};
 pub use self::value::KVal;

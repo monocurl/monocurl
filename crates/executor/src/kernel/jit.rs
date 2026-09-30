@@ -52,6 +52,7 @@ use super::{
     KernelStats,
     input::{Num, NumArg},
     ir::{BinKind, KernelIntrinsic, Reg},
+    output::FLAT_MAX,
     run::{self, CALL_OP_BUDGET, Fault},
     tier::dump_kernels,
     typed::{Class, Opnd, Spec, TOp},
@@ -2405,23 +2406,34 @@ impl JitVm {
         arena: &ClosureArena,
         args: &[KVal],
     ) -> Result<KVal, Fault> {
+        self.run_args(spec, arena, args)?;
+        Ok(self.result(spec))
+    }
+
+    /// `call`, leaving the result in the frame for `result` or `flat`
+    pub(crate) fn run_args(
+        &mut self,
+        spec: &Spec,
+        arena: &ClosureArena,
+        args: &[KVal],
+    ) -> Result<(), Fault> {
         if !self.ready {
             return Err(Fault::Type);
         }
         for (i, arg) in args.iter().enumerate() {
             self.write_arg(spec, i, arg)?;
         }
-        self.run(spec, arena)
+        self.run(arena)
     }
 
-    /// `call` on typed input: the numbers of `call` followed by `defaults`
-    pub(crate) fn call_nums<'n>(
+    /// `run_args` on typed input: the numbers of `call` followed by `defaults`
+    pub(crate) fn run_nums<'n>(
         &mut self,
         spec: &Spec,
         arena: &ClosureArena,
         call: impl Iterator<Item = NumArg<'n>>,
         defaults: &[KVal],
-    ) -> Result<KVal, Fault> {
+    ) -> Result<(), Fault> {
         if !self.ready {
             return Err(Fault::Type);
         }
@@ -2446,7 +2458,7 @@ impl JitVm {
         for (i, default) in defaults.iter().enumerate() {
             self.write_arg(spec, provided + i, default)?;
         }
-        self.run(spec, arena)
+        self.run(arena)
     }
 
     fn write_arg(&mut self, spec: &Spec, i: usize, arg: &KVal) -> Result<(), Fault> {
@@ -2458,7 +2470,7 @@ impl JitVm {
         Ok(())
     }
 
-    fn run(&mut self, spec: &Spec, arena: &ClosureArena) -> Result<KVal, Fault> {
+    fn run(&mut self, arena: &ClosureArena) -> Result<(), Fault> {
         let mut budget = CALL_OP_BUDGET as i64;
         let abort = self
             .abort
@@ -2471,29 +2483,72 @@ impl JitVm {
         // safety: the frame has the layout the code was generated for, and
         // the budget and abort flag outlive the call
         let code = unsafe { (compiled.entry)(self.words.as_mut_ptr(), &mut budget, abort, arena) };
-        if code != 0 {
-            return Err(fault_of(code));
+        match code {
+            0 => Ok(()),
+            code => Err(fault_of(code)),
         }
+    }
+
+    fn returned(&self, spec: &Spec) -> Returned<'_> {
         let layout = Layout::of(spec.frame_size);
-        let scalar = |word: u64, kind: u64| match kind as i64 {
-            KIND_INT => KVal::Int(word as i64),
-            _ => KVal::Float(f64::from_bits(word)),
-        };
         let words = &self.words;
-        Ok(match words[layout.kind] as i64 {
+        match words[layout.kind] as i64 {
             kind @ KIND_LIST.. => {
                 let items = layout.items + Layout::site((kind - KIND_LIST) as u8);
                 let count = words[layout.result] as usize;
-                KVal::list(
-                    words[items..items + count]
-                        .iter()
-                        .zip(&words[items + LIST_CAP..])
-                        .map(|(word, kind)| scalar(*word, *kind)),
-                )
+                Returned::List {
+                    values: &words[items..items + count],
+                    kinds: &words[items + LIST_CAP..items + LIST_CAP + count],
+                }
             }
-            kind => scalar(words[layout.result], kind as u64),
-        })
+            kind => Returned::Scalar {
+                word: words[layout.result],
+                kind,
+            },
+        }
     }
+
+    /// the result of the last successful run
+    pub(crate) fn result(&self, spec: &Spec) -> KVal {
+        let scalar = |word: u64, kind: i64| match kind {
+            KIND_INT => KVal::Int(word as i64),
+            _ => KVal::Float(f64::from_bits(word)),
+        };
+        match self.returned(spec) {
+            Returned::List { values, kinds } => KVal::list(
+                values
+                    .iter()
+                    .zip(kinds)
+                    .map(|(&word, &kind)| scalar(word, kind as i64)),
+            ),
+            Returned::Scalar { word, kind } => scalar(word, kind),
+        }
+    }
+
+    /// the result of the last successful run as `output::flat_of` reads it,
+    /// without building the list; `None` for a scalar or another length
+    pub(crate) fn flat(&self, spec: &Spec, width: usize) -> Option<[f32; FLAT_MAX]> {
+        let Returned::List { values, kinds } = self.returned(spec) else {
+            return None;
+        };
+        if values.len() != width || width > FLAT_MAX {
+            return None;
+        }
+        let mut out = [0.0; FLAT_MAX];
+        for (slot, (&word, &kind)) in out.iter_mut().zip(values.iter().zip(kinds)) {
+            *slot = match kind as i64 {
+                KIND_INT => word as i64 as f32,
+                _ => f64::from_bits(word) as f32,
+            };
+        }
+        Some(out)
+    }
+}
+
+/// what the last run left in the frame
+enum Returned<'a> {
+    List { values: &'a [u64], kinds: &'a [u64] },
+    Scalar { word: u64, kind: i64 },
 }
 
 /// write `value` into `words[slot]` as the typed machine's `store` would;
@@ -2526,6 +2581,7 @@ mod tests {
     use super::*;
     use crate::kernel::{
         ir::{KOp, Kernel, KernelIntrinsic},
+        output::flat_of,
         run::Vm,
         typed::TypedProgram,
         typed_run::TVm,
@@ -2587,6 +2643,17 @@ mod tests {
                     (Ok(a), Ok(b)) => assert!(KVal::strictly_equal(a, b), "{args:?}"),
                     (Err(a), Err(b)) => assert_eq!(a, b, "{args:?}"),
                     _ => panic!("{args:?}: typed {typed:?}, dynamic {dynamic:?}"),
+                }
+                if let Ok(native) = &native {
+                    let bits =
+                        |values: Option<[f32; FLAT_MAX]>| values.map(|v| v.map(f32::to_bits));
+                    for width in 0..=FLAT_MAX + 1 {
+                        assert_eq!(
+                            bits(jit.flat(spec, width)),
+                            bits(flat_of(native, width)),
+                            "{args:?}: numbers of width {width} off {native:?}"
+                        );
+                    }
                 }
                 match (&native, &typed) {
                     (Ok(a), Ok(b)) => assert!(

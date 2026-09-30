@@ -15,7 +15,7 @@ use executor::{
     error::ExecutorError,
     executor::Executor,
     heap::{VRc, with_heap},
-    kernel::{BatchInput, KVal, kernel_value_to_value},
+    kernel::{BatchInput, FlatOutput, KVal, kernel_value_to_value},
     value::{Value, container::List, lambda::Lambda},
 };
 use geo::{
@@ -1517,6 +1517,21 @@ pub(super) async fn invoke_callable_many_input<T>(
         .await
 }
 
+/// `invoke_callable_many_input` for results of `T::WIDTH` numbers, which
+/// native code hands back without building a list
+pub(super) async fn invoke_callable_many_flat<T: FlatOutput>(
+    executor: &mut Executor,
+    callable: &Value,
+    input: BatchInput<'_>,
+    name: &'static str,
+    from_value: impl Fn(Value) -> Result<T, ExecutorError>,
+) -> Result<Vec<T>, ExecutorError> {
+    let lambda = callable_lambda(callable, name)?;
+    executor
+        .eagerly_invoke_lambda_many_flat(&lambda, input, None, from_value)
+        .await
+}
+
 /// `invoke_callable_many_input` keeping every result as a value
 pub(super) async fn invoke_callable_many_values(
     executor: &mut Executor,
@@ -1533,30 +1548,6 @@ fn kernel_f32(value: &KVal) -> Option<f32> {
         KVal::Float(f) => Some(*f as f32),
         _ => None,
     }
-}
-
-fn kernel_components<const N: usize>(value: &KVal) -> Option<[f32; N]> {
-    let KVal::List(list) = value else { return None };
-    if list.len() != N {
-        return None;
-    }
-    let mut out = [0.0; N];
-    for (slot, element) in out.iter_mut().zip(list.iter()) {
-        *slot = kernel_f32(element)?;
-    }
-    Some(out)
-}
-
-pub(super) fn float2_from_kernel(value: &KVal) -> Option<Float2> {
-    kernel_components::<2>(value).map(Float2::from_array)
-}
-
-pub(super) fn float3_from_kernel(value: &KVal) -> Option<Float3> {
-    kernel_components::<3>(value).map(Float3::from_array)
-}
-
-pub(super) fn float4_from_kernel(value: &KVal) -> Option<Float4> {
-    kernel_components::<4>(value).map(Float4::from_array)
 }
 
 pub(super) fn f32_from_kernel(value: &KVal) -> Option<f32> {

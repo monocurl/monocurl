@@ -6,8 +6,8 @@ use crate::{
     error::ExecutorError,
     heap::heap_replace,
     kernel::{
-        BatchInput, BatchOutcome, Calls, KVal, KernelMode, NumArgs, kernel_value_to_value,
-        strictly_equal,
+        BatchInput, BatchOutcome, Calls, FLAT_MAX, FlatOutput, KVal, KernelMode, NumArgs, Output,
+        kernel_value_to_value, strictly_equal,
     },
     state::MAX_CALL_DEPTH,
     value::{Value, lambda::Lambda},
@@ -124,6 +124,7 @@ impl Executor {
             lambda,
             Calls::Values(args),
             trace_parent_idx,
+            None,
             from_kernel,
             from_value,
         )
@@ -149,16 +150,43 @@ impl Executor {
             lambda,
             Calls::Nums(Arc::new(NumArgs::new(input))),
             trace_parent_idx,
+            None,
             from_kernel,
             from_value,
         )
     }
 
+    /// `eagerly_invoke_lambda_many_input` for results of a fixed number of
+    /// numbers, which native code hands back without building a list
+    pub fn eagerly_invoke_lambda_many_flat<'a, T, V>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        input: BatchInput<'_>,
+        trace_parent_idx: Option<usize>,
+        from_value: V,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<T>, ExecutorError>> + 'a>>
+    where
+        T: FlatOutput + 'a,
+        V: Fn(Value) -> Result<T, ExecutorError> + 'a,
+    {
+        self.invoke_many_mapped::<Vec<Value>, _, _, _>(
+            lambda,
+            Calls::Nums(Arc::new(NumArgs::new(input))),
+            trace_parent_idx,
+            Some((T::WIDTH, T::from_flat)),
+            T::from_kernel,
+            from_value,
+        )
+    }
+
+    /// `flat` is the width of list native code may hand back as numbers and
+    /// how to read them
     fn invoke_many_mapped<'a, A, T, K, V>(
         &'a mut self,
         lambda: &'a Lambda,
         calls: Calls<'a, A>,
         trace_parent_idx: Option<usize>,
+        flat: Option<FlatReader<T>>,
         from_kernel: K,
         from_value: V,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<T>, ExecutorError>> + 'a>>
@@ -180,7 +208,10 @@ impl Executor {
                 }
                 Calls::Nums(nums) => validate_eager_arg_count(nums.arity(), lambda)?,
             }
-            let kernel_results = match self.kernel_batch(lambda, &calls).await {
+            let kernel_results = match self
+                .kernel_batch(lambda, &calls, flat.map(|(width, _)| width))
+                .await
+            {
                 BatchOutcome::Results(results) => Some(results),
                 BatchOutcome::Interpreter => None,
             };
@@ -189,19 +220,25 @@ impl Executor {
             {
                 let mut mapped = Vec::with_capacity(results.len());
                 for result in &results {
-                    let item = match from_kernel(result) {
-                        Some(item) => item,
-                        None => match kernel_value_to_value(result) {
-                            Some(value) => from_value(value)?,
-                            None => {
-                                self.kernel_result_unconvertible(lambda);
-                                return self
-                                    .interpret_lambda_many(lambda, &calls, trace_parent_idx)
-                                    .await?
-                                    .into_iter()
-                                    .map(&from_value)
-                                    .collect();
-                            }
+                    let item = match (result, flat) {
+                        (Output::Flat(values), Some((_, from_flat))) => from_flat(*values),
+                        (Output::Flat(_), None) => {
+                            unreachable!("numbers only come back when asked for")
+                        }
+                        (Output::Value(result), _) => match from_kernel(result) {
+                            Some(item) => item,
+                            None => match kernel_value_to_value(result) {
+                                Some(value) => from_value(value)?,
+                                None => {
+                                    self.kernel_result_unconvertible(lambda);
+                                    return self
+                                        .interpret_lambda_many(lambda, &calls, trace_parent_idx)
+                                        .await?
+                                        .into_iter()
+                                        .map(&from_value)
+                                        .collect();
+                                }
+                            },
                         },
                     };
                     mapped.push(item);
@@ -220,6 +257,9 @@ impl Executor {
                     )
                 });
                 for (index, (kernel, interpreter)) in results.iter().zip(interpreted).enumerate() {
+                    let Output::Value(kernel) = kernel else {
+                        panic!("verify mode hands back values only");
+                    };
                     let kernel = kernel_value_to_value(kernel);
                     assert!(
                         kernel
@@ -382,6 +422,9 @@ impl Executor {
         Ok(())
     }
 }
+
+/// a width of list and how to read its numbers
+type FlatReader<T> = (usize, fn([f32; FLAT_MAX]) -> T);
 
 fn validate_eager_arg_count(arg_count: usize, lambda: &Lambda) -> Result<(), ExecutorError> {
     let minimum = lambda.required_args as usize;
