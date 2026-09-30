@@ -349,7 +349,7 @@ impl Vm {
                     arg_count,
                 } => {
                     let start = base + arg_start as usize;
-                    let value = native(
+                    let value = native_in(
                         arena,
                         intrinsic,
                         &self.regs[start..start + arg_count as usize],
@@ -582,11 +582,22 @@ fn float_list(value: &KVal) -> Result<SmallVec<[f64; 4]>, Fault> {
     }
 }
 
-pub fn native(
+/// a native that may read the batch's palettes; everything else goes through
+/// `native`, which the jit's shims call without an arena
+pub fn native_in(
     arena: &ClosureArena,
     intrinsic: KernelIntrinsic,
     args: &[KVal],
 ) -> Result<KVal, Fault> {
+    match (intrinsic, args) {
+        (KernelIntrinsic::KeyframeLerp, [KVal::Palette(id), t]) => {
+            keyframe_lerp(arena.palette(*id), as_f64(t)?)
+        }
+        _ => native(intrinsic, args),
+    }
+}
+
+pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> {
     use KernelIntrinsic::*;
 
     let unary = |f: fn(f64) -> f64| as_f64(&args[0]).map(|x| KVal::Float(f(x)));
@@ -680,10 +691,8 @@ pub fn native(
             KVal::Float(f) => Ok(KVal::Float(*f)),
             _ => Err(Fault::Type),
         },
-        KeyframeLerp => match &args[0] {
-            KVal::Palette(id) => keyframe_lerp(arena.palette(*id), as_f64(&args[1])?),
-            _ => Err(Fault::Type),
-        },
+        // palettes live in the arena, so only `native_in` can read them
+        KeyframeLerp => Err(Fault::Type),
         Fallthrough => Err(Fault::Type),
     }
 }
