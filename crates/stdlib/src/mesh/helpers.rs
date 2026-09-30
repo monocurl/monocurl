@@ -1,7 +1,7 @@
 use std::{
     any::Any,
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     future::Future,
     ops::Range,
     pin::Pin,
@@ -23,7 +23,8 @@ use executor::{
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Shared, Tri, TriVertex, Uniforms, make_mesh_mut},
     mesh_build::{
-        self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceVertex,
+        self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceTopology,
+        SurfaceVertex,
     },
     simd::{Float2, Float3, Float4},
 };
@@ -867,6 +868,32 @@ pub(crate) fn build_indexed_surface(
     boundary_edges: &BoundaryEdges,
 ) -> (Vec<Lin>, Vec<Tri>) {
     mesh_build::build_indexed_surface(vertices, faces, boundary_edges)
+}
+
+/// grids kept for their topology: a grid redrawn with new heights or colours
+/// keeps its cells, so its edges need matching only once
+const GRID_TOPOLOGIES: usize = 4;
+
+thread_local! {
+    static GRID_TOPOLOGY: RefCell<VecDeque<Rc<SurfaceTopology>>> = RefCell::default();
+}
+
+/// `build_indexed_surface` without boundary templates for faces that are
+/// likely to come again with other vertices
+pub(crate) fn build_grid_surface(
+    vertices: &[SurfaceVertex],
+    faces: Vec<[usize; 3]>,
+) -> (Vec<Lin>, Vec<Tri>) {
+    let topology = GRID_TOPOLOGY.with_borrow_mut(|cache| {
+        let topology = match cache.iter().position(|topology| topology.faces() == faces) {
+            Some(idx) => cache.remove(idx).unwrap(),
+            None => Rc::new(SurfaceTopology::new(faces)),
+        };
+        cache.push_front(topology.clone());
+        cache.truncate(GRID_TOPOLOGIES);
+        topology
+    });
+    topology.build(vertices, &BoundaryEdges::default())
 }
 
 pub(super) fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]]) -> Vec<Tri> {
