@@ -1,6 +1,6 @@
 use executor::{error::ExecutorError, executor::Executor, kernel::BatchInput, value::Value};
 use geo::{
-    mesh_build::{BoundaryEdges, SurfaceVertex},
+    mesh_build::SurfaceVertex,
     simd::{Float2, Float3, Float4},
 };
 use stdlib_macros::stdlib_func;
@@ -87,7 +87,7 @@ pub async fn mk_color_grid(
             faces.push([a, c, d]);
         }
 
-        let (lins, tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
+        let (lins, tris) = build_grid_surface(&vertices, faces);
         return Ok(mesh_from_parts(vec![], lins, tris));
     }
 
@@ -116,7 +116,7 @@ pub async fn mk_color_grid(
         faces.push([a, c, d]);
     }
 
-    let (mut lins, mut tris) = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
+    let (mut lins, mut tris) = build_grid_surface(&vertices, faces);
     for (tri_pair, color) in tris.chunks_mut(2).zip(colors) {
         for tri in tri_pair {
             tri.a.col = color;

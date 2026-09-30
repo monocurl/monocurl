@@ -364,7 +364,7 @@ async fn mk_explicit2d_uncached(
             uv: Float2::ZERO,
         })
         .collect();
-    let (lins, tris) = build_indexed_surface(&surface_vertices, &faces, &BoundaryEdges::default());
+    let (lins, tris) = build_grid_surface(&surface_vertices, faces);
     Ok(mesh_from_parts(vec![], lins, tris))
 }
 

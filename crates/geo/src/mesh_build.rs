@@ -142,41 +142,169 @@ pub fn build_indexed_surface_with(
     faces: &[[usize; 3]],
     edge_for: impl Fn(usize, usize) -> Option<BoundaryEdge>,
 ) -> (Vec<Lin>, Vec<Tri>) {
-    let (mut tris, edge_map) = build_surface_tris(vertices, faces);
+    let mut tris = unconnected_tris(vertices, faces);
+    let lines = connect_faces(faces, tris.as_mut_slice());
+    (boundary_lins(vertices, &lines, edge_for), tris)
+}
+
+/// the part of `build_indexed_surface` that depends only on the faces: which
+/// triangles meet across each edge and the boundary lines between them, so a
+/// surface whose vertices move but whose faces stay put skips matching edges
+#[derive(Clone, Debug)]
+pub struct SurfaceTopology {
+    faces: Vec<[usize; 3]>,
+    adjacency: Vec<[i32; 3]>,
+    lines: Vec<BoundaryLine>,
+}
+
+impl SurfaceTopology {
+    pub fn new(faces: Vec<[usize; 3]>) -> Self {
+        let mut adjacency = vec![[-1; 3]; faces.len()];
+        let lines = connect_faces(&faces, adjacency.as_mut_slice());
+        Self {
+            faces,
+            adjacency,
+            lines,
+        }
+    }
+
+    pub fn faces(&self) -> &[[usize; 3]] {
+        &self.faces
+    }
+
+    /// `build_indexed_surface(vertices, self.faces(), boundary_edges)`
+    pub fn build(
+        &self,
+        vertices: &[SurfaceVertex],
+        boundary_edges: &BoundaryEdges,
+    ) -> (Vec<Lin>, Vec<Tri>) {
+        let tris = self
+            .faces
+            .iter()
+            .zip(&self.adjacency)
+            .map(|(&face, &[ab, bc, ca])| Tri {
+                ab,
+                bc,
+                ca,
+                ..unconnected_tri(vertices, face)
+            })
+            .collect();
+        let lins = boundary_lins(vertices, &self.lines, |a, b| {
+            boundary_edges.get(&(a, b)).copied()
+        });
+        (lins, tris)
+    }
+}
+
+/// where a surface's triangles keep their `[ab, bc, ca]`: a neighbouring
+/// triangle, `mesh_ref` of a boundary line, or -1
+trait TriEdges {
+    fn edge(&self, tri: usize, edge_idx: usize) -> i32;
+    fn set_edge(&mut self, tri: usize, edge_idx: usize, value: i32);
+}
+
+impl TriEdges for [Tri] {
+    fn edge(&self, tri: usize, edge_idx: usize) -> i32 {
+        let tri = &self[tri];
+        [tri.ab, tri.bc, tri.ca][edge_idx]
+    }
+
+    fn set_edge(&mut self, tri: usize, edge_idx: usize, value: i32) {
+        let tri = &mut self[tri];
+        *[&mut tri.ab, &mut tri.bc, &mut tri.ca][edge_idx] = value;
+    }
+}
+
+impl TriEdges for [[i32; 3]] {
+    fn edge(&self, tri: usize, edge_idx: usize) -> i32 {
+        self[tri][edge_idx]
+    }
+
+    fn set_edge(&mut self, tri: usize, edge_idx: usize, value: i32) {
+        self[tri][edge_idx] = value;
+    }
+}
+
+/// a boundary edge `a -> b` of triangle `tri` and its neighbours in the loop
+#[derive(Clone, Copy, Debug)]
+struct BoundaryLine {
+    a: usize,
+    b: usize,
+    tri: usize,
+    prev: i32,
+    next: i32,
+}
+
+/// links the faces' triangles in `edges` and gives the boundary lines in
+/// triangle and edge order, each set as its triangle's edge
+fn connect_faces(faces: &[[usize; 3]], edges: &mut (impl TriEdges + ?Sized)) -> Vec<BoundaryLine> {
+    let edge_map = match_edges(faces, edges);
 
     let mut boundary_items = Vec::new();
-    for ((a, b), edges) in edge_map {
-        for (tri_idx, edge_idx) in edges {
+    for ((a, b), unmatched) in edge_map {
+        for (tri_idx, edge_idx) in unmatched {
             boundary_items.push((tri_idx, edge_idx, a, b));
         }
     }
     boundary_items.sort_unstable_by_key(|(tri_idx, edge_idx, _, _)| (*tri_idx, *edge_idx));
 
-    let mut lins = Vec::with_capacity(boundary_items.len());
-    let mut line_edges = Vec::with_capacity(boundary_items.len());
-    for (tri_idx, edge_idx, a, b) in boundary_items {
-        let template = edge_for(a, b).unwrap_or(BoundaryEdge {
-            a_col: vertices[a].col,
-            b_col: vertices[b].col,
-            norm: Float3::ZERO,
+    let mut lines = Vec::with_capacity(boundary_items.len());
+    for (line_idx, &(tri, edge_idx, a, b)) in boundary_items.iter().enumerate() {
+        edges.set_edge(tri, edge_idx, mesh_ref(line_idx));
+        lines.push(BoundaryLine {
+            a,
+            b,
+            tri,
+            prev: -1,
+            next: -1,
         });
-        let line_idx = lins.len();
-        let mut edge = line(
-            vertices[a].pos,
-            vertices[b].pos,
-            template.norm,
-            template.a_col,
-        );
-        edge.b.col = template.b_col;
-        edge.inv = mesh_ref(tri_idx);
-        set_tri_edge(&mut tris[tri_idx], edge_idx, mesh_ref(line_idx));
-        lins.push(edge);
-        line_edges.push((tri_idx, edge_idx));
     }
 
-    link_boundary_loops(&mut lins, &tris, faces, &line_edges);
+    for (line_idx, &(tri_idx, edge_idx, _, _)) in boundary_items.iter().enumerate() {
+        let Some(next_idx) = next_boundary_line(edges, faces, tri_idx, edge_idx) else {
+            continue;
+        };
+        lines[line_idx].next = next_idx as i32;
+        lines[next_idx].prev = line_idx as i32;
+    }
 
-    (lins, tris)
+    lines
+}
+
+fn boundary_lins(
+    vertices: &[SurfaceVertex],
+    lines: &[BoundaryLine],
+    edge_for: impl Fn(usize, usize) -> Option<BoundaryEdge>,
+) -> Vec<Lin> {
+    lines
+        .iter()
+        .map(
+            |&BoundaryLine {
+                 a,
+                 b,
+                 tri,
+                 prev,
+                 next,
+             }| {
+                let template = edge_for(a, b).unwrap_or(BoundaryEdge {
+                    a_col: vertices[a].col,
+                    b_col: vertices[b].col,
+                    norm: Float3::ZERO,
+                });
+                let mut edge = line(
+                    vertices[a].pos,
+                    vertices[b].pos,
+                    template.norm,
+                    template.a_col,
+                );
+                edge.b.col = template.b_col;
+                edge.inv = mesh_ref(tri);
+                edge.prev = prev;
+                edge.next = next;
+                edge
+            },
+        )
+        .collect()
 }
 
 pub fn build_indexed_tris_with_open_boundaries(
@@ -193,7 +321,9 @@ pub fn build_indexed_tris_with_open_boundaries(
             uv: Float2::ZERO,
         })
         .collect();
-    build_surface_tris(&vertices, faces).0
+    let mut tris = unconnected_tris(&vertices, faces);
+    match_edges(faces, tris.as_mut_slice());
+    tris
 }
 
 pub fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]], color: Float4) -> Vec<Tri> {
@@ -214,35 +344,32 @@ pub fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]], color: Floa
     tris
 }
 
-fn build_surface_tris(
-    vertices: &[SurfaceVertex],
-    faces: &[[usize; 3]],
-) -> (Vec<Tri>, BoundaryEdgeMap) {
-    let mut tris: Vec<_> = faces
-        .iter()
-        .map(|face| Tri {
-            a: TriVertex {
-                pos: vertices[face[0]].pos,
-                col: vertices[face[0]].col,
-                uv: vertices[face[0]].uv,
-            },
-            b: TriVertex {
-                pos: vertices[face[1]].pos,
-                col: vertices[face[1]].col,
-                uv: vertices[face[1]].uv,
-            },
-            c: TriVertex {
-                pos: vertices[face[2]].pos,
-                col: vertices[face[2]].col,
-                uv: vertices[face[2]].uv,
-            },
-            ab: -1,
-            bc: -1,
-            ca: -1,
-            is_dom_sib: false,
-        })
-        .collect();
+fn unconnected_tri(vertices: &[SurfaceVertex], face: [usize; 3]) -> Tri {
+    let corner = |idx: usize| {
+        let SurfaceVertex { pos, col, uv } = vertices[idx];
+        TriVertex { pos, col, uv }
+    };
+    Tri {
+        a: corner(face[0]),
+        b: corner(face[1]),
+        c: corner(face[2]),
+        ab: -1,
+        bc: -1,
+        ca: -1,
+        is_dom_sib: false,
+    }
+}
 
+fn unconnected_tris(vertices: &[SurfaceVertex], faces: &[[usize; 3]]) -> Vec<Tri> {
+    faces
+        .iter()
+        .map(|&face| unconnected_tri(vertices, face))
+        .collect()
+}
+
+/// sets the neighbours of every pair of faces meeting on opposite directed
+/// edges and gives the directed edges left unmatched
+fn match_edges(faces: &[[usize; 3]], edges: &mut (impl TriEdges + ?Sized)) -> BoundaryEdgeMap {
     let mut edge_map =
         BoundaryEdgeMap::with_capacity_and_hasher(faces.len() * 3, Default::default());
     for (tri_idx, face) in faces.iter().enumerate() {
@@ -256,8 +383,8 @@ fn build_surface_tris(
                 if other_edges.is_empty() {
                     edge_map.remove(&(b, a));
                 }
-                set_tri_edge(&mut tris[tri_idx], edge_idx, other_tri as i32);
-                set_tri_edge(&mut tris[other_tri], other_edge, tri_idx as i32);
+                edges.set_edge(tri_idx, edge_idx, other_tri as i32);
+                edges.set_edge(other_tri, other_edge, tri_idx as i32);
                 continue;
             }
 
@@ -267,45 +394,20 @@ fn build_surface_tris(
                 .push((tri_idx, edge_idx));
         }
     }
-
-    (tris, edge_map)
-}
-
-fn set_tri_edge(tri: &mut Tri, edge_idx: usize, value: i32) {
-    match edge_idx {
-        0 => tri.ab = value,
-        1 => tri.bc = value,
-        2 => tri.ca = value,
-        _ => unreachable!(),
-    }
-}
-
-fn link_boundary_loops(
-    lins: &mut [Lin],
-    tris: &[Tri],
-    faces: &[[usize; 3]],
-    line_edges: &[(usize, usize)],
-) {
-    for (line_idx, &(tri_idx, edge_idx)) in line_edges.iter().enumerate() {
-        let Some(next_idx) = next_boundary_line(tris, faces, tri_idx, edge_idx) else {
-            continue;
-        };
-        lins[line_idx].next = next_idx as i32;
-        lins[next_idx].prev = line_idx as i32;
-    }
+    edge_map
 }
 
 fn next_boundary_line(
-    tris: &[Tri],
+    edges: &(impl TriEdges + ?Sized),
     faces: &[[usize; 3]],
     start_tri_idx: usize,
     start_edge_idx: usize,
 ) -> Option<usize> {
     let mut tri_idx = start_tri_idx;
     let mut edge_idx = start_edge_idx;
-    for _ in 0..tris.len().saturating_mul(3) {
+    for _ in 0..faces.len().saturating_mul(3) {
         let next_edge_idx = (edge_idx + 1) % 3;
-        let edge_ref = tri_edge(&tris[tri_idx], next_edge_idx);
+        let edge_ref = edges.edge(tri_idx, next_edge_idx);
         if let Some(line_idx) = decode_mesh_ref(edge_ref) {
             return Some(line_idx);
         }
@@ -316,15 +418,6 @@ fn next_boundary_line(
         tri_idx = next_tri_idx;
     }
     None
-}
-
-fn tri_edge(tri: &Tri, edge_idx: usize) -> i32 {
-    match edge_idx {
-        0 => tri.ab,
-        1 => tri.bc,
-        2 => tri.ca,
-        _ => unreachable!(),
-    }
 }
 
 fn face_edge(face: [usize; 3], edge_idx: usize) -> (usize, usize) {
@@ -354,7 +447,7 @@ mod tests {
     };
 
     use super::{
-        SurfaceVertex, build_indexed_surface, build_indexed_tris,
+        SurfaceTopology, SurfaceVertex, build_indexed_surface, build_indexed_tris,
         build_indexed_tris_with_open_boundaries,
     };
 
@@ -493,5 +586,39 @@ mod tests {
         assert_eq!(tris[0].ab, -1);
         assert_eq!(tris[0].bc, -1);
         assert_eq!(tris[0].ca, -1);
+    }
+
+    #[test]
+    fn surface_topology_builds_what_build_indexed_surface_does() {
+        // a 4 by 3 grid with its middle cell missing: an outer and an inner loop
+        let (nx, ny) = (4, 3);
+        let vertices: Vec<_> = (0..=nx)
+            .flat_map(|ix| {
+                (0..=ny).map(move |iy| SurfaceVertex {
+                    pos: Float3::new(ix as f32, iy as f32, (ix * iy) as f32),
+                    col: Float4::new(ix as f32, iy as f32, 0.5, 1.0),
+                    uv: Float2::ZERO,
+                })
+            })
+            .collect();
+        let vertex = |ix: usize, iy: usize| ix * (ny + 1) + iy;
+        let faces: Vec<_> = (0..nx)
+            .flat_map(|ix| (0..ny).map(move |iy| (ix, iy)))
+            .filter(|&cell| cell != (1, 1))
+            .flat_map(|(ix, iy)| {
+                let (a, b, c, d) = (
+                    vertex(ix, iy),
+                    vertex(ix + 1, iy),
+                    vertex(ix + 1, iy + 1),
+                    vertex(ix, iy + 1),
+                );
+                [[a, b, c], [a, c, d]]
+            })
+            .collect();
+
+        let expected = build_indexed_surface(&vertices, &faces, &BoundaryEdges::default());
+        let built = SurfaceTopology::new(faces).build(&vertices, &BoundaryEdges::default());
+        assert!(!expected.0.is_empty());
+        assert_eq!(format!("{built:?}"), format!("{expected:?}"));
     }
 }
