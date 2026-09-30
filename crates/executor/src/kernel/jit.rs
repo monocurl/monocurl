@@ -50,6 +50,7 @@ use rustc_hash::FxHashMap;
 
 use super::{
     KernelStats,
+    input::{Num, NumArg},
     ir::{BinKind, KernelIntrinsic, Reg},
     run::{self, CALL_OP_BUDGET, Fault},
     tier::dump_kernels,
@@ -124,30 +125,46 @@ fn inputs(spec: &Spec) -> usize {
 
 /// copy `value` into the input at `words[0..INPUT_WORDS]`
 fn write_input(words: &mut [u64], value: &KVal) {
-    let (palette, rest) = words.split_first_mut().unwrap();
-    let (len, items) = rest.split_first_mut().unwrap();
-    *palette = match value {
-        KVal::Palette(id) => id.0 as u64,
-        _ => ABSENT,
-    };
-    *len = match value {
-        KVal::List(list) if list.len() <= LIST_CAP => {
-            let (values, kinds) = items.split_at_mut(LIST_CAP);
-            let scalars =
-                list.iter()
-                    .zip(values.iter_mut().zip(kinds))
-                    .all(|(element, (value, kind))| {
-                        (*value, *kind) = match *element {
-                            KVal::Int(n) => (n as u64, KIND_INT as u64),
-                            KVal::Float(f) => (f.to_bits(), KIND_FLOAT as u64),
-                            _ => return false,
-                        };
-                        true
-                    });
-            if scalars { list.len() as u64 } else { ABSENT }
+    match value {
+        KVal::Palette(id) => {
+            words[0] = id.0 as u64;
+            words[1] = ABSENT;
         }
-        _ => ABSENT,
-    };
+        KVal::List(list) => write_list_input(
+            words,
+            list.len(),
+            list.iter().map(|element| match *element {
+                KVal::Int(n) => Some(Num::Int(n)),
+                KVal::Float(f) => Some(Num::Float(f)),
+                _ => None,
+            }),
+        ),
+        _ => {
+            words[0] = ABSENT;
+            words[1] = ABSENT;
+        }
+    }
+}
+
+/// copy a list of `len` elements into the input at `words[0..INPUT_WORDS]`;
+/// its length reads as absent when it is too long or holds a non-scalar
+fn write_list_input(words: &mut [u64], len: usize, elements: impl Iterator<Item = Option<Num>>) {
+    let (palette, rest) = words.split_first_mut().unwrap();
+    let (slot, items) = rest.split_first_mut().unwrap();
+    *palette = ABSENT;
+    let (values, kinds) = items.split_at_mut(LIST_CAP);
+    let scalars = len <= LIST_CAP
+        && elements
+            .zip(values.iter_mut().zip(kinds))
+            .all(|(element, (value, kind))| {
+                (*value, *kind) = match element {
+                    Some(Num::Int(n)) => (n as u64, KIND_INT as u64),
+                    Some(Num::Float(f)) => (f.to_bits(), KIND_FLOAT as u64),
+                    None => return false,
+                };
+                true
+            });
+    *slot = if scalars { len as u64 } else { ABSENT };
 }
 
 const KIND_INT: i64 = 0;
@@ -2391,15 +2408,57 @@ impl JitVm {
         if !self.ready {
             return Err(Fault::Type);
         }
-        for (i, ((arg, class), input)) in
-            args.iter().zip(&spec.sig).zip(&self.arg_inputs).enumerate()
-        {
-            match input {
-                Some(at) => write_input(&mut self.words[*at..*at + INPUT_WORDS], arg),
-                None if store(&mut self.words, i, *class, arg) => {}
-                None => return Err(Fault::Type),
-            }
+        for (i, arg) in args.iter().enumerate() {
+            self.write_arg(spec, i, arg)?;
         }
+        self.run(spec, arena)
+    }
+
+    /// `call` on typed input: the numbers of `call` followed by `defaults`
+    pub(crate) fn call_nums<'n>(
+        &mut self,
+        spec: &Spec,
+        arena: &ClosureArena,
+        call: impl Iterator<Item = NumArg<'n>>,
+        defaults: &[KVal],
+    ) -> Result<KVal, Fault> {
+        if !self.ready {
+            return Err(Fault::Type);
+        }
+        let mut provided = 0;
+        for (i, arg) in call.enumerate() {
+            match (arg, self.arg_inputs[i]) {
+                (NumArg::List(nums), Some(at)) => write_list_input(
+                    &mut self.words[at..at + INPUT_WORDS],
+                    nums.len(),
+                    nums.iter().copied().map(Some),
+                ),
+                (NumArg::Num(Num::Int(n)), None) if spec.sig[i] == Class::Int => {
+                    self.words[i] = n as u64
+                }
+                (NumArg::Num(Num::Float(f)), None) if spec.sig[i] == Class::Float => {
+                    self.words[i] = f.to_bits()
+                }
+                _ => return Err(Fault::Type),
+            }
+            provided += 1;
+        }
+        for (i, default) in defaults.iter().enumerate() {
+            self.write_arg(spec, provided + i, default)?;
+        }
+        self.run(spec, arena)
+    }
+
+    fn write_arg(&mut self, spec: &Spec, i: usize, arg: &KVal) -> Result<(), Fault> {
+        match self.arg_inputs[i] {
+            Some(at) => write_input(&mut self.words[at..at + INPUT_WORDS], arg),
+            None if store(&mut self.words, i, spec.sig[i], arg) => {}
+            None => return Err(Fault::Type),
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, spec: &Spec, arena: &ClosureArena) -> Result<KVal, Fault> {
         let mut budget = CALL_OP_BUDGET as i64;
         let abort = self
             .abort

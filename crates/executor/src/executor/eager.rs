@@ -5,11 +5,15 @@
 use crate::{
     error::ExecutorError,
     heap::heap_replace,
-    kernel::{BatchOutcome, KVal, KernelMode, kernel_value_to_value, strictly_equal},
+    kernel::{
+        BatchInput, BatchOutcome, Calls, KVal, KernelMode, NumArgs, kernel_value_to_value,
+        strictly_equal,
+    },
     state::MAX_CALL_DEPTH,
     value::{Value, lambda::Lambda},
 };
 use smallvec::SmallVec;
+use std::sync::Arc;
 
 use super::{ExecSingle, Executor, invoke::wrap_reference_argument};
 
@@ -153,14 +157,67 @@ impl Executor {
         K: Fn(&KVal) -> Option<T> + 'a,
         V: Fn(Value) -> Result<T, ExecutorError> + 'a,
     {
+        self.invoke_many_mapped(
+            lambda,
+            Calls::Values(args),
+            trace_parent_idx,
+            from_kernel,
+            from_value,
+        )
+    }
+
+    /// `eagerly_invoke_lambda_many_mapped` on arguments given as numbers: the
+    /// kernel tier reads them directly, and heap values are built only for
+    /// the calls the interpreter runs
+    pub fn eagerly_invoke_lambda_many_input<'a, T, K, V>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        input: BatchInput<'_>,
+        trace_parent_idx: Option<usize>,
+        from_kernel: K,
+        from_value: V,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<T>, ExecutorError>> + 'a>>
+    where
+        T: 'a,
+        K: Fn(&KVal) -> Option<T> + 'a,
+        V: Fn(Value) -> Result<T, ExecutorError> + 'a,
+    {
+        self.invoke_many_mapped::<Vec<Value>, _, _, _>(
+            lambda,
+            Calls::Nums(Arc::new(NumArgs::new(input))),
+            trace_parent_idx,
+            from_kernel,
+            from_value,
+        )
+    }
+
+    fn invoke_many_mapped<'a, A, T, K, V>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        calls: Calls<'a, A>,
+        trace_parent_idx: Option<usize>,
+        from_kernel: K,
+        from_value: V,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<T>, ExecutorError>> + 'a>>
+    where
+        A: AsRef<[Value]> + 'a,
+        T: 'a,
+        K: Fn(&KVal) -> Option<T> + 'a,
+        V: Fn(Value) -> Result<T, ExecutorError> + 'a,
+    {
         Box::pin(async move {
-            if args.is_empty() {
+            if calls.len() == 0 {
                 return Ok(Vec::new());
             }
-            for call_args in args {
-                validate_eager_arg_count(call_args.as_ref().len(), lambda)?;
+            match &calls {
+                Calls::Values(args) => {
+                    for call_args in *args {
+                        validate_eager_arg_count(call_args.as_ref().len(), lambda)?;
+                    }
+                }
+                Calls::Nums(nums) => validate_eager_arg_count(nums.arity(), lambda)?,
             }
-            let kernel_results = match self.kernel_batch(lambda, args).await {
+            let kernel_results = match self.kernel_batch(lambda, &calls).await {
                 BatchOutcome::Results(results) => Some(results),
                 BatchOutcome::Interpreter => None,
             };
@@ -176,7 +233,7 @@ impl Executor {
                             None => {
                                 self.kernel_result_unconvertible(lambda);
                                 return self
-                                    .interpret_lambda_many(lambda, args, trace_parent_idx)
+                                    .interpret_lambda_many(lambda, &calls, trace_parent_idx)
                                     .await?
                                     .into_iter()
                                     .map(&from_value)
@@ -191,7 +248,7 @@ impl Executor {
                 return Ok(mapped);
             }
             let interpreted = self
-                .interpret_lambda_many(lambda, args, trace_parent_idx)
+                .interpret_lambda_many(lambda, &calls, trace_parent_idx)
                 .await;
             if let Some(results) = kernel_results {
                 let interpreted = interpreted.as_ref().unwrap_or_else(|error| {
@@ -223,7 +280,7 @@ impl Executor {
     fn interpret_lambda_many<'a, A>(
         &'a mut self,
         lambda: &'a Lambda,
-        args: &'a [A],
+        calls: &'a Calls<'a, A>,
         trace_parent_idx: Option<usize>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Value>, ExecutorError>> + 'a>>
     where
@@ -247,8 +304,7 @@ impl Executor {
                 })?;
             let full_arg_len = lambda.required_args as usize + lambda.defaults.len();
 
-            let first_args = args[0].as_ref();
-            let prepared_first = prepare_eager_call_args(first_args.iter().cloned(), lambda)?;
+            let prepared_first = prepare_eager_call_args(calls.values(0).iter().cloned(), lambda)?;
             {
                 let stack = self.state.stack_mut(temp_idx);
                 stack
@@ -261,9 +317,10 @@ impl Executor {
                 stack.set_retained_prefix_len(full_arg_len + lambda.captures.len());
             }
 
-            let mut results = Vec::with_capacity(args.len());
-            for call_args in args {
-                if let Err(e) = self.reseed_eager_many_stack(temp_idx, lambda, call_args.as_ref()) {
+            let mut results = Vec::with_capacity(calls.len());
+            for index in 0..calls.len() {
+                if let Err(e) = self.reseed_eager_many_stack(temp_idx, lambda, &calls.values(index))
+                {
                     self.state.free_stack(temp_idx);
                     self.state.call_depth -= 1;
                     return Err(e);

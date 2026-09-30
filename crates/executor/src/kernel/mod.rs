@@ -24,11 +24,13 @@
 //! machine (`lanes`), whose scalar ops are arrays the compiler vectorises.
 //! on native targets a typed kernel whose registers are all ints and floats
 //! is compiled to machine code instead (`jit`), which runs a call with no
-//! dispatch at all
+//! dispatch at all. samplers can hand a batch its arguments as plain numbers
+//! (`input`), which native code reads without any `KVal` or heap value
 
 mod batch;
 pub mod compile;
 pub mod convert;
+mod input;
 pub mod ir;
 #[cfg(all(feature = "jit", not(target_arch = "wasm32")))]
 pub mod jit;
@@ -47,6 +49,8 @@ use crate::{heap::with_heap, value::Value};
 
 pub(crate) use self::batch::BatchOutcome;
 pub use self::convert::to_value as kernel_value_to_value;
+pub use self::input::BatchInput;
+pub(crate) use self::input::{Calls, NumArgs};
 pub use self::ir::KernelIntrinsic;
 pub(crate) use self::tier::KernelTier;
 pub use self::tier::{KernelMode, KernelStats};

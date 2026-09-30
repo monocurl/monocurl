@@ -1,9 +1,8 @@
-use executor::{error::ExecutorError, executor::Executor, value::Value};
+use executor::{error::ExecutorError, executor::Executor, kernel::BatchInput, value::Value};
 use geo::{
     mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
-use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use crate::mesh::helpers::*;
@@ -42,15 +41,15 @@ pub async fn mk_color_grid(
 
     let grid_vertex = |ix: usize, iy: usize| ix * y_samples + iy;
     let mut cells = Vec::with_capacity(cell_count);
-    let mut mask_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(cell_count);
+    let mut centers = Vec::with_capacity(cell_count);
     for ix in 0..nx {
         for iy in 0..ny {
-            let center = grid_cell_center(x0, x1, y0, y1, nx, ny, ix, iy);
             cells.push((ix, iy));
-            mask_args.push(smallvec![point_value(center)]);
+            centers.push(grid_cell_center(x0, x1, y0, y1, nx, ny, ix, iy));
         }
     }
-    let mask_values = invoke_callable_many(executor, &mask, &mask_args, "mask").await?;
+    let mask_values =
+        invoke_callable_many_values(executor, &mask, BatchInput::Points(&centers), "mask").await?;
     let mut enabled_cells = Vec::new();
     for (cell, mask_value) in cells.into_iter().zip(mask_values) {
         if mask_value.check_truthy()? {
@@ -61,23 +60,23 @@ pub async fn mk_color_grid(
     let mut vertices = Vec::<SurfaceVertex>::with_capacity(x_samples * y_samples);
     let mut faces = Vec::<[usize; 3]>::with_capacity(enabled_cells.len() * 2);
     if smooth {
-        let mut positions = Vec::with_capacity(x_samples * y_samples);
-        let mut color_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
+        let mut samples = Vec::with_capacity(x_samples * y_samples);
         for ix in 0..x_samples {
             for iy in 0..y_samples {
-                let pos = grid_point(x0, x1, y0, y1, nx, ny, ix, iy);
-                positions.push(pos);
-                color_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
+                samples.push((grid_point(x0, x1, y0, y1, nx, ny, ix, iy), [ix, iy]));
             }
         }
-        let colors = invoke_callable_many(executor, &color_at, &color_args, "color_at").await?;
-        for (pos, color) in positions.into_iter().zip(colors) {
-            vertices.push(SurfaceVertex {
-                pos,
-                col: float4_from_value(color, "color_at")?,
-                uv: Float2::ZERO,
-            });
-        }
+        let colors = sample_colors(executor, &color_at, &samples).await?;
+        vertices.extend(
+            samples
+                .into_iter()
+                .zip(colors)
+                .map(|((pos, _), col)| SurfaceVertex {
+                    pos,
+                    col,
+                    uv: Float2::ZERO,
+                }),
+        );
 
         for (ix, iy) in enabled_cells {
             let a = grid_vertex(ix, iy);
@@ -102,17 +101,11 @@ pub async fn mk_color_grid(
         }
     }
 
-    let mut color_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(enabled_cells.len());
-    for &(ix, iy) in &enabled_cells {
-        let pos = grid_point(x0, x1, y0, y1, nx, ny, ix, iy);
-        color_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
-    }
-    let colors = invoke_callable_many(executor, &color_at, &color_args, "color_at").await?;
-    let colors = colors
-        .into_iter()
-        .map(|color| float4_from_value(color, "color_at"))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter();
+    let samples: Vec<_> = enabled_cells
+        .iter()
+        .map(|&(ix, iy)| (grid_point(x0, x1, y0, y1, nx, ny, ix, iy), [ix, iy]))
+        .collect();
+    let colors = sample_colors(executor, &color_at, &samples).await?;
 
     for (ix, iy) in enabled_cells {
         let a = grid_vertex(ix, iy);
@@ -143,6 +136,23 @@ pub async fn mk_color_grid(
     }
 
     Ok(mesh_from_parts(vec![], lins, tris))
+}
+
+/// `color_at` at every `(pos, [ix, iy])`
+async fn sample_colors(
+    executor: &mut Executor,
+    color_at: &Value,
+    samples: &[(Float3, [usize; 2])],
+) -> Result<Vec<Float4>, ExecutorError> {
+    invoke_callable_many_input(
+        executor,
+        color_at,
+        BatchInput::IndexedPoints(samples),
+        "color_at",
+        float4_from_kernel,
+        |value| float4_from_value(value, "color_at"),
+    )
+    .await
 }
 
 #[stdlib_func]

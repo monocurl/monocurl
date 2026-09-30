@@ -17,7 +17,7 @@ use executor::{
     error::ExecutorError,
     executor::Executor,
     heap::{VRc, with_heap},
-    kernel::KVal,
+    kernel::{BatchInput, KVal, kernel_value_to_value},
     value::{Value, container::List, lambda::Lambda},
 };
 use geo::{
@@ -1609,33 +1609,43 @@ pub(super) async fn invoke_callable(
     raw.elide_wrappers_rec(executor).await
 }
 
-/// `invoke_callable_many` for callers that reduce every result to a `T`; see
-/// `Executor::eagerly_invoke_lambda_many_mapped`
-pub(super) async fn invoke_callable_many_mapped<A, T>(
+fn callable_lambda(callable: &Value, name: &'static str) -> Result<Rc<Lambda>, ExecutorError> {
+    match callable.clone().elide_lvalue() {
+        Value::Lambda(lambda) => Ok(lambda),
+        Value::Operator(operator) => Ok(operator.0),
+        other => Err(ExecutorError::type_error_for(
+            "lambda / operator",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
+/// run `callable` once per call of `input`, reducing every result to a `T`;
+/// see `Executor::eagerly_invoke_lambda_many_input`. the arguments never
+/// reach the heap unless the interpreter runs the calls
+pub(super) async fn invoke_callable_many_input<T>(
     executor: &mut Executor,
     callable: &Value,
-    args: &[A],
+    input: BatchInput<'_>,
     name: &'static str,
     from_kernel: impl Fn(&KVal) -> Option<T>,
     from_value: impl Fn(Value) -> Result<T, ExecutorError>,
-) -> Result<Vec<T>, ExecutorError>
-where
-    A: AsRef<[Value]>,
-{
-    let lambda = match callable.clone().elide_lvalue() {
-        Value::Lambda(lambda) => lambda,
-        Value::Operator(operator) => operator.0,
-        other => {
-            return Err(ExecutorError::type_error_for(
-                "lambda / operator",
-                other.type_name(),
-                name,
-            ));
-        }
-    };
+) -> Result<Vec<T>, ExecutorError> {
+    let lambda = callable_lambda(callable, name)?;
     executor
-        .eagerly_invoke_lambda_many_mapped(&lambda, args, None, from_kernel, from_value)
+        .eagerly_invoke_lambda_many_input(&lambda, input, None, from_kernel, from_value)
         .await
+}
+
+/// `invoke_callable_many_input` keeping every result as a value
+pub(super) async fn invoke_callable_many_values(
+    executor: &mut Executor,
+    callable: &Value,
+    input: BatchInput<'_>,
+    name: &'static str,
+) -> Result<Vec<Value>, ExecutorError> {
+    invoke_callable_many_input(executor, callable, input, name, kernel_value_to_value, Ok).await
 }
 
 fn kernel_f32(value: &KVal) -> Option<f32> {
@@ -1672,37 +1682,6 @@ pub(super) fn float4_from_kernel(value: &KVal) -> Option<Float4> {
 
 pub(super) fn f32_from_kernel(value: &KVal) -> Option<f32> {
     kernel_f32(value)
-}
-
-pub(super) async fn invoke_callable_many<A>(
-    executor: &mut Executor,
-    callable: &Value,
-    args: &[A],
-    name: &'static str,
-) -> Result<Vec<Value>, ExecutorError>
-where
-    A: AsRef<[Value]>,
-{
-    let raw: Vec<Value> = match callable.clone().elide_lvalue() {
-        Value::Lambda(lambda) => {
-            executor
-                .eagerly_invoke_lambda_many(&lambda, args, None)
-                .await?
-        }
-        Value::Operator(operator) => {
-            executor
-                .eagerly_invoke_lambda_many(&operator.0, args, None)
-                .await?
-        }
-        other => {
-            return Err(ExecutorError::type_error_for(
-                "lambda / operator",
-                other.type_name(),
-                name,
-            ));
-        }
-    };
-    Ok(raw)
 }
 
 pub(super) fn split_tree_by_tag_filter<'a>(

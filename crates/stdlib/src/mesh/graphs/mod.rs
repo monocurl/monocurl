@@ -207,10 +207,6 @@ fn grid_cell_center(
         / 2.0
 }
 
-fn sample_index_value(ix: usize, iy: usize) -> Value {
-    list_value([Value::Integer(ix as i64), Value::Integer(iy as i64)])
-}
-
 async fn read_optional_color(
     executor: &mut Executor,
     stack_idx: usize,
