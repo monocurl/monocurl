@@ -44,7 +44,7 @@ let RecursiveTree = |depth, angle, shrink|
     Branch(Branch, to_int(depth), [0, -2.15, 0], UP, 0.95, angle, shrink, 1)
 
 slide "Recursive Tree"
-    mesh tree = RecursiveTree(depth: 2, angle: 0.52, shrink: 0.72)
+    mesh tree = RecursiveTree(depth: 3, angle: 0.52, shrink: 0.72)
     mesh note =
         center{2u}
         Text("one branch returns two smaller branches")
@@ -53,7 +53,7 @@ slide "Recursive Tree"
 
 slide "Integer Lerp"
     # identity-rate lerp makes integer depth pop one level at a time.
-    tree.depth = 7
+    tree.depth = 9
     play rate{identity} Lerp(3)
     play Wait(1)
 

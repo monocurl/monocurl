@@ -59,8 +59,8 @@ let NeedleField = |src, dst, swirl_value, pressure_value|
     # Field handles the repeated sampling; Needle stays focused on one glyph.
     Field(
         |pos, idx| Needle(pos, src, dst, swirl_value, pressure_value, idx),
-        [bounds_x[0] + 0.24, bounds_x[1] - 0.24, 15],
-        [bounds_y[0] + 0.2, bounds_y[1] - 0.2, 9]
+        [bounds_x[0] + 0.24, bounds_x[1] - 0.24, 25],
+        [bounds_y[0] + 0.2, bounds_y[1] - 0.2, 15]
     )
 
 let streamline_points = |seed, src, dst, swirl_value, pressure_value| {
@@ -84,7 +84,7 @@ let Streamline = |seed, src, dst, swirl_value, pressure_value, id| {
 }
 
 let Streamlines = |src, dst, swirl_value, pressure_value| block {
-    for (entry in enumerate(sample_clopen(0, TAU, 14))) {
+    for (entry in enumerate(sample_clopen(0, TAU, 22))) {
         let i = entry[0]
         let theta = entry[1]
         let seed = src + 0.18 * [cos(theta), sin(theta), 0]

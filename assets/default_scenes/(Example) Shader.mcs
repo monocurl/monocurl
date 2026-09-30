@@ -1,0 +1,59 @@
+# example: live shader / per-pixel lambda
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+# A lambda evaluated for every pixel of a 360 by 202 texture, each frame,
+# with the escape loop compiled to native code by the kernel tier.
+let iterations = 24
+
+# smooth escape time: the fractional part removes the bands that integer
+# iteration counts leave, at no extra cost per pixel
+let escape = |cx, cy, zoom| {
+    var zx = 0.0
+    var zy = 0.0
+    var i = 0
+    while (i < iterations and zx * zx + zy * zy < 4) {
+        let nx = zx * zx - zy * zy + cx * zoom
+        zy = 2 * zx * zy + cy * zoom
+        zx = nx
+        i = i + 1
+    }
+    if (i >= iterations) { return 1 }
+    let mag = zx * zx + zy * zy
+    return (i + 1 - ln(ln(mag) * 0.5) / ln(2)) / iterations
+}
+
+# a cosine palette over the escape value; points that never escape stay dark
+let shade = |z, phase| {
+    if (z >= 1) { return [0.05, 0.04, 0.09, 1] }
+    let w = 4.5 * sqrt(z) + phase
+    return [
+        0.52 + 0.42 * sin(w),
+        0.5 + 0.4 * sin(w + 1.9),
+        0.55 + 0.4 * sin(w + 3.6),
+        1
+    ]
+}
+
+let Plasma = |zoom, phase|
+    Shader(
+        |x, y| shade(escape(x * 0.4 - 0.6, y * 0.4, zoom), phase),
+        [-4, 4],
+        [-2.25, 2.25],
+        360
+    )
+
+mesh surface = Plasma(zoom: 1, phase: 0)
+
+slide "Plasma"
+    play Set()
+
+slide "Breathe"
+    surface.phase = 6.28
+    surface.zoom = 0.85
+    play rate{linear} Lerp(6)

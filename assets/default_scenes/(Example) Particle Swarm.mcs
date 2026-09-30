@@ -1,0 +1,38 @@
+# example: particle swarm / many objects
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+# Six hundred independent circles, each placed, sized and colored by its
+# own formula, re-evaluated every frame while the swarm turns.
+let palette = [0 -> BLUE, 0.35 -> TEAL, 0.7 -> ORANGE, 1 -> RED]
+
+let Particle = |i, t| {
+    # two low-discrepancy sequences spread the swarm over the disc
+    let u = mod(i * 0.7548776662, 1)
+    let ring = mod(i * 0.5698402910, 1)
+    let radius = 0.3 + 1.6 * sqrt(ring)
+    let angle = u * TAU + t * (0.1 + 0.4 * (1 - ring))
+    let pos = [cos(angle) * radius * 1.55, sin(angle) * radius, 0]
+    let col = keyframe_lerp(palette, ring)
+    return fill{col} center{pos} Circle(0.02 + 0.03 * (1 - ring))
+}
+
+let Swarm = |n, t| block {
+    for (i in range(0, n)) {
+        . Particle(i, t)
+    }
+}
+
+mesh swarm = Swarm(n: 600, t: 0)
+
+slide "Swarm"
+    play Fade(0.6)
+
+slide "Turn"
+    swarm.t = 10
+    play rate{linear} Lerp(8)

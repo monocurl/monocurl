@@ -30,9 +30,8 @@ let RectAt = |pos, width, height, fill_color, id|
     Rect([width, height])
 
 let rect_colors = [0 -> RED, 1 -> YELLOW]
-let Rectangles = |height_scale, selected = -1|
+let Rectangles = |height_scale, selected = -1, n = 7|
     embed_graph{} block {
-        let n = 7
         let delta = 3.5 / n
         for (i in range(0, n)) {
             let x = 0.5 + delta * (i + 0.5)
@@ -71,11 +70,16 @@ slide "Area"
     play Write(1.0)
 slide "Left Rectangles"
     # height_scale lerps from 0 to 1 to grow the rectangles up from the axis
-    mesh rects = Rectangles(height_scale: 0, selected: -1)
+    mesh rects = Rectangles(height_scale: 0, selected: -1, n: 7)
     play Fade(0.3)
 
     rects.height_scale = 1
     play Lerp(0.9)
+
+slide "Refine"
+    # the rectangle count is an argument too: an integer lerp adds bars one at a time
+    rects.n = 200
+    play rate{linear} Lerp(3)
 
 slide "Rectangle Dimensions"
     # Rectangle ids double as tags, so tag_filter can isolate one bar for labels.
