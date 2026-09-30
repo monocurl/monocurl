@@ -655,17 +655,40 @@ enum TemplateKey {
 
 type TemplateParts = (Shared<Dot>, Shared<Lin>, Shared<Tri>);
 
-const TEMPLATE_CACHE_ENTRIES: usize = 512;
+/// templates are kept by size, not count: a swarm of circles with hundreds of
+/// distinct radii must fit, or every frame rebuilds them all
+const TEMPLATE_CACHE_BYTES: usize = 32 << 20;
+
+#[derive(Default)]
+struct TemplateCache {
+    parts: HashMap<TemplateKey, TemplateParts>,
+    bytes: usize,
+}
+
+impl TemplateCache {
+    fn insert(&mut self, key: TemplateKey, parts: TemplateParts) {
+        let (dots, lins, tris) = &parts;
+        let bytes = dots.len() * size_of::<Dot>()
+            + lins.len() * size_of::<Lin>()
+            + tris.len() * size_of::<Tri>();
+        if self.bytes + bytes > TEMPLATE_CACHE_BYTES {
+            self.parts.clear();
+            self.bytes = 0;
+        }
+        self.bytes += bytes;
+        self.parts.insert(key, parts);
+    }
+}
 
 thread_local! {
-    static TEMPLATES: RefCell<HashMap<TemplateKey, TemplateParts>> = RefCell::default();
+    static TEMPLATES: RefCell<TemplateCache> = RefCell::default();
 }
 
 fn template_mesh(
     key: TemplateKey,
     build: impl FnOnce() -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError>,
 ) -> Result<Value, ExecutorError> {
-    let cached = TEMPLATES.with(|templates| templates.borrow().get(&key).cloned());
+    let cached = TEMPLATES.with(|templates| templates.borrow().parts.get(&key).cloned());
     let (dots, lins, tris) = match cached {
         Some(parts) => parts,
         None => {
@@ -674,13 +697,7 @@ fn template_mesh(
                 unreachable!("mesh_from_parts builds a mesh");
             };
             let parts = (mesh.dots.clone(), mesh.lins.clone(), mesh.tris.clone());
-            TEMPLATES.with(|templates| {
-                let mut templates = templates.borrow_mut();
-                if templates.len() >= TEMPLATE_CACHE_ENTRIES {
-                    templates.clear();
-                }
-                templates.insert(key, parts.clone());
-            });
+            TEMPLATES.with(|templates| templates.borrow_mut().insert(key, parts.clone()));
             return Ok(Value::Mesh(mesh));
         }
     };

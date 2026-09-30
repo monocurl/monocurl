@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     KernelTier,
-    value::{ClosureArena, ClosureId, KClosure, KVal},
+    value::{ClosureArena, ClosureId, KClosure, KList, KVal},
 };
 
 /// one conversion session: values become `KVal`s and every lambda reached on
@@ -77,6 +77,21 @@ impl<'a> Converter<'a> {
             // live wrapper materialises it, which allocates on the heap, and
             // the heap cannot be borrowed while that happens
             Value::List(list) => {
+                // lists of numbers (points, colors) convert in place
+                let scalars: Option<KList> = with_heap(|heap| {
+                    list.elements()
+                        .iter()
+                        .map(|key| match &*heap.get(key.key()) {
+                            Value::Nil => Some(KVal::Nil),
+                            Value::Integer(n) => Some(KVal::Int(*n)),
+                            Value::Float(f) => Some(KVal::Float(*f)),
+                            _ => None,
+                        })
+                        .collect()
+                });
+                if let Some(scalars) = scalars {
+                    return KVal::List(Arc::new(scalars));
+                }
                 let elements: Vec<Value> = with_heap(|heap| {
                     list.elements()
                         .iter()
