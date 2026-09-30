@@ -12,9 +12,12 @@ use std::{
 
 type Job = Box<dyn FnOnce() + Send>;
 
+/// every worker owns its channel: a run hands chunk `k` to worker `k - 1`
+/// directly. sharing one receiver behind a mutex made the workers take jobs
+/// one at a time, each pickup a mutex handoff and a kernel wake-up, which
+/// cost a per-pixel frame more than the kernels themselves
 pub struct Pool {
-    sender: Mutex<Sender<Job>>,
-    workers: usize,
+    senders: Vec<Mutex<Sender<Job>>>,
 }
 
 /// the process-wide pool, sized like `worker_threads` minus the calling
@@ -23,29 +26,22 @@ pub fn pool(threads: usize) -> &'static Pool {
     static POOL: OnceLock<Pool> = OnceLock::new();
     POOL.get_or_init(|| {
         let workers = threads.saturating_sub(1).max(1);
-        let (sender, receiver) = mpsc::channel::<Job>();
-        let receiver = Arc::new(Mutex::new(receiver));
-        for index in 0..workers {
-            let receiver = Arc::clone(&receiver);
-            std::thread::Builder::new()
-                .name(format!("monocurl-kernel-{index}"))
-                .spawn(move || worker(receiver))
-                .expect("kernel worker thread should spawn");
-        }
-        Pool {
-            sender: Mutex::new(sender),
-            workers,
-        }
+        let senders = (0..workers)
+            .map(|index| {
+                let (sender, receiver) = mpsc::channel::<Job>();
+                std::thread::Builder::new()
+                    .name(format!("monocurl-kernel-{index}"))
+                    .spawn(move || worker(receiver))
+                    .expect("kernel worker thread should spawn");
+                Mutex::new(sender)
+            })
+            .collect();
+        Pool { senders }
     })
 }
 
-fn worker(receiver: Arc<Mutex<Receiver<Job>>>) {
-    loop {
-        let job = match receiver.lock() {
-            Ok(receiver) => receiver.recv(),
-            Err(_) => return,
-        };
-        let Ok(job) = job else { return };
+fn worker(receiver: Receiver<Job>) {
+    while let Ok(job) = receiver.recv() {
         // a panicking job must not take the worker with it; the caller notices
         // the missing result
         let _ = catch_unwind(AssertUnwindSafe(job));
@@ -56,7 +52,7 @@ impl Pool {
     /// the number of chunks a batch should be split into so that every worker
     /// and the calling thread get one
     pub fn chunk_count(&self) -> usize {
-        self.workers + 1
+        self.senders.len() + 1
     }
 
     /// run `job(0..count)` across the workers and the calling thread, which
@@ -69,15 +65,15 @@ impl Pool {
     ) -> Vec<Option<R>> {
         let job = Arc::new(job);
         let (results_tx, results_rx) = mpsc::channel::<(usize, R)>();
-        {
-            let sender = self.sender.lock().expect("kernel pool sender poisoned");
-            for index in 1..count {
-                let job = Arc::clone(&job);
-                let results_tx = results_tx.clone();
-                let _ = sender.send(Box::new(move || {
-                    let _ = results_tx.send((index, job(index)));
-                }));
-            }
+        for index in 1..count {
+            let job = Arc::clone(&job);
+            let results_tx = results_tx.clone();
+            let sender = self.senders[(index - 1) % self.senders.len()]
+                .lock()
+                .expect("kernel pool sender poisoned");
+            let _ = sender.send(Box::new(move || {
+                let _ = results_tx.send((index, job(index)));
+            }));
         }
         drop(results_tx);
 
