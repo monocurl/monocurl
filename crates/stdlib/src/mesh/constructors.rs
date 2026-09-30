@@ -1,7 +1,9 @@
+use std::{cell::RefCell, collections::HashMap, sync::Arc};
+
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
-    mesh::{DEFAULT_DOT_RADIUS, PixelTexture, TextureSource},
+    mesh::{DEFAULT_DOT_RADIUS, Dot, Lin, Mesh, PixelTexture, Shared, TextureSource, Tri, Uniforms},
     mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
@@ -641,13 +643,73 @@ pub fn mk_dot(executor: &mut Executor, stack_idx: usize) -> Result<Value, Execut
     ))
 }
 
+/// the finished arrays of a template shape at one size: a scene builds the
+/// same small circle hundreds of times per frame, and since a mesh's arrays
+/// are shared until edited, the second construction costs three reference
+/// counts instead of writing and normalising the shape again
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum TemplateKey {
+    Polygon { samples: usize, radius: u32 },
+    Rect { width: u32, height: u32 },
+}
+
+type TemplateParts = (Shared<Dot>, Shared<Lin>, Shared<Tri>);
+
+const TEMPLATE_CACHE_ENTRIES: usize = 512;
+
+thread_local! {
+    static TEMPLATES: RefCell<HashMap<TemplateKey, TemplateParts>> = RefCell::default();
+}
+
+fn template_mesh(
+    key: TemplateKey,
+    build: impl FnOnce() -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError>,
+) -> Result<Value, ExecutorError> {
+    let cached = TEMPLATES.with(|templates| templates.borrow().get(&key).cloned());
+    let (dots, lins, tris) = match cached {
+        Some(parts) => parts,
+        None => {
+            let (lins, tris) = build()?;
+            let Value::Mesh(mesh) = mesh_from_parts(vec![], lins, tris) else {
+                unreachable!("mesh_from_parts builds a mesh");
+            };
+            let parts = (mesh.dots.clone(), mesh.lins.clone(), mesh.tris.clone());
+            TEMPLATES.with(|templates| {
+                let mut templates = templates.borrow_mut();
+                if templates.len() >= TEMPLATE_CACHE_ENTRIES {
+                    templates.clear();
+                }
+                templates.insert(key, parts.clone());
+            });
+            return Ok(Value::Mesh(mesh));
+        }
+    };
+    let mesh = Mesh {
+        dots,
+        lins,
+        tris,
+        uniform: Uniforms {
+            dot_radius: 0.0,
+            ..Uniforms::default()
+        },
+        tag: vec![],
+        version: Mesh::fresh_version(),
+    };
+    Ok(Value::Mesh(Arc::new(mesh)))
+}
+
 #[stdlib_func]
 pub fn mk_circle(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let radius = crate::read_float(executor, stack_idx, -2, "radius")? as f32;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(3) as usize;
     ensure_limit("circle samples", samples, MAX_POLYGON_POINTS)?;
-    let (lins, tris) = polygon_surface(radius, samples)?;
-    Ok(mesh_from_parts(vec![], lins, tris))
+    template_mesh(
+        TemplateKey::Polygon {
+            samples,
+            radius: radius.to_bits(),
+        },
+        || polygon_surface(radius, samples),
+    )
 }
 
 #[stdlib_func]
@@ -678,16 +740,26 @@ pub fn mk_annulus(executor: &mut Executor, stack_idx: usize) -> Result<Value, Ex
 #[stdlib_func]
 pub fn mk_square(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let width = crate::read_float(executor, stack_idx, -1, "width")? as f32;
-    let (lins, tris) = rect_surface(width, width)?;
-    Ok(mesh_from_parts(vec![], lins, tris))
+    template_mesh(
+        TemplateKey::Rect {
+            width: width.to_bits(),
+            height: width.to_bits(),
+        },
+        || rect_surface(width, width),
+    )
 }
 
 #[stdlib_func]
 pub fn mk_rect(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
     let width = crate::read_float(executor, stack_idx, -2, "width")? as f32;
     let height = crate::read_float(executor, stack_idx, -1, "height")? as f32;
-    let (lins, tris) = rect_surface(width, height)?;
-    Ok(mesh_from_parts(vec![], lins, tris))
+    template_mesh(
+        TemplateKey::Rect {
+            width: width.to_bits(),
+            height: height.to_bits(),
+        },
+        || rect_surface(width, height),
+    )
 }
 
 #[stdlib_func]
@@ -698,8 +770,13 @@ pub fn mk_regular_polygon(
     let n = read_int(executor, stack_idx, -2, "n")?.max(3) as usize;
     ensure_limit("regular polygon sides", n, MAX_POLYGON_POINTS)?;
     let radius = crate::read_float(executor, stack_idx, -1, "circumradius")? as f32;
-    let (lins, tris) = polygon_surface(radius, n)?;
-    Ok(mesh_from_parts(vec![], lins, tris))
+    template_mesh(
+        TemplateKey::Polygon {
+            samples: n,
+            radius: radius.to_bits(),
+        },
+        || polygon_surface(radius, n),
+    )
 }
 
 #[stdlib_func]
