@@ -57,3 +57,44 @@ fn revisited_frames_reuse_sampled_results() {
     );
     assert!(executor.state.errors.is_empty());
 }
+
+const PALETTE_SCENE: &str = "
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+let palette = [0 -> BLUE, 0.5 -> YELLOW, 1 -> RED]
+
+let Plasma = |zoom|
+    Shader(|x, y| keyframe_lerp(palette, 0.5 + 0.5 * sin(x * zoom + y)), [-1, 1], [-1, 1], 24)
+
+mesh surface = Plasma(zoom: 1)
+
+slide \"Zoom\"
+    surface.zoom = 4
+    play Lerp(1)
+";
+
+#[test]
+fn shaders_capturing_a_palette_are_cached_too() {
+    use_repo_assets();
+    let (mut executor, _) = prepare(PALETTE_SCENE, Path::new("result_cache_palette_test.mcs")).unwrap();
+    seek(&mut executor, 0.5);
+    let after_first = executor.kernel_stats().calls;
+    assert!(after_first > 0, "the palette shader should sample as a batch");
+
+    seek(&mut executor, 0.25);
+    let after_second = executor.kernel_stats().calls;
+    assert!(after_second > after_first, "a new frame samples again");
+
+    seek(&mut executor, 0.5);
+    assert_eq!(
+        executor.kernel_stats().calls,
+        after_second,
+        "a revisited frame must come from the result cache even though the callback captures a map"
+    );
+    assert!(executor.state.errors.is_empty());
+}
