@@ -53,10 +53,10 @@ use super::{
     input::{Num, NumArg},
     ir::{BinKind, KernelIntrinsic, Reg},
     output::FLAT_MAX,
-    run::{self, CALL_OP_BUDGET, Fault},
+    run::{self, CALL_OP_BUDGET, Fault, Keyframe},
     tier::dump_kernels,
     typed::{Class, Opnd, Spec, TOp},
-    value::{ClosureArena, KVal, PaletteId},
+    value::{ClosureArena, KPalette, KVal, PaletteId},
 };
 
 type Entry = unsafe extern "C" fn(*mut u64, *mut i64, *const u8, *const ClosureArena) -> i32;
@@ -366,25 +366,12 @@ extern "C" fn shim_palette(
     // safety: `arena` is the batch's arena, which outlives the call and whose
     // palettes the inputs were copied from
     let palette = unsafe { &*arena }.palette(PaletteId(id as u32));
-    let (value, kind) = match run::keyframe_lerp(palette, t) {
-        Ok(KVal::Int(n)) => (n as u64, KIND_INT as u64),
-        Ok(KVal::Float(f)) => (f.to_bits(), KIND_FLOAT as u64),
-        Ok(KVal::List(list)) if list.len() <= LIST_CAP => {
-            // safety: `items` is the site's area in the frame, `LIST_CAP`
-            // elements then as many kinds
-            let area = unsafe { std::slice::from_raw_parts_mut(items, 2 * LIST_CAP) };
-            let (values, kinds) = area.split_at_mut(LIST_CAP);
-            for (element, (value, kind)) in list.iter().zip(values.iter_mut().zip(kinds)) {
-                (*value, *kind) = match *element {
-                    KVal::Int(n) => (n as u64, KIND_INT as u64),
-                    KVal::Float(f) => (f.to_bits(), KIND_FLOAT as u64),
-                    _ => return fault_code(Fault::Type),
-                };
-            }
-            (list.len() as u64, list_kind)
-        }
-        Ok(_) => return fault_code(Fault::Type),
-        Err(fault) => return fault_code(fault),
+    // safety: `items` is the site's area in the frame, `LIST_CAP` elements
+    // then as many kinds
+    let area = unsafe { std::slice::from_raw_parts_mut(items, 2 * LIST_CAP) };
+    let (value, kind) = match palette_site(palette, t, list_kind, area) {
+        Some(written) => written,
+        None => return fault_code(palette_fault(palette, t)),
     };
     // safety: `out` is the generated code's own two word stack slot
     unsafe {
@@ -392,6 +379,62 @@ extern "C" fn shim_palette(
         *out.add(1) = kind;
     }
     0
+}
+
+/// a number's word and kind
+fn number_word(value: &KVal) -> Option<(u64, u64)> {
+    match *value {
+        KVal::Int(n) => Some((n as u64, KIND_INT as u64)),
+        KVal::Float(f) => Some((f.to_bits(), KIND_FLOAT as u64)),
+        _ => None,
+    }
+}
+
+/// the palette's value at `t` written straight to the site without building
+/// a list: `None` when it is not a number or a flat list of numbers that fits
+fn palette_site(
+    palette: &KPalette,
+    t: f64,
+    list_kind: u64,
+    area: &mut [u64],
+) -> Option<(u64, u64)> {
+    fn blend(a: &KVal, b: &KVal, t: f64) -> Option<(u64, u64)> {
+        number_word(&run::lerp_number(a, b, t).ok()?)
+    }
+    match run::keyframe(palette, t) {
+        Keyframe::At(KVal::List(list)) => {
+            fill(area, list.iter().map(number_word)).map(|n| (n, list_kind))
+        }
+        Keyframe::At(value) => number_word(value),
+        Keyframe::Between(KVal::List(a), KVal::List(b), t) if a.len() == b.len() => {
+            fill(area, a.iter().zip(b.iter()).map(|(a, b)| blend(a, b, t))).map(|n| (n, list_kind))
+        }
+        Keyframe::Between(KVal::List(_), _, _) | Keyframe::Between(_, KVal::List(_), _) => None,
+        Keyframe::Between(a, b, t) => blend(a, b, t),
+    }
+}
+
+/// writes `elements` to the site's values and kinds and gives their count
+fn fill(
+    area: &mut [u64],
+    elements: impl ExactSizeIterator<Item = Option<(u64, u64)>>,
+) -> Option<u64> {
+    let len = elements.len();
+    if len > LIST_CAP {
+        return None;
+    }
+    let (values, kinds) = area.split_at_mut(LIST_CAP);
+    for (element, (value, kind)) in elements.zip(values.iter_mut().zip(kinds)) {
+        (*value, *kind) = element?;
+    }
+    Some(len as u64)
+}
+
+/// why `palette_site` could not write the palette's value at `t`: the fault
+/// `keyframe_lerp` raises, or a type fault for a result the site cannot hold
+#[cold]
+fn palette_fault(palette: &KPalette, t: f64) -> Fault {
+    run::keyframe_lerp(palette, t).err().unwrap_or(Fault::Type)
 }
 
 #[derive(Clone, Copy)]
