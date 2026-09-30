@@ -24,6 +24,9 @@ pub enum KVal {
     /// frame), and an index copies without touching a shared reference count,
     /// which worker threads would otherwise fight over
     Closure(ClosureId),
+    /// a keyframe map of numbers or numeric lists, by its index into the
+    /// batch's arena for the same reason as closures
+    Palette(PaletteId),
     /// a value the tier does not model. it can be carried around and returned
     /// through a list, but any operation that inspects it faults, which hands
     /// the call back to the interpreter
@@ -32,6 +35,16 @@ pub enum KVal {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ClosureId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PaletteId(pub u32);
+
+/// the keyframes of a `keyframe_lerp` map, sorted by time as the stdlib sorts
+/// them. values hold only ints, floats and lists of them
+#[derive(Debug)]
+pub struct KPalette {
+    pub keys: Box<[(f64, KVal)]>,
+}
 
 /// a lambda value as a kernel sees it: its compiled body plus the captured and
 /// default values it closes over, already converted
@@ -48,6 +61,7 @@ pub struct KClosure {
 #[derive(Debug, Default)]
 pub struct ClosureArena {
     closures: Vec<KClosure>,
+    palettes: Vec<KPalette>,
 }
 
 impl ClosureArena {
@@ -61,6 +75,16 @@ impl ClosureArena {
         &self.closures[id.0 as usize]
     }
 
+    pub fn push_palette(&mut self, palette: KPalette) -> PaletteId {
+        let id = PaletteId(self.palettes.len() as u32);
+        self.palettes.push(palette);
+        id
+    }
+
+    pub fn palette(&self, id: PaletteId) -> &KPalette {
+        &self.palettes[id.0 as usize]
+    }
+
     /// whether any placed closure fills default arguments; a call to one is
     /// a live value in the interpreter, so a single call whose result may be
     /// such a value must not run here
@@ -72,6 +96,7 @@ impl ClosureArena {
 
     pub fn clear(&mut self) {
         self.closures.clear();
+        self.palettes.clear();
     }
 }
 
@@ -87,6 +112,7 @@ impl KVal {
             KVal::Float(_) => "float",
             KVal::List(_) => "list",
             KVal::Closure(_) => "lambda",
+            KVal::Palette(_) => "map",
             KVal::Opaque => "opaque",
         }
     }
@@ -95,7 +121,9 @@ impl KVal {
     /// opaque operands
     pub fn equals(arena: &ClosureArena, a: &KVal, b: &KVal) -> Option<bool> {
         Some(match (a, b) {
-            (KVal::Opaque, _) | (_, KVal::Opaque) => return None,
+            (KVal::Opaque | KVal::Palette(_), _) | (_, KVal::Opaque | KVal::Palette(_)) => {
+                return None;
+            }
             (KVal::Nil, KVal::Nil) => true,
             (KVal::Int(x), KVal::Int(y)) => x == y,
             (KVal::Float(x), KVal::Float(y)) => x == y,
@@ -135,6 +163,7 @@ impl KVal {
                         .all(|(a, b)| KVal::strictly_equal(a, b))
             }
             (KVal::Closure(x), KVal::Closure(y)) => x == y,
+            (KVal::Palette(x), KVal::Palette(y)) => x == y,
             _ => false,
         }
     }
