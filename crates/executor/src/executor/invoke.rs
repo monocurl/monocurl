@@ -228,11 +228,12 @@ impl Executor {
                 SmallVec::new()
             };
 
+            // the arguments leave the stack once: the call gets a copy and the
+            // live value keeps the originals
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
-            stack.pop_n(n);
+            let args: SmallVec<[Value; 8]> = stack.var_stack.drain(stack_len - n..).collect();
 
             let prepared_args = match prepare_eager_call_args(args.iter().cloned(), &lambda) {
                 Ok(args) => args,
@@ -251,7 +252,7 @@ impl Executor {
                     };
                     let inv = make_invoked_function(
                         Value::Lambda(lambda),
-                        full_args.into(),
+                        full_args,
                         labels,
                         Some(result_val),
                     );
@@ -370,19 +371,17 @@ impl Executor {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
-            stack.pop_n(n);
+            let args: SmallVec<[Value; 8]> = stack.var_stack.drain(stack_len - n..).collect();
             let operand = stack.pop();
-
             let labels = self.drain_labels(stack_idx, section_idx);
 
-            let mut full_args = vec![operand.clone()];
-            full_args.extend(args.iter().cloned());
-            let prepared_args =
-                match prepare_eager_call_args(full_args.iter().cloned(), &operator.0) {
-                    Ok(args) => args,
-                    Err(error) => return ExecSingle::Error(error),
-                };
+            let prepared_args = match prepare_eager_call_args(
+                std::iter::once(operand.clone()).chain(args.iter().cloned()),
+                &operator.0,
+            ) {
+                Ok(args) => args,
+                Err(error) => return ExecSingle::Error(error),
+            };
 
             match self
                 .eagerly_invoke_lambda(&operator.0, prepared_args, Some(stack_idx))
@@ -401,7 +400,7 @@ impl Executor {
                         let inv = make_invoked_operator(
                             Value::Operator(operator),
                             operand,
-                            args.into(),
+                            args,
                             labels,
                             initial,
                             modified,
@@ -419,17 +418,16 @@ impl Executor {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
-            stack.pop_n(n);
+            let args: SmallVec<[Value; 8]> = stack.var_stack.drain(stack_len - n..).collect();
             let operand = stack.pop();
 
-            let mut full_args = vec![operand.clone()];
-            full_args.extend(args.iter().cloned());
-            let prepared_args =
-                match prepare_eager_call_args(full_args.iter().cloned(), &operator.0) {
-                    Ok(args) => args,
-                    Err(error) => return ExecSingle::Error(error),
-                };
+            let prepared_args = match prepare_eager_call_args(
+                std::iter::once(operand.clone()).chain(args.iter().cloned()),
+                &operator.0,
+            ) {
+                Ok(args) => args,
+                Err(error) => return ExecSingle::Error(error),
+            };
 
             match self
                 .eagerly_invoke_lambda(&operator.0, prepared_args, Some(stack_idx))
@@ -448,7 +446,7 @@ impl Executor {
                         let inv = make_invoked_operator(
                             Value::Operator(operator),
                             operand,
-                            args.into(),
+                            args,
                             SmallVec::new(),
                             initial,
                             modified,

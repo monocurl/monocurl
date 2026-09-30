@@ -347,7 +347,10 @@ fn validate_eager_arg_count(arg_count: usize, lambda: &Lambda) -> Result<(), Exe
 }
 
 #[inline]
-pub(crate) fn fill_defaults(mut args: Vec<Value>, lambda: &Lambda) -> Vec<Value> {
+pub(crate) fn fill_defaults(
+    mut args: SmallVec<[Value; 8]>,
+    lambda: &Lambda,
+) -> SmallVec<[Value; 8]> {
     let total = lambda.total_args();
     if args.len() < total {
         let missing = total - args.len();

@@ -101,7 +101,7 @@ impl InvokedOperator {
                     }
                 };
 
-                let mut full_args = Vec::with_capacity(this.body.arguments.len() + 1);
+                let mut full_args = SmallVec::<[Value; 8]>::with_capacity(this.body.arguments.len() + 1);
                 full_args.push(normalize_operand(&this.body));
                 full_args.extend(
                     (0..this.body.arguments.len())

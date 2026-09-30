@@ -204,6 +204,9 @@ pub struct ExecutionState {
     /// of calls per frame, so without reuse the ghosts pile up for the whole
     /// scene and into every snapshot of it
     spare_stack_slots: Vec<usize>,
+    /// the value stacks those calls used, cleared but with their capacity,
+    /// so the next call does not grow one from empty
+    spare_var_stacks: Vec<Vec<Value>>,
     pub execution_heads: BTreeSet<usize>,
     pub primitive_anims: Vec<BakedPrimitiveAnim>,
 
@@ -239,6 +242,7 @@ impl ExecutionState {
             alive_stack_count: 0,
             execution_stacks: Vec::new(),
             spare_stack_slots: Vec::new(),
+            spare_var_stacks: Vec::new(),
             execution_heads: BTreeSet::new(),
             primitive_anims: Vec::new(),
             leaders: Vec::new(),
@@ -305,6 +309,9 @@ impl ExecutionState {
 
         self.alive_stack_count += 1;
         let mut stack = ExecutionStack::new(ip, parent_idx, trace_parent_idx);
+        if let Some(var_stack) = self.spare_var_stacks.pop() {
+            stack.var_stack = var_stack;
+        }
         if let Some(idx) = self.spare_stack_slots.pop() {
             if let ExecutionStackSlot::Ghost(ghost) = &mut self.execution_stacks[idx] {
                 stack.call_stack = std::mem::take(&mut ghost.call_stack);
@@ -321,6 +328,13 @@ impl ExecutionState {
 
     /// free an eager call's stack whose trace nobody will need again
     pub fn recycle_stack(&mut self, idx: usize) {
+        if let ExecutionStackSlot::Alive(stack) = &mut self.execution_stacks[idx] {
+            let mut var_stack = std::mem::take(&mut stack.var_stack);
+            var_stack.clear();
+            if self.spare_var_stacks.len() < 64 {
+                self.spare_var_stacks.push(var_stack);
+            }
+        }
         self.free_stack(idx);
         self.spare_stack_slots.push(idx);
     }
