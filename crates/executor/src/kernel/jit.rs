@@ -10,11 +10,13 @@
 //! `extern "C"` shim running the same rust expression or the same `run.rs`
 //! helper the typed machine runs, so results and faults cannot diverge.
 //! two boxed shapes are modelled. a list of scalars built and returned by the
-//! body (a colour, a point) lives in the frame. a number, a boxed register that
-//! only ever holds an int or a float (`var sum = 0` accumulating floats, where
-//! the specialiser boxes at the merge), is a value word plus a kind word, and
-//! the dynamic ops on it branch on the kinds the way `run::binary` does, so an
-//! int stays an int until a float reaches it. a spec with a boxed argument or
+//! body (a colour, a point) lives in the frame, one area per site, and a
+//! register holding one is its length and site, so the lists of several
+//! branches can merge into the register returned. a number, a boxed register
+//! that only ever holds an int or a float (`var sum = 0` accumulating floats,
+//! where the specialiser boxes at the merge), is a value word plus a kind word,
+//! and the dynamic ops on it branch on the kinds the way `run::binary` does, so
+//! an int stays an int until a float reaches it. a spec with a boxed argument or
 //! capture, any other boxed read, or a call the specialiser did not inline is
 //! declined and stays with the typed and lane machines.
 //!
@@ -63,14 +65,13 @@ const LIST_CAP: usize = 16;
 /// lists a body may build: one per `EmptyList` op, none of them in a loop
 const LIST_SITES: usize = 4;
 
-/// where things live in the frame, in words: the registers, then the result,
-/// its kind, the returned list's length, each list's elements and element
+/// where things live in the frame, in words: the registers, then the result
+/// (a returned list's length), its kind, each list's elements and element
 /// kinds, and the float constants
 #[derive(Clone, Copy)]
 struct Layout {
     result: usize,
     kind: usize,
-    count: usize,
     items: usize,
     consts: usize,
 }
@@ -81,9 +82,8 @@ impl Layout {
         Self {
             result,
             kind: result + 1,
-            count: result + 2,
-            items: result + 3,
-            consts: result + 3 + 2 * LIST_CAP * LIST_SITES,
+            items: result + 2,
+            consts: result + 2 + 2 * LIST_CAP * LIST_SITES,
         }
     }
 
@@ -515,15 +515,17 @@ enum Word {
 }
 
 /// what a register of the boxed file holds at one point. the boxed values the
-/// jit models are lists of scalars a body builds and returns, each living in
-/// the frame, and numbers
+/// jit models are numbers and lists of scalars a body builds and returns, each
+/// list living in the frame. native code holds either as a word and a kind
+/// word: a number's value and kind, or a list's length and site
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Boxed {
     Nothing,
     /// the list built at a site, still growing
     List(u8),
-    /// a list after a copy of it was taken: appending would have to copy it,
-    /// so it may only be returned
+    /// a list from one of a set of sites, a bit each, after a copy of it was
+    /// taken or where lists of several sites merge: appending would have to
+    /// copy it, so it may only be copied and returned
     Shared(u8),
     /// an int or a float, which of the two known only at run time
     Num,
@@ -532,13 +534,23 @@ enum Boxed {
 }
 
 impl Boxed {
+    fn sites(self) -> Option<u8> {
+        match self {
+            Boxed::List(site) => Some(1 << site),
+            Boxed::Shared(sites) => Some(sites),
+            _ => None,
+        }
+    }
+
     fn join(self, other: Boxed) -> Boxed {
         match (self, other) {
             (a, b) if a == b => a,
-            // the path that never wrote it would read an undefined word
-            (Boxed::Nothing, Boxed::Num) | (Boxed::Num, Boxed::Nothing) => Boxed::Opaque,
-            (Boxed::Nothing, x) | (x, Boxed::Nothing) => x,
-            _ => Boxed::Opaque,
+            // the path that never wrote it would read undefined words
+            (Boxed::Nothing, _) | (_, Boxed::Nothing) => Boxed::Opaque,
+            (a, b) => match a.sites().zip(b.sites()) {
+                Some((a, b)) => Boxed::Shared(a | b),
+                None => Boxed::Opaque,
+            },
         }
     }
 }
@@ -677,71 +689,81 @@ impl State {
     }
 }
 
-/// the boxed value an op reads or copies, for codegen
-#[derive(Clone, Copy, Default)]
-enum Touch {
-    #[default]
-    Nothing,
-    /// the list of a site
-    List(u8),
-    Num,
-}
+/// why the jit leaves a spec to the typed machine
+type Decline = &'static str;
 
-/// the effect of `op` on the boxed file, and the boxed value it touches;
-/// `None` when it reads a boxed value the jit does not model
-fn step_boxed(op: &TOp, pc: usize, sites: &[usize], boxed: &mut [Boxed]) -> Option<Touch> {
-    let at = |boxed: &[Boxed], reg: Reg| boxed.get(reg as usize).copied();
-    let list = |boxed: &[Boxed], reg: Reg| match at(boxed, reg)? {
-        Boxed::List(site) | Boxed::Shared(site) => Some(site),
-        _ => None,
-    };
+const OUTSIDE: Decline = "a register outside the frame";
+
+/// the effect of `op` on the boxed file, and the site of the list it builds if
+/// it builds one; an error when it reads a boxed value the jit does not model
+fn step_boxed(
+    op: &TOp,
+    pc: usize,
+    site_pcs: &[usize],
+    boxed: &mut [Boxed],
+) -> Result<Option<u8>, Decline> {
+    let at = |boxed: &[Boxed], reg: Reg| boxed.get(reg as usize).copied().ok_or(OUTSIDE);
     let numeric = |boxed: &[Boxed], opnd: Opnd| match opnd {
-        Opnd::I(_) | Opnd::F(_) => Some(()),
-        Opnd::B(reg) => (at(boxed, reg)? == Boxed::Num).then_some(()),
-        Opnd::C(_) => None,
+        Opnd::I(_) | Opnd::F(_) => Ok(()),
+        Opnd::B(reg) => match at(boxed, reg)? {
+            Boxed::Num => Ok(()),
+            Boxed::List(_) | Boxed::Shared(_) => Err("a list read as a number"),
+            _ => Err("a boxed read it does not model"),
+        },
+        Opnd::C(_) => Err("a closure operand"),
     };
     let set = |boxed: &mut [Boxed], reg: Reg, value: Boxed| {
-        *boxed.get_mut(reg as usize)? = value;
-        Some(())
+        *boxed.get_mut(reg as usize).ok_or(OUTSIDE)? = value;
+        Ok(())
     };
     // a copy of a boxed register: a number is copied, a list is shared
     let copy = |boxed: &mut [Boxed], dst: Reg, src: Reg| {
-        if at(boxed, src)? == Boxed::Num {
-            set(boxed, dst, Boxed::Num)?;
-            return Some(Touch::Num);
-        }
-        let site = list(boxed, src)?;
-        // both now name the list: neither may grow it
-        for reg in boxed.iter_mut() {
-            if *reg == Boxed::List(site) {
-                *reg = Boxed::Shared(site);
+        let value = match at(boxed, src)? {
+            Boxed::Num => Boxed::Num,
+            held => {
+                let sites = held
+                    .sites()
+                    .ok_or("a copy of a boxed value it does not model")?;
+                // both now name the list: neither may grow it
+                for reg in boxed.iter_mut() {
+                    if let Boxed::List(site) = *reg
+                        && sites & 1 << site != 0
+                    {
+                        *reg = Boxed::Shared(1 << site);
+                    }
+                }
+                Boxed::Shared(sites)
             }
-        }
-        set(boxed, dst, Boxed::Shared(site))?;
-        Some(Touch::List(site))
+        };
+        set(boxed, dst, value)?;
+        Ok(None)
     };
-    Some(match *op {
+    Ok(match *op {
         TOp::BoxI { reg } | TOp::BoxF { reg } => {
             set(boxed, reg, Boxed::Num)?;
-            Touch::Nothing
+            None
         }
         TOp::BoxC { reg: dst, .. }
         | TOp::Nil { dst }
         | TOp::Capture { dst, .. }
         | TOp::Default { dst, .. } => {
             set(boxed, dst, Boxed::Opaque)?;
-            Touch::Nothing
+            None
         }
         TOp::EmptyList { dst } => {
-            let site = sites.iter().position(|&at| at == pc)? as u8;
+            let site = site_pcs
+                .iter()
+                .position(|&at| at == pc)
+                .ok_or("a list site it did not count")? as u8;
             set(boxed, dst, Boxed::List(site))?;
-            Touch::List(site)
+            Some(site)
         }
         TOp::Append { list, value } => {
-            numeric(boxed, value)?;
+            numeric(boxed, value).map_err(|_| "a list element that is not a number")?;
             match at(boxed, list)? {
-                Boxed::List(site) => Touch::List(site),
-                _ => return None,
+                Boxed::List(site) => Some(site),
+                Boxed::Shared(_) => return Err("an append to a copied or merged list"),
+                _ => return Err("an append to a list it does not model"),
             }
         }
         TOp::MoveB { dst, src } => copy(boxed, dst, src)?,
@@ -749,13 +771,13 @@ fn step_boxed(op: &TOp, pc: usize, sites: &[usize], boxed: &mut [Boxed]) -> Opti
             Opnd::B(src) => copy(boxed, dst, src)?,
             Opnd::I(_) | Opnd::F(_) => {
                 set(boxed, dst, Boxed::Num)?;
-                Touch::Num
+                None
             }
-            Opnd::C(_) => return None,
+            Opnd::C(_) => return Err("a closure operand"),
         },
         TOp::Return { src: Opnd::B(reg) } => match at(boxed, reg)? {
-            Boxed::Num => Touch::Num,
-            _ => Touch::List(list(boxed, reg)?),
+            Boxed::Num | Boxed::List(_) | Boxed::Shared(_) => None,
+            _ => return Err("a return of a boxed value it does not model"),
         },
         TOp::DynBin { dst, a, b, ret, .. } => {
             numeric(boxed, a)?;
@@ -763,25 +785,25 @@ fn step_boxed(op: &TOp, pc: usize, sites: &[usize], boxed: &mut [Boxed]) -> Opti
             if ret == Class::Boxed {
                 set(boxed, dst, Boxed::Num)?;
             }
-            Touch::Nothing
+            None
         }
         TOp::DynNeg { dst, src } => {
             numeric(boxed, src)?;
             set(boxed, dst, Boxed::Num)?;
-            Touch::Nothing
+            None
         }
         TOp::DynNot { src: cond, .. } | TOp::DynJumpIf { cond, .. } => {
             numeric(boxed, cond)?;
-            Touch::Nothing
+            None
         }
         TOp::DynRangeTest { current, stop, .. } => {
             numeric(boxed, current)?;
             numeric(boxed, stop)?;
-            Touch::Nothing
+            None
         }
         TOp::DynInc { reg } => {
             numeric(boxed, Opnd::B(reg))?;
-            Touch::Nothing
+            None
         }
         TOp::DynNative {
             dst,
@@ -796,10 +818,12 @@ fn step_boxed(op: &TOp, pc: usize, sites: &[usize], boxed: &mut [Boxed]) -> Opti
             if ret == Class::Boxed {
                 set(boxed, dst, Boxed::Num)?;
             }
-            Touch::Nothing
+            None
         }
-        TOp::Call { .. } | TOp::Index { .. } | TOp::Len { .. } => return None,
-        _ => Touch::Nothing,
+        TOp::Call { .. } => return Err("a call that was not inlined"),
+        TOp::Index { .. } => return Err("an index"),
+        TOp::Len { .. } => return Err("a len"),
+        _ => None,
     })
 }
 
@@ -807,16 +831,16 @@ fn step_boxed(op: &TOp, pc: usize, sites: &[usize], boxed: &mut [Boxed]) -> Opti
 struct Facts {
     /// for a `MoveS`, whether it copies a float
     float_moves: Vec<bool>,
-    /// the boxed value each op touches
-    touches: Vec<Touch>,
+    /// for an `EmptyList` or an `Append`, the site of its list
+    sites: Vec<Option<u8>>,
 }
 
-/// the facts codegen needs, checked along with every boxed read. `None` when
-/// a copy's source is not one class on every path, when a boxed value other
-/// than a list of scalars or a number is read, or when a list could be built
-/// twice in one call (one list per site and call is what lets it live in the
-/// frame)
-fn analyse(spec: &Spec) -> Option<Facts> {
+/// the facts codegen needs, checked along with every boxed read. an error
+/// when a copy's source is not one class on every path, when a boxed value
+/// other than a list of scalars or a number is read, or when a list could be
+/// built twice in one call (one list per site and call is what lets it live in
+/// the frame)
+fn analyse(spec: &Spec) -> Result<Facts, Decline> {
     let ops = &spec.ops;
     let regs = spec.frame_size as usize;
     let mut entry = State {
@@ -833,8 +857,11 @@ fn analyse(spec: &Spec) -> Option<Facts> {
     let lists: Vec<usize> = (0..ops.len())
         .filter(|&pc| matches!(ops[pc], TOp::EmptyList { .. }))
         .collect();
-    if lists.len() > LIST_SITES || lists.iter().any(|&pc| reaches_itself(ops, pc as u32)) {
-        return None;
+    if lists.len() > LIST_SITES {
+        return Err("more list sites than it models");
+    }
+    if lists.iter().any(|&pc| reaches_itself(ops, pc as u32)) {
+        return Err("a list built in a loop");
     }
 
     let mut states: Vec<Option<State>> = vec![None; ops.len()];
@@ -844,10 +871,12 @@ fn analyse(spec: &Spec) -> Option<Facts> {
         worklist.push(0u32);
     }
     while let Some(pc) = worklist.pop() {
-        let mut state = states[pc as usize].clone()?;
+        let Some(mut state) = states[pc as usize].clone() else {
+            continue;
+        };
         let op = &ops[pc as usize];
         if let Some((reg, word)) = writes(op, &state.words) {
-            *state.words.get_mut(reg as usize)? = word;
+            *state.words.get_mut(reg as usize).ok_or(OUTSIDE)? = word;
         }
         step_boxed(op, pc as usize, &lists, &mut state.boxed)?;
         for succ in successors(op, pc) {
@@ -867,23 +896,25 @@ fn analyse(spec: &Spec) -> Option<Facts> {
     }
     let mut facts = Facts {
         float_moves: vec![false; ops.len()],
-        touches: vec![Touch::Nothing; ops.len()],
+        sites: vec![None; ops.len()],
     };
     for (pc, op) in ops.iter().enumerate() {
         let Some(state) = &states[pc] else {
             continue;
         };
         if let TOp::MoveS { src, .. } = op {
-            facts.float_moves[pc] = match state.words.get(*src as usize)? {
+            facts.float_moves[pc] = match state.words.get(*src as usize).ok_or(OUTSIDE)? {
                 Word::Int => false,
                 Word::Float => true,
-                Word::Nothing | Word::Mixed => return None,
+                Word::Nothing | Word::Mixed => {
+                    return Err("a copy of a register not one class on every path");
+                }
             };
         }
         let mut boxed = state.boxed.clone();
-        facts.touches[pc] = step_boxed(op, pc, &lists, &mut boxed)?;
+        facts.sites[pc] = step_boxed(op, pc, &lists, &mut boxed)?;
     }
-    Some(facts)
+    Ok(facts)
 }
 
 /// whether control can come back to `start` after leaving it
@@ -1118,8 +1149,7 @@ impl Faults {
     }
 }
 
-fn compile(spec: &Spec) -> Option<Compiled> {
-    let facts = analyse(spec)?;
+fn compile(spec: &Spec, facts: &Facts) -> Option<Compiled> {
     let isa = host_isa()?;
     let mut jit = JITBuilder::with_isa(isa, default_libcall_names());
     for shim in Shim::ALL {
@@ -1158,7 +1188,7 @@ fn compile(spec: &Spec) -> Option<Compiled> {
         }
         Codegen {
             spec,
-            facts: &facts,
+            facts,
             refs: refs.map(Option::unwrap),
             ptr,
         }
@@ -1207,13 +1237,6 @@ fn word_of(b: &mut FunctionBuilder, (value, float): (Value, bool)) -> Value {
 }
 
 impl Codegen<'_> {
-    fn site(&self, pc: usize) -> Option<u8> {
-        match self.facts.touches[pc] {
-            Touch::List(site) => Some(site),
-            Touch::Nothing | Touch::Num => None,
-        }
-    }
-
     fn pure(&self, b: &mut FunctionBuilder, shim: Shim, args: &[Value]) -> Value {
         let call = b.ins().call(self.refs[shim as usize], args);
         b.inst_results(call)[0]
@@ -1457,7 +1480,6 @@ impl Codegen<'_> {
             next_const += 1;
             value
         };
-        let counts: [Variable; LIST_SITES] = std::array::from_fn(|_| b.declare_var(types::I64));
         let items = b.ins().iadd_imm_s(frame, word(layout.items) as i64);
         let out = b.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 16, 3));
         b.ins().jump(blocks[0]?, &[]);
@@ -1558,20 +1580,17 @@ impl Codegen<'_> {
                     let x = bits(b, x);
                     regs.set_num(b, reg, (x, Kind::Float))
                 }
-                // boxed values nothing reads (`analyse` checks); a copy of a
-                // list is the list, there being one per site and call
+                // boxed values nothing reads (`analyse` checks)
                 TOp::BoxC { .. } | TOp::Nil { .. } | TOp::Capture { .. } | TOp::Default { .. } => {}
+                // a copy of a list is its length and site, there being one
+                // list per site and call
                 TOp::MoveB { dst, src } => {
-                    if let Touch::Num = self.facts.touches[pc] {
-                        let number = regs.num(b, src);
-                        regs.set_num(b, dst, number);
-                    }
+                    let pair = regs.num(b, src);
+                    regs.set_num(b, dst, pair);
                 }
                 TOp::BoxInto { dst, src } => {
-                    if let Touch::Num = self.facts.touches[pc] {
-                        let number = regs.operand(b, src)?;
-                        regs.set_num(b, dst, number);
-                    }
+                    let pair = regs.operand(b, src)?;
+                    regs.set_num(b, dst, pair);
                 }
                 TOp::DynBin {
                     op: BinKind::In, ..
@@ -1725,13 +1744,15 @@ impl Codegen<'_> {
                         }
                     }
                 }
-                TOp::EmptyList { .. } => {
+                TOp::EmptyList { dst } => {
+                    let site = self.facts.sites[pc]?;
                     let zero = b.ins().iconst(types::I64, 0);
-                    b.def_var(counts[self.site(pc)? as usize], zero);
+                    let kind = b.ins().iconst(types::I64, KIND_LIST + site as i64);
+                    regs.set_num(b, dst, (zero, Kind::Dyn(kind)));
                 }
-                TOp::Append { value, .. } => {
-                    let site = self.site(pc)?;
-                    let count = counts[site as usize];
+                TOp::Append { list, value } => {
+                    let site = self.facts.sites[pc]?;
+                    let (count, _) = regs.num_vars(b, list);
                     let n = b.use_var(count);
                     let full =
                         b.ins()
@@ -1962,18 +1983,9 @@ impl Codegen<'_> {
                     pure!(Shim::FloatAtan2, [x, y])
                 }),
                 TOp::Return { src } => {
-                    let (value, kind, slot) = match (src, self.facts.touches[pc]) {
-                        (Opnd::B(_), Touch::List(site)) => {
-                            let count = b.use_var(counts[site as usize]);
-                            let kind = b.ins().iconst(types::I64, KIND_LIST + site as i64);
-                            (count, kind, layout.count)
-                        }
-                        _ => {
-                            let (value, kind) = regs.operand(b, src)?;
-                            (value, kind.value(b), layout.result)
-                        }
-                    };
-                    b.ins().store(flags, value, frame, word(slot));
+                    let (value, kind) = regs.operand(b, src)?;
+                    let kind = kind.value(b);
+                    b.ins().store(flags, value, frame, word(layout.result));
                     b.ins().store(flags, kind, frame, word(layout.kind));
                     let ok = b.ins().iconst(types::I32, 0);
                     b.ins().return_(&[ok]);
@@ -2055,10 +2067,15 @@ impl JitCache {
                     self.compiled.clear();
                 }
                 let started = Instant::now();
-                let compiled = compile(spec).map(Arc::new);
-                if compiled.is_none() && dump_kernels() {
-                    eprintln!("jit declined: a boxed read it does not model");
-                }
+                let compiled = analyse(spec)
+                    .and_then(|facts| compile(spec, &facts).ok_or("code generation failed"))
+                    .inspect_err(|reason| {
+                        if dump_kernels() {
+                            eprintln!("jit declined: {reason}");
+                        }
+                    })
+                    .ok()
+                    .map(Arc::new);
                 stats.jit_compile_elapsed += started.elapsed();
                 stats.jit_compiles += 1;
                 self.compiled.insert(shape.key, compiled.clone());
@@ -2144,7 +2161,7 @@ impl JitVm {
         Ok(match words[layout.kind] as i64 {
             kind @ KIND_LIST.. => {
                 let items = layout.items + Layout::site((kind - KIND_LIST) as u8);
-                let count = words[layout.count] as usize;
+                let count = words[layout.result] as usize;
                 KVal::list(
                     words[items..items + count]
                         .iter()
@@ -2920,5 +2937,103 @@ mod tests {
                 .prepare(program.spec(spec), &mut KernelStats::default())
                 .is_none()
         );
+    }
+
+    /// `r = n > 0 ? [x; floats] : [n; ints]` then `ops` after the merge at
+    /// the op they return, over the arguments `n, x`: each branch builds its
+    /// list in a register of its own and moves it into register 4, or builds
+    /// it in register 4 directly
+    fn merged_lists(floats: usize, ints: usize, direct: bool, after: Vec<KOp>) -> Vec<KOp> {
+        let (a, b) = if direct { (4, 4) } else { (3, 5) };
+        let mut ops = vec![
+            KOp::Int { dst: 2, value: 0 },
+            bin(BinKind::Gt, 2, 0, 2),
+            KOp::JumpIfNot { cond: 2, to: 0 },
+            KOp::EmptyList { dst: a },
+        ];
+        ops.extend((0..floats).map(|_| KOp::Append { list: a, value: 1 }));
+        if !direct {
+            ops.push(KOp::Move { dst: 4, src: a });
+        }
+        let jump = ops.len();
+        ops.push(KOp::Jump { to: 0 });
+        ops[2] = KOp::JumpIfNot {
+            cond: 2,
+            to: ops.len() as u32,
+        };
+        ops.push(KOp::EmptyList { dst: b });
+        ops.extend((0..ints).map(|_| KOp::Append { list: b, value: 0 }));
+        if !direct {
+            ops.push(KOp::Move { dst: 4, src: b });
+        }
+        ops[jump] = KOp::Jump {
+            to: ops.len() as u32,
+        };
+        ops.extend(after);
+        ops
+    }
+
+    fn analysed(ops: Vec<KOp>) -> Result<(), Decline> {
+        let (arena, id) = closure(2, 7, ops);
+        let (program, spec) =
+            TypedProgram::specialise(&arena, id, &[KVal::Int(3), KVal::Float(0.5)]).unwrap();
+        analyse(program.spec(spec)).map(|_| ())
+    }
+
+    #[test]
+    fn lists_merged_from_two_branches_match_the_typed_machine() {
+        for (floats, ints) in [(3, 3), (4, 1), (0, 2), (LIST_CAP, 2)] {
+            for direct in [false, true] {
+                let ops = merged_lists(floats, ints, direct, vec![KOp::Return { src: 4 }]);
+                let jit = compiled(2, 7, ops, &[KVal::Int(3), KVal::Float(0.5)]);
+                jit.agree(samples(12, 100).map(|(n, x)| vec![KVal::Int(n), KVal::Float(x)]));
+            }
+        }
+    }
+
+    #[test]
+    fn a_merged_list_read_other_than_by_a_return_is_declined() {
+        let index = vec![
+            KOp::Int { dst: 6, value: 0 },
+            KOp::Index {
+                dst: 6,
+                list: 4,
+                index: 6,
+            },
+            KOp::Return { src: 6 },
+        ];
+        let append = vec![KOp::Append { list: 4, value: 0 }, KOp::Return { src: 4 }];
+        let add = vec![bin(BinKind::Add, 6, 4, 1), KOp::Return { src: 6 }];
+        for (after, reason) in [
+            (index, "an index"),
+            (append, "an append to a copied or merged list"),
+            (add, "a list read as a number"),
+        ] {
+            for direct in [false, true] {
+                assert_eq!(
+                    analysed(merged_lists(2, 2, direct, after.clone())),
+                    Err(reason)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_list_built_in_a_loop_is_declined() {
+        // i = 0; l = [0]; while i < n { l = [x, i]; i += 1 }; l
+        let ops = vec![
+            KOp::Int { dst: 2, value: 0 },
+            KOp::EmptyList { dst: 4 },
+            KOp::Append { list: 4, value: 2 },
+            bin(BinKind::Lt, 3, 2, 0),
+            KOp::JumpIfNot { cond: 3, to: 10 },
+            KOp::EmptyList { dst: 4 },
+            KOp::Append { list: 4, value: 1 },
+            KOp::Append { list: 4, value: 2 },
+            KOp::Inc { reg: 2 },
+            KOp::Jump { to: 3 },
+            KOp::Return { src: 4 },
+        ];
+        assert_eq!(analysed(ops), Err("a list built in a loop"));
     }
 }
