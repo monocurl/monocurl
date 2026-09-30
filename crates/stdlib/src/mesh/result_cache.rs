@@ -10,7 +10,11 @@
 
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
-use executor::{executor::Executor, heap::with_heap, value::Value};
+use executor::{
+    executor::Executor,
+    heap::with_heap,
+    value::{Value, container::HashableKey},
+};
 use geo::mesh::{Mesh, PixelTexture};
 
 const MAX_BYTES: usize = 128 << 20;
@@ -170,7 +174,35 @@ fn encode(executor: &mut Executor, value: &Value, key: &mut Key) -> Option<()> {
             let inner = with_heap(|heap| heap.get(reference.key()).clone());
             encode(executor, &inner, key)?;
         }
+        // palettes: keyed in insertion order, so two equal maps built in a
+        // different order miss each other, which only costs a re-run
+        Value::Map(map) => {
+            out.extend([7, map.len() as u64]);
+            for map_key in &map.insertion_order {
+                encode_key(map_key, &mut key.words)?;
+                let value = map.get(map_key)?;
+                let inner = with_heap(|heap| heap.get(value.key()).clone());
+                encode(executor, &inner, key)?;
+            }
+        }
         _ => return None,
+    }
+    Some(())
+}
+
+fn encode_key(map_key: &HashableKey, out: &mut Vec<u64>) -> Option<()> {
+    match map_key {
+        HashableKey::Integer(n) => out.extend([1, *n as u64]),
+        HashableKey::Float(bits) => out.extend([2, *bits]),
+        HashableKey::String(s) => {
+            out.extend([3, s.len() as u64]);
+            out.extend(s.as_bytes().chunks(8).map(|chunk| {
+                let mut word = [0u8; 8];
+                word[..chunk.len()].copy_from_slice(chunk);
+                u64::from_le_bytes(word)
+            }));
+        }
+        HashableKey::List(_) => return None,
     }
     Some(())
 }
