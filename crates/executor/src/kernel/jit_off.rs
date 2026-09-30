@@ -36,7 +36,12 @@ impl JitVm {
         match *entry {}
     }
 
-    pub fn call(&mut self, _spec: &Spec, _args: &[KVal]) -> Result<KVal, Fault> {
+    pub fn call(
+        &mut self,
+        _spec: &Spec,
+        _arena: &ClosureArena,
+        _args: &[KVal],
+    ) -> Result<KVal, Fault> {
         match *self {}
     }
 }

@@ -197,7 +197,7 @@ impl<'a> Machines<'a> {
         if !TVm::accepts(spec, args) {
             return self.call(args);
         }
-        match jit.call(spec, args) {
+        match jit.call(spec, self.arena, args) {
             Ok(native) => {
                 self.jit_calls += 1;
                 self.typed_calls += 1;
