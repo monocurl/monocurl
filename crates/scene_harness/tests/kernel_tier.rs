@@ -344,6 +344,36 @@ fn point_and_colour_maps() {
 }
 
 #[test]
+fn typed_batch_inputs_keep_their_classes() {
+    // whole coordinates reach the lambda as ints and the rest as floats,
+    // grid indices as ints, and defaults follow the typed arguments
+    check(
+        "
+        let classify = |v| {
+            if (v == 0) { return 1 }
+            return 0.5
+        }
+        mesh grid = LineGrid([-1, 1, 5], [-1, 1, 5], 1)
+        mesh lifted = point_map{|p, k = 2| [p[0] * k, p[1] + p[0] / 4, p[0] * p[1]]} grid
+        mesh tinted = color_map{|p| [classify(p[0]), p[1] * p[1], 0.5, 1]} lifted
+        mesh cells = ColorGrid(
+            |pos, idx| [idx[0] / 4, idx[1] * 0.5, pos[0] * pos[1], 1],
+            [-1, 1, 5],
+            [-1, 1, 3],
+            mask: |pos| pos[0] > -0.5
+        )
+        mesh smooth = ColorGrid(|pos, idx| [idx[0] * 0.25, 0, pos[1] * 0.5 + 0.5, 1], [-1, 1, 5], [-1, 1, 3], smooth: 1)
+        mesh curve = ParametricFunc(|t, r = 1| [r * cos(t), r * sin(t), 0], [0, 3, 17])
+        mesh level = ImplicitFunc2d(|x, y| x * x + y * y - 0.5, [-1, 1, 9], [-1, 1, 9])
+        mesh between = ExplicitFuncDiff(|x| x * x, |x| x / 2, [0, 1, 9])
+        mesh height = ExplicitFunc2d(|x, y| x * y, [-1, 1, 5], [-1, 1, 5], color_at: |x, y, z| [x * 0.5 + 0.5, y * 0.5 + 0.5, z, 1])
+        print [grid, lifted, tinted, cells, smooth, curve, level, between, height]
+        ",
+        Expect::Native,
+    );
+}
+
+#[test]
 fn deep_recursion_falls_back_without_changing_the_answer() {
     check(
         "

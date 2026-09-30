@@ -1,10 +1,14 @@
-use executor::{error::ExecutorError, executor::Executor, kernel::KVal, value::Value};
+use executor::{
+    error::ExecutorError,
+    executor::Executor,
+    kernel::{BatchInput, KVal},
+    value::Value,
+};
 use geo::{
     mesh::Mesh,
     mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
-use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use crate::mesh::{helpers::*, implicit2d};
@@ -78,24 +82,34 @@ pub async fn mk_field(executor: &mut Executor, stack_idx: usize) -> Result<Value
     let ny = y_samples.saturating_sub(1).max(1);
 
     let mut samples = Vec::with_capacity(sample_count);
-    let mut mask_args = Vec::<SmallVec<[Value; 2]>>::with_capacity(sample_count);
+    let mut positions = Vec::with_capacity(sample_count);
     for ix in 0..x_samples {
         for iy in 0..y_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             let pos = Float3::new(x, y, 0.0);
-            samples.push((pos, ix, iy));
-            mask_args.push(smallvec![point_value(pos)]);
+            samples.push((pos, [ix, iy]));
+            positions.push(pos);
         }
     }
-    let mask_values = invoke_callable_many(executor, &mask, &mask_args, "mask").await?;
-    let mut mesh_args = Vec::<SmallVec<[Value; 2]>>::new();
-    for ((pos, ix, iy), mask_value) in samples.into_iter().zip(mask_values) {
+    let mask_values =
+        invoke_callable_many_values(executor, &mask, BatchInput::Points(&positions), "mask")
+            .await?;
+    let mut enabled = Vec::new();
+    for (sample, mask_value) in samples.into_iter().zip(mask_values) {
         if mask_value.check_truthy()? {
-            mesh_args.push(smallvec![point_value(pos), sample_index_value(ix, iy)]);
+            enabled.push(sample);
         }
     }
-    out.extend(invoke_callable_many(executor, &mesh_at, &mesh_args, "mesh_at").await?);
+    out.extend(
+        invoke_callable_many_values(
+            executor,
+            &mesh_at,
+            BatchInput::IndexedPoints(&enabled),
+            "mesh_at",
+        )
+        .await?,
+    );
 
     Ok(list_value(out))
 }
@@ -133,16 +147,25 @@ async fn mk_parametric_uncached(
     let t1 = crate::read_float(executor, stack_idx, -2, "t1")?;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(2) as usize;
     ensure_limit("parametric samples", samples, MAX_CURVE_SAMPLES)?;
-    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(samples);
-    for i in 0..samples {
-        let t = if samples == 1 {
-            t0
-        } else {
-            t0 + (t1 - t0) * i as f64 / (samples - 1) as f64
-        };
-        args.push(smallvec![Value::Float(t)]);
-    }
-    let values = invoke_callable_many(executor, &f, &args, "f").await?;
+    let ts: Vec<f64> = (0..samples)
+        .map(|i| {
+            if samples == 1 {
+                t0
+            } else {
+                t0 + (t1 - t0) * i as f64 / (samples - 1) as f64
+            }
+        })
+        .collect();
+    let values = invoke_callable_many_values(
+        executor,
+        &f,
+        BatchInput::Floats {
+            values: &ts,
+            arity: 1,
+        },
+        "f",
+    )
+    .await?;
     let points = values
         .into_iter()
         .map(|value| parametric_sample_point(value, "f"))
@@ -195,17 +218,16 @@ async fn mk_explicit_uncached(
     let x1 = crate::read_float(executor, stack_idx, -2, "x1")?;
     let samples = read_int(executor, stack_idx, -1, "samples")?.max(2) as usize;
     ensure_limit("explicit samples", samples, MAX_CURVE_SAMPLES)?;
-    let mut xs = Vec::with_capacity(samples);
-    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(samples);
-    for i in 0..samples {
-        let x = x0 + (x1 - x0) * i as f64 / (samples - 1) as f64;
-        xs.push(x);
-        args.push(smallvec![Value::Float(x)]);
-    }
-    let ys = invoke_callable_many_mapped(
+    let xs: Vec<f64> = (0..samples)
+        .map(|i| x0 + (x1 - x0) * i as f64 / (samples - 1) as f64)
+        .collect();
+    let ys = invoke_callable_many_input(
         executor,
         &f,
-        &args,
+        BatchInput::Floats {
+            values: &xs,
+            arity: 1,
+        },
         "f",
         explicit_sample_y_from_kernel,
         |value| explicit_sample_y(value, "f"),
@@ -273,33 +295,35 @@ async fn mk_explicit2d_uncached(
     ensure_surface_triangles("explicit surface triangles", cell_count.saturating_mul(2))?;
     let mut grid = vec![vec![Float3::ZERO; y_samples]; x_samples];
     let mut coords = Vec::with_capacity(x_samples * y_samples);
-    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
+    let mut args = Vec::with_capacity(2 * x_samples * y_samples);
     for ix in 0..x_samples {
         for iy in 0..y_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             coords.push((ix, iy, x, y));
-            args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
+            args.extend([x as f64, y as f64]);
         }
     }
-    let values =
-        invoke_callable_many_mapped(
-            executor,
-            &f,
-            &args,
-            "f",
-            f32_from_kernel,
-            |value| match value {
-                Value::Float(v) => Ok(v as f32),
-                Value::Integer(v) => Ok(v as f32),
-                other => Err(ExecutorError::type_error_for(
-                    "float",
-                    other.type_name(),
-                    "f",
-                )),
-            },
-        )
-        .await?;
+    let values = invoke_callable_many_input(
+        executor,
+        &f,
+        BatchInput::Floats {
+            values: &args,
+            arity: 2,
+        },
+        "f",
+        f32_from_kernel,
+        |value| match value {
+            Value::Float(v) => Ok(v as f32),
+            Value::Integer(v) => Ok(v as f32),
+            other => Err(ExecutorError::type_error_for(
+                "float",
+                other.type_name(),
+                "f",
+            )),
+        },
+    )
+    .await?;
     for ((ix, iy, x, y), z) in coords.into_iter().zip(values) {
         grid[ix][iy] = Float3::new(x, y, z);
     }
@@ -313,20 +337,17 @@ async fn mk_explicit2d_uncached(
         }
     }
     let colors: Vec<Float4> = if let Some(cb) = &color_at {
-        let color_args: Vec<SmallVec<[Value; 2]>> = vertices
+        let color_args: Vec<f64> = vertices
             .iter()
-            .map(|p| {
-                smallvec![
-                    Value::Float(p.x as f64),
-                    Value::Float(p.y as f64),
-                    Value::Float(p.z as f64),
-                ]
-            })
+            .flat_map(|p| p.to_array().map(f64::from))
             .collect();
-        invoke_callable_many_mapped(
+        invoke_callable_many_input(
             executor,
             cb,
-            &color_args,
+            BatchInput::Floats {
+                values: &color_args,
+                arity: 3,
+            },
             "color_at",
             float4_from_kernel,
             |value| float4_from_value(value, "color_at"),
@@ -371,16 +392,25 @@ pub async fn mk_implicit2d(
     let sign_stride = x_samples + 2;
     let mut sign = vec![false; (y_samples + 2) * sign_stride];
     let mut coords = Vec::with_capacity(x_samples * y_samples);
-    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(x_samples * y_samples);
+    let mut args = Vec::with_capacity(2 * x_samples * y_samples);
     for iy in 0..y_samples {
         for ix in 0..x_samples {
             let x = x0 + (x1 - x0) * ix as f32 / nx as f32;
             let y = y0 + (y1 - y0) * iy as f32 / ny as f32;
             coords.push((ix, iy));
-            args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
+            args.extend([x as f64, y as f64]);
         }
     }
-    let values = invoke_callable_many(executor, &f, &args, "f").await?;
+    let values = invoke_callable_many_values(
+        executor,
+        &f,
+        BatchInput::Floats {
+            values: &args,
+            arity: 2,
+        },
+        "f",
+    )
+    .await?;
     for ((ix, iy), value) in coords.into_iter().zip(values) {
         let value = match value {
             Value::Float(v) => v as f32,
@@ -440,15 +470,15 @@ pub async fn mk_explicit_diff(
 
     let mut upper = Vec::with_capacity(samples);
     let mut lower = Vec::with_capacity(samples);
-    let mut xs = Vec::with_capacity(samples);
-    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(samples);
-    for i in 0..samples {
-        let x = x0 + (x1 - x0) * i as f64 / (samples - 1) as f64;
-        xs.push(x);
-        args.push(smallvec![Value::Float(x)]);
-    }
-    let upper_values = invoke_callable_many(executor, &f, &args, "f").await?;
-    let lower_values = invoke_callable_many(executor, &g, &args, "g").await?;
+    let xs: Vec<f64> = (0..samples)
+        .map(|i| x0 + (x1 - x0) * i as f64 / (samples - 1) as f64)
+        .collect();
+    let input = BatchInput::Floats {
+        values: &xs,
+        arity: 1,
+    };
+    let upper_values = invoke_callable_many_values(executor, &f, input, "f").await?;
+    let lower_values = invoke_callable_many_values(executor, &g, input, "g").await?;
     // a column is valid only if both f and g are finite there; `nil` / non-finite
     // marks a domain gap and the fill / outline is split around it.
     let mut valid = Vec::with_capacity(samples);
