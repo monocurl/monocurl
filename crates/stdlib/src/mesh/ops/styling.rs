@@ -40,6 +40,25 @@ fn op_fade_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Valu
     })())
 }
 
+fn restroke_mesh(mesh: &mut Mesh, color: Float4, level: f32) {
+    edit_keeping_positions(&mut mesh.lins, |lins| {
+        for lin in lins {
+            lin.a.col = lin.a.col.lerp(color, level);
+            lin.b.col = lin.b.col.lerp(color, level);
+        }
+    });
+}
+
+fn refill_mesh(mesh: &mut Mesh, color: Float4, level: f32) {
+    edit_keeping_positions(&mut mesh.tris, |tris| {
+        for tri in tris {
+            tri.a.col = tri.a.col.lerp(color, level);
+            tri.b.col = tri.b.col.lerp(color, level);
+            tri.c.col = tri.c.col.lerp(color, level);
+        }
+    });
+}
+
 #[stdlib_func(sync = op_restroke_sync)]
 pub async fn op_restroke(
     executor: &mut Executor,
@@ -67,10 +86,7 @@ pub async fn op_restroke(
         return Ok(tree.into_value());
     }
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        for lin in &mut mesh.lins {
-            lin.a.col = lin.a.col.lerp(color, level);
-            lin.b.col = lin.b.col.lerp(color, level);
-        }
+        restroke_mesh(mesh, color, level)
     })
     .await?;
     Ok(tree.into_value())
@@ -103,12 +119,7 @@ fn op_restroke_sync(
             tree.for_each_mut(&mut |mesh| mesh.uniform.stroke_radius = radius);
         }
         if level > 0.0 {
-            tree.for_each_mut(&mut |mesh| {
-                for lin in &mut mesh.lins {
-                    lin.a.col = lin.a.col.lerp(color, level);
-                    lin.b.col = lin.b.col.lerp(color, level);
-                }
-            });
+            tree.for_each_mut(&mut |mesh| restroke_mesh(mesh, color, level));
         }
         Ok(tree.into_value())
     })())
@@ -124,17 +135,16 @@ pub async fn op_refill(executor: &mut Executor, stack_idx: usize) -> Result<Valu
     let color = read_float4(executor, stack_idx, -3, "color").await?;
     let filter = read_optional_tag_filter(executor, stack_idx, -2, "filter")?;
     tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
-        for tri in &mut mesh.tris {
-            tri.a.col = tri.a.col.lerp(color, level);
-            tri.b.col = tri.b.col.lerp(color, level);
-            tri.c.col = tri.c.col.lerp(color, level);
-        }
+        refill_mesh(mesh, color, level)
     })
     .await?;
     Ok(tree.into_value())
 }
 
-fn op_refill_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+fn op_refill_sync(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Option<Result<Value, ExecutorError>> {
     let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -4)?;
     if !has_no_tag_filter(executor, stack_idx, -2) {
         return None;
@@ -145,18 +155,15 @@ fn op_refill_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Va
     };
     if level > 0.0 {
         let color = try_read_float4_arg(executor, stack_idx, -3)?;
-        tree.for_each_mut(&mut |mesh| {
-            for tri in &mut mesh.tris {
-                tri.a.col = tri.a.col.lerp(color, level);
-                tri.b.col = tri.b.col.lerp(color, level);
-                tri.c.col = tri.c.col.lerp(color, level);
-            }
-        });
+        tree.for_each_mut(&mut |mesh| refill_mesh(mesh, color, level));
     }
     Some(Ok(tree.into_value()))
 }
 
-fn op_redot_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+fn op_redot_sync(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Option<Result<Value, ExecutorError>> {
     let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -4)?;
     if !has_no_tag_filter(executor, stack_idx, -2) {
         return None;
@@ -238,7 +245,10 @@ fn add_line_vertex_dots(mesh: &mut Mesh) {
     mesh.debug_assert_consistent_topology();
 }
 
-fn op_recolor_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+fn op_recolor_sync(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Option<Result<Value, ExecutorError>> {
     let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -4)?;
     if !has_no_tag_filter(executor, stack_idx, -2) {
         return None;
@@ -349,7 +359,10 @@ pub async fn op_with_zindex(
     Ok(tree.into_value())
 }
 
-fn op_gloss_sync(executor: &mut Executor, stack_idx: usize) -> Option<Result<Value, ExecutorError>> {
+fn op_gloss_sync(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Option<Result<Value, ExecutorError>> {
     let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -3)?;
     if !has_no_tag_filter(executor, stack_idx, -1) {
         return None;

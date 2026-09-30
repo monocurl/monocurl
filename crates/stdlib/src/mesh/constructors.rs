@@ -3,7 +3,9 @@ use std::{cell::RefCell, collections::HashMap, sync::Arc};
 use executor::executor::TextRenderQuality;
 use executor::{error::ExecutorError, executor::Executor, value::Value};
 use geo::{
-    mesh::{DEFAULT_DOT_RADIUS, Dot, Lin, Mesh, PixelTexture, Shared, TextureSource, Tri, Uniforms},
+    mesh::{
+        DEFAULT_DOT_RADIUS, Dot, Lin, Mesh, PixelTexture, Shared, TextureSource, Tri, Uniforms,
+    },
     mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
@@ -659,9 +661,15 @@ type TemplateParts = (Shared<Dot>, Shared<Lin>, Shared<Tri>);
 /// distinct radii must fit, or every frame rebuilds them all
 const TEMPLATE_CACHE_BYTES: usize = 32 << 20;
 
+struct Template {
+    parts: TemplateParts,
+    // pinned on reuse, so a shape built once per frame pays no bounds walk
+    bounds_pinned: bool,
+}
+
 #[derive(Default)]
 struct TemplateCache {
-    parts: HashMap<TemplateKey, TemplateParts>,
+    templates: HashMap<TemplateKey, Template>,
     bytes: usize,
 }
 
@@ -672,11 +680,17 @@ impl TemplateCache {
             + lins.len() * size_of::<Lin>()
             + tris.len() * size_of::<Tri>();
         if self.bytes + bytes > TEMPLATE_CACHE_BYTES {
-            self.parts.clear();
+            self.templates.clear();
             self.bytes = 0;
         }
         self.bytes += bytes;
-        self.parts.insert(key, parts);
+        self.templates.insert(
+            key,
+            Template {
+                parts,
+                bounds_pinned: false,
+            },
+        );
     }
 }
 
@@ -688,7 +702,15 @@ fn template_mesh(
     key: TemplateKey,
     build: impl FnOnce() -> Result<(Vec<Lin>, Vec<Tri>), ExecutorError>,
 ) -> Result<Value, ExecutorError> {
-    let cached = TEMPLATES.with(|templates| templates.borrow().parts.get(&key).cloned());
+    let cached = TEMPLATES.with(|templates| {
+        let mut templates = templates.borrow_mut();
+        let template = templates.templates.get_mut(&key)?;
+        if !template.bounds_pinned {
+            pin_template_bounds(&template.parts);
+            template.bounds_pinned = true;
+        }
+        Some(template.parts.clone())
+    });
     let (dots, lins, tris) = match cached {
         Some(parts) => parts,
         None => {
@@ -697,7 +719,7 @@ fn template_mesh(
                 unreachable!("mesh_from_parts builds a mesh");
             };
             let parts = (mesh.dots.clone(), mesh.lins.clone(), mesh.tris.clone());
-            TEMPLATES.with(|templates| templates.borrow_mut().insert(key, parts.clone()));
+            TEMPLATES.with(|templates| templates.borrow_mut().insert(key, parts));
             return Ok(Value::Mesh(mesh));
         }
     };
