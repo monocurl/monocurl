@@ -17,7 +17,6 @@ const DEFAULT_SCENE_FILES: &[&str] = &[
     "(Tutorial) Meshes.mcs",
     "(Tutorial) Animations.mcs",
     "(Example) Fractal.mcs",
-    "(Example) Flow Field.mcs",
     "(Example) Particle Swarm.mcs",
     "(Example) Shader.mcs",
     "(Example) Surface.mcs",

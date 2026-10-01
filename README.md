@@ -20,10 +20,10 @@ Every scene below runs live in the editor while you type. Sources are in the [ga
 
 | | | |
 |:-:|:-:|:-:|
-| [![Particle swarm](.github/assets/gallery/particle-swarm.gif)](https://monocurl.com/gallery/#12-particle-swarm) | [![Shader](.github/assets/gallery/shader.png)](https://monocurl.com/gallery/#13-shader) | [![Surface](.github/assets/gallery/surface.gif)](https://monocurl.com/gallery/#14-surface) |
-| 600 particles, restyled every frame | per-pixel shader, rendered as a still | 70x70 morphing surface |
-| [![Flow field](.github/assets/gallery/flow-field.gif)](https://monocurl.com/gallery/#06-flow-field) | [![Tree fractal](.github/assets/gallery/tree-fractal.png)](https://monocurl.com/gallery/#09-tree-fractal) | [![Pythagorean theorem](.github/assets/gallery/pythagorean-theorem.gif)](https://monocurl.com/gallery/#04-pythagorean-theorem) |
-| interactive flow field with streamlines | recursive tree to depth 9 | Pythagorean theorem walkthrough |
+| [![Pythagorean theorem](.github/assets/gallery/pythagorean-theorem.gif)](https://monocurl.com/gallery/#04-pythagorean-theorem) | [![Breather surface](.github/assets/gallery/breather-surface.png)](https://monocurl.com/gallery/#08-breather-surface) | [![Tree fractal](.github/assets/gallery/tree-fractal.png)](https://monocurl.com/gallery/#09-tree-fractal) |
+| Pythagorean theorem walkthrough | breather surface, a 128x512 parametric grid | recursive tree to depth 9 |
+| [![Shader](.github/assets/gallery/shader.png)](https://monocurl.com/gallery/#13-shader) | [![Surface](.github/assets/gallery/surface.gif)](https://monocurl.com/gallery/#14-surface) | [![Julia morph](.github/assets/gallery/julia-morph.gif)](https://monocurl.com/gallery/#15-julia-morph) |
+| per-pixel shader, rendered as a still | 70x70 morphing surface | Julia set morph, every pixel recomputed per frame |
 
 ## Minimal Example
 
