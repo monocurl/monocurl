@@ -1,5 +1,4 @@
 use std::{
-    ops::Range,
     path::{Path, PathBuf},
 };
 
@@ -546,31 +545,34 @@ impl HomeView {
     }
 
     fn projects_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let projects = &self.state.read(cx).recently_opened;
+        let paths: Vec<PathBuf> = self
+            .state
+            .read(cx)
+            .recently_opened
+            .iter()
+            .map(|p| p.path.clone())
+            .collect();
         div()
             .text_sm()
             .size_full()
             .p_2()
             .overflow_hidden()
-            .child(if projects.is_empty() {
+            .child(if paths.is_empty() {
                 div()
                     .text_center()
                     .child("No recent projects")
                     .into_any_element()
             } else {
-                uniform_list(
-                    "project-list",
-                    projects.len(),
-                    cx.processor(move |this, range: Range<usize>, _, cx| {
-                        this.state.read(cx).recently_opened[range]
-                            .iter()
-                            .map(|p| this.single_project(p.path.clone(), cx))
-                            .collect()
-                    }),
-                )
-                .size_full()
-                .pb_10()
-                .into_any_element()
+                // the list is short, so it scrolls as plain children: a
+                // virtualised list measured against the bottom padding made
+                // the last row pop in and out near the end of the scroll
+                div()
+                    .id("project-list")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .pb_10()
+                    .children(paths.into_iter().map(|path| self.single_project(path, cx)))
+                    .into_any_element()
             })
     }
 
