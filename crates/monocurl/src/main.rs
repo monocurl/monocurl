@@ -221,6 +221,12 @@ impl MonocurlLauncher {
         let options = WindowOptions {
             titlebar: Some(TitlebarOptions {
                 title: Some("Monocurl".into()),
+                // the navbar doubles as the title bar on macos, so the window
+                // chrome has one colour instead of a grey strip above it
+                #[cfg(target_os = "macos")]
+                appears_transparent: true,
+                #[cfg(target_os = "macos")]
+                traffic_light_position: Some(point(px(10.0), px(9.0))),
                 ..Default::default()
             }),
             window_bounds: Some(WindowBounds::Windowed(window_bounds)),
