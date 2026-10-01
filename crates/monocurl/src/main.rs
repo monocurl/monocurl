@@ -26,6 +26,7 @@ use crate::{
     settings_window::SettingsWindow,
     state::{user_settings::UserSettings, window_state::WindowState},
     theme::ThemeSettings,
+    thumbnails::Thumbnails,
     window::MonocurlWindow,
 };
 use gpui::*;
@@ -47,6 +48,7 @@ mod services;
 mod settings_window;
 mod state;
 mod theme;
+mod thumbnails;
 mod timeline;
 mod viewport;
 mod window;
@@ -252,6 +254,7 @@ impl MonocurlLauncher {
                 UserSettings::init(cx);
                 Localization::init(cx);
                 AutoUpdater::init(cx);
+                Thumbnails::init(cx);
                 Self::setup_modules(cx);
                 Self::setup_global_actions(cx);
                 Self::setup_menus(cx);

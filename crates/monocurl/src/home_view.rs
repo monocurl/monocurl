@@ -1,4 +1,7 @@
-use std::{ops::Range, path::PathBuf};
+use std::{
+    ops::Range,
+    path::{Path, PathBuf},
+};
 
 use gpui::*;
 use structs::assets::Assets;
@@ -8,8 +11,12 @@ use crate::{
     auto_update::{AutoUpdateStatus, AutoUpdater, CURRENT_VERSION},
     components::{buttons::link_button, latex_warning::render_latex_warning},
     navbar_view::Navbar,
-    state::{user_settings::UserSettings, window_state::WindowState},
-    theme::ThemeSettings,
+    state::{
+        user_settings::UserSettings,
+        window_state::{ActiveScreen, WindowState},
+    },
+    theme::{FontSet, ThemeSettings},
+    thumbnails::{THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH, Thumbnails},
 };
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
@@ -18,6 +25,9 @@ const HOME_LOGO_WIDE_FRACTION: f32 = 0.58;
 const HOME_LOGO_MIN_EXPANDED_WIDTH: f32 = 520.0;
 const HOME_LOGO_MAX_WIDTH: f32 = 960.0;
 const HOME_LOGO_CARD_MAX_WIDTH: f32 = 430.0;
+const PROJECT_THUMBNAIL_WIDTH: f32 = 96.0;
+const PROJECT_THUMBNAIL_HEIGHT: f32 =
+    PROJECT_THUMBNAIL_WIDTH * THUMBNAIL_HEIGHT as f32 / THUMBNAIL_WIDTH as f32;
 
 #[derive(Clone, Copy)]
 struct LogoMetrics {
@@ -80,14 +90,22 @@ fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
 pub struct HomeView {
     navbar: Entity<Navbar>,
     state: Entity<WindowState>,
+    thumbnails: Option<Entity<Thumbnails>>,
+    /// projects whose thumbnails were last requested while home was showing
+    thumbnails_requested: Option<Vec<PathBuf>>,
 }
 
 impl HomeView {
     pub fn new(cx: &mut Context<HomeView>, state: Entity<WindowState>) -> Self {
-        cx.observe(&state, |_this, _, cx| {
+        cx.observe(&state, |this, _, cx| {
+            this.refresh_thumbnails(cx);
             cx.notify();
         })
         .detach();
+        let thumbnails = Thumbnails::get(cx);
+        if let Some(thumbnails) = &thumbnails {
+            cx.observe(thumbnails, |_this, _, cx| cx.notify()).detach();
+        }
         cx.observe_global::<ThemeSettings>(|_this, cx| {
             cx.notify();
         })
@@ -105,7 +123,38 @@ impl HomeView {
 
         let navbar = cx.new(|cx| Navbar::new(state.downgrade(), cx));
 
-        Self { navbar, state }
+        let mut this = Self {
+            navbar,
+            state,
+            thumbnails,
+            thumbnails_requested: None,
+        };
+        this.refresh_thumbnails(cx);
+        this
+    }
+
+    /// queues missing or stale thumbnails whenever home is shown or its list changes
+    fn refresh_thumbnails(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        if !matches!(state.screen, ActiveScreen::Home) {
+            self.thumbnails_requested = None;
+            return;
+        }
+
+        let projects: Vec<_> = state
+            .recently_opened
+            .iter()
+            .map(|recent| recent.path.clone())
+            .collect();
+        if self.thumbnails_requested.as_ref() == Some(&projects) {
+            return;
+        }
+        if let Some(thumbnails) = &self.thumbnails {
+            thumbnails.update(cx, |thumbnails, cx| {
+                thumbnails.refresh(projects.iter().map(PathBuf::as_path), cx);
+            });
+        }
+        self.thumbnails_requested = Some(projects);
     }
 
     fn render_update_status(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -190,8 +239,11 @@ impl HomeView {
     ) -> Result<(), String> {
         log::info!("Adding projects {:?}", paths);
 
-        self.state
-            .update(cx, move |state, _cx| state.import_many(paths))
+        self.state.update(cx, move |state, cx| {
+            let result = state.import_many(paths);
+            cx.notify();
+            result
+        })
     }
 
     fn create_default(&mut self, dtype: DocumentType, window: &mut Window, cx: &mut Context<Self>) {
@@ -224,8 +276,9 @@ impl HomeView {
     fn forget(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
         log::info!("Forgetting project {:?}", path);
 
-        self.state.update(cx, move |state, _cx| {
+        self.state.update(cx, move |state, cx| {
             state.forget_project(&path);
+            cx.notify();
         });
     }
 
@@ -321,6 +374,41 @@ impl HomeView {
             .into_any_element()
     }
 
+    fn thumbnail(&self, project_path: &Path, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let theme = ThemeSettings::theme(cx);
+        let radius = px(4.);
+        let tile = div()
+            .flex_none()
+            .w(px(PROJECT_THUMBNAIL_WIDTH))
+            .h(px(PROJECT_THUMBNAIL_HEIGHT))
+            .rounded(radius)
+            .overflow_hidden()
+            .border(px(0.5))
+            .border_color(theme.navbar_border)
+            .bg(theme.viewport_stage_background);
+
+        match self
+            .thumbnails
+            .as_ref()
+            .and_then(|thumbnails| thumbnails.read(cx).image(project_path))
+        {
+            Some(image) => tile.child(img(image).size_full().rounded(radius)),
+            None => tile.flex().items_center().justify_center().child(
+                div()
+                    .font_family(FontSet::MONOSPACE)
+                    .text_size(px(10.))
+                    .text_color(theme.text_muted)
+                    .opacity(0.6)
+                    .child(
+                        project_path
+                            .extension()
+                            .map(|ext| format!(".{}", ext.to_string_lossy()))
+                            .unwrap_or_default(),
+                    ),
+            ),
+        }
+    }
+
     fn single_project(
         &self,
         project_path: std::path::PathBuf,
@@ -370,11 +458,13 @@ impl HomeView {
                     .flex_row()
                     .items_center()
                     .justify_between()
+                    .gap_3()
                     .w_full()
                     .p_2()
                     .on_click(cx.listener(move |this, _event, window, cx| {
                         this.open(path_for_open.clone(), window, cx);
                     }))
+                    .child(self.thumbnail(&project_path, cx))
                     .child(
                         div()
                             .flex()
