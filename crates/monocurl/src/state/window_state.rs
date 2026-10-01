@@ -16,14 +16,16 @@ const DEFAULT_SCENE_FILES: &[&str] = &[
     "(Tutorial) Language Basics.mcs",
     "(Tutorial) Meshes.mcs",
     "(Tutorial) Animations.mcs",
-    "(Example) Fractal.mcs",
-    "(Example) Flow Field.mcs",
-    "(Example) Riemann Sum.mcs",
     "(Example) Geometry Proof.mcs",
+    "(Example) Fractal.mcs",
+    "(Example) Particle Swarm.mcs",
+    "(Example) Surface.mcs",
+    "(Example) Shader.mcs",
+    "(Example) Riemann Sum.mcs",
+    "(Example) Lorenz Attractor.mcs",
     "(Example) Text.mcs",
     "(Example) Algorithm.mcs",
     "(Example) 3D Camera Animation.mcs",
-    "(Example) Image.mcs",
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

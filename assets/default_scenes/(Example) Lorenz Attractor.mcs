@@ -1,0 +1,46 @@
+# example: lorenz attractor / computed curves in 3d
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+# The Lorenz system integrated in the scene itself: thousands of steps of
+# plain arithmetic become one polyline, coloured by height. The step count
+# is a live argument, so lerping it grows the trail; then the camera orbits.
+background = [0.03, 0.03, 0.06, 1]
+let palette = [0 -> [0.3, 0.7, 1, 1], 0.5 -> [0.95, 0.5, 0.6, 1], 1 -> [1, 0.9, 0.7, 1]]
+
+let Lorenz = |steps, dt| {
+    var p = [0.1, 0, 0]
+    var points = []
+    for (i in range(0, steps)) {
+        let x = p[0]
+        let y = p[1]
+        let z = p[2]
+        let velocity = [10 * (y - x), x * (28 - z) - y, x * y - 8 / 3 * z]
+        p = p + dt * velocity
+        points .= [p[0] * 0.09, p[1] * 0.09, (p[2] - 25) * 0.09]
+    }
+    return points
+}
+
+let Trail = |steps|
+    color_map{|q| keyframe_lerp(palette, (q[2] + 1.6) / 3.2)}
+    stroke{WHITE, 1.4}
+    Polyline(Lorenz(steps, 0.006))
+
+mesh curve = Trail(steps: 150)
+
+camera = Camera([0, -6.5, 1.2], [0, 0, 0], [0, 0, 1])
+
+slide "Attractor"
+    # an integer lerp adds steps one by one, so the trail is drawn as it runs
+    curve.steps = 6000
+    play rate{linear} Lerp(5)
+
+slide "Orbit"
+    camera = Camera([5.5, -3.5, 2.8], [0, 0, 0], [0, 0, 1])
+    play CameraLerp(&camera, 6)

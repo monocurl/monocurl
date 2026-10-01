@@ -1,0 +1,52 @@
+# example: image render / per-pixel shader
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+# A still image: no slides, so the editor shows the init state and the
+# scene exports with `monocurl image`. The lambda runs for every pixel of a
+# 960 by 540 texture; the kernel tier compiles it to native code.
+let iterations = 160
+
+# smooth escape time: the fractional part removes the bands that integer
+# iteration counts leave
+let escape = |cx, cy| {
+    var zx = 0.0
+    var zy = 0.0
+    var i = 0
+    while (i < iterations and zx * zx + zy * zy < 4) {
+        let nx = zx * zx - zy * zy + cx
+        zy = 2 * zx * zy + cy
+        zx = nx
+        i = i + 1
+    }
+    if (i >= iterations) { return 1.0 }
+    let mag = zx * zx + zy * zy
+    return (i + 1 - ln(ln(mag) * 0.5) / ln(2)) / iterations
+}
+
+# a cosine palette over the escape value; points that never escape stay dark
+let shade = |z| {
+    if (z >= 1) { return [0.05, 0.04, 0.09, 1] }
+    let w = 9 * sqrt(z)
+    return [
+        0.52 + 0.42 * sin(w),
+        0.5 + 0.4 * sin(w + 1.9),
+        0.55 + 0.4 * sin(w + 3.6),
+        1
+    ]
+}
+
+# zoomed on the seahorse valley between the main cardioid and its bulb
+let center = [-0.7436, 0.1318]
+let span = 0.012
+mesh fractal = Shader(
+    |x, y| shade(escape(center[0] + x * span / 4, center[1] + y * span / 4)),
+    [-4, 4],
+    [-2.25, 2.25],
+    960
+)
