@@ -1,4 +1,6 @@
-use std::{ops::Range, path::PathBuf};
+use std::{
+    path::{Path, PathBuf},
+};
 
 use gpui::*;
 use structs::assets::Assets;
@@ -8,8 +10,12 @@ use crate::{
     auto_update::{AutoUpdateStatus, AutoUpdater, CURRENT_VERSION},
     components::{buttons::link_button, latex_warning::render_latex_warning},
     navbar_view::Navbar,
-    state::{user_settings::UserSettings, window_state::WindowState},
-    theme::ThemeSettings,
+    state::{
+        user_settings::UserSettings,
+        window_state::{ActiveScreen, WindowState},
+    },
+    theme::{FontSet, ThemeSettings},
+    thumbnails::{THUMBNAIL_HEIGHT, THUMBNAIL_WIDTH, Thumbnails},
 };
 
 const SHOULD_PROMPT_ON_DELETE: bool = true;
@@ -18,6 +24,9 @@ const HOME_LOGO_WIDE_FRACTION: f32 = 0.58;
 const HOME_LOGO_MIN_EXPANDED_WIDTH: f32 = 520.0;
 const HOME_LOGO_MAX_WIDTH: f32 = 960.0;
 const HOME_LOGO_CARD_MAX_WIDTH: f32 = 430.0;
+const PROJECT_THUMBNAIL_WIDTH: f32 = 96.0;
+const PROJECT_THUMBNAIL_HEIGHT: f32 =
+    PROJECT_THUMBNAIL_WIDTH * THUMBNAIL_HEIGHT as f32 / THUMBNAIL_WIDTH as f32;
 
 #[derive(Clone, Copy)]
 struct LogoMetrics {
@@ -77,17 +86,53 @@ fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
     })
 }
 
+/// the folder line under a project name: bundled examples say so, home
+/// paths start with `~`, and long paths lose leading folders rather than
+/// their tail, which is the part that tells projects apart
+fn display_folder(raw: &std::path::Path) -> String {
+    const MAX_CHARS: usize = 48;
+    if raw.starts_with(Assets::default_scene("")) {
+        return "Built-in example".to_string();
+    }
+    let folder = raw.parent().unwrap_or(raw);
+    let folder = sub_home_dir(folder).unwrap_or_else(|| folder.to_path_buf());
+    let mut parts: Vec<String> = folder
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .filter(|c| c != "/")
+        .collect();
+    let joined = |parts: &[String]| parts.join("/");
+    let mut shortened = false;
+    while parts.len() > 2 && joined(&parts).len() + 2 > MAX_CHARS {
+        parts.remove(0);
+        shortened = true;
+    }
+    match (shortened, folder.has_root()) {
+        (true, _) => format!("…/{}", joined(&parts)),
+        (false, true) => format!("/{}", joined(&parts)),
+        (false, false) => joined(&parts),
+    }
+}
+
 pub struct HomeView {
     navbar: Entity<Navbar>,
     state: Entity<WindowState>,
+    thumbnails: Option<Entity<Thumbnails>>,
+    /// projects whose thumbnails were last requested while home was showing
+    thumbnails_requested: Option<Vec<PathBuf>>,
 }
 
 impl HomeView {
     pub fn new(cx: &mut Context<HomeView>, state: Entity<WindowState>) -> Self {
-        cx.observe(&state, |_this, _, cx| {
+        cx.observe(&state, |this, _, cx| {
+            this.refresh_thumbnails(cx);
             cx.notify();
         })
         .detach();
+        let thumbnails = Thumbnails::get(cx);
+        if let Some(thumbnails) = &thumbnails {
+            cx.observe(thumbnails, |_this, _, cx| cx.notify()).detach();
+        }
         cx.observe_global::<ThemeSettings>(|_this, cx| {
             cx.notify();
         })
@@ -105,7 +150,38 @@ impl HomeView {
 
         let navbar = cx.new(|cx| Navbar::new(state.downgrade(), cx));
 
-        Self { navbar, state }
+        let mut this = Self {
+            navbar,
+            state,
+            thumbnails,
+            thumbnails_requested: None,
+        };
+        this.refresh_thumbnails(cx);
+        this
+    }
+
+    /// queues missing or stale thumbnails whenever home is shown or its list changes
+    fn refresh_thumbnails(&mut self, cx: &mut Context<Self>) {
+        let state = self.state.read(cx);
+        if !matches!(state.screen, ActiveScreen::Home) {
+            self.thumbnails_requested = None;
+            return;
+        }
+
+        let projects: Vec<_> = state
+            .recently_opened
+            .iter()
+            .map(|recent| recent.path.clone())
+            .collect();
+        if self.thumbnails_requested.as_ref() == Some(&projects) {
+            return;
+        }
+        if let Some(thumbnails) = &self.thumbnails {
+            thumbnails.update(cx, |thumbnails, cx| {
+                thumbnails.refresh(projects.iter().map(PathBuf::as_path), cx);
+            });
+        }
+        self.thumbnails_requested = Some(projects);
     }
 
     fn render_update_status(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -190,8 +266,11 @@ impl HomeView {
     ) -> Result<(), String> {
         log::info!("Adding projects {:?}", paths);
 
-        self.state
-            .update(cx, move |state, _cx| state.import_many(paths))
+        self.state.update(cx, move |state, cx| {
+            let result = state.import_many(paths);
+            cx.notify();
+            result
+        })
     }
 
     fn create_default(&mut self, dtype: DocumentType, window: &mut Window, cx: &mut Context<Self>) {
@@ -224,8 +303,9 @@ impl HomeView {
     fn forget(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
         log::info!("Forgetting project {:?}", path);
 
-        self.state.update(cx, move |state, _cx| {
+        self.state.update(cx, move |state, cx| {
             state.forget_project(&path);
+            cx.notify();
         });
     }
 
@@ -321,16 +401,48 @@ impl HomeView {
             .into_any_element()
     }
 
+    fn thumbnail(&self, project_path: &Path, cx: &Context<Self>) -> impl IntoElement + use<> {
+        let theme = ThemeSettings::theme(cx);
+        let radius = px(4.);
+        let tile = div()
+            .flex_none()
+            .w(px(PROJECT_THUMBNAIL_WIDTH))
+            .h(px(PROJECT_THUMBNAIL_HEIGHT))
+            .rounded(radius)
+            .overflow_hidden()
+            .border(px(0.5))
+            .border_color(theme.navbar_border)
+            .bg(theme.viewport_stage_background);
+
+        match self
+            .thumbnails
+            .as_ref()
+            .and_then(|thumbnails| thumbnails.read(cx).image(project_path))
+        {
+            Some(image) => tile.child(img(image).size_full().rounded(radius)),
+            None => tile.flex().items_center().justify_center().child(
+                div()
+                    .font_family(FontSet::MONOSPACE)
+                    .text_size(px(10.))
+                    .text_color(theme.text_muted)
+                    .opacity(0.6)
+                    .child(
+                        project_path
+                            .extension()
+                            .map(|ext| format!(".{}", ext.to_string_lossy()))
+                            .unwrap_or_default(),
+                    ),
+            ),
+        }
+    }
+
     fn single_project(
         &self,
         project_path: std::path::PathBuf,
         cx: &Context<HomeView>,
     ) -> impl IntoElement + use<> {
         let theme = ThemeSettings::theme(cx);
-        let path = sub_home_dir(&project_path)
-            .unwrap_or(project_path.to_path_buf())
-            .to_string_lossy()
-            .to_string();
+        let path = display_folder(&project_path);
 
         let path_for_open = project_path.clone();
         let path_for_remove = project_path.clone();
@@ -340,7 +452,8 @@ impl HomeView {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or("Untitled".to_string());
 
-        let id: SharedString = format!("project {}", path).into();
+        // keyed by the real path: the shown folder is not unique
+        let id: SharedString = format!("project {}", project_path.display()).into();
         let group_name: SharedString = "project-group".into();
 
         div()
@@ -370,11 +483,13 @@ impl HomeView {
                     .flex_row()
                     .items_center()
                     .justify_between()
+                    .gap_3()
                     .w_full()
                     .p_2()
                     .on_click(cx.listener(move |this, _event, window, cx| {
                         this.open(path_for_open.clone(), window, cx);
                     }))
+                    .child(self.thumbnail(&project_path, cx))
                     .child(
                         div()
                             .flex()
@@ -456,31 +571,34 @@ impl HomeView {
     }
 
     fn projects_list(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let projects = &self.state.read(cx).recently_opened;
+        let paths: Vec<PathBuf> = self
+            .state
+            .read(cx)
+            .recently_opened
+            .iter()
+            .map(|p| p.path.clone())
+            .collect();
         div()
             .text_sm()
             .size_full()
             .p_2()
             .overflow_hidden()
-            .child(if projects.is_empty() {
+            .child(if paths.is_empty() {
                 div()
                     .text_center()
                     .child("No recent projects")
                     .into_any_element()
             } else {
-                uniform_list(
-                    "project-list",
-                    projects.len(),
-                    cx.processor(move |this, range: Range<usize>, _, cx| {
-                        this.state.read(cx).recently_opened[range]
-                            .iter()
-                            .map(|p| this.single_project(p.path.clone(), cx))
-                            .collect()
-                    }),
-                )
-                .size_full()
-                .pb_10()
-                .into_any_element()
+                // the list is short, so it scrolls as plain children: a
+                // virtualised list measured against the bottom padding made
+                // the last row pop in and out near the end of the scroll
+                div()
+                    .id("project-list")
+                    .size_full()
+                    .overflow_y_scroll()
+                    .pb_10()
+                    .children(paths.into_iter().map(|path| self.single_project(path, cx)))
+                    .into_any_element()
             })
     }
 
@@ -587,5 +705,21 @@ impl Render for HomeView {
             .bg(theme.app_background)
             .text_color(theme.text_primary)
             .size_full()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_folder;
+    use std::path::Path;
+
+    #[test]
+    fn folders_shorten_from_the_left() {
+        let long = Path::new("/one/two/three/four/five/six/seven/eight/nine/ten/eleven/scene.mcs");
+        let shown = display_folder(long);
+        assert!(shown.starts_with("…/"), "{shown}");
+        assert!(shown.ends_with("/eleven"), "{shown}");
+        assert!(shown.chars().count() <= 50, "{shown}");
+        assert_eq!(display_folder(Path::new("/a/b/scene.mcs")), "/a/b");
     }
 }

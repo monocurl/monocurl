@@ -18,6 +18,7 @@ use structs::text::Location8;
 
 use crate::{
     editor::text_editor::TextEditor, services::ServiceManager, state::textual_state::TextualState,
+    thumbnails::Thumbnails,
 };
 
 const SAVE_INTERVAL: Duration = Duration::from_secs(5);
@@ -260,6 +261,7 @@ impl Editor {
                 self.last_disk_text = content;
                 self.save_dirty.update(cx, |dirty, _| *dirty = false);
                 self.dirty.update(cx, |dirty, _| *dirty = false);
+                Thumbnails::source_saved(&self.path, cx);
             }
             Err(err) => {
                 log::error!("Failed to save file to {}: {}", self.path.display(), err);

@@ -316,6 +316,8 @@ impl Render for Navbar {
                     .h_full()
                     .flex_1()
                     .min_w_0()
+                    // room for the macos traffic lights, which sit on the navbar
+                    .pl(px(if cfg!(target_os = "macos") { 72.0 } else { 0.0 }))
                     .child(
                         div()
                             .bg(if is_home {

@@ -72,6 +72,10 @@ impl ExportSettings {
 pub enum ImageExportTimestamp {
     Exact(Timestamp),
     SceneEnd,
+    /// `time` seconds into the last slide, clamped to its length
+    LastSlide {
+        time: f64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -494,6 +498,11 @@ async fn export_image(
         ImageExportTimestamp::Exact(timestamp) => timestamp,
         ImageExportTimestamp::SceneEnd => {
             resolve_scene_end_timestamp(&mut prepared.executor, &prepared.root_text_rope).await?
+        }
+        ImageExportTimestamp::LastSlide { time } => {
+            let end = resolve_scene_end_timestamp(&mut prepared.executor, &prepared.root_text_rope)
+                .await?;
+            Timestamp::new(end.slide, end.time.min(time))
         }
     };
 
@@ -1093,11 +1102,11 @@ async fn render_frame(
     .await?;
     // a frame on an instant should show that instant's zero duration animations,
     // e.g. a `play Set()` at slide time 0
-    if let Err(error) = executor
-        .settle_current_instant(SeekOptions::fast())
-        .await
-    {
-        bail!("{}", last_runtime_error_message(executor, root_text_rope, &error));
+    if let Err(error) = executor.settle_current_instant(SeekOptions::fast()).await {
+        bail!(
+            "{}",
+            last_runtime_error_message(executor, root_text_rope, &error)
+        );
     }
 
     let scene = executor
@@ -1139,7 +1148,10 @@ async fn seek_internal_timestamp_with_options(
     match executor.seek_to_with_options(target, seek_options).await {
         SeekToResult::SeekedTo(timestamp) => Ok(timestamp),
         SeekToResult::Error(error) => {
-            bail!("{}", last_runtime_error_message(executor, root_text_rope, &error))
+            bail!(
+                "{}",
+                last_runtime_error_message(executor, root_text_rope, &error)
+            )
         }
     }
 }
@@ -1263,7 +1275,6 @@ fn video_qp_range(size: RenderSize) -> QpRange {
         QpRange::new(6, 18)
     }
 }
-
 
 fn emit_progress(
     on_progress: &mut dyn FnMut(ExportProgress),
