@@ -1,6 +1,7 @@
 use gpui::*;
 
 use crate::{
+    auto_update::{AutoUpdateStatus, AutoUpdater},
     components::buttons::link_button,
     document_view::OpenDocument,
     i18n::Localization,
@@ -191,8 +192,66 @@ impl Navbar {
     }
 }
 
+impl Navbar {
+    /// the update state next to the home button, so people editing see it:
+    /// a loud pill once an update is ready, a quiet one while it downloads
+    fn render_update_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let theme = ThemeSettings::theme(cx);
+        let (label, ready, errored) = match AutoUpdater::status(cx) {
+            AutoUpdateStatus::Idle => return None,
+            AutoUpdateStatus::Checking => ("Checking for updates".to_string(), false, false),
+            AutoUpdateStatus::Downloading { version } => {
+                (format!("Downloading v{version}"), false, false)
+            }
+            AutoUpdateStatus::Installing { version } => {
+                (format!("Installing v{version}"), false, false)
+            }
+            AutoUpdateStatus::ReadyToRestart { version } => {
+                (format!("Update v{version} ready: restart"), true, false)
+            }
+            AutoUpdateStatus::Errored { .. } => ("Update failed: retry".to_string(), false, true),
+        };
+        let pill = div()
+            .id("navbar-update")
+            .flex_none()
+            .ml_2()
+            .px_2()
+            .py(px(2.0))
+            .rounded(px(10.0))
+            .text_size(px(11.0))
+            .line_height(px(14.0))
+            .child(label);
+        let pill = if ready {
+            pill.bg(theme.accent)
+                .text_color(theme.app_background)
+                .cursor_pointer()
+                .hover(|style| style.opacity(0.85))
+                .on_click(|_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    AutoUpdater::restart_from_update_status(cx);
+                })
+        } else if errored {
+            pill.border_1()
+                .border_color(theme.danger)
+                .text_color(theme.danger)
+                .cursor_pointer()
+                .hover(|style| style.opacity(0.85))
+                .on_click(|_, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    AutoUpdater::check_for_updates(Some(window.window_handle()), cx);
+                })
+        } else {
+            pill.text_color(theme.text_muted)
+        };
+        Some(pill.into_any_element())
+    }
+}
+
 impl Render for Navbar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let update_pill = self.render_update_button(cx);
         let entity = self.window_state.upgrade().unwrap();
         let state = entity.read(cx);
         let theme = ThemeSettings::theme(cx);
@@ -281,6 +340,7 @@ impl Render for Navbar {
                             .flex_none()
                             .items_center(),
                     )
+                    .children(update_pill)
                     .child(document_list),
             )
             .child(
