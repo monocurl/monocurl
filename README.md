@@ -20,10 +20,10 @@ Every scene below runs live in the editor while you type. Sources are in the [ga
 
 | | | |
 |:-:|:-:|:-:|
-| [![Pythagorean theorem](.github/assets/gallery/pythagorean-theorem.gif)](https://monocurl.com/gallery/#04-pythagorean-theorem) | [![Breather surface](.github/assets/gallery/breather-surface.png)](https://monocurl.com/gallery/#08-breather-surface) | [![Tree fractal](.github/assets/gallery/tree-fractal.png)](https://monocurl.com/gallery/#09-tree-fractal) |
-| Pythagorean theorem walkthrough | breather surface, a 128x512 parametric grid | recursive tree to depth 9 |
-| [![Shader](.github/assets/gallery/shader.png)](https://monocurl.com/gallery/#13-shader) | [![Surface](.github/assets/gallery/surface.gif)](https://monocurl.com/gallery/#14-surface) | [![Julia morph](.github/assets/gallery/julia-morph.gif)](https://monocurl.com/gallery/#15-julia-morph) |
-| per-pixel shader, rendered as a still | 70x70 morphing surface | Julia set morph, every pixel recomputed per frame |
+| [![Pythagorean theorem](.github/assets/gallery/pythagorean-theorem.gif)](https://monocurl.com/gallery/#04-pythagorean-theorem) | [![Riemann rectangles](.github/assets/gallery/riemann-rectangles.gif)](https://monocurl.com/gallery/#01-riemann-rectangles-full) | [![Breather surface](.github/assets/gallery/breather-surface.png)](https://monocurl.com/gallery/#08-breather-surface) |
+| Pythagorean theorem walkthrough | Riemann sums with tagged formula fragments | breather surface, a 128x512 parametric grid |
+| [![Tree fractal](.github/assets/gallery/tree-fractal.png)](https://monocurl.com/gallery/#09-tree-fractal) | [![Shader](.github/assets/gallery/shader.png)](https://monocurl.com/gallery/#13-shader) | [![Lorenz attractor](.github/assets/gallery/lorenz-attractor.gif)](https://monocurl.com/gallery/#16-lorenz-attractor) |
+| recursive tree to depth 9 | per-pixel shader, rendered as a still | Lorenz attractor integrated in the scene, orbited in 3D |
 
 ## Minimal Example
 
