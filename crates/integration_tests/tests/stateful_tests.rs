@@ -999,3 +999,35 @@ fn test_stateful_two_params_arithmetic() {
     );
     r.assert_error("operators cannot be applied to stateful values");
 }
+
+// ── labeled arguments in stateful calls ──────────────────────────────────────
+
+#[test]
+fn test_stateful_labeled_call_skips_a_default() {
+    let r = run_anim(
+        "
+        param p = 9
+        let f = |a = 1, b = 2, c = nil, d = 0| [a, b, c, d]
+        mesh m = f(d: $p, a: 5)
+        print m
+        p = 4
+        print m
+    ",
+    );
+    r.assert_transcript(&["[5, 2, nil, 9]", "[5, 2, nil, 4]"]);
+}
+
+#[test]
+fn test_stateful_labeled_operator_call_skips_a_default() {
+    let r = run_anim(
+        "
+        param p = 9
+        let op = operator |target, a = 1, b = 2, c = 3| [target, [target, a, b, c]]
+        mesh m = op{c: $p} 0
+        print m
+        p = 4
+        print m
+    ",
+    );
+    r.assert_transcript(&["[0, 1, 2, 9]", "[0, 1, 2, 4]"]);
+}

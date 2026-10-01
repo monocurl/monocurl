@@ -169,7 +169,7 @@ impl Executor {
         }
 
         if stateful {
-            let labels = if labeled {
+            let mut labels = if labeled {
                 self.drain_labels(stack_idx, section_idx)
             } else {
                 SmallVec::new()
@@ -178,8 +178,13 @@ impl Executor {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
+            let mut args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
             stack.pop_n(n);
+            if labeled
+                && let Err(error) = bind_labeled_arguments(&mut args, &mut labels, &lambda, 0)
+            {
+                return ExecSingle::Error(error);
+            }
 
             let (func_node, mut roots) = value_into_stateful_node(Value::Lambda(lambda));
             let arg_refs: Vec<VRc> = args
@@ -219,7 +224,7 @@ impl Executor {
                 .push(Value::Stateful(stateful));
             ExecSingle::Continue
         } else if labeled || !lambda.defaults.is_empty() {
-            let labels = if labeled {
+            let mut labels = if labeled {
                 self.drain_labels(stack_idx, section_idx)
             } else {
                 SmallVec::new()
@@ -232,6 +237,11 @@ impl Executor {
             let stack_len = stack.stack_len();
             let mut args = Vec::with_capacity(lambda.total_args());
             args.extend(stack.var_stack.drain(stack_len - n..));
+            if labeled
+                && let Err(error) = bind_labeled_arguments(&mut args, &mut labels, &lambda, 0)
+            {
+                return ExecSingle::Error(error);
+            }
 
             let result = self
                 .eagerly_invoke_lambda_cloning(&lambda, args.iter(), Some(stack_idx))
@@ -307,15 +317,20 @@ impl Executor {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let extra_args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
+            let mut extra_args: Vec<Value> = stack.var_stack[stack_len - n..stack_len].to_vec();
             stack.pop_n(n);
             let operand = stack.pop().elide_lvalue();
 
-            let labels = if labeled {
+            let mut labels = if labeled {
                 self.drain_labels(stack_idx, section_idx)
             } else {
                 SmallVec::new()
             };
+            if labeled
+                && let Err(error) = bind_labeled_arguments(&mut extra_args, &mut labels, lambda, 1)
+            {
+                return ExecSingle::Error(error);
+            }
 
             let (op_node, mut roots) = value_into_stateful_node(Value::Operator(operator));
             collect_roots_from_value(&operand, &mut roots);
@@ -365,9 +380,12 @@ impl Executor {
             let n = num_args as usize;
             let stack = self.state.stack_mut(stack_idx);
             let stack_len = stack.stack_len();
-            let args: Vec<Value> = stack.var_stack.drain(stack_len - n..).collect();
+            let mut args: Vec<Value> = stack.var_stack.drain(stack_len - n..).collect();
             let operand = stack.pop();
-            let labels = self.drain_labels(stack_idx, section_idx);
+            let mut labels = self.drain_labels(stack_idx, section_idx);
+            if let Err(error) = bind_labeled_arguments(&mut args, &mut labels, &operator.0, 1) {
+                return ExecSingle::Error(error);
+            }
 
             match self
                 .eagerly_invoke_lambda_cloning(
@@ -630,6 +648,88 @@ impl Executor {
             .any(|arg| matches!(arg, Value::Stateful(_)))
             .then_some(ExecutorError::stateful_illegal_assignment())
     }
+}
+
+/// binds a labeled call's arguments to parameter order: an argument labeled
+/// with a parameter's name takes that parameter's slot, the rest fill the free
+/// slots left to right and skipped slots take their defaults. a label naming no
+/// parameter is an alias that stays on its positionally bound argument.
+/// trailing defaults are left for `fill_defaults`. `first_param` skips an
+/// operator's operand, so the rewritten labels index `args` in ascending order
+#[inline(never)]
+fn bind_labeled_arguments(
+    args: &mut Vec<Value>,
+    labels: &mut Labels,
+    lambda: &Lambda,
+    first_param: usize,
+) -> Result<(), ExecutorError> {
+    let params = &lambda.arg_names[first_param..];
+    let mut slots: SmallVec<[Option<Value>; 8]> =
+        std::iter::repeat_with(|| None).take(params.len()).collect();
+    let mut pending: SmallVec<[Option<Value>; 8]> = args.drain(..).map(Some).collect();
+    let mut aliases = Labels::new();
+
+    let mut bound_labels = Labels::with_capacity(labels.len());
+    for (arg_idx, name) in labels.drain(..) {
+        let Some(slot) = params.iter().position(|param| **param == *name) else {
+            aliases.push((arg_idx, name));
+            continue;
+        };
+        if slots[slot].is_some() {
+            return Err(ExecutorError::invalid_invocation(format!(
+                "argument '{name}' given more than once"
+            )));
+        }
+        slots[slot] = pending[arg_idx].take();
+        bound_labels.push((slot, name));
+    }
+
+    // arity was checked by the caller, so every remaining argument has a free slot
+    let mut free_slots = slots
+        .iter_mut()
+        .enumerate()
+        .filter(|(_, slot)| slot.is_none());
+    for (arg_idx, arg) in pending
+        .into_iter()
+        .enumerate()
+        .filter_map(|(arg_idx, arg)| Some((arg_idx, arg?)))
+    {
+        let (slot_idx, slot) = free_slots.next().expect("more arguments than parameters");
+        *slot = Some(arg);
+        bound_labels.extend(
+            aliases
+                .iter()
+                .filter(|(alias_idx, _)| *alias_idx == arg_idx)
+                .map(|(_, name)| (slot_idx, name.clone())),
+        );
+    }
+    bound_labels.sort_unstable_by_key(|&(slot, _)| slot);
+
+    let required = lambda.required_args as usize;
+    let required_slots = &slots[..required.saturating_sub(first_param)];
+    if required_slots.iter().any(Option::is_none) {
+        return Err(ExecutorError::TooFewArguments {
+            minimum: required,
+            got: first_param + required_slots.iter().flatten().count(),
+            operator: first_param > 0,
+        });
+    }
+
+    let bound_len = slots
+        .iter()
+        .rposition(Option::is_some)
+        .map_or(0, |last| last + 1);
+    args.extend(
+        slots
+            .into_iter()
+            .take(bound_len)
+            .enumerate()
+            .map(|(slot, arg)| {
+                arg.unwrap_or_else(|| lambda.defaults[first_param + slot - required].clone())
+            }),
+    );
+    *labels = bound_labels;
+    Ok(())
 }
 
 fn reference_argument_shape_is_allowed(arg: &Value) -> bool {
