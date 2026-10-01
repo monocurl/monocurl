@@ -1,8 +1,9 @@
 use std::{future::Future, pin::Pin};
 
-use executor::{error::ExecutorError, executor::Executor, heap::with_heap, value::Value};
+use executor::{
+    error::ExecutorError, executor::Executor, heap::with_heap, kernel::BatchInput, value::Value,
+};
 use geo::mesh::make_mesh_mut;
-use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use crate::mesh::helpers::*;
@@ -68,16 +69,11 @@ async fn op_point_map_uncached(
                         }
                         positions
                     };
-                    let args = positions
-                        .iter()
-                        .map(|pos| smallvec![point_value(*pos)])
-                        .collect::<Vec<SmallVec<[Value; 2]>>>();
-                    let mapped = invoke_callable_many_mapped(
+                    let mapped = invoke_callable_many_flat(
                         executor,
                         func,
-                        &args,
+                        BatchInput::Points(&positions),
                         "f",
-                        float3_from_kernel,
                         |value| float3_from_value(value, "f"),
                     )
                     .await?;
@@ -191,16 +187,11 @@ async fn op_color_map_uncached(
                         }
                         positions
                     };
-                    let args = positions
-                        .iter()
-                        .map(|pos| smallvec![point_value(*pos)])
-                        .collect::<Vec<SmallVec<[Value; 2]>>>();
-                    let mapped = invoke_callable_many_mapped(
+                    let mapped = invoke_callable_many_flat(
                         executor,
                         func,
-                        &args,
+                        BatchInput::Points(&positions),
                         "f",
-                        float4_from_kernel,
                         |value| float4_from_value(value, "f"),
                     )
                     .await?;
@@ -286,16 +277,11 @@ pub async fn op_uv_map(executor: &mut Executor, stack_idx: usize) -> Result<Valu
                         }
                         positions
                     };
-                    let args = positions
-                        .iter()
-                        .map(|pos| smallvec![point_value(*pos)])
-                        .collect::<Vec<SmallVec<[Value; 2]>>>();
-                    let mapped = invoke_callable_many_mapped(
+                    let mapped = invoke_callable_many_flat(
                         executor,
                         func,
-                        &args,
+                        BatchInput::Points(&positions),
                         "f",
-                        float2_from_kernel,
                         |value| float2_from_value(value, "f"),
                     )
                     .await?;

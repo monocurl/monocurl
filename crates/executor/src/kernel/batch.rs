@@ -2,6 +2,7 @@
 //! worker pool once the batch has shown itself to be long
 
 use std::{
+    ops::Deref,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -19,11 +20,13 @@ use crate::{
 use super::{
     KernelMode,
     convert::Converter,
+    input::{Calls, Num, NumArg, NumArgs},
     jit::{JitEntry, JitVm},
     lanes::{LANES, LVm},
+    output::{FLAT_MAX, Output, flat_of},
     pool,
     run::{Fault, Vm},
-    typed::{SpecId, TypedProgram},
+    typed::{Class, Spec, SpecId, TypedProgram},
     typed_run::TVm,
     value::{ClosureArena, ClosureId, KVal},
 };
@@ -38,35 +41,85 @@ const PARALLEL_PROBE_CALLS: usize = 8;
 /// projected serial time above which the remaining calls go to worker threads
 const PARALLEL_MIN_PROJECTED: Duration = Duration::from_micros(250);
 
-/// the calls of one batch: every argument list laid flat with a fixed stride,
-/// so a batch of thousands of calls is one allocation, shared with the workers
-struct BatchArgs {
-    values: Vec<KVal>,
-    arity: usize,
+/// the calls of one batch, shared with the workers
+enum BatchArgs {
+    /// converted arguments laid flat with a fixed stride, so a batch of
+    /// thousands of calls is one allocation
+    Values { values: Vec<KVal>, arity: usize },
+    /// the caller's numbers, which native code reads as they are; the other
+    /// machines get kernel values built per call
+    Nums {
+        nums: Arc<NumArgs>,
+        defaults: Box<[KVal]>,
+    },
 }
 
 impl BatchArgs {
     fn len(&self) -> usize {
-        if self.arity == 0 {
-            self.values.len()
-        } else {
-            self.values.len() / self.arity
+        match self {
+            BatchArgs::Values { values, arity: 0 } => values.len(),
+            BatchArgs::Values { values, arity } => values.len() / arity,
+            BatchArgs::Nums { nums, .. } => nums.len(),
         }
     }
 
-    fn call(&self, index: usize) -> &[KVal] {
-        &self.values[index * self.arity..(index + 1) * self.arity]
+    fn call(&self, index: usize) -> CallArgs<'_> {
+        match self {
+            BatchArgs::Values { values, arity } => {
+                CallArgs::Flat(&values[index * arity..(index + 1) * arity])
+            }
+            BatchArgs::Nums { nums, defaults } => CallArgs::Built(
+                nums.call(index)
+                    .map(NumArg::kval)
+                    .chain(defaults.iter().cloned())
+                    .collect(),
+            ),
+        }
     }
 }
 
+/// the arguments of one call
+enum CallArgs<'a> {
+    Flat(&'a [KVal]),
+    Built(SmallVec<[KVal; 4]>),
+}
+
+impl Deref for CallArgs<'_> {
+    type Target = [KVal];
+
+    fn deref(&self) -> &[KVal] {
+        match self {
+            CallArgs::Flat(args) => args,
+            CallArgs::Built(args) => args,
+        }
+    }
+}
+
+/// `TVm::accepts` for typed input
+fn accepts_nums<'n>(
+    spec: &Spec,
+    call: impl Iterator<Item = NumArg<'n>>,
+    defaults: &[KVal],
+) -> bool {
+    call.map(|arg| match arg {
+        NumArg::Num(Num::Int(_)) => Class::Int,
+        NumArg::Num(Num::Float(_)) => Class::Float,
+        NumArg::List(_) => Class::Boxed,
+    })
+    .chain(defaults.iter().map(Class::of))
+    .eq(spec.sig.iter().copied())
+}
+
 /// how one batch runs: which specialisation it has, if any, its native code,
-/// whether the lane machine is on, and whether every result is cross-checked
+/// whether the lane machine is on, whether every result is cross-checked, and
+/// the width of list native code hands back as numbers
 #[derive(Clone)]
 struct Plan {
     typed: Option<Arc<(TypedProgram, SpecId)>>,
     jit: Option<Arc<JitEntry>>,
     lanes: bool,
     verify: bool,
+    flat: Option<usize>,
 }
 
 /// the machines one batch runs on: native code for typed calls when the
@@ -132,17 +185,17 @@ impl<'a> Machines<'a> {
         &mut self,
         args: &BatchArgs,
         range: std::ops::Range<usize>,
-        results: &mut Vec<KVal>,
+        results: &mut Vec<Output>,
     ) -> Result<(), Fault> {
         if self.jit.is_some() {
             for index in range {
-                results.push(self.jit_call(args.call(index))?);
+                results.push(self.jit_call(args, index)?);
             }
             return Ok(());
         }
         let Some(typed) = self.plan.typed.as_deref().filter(|_| self.plan.lanes) else {
             for index in range {
-                results.push(self.call(args.call(index))?);
+                results.push(Output::Value(self.call(&args.call(index))?));
             }
             return Ok(());
         };
@@ -150,8 +203,9 @@ impl<'a> Machines<'a> {
         let mut index = range.start;
         while index < range.end {
             let group_end = (index + LANES).min(range.end);
-            let group: SmallVec<[&[KVal]; LANES]> =
+            let calls: SmallVec<[CallArgs; LANES]> =
                 (index..group_end).map(|i| args.call(i)).collect();
+            let group: SmallVec<[&[KVal]; LANES]> = calls.iter().map(|call| &**call).collect();
             let accepted = group_end - index > 1
                 && group
                     .iter()
@@ -170,7 +224,7 @@ impl<'a> Machines<'a> {
                                 );
                             }
                         }
-                        results.extend(lane_results);
+                        results.extend(lane_results.into_iter().map(Output::Value));
                         index = group_end;
                         continue;
                     }
@@ -180,38 +234,66 @@ impl<'a> Machines<'a> {
                 }
             }
             for call in group {
-                results.push(self.call(call)?);
+                results.push(Output::Value(self.call(call)?));
             }
             index = group_end;
         }
         Ok(())
     }
 
-    /// one call as native code, falling back to the typed machine when its
-    /// classes differ or it faults
-    fn jit_call(&mut self, args: &[KVal]) -> Result<KVal, Fault> {
+    /// call `index` as native code, falling back to the typed machine when
+    /// its classes differ or it faults. a list of the plan's flat width comes
+    /// back as numbers, anything else as a value
+    fn jit_call(&mut self, args: &BatchArgs, index: usize) -> Result<Output, Fault> {
         let (Some((program, spec)), Some(jit)) = (self.plan.typed.as_deref(), &mut self.jit) else {
-            return self.call(args);
+            return self.call(&args.call(index)).map(Output::Value);
         };
         let spec = program.spec(*spec);
-        if !TVm::accepts(spec, args) {
-            return self.call(args);
-        }
-        match jit.call(spec, args) {
-            Ok(native) => {
+        let outcome = match args {
+            BatchArgs::Values { .. } => {
+                let call = args.call(index);
+                if !TVm::accepts(spec, &call) {
+                    return self.call(&call).map(Output::Value);
+                }
+                jit.run_args(spec, self.arena, &call)
+            }
+            BatchArgs::Nums { nums, defaults } => {
+                if !accepts_nums(spec, nums.call(index), defaults) {
+                    return self.call(&args.call(index)).map(Output::Value);
+                }
+                jit.run_nums(spec, self.arena, nums.call(index), defaults)
+            }
+        };
+        match outcome {
+            Ok(()) => {
                 self.jit_calls += 1;
                 self.typed_calls += 1;
-                if self.plan.verify {
-                    let dynamic = self.vm.call(self.arena, self.entry, args)?;
-                    assert!(
-                        KVal::strictly_equal(&native, &dynamic),
-                        "native kernel disagrees with the dynamic machine: {native:?} vs {dynamic:?}"
+                let flat = self.plan.flat.and_then(|width| jit.flat(spec, width));
+                if !self.plan.verify {
+                    return Ok(flat.map_or_else(|| Output::Value(jit.result(spec)), Output::Flat));
+                }
+                // the value goes on to be checked against the interpreter;
+                // the numbers must be what the caller would read off it
+                let native = jit.result(spec);
+                if let Some(width) = self.plan.flat {
+                    let bits = |values: Option<[f32; FLAT_MAX]>| {
+                        values.map(|values| values.map(f32::to_bits))
+                    };
+                    assert_eq!(
+                        bits(flat),
+                        bits(flat_of(&native, width)),
+                        "native numbers disagree with the native value {native:?}"
                     );
                 }
-                Ok(native)
+                let dynamic = self.vm.call(self.arena, self.entry, &args.call(index))?;
+                assert!(
+                    KVal::strictly_equal(&native, &dynamic),
+                    "native kernel disagrees with the dynamic machine: {native:?} vs {dynamic:?}"
+                );
+                Ok(Output::Value(native))
             }
             Err(fault @ (Fault::Budget | Fault::Aborted)) => Err(fault),
-            Err(_) => self.call(args),
+            Err(_) => self.call(&args.call(index)).map(Output::Value),
         }
     }
 
@@ -261,7 +343,7 @@ fn run_batch(
     plan: &Plan,
     args: &Arc<BatchArgs>,
     range: std::ops::Range<usize>,
-) -> Result<(Vec<KVal>, Ran), Fault> {
+) -> Result<(Vec<Output>, Ran), Fault> {
     let mut results = Vec::with_capacity(range.len());
     let mut machines = Machines::new(arena, entry, plan, None);
     let mut ran = Ran::default();
@@ -390,8 +472,9 @@ fn worker_threads() -> usize {
 
 pub(crate) enum BatchOutcome {
     /// one raw result per call; callers read what they need straight off the
-    /// kernel values and only go through the heap for shapes they do not know
-    Results(Vec<KVal>),
+    /// numbers or kernel values and only go through the heap for shapes they
+    /// do not know
+    Results(Vec<Output>),
     /// the tier declined or faulted; the interpreter takes the batch
     Interpreter,
 }
@@ -403,17 +486,27 @@ const CHUNK_CALLS: usize = 4096;
 
 const YIELD_AFTER: Duration = Duration::from_millis(4);
 
-/// the default arguments of `entry`, in arity order
-fn arena_defaults<'a>(converter: &'a Converter<'_>, entry: ClosureId) -> &'a [KVal] {
-    &converter.arena().get(entry).defaults
+/// the defaults `entry` fills for a call of `provided` arguments; every call
+/// then has the full arity
+fn missing_defaults<'a>(
+    converter: &'a Converter<'_>,
+    entry: ClosureId,
+    arity: usize,
+    provided: usize,
+) -> &'a [KVal] {
+    let defaults = &converter.arena().get(entry).defaults;
+    let missing = (arity - provided).min(defaults.len());
+    &defaults[defaults.len() - missing..]
 }
 
 impl Executor {
-    /// try to run a batch of calls to `lambda` as a kernel
+    /// try to run a batch of calls to `lambda` as a kernel; native code hands
+    /// back a returned list of `flat` elements as numbers
     pub(crate) async fn kernel_batch<A: AsRef<[Value]>>(
         &mut self,
         lambda: &Lambda,
-        args: &[A],
+        calls: &Calls<'_, A>,
+        flat: Option<usize>,
     ) -> BatchOutcome {
         let tier = &mut self.kernels;
         if tier.mode == KernelMode::Off || tier.disabled.contains(&lambda.ip) {
@@ -426,17 +519,27 @@ impl Executor {
             return BatchOutcome::Interpreter;
         };
         let arity = lambda.total_args();
-        let mut values = Vec::with_capacity(args.len() * arity);
-        for call in args {
-            let provided = call.as_ref();
-            values.extend(provided.iter().map(|arg| converter.convert(arg)));
-            // defaults are filled here so every call has the full arity
-            let defaults = arena_defaults(&converter, entry);
-            let missing = (arity - provided.len()).min(defaults.len());
-            values.extend(defaults[defaults.len() - missing..].iter().cloned());
-        }
+        let batch = match calls {
+            Calls::Values(args) => {
+                let mut values = Vec::with_capacity(args.len() * arity);
+                for call in *args {
+                    let provided = call.as_ref();
+                    values.extend(provided.iter().map(|arg| converter.convert(arg)));
+                    values.extend(
+                        missing_defaults(&converter, entry, arity, provided.len())
+                            .iter()
+                            .cloned(),
+                    );
+                }
+                BatchArgs::Values { values, arity }
+            }
+            Calls::Nums(nums) => BatchArgs::Nums {
+                nums: Arc::clone(nums),
+                defaults: missing_defaults(&converter, entry, arity, nums.arity()).into(),
+            },
+        };
         let arena = Arc::new(arena);
-        let batch = Arc::new(BatchArgs { values, arity });
+        let batch = Arc::new(batch);
         let call_count = batch.len();
 
         tier.stats.batches += 1;
@@ -444,7 +547,7 @@ impl Executor {
         // the batch's first call decides the classes the kernels are
         // specialised to; calls with other classes run dynamically
         let typed = (tier.typed && call_count > 0)
-            .then(|| TypedProgram::specialise(&arena, entry, batch.call(0)))
+            .then(|| TypedProgram::specialise(&arena, entry, &batch.call(0)))
             .flatten()
             .map(Arc::new);
         if tier.typed && typed.is_none() {
@@ -474,6 +577,7 @@ impl Executor {
             jit,
             lanes: tier.lanes,
             verify: tier.mode == KernelMode::Verify,
+            flat,
         };
         let mut was_parallel = false;
         let mut results = Vec::with_capacity(call_count);

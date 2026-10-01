@@ -16,9 +16,13 @@
 //! that only ever holds an int or a float (`var sum = 0` accumulating floats,
 //! where the specialiser boxes at the merge), is a value word plus a kind word,
 //! and the dynamic ops on it branch on the kinds the way `run::binary` does, so
-//! an int stays an int until a float reaches it. a spec with a boxed argument or
-//! capture, any other boxed read, or a call the specialiser did not inline is
-//! declined and stays with the typed and lane machines.
+//! an int stays an int until a float reaches it. a boxed argument or capture is
+//! an input: the frame carries a copy of it as a palette id and a list of
+//! scalars (either may be absent), so the body can index it (a point's
+//! coordinates) or look a colour up in it with `keyframe_lerp`, whose result
+//! lands in a list site of its own through a shim. any other boxed read, or a
+//! call the specialiser did not inline, is declined and stays with the typed
+//! and lane machines.
 //!
 //! compiled code is cached by the spec's shape: its entry classes and ops with
 //! every float constant replaced by a slot of the frame. the code is a pure
@@ -46,14 +50,16 @@ use rustc_hash::FxHashMap;
 
 use super::{
     KernelStats,
+    input::{Num, NumArg},
     ir::{BinKind, KernelIntrinsic, Reg},
-    run::{self, CALL_OP_BUDGET, Fault},
+    output::FLAT_MAX,
+    run::{self, CALL_OP_BUDGET, Fault, Keyframe},
     tier::dump_kernels,
     typed::{Class, Opnd, Spec, TOp},
-    value::{ClosureArena, KVal},
+    value::{ClosureArena, KPalette, KVal, PaletteId},
 };
 
-type Entry = unsafe extern "C" fn(*mut u64, *mut i64, *const u8) -> i32;
+type Entry = unsafe extern "C" fn(*mut u64, *mut i64, *const u8, *const ClosureArena) -> i32;
 
 /// compiled bodies kept at once; the cache is cleared wholesale past this
 const CACHE_MAX: usize = 256;
@@ -62,12 +68,21 @@ const CACHE_MAX: usize = 256;
 /// on the typed machine
 const LIST_CAP: usize = 16;
 
-/// lists a body may build: one per `EmptyList` op, none of them in a loop
+/// lists a body may build: one per `EmptyList` or palette lookup, none of
+/// them in a loop
 const LIST_SITES: usize = 4;
+
+/// words an input takes: its palette id, its length as a list, and the
+/// list's elements and element kinds
+const INPUT_WORDS: usize = 2 + 2 * LIST_CAP;
+
+/// an input that is not a palette, or not a list of at most `LIST_CAP`
+/// scalars
+const ABSENT: u64 = u64::MAX;
 
 /// where things live in the frame, in words: the registers, then the result
 /// (a returned list's length), its kind, each list's elements and element
-/// kinds, and the float constants
+/// kinds, the float constants, and the inputs
 #[derive(Clone, Copy)]
 struct Layout {
     result: usize,
@@ -91,6 +106,66 @@ impl Layout {
     fn site(site: u8) -> usize {
         site as usize * 2 * LIST_CAP
     }
+
+    /// input `index` of a frame with `consts` float constants
+    fn input(&self, consts: usize, index: usize) -> usize {
+        self.consts + consts + index * INPUT_WORDS
+    }
+}
+
+/// the boxed entry registers and the `Capture` and `Default` ops, in the order
+/// their inputs are laid out
+fn inputs(spec: &Spec) -> usize {
+    let entries = spec.entry.iter().filter(|&&class| class == Class::Boxed);
+    let ops = spec
+        .ops
+        .iter()
+        .filter(|op| matches!(op, TOp::Capture { .. } | TOp::Default { .. }));
+    entries.count() + ops.count()
+}
+
+/// copy `value` into the input at `words[0..INPUT_WORDS]`
+fn write_input(words: &mut [u64], value: &KVal) {
+    match value {
+        KVal::Palette(id) => {
+            words[0] = id.0 as u64;
+            words[1] = ABSENT;
+        }
+        KVal::List(list) => write_list_input(
+            words,
+            list.len(),
+            list.iter().map(|element| match *element {
+                KVal::Int(n) => Some(Num::Int(n)),
+                KVal::Float(f) => Some(Num::Float(f)),
+                _ => None,
+            }),
+        ),
+        _ => {
+            words[0] = ABSENT;
+            words[1] = ABSENT;
+        }
+    }
+}
+
+/// copy a list of `len` elements into the input at `words[0..INPUT_WORDS]`;
+/// its length reads as absent when it is too long or holds a non-scalar
+fn write_list_input(words: &mut [u64], len: usize, elements: impl Iterator<Item = Option<Num>>) {
+    let (palette, rest) = words.split_first_mut().unwrap();
+    let (slot, items) = rest.split_first_mut().unwrap();
+    *palette = ABSENT;
+    let (values, kinds) = items.split_at_mut(LIST_CAP);
+    let scalars = len <= LIST_CAP
+        && elements
+            .zip(values.iter_mut().zip(kinds))
+            .all(|(element, (value, kind))| {
+                (*value, *kind) = match element {
+                    Some(Num::Int(n)) => (n as u64, KIND_INT as u64),
+                    Some(Num::Float(f)) => (f.to_bits(), KIND_FLOAT as u64),
+                    None => return false,
+                };
+                true
+            });
+    *slot = if scalars { len as u64 } else { ABSENT };
 }
 
 const KIND_INT: i64 = 0;
@@ -273,6 +348,95 @@ extern "C" fn shim_native(
     0
 }
 
+/// `keyframe_lerp` on the palette `id` of `arena`: a list result is written
+/// to the site area at `items` and `out` takes its length and `list_kind`, a
+/// number result is written to `out` as a word and a kind. anything else,
+/// including a list too long for the site, faults
+extern "C" fn shim_palette(
+    arena: *const ClosureArena,
+    id: u64,
+    t: f64,
+    list_kind: u64,
+    items: *mut u64,
+    out: *mut u64,
+) -> i32 {
+    if id == ABSENT {
+        return fault_code(Fault::Type);
+    }
+    // safety: `arena` is the batch's arena, which outlives the call and whose
+    // palettes the inputs were copied from
+    let palette = unsafe { &*arena }.palette(PaletteId(id as u32));
+    // safety: `items` is the site's area in the frame, `LIST_CAP` elements
+    // then as many kinds
+    let area = unsafe { std::slice::from_raw_parts_mut(items, 2 * LIST_CAP) };
+    let (value, kind) = match palette_site(palette, t, list_kind, area) {
+        Some(written) => written,
+        None => return fault_code(palette_fault(palette, t)),
+    };
+    // safety: `out` is the generated code's own two word stack slot
+    unsafe {
+        *out = value;
+        *out.add(1) = kind;
+    }
+    0
+}
+
+/// a number's word and kind
+fn number_word(value: &KVal) -> Option<(u64, u64)> {
+    match *value {
+        KVal::Int(n) => Some((n as u64, KIND_INT as u64)),
+        KVal::Float(f) => Some((f.to_bits(), KIND_FLOAT as u64)),
+        _ => None,
+    }
+}
+
+/// the palette's value at `t` written straight to the site without building
+/// a list: `None` when it is not a number or a flat list of numbers that fits
+fn palette_site(
+    palette: &KPalette,
+    t: f64,
+    list_kind: u64,
+    area: &mut [u64],
+) -> Option<(u64, u64)> {
+    fn blend(a: &KVal, b: &KVal, t: f64) -> Option<(u64, u64)> {
+        number_word(&run::lerp_number(a, b, t).ok()?)
+    }
+    match run::keyframe(palette, t) {
+        Keyframe::At(KVal::List(list)) => {
+            fill(area, list.iter().map(number_word)).map(|n| (n, list_kind))
+        }
+        Keyframe::At(value) => number_word(value),
+        Keyframe::Between(KVal::List(a), KVal::List(b), t) if a.len() == b.len() => {
+            fill(area, a.iter().zip(b.iter()).map(|(a, b)| blend(a, b, t))).map(|n| (n, list_kind))
+        }
+        Keyframe::Between(KVal::List(_), _, _) | Keyframe::Between(_, KVal::List(_), _) => None,
+        Keyframe::Between(a, b, t) => blend(a, b, t),
+    }
+}
+
+/// writes `elements` to the site's values and kinds and gives their count
+fn fill(
+    area: &mut [u64],
+    elements: impl ExactSizeIterator<Item = Option<(u64, u64)>>,
+) -> Option<u64> {
+    let len = elements.len();
+    if len > LIST_CAP {
+        return None;
+    }
+    let (values, kinds) = area.split_at_mut(LIST_CAP);
+    for (element, (value, kind)) in elements.zip(values.iter_mut().zip(kinds)) {
+        (*value, *kind) = element?;
+    }
+    Some(len as u64)
+}
+
+/// why `palette_site` could not write the palette's value at `t`: the fault
+/// `keyframe_lerp` raises, or a type fault for a result the site cannot hold
+#[cold]
+fn palette_fault(palette: &KPalette, t: f64) -> Fault {
+    run::keyframe_lerp(palette, t).err().unwrap_or(Fault::Type)
+}
+
 #[derive(Clone, Copy)]
 enum Shim {
     IntBinary,
@@ -286,10 +450,11 @@ enum Shim {
     FloatPow,
     FloatAtan2,
     Native,
+    Palette,
 }
 
 impl Shim {
-    const ALL: [Shim; 11] = [
+    const ALL: [Shim; 12] = [
         Shim::IntBinary,
         Shim::FloatBinary,
         Shim::Unary,
@@ -301,6 +466,7 @@ impl Shim {
         Shim::FloatPow,
         Shim::FloatAtan2,
         Shim::Native,
+        Shim::Palette,
     ];
 
     fn name(self) -> &'static str {
@@ -316,6 +482,7 @@ impl Shim {
             Shim::FloatPow => "mc_float_pow",
             Shim::FloatAtan2 => "mc_float_atan2",
             Shim::Native => "mc_native",
+            Shim::Palette => "mc_palette",
         }
     }
 
@@ -332,6 +499,7 @@ impl Shim {
             Shim::FloatPow => shim_float_pow as *const u8,
             Shim::FloatAtan2 => shim_float_atan2 as *const u8,
             Shim::Native => shim_native as *const u8,
+            Shim::Palette => shim_palette as *const u8,
         }
     }
 
@@ -350,6 +518,7 @@ impl Shim {
                 (vec![F64, F64], F64)
             }
             Shim::Native => (vec![I32, I32, I64, I64, I64, I64, ptr], I32),
+            Shim::Palette => (vec![ptr, I64, F64, I64, ptr, ptr], I32),
         }
     }
 }
@@ -360,12 +529,12 @@ struct Shape {
     consts: Vec<u64>,
 }
 
-fn class_code(class: Class) -> Option<u64> {
+fn class_code(class: Class) -> u64 {
     match class {
-        Class::Unset | Class::Closure(_) => Some(0),
-        Class::Int => Some(1),
-        Class::Float => Some(2),
-        Class::Boxed => None,
+        Class::Unset | Class::Closure(_) => 0,
+        Class::Int => 1,
+        Class::Float => 2,
+        Class::Boxed => 3,
     }
 }
 
@@ -396,9 +565,7 @@ fn shape(spec: &Spec) -> Result<Shape, &'static str> {
     let mut consts = Vec::new();
     key.push(spec.frame_size as u64);
     key.push(spec.entry.len() as u64);
-    for class in &spec.entry {
-        key.push(class_code(*class).ok_or("a boxed argument or capture")?);
-    }
+    key.extend(spec.entry.iter().map(|&class| class_code(class)));
     let opnd = |opnd| opnd_code(opnd).ok_or("a closure operand");
     let ret = |class| ret_code(class).ok_or("a closure result");
     macro_rules! enc {
@@ -477,6 +644,13 @@ fn shape(spec: &Spec) -> Result<Shape, &'static str> {
             TOp::DynInc { reg } => enc!(53, reg),
             TOp::BoxInto { dst, src } => enc!(54, dst, opnd(src)?),
             TOp::DynNative {
+                intrinsic: KernelIntrinsic::KeyframeLerp,
+                dst,
+                args,
+                ret: Class::Boxed,
+                ..
+            } => enc!(59, dst, opnd(args[0])?, opnd(args[1])?),
+            TOp::DynNative {
                 intrinsic,
                 dst,
                 args,
@@ -491,10 +665,10 @@ fn shape(spec: &Spec) -> Result<Shape, &'static str> {
             }
             TOp::BoxF { reg } => enc!(56, reg),
             TOp::BoxC { reg, .. } => enc!(57, reg),
-            // a boxed value the body never reads (`analyse` checks)
+            // an input, filled once per batch
             TOp::Capture { dst, .. } | TOp::Default { dst, .. } => enc!(58, dst),
             TOp::Call { .. } => return Err("a call that was not inlined"),
-            TOp::Index { .. } => return Err("an index"),
+            TOp::Index { dst, list, index } => enc!(60, dst, list, opnd(index)?),
             TOp::Len { .. } => return Err("a len"),
         }
     }
@@ -515,9 +689,10 @@ enum Word {
 }
 
 /// what a register of the boxed file holds at one point. the boxed values the
-/// jit models are numbers and lists of scalars a body builds and returns, each
-/// list living in the frame. native code holds either as a word and a kind
-/// word: a number's value and kind, or a list's length and site
+/// jit models are numbers, lists of scalars a body builds and returns, each
+/// list living in the frame, and inputs. native code holds any of them as a
+/// word and a kind word: a number's value and kind, a list's length and site,
+/// or an input's palette id and the address of its copy in the frame
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Boxed {
     Nothing,
@@ -529,6 +704,8 @@ enum Boxed {
     Shared(u8),
     /// an int or a float, which of the two known only at run time
     Num,
+    /// a boxed argument or capture, read only by an index or as a palette
+    Input,
     /// anything else, which nothing may read
     Opaque,
 }
@@ -703,6 +880,13 @@ fn step_boxed(
     boxed: &mut [Boxed],
 ) -> Result<Option<u8>, Decline> {
     let at = |boxed: &[Boxed], reg: Reg| boxed.get(reg as usize).copied().ok_or(OUTSIDE);
+    let site_of = |site_pcs: &[usize]| {
+        site_pcs
+            .iter()
+            .position(|&at| at == pc)
+            .map(|site| site as u8)
+            .ok_or("a list site it did not count")
+    };
     let numeric = |boxed: &[Boxed], opnd: Opnd| match opnd {
         Opnd::I(_) | Opnd::F(_) => Ok(()),
         Opnd::B(reg) => match at(boxed, reg)? {
@@ -719,7 +903,7 @@ fn step_boxed(
     // a copy of a boxed register: a number is copied, a list is shared
     let copy = |boxed: &mut [Boxed], dst: Reg, src: Reg| {
         let value = match at(boxed, src)? {
-            Boxed::Num => Boxed::Num,
+            held @ (Boxed::Num | Boxed::Input) => held,
             held => {
                 let sites = held
                     .sites()
@@ -743,18 +927,16 @@ fn step_boxed(
             set(boxed, reg, Boxed::Num)?;
             None
         }
-        TOp::BoxC { reg: dst, .. }
-        | TOp::Nil { dst }
-        | TOp::Capture { dst, .. }
-        | TOp::Default { dst, .. } => {
+        TOp::BoxC { reg: dst, .. } | TOp::Nil { dst } => {
             set(boxed, dst, Boxed::Opaque)?;
             None
         }
+        TOp::Capture { dst, .. } | TOp::Default { dst, .. } => {
+            set(boxed, dst, Boxed::Input)?;
+            None
+        }
         TOp::EmptyList { dst } => {
-            let site = site_pcs
-                .iter()
-                .position(|&at| at == pc)
-                .ok_or("a list site it did not count")? as u8;
+            let site = site_of(site_pcs)?;
             set(boxed, dst, Boxed::List(site))?;
             Some(site)
         }
@@ -775,6 +957,32 @@ fn step_boxed(
             }
             Opnd::C(_) => return Err("a closure operand"),
         },
+        TOp::Index { dst, list, index } => {
+            if at(boxed, list)? != Boxed::Input {
+                return Err("an index");
+            }
+            match index {
+                Opnd::I(_) => {}
+                Opnd::B(reg) if at(boxed, reg)? == Boxed::Num => {}
+                _ => return Err("an index that is not an int"),
+            }
+            set(boxed, dst, Boxed::Num)?;
+            None
+        }
+        TOp::DynNative {
+            intrinsic: KernelIntrinsic::KeyframeLerp,
+            dst,
+            args: [palette, t],
+            ..
+        } => {
+            if !matches!(palette, Opnd::B(reg) if at(boxed, reg)? == Boxed::Input) {
+                return Err("a palette lookup on something other than an input");
+            }
+            numeric(boxed, t)?;
+            let site = site_of(site_pcs)?;
+            set(boxed, dst, Boxed::Shared(1 << site))?;
+            Some(site)
+        }
         TOp::Return { src: Opnd::B(reg) } => match at(boxed, reg)? {
             Boxed::Num | Boxed::List(_) | Boxed::Shared(_) => None,
             _ => return Err("a return of a boxed value it does not model"),
@@ -821,7 +1029,6 @@ fn step_boxed(
             None
         }
         TOp::Call { .. } => return Err("a call that was not inlined"),
-        TOp::Index { .. } => return Err("an index"),
         TOp::Len { .. } => return Err("a len"),
         _ => None,
     })
@@ -837,9 +1044,9 @@ struct Facts {
 
 /// the facts codegen needs, checked along with every boxed read. an error
 /// when a copy's source is not one class on every path, when a boxed value
-/// other than a list of scalars or a number is read, or when a list could be
-/// built twice in one call (one list per site and call is what lets it live in
-/// the frame)
+/// other than a list of scalars, a number or an input is read, or when a list
+/// could be built twice in one call (one list per site and call is what lets
+/// it live in the frame)
 fn analyse(spec: &Spec) -> Result<Facts, Decline> {
     let ops = &spec.ops;
     let regs = spec.frame_size as usize;
@@ -847,15 +1054,30 @@ fn analyse(spec: &Spec) -> Result<Facts, Decline> {
         words: vec![Word::Nothing; regs],
         boxed: vec![Boxed::Nothing; regs],
     };
-    for (slot, class) in entry.words.iter_mut().zip(&spec.entry) {
-        *slot = match class {
-            Class::Int => Word::Int,
-            Class::Float => Word::Float,
-            _ => Word::Nothing,
-        };
+    for ((word, boxed), class) in entry
+        .words
+        .iter_mut()
+        .zip(entry.boxed.iter_mut())
+        .zip(&spec.entry)
+    {
+        match class {
+            Class::Int => *word = Word::Int,
+            Class::Float => *word = Word::Float,
+            Class::Boxed => *boxed = Boxed::Input,
+            Class::Unset | Class::Closure(_) => {}
+        }
     }
     let lists: Vec<usize> = (0..ops.len())
-        .filter(|&pc| matches!(ops[pc], TOp::EmptyList { .. }))
+        .filter(|&pc| {
+            matches!(
+                ops[pc],
+                TOp::EmptyList { .. }
+                    | TOp::DynNative {
+                        intrinsic: KernelIntrinsic::KeyframeLerp,
+                        ..
+                    }
+            )
+        })
         .collect();
     if lists.len() > LIST_SITES {
         return Err("more list sites than it models");
@@ -1172,7 +1394,7 @@ fn compile(spec: &Spec, facts: &Facts) -> Option<Compiled> {
     }
 
     let mut ctx = module.make_context();
-    ctx.func.signature.params.extend([AbiParam::new(ptr); 3]);
+    ctx.func.signature.params.extend([AbiParam::new(ptr); 4]);
     ctx.func.signature.returns.push(AbiParam::new(types::I32));
     let id = module
         .declare_function("kernel", Linkage::Local, &ctx.func.signature)
@@ -1452,16 +1674,33 @@ impl Codegen<'_> {
         let start = b.create_block();
         b.append_block_params_for_function_params(start);
         b.switch_to_block(start);
-        let [frame, budget_ptr, abort] = b.block_params(start) else {
+        let [frame, budget_ptr, abort, arena] = b.block_params(start) else {
             return None;
         };
-        let (frame, budget_ptr, abort) = (*frame, *budget_ptr, *abort);
+        let (frame, budget_ptr, abort, arena) = (*frame, *budget_ptr, *abort, *arena);
         let budget = b.declare_var(types::I64);
         let initial = b.ins().load(types::I64, flags, budget_ptr, 0);
         b.def_var(budget, initial);
+        // an input as a register holds it: its palette id and its address
+        let consts = ops
+            .iter()
+            .filter(|op| matches!(op, TOp::FConst { .. }))
+            .count();
+        let mut next_input = 0;
+        let mut input = |b: &mut FunctionBuilder| {
+            let at = layout.input(consts, next_input);
+            next_input += 1;
+            let palette = b.ins().load(types::I64, fixed, frame, word(at));
+            let address = b.ins().iadd_imm_s(frame, word(at + 1) as i64);
+            (palette, Kind::Dyn(address))
+        };
         for (reg, class) in self.spec.entry.iter().enumerate() {
             let offset = (reg * 8) as i32;
             match class {
+                Class::Boxed => {
+                    let pair = input(b);
+                    regs.set_num(b, reg as Reg, pair);
+                }
                 Class::Int => {
                     let value = b.ins().load(types::I64, fixed, frame, offset);
                     regs.set_int(b, reg as Reg, value);
@@ -1581,7 +1820,52 @@ impl Codegen<'_> {
                     regs.set_num(b, reg, (x, Kind::Float))
                 }
                 // boxed values nothing reads (`analyse` checks)
-                TOp::BoxC { .. } | TOp::Nil { .. } | TOp::Capture { .. } | TOp::Default { .. } => {}
+                TOp::BoxC { .. } | TOp::Nil { .. } => {}
+                TOp::Capture { dst, .. } | TOp::Default { dst, .. } => {
+                    let pair = input(b);
+                    regs.set_num(b, dst, pair);
+                }
+                TOp::Index { dst, list, index } => {
+                    // `run`'s `list.get(index as usize)` on the input's copy
+                    let (_, Kind::Dyn(address)) = regs.num(b, list) else {
+                        return None;
+                    };
+                    let (i, kind) = regs.operand(b, index)?;
+                    match kind {
+                        Kind::Int => {}
+                        Kind::Float => return None,
+                        Kind::Dyn(kind) => {
+                            let not_int = b.ins().icmp_imm_s(IntCC::NotEqual, kind, KIND_INT);
+                            faults.guard(b, not_int, Fault::Type);
+                        }
+                    }
+                    let len = b.ins().load(types::I64, fixed, address, 0);
+                    let absent = b.ins().icmp_imm_s(IntCC::Equal, len, ABSENT as i64);
+                    faults.guard(b, absent, Fault::Type);
+                    let outside = b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, i, len);
+                    faults.guard(b, outside, Fault::Index);
+                    let offset = b.ins().ishl_imm_s(i, 3);
+                    let at = b.ins().iadd(address, offset);
+                    let value = b.ins().load(types::I64, fixed, at, word(1));
+                    let kind = b.ins().load(types::I64, fixed, at, word(1 + LIST_CAP));
+                    regs.set_num(b, dst, (value, Kind::Dyn(kind)));
+                }
+                TOp::DynNative {
+                    intrinsic: KernelIntrinsic::KeyframeLerp,
+                    dst,
+                    args: [Opnd::B(palette), t],
+                    ..
+                } => {
+                    let site = self.facts.sites[pc]?;
+                    let (id, _) = regs.num(b, palette);
+                    let t = regs.operand(b, t)?;
+                    let t = promoted(b, t);
+                    let list_kind = b.ins().iconst(types::I64, KIND_LIST + site as i64);
+                    let area = b.ins().iadd_imm_s(items, word(Layout::site(site)) as i64);
+                    let value = fallible!(Shim::Palette, [arena, id, t, list_kind, area]);
+                    let kind = b.ins().stack_load(self.ptr, types::I64, out, 8);
+                    regs.set_num(b, dst, (value, Kind::Dyn(kind)));
+                }
                 // a copy of a list is its length and site, there being one
                 // list per site and call
                 TOp::MoveB { dst, src } => {
@@ -2048,7 +2332,8 @@ impl JitCache {
     }
 
     /// native code for `spec`, compiling it the first time its shape is seen;
-    /// `None` when the spec is not purely scalar or the jit is off
+    /// `None` when the spec reads a value the jit does not model or the jit is
+    /// off
     pub fn prepare(&mut self, spec: &Spec, stats: &mut KernelStats) -> Option<Arc<JitEntry>> {
         if !self.enabled {
             return None;
@@ -2094,6 +2379,8 @@ impl JitCache {
 pub struct JitVm {
     entry: Arc<JitEntry>,
     words: Vec<u64>,
+    /// where each argument's input starts, for the boxed ones
+    arg_inputs: Vec<Option<usize>>,
     abort: Option<Arc<AtomicBool>>,
     /// whether the captures could be laid out; if not every call faults
     ready: bool,
@@ -2109,34 +2396,124 @@ impl JitVm {
         abort: Option<Arc<AtomicBool>>,
     ) -> Self {
         let layout = Layout::of(spec.frame_size);
-        let mut words = vec![0; layout.consts + entry.consts.len()];
-        words[layout.consts..].copy_from_slice(&entry.consts);
+        let consts = entry.consts.len();
+        let mut words = vec![0; layout.input(consts, inputs(spec))];
+        words[layout.consts..layout.consts + consts].copy_from_slice(&entry.consts);
+        // the inputs in the order codegen reads them: boxed entry registers,
+        // then the inlined captures and defaults
+        let mut next = (0..).map(|index| layout.input(consts, index));
+        let entries: Vec<Option<usize>> = spec
+            .entry
+            .iter()
+            .map(|&class| (class == Class::Boxed).then(|| next.next().unwrap()))
+            .collect();
         let total = spec.sig.len();
         let ready = arena
             .get(spec.closure)
             .captures
             .iter()
+            .zip(&entries[total..])
             .enumerate()
-            .all(|(i, capture)| store(&mut words, total + i, spec.entry[total + i], capture));
+            .all(|(i, (capture, input))| match input {
+                Some(at) => {
+                    write_input(&mut words[*at..*at + INPUT_WORDS], capture);
+                    true
+                }
+                None => store(&mut words, total + i, spec.entry[total + i], capture),
+            });
+        for op in spec.ops.iter() {
+            let value = match *op {
+                TOp::Capture { closure, index, .. } => &arena.get(closure).captures[index as usize],
+                TOp::Default { closure, index, .. } => &arena.get(closure).defaults[index as usize],
+                _ => continue,
+            };
+            let at = next.next().unwrap();
+            write_input(&mut words[at..at + INPUT_WORDS], value);
+        }
+        let mut arg_inputs = entries;
+        arg_inputs.truncate(total);
         Self {
             entry,
             words,
+            arg_inputs,
             abort,
             ready,
         }
     }
 
     /// run the body on `args`, whose classes the caller has checked with
-    /// `TVm::accepts`
-    pub fn call(&mut self, spec: &Spec, args: &[KVal]) -> Result<KVal, Fault> {
+    /// `TVm::accepts`; `arena` is the batch's, the one this was made with
+    pub fn call(
+        &mut self,
+        spec: &Spec,
+        arena: &ClosureArena,
+        args: &[KVal],
+    ) -> Result<KVal, Fault> {
+        self.run_args(spec, arena, args)?;
+        Ok(self.result(spec))
+    }
+
+    /// `call`, leaving the result in the frame for `result` or `flat`
+    pub(crate) fn run_args(
+        &mut self,
+        spec: &Spec,
+        arena: &ClosureArena,
+        args: &[KVal],
+    ) -> Result<(), Fault> {
         if !self.ready {
             return Err(Fault::Type);
         }
-        for (i, (arg, class)) in args.iter().zip(&spec.sig).enumerate() {
-            if !store(&mut self.words, i, *class, arg) {
-                return Err(Fault::Type);
-            }
+        for (i, arg) in args.iter().enumerate() {
+            self.write_arg(spec, i, arg)?;
         }
+        self.run(arena)
+    }
+
+    /// `run_args` on typed input: the numbers of `call` followed by `defaults`
+    pub(crate) fn run_nums<'n>(
+        &mut self,
+        spec: &Spec,
+        arena: &ClosureArena,
+        call: impl Iterator<Item = NumArg<'n>>,
+        defaults: &[KVal],
+    ) -> Result<(), Fault> {
+        if !self.ready {
+            return Err(Fault::Type);
+        }
+        let mut provided = 0;
+        for (i, arg) in call.enumerate() {
+            match (arg, self.arg_inputs[i]) {
+                (NumArg::List(nums), Some(at)) => write_list_input(
+                    &mut self.words[at..at + INPUT_WORDS],
+                    nums.len(),
+                    nums.iter().copied().map(Some),
+                ),
+                (NumArg::Num(Num::Int(n)), None) if spec.sig[i] == Class::Int => {
+                    self.words[i] = n as u64
+                }
+                (NumArg::Num(Num::Float(f)), None) if spec.sig[i] == Class::Float => {
+                    self.words[i] = f.to_bits()
+                }
+                _ => return Err(Fault::Type),
+            }
+            provided += 1;
+        }
+        for (i, default) in defaults.iter().enumerate() {
+            self.write_arg(spec, provided + i, default)?;
+        }
+        self.run(arena)
+    }
+
+    fn write_arg(&mut self, spec: &Spec, i: usize, arg: &KVal) -> Result<(), Fault> {
+        match self.arg_inputs[i] {
+            Some(at) => write_input(&mut self.words[at..at + INPUT_WORDS], arg),
+            None if store(&mut self.words, i, spec.sig[i], arg) => {}
+            None => return Err(Fault::Type),
+        }
+        Ok(())
+    }
+
+    fn run(&mut self, arena: &ClosureArena) -> Result<(), Fault> {
         let mut budget = CALL_OP_BUDGET as i64;
         let abort = self
             .abort
@@ -2148,30 +2525,73 @@ impl JitVm {
         let compiled = &self.entry.compiled;
         // safety: the frame has the layout the code was generated for, and
         // the budget and abort flag outlive the call
-        let code = unsafe { (compiled.entry)(self.words.as_mut_ptr(), &mut budget, abort) };
-        if code != 0 {
-            return Err(fault_of(code));
+        let code = unsafe { (compiled.entry)(self.words.as_mut_ptr(), &mut budget, abort, arena) };
+        match code {
+            0 => Ok(()),
+            code => Err(fault_of(code)),
         }
+    }
+
+    fn returned(&self, spec: &Spec) -> Returned<'_> {
         let layout = Layout::of(spec.frame_size);
-        let scalar = |word: u64, kind: u64| match kind as i64 {
-            KIND_INT => KVal::Int(word as i64),
-            _ => KVal::Float(f64::from_bits(word)),
-        };
         let words = &self.words;
-        Ok(match words[layout.kind] as i64 {
+        match words[layout.kind] as i64 {
             kind @ KIND_LIST.. => {
                 let items = layout.items + Layout::site((kind - KIND_LIST) as u8);
                 let count = words[layout.result] as usize;
-                KVal::list(
-                    words[items..items + count]
-                        .iter()
-                        .zip(&words[items + LIST_CAP..])
-                        .map(|(word, kind)| scalar(*word, *kind)),
-                )
+                Returned::List {
+                    values: &words[items..items + count],
+                    kinds: &words[items + LIST_CAP..items + LIST_CAP + count],
+                }
             }
-            kind => scalar(words[layout.result], kind as u64),
-        })
+            kind => Returned::Scalar {
+                word: words[layout.result],
+                kind,
+            },
+        }
     }
+
+    /// the result of the last successful run
+    pub(crate) fn result(&self, spec: &Spec) -> KVal {
+        let scalar = |word: u64, kind: i64| match kind {
+            KIND_INT => KVal::Int(word as i64),
+            _ => KVal::Float(f64::from_bits(word)),
+        };
+        match self.returned(spec) {
+            Returned::List { values, kinds } => KVal::list(
+                values
+                    .iter()
+                    .zip(kinds)
+                    .map(|(&word, &kind)| scalar(word, kind as i64)),
+            ),
+            Returned::Scalar { word, kind } => scalar(word, kind),
+        }
+    }
+
+    /// the result of the last successful run as `output::flat_of` reads it,
+    /// without building the list; `None` for a scalar or another length
+    pub(crate) fn flat(&self, spec: &Spec, width: usize) -> Option<[f32; FLAT_MAX]> {
+        let Returned::List { values, kinds } = self.returned(spec) else {
+            return None;
+        };
+        if values.len() != width || width > FLAT_MAX {
+            return None;
+        }
+        let mut out = [0.0; FLAT_MAX];
+        for (slot, (&word, &kind)) in out.iter_mut().zip(values.iter().zip(kinds)) {
+            *slot = match kind as i64 {
+                KIND_INT => word as i64 as f32,
+                _ => f64::from_bits(word) as f32,
+            };
+        }
+        Some(out)
+    }
+}
+
+/// what the last run left in the frame
+enum Returned<'a> {
+    List { values: &'a [u64], kinds: &'a [u64] },
+    Scalar { word: u64, kind: i64 },
 }
 
 /// write `value` into `words[slot]` as the typed machine's `store` would;
@@ -2204,10 +2624,11 @@ mod tests {
     use super::*;
     use crate::kernel::{
         ir::{KOp, Kernel, KernelIntrinsic},
+        output::flat_of,
         run::Vm,
         typed::TypedProgram,
         typed_run::TVm,
-        value::{ClosureId, KClosure},
+        value::{ClosureId, KClosure, KPalette},
     };
 
     fn closure(total_args: u16, frame_size: u16, ops: Vec<KOp>) -> (ClosureArena, ClosureId) {
@@ -2258,13 +2679,24 @@ mod tests {
             let mut tvm = TVm::new();
             let mut vm = Vm::new();
             for args in calls {
-                let native = jit.call(spec, &args);
+                let native = jit.call(spec, &self.arena, &args);
                 let typed = tvm.call(&self.program, &self.arena, self.spec, &args);
                 let dynamic = vm.call(&self.arena, spec.closure, &args);
                 match (&typed, &dynamic) {
                     (Ok(a), Ok(b)) => assert!(KVal::strictly_equal(a, b), "{args:?}"),
                     (Err(a), Err(b)) => assert_eq!(a, b, "{args:?}"),
                     _ => panic!("{args:?}: typed {typed:?}, dynamic {dynamic:?}"),
+                }
+                if let Ok(native) = &native {
+                    let bits =
+                        |values: Option<[f32; FLAT_MAX]>| values.map(|v| v.map(f32::to_bits));
+                    for width in 0..=FLAT_MAX + 1 {
+                        assert_eq!(
+                            bits(jit.flat(spec, width)),
+                            bits(flat_of(native, width)),
+                            "{args:?}: numbers of width {width} off {native:?}"
+                        );
+                    }
                 }
                 match (&native, &typed) {
                     (Ok(a), Ok(b)) => assert!(
@@ -2415,7 +2847,10 @@ mod tests {
         floats.agree(zero.clone());
         let spec = floats.program.spec(floats.spec);
         let mut jit = JitVm::new(Arc::clone(&floats.entry), spec, &floats.arena, None);
-        assert_eq!(jit.call(spec, &zero[0]).err(), Some(Fault::DivisionByZero));
+        assert_eq!(
+            jit.call(spec, &floats.arena, &zero[0]).err(),
+            Some(Fault::DivisionByZero)
+        );
     }
 
     #[test]
@@ -2513,7 +2948,10 @@ mod tests {
         let jit = compiled(1, 3, ops, &[KVal::Int(0)]);
         let spec = jit.program.spec(jit.spec);
         let mut vm = JitVm::new(Arc::clone(&jit.entry), spec, &jit.arena, None);
-        assert_eq!(vm.call(spec, &[KVal::Int(0)]).err(), Some(Fault::Budget));
+        assert_eq!(
+            vm.call(spec, &jit.arena, &[KVal::Int(0)]).err(),
+            Some(Fault::Budget)
+        );
 
         let abort = Arc::new(AtomicBool::new(false));
         let mut vm = JitVm::new(
@@ -2523,7 +2961,10 @@ mod tests {
             Some(Arc::clone(&abort)),
         );
         abort.store(true, Ordering::Relaxed);
-        assert_eq!(vm.call(spec, &[KVal::Int(0)]).err(), Some(Fault::Aborted));
+        assert_eq!(
+            vm.call(spec, &jit.arena, &[KVal::Int(0)]).err(),
+            Some(Fault::Aborted)
+        );
     }
 
     #[test]
@@ -2654,7 +3095,7 @@ mod tests {
         let spec = jit.program.spec(jit.spec);
         let mut vm = JitVm::new(Arc::clone(&jit.entry), spec, &jit.arena, None);
         let long = [KVal::Int(LIST_CAP as i64 + 1)];
-        assert_eq!(vm.call(spec, &long).err(), Some(Fault::Type));
+        assert_eq!(vm.call(spec, &jit.arena, &long).err(), Some(Fault::Type));
     }
 
     #[test]
@@ -2682,7 +3123,7 @@ mod tests {
             let spec = program.spec(spec_id);
             let entry = cache.prepare(spec, &mut stats).unwrap();
             let mut vm = JitVm::new(entry, spec, &arena, None);
-            results.push(vm.call(spec, &[KVal::Float(1.5)]).unwrap());
+            results.push(vm.call(spec, &arena, &[KVal::Float(1.5)]).unwrap());
         }
         assert_eq!(stats.jit_compiles, 1);
         assert!(KVal::strictly_equal(&results[0], &KVal::Float(3.0)));
@@ -2710,7 +3151,11 @@ mod tests {
 
         fn call(&self, args: &[KVal]) -> Result<KVal, Fault> {
             let spec = self.program.spec(self.spec);
-            JitVm::new(Arc::clone(&self.entry), spec, &self.arena, None).call(spec, args)
+            JitVm::new(Arc::clone(&self.entry), spec, &self.arena, None).call(
+                spec,
+                &self.arena,
+                args,
+            )
         }
     }
 
@@ -3035,5 +3480,218 @@ mod tests {
             KOp::Return { src: 4 },
         ];
         assert_eq!(analysed(ops), Err("a list built in a loop"));
+    }
+
+    fn colour(values: [f64; 4]) -> KVal {
+        KVal::list(values.map(|x| {
+            if x.fract() == 0.0 {
+                KVal::Int(x as i64)
+            } else {
+                KVal::Float(x)
+            }
+        }))
+    }
+
+    /// a closure over `total_args` arguments capturing `palette`, the
+    /// capture landing in register `total_args`
+    fn capturing(
+        total_args: u16,
+        frame_size: u16,
+        ops: Vec<KOp>,
+        palette: Vec<(f64, KVal)>,
+    ) -> (ClosureArena, ClosureId) {
+        let mut arena = ClosureArena::default();
+        let palette = arena.push_palette(KPalette {
+            keys: palette.into_boxed_slice(),
+        });
+        let id = arena.push(KClosure {
+            ip: Default::default(),
+            kernel: Arc::new(Kernel {
+                ip: Default::default(),
+                required_args: total_args,
+                total_args,
+                capture_count: 1,
+                frame_size,
+                ops: ops.into_boxed_slice(),
+            }),
+            captures: Box::new([KVal::Palette(palette)]),
+            defaults: Box::new([]),
+        });
+        (arena, id)
+    }
+
+    fn compiled_capturing(
+        total_args: u16,
+        frame_size: u16,
+        ops: Vec<KOp>,
+        palette: Vec<(f64, KVal)>,
+        sample: &[KVal],
+    ) -> Compiled {
+        let (arena, id) = capturing(total_args, frame_size, ops, palette);
+        let (program, spec) = TypedProgram::specialise(&arena, id, sample).expect("typed");
+        let entry = JitCache::new(true)
+            .prepare(program.spec(spec), &mut KernelStats::default())
+            .expect("compiled");
+        Compiled {
+            arena,
+            program,
+            spec,
+            entry,
+        }
+    }
+
+    fn lerp(arg_start: u16) -> KOp {
+        KOp::Native {
+            intrinsic: KernelIntrinsic::KeyframeLerp,
+            arg_start,
+            arg_count: 2,
+        }
+    }
+
+    /// `keyframe_lerp(palette, t)` over the argument `t`
+    fn lookup() -> Vec<KOp> {
+        vec![
+            KOp::Move { dst: 2, src: 1 },
+            KOp::Move { dst: 3, src: 0 },
+            lerp(2),
+            KOp::Return { src: 2 },
+        ]
+    }
+
+    fn colours() -> Vec<(f64, KVal)> {
+        vec![
+            (0.0, colour([0.0, 0.0, 1.0, 1.0])),
+            (0.35, colour([0.0, 0.5, 0.5, 1.0])),
+            (0.6, colour([1.0, 1.0, 0.0, 1.0])),
+            (1.0, colour([1.0, 0.0, 0.0, 1.0])),
+        ]
+    }
+
+    /// below, at and inside every window, above, and the awkward floats
+    fn times() -> Vec<f64> {
+        let mut times = vec![-1.0, 0.0, 0.1, 0.35, 0.5, 0.6, 0.99, 1.0, 2.0];
+        times.extend([f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.0]);
+        times.extend(samples(17, 200).map(|(_, x)| x / 400.0));
+        times
+    }
+
+    #[test]
+    fn a_palette_lookup_returned_directly_matches_the_typed_machine() {
+        let steps = vec![
+            (-1.0, colour([0.0, 0.0, 0.0, 1.0])),
+            (0.0, colour([1.0, 0.0, 0.0, 1.0])),
+            // a time named twice: the window between them has no length
+            (0.0, colour([0.0, 1.0, 0.0, 1.0])),
+            (2.0, colour([0.0, 0.0, 1.0, 1.5])),
+        ];
+        let scalars = vec![
+            (0.0, KVal::Int(2)),
+            (0.5, KVal::Int(2)),
+            (1.0, KVal::Float(4.0)),
+        ];
+        for palette in [colours(), steps, scalars] {
+            let floats = compiled_capturing(1, 4, lookup(), palette.clone(), &[KVal::Float(0.5)]);
+            floats.agree(times().into_iter().map(|t| vec![KVal::Float(t)]));
+            let ints = compiled_capturing(1, 4, lookup(), palette, &[KVal::Int(0)]);
+            ints.agree((-2..=3).map(|t| vec![KVal::Int(t)]));
+        }
+    }
+
+    #[test]
+    fn a_palette_lookup_the_frame_cannot_hold_faults_to_the_typed_machine() {
+        let long = |n: usize| KVal::list((0..n).map(|i| KVal::Int(i as i64)));
+        let too_long = vec![(0.0, long(LIST_CAP + 1)), (1.0, long(LIST_CAP + 1))];
+        let jit = compiled_capturing(1, 4, lookup(), too_long, &[KVal::Float(0.5)]);
+        assert_eq!(jit.call(&[KVal::Float(0.5)]).err(), Some(Fault::Type));
+        let nested = vec![(0.0, KVal::list([long(2)])), (1.0, KVal::list([long(2)]))];
+        let jit = compiled_capturing(1, 4, lookup(), nested, &[KVal::Float(0.5)]);
+        assert_eq!(jit.call(&[KVal::Float(0.5)]).err(), Some(Fault::Type));
+        let mismatched = vec![(0.0, long(3)), (1.0, long(4))];
+        let jit = compiled_capturing(1, 4, lookup(), mismatched, &[KVal::Float(0.5)]);
+        jit.agree([0.5, -1.0, 2.0].map(|t| vec![KVal::Float(t)]));
+    }
+
+    #[test]
+    fn a_palette_lookup_merged_with_a_list_matches_the_typed_machine() {
+        // n > 0 ? keyframe_lerp(palette, t) : [t, n]
+        let ops = vec![
+            KOp::Int { dst: 3, value: 0 },
+            bin(BinKind::Gt, 3, 0, 3),
+            KOp::JumpIfNot { cond: 3, to: 8 },
+            KOp::Move { dst: 4, src: 2 },
+            KOp::Move { dst: 5, src: 1 },
+            lerp(4),
+            KOp::Move { dst: 6, src: 4 },
+            KOp::Jump { to: 11 },
+            KOp::EmptyList { dst: 6 },
+            KOp::Append { list: 6, value: 1 },
+            KOp::Append { list: 6, value: 0 },
+            KOp::Return { src: 6 },
+        ];
+        let jit = compiled_capturing(2, 7, ops, colours(), &[KVal::Int(1), KVal::Float(0.5)]);
+        jit.agree(
+            samples(18, 300)
+                .zip(times())
+                .map(|((n, _), t)| vec![KVal::Int(n), KVal::Float(t)]),
+        );
+    }
+
+    #[test]
+    fn a_palette_lookup_read_other_than_by_a_return_is_declined() {
+        let index = vec![
+            KOp::Int { dst: 4, value: 0 },
+            KOp::Index {
+                dst: 4,
+                list: 2,
+                index: 4,
+            },
+            KOp::Return { src: 4 },
+        ];
+        let add = vec![bin(BinKind::Add, 2, 2, 0), KOp::Return { src: 2 }];
+        for (after, reason) in [(index, "an index"), (add, "a list read as a number")] {
+            let mut ops = lookup();
+            ops.pop();
+            ops.extend(after);
+            let (arena, id) = capturing(1, 5, ops, colours());
+            let (program, spec) =
+                TypedProgram::specialise(&arena, id, &[KVal::Float(0.5)]).unwrap();
+            assert_eq!(analyse(program.spec(spec)).map(|_| ()), Err(reason));
+        }
+    }
+
+    #[test]
+    fn indexing_a_list_argument_matches_the_typed_machine() {
+        // [p[0] * 2, p[i]] over the arguments `p, i`
+        let ops = vec![
+            KOp::EmptyList { dst: 2 },
+            KOp::Int { dst: 3, value: 0 },
+            KOp::Index {
+                dst: 3,
+                list: 0,
+                index: 3,
+            },
+            KOp::Int { dst: 4, value: 2 },
+            bin(BinKind::Mul, 3, 3, 4),
+            KOp::Append { list: 2, value: 3 },
+            KOp::Index {
+                dst: 3,
+                list: 0,
+                index: 1,
+            },
+            KOp::Append { list: 2, value: 3 },
+            KOp::Return { src: 2 },
+        ];
+        let point = |x: f64, y: i64| KVal::list([KVal::Float(x), KVal::Int(y)]);
+        let jit = compiled(2, 5, ops, &[point(0.5, 1), KVal::Int(1)]);
+        jit.agree(
+            samples(19, 300)
+                .map(|(n, x)| vec![point(x, n), KVal::Int(n.rem_euclid(4) - 1)])
+                .chain([
+                    vec![KVal::list([KVal::Int(3)]), KVal::Int(0)],
+                    vec![KVal::list([]), KVal::Int(0)],
+                ]),
+        );
+        let long = KVal::list((0..=LIST_CAP as i64).map(KVal::Int));
+        assert_eq!(jit.call(&[long, KVal::Int(0)]).err(), Some(Fault::Type));
     }
 }

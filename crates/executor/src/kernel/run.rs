@@ -700,27 +700,43 @@ pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> 
 /// the stdlib's `keyframe_lerp` on a converted palette: clamped at both ends,
 /// the first window whose end reaches `t`, and the later keyframe of a window
 /// of zero length
-fn keyframe_lerp(palette: &KPalette, t: f64) -> Result<KVal, Fault> {
+/// where `t` falls among a palette's keyframes: on one of them, or between
+/// two with a blend factor
+pub(crate) enum Keyframe<'a> {
+    At(&'a KVal),
+    Between(&'a KVal, &'a KVal, f64),
+}
+
+pub(crate) fn keyframe(palette: &KPalette, t: f64) -> Keyframe<'_> {
     let keys = &palette.keys;
     let (first, last) = (&keys[0], &keys[keys.len() - 1]);
     if t <= first.0 {
-        return Ok(detached(&first.1));
+        return Keyframe::At(&first.1);
     }
     if t >= last.0 {
-        return Ok(detached(&last.1));
+        return Keyframe::At(&last.1);
     }
-    for window in keys.windows(2) {
-        let [(t0, v0), (t1, v1)] = window else {
-            unreachable!()
-        };
-        if t <= *t1 {
-            if t1 == t0 {
-                return Ok(detached(v1));
-            }
-            return lerp_numeric(v0, v1, (t - t0) / (t1 - t0));
-        }
+    keys.windows(2)
+        .find_map(|window| {
+            let [(t0, v0), (t1, v1)] = window else {
+                unreachable!()
+            };
+            (t <= *t1).then(|| {
+                if t1 == t0 {
+                    Keyframe::At(v1)
+                } else {
+                    Keyframe::Between(v0, v1, (t - t0) / (t1 - t0))
+                }
+            })
+        })
+        .unwrap_or(Keyframe::At(&last.1))
+}
+
+pub(crate) fn keyframe_lerp(palette: &KPalette, t: f64) -> Result<KVal, Fault> {
+    match keyframe(palette, t) {
+        Keyframe::At(value) => Ok(detached(value)),
+        Keyframe::Between(a, b, t) => lerp_numeric(a, b, t),
     }
-    Ok(detached(&last.1))
 }
 
 /// a copy of a palette value with lists of its own, so worker threads never
@@ -735,26 +751,33 @@ fn detached(value: &KVal) -> KVal {
 /// `Executor::lerp` on numbers and lists of them: equal operands keep the
 /// first, anything else blends to a float
 fn lerp_numeric(a: &KVal, b: &KVal, t: f64) -> Result<KVal, Fault> {
-    let s = 1.0 - t;
-    Ok(match (a, b) {
+    match (a, b) {
         (KVal::List(a), KVal::List(b)) => {
             if a.len() != b.len() {
                 return Err(Fault::LengthMismatch);
             }
-            KVal::List(Arc::new(
+            Ok(KVal::List(Arc::new(
                 a.iter()
                     .zip(b.iter())
                     .map(|(a, b)| lerp_numeric(a, b, t))
                     .collect::<Result<KList, _>>()?,
-            ))
+            )))
         }
+        _ => lerp_number(a, b, t),
+    }
+}
+
+/// `lerp_numeric` on anything but two lists
+pub(crate) fn lerp_number(a: &KVal, b: &KVal, t: f64) -> Result<KVal, Fault> {
+    let s = 1.0 - t;
+    Ok(match (a, b) {
         // ints compare exactly, not through floats
         (KVal::Int(x), KVal::Int(y)) if x == y => KVal::Int(*x),
         (KVal::Int(x), KVal::Int(y)) => KVal::Float(s * *x as f64 + t * *y as f64),
         _ => {
             let (x, y) = (as_f64(a)?, as_f64(b)?);
             if x == y {
-                detached(a)
+                a.clone()
             } else {
                 KVal::Float(s * x + t * y)
             }

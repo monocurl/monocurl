@@ -1,7 +1,7 @@
 use std::{
     any::Any,
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     future::Future,
     ops::Range,
     pin::Pin,
@@ -17,13 +17,14 @@ use executor::{
     error::ExecutorError,
     executor::Executor,
     heap::{VRc, with_heap},
-    kernel::KVal,
+    kernel::{BatchInput, FlatOutput, KVal, kernel_value_to_value},
     value::{Value, container::List, lambda::Lambda},
 };
 use geo::{
     mesh::{Dot, Lin, LinVertex, Mesh, Shared, Tri, TriVertex, Uniforms, make_mesh_mut},
     mesh_build::{
-        self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceVertex,
+        self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceTopology,
+        SurfaceVertex,
     },
     simd::{Float2, Float3, Float4},
 };
@@ -869,6 +870,32 @@ pub(crate) fn build_indexed_surface(
     mesh_build::build_indexed_surface(vertices, faces, boundary_edges)
 }
 
+/// grids kept for their topology: a grid redrawn with new heights or colours
+/// keeps its cells, so its edges need matching only once
+const GRID_TOPOLOGIES: usize = 4;
+
+thread_local! {
+    static GRID_TOPOLOGY: RefCell<VecDeque<Rc<SurfaceTopology>>> = RefCell::default();
+}
+
+/// `build_indexed_surface` without boundary templates for faces that are
+/// likely to come again with other vertices
+pub(crate) fn build_grid_surface(
+    vertices: &[SurfaceVertex],
+    faces: Vec<[usize; 3]>,
+) -> (Vec<Lin>, Vec<Tri>) {
+    let topology = GRID_TOPOLOGY.with_borrow_mut(|cache| {
+        let topology = match cache.iter().position(|topology| topology.faces() == faces) {
+            Some(idx) => cache.remove(idx).unwrap(),
+            None => Rc::new(SurfaceTopology::new(faces)),
+        };
+        cache.push_front(topology.clone());
+        cache.truncate(GRID_TOPOLOGIES);
+        topology
+    });
+    topology.build(vertices, &BoundaryEdges::default())
+}
+
 pub(super) fn build_indexed_tris(vertices: &[Float3], faces: &[[usize; 3]]) -> Vec<Tri> {
     mesh_build::build_indexed_tris(vertices, faces, default_ink())
 }
@@ -1609,33 +1636,58 @@ pub(super) async fn invoke_callable(
     raw.elide_wrappers_rec(executor).await
 }
 
-/// `invoke_callable_many` for callers that reduce every result to a `T`; see
-/// `Executor::eagerly_invoke_lambda_many_mapped`
-pub(super) async fn invoke_callable_many_mapped<A, T>(
+fn callable_lambda(callable: &Value, name: &'static str) -> Result<Rc<Lambda>, ExecutorError> {
+    match callable.clone().elide_lvalue() {
+        Value::Lambda(lambda) => Ok(lambda),
+        Value::Operator(operator) => Ok(operator.0),
+        other => Err(ExecutorError::type_error_for(
+            "lambda / operator",
+            other.type_name(),
+            name,
+        )),
+    }
+}
+
+/// run `callable` once per call of `input`, reducing every result to a `T`;
+/// see `Executor::eagerly_invoke_lambda_many_input`. the arguments never
+/// reach the heap unless the interpreter runs the calls
+pub(super) async fn invoke_callable_many_input<T>(
     executor: &mut Executor,
     callable: &Value,
-    args: &[A],
+    input: BatchInput<'_>,
     name: &'static str,
     from_kernel: impl Fn(&KVal) -> Option<T>,
     from_value: impl Fn(Value) -> Result<T, ExecutorError>,
-) -> Result<Vec<T>, ExecutorError>
-where
-    A: AsRef<[Value]>,
-{
-    let lambda = match callable.clone().elide_lvalue() {
-        Value::Lambda(lambda) => lambda,
-        Value::Operator(operator) => operator.0,
-        other => {
-            return Err(ExecutorError::type_error_for(
-                "lambda / operator",
-                other.type_name(),
-                name,
-            ));
-        }
-    };
+) -> Result<Vec<T>, ExecutorError> {
+    let lambda = callable_lambda(callable, name)?;
     executor
-        .eagerly_invoke_lambda_many_mapped(&lambda, args, None, from_kernel, from_value)
+        .eagerly_invoke_lambda_many_input(&lambda, input, None, from_kernel, from_value)
         .await
+}
+
+/// `invoke_callable_many_input` for results of `T::WIDTH` numbers, which
+/// native code hands back without building a list
+pub(super) async fn invoke_callable_many_flat<T: FlatOutput>(
+    executor: &mut Executor,
+    callable: &Value,
+    input: BatchInput<'_>,
+    name: &'static str,
+    from_value: impl Fn(Value) -> Result<T, ExecutorError>,
+) -> Result<Vec<T>, ExecutorError> {
+    let lambda = callable_lambda(callable, name)?;
+    executor
+        .eagerly_invoke_lambda_many_flat(&lambda, input, None, from_value)
+        .await
+}
+
+/// `invoke_callable_many_input` keeping every result as a value
+pub(super) async fn invoke_callable_many_values(
+    executor: &mut Executor,
+    callable: &Value,
+    input: BatchInput<'_>,
+    name: &'static str,
+) -> Result<Vec<Value>, ExecutorError> {
+    invoke_callable_many_input(executor, callable, input, name, kernel_value_to_value, Ok).await
 }
 
 fn kernel_f32(value: &KVal) -> Option<f32> {
@@ -1646,63 +1698,8 @@ fn kernel_f32(value: &KVal) -> Option<f32> {
     }
 }
 
-fn kernel_components<const N: usize>(value: &KVal) -> Option<[f32; N]> {
-    let KVal::List(list) = value else { return None };
-    if list.len() != N {
-        return None;
-    }
-    let mut out = [0.0; N];
-    for (slot, element) in out.iter_mut().zip(list.iter()) {
-        *slot = kernel_f32(element)?;
-    }
-    Some(out)
-}
-
-pub(super) fn float2_from_kernel(value: &KVal) -> Option<Float2> {
-    kernel_components::<2>(value).map(Float2::from_array)
-}
-
-pub(super) fn float3_from_kernel(value: &KVal) -> Option<Float3> {
-    kernel_components::<3>(value).map(Float3::from_array)
-}
-
-pub(super) fn float4_from_kernel(value: &KVal) -> Option<Float4> {
-    kernel_components::<4>(value).map(Float4::from_array)
-}
-
 pub(super) fn f32_from_kernel(value: &KVal) -> Option<f32> {
     kernel_f32(value)
-}
-
-pub(super) async fn invoke_callable_many<A>(
-    executor: &mut Executor,
-    callable: &Value,
-    args: &[A],
-    name: &'static str,
-) -> Result<Vec<Value>, ExecutorError>
-where
-    A: AsRef<[Value]>,
-{
-    let raw: Vec<Value> = match callable.clone().elide_lvalue() {
-        Value::Lambda(lambda) => {
-            executor
-                .eagerly_invoke_lambda_many(&lambda, args, None)
-                .await?
-        }
-        Value::Operator(operator) => {
-            executor
-                .eagerly_invoke_lambda_many(&operator.0, args, None)
-                .await?
-        }
-        other => {
-            return Err(ExecutorError::type_error_for(
-                "lambda / operator",
-                other.type_name(),
-                name,
-            ));
-        }
-    };
-    Ok(raw)
 }
 
 pub(super) fn split_tree_by_tag_filter<'a>(

@@ -5,6 +5,8 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 use super::{
     KernelStats,
+    input::NumArg,
+    output::FLAT_MAX,
     run::Fault,
     typed::Spec,
     value::{ClosureArena, KVal},
@@ -36,7 +38,39 @@ impl JitVm {
         match *entry {}
     }
 
-    pub fn call(&mut self, _spec: &Spec, _args: &[KVal]) -> Result<KVal, Fault> {
+    pub fn call(
+        &mut self,
+        _spec: &Spec,
+        _arena: &ClosureArena,
+        _args: &[KVal],
+    ) -> Result<KVal, Fault> {
+        match *self {}
+    }
+
+    pub(crate) fn run_args(
+        &mut self,
+        _spec: &Spec,
+        _arena: &ClosureArena,
+        _args: &[KVal],
+    ) -> Result<(), Fault> {
+        match *self {}
+    }
+
+    pub(crate) fn run_nums<'n>(
+        &mut self,
+        _spec: &Spec,
+        _arena: &ClosureArena,
+        _call: impl Iterator<Item = NumArg<'n>>,
+        _defaults: &[KVal],
+    ) -> Result<(), Fault> {
+        match *self {}
+    }
+
+    pub(crate) fn result(&self, _spec: &Spec) -> KVal {
+        match *self {}
+    }
+
+    pub(crate) fn flat(&self, _spec: &Spec, _width: usize) -> Option<[f32; FLAT_MAX]> {
         match *self {}
     }
 }

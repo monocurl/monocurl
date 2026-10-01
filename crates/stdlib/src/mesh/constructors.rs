@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 use executor::executor::TextRenderQuality;
-use executor::{error::ExecutorError, executor::Executor, value::Value};
+use executor::{error::ExecutorError, executor::Executor, kernel::BatchInput, value::Value};
 use geo::{
     mesh::{
         DEFAULT_DOT_RADIUS, Dot, Lin, Mesh, PixelTexture, Shared, TextureSource, Tri, Uniforms,
@@ -9,7 +9,6 @@ use geo::{
     mesh_build::{BoundaryEdges, SurfaceVertex},
     simd::{Float2, Float3, Float4},
 };
-use smallvec::{SmallVec, smallvec};
 use stdlib_macros::stdlib_func;
 
 use super::helpers::*;
@@ -1432,20 +1431,22 @@ async fn shade(
     columns: usize,
     rows: usize,
 ) -> Result<PixelTexture, ExecutorError> {
-    let mut args = Vec::<SmallVec<[Value; 2]>>::with_capacity(columns * rows);
+    let mut args = Vec::with_capacity(2 * columns * rows);
     for row in 0..rows {
         let y = y_max - height * (row as f32 + 0.5) / rows as f32;
         for column in 0..columns {
             let x = x_min + width * (column as f32 + 0.5) / columns as f32;
-            args.push(smallvec![Value::Float(x as f64), Value::Float(y as f64)]);
+            args.extend([x as f64, y as f64]);
         }
     }
-    let colors = invoke_callable_many_mapped(
+    let colors = invoke_callable_many_flat(
         executor,
         color_at,
-        &args,
+        BatchInput::Floats {
+            values: &args,
+            arity: 2,
+        },
         "color_at",
-        float4_from_kernel,
         |value| float4_from_value(value, "color_at"),
     )
     .await?;
