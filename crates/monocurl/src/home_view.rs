@@ -452,7 +452,8 @@ impl HomeView {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or("Untitled".to_string());
 
-        let id: SharedString = format!("project {}", path).into();
+        // keyed by the real path: the shown folder is not unique
+        let id: SharedString = format!("project {}", project_path.display()).into();
         let group_name: SharedString = "project-group".into();
 
         div()
