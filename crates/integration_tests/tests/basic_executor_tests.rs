@@ -441,6 +441,8 @@ mod collections;
 mod control_flow;
 #[path = "basic_executor_tests/heap.rs"]
 mod heap;
+#[path = "basic_executor_tests/labeled_arguments.rs"]
+mod labeled_arguments;
 #[path = "basic_executor_tests/lambdas.rs"]
 mod lambdas;
 #[path = "basic_executor_tests/live_values.rs"]
