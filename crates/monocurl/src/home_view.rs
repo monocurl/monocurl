@@ -86,6 +86,34 @@ fn sub_home_dir(raw: &std::path::Path) -> Option<PathBuf> {
     })
 }
 
+/// the folder line under a project name: bundled examples say so, home
+/// paths start with `~`, and long paths lose leading folders rather than
+/// their tail, which is the part that tells projects apart
+fn display_folder(raw: &std::path::Path) -> String {
+    const MAX_CHARS: usize = 48;
+    if raw.starts_with(Assets::default_scene("")) {
+        return "Built-in example".to_string();
+    }
+    let folder = raw.parent().unwrap_or(raw);
+    let folder = sub_home_dir(folder).unwrap_or_else(|| folder.to_path_buf());
+    let mut parts: Vec<String> = folder
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .filter(|c| c != "/")
+        .collect();
+    let joined = |parts: &[String]| parts.join("/");
+    let mut shortened = false;
+    while parts.len() > 2 && joined(&parts).len() + 2 > MAX_CHARS {
+        parts.remove(0);
+        shortened = true;
+    }
+    match (shortened, folder.has_root()) {
+        (true, _) => format!("…/{}", joined(&parts)),
+        (false, true) => format!("/{}", joined(&parts)),
+        (false, false) => joined(&parts),
+    }
+}
+
 pub struct HomeView {
     navbar: Entity<Navbar>,
     state: Entity<WindowState>,
@@ -414,10 +442,7 @@ impl HomeView {
         cx: &Context<HomeView>,
     ) -> impl IntoElement + use<> {
         let theme = ThemeSettings::theme(cx);
-        let path = sub_home_dir(&project_path)
-            .unwrap_or(project_path.to_path_buf())
-            .to_string_lossy()
-            .to_string();
+        let path = display_folder(&project_path);
 
         let path_for_open = project_path.clone();
         let path_for_remove = project_path.clone();
@@ -679,5 +704,21 @@ impl Render for HomeView {
             .bg(theme.app_background)
             .text_color(theme.text_primary)
             .size_full()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::display_folder;
+    use std::path::Path;
+
+    #[test]
+    fn folders_shorten_from_the_left() {
+        let long = Path::new("/one/two/three/four/five/six/seven/eight/nine/ten/eleven/scene.mcs");
+        let shown = display_folder(long);
+        assert!(shown.starts_with("…/"), "{shown}");
+        assert!(shown.ends_with("/eleven"), "{shown}");
+        assert!(shown.chars().count() <= 50, "{shown}");
+        assert_eq!(display_folder(Path::new("/a/b/scene.mcs")), "/a/b");
     }
 }
