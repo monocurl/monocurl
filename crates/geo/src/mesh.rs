@@ -3,7 +3,7 @@ use std::{
     ops::{Deref, DerefMut},
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, Weak,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -154,6 +154,18 @@ pub struct Shared<T>(Arc<Vec<T>>);
 impl<T: Clone> Shared<T> {
     pub fn into_vec(self) -> Vec<T> {
         Arc::try_unwrap(self.0).unwrap_or_else(|shared| (*shared).clone())
+    }
+}
+
+impl<T> Shared<T> {
+    /// a handle to this storage: while it lives the address is not reused,
+    /// and a write through any clone detaches into new storage instead
+    pub fn downgrade(&self) -> Weak<Vec<T>> {
+        Arc::downgrade(&self.0)
+    }
+
+    pub fn storage_ptr(&self) -> *const Vec<T> {
+        Arc::as_ptr(&self.0)
     }
 }
 

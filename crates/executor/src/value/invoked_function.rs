@@ -27,7 +27,7 @@ pub type InvokedFunction = RcCached<InvokedFunctionBody, InvFuncCache>;
 
 pub fn make_invoked_function(
     lambda: Value,
-    arguments: SmallVec<[Value; 8]>,
+    arguments: Vec<Value>,
     labels: Labels,
     cached_result: Option<Value>,
 ) -> InvokedFunction {
@@ -36,7 +36,7 @@ pub fn make_invoked_function(
     RcCached::new(
         InvokedFunctionBody {
             lambda: Box::new(lambda),
-            arguments: arguments.into_vec(),
+            arguments,
             boxed_arguments,
             labels,
         },
@@ -74,7 +74,7 @@ impl InvokedFunction {
                 let full_args = fill_defaults(
                     (0..this.body.arguments.len())
                         .map(|arg_idx| normalize_argument(&this.body, arg_idx))
-                        .collect(),
+                        .collect::<SmallVec<[Value; 8]>>(),
                     &lambda,
                 );
                 let prepared_args = prepare_eager_call_args(full_args, &lambda)?;

@@ -1,10 +1,12 @@
 use std::{
+    any::Any,
+    cell::RefCell,
     collections::{HashMap, HashSet},
     future::Future,
     ops::Range,
     pin::Pin,
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, Weak},
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -19,7 +21,7 @@ use executor::{
     value::{Value, container::List, lambda::Lambda},
 };
 use geo::{
-    mesh::{Dot, Lin, LinVertex, Mesh, Tri, TriVertex, Uniforms, make_mesh_mut},
+    mesh::{Dot, Lin, LinVertex, Mesh, Shared, Tri, TriVertex, Uniforms, make_mesh_mut},
     mesh_build::{
         self, BoundaryEdge, BoundaryEdges, IndexedLineMesh, IndexedSurface, SurfaceVertex,
     },
@@ -1351,18 +1353,137 @@ pub(super) fn triangle_key(a: Float3, b: Float3, c: Float3) -> [[u32; 3]; 3] {
     key
 }
 
-pub(super) fn bounds_of(tree: &MeshTree) -> Option<(Float3, Float3)> {
-    let mut vertices = tree.iter().flat_map(mesh_vertices);
-    let first = vertices.next()?;
-    Some(vertices.fold((first, first), |(mut min, mut max), point| {
-        min.x = min.x.min(point.x);
-        min.y = min.y.min(point.y);
-        min.z = min.z.min(point.z);
-        max.x = max.x.max(point.x);
-        max.y = max.y.max(point.y);
-        max.z = max.z.max(point.z);
-        (min, max)
-    }))
+type Bounds = (Float3, Float3);
+
+fn union_bounds((a_min, a_max): Bounds, (b_min, b_max): Bounds) -> Bounds {
+    (
+        Float3::new(
+            a_min.x.min(b_min.x),
+            a_min.y.min(b_min.y),
+            a_min.z.min(b_min.z),
+        ),
+        Float3::new(
+            a_max.x.max(b_max.x),
+            a_max.y.max(b_max.y),
+            a_max.z.max(b_max.z),
+        ),
+    )
+}
+
+fn points_bounds(points: impl IntoIterator<Item = Float3>) -> Option<Bounds> {
+    points
+        .into_iter()
+        .map(|point| (point, point))
+        .reduce(union_bounds)
+}
+
+const ARRAY_BOUNDS_ENTRIES: usize = 4096;
+
+struct CachedBounds {
+    // pins the address, so a hit is the same unedited storage
+    storage: Weak<dyn Any>,
+    bounds: Bounds,
+    // template arrays outlive an eviction as long as the template cache holds them
+    pinned: bool,
+}
+
+thread_local! {
+    /// bounds of vertex arrays by storage: template constructors hand out the
+    /// same arrays every frame, and colour edits carry the entry to their copy
+    static ARRAY_BOUNDS: RefCell<HashMap<usize, CachedBounds, rustc_hash::FxBuildHasher>> =
+        RefCell::default();
+}
+
+fn cached_array_bounds<T>(array: &Shared<T>) -> Option<Bounds> {
+    let key = array.storage_ptr() as usize;
+    ARRAY_BOUNDS.with(|cache| cache.borrow().get(&key).map(|entry| entry.bounds))
+}
+
+fn cache_array_bounds<T: 'static>(array: &Shared<T>, bounds: Bounds, pinned: bool) {
+    ARRAY_BOUNDS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= ARRAY_BOUNDS_ENTRIES {
+            cache.retain(|_, entry| entry.pinned && entry.storage.strong_count() > 0);
+            if cache.len() >= ARRAY_BOUNDS_ENTRIES / 2 {
+                cache.clear();
+            }
+        }
+        let storage: Weak<dyn Any> = array.downgrade();
+        cache.insert(
+            array.storage_ptr() as usize,
+            CachedBounds {
+                storage,
+                bounds,
+                pinned,
+            },
+        );
+    });
+}
+
+fn array_bounds<T: 'static, P: IntoIterator<Item = Float3>>(
+    array: &Shared<T>,
+    points: impl Fn(&T) -> P,
+) -> Option<Bounds> {
+    if array.is_empty() {
+        return None;
+    }
+    cached_array_bounds(array).or_else(|| points_bounds(array.iter().flat_map(points)))
+}
+
+fn lin_points(lin: &Lin) -> [Float3; 2] {
+    [lin.a.pos, lin.b.pos]
+}
+
+fn tri_points(tri: &Tri) -> [Float3; 3] {
+    [tri.a.pos, tri.b.pos, tri.c.pos]
+}
+
+fn dot_points(dot: &Dot) -> [Float3; 1] {
+    [dot.pos]
+}
+
+fn pin_array_bounds<T: 'static, P: IntoIterator<Item = Float3>>(
+    array: &Shared<T>,
+    points: impl Fn(&T) -> P,
+) {
+    if let Some(bounds) = points_bounds(array.iter().flat_map(points)) {
+        cache_array_bounds(array, bounds, true);
+    }
+}
+
+/// records the bounds of a template's arrays, which are handed out unchanged
+pub(super) fn pin_template_bounds((dots, lins, tris): &(Shared<Dot>, Shared<Lin>, Shared<Tri>)) {
+    pin_array_bounds(dots, dot_points);
+    pin_array_bounds(lins, lin_points);
+    pin_array_bounds(tris, tri_points);
+}
+
+/// runs an edit that leaves every position in place, carrying the array's
+/// cached bounds over to the copy the edit may detach into
+pub(super) fn edit_keeping_positions<T: Clone + 'static>(
+    array: &mut Shared<T>,
+    edit: impl FnOnce(&mut Vec<T>),
+) {
+    let bounds = cached_array_bounds(array);
+    edit(array);
+    if let Some(bounds) = bounds {
+        cache_array_bounds(array, bounds, false);
+    }
+}
+
+fn mesh_bounds(mesh: &Mesh) -> Option<Bounds> {
+    [
+        array_bounds(&mesh.dots, dot_points),
+        array_bounds(&mesh.lins, lin_points),
+        array_bounds(&mesh.tris, tri_points),
+    ]
+    .into_iter()
+    .flatten()
+    .reduce(union_bounds)
+}
+
+pub(super) fn bounds_of(tree: &MeshTree) -> Option<Bounds> {
+    tree.iter().filter_map(mesh_bounds).reduce(union_bounds)
 }
 
 pub(super) fn extremal_point(tree: &MeshTree, direction: Float3) -> Option<Float3> {
@@ -1761,8 +1882,9 @@ mod tests {
     };
 
     use super::{
-        mesh_from_parts, mesh_position_groups, mesh_ref, mesh_to_indexed_lines, polygon_basis,
-        push_closed_polyline, uprank_mesh,
+        MeshTree, bounds_of, edit_keeping_positions, mesh_from_parts, mesh_position_groups,
+        mesh_ref, mesh_to_indexed_lines, pin_template_bounds, polygon_basis, push_closed_polyline,
+        uprank_mesh,
     };
     use crate::mesh::tessellation::tessellate_planar_loops;
 
@@ -1977,5 +2099,39 @@ mod tests {
 
         assert!(!upranked.tris.is_empty());
         assert!(upranked.has_consistent_topology());
+    }
+
+    #[test]
+    fn cached_bounds_follow_array_storage() {
+        let mut mesh = mesh_from_tessellated(&[square(1.0, 2.0, 0.5)], Float3::Z);
+        pin_template_bounds(&(mesh.dots.clone(), mesh.lins.clone(), mesh.tris.clone()));
+        let template = MeshTree::Mesh(mesh.clone().into());
+        let expected = (Float3::new(0.5, 1.5, 0.0), Float3::new(1.5, 2.5, 0.0));
+        assert_eq!(bounds_of(&template), Some(expected));
+
+        edit_keeping_positions(&mut mesh.tris, |tris| {
+            tris.iter_mut().for_each(|tri| tri.a.col = Float4::ZERO)
+        });
+        assert_eq!(
+            bounds_of(&MeshTree::Mesh(mesh.clone().into())),
+            Some(expected)
+        );
+
+        let shift = Float3::new(3.0, 0.0, 0.0);
+        for tri in &mut mesh.tris {
+            tri.a.pos = tri.a.pos + shift;
+            tri.b.pos = tri.b.pos + shift;
+            tri.c.pos = tri.c.pos + shift;
+        }
+        for lin in &mut mesh.lins {
+            lin.a.pos = lin.a.pos + shift;
+            lin.b.pos = lin.b.pos + shift;
+        }
+        let (min, max) = expected;
+        assert_eq!(
+            bounds_of(&MeshTree::Mesh(mesh.into())),
+            Some((min + shift, max + shift))
+        );
+        assert_eq!(bounds_of(&template), Some(expected));
     }
 }

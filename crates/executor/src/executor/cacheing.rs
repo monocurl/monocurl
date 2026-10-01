@@ -453,7 +453,7 @@ mod tests {
         }));
         let live = Value::InvokedFunction(make_invoked_function(
             lambda,
-            smallvec::smallvec![Value::Integer(1)],
+            vec![Value::Integer(1)],
             Labels::new(),
             None,
         ));

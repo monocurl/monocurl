@@ -11,10 +11,7 @@ use crate::{
 };
 use smallvec::SmallVec;
 
-use super::{
-    ExecSingle, Executor,
-    invoke::{prepare_lambda_argument, wrap_reference_argument},
-};
+use super::{ExecSingle, Executor, invoke::wrap_reference_argument};
 
 impl Executor {
     #[inline]
@@ -25,6 +22,40 @@ impl Executor {
         &'a mut self,
         lambda: &'a Lambda,
         args: SmallVec<[Value; 4]>,
+        trace_parent_idx: Option<usize>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
+    {
+        self.eagerly_invoke_seeded(
+            lambda,
+            move |frame| {
+                frame.extend(args);
+                Ok(())
+            },
+            trace_parent_idx,
+        )
+    }
+
+    /// `eagerly_invoke_lambda` for a live call, which keeps the originals:
+    /// each argument is cloned straight into the new frame and prepared there
+    #[inline]
+    pub(crate) fn eagerly_invoke_lambda_cloning<'a>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        args: impl Iterator<Item = &'a Value> + 'a,
+        trace_parent_idx: Option<usize>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
+    {
+        self.eagerly_invoke_seeded(
+            lambda,
+            move |frame| prepare_args_in(frame, args.cloned(), lambda),
+            trace_parent_idx,
+        )
+    }
+
+    fn eagerly_invoke_seeded<'a>(
+        &'a mut self,
+        lambda: &'a Lambda,
+        seed: impl FnOnce(&mut Vec<Value>) -> Result<(), ExecutorError> + 'a,
         trace_parent_idx: Option<usize>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, ExecutorError>> + 'a>>
     {
@@ -45,8 +76,14 @@ impl Executor {
                     ExecutorError::TooManyActiveAnimations
                 })?;
             let stack = self.state.stack_mut(temp_idx);
-            stack.var_stack.reserve(args.len() + lambda.captures.len());
-            stack.var_stack.extend(args);
+            stack
+                .var_stack
+                .reserve(lambda.total_args() + lambda.captures.len());
+            if let Err(e) = seed(&mut stack.var_stack) {
+                self.state.free_stack(temp_idx);
+                self.state.call_depth -= 1;
+                return Err(e);
+            }
             for cap in &lambda.captures {
                 stack.push(cap.clone());
             }
@@ -347,10 +384,10 @@ fn validate_eager_arg_count(arg_count: usize, lambda: &Lambda) -> Result<(), Exe
 }
 
 #[inline]
-pub(crate) fn fill_defaults(
-    mut args: SmallVec<[Value; 8]>,
+pub(crate) fn fill_defaults<B: Extend<Value> + std::ops::Deref<Target = [Value]>>(
+    mut args: B,
     lambda: &Lambda,
-) -> SmallVec<[Value; 8]> {
+) -> B {
     let total = lambda.total_args();
     if args.len() < total {
         let missing = total - args.len();
@@ -365,39 +402,32 @@ pub(crate) fn prepare_eager_call_args(
     args: impl IntoIterator<Item = Value>,
     lambda: &Lambda,
 ) -> Result<SmallVec<[Value; 4]>, ExecutorError> {
-    let mut raw = SmallVec::<[Value; 4]>::new();
-    raw.extend(args);
-    let minimum = lambda.required_args as usize;
-    let maximum = lambda.total_args();
-    if raw.len() < minimum {
-        return Err(ExecutorError::TooFewArguments {
-            minimum,
-            got: raw.len(),
-            operator: false,
-        });
-    }
-    if raw.len() > maximum {
-        return Err(ExecutorError::TooManyArguments {
-            maximum,
-            got: raw.len(),
-            operator: false,
-        });
-    }
-    let provided_count = raw.len();
-    if raw.len() < maximum {
-        let missing = maximum - raw.len();
-        let default_start = lambda.defaults.len().saturating_sub(missing);
-        raw.extend(lambda.defaults[default_start..].iter().cloned());
-    }
-
-    let mut prepared = SmallVec::<[Value; 4]>::with_capacity(raw.len());
-    for (arg_idx, arg) in raw.into_iter().enumerate() {
-        prepared.push(prepare_lambda_argument(
-            lambda,
-            arg_idx,
-            arg,
-            arg_idx < provided_count,
-        )?);
-    }
+    let mut prepared = SmallVec::with_capacity(lambda.total_args());
+    prepare_args_in(&mut prepared, args, lambda)?;
     Ok(prepared)
+}
+
+/// appends a call's arguments to an empty buffer, filling defaults and
+/// wrapping reference parameters in place
+fn prepare_args_in<B>(
+    buffer: &mut B,
+    args: impl IntoIterator<Item = Value>,
+    lambda: &Lambda,
+) -> Result<(), ExecutorError>
+where
+    B: Extend<Value> + std::ops::DerefMut<Target = [Value]>,
+{
+    buffer.extend(args);
+    let provided_count = buffer.len();
+    validate_eager_arg_count(provided_count, lambda)?;
+    let default_start = lambda.defaults.len() - (lambda.total_args() - provided_count);
+    buffer.extend(lambda.defaults[default_start..].iter().cloned());
+
+    for (arg_idx, arg) in buffer.iter_mut().enumerate() {
+        if lambda.arg_is_reference(arg_idx) {
+            let value = std::mem::replace(arg, Value::Nil);
+            *arg = wrap_reference_argument(value, arg_idx < provided_count)?;
+        }
+    }
+    Ok(())
 }

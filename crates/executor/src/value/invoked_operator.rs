@@ -35,7 +35,7 @@ pub type InvokedOperator = RcCached<InvokedOperatorBody, InvOpCache>;
 pub fn make_invoked_operator(
     operator: Value,
     operand: Value,
-    arguments: SmallVec<[Value; 8]>,
+    arguments: Vec<Value>,
     labels: Labels,
     initial: Value,
     modified: Value,
@@ -47,7 +47,7 @@ pub fn make_invoked_operator(
             operator: Box::new(operator),
             operand: Box::new(operand),
             boxed_operand: false,
-            arguments: arguments.into_vec(),
+            arguments,
             boxed_arguments,
             labels,
         },

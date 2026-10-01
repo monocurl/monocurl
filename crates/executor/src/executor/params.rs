@@ -246,14 +246,14 @@ mod tests {
         let mut executor = empty_executor();
         let base = Value::InvokedFunction(make_invoked_function(
             Value::Nil,
-            smallvec![Value::Float(1.0)],
+            vec![Value::Float(1.0)],
             smallvec![(0, "radius".into())],
             Some(Value::Nil),
         ));
         let live = Value::InvokedOperator(make_invoked_operator(
             Value::Nil,
             base,
-            smallvec![Value::Integer(2)],
+            vec![Value::Integer(2)],
             smallvec![(0, "copies".into())],
             Value::Nil,
             Value::Nil,
@@ -293,7 +293,7 @@ mod tests {
         let mut executor = empty_executor();
         let live = Value::InvokedFunction(make_invoked_function(
             Value::Nil,
-            smallvec![Value::Float(1.0)],
+            vec![Value::Float(1.0)],
             smallvec![(0, "radius".into())],
             Some(Value::Nil),
         ));
@@ -324,7 +324,7 @@ mod tests {
         let mut executor = empty_executor();
         let live = Value::InvokedFunction(make_invoked_function(
             Value::Nil,
-            smallvec![Value::Float(1.0), Value::Float(2.0)],
+            vec![Value::Float(1.0), Value::Float(2.0)],
             smallvec![(0, "radius".into()), (1, "radius".into())],
             Some(Value::Nil),
         ));
