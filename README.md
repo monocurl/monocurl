@@ -20,8 +20,8 @@ Every scene below runs live in the editor while you type. Sources are in the [ga
 
 | | | |
 |:-:|:-:|:-:|
-| [![Particle swarm](.github/assets/gallery/particle-swarm.gif)](https://monocurl.com/gallery/#12-particle-swarm) | [![Shader](.github/assets/gallery/shader.gif)](https://monocurl.com/gallery/#13-shader) | [![Surface](.github/assets/gallery/surface.gif)](https://monocurl.com/gallery/#14-surface) |
-| 600 particles, restyled every frame | per-pixel Mandelbrot shader | 70x70 morphing surface |
+| [![Particle swarm](.github/assets/gallery/particle-swarm.gif)](https://monocurl.com/gallery/#12-particle-swarm) | [![Shader](.github/assets/gallery/shader.png)](https://monocurl.com/gallery/#13-shader) | [![Surface](.github/assets/gallery/surface.gif)](https://monocurl.com/gallery/#14-surface) |
+| 600 particles, restyled every frame | per-pixel shader, rendered as a still | 70x70 morphing surface |
 | [![Flow field](.github/assets/gallery/flow-field.gif)](https://monocurl.com/gallery/#06-flow-field) | [![Tree fractal](.github/assets/gallery/tree-fractal.png)](https://monocurl.com/gallery/#09-tree-fractal) | [![Pythagorean theorem](.github/assets/gallery/pythagorean-theorem.gif)](https://monocurl.com/gallery/#04-pythagorean-theorem) |
 | interactive flow field with streamlines | recursive tree to depth 9 | Pythagorean theorem walkthrough |
 

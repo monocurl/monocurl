@@ -26,7 +26,6 @@ const DEFAULT_SCENE_FILES: &[&str] = &[
     "(Example) Text.mcs",
     "(Example) Algorithm.mcs",
     "(Example) 3D Camera Animation.mcs",
-    "(Example) Image.mcs",
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

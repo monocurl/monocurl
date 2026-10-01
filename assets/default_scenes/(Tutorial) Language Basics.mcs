@@ -7,6 +7,8 @@
 
 import std.util
 import std.math
+import std.color
+import std.mesh
 
 # In normal slide scenes, a print statement only appears after the playhead has
 # reached that line. This file has all prints in init, so they appear immediately
@@ -107,3 +109,20 @@ let fact = |self, x| {
 }
 
 print ["factorial 5" -> fact(fact, 5)]
+
+# The transcript panel is this file's real output. A small picture closes the
+# lesson so the scene is not blank: one dot per value, raised above the line
+# when it beat the threshold.
+mesh values_plot = block {
+    for (entry in enumerate(values)) {
+        var col = LIGHT_GRAY
+        var y = -0.4
+        if (entry[1] > threshold) {
+            col = ORANGE
+            y = 0.6
+        }
+        . fill{col} center{[-2.5 + entry[0], y, 0]} Circle(0.22)
+    }
+    . stroke{GRAY, 1} Line([-3, 0, 0], [3, 0, 0])
+    . center{[0, 1.5, 0]} Text("values above the threshold", 0.55)
+}
