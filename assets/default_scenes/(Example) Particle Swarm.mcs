@@ -37,9 +37,8 @@ let Galaxy = |n, t| block {
     }
 }
 
-mesh galaxy = Galaxy(n: 900, t: 0)
-
 slide "Galaxy"
+    mesh galaxy = Galaxy(n: 900, t: 0)
     play Fade(0.8)
 
 slide "Turn"
