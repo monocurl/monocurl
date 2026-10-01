@@ -16,6 +16,7 @@ const DEFAULT_SCENE_FILES: &[&str] = &[
     "(Tutorial) Language Basics.mcs",
     "(Tutorial) Meshes.mcs",
     "(Tutorial) Animations.mcs",
+    "(Example) Geometry Proof.mcs",
     "(Example) Fractal.mcs",
     "(Example) Particle Swarm.mcs",
     "(Example) Surface.mcs",
@@ -23,7 +24,6 @@ const DEFAULT_SCENE_FILES: &[&str] = &[
     "(Example) Riemann Sum.mcs",
     "(Example) Lorenz Attractor.mcs",
     "(Example) Text.mcs",
-    "(Example) Geometry Proof.mcs",
     "(Example) Algorithm.mcs",
     "(Example) 3D Camera Animation.mcs",
 ];

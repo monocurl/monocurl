@@ -222,6 +222,19 @@ let random = |low = 0, high = 1| __monocurl__native__ random(low, high)
 ## [description]
 ## `high` is exclusive and must be greater than `low`. Like `random`, this can only be called from the root frame.
 let randint = |low, high|         __monocurl__native__ randint(low, high)
+## [overview]
+## A random-looking float in [0, 1) that depends only on its arguments.
+## [description]
+## Unlike `random`, this is a pure function: the same `seed` and `salt` always give the same value, and it can be used anywhere, including inside lambdas evaluated per vertex, pixel or particle. Pass an index as the seed and a different salt for each quantity you need.
+## [example]
+## ```
+## let Star = |i| {
+##     let u = seeded_random(i)
+##     let v = seeded_random(i, 1)
+##     ...
+## }
+## ```
+let seeded_random = |seed, salt = 0| mod(sin(seed * 12.9898 + salt * 78.233) * 43758.5453, 1)
 
 # statistics
 ## [overview]

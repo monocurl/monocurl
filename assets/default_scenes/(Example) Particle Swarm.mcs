@@ -13,13 +13,11 @@ import std.scene
 background = [0.03, 0.03, 0.06, 1]
 let palette = [0 -> [1, 0.9, 0.7, 1], 0.25 -> ORANGE, 0.5 -> [0.95, 0.5, 0.6, 1], 0.75 -> [0.5, 0.6, 1, 1], 1 -> [0.3, 0.7, 1, 1]]
 
-# a cheap hash: three independent-looking numbers in [0, 1) per star
-let hash = |i, salt| mod(sin(i * 12.9898 + salt * 78.233) * 43758.5453, 1)
-
 let Star = |i, t| {
-    let u = hash(i, 1)
-    let v = hash(i, 2)
-    let w = hash(i, 3)
+    # three independent random-looking numbers per star, stable across frames
+    let u = seeded_random(i)
+    let v = seeded_random(i, 1)
+    let w = seeded_random(i, 2)
     let r = 0.06 + 1.9 * u * u
     # two arms, each a logarithmic spiral, with scatter that grows outward
     let arm = PI * mod(i, 2)
