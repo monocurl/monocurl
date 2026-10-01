@@ -548,7 +548,7 @@ impl LVm {
                                 .iter()
                                 .map(|&arg| self.load(lane, arg))
                                 .collect();
-                            let value = run::native(intrinsic, &values)?;
+                            let value = run::native_in(arena, intrinsic, &values)?;
                             self.store(lane, dst, ret, value)?;
                         }
                     }

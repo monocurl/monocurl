@@ -491,7 +491,7 @@ impl TVm {
                         .iter()
                         .map(|&arg| self.load(base, arg))
                         .collect();
-                    let value = run::native(intrinsic, &values)?;
+                    let value = run::native_in(arena, intrinsic, &values)?;
                     self.store(base, dst, ret, value)?;
                 }
                 TOp::Capture {

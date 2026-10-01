@@ -690,11 +690,37 @@ impl<'a> Generator<'a> {
         } else {
             name.to_string()
         };
+        let mut lines = Vec::new();
+        // a colour callback sometimes looks its colour up in a keyframe
+        // palette. drawn from a side stream so the rest of the program is the
+        // one the seed always produced
+        let mut side = Rng::new(self.rng.0 ^ 0x9a1e_77e5);
+        let params = match kind {
+            Sampling::SurfaceColor => Some("u0, u1, u2"),
+            Sampling::Shader => Some("u0, u1"),
+            Sampling::ColorMap => Some("u0"),
+            _ => None,
+        };
+        let callee = match params {
+            Some(params) if callee == *name && side.chance(40) => {
+                let palette = format!("{name}p");
+                lines.push(format!("let {palette} = {}", palette_source(&mut side)));
+                let first = params.split(", ").next().unwrap_or(params);
+                let t = match side.below(3) {
+                    0 => format!("{name}({params})[{}]", side.below(4)),
+                    1 if matches!(kind, Sampling::ColorMap) => format!("{first}[0] * 0.8 + 0.5"),
+                    1 => format!("{first} * 0.8 + 0.5"),
+                    _ => format!("{} * {name}({params})[0]", side.pick(&["1", "0.5", "2"])),
+                };
+                format!("|{params}| keyframe_lerp({palette}, {t})")
+            }
+            _ => callee,
+        };
         let mesh = self.name("g");
-        let mut lines = vec![format!(
+        lines.push(format!(
             "mesh {mesh} = {}",
             domain.constructor(&callee, self.rng)
-        )];
+        ));
         lines.push(format!("print {mesh}"));
         // colours only reach the transcript through verify mode, but geometry
         // can be read back
@@ -1801,6 +1827,38 @@ impl Domain {
             Self::Colors { grid } => format!("color_map{{{callee}}} {}", target_mesh(grid, 2, 1)),
         }
     }
+}
+
+/// a `keyframe_lerp` map: numeric times, sometimes an int and a float naming
+/// the same time, over colours whose components mix ints and floats. a rare
+/// palette has a short or scalar value, which the constructor rejects
+fn palette_source(rng: &mut Rng) -> String {
+    const TIMES: [&str; 8] = ["0", "0.25", "0.5", "1", "1.0", "-1", "0.75", "2"];
+    const COMPONENTS: [&str; 6] = ["0", "1", "0.5", "0.25", "1.0", "0.8"];
+    let count = 1 + rng.below(4);
+    let mut times: Vec<&str> = Vec::new();
+    while times.len() < count {
+        let time = *rng.pick(&TIMES);
+        if !times.contains(&time) {
+            times.push(time);
+        }
+    }
+    let entries: Vec<String> = times
+        .iter()
+        .map(|time| {
+            let value = match rng.below(20) {
+                0 => rng.pick(&COMPONENTS).to_string(),
+                1 => "[0.5, 0.5, 0.5]".into(),
+                _ => {
+                    let alpha = *rng.pick(&["1", "1.0", "0.5"]);
+                    let rgb: Vec<&str> = (0..3).map(|_| *rng.pick(&COMPONENTS)).collect();
+                    format!("[{}, {alpha}]", rgb.join(", "))
+                }
+            };
+            format!("{time} -> {value}")
+        })
+        .collect();
+    format!("[{}]", entries.join(", "))
 }
 
 /// a corner of the `Rect` of `size`, one of the points a map samples

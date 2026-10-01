@@ -7,12 +7,16 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     heap::{VRc, with_heap},
-    value::{Value, container::List, lambda::Lambda},
+    value::{
+        Value,
+        container::{HashableKey, List, Map},
+        lambda::Lambda,
+    },
 };
 
 use super::{
     KernelTier,
-    value::{ClosureArena, ClosureId, KClosure, KList, KVal},
+    value::{ClosureArena, ClosureId, KClosure, KList, KPalette, KVal},
 };
 
 /// one conversion session: values become `KVal`s and every lambda reached on
@@ -114,6 +118,9 @@ impl<'a> Converter<'a> {
                 self.convert(&inner)
             }
             Value::Lambda(lambda) => self.place(lambda).map_or(KVal::Opaque, KVal::Closure),
+            Value::Map(map) => palette(map).map_or(KVal::Opaque, |palette| {
+                KVal::Palette(self.arena.push_palette(palette))
+            }),
             Value::InvokedFunction(_) | Value::InvokedOperator(_) => {
                 match value.clone().elide_cached_wrappers_rec() {
                     Value::InvokedFunction(_) | Value::InvokedOperator(_) => KVal::Opaque,
@@ -123,6 +130,54 @@ impl<'a> Converter<'a> {
             _ => KVal::Opaque,
         }
     }
+}
+
+/// a map `keyframe_lerp` can read without the interpreter: numeric times and
+/// values that are numbers or lists of them, sorted the way the stdlib sorts
+fn palette(map: &Map) -> Option<KPalette> {
+    if map.is_empty() {
+        return None;
+    }
+    let mut keys = map
+        .iter()
+        .map(|(time, value)| {
+            let time = match time {
+                HashableKey::Integer(n) => *n as f64,
+                HashableKey::Float(bits) => HashableKey::float_value(*bits),
+                HashableKey::String(_) | HashableKey::List(_) => return None,
+            };
+            // named colors and `hex(...)` results reach the map as references
+            // and cached calls; read through them outside the heap borrow
+            let value = with_heap(|heap| heap.get(value.key()).clone()).elide_cached_wrappers_rec();
+            Some((time, numeric(&value)?))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    keys.sort_by(|(a, _), (b, _)| a.total_cmp(b));
+    Some(KPalette {
+        keys: keys.into_boxed_slice(),
+    })
+}
+
+fn numeric(value: &Value) -> Option<KVal> {
+    Some(match value {
+        Value::Integer(n) => KVal::Int(*n),
+        Value::Float(f) => KVal::Float(*f),
+        Value::List(list) => {
+            let elements: Vec<Value> = with_heap(|heap| {
+                list.elements()
+                    .iter()
+                    .map(|key| heap.get(key.key()).clone())
+                    .collect()
+            });
+            KVal::List(Arc::new(
+                elements
+                    .into_iter()
+                    .map(|element| numeric(&element.elide_cached_wrappers_rec()))
+                    .collect::<Option<KList>>()?,
+            ))
+        }
+        _ => return None,
+    })
 }
 
 /// bring a kernel result back onto the heap. closures and opaque values have
@@ -140,6 +195,6 @@ pub fn to_value(value: &KVal) -> Option<Value> {
                 .collect::<Option<Vec<_>>>()?;
             Value::List(List::new_with(elements))
         }
-        KVal::Closure(_) | KVal::Opaque => return None,
+        KVal::Closure(_) | KVal::Palette(_) | KVal::Opaque => return None,
     })
 }

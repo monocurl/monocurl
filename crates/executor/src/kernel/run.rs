@@ -14,7 +14,7 @@ use smallvec::SmallVec;
 
 use super::{
     ir::{BinKind, KOp, KernelIntrinsic},
-    value::{ClosureArena, ClosureId, KClosure, KList, KVal},
+    value::{ClosureArena, ClosureId, KClosure, KList, KPalette, KVal},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -349,7 +349,11 @@ impl Vm {
                     arg_count,
                 } => {
                     let start = base + arg_start as usize;
-                    let value = native(intrinsic, &self.regs[start..start + arg_count as usize])?;
+                    let value = native_in(
+                        arena,
+                        intrinsic,
+                        &self.regs[start..start + arg_count as usize],
+                    )?;
                     reg!(arg_start) = value;
                 }
                 KOp::Exit => return Ok(KVal::Nil),
@@ -578,6 +582,21 @@ fn float_list(value: &KVal) -> Result<SmallVec<[f64; 4]>, Fault> {
     }
 }
 
+/// a native that may read the batch's palettes; everything else goes through
+/// `native`, which the jit's shims call without an arena
+pub fn native_in(
+    arena: &ClosureArena,
+    intrinsic: KernelIntrinsic,
+    args: &[KVal],
+) -> Result<KVal, Fault> {
+    match (intrinsic, args) {
+        (KernelIntrinsic::KeyframeLerp, [KVal::Palette(id), t]) => {
+            keyframe_lerp(arena.palette(*id), as_f64(t)?)
+        }
+        _ => native(intrinsic, args),
+    }
+}
+
 pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> {
     use KernelIntrinsic::*;
 
@@ -672,8 +691,75 @@ pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> 
             KVal::Float(f) => Ok(KVal::Float(*f)),
             _ => Err(Fault::Type),
         },
+        // palettes live in the arena, so only `native_in` can read them
+        KeyframeLerp => Err(Fault::Type),
         Fallthrough => Err(Fault::Type),
     }
+}
+
+/// the stdlib's `keyframe_lerp` on a converted palette: clamped at both ends,
+/// the first window whose end reaches `t`, and the later keyframe of a window
+/// of zero length
+fn keyframe_lerp(palette: &KPalette, t: f64) -> Result<KVal, Fault> {
+    let keys = &palette.keys;
+    let (first, last) = (&keys[0], &keys[keys.len() - 1]);
+    if t <= first.0 {
+        return Ok(detached(&first.1));
+    }
+    if t >= last.0 {
+        return Ok(detached(&last.1));
+    }
+    for window in keys.windows(2) {
+        let [(t0, v0), (t1, v1)] = window else {
+            unreachable!()
+        };
+        if t <= *t1 {
+            if t1 == t0 {
+                return Ok(detached(v1));
+            }
+            return lerp_numeric(v0, v1, (t - t0) / (t1 - t0));
+        }
+    }
+    Ok(detached(&last.1))
+}
+
+/// a copy of a palette value with lists of its own, so worker threads never
+/// share a reference count
+fn detached(value: &KVal) -> KVal {
+    match value {
+        KVal::List(list) => KVal::List(Arc::new(list.iter().map(detached).collect())),
+        other => other.clone(),
+    }
+}
+
+/// `Executor::lerp` on numbers and lists of them: equal operands keep the
+/// first, anything else blends to a float
+fn lerp_numeric(a: &KVal, b: &KVal, t: f64) -> Result<KVal, Fault> {
+    let s = 1.0 - t;
+    Ok(match (a, b) {
+        (KVal::List(a), KVal::List(b)) => {
+            if a.len() != b.len() {
+                return Err(Fault::LengthMismatch);
+            }
+            KVal::List(Arc::new(
+                a.iter()
+                    .zip(b.iter())
+                    .map(|(a, b)| lerp_numeric(a, b, t))
+                    .collect::<Result<KList, _>>()?,
+            ))
+        }
+        // ints compare exactly, not through floats
+        (KVal::Int(x), KVal::Int(y)) if x == y => KVal::Int(*x),
+        (KVal::Int(x), KVal::Int(y)) => KVal::Float(s * *x as f64 + t * *y as f64),
+        _ => {
+            let (x, y) = (as_f64(a)?, as_f64(b)?);
+            if x == y {
+                detached(a)
+            } else {
+                KVal::Float(s * x + t * y)
+            }
+        }
+    })
 }
 
 #[cfg(test)]

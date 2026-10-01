@@ -760,3 +760,54 @@ fn region_results_feed_lerps_and_later_code() {
         Expect::Any,
     );
 }
+
+#[test]
+fn keyframe_palettes_run_inside_typed_kernels() {
+    // int and float keys, a time named twice, int components that stay ints
+    // where neighbours agree, and lookups past both ends
+    check(
+        "
+        let keys = [0 -> BLUE, 0.35 -> TEAL, 0.6 -> [1, 1, 0, 1], 0.85 -> ORANGE, 1 -> RED]
+        let steps = [-1 -> [0, 0, 0, 1], 0 -> [1, 0, 0, 1], 0.0 -> [0, 1, 0, 1], 2 -> [0, 0, 1, 1.0]]
+        let single = [0.5 -> [0.2, 0.4, 0.6, 1]]
+        let h = |x, y| 0.3 * sin(3 * x) * cos(3 * y)
+        mesh grid = ColorGrid(
+            |pos, idx| keyframe_lerp(keys, 0.5 + 1.6 * h(pos[0], pos[1])),
+            [-1, 1, 9],
+            [-1, 1, 7]
+        )
+        mesh stepped = ColorGrid(
+            |pos, idx| keyframe_lerp(steps, 3 * pos[0]) * 0.5 + keyframe_lerp(single, pos[1]) * 0.5,
+            [-1, 1, 9],
+            [-1, 1, 5]
+        )
+        mesh mapped = color_map{|p| keyframe_lerp(steps, 2 * p[0] + p[1])} LineGrid([-1, 1, 5], [-1, 1, 3], 1)
+        mesh shaded = Shader(|x, y| keyframe_lerp(keys, x * x + y * y), [-1, 1], [-1, 1], 8)
+        print [grid, stepped, mapped, shaded]
+        print [keyframe_lerp(keys, 0.5), keyframe_lerp(steps, 0), keyframe_lerp(steps, 1)]
+        ",
+        Expect::Typed,
+    );
+}
+
+#[test]
+fn palettes_the_tier_cannot_read_reach_the_interpreter() {
+    // a value of another length is an interpolation error, a string key is
+    // not a palette at all
+    check(
+        "
+        let short = [0 -> [1, 0, 0, 1], 1 -> [0, 1, 0]]
+        mesh grid = ColorGrid(|pos, idx| keyframe_lerp(short, pos[0]), [-1, 1, 5], [-1, 1, 3])
+        print grid
+        ",
+        Expect::Fault,
+    );
+    check(
+        "
+        let named = [\"a\" -> [1, 0, 0, 1]]
+        mesh grid = ColorGrid(|pos, idx| keyframe_lerp(named, pos[0]), [-1, 1, 5], [-1, 1, 3])
+        print grid
+        ",
+        Expect::Any,
+    );
+}

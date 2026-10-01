@@ -57,6 +57,8 @@ pub enum KernelIntrinsic {
     Len,
     ToInt,
     ToFloat,
+    /// `keyframe_lerp` over a map the conversion recognised as a palette
+    KeyframeLerp,
     /// the native the compiler places after a block body that fell through
     /// without returning; always an error
     Fallthrough,
@@ -68,7 +70,7 @@ impl KernelIntrinsic {
         match self {
             Sqrt | Cbrt | Exp | Ln | Sin | Cos | Tan | Asin | Acos | Atan | Sinh | Cosh | Tanh
             | Abs | Sign | Floor | Ceil | Round | Trunc | Len | ToInt | ToFloat => 1,
-            Pow | Atan2 | Mod | Min | Max | Dot | Cross => 2,
+            Pow | Atan2 | Mod | Min | Max | Dot | Cross | KeyframeLerp => 2,
             Fallthrough => 0,
         }
     }
