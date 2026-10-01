@@ -28,10 +28,9 @@ let Ripple = |freq, mix|
 
 mesh axis =
     shift{[0, 0, -0.4]}
-    Axis3d(basis: [1r, 1u, 1b], color: LIGHT_GRAY, grid_color: nil, label_up: [2r, 2u, 0.8b])
+    Axis3d(basis: [1r, 1u, 1b], color: GRAY, grid_color: nil, label_up: [2r, 2u, 0.8b])
 mesh surface = Ripple(freq: 3, mix: 0)
 camera = Camera([2.6, -2.4, 1.7], [0, 0, 0], [0, 0, 1])
-background = [0.06, 0.07, 0.10, 1]
 
 slide "Surface"
     play Fade(0.8)
