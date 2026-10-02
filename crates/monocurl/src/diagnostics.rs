@@ -61,6 +61,7 @@ pub fn initialize() -> Option<PathBuf> {
     let mut builder = env_logger::Builder::from_default_env();
     builder
         .filter_level(log::LevelFilter::Info)
+        .filter_module("cranelift_jit", log::LevelFilter::Warn)
         .format_timestamp_millis()
         .target(Target::Pipe(Box::new(TeeWriter {
             file: Mutex::new(file),
