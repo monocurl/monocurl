@@ -198,32 +198,30 @@ impl Navbar {
     fn render_update_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let theme = ThemeSettings::theme(cx);
         let (label, ready, errored) = match AutoUpdater::status(cx) {
-            AutoUpdateStatus::Idle => return None,
-            AutoUpdateStatus::Checking => ("Checking for updates".to_string(), false, false),
-            AutoUpdateStatus::Downloading { version } => {
-                (format!("Downloading v{version}"), false, false)
-            }
-            AutoUpdateStatus::Installing { version } => {
-                (format!("Installing v{version}"), false, false)
+            AutoUpdateStatus::Idle | AutoUpdateStatus::Checking => return None,
+            AutoUpdateStatus::Downloading { .. } | AutoUpdateStatus::Installing { .. } => {
+                ("Updating\u{2026}".to_string(), false, false)
             }
             AutoUpdateStatus::ReadyToRestart { version } => {
-                (format!("Update v{version} ready: restart"), true, false)
+                (format!("Update v{version}"), true, false)
             }
-            AutoUpdateStatus::Errored { .. } => ("Update failed: retry".to_string(), false, true),
+            AutoUpdateStatus::Errored { .. } => ("Update failed".to_string(), false, true),
         };
         let pill = div()
             .id("navbar-update")
             .flex_none()
-            .ml_2()
-            .px_2()
-            .py(px(2.0))
-            .rounded(px(10.0))
+            .mx_2()
+            .px(px(10.0))
+            .py(px(3.0))
+            .rounded_full()
             .text_size(px(11.0))
             .line_height(px(14.0))
+            .whitespace_nowrap()
             .child(label);
         let pill = if ready {
             pill.bg(theme.accent)
                 .text_color(theme.app_background)
+                .font_weight(FontWeight::MEDIUM)
                 .cursor_pointer()
                 .hover(|style| style.opacity(0.85))
                 .on_click(|_, window, cx| {
