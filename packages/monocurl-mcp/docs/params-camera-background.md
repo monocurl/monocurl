@@ -128,3 +128,21 @@ camera = Camera([1.5, 0.8, 4])
 # positions it perfectly relative to the new camera
 play CameraLerp(&camera, 1)
 ```
+
+### Heads-up overlays
+
+`camera_transfer` holds a mesh's screen position while the camera moves, but it
+does not lift the mesh out of the scene's depth, so 3-D geometry nearer the
+camera can still cover it. Pair it with `z_index` for a heads-up layer: each
+distinct `z_index` is a drawing layer, and a higher layer draws over everything
+below it regardless of depth.
+
+```monocurl
+mesh hud =
+    z_index{1}
+    camera_transfer{camera, $camera}
+    to_corner{UP + LEFT}
+    Text("t = 0.0")
+```
+
+Scenes that never set a `z_index` have a single layer and are unaffected.

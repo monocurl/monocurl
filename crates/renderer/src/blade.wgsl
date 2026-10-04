@@ -13,6 +13,7 @@ struct CameraParams {
 
 struct TriShaderParams {
     values: vec4<f32>,
+    depth_slice: vec4<f32>,
 }
 
 struct LineShaderParams {
@@ -154,6 +155,7 @@ fn project_camera(
     camera: CameraParams,
     depth_bias: f32,
     eye_bias: f32,
+    depth_slice: vec2<f32>,
 ) -> ProjectedPoint {
     let camera_x = model.x;
     let camera_y = model.y;
@@ -180,6 +182,10 @@ fn project_camera(
 
     var clip = vec4<f32>(clip_x, clip_y, clip_z, clip_w);
     clip.z -= depth_bias * clip.w;
+    // z_index layering: each layer owns a disjoint depth slice, higher layers
+    // nearer. (scale, offset) == (1, 0) for a scene with one layer, which makes
+    // this bit-identical to the unsliced projection.
+    clip.z = clip.z * depth_slice.x + depth_slice.y * clip.w;
     let inv_w = 1.0 / max(abs(clip.w), 1e-6);
 
     return ProjectedPoint(clip, clip.xy * inv_w);
@@ -190,8 +196,15 @@ fn project(
     camera: CameraParams,
     depth_bias: f32,
     eye_bias: f32,
+    depth_slice: vec2<f32>,
 ) -> ProjectedPoint {
-    return project_camera(world_to_camera(world, camera), camera, depth_bias, eye_bias);
+    return project_camera(
+        world_to_camera(world, camera),
+        camera,
+        depth_bias,
+        eye_bias,
+        depth_slice,
+    );
 }
 
 fn safe_normalize3(v: vec3<f32>) -> vec3<f32> {
@@ -217,7 +230,7 @@ fn fs_background(in: ColorOut) -> @location(0) vec4<f32> {
 @vertex
 fn vs_triangle(@builtin(vertex_index) vertex_index: u32) -> TriOut {
     let vertex = tri_vertices[vertex_index];
-    let projected = project(vertex.pos.xyz, tri_camera, tri_params.values.y, 0.0);
+    let projected = project(vertex.pos.xyz, tri_camera, tri_params.values.y, 0.0, tri_params.depth_slice.xy);
     let model = world_to_camera(vertex.pos.xyz, tri_camera);
 
     var out: TriOut;
@@ -307,7 +320,7 @@ fn vs_line(
         full_normal = miter_clip * scale;
     }
     let eye_bias = min(width_eye * DECAL_SCALE, eye_depth * DECAL_MAX_FRACTION);
-    let projected = project_camera(model + full_normal, line_camera, line_params.depth_bias.x, eye_bias);
+    let projected = project_camera(model + full_normal, line_camera, line_params.depth_bias.x, eye_bias, line_params.depth_bias.zw);
 
     var out: ColorOut;
     out.pos = projected.clip;
@@ -342,7 +355,7 @@ fn vs_dot(
     let eye_depth = max(-model.z, dot_camera.clip.x);
     let width_eye = 2.0 * radius_px * eye_depth * tan_half_fov * aspect / viewport.x;
     let eye_bias = min(width_eye * DECAL_SCALE, eye_depth * DECAL_MAX_FRACTION);
-    let projected = project_camera(model, dot_camera, dot_params.depth_bias.x, eye_bias);
+    let projected = project_camera(model, dot_camera, dot_params.depth_bias.x, eye_bias, dot_params.depth_bias.zw);
 
     var out: DotOut;
     let position_xy = (projected.ndc + offset_ndc) * projected.clip.w;

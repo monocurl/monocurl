@@ -26,6 +26,8 @@ pub(super) struct CameraParams {
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(super) struct TriShaderParams {
     pub(super) values: [f32; 4],
+    /// `[scale, offset, 0, 0]` depth slice for this mesh's z_index layer.
+    pub(super) depth_slice: [f32; 4],
 }
 
 #[repr(C)]

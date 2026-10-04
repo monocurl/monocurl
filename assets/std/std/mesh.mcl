@@ -1182,9 +1182,13 @@ let tag = operator |target, tag, filter = nil| [target, __monocurl__native__ op_
 ## Not available in web runtimes yet.
 let textured = operator |target, image, filter = nil| [target, __monocurl__native__ op_retextured(target, image, filter)]
 ## [overview]
-## Assign a draw ordering hint to a mesh.
+## Put a mesh on a drawing layer.
 ## [description]
-## Higher z-index values draw later among otherwise comparable meshes.
+## Each distinct z-index in a frame is a layer, and higher layers draw over lower ones even when the lower geometry is nearer the camera. Within a layer, ordinary depth applies. A scene that never sets a z-index has a single layer and renders exactly as it would without this operator.
+## [example]
+## ```
+## mesh label = z_index{1} camera_transfer{camera, $camera} to_corner{UP + LEFT} Text("step 1")
+## ```
 let z_index = operator |target, z_index, filter = nil| [target, __monocurl__native__ op_with_zindex(target, z_index, filter)]
 ## [overview]
 ## Add glossy lighting amount to a mesh.
@@ -1330,6 +1334,11 @@ let center = operator |target, center, filter = nil| {
 ## [example]
 ## ```
 ## mesh hud = camera_transfer{camera, $camera} to_side{UP} Text("fixed")
+## ```
+## [notes]
+## For a heads-up display over a 3-D scene, pair this with `z_index`. `camera_transfer` holds the screen position, and a higher `z_index` puts the mesh on a layer above the scene so geometry closer to the camera cannot cover it.
+## ```
+## mesh hud = z_index{1} camera_transfer{camera, $camera} to_corner{UP + LEFT} Text("t = 0.0")
 ## ```
 let camera_transfer = operator |target, original_camera, live_camera, filter = nil| {
     let go = |level| __monocurl__native__ op_camera_transfer(target, original_camera, live_camera, filter, level)

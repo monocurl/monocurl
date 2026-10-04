@@ -467,6 +467,13 @@ impl BladeRenderer {
         let camera = CameraParams::from_basis(basis, view);
         let size = view.output_size;
         let mut z_offset = 0.0;
+        // `items` arrives sorted by (z_index, order), so dedup gives the
+        // distinct layers in ascending order.
+        let layers: Vec<i32> = {
+            let mut seen: Vec<i32> = items.iter().map(|item| item.z_index).collect();
+            seen.dedup();
+            seen
+        };
         let color_target = match target.color_msaa_view {
             Some(msaa_view) => gpu::RenderTarget {
                 view: msaa_view,
@@ -508,6 +515,7 @@ impl BladeRenderer {
             let Some(buffers) = self.mesh_cache.get(&item.key) else {
                 continue;
             };
+            let [slice_scale, slice_offset] = depth_slice_for(&layers, item.z_index);
 
             if let Some(triangles) = buffers.triangles.as_ref() {
                 let texture_view = item
@@ -526,6 +534,7 @@ impl BladeRenderer {
                     &TrianglesData {
                         tri_camera: camera,
                         tri_params: TriShaderParams {
+                            depth_slice: [slice_scale, slice_offset, 0.0, 0.0],
                             values: [
                                 item.mesh.uniform.alpha as f32,
                                 z_offset,
@@ -560,8 +569,8 @@ impl BladeRenderer {
                                 depth_bias: [
                                     z_offset,
                                     mesh_line_miter_scale(item.mesh.as_ref()),
-                                    0.0,
-                                    0.0,
+                                    slice_scale,
+                                    slice_offset,
                                 ],
                             },
                             line_vertices: lines.buffer.into(),
@@ -596,7 +605,12 @@ impl BladeRenderer {
                                     dot_radius,
                                     item.mesh.uniform.alpha as f32,
                                 ],
-                                depth_bias: [z_offset, dot_vertex_count as f32, 0.0, 0.0],
+                                depth_bias: [
+                                    z_offset,
+                                    dot_vertex_count as f32,
+                                    slice_scale,
+                                    slice_offset,
+                                ],
                             },
                             dot_instances: dots.buffer.into(),
                         },
@@ -700,3 +714,29 @@ impl Drop for BladeRenderer {
         self.destroy();
     }
 }
+
+/// Depth slice `[scale, offset]` for a z_index layer.
+///
+/// Layers are the distinct `z_index` values present in the frame, ascending.
+/// Each owns an equal, disjoint band of the depth range, with higher `z_index`
+/// nearer the camera, so `z_index` decides occlusion outright rather than only
+/// breaking ties between coplanar geometry. Within a layer, ordinary depth
+/// testing is untouched.
+///
+/// A frame with a single layer — every scene that never calls `z_index{}` —
+/// gets `[1.0, 0.0]`, which leaves the projection bit-identical.
+fn depth_slice_for(layers: &[i32], z_index: i32) -> [f32; 2] {
+    let count = layers.len();
+    if count <= 1 {
+        return IDENTITY_DEPTH_SLICE;
+    }
+    let rank = layers
+        .iter()
+        .position(|layer| *layer == z_index)
+        .unwrap_or(count - 1);
+    let scale = 1.0 / count as f32;
+    let offset = (count - 1 - rank) as f32 * scale;
+    [scale, offset]
+}
+
+const IDENTITY_DEPTH_SLICE: [f32; 2] = [1.0, 0.0];

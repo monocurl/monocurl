@@ -412,6 +412,72 @@ mod tests {
         );
     }
 
+    /// Same triangle as `flat_triangle_mesh`, pushed to a given z in world space
+    /// so two of them genuinely occlude each other in 3D.
+    fn triangle_mesh_at_depth(color: Float4, z_index: i32, z: f32) -> Mesh {
+        let mut mesh = flat_triangle_mesh(color, z_index);
+        let mut tris: Vec<Tri> = mesh.tris.iter().copied().collect();
+        for tri in tris.iter_mut() {
+            tri.a.pos.z = z;
+            tri.b.pos.z = z;
+            tri.c.pos.z = z;
+        }
+        mesh.tris = tris.into();
+        mesh.version = Mesh::fresh_version();
+        mesh
+    }
+
+    #[test]
+    fn z_index_beats_geometric_depth() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        // Red sits nearer the camera (z = 1.0) but on the lower layer; green is
+        // further away (z = -1.0) on the higher layer. z_index is authoritative,
+        // so green must win despite losing the depth test.
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![
+                Arc::new(triangle_mesh_at_depth(Float4::new(1.0, 0.0, 0.0, 1.0), 0, 1.0)),
+                Arc::new(triangle_mesh_at_depth(Float4::new(0.0, 1.0, 0.0, 1.0), 1, -1.0)),
+            ],
+        };
+
+        let image = renderer.render(&scene, RenderSize::new(32, 32)).unwrap();
+        let center = image.get_pixel(16, 16).0;
+
+        assert!(
+            center[1] > center[2],
+            "expected the higher z_index triangle to win over nearer geometry, got {center:?}"
+        );
+    }
+
+    #[test]
+    fn single_layer_scenes_keep_geometric_depth() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        // Both on the same layer, so ordinary depth testing decides: the nearer
+        // red triangle wins even though green is drawn after it.
+        let scene = SceneRenderData {
+            background: BackgroundSnapshot::default(),
+            camera: CameraSnapshot::default(),
+            meshes: vec![
+                Arc::new(triangle_mesh_at_depth(Float4::new(1.0, 0.0, 0.0, 1.0), 0, 1.0)),
+                Arc::new(triangle_mesh_at_depth(Float4::new(0.0, 1.0, 0.0, 1.0), 0, -1.0)),
+            ],
+        };
+
+        let image = renderer.render(&scene, RenderSize::new(32, 32)).unwrap();
+        let center = image.get_pixel(16, 16).0;
+
+        assert!(
+            center[2] > center[1],
+            "expected nearer geometry to win within a single layer, got {center:?}"
+        );
+    }
+
     fn flat_triangle_mesh(color: Float4, z_index: i32) -> Mesh {
         Mesh {
             dots: Default::default(),
