@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
-    io::BufWriter,
+    io::{BufWriter, Write},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -751,6 +751,14 @@ fn frame_count_for_duration(duration: f64, fps: u32) -> usize {
     ((duration * fps as f64).ceil() as usize).max(1)
 }
 
+/// Sibling scratch path for an in-progress export, in the same directory so the
+/// finishing rename stays on one filesystem and is therefore atomic.
+fn partial_video_path(output_path: &Path) -> PathBuf {
+    let mut name = output_path.file_name().unwrap_or_default().to_os_string();
+    name.push(".part");
+    output_path.with_file_name(name)
+}
+
 async fn write_video_file(
     prepared: &mut PreparedScene,
     renderer: &mut Renderer,
@@ -772,7 +780,12 @@ async fn write_video_file(
         .ok_or_else(|| anyhow!("mp4 timescale overflow"))?;
     let mut encoder = new_video_encoder(settings)?;
     let mut parameter_sets = AvcParameterSets::default();
-    let mut cleanup = PartialOutputCleanup::new(output_path.to_path_buf());
+    // mp4 keeps its moov atom at the end, so a half-written file is unplayable
+    // while still looking finished. encode to a sibling .part and rename only
+    // once write_end has succeeded, so output_path never exists unless it is
+    // complete. Drop-based cleanup cannot cover a hard kill; the rename can.
+    let temp_path = partial_video_path(output_path);
+    let mut cleanup = PartialOutputCleanup::new(temp_path.clone());
     let mut writer = None;
     let mut sample_start_time = 0_u64;
     let mut previous_slide = None;
@@ -815,8 +828,8 @@ async fn write_video_file(
                 "encoder did not emit SPS/PPS parameter sets for the initial video sample"
             );
             check_cancelled(cancel_flag)?;
-            let file = File::create(output_path).with_context(|| {
-                format!("failed to create video export {}", output_path.display())
+            let file = File::create(&temp_path).with_context(|| {
+                format!("failed to create video export {}", temp_path.display())
             })?;
             cleanup.arm();
             writer = Some(start_mp4_writer(
@@ -861,6 +874,24 @@ async fn write_video_file(
         .ok_or_else(|| anyhow!("video export produced no encoded samples"))?
         .write_end()
         .with_context(|| format!("failed to finalize video export {}", output_path.display()))?;
+
+    // flush explicitly: BufWriter's own Drop swallows errors, and a short write
+    // here would otherwise be renamed into place as a valid-looking file
+    let mut buffered = writer
+        .take()
+        .expect("writer present after write_end")
+        .into_writer();
+    buffered
+        .flush()
+        .with_context(|| format!("failed to flush video export {}", temp_path.display()))?;
+    drop(buffered);
+
+    std::fs::rename(&temp_path, output_path).with_context(|| {
+        format!(
+            "failed to move finished video export into place at {}",
+            output_path.display()
+        )
+    })?;
     cleanup.keep();
     *completed += 1;
 
