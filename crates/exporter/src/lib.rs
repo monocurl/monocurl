@@ -78,10 +78,28 @@ pub enum ImageExportTimestamp {
     },
 }
 
+/// part of a scene's frames: slides `first_slide..end_slide`, from `start_time` into the first
+/// slide up to (excluding) `end_time` into the last. times snap up to the scene's frame grid, so
+/// adjacent ranges tile the full export with no frame dropped or repeated
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct VideoRange {
+    pub first_slide: usize,
+    pub end_slide: Option<usize>,
+    pub start_time: Option<f64>,
+    pub end_time: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SlidePlan {
+    pub name: Option<String>,
+    pub duration: f64,
+    pub frames: usize,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExportKind {
     Image { timestamp: ImageExportTimestamp },
-    Video,
+    Video { range: VideoRange },
     SlidesAsVideos,
 }
 
@@ -322,7 +340,7 @@ async fn export_scene_async(
             )
             .await
         }
-        ExportKind::Video => {
+        ExportKind::Video { range } => {
             let prepared = prepare_scene(
                 &request.root_text,
                 &request.root_path,
@@ -336,6 +354,7 @@ async fn export_scene_async(
                 prepared,
                 request.output_path,
                 request.settings,
+                range,
                 cancel_flag,
                 on_progress,
             )
@@ -361,6 +380,39 @@ async fn export_scene_async(
             .await
         }
     }
+}
+
+/// per-slide durations and frame counts of a video export, without rendering
+pub fn plan_video_slides(
+    root_text: &str,
+    root_path: &Path,
+    settings: ExportSettings,
+    cancel_flag: Arc<AtomicBool>,
+    mut on_progress: impl FnMut(ExportProgress),
+) -> Result<Vec<SlidePlan>> {
+    smol::block_on(async {
+        let mut prepared = prepare_scene(
+            root_text,
+            root_path,
+            &HashMap::new(),
+            &cancel_flag,
+            &mut on_progress,
+            0,
+            3,
+        )?;
+        emit_progress_checked(&cancel_flag, &mut on_progress, "Evaluating timeline", 2, 3)?;
+        let plan = prepare_video_render_plan(&mut prepared, settings).await?;
+        let mut names = plan.slide_names.into_iter();
+        Ok(plan
+            .slide_durations
+            .into_iter()
+            .map(|duration| SlidePlan {
+                name: names.next().flatten(),
+                duration,
+                frames: frame_count_for_duration(duration, settings.fps),
+            })
+            .collect())
+    })
 }
 
 async fn inspect_scene_async(
@@ -565,6 +617,7 @@ async fn export_video(
     mut prepared: PreparedScene,
     output_path: PathBuf,
     settings: ExportSettings,
+    range: VideoRange,
     cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
@@ -573,8 +626,15 @@ async fn export_video(
     validate_video_settings(settings)?;
     let plan = prepare_video_render_plan(&mut prepared, settings).await?;
     check_cancelled(cancel_flag)?;
-    let frame_targets = build_frame_targets(&plan.slide_durations, settings.fps);
-    ensure!(!frame_targets.is_empty(), "scene has no slides to export");
+    ensure!(!plan.slide_durations.is_empty(), "scene has no slides to export");
+    ensure!(
+        range.first_slide < plan.slide_durations.len(),
+        "slide {} is out of range; the scene has {} slides",
+        range.first_slide,
+        plan.slide_durations.len()
+    );
+    let frame_targets = build_frame_targets(&plan.slide_durations, settings.fps, range);
+    ensure!(!frame_targets.is_empty(), "the requested range has no frames");
 
     let total_steps = frame_targets.len() + 1;
     let mut renderer = Renderer::try_new(RenderOptions::default())
@@ -729,14 +789,30 @@ async fn precompute_slide_durations(
     Ok(resolved)
 }
 
-fn build_frame_targets(slide_durations: &[f64], fps: u32) -> Vec<Timestamp> {
-    let mut frames = Vec::new();
+fn build_frame_targets(slide_durations: &[f64], fps: u32, range: VideoRange) -> Vec<Timestamp> {
+    let end_slide = range
+        .end_slide
+        .map_or(slide_durations.len(), |end| end.min(slide_durations.len()));
+    let first_frame = range
+        .start_time
+        .map_or(0, |time| frame_index_at_or_after(time, fps));
+    let end_frame = range.end_time.map(|time| frame_index_at_or_after(time, fps));
 
-    for (slide, duration) in slide_durations.iter().copied().enumerate() {
-        frames.extend(build_slide_frame_targets(slide, duration, fps));
-    }
+    (range.first_slide..end_slide)
+        .flat_map(|slide| {
+            let frames = build_slide_frame_targets(slide, slide_durations[slide], fps);
+            let lo = if slide == range.first_slide { first_frame } else { 0 };
+            let hi = end_frame
+                .filter(|_| slide + 1 == end_slide)
+                .map_or(frames.len(), |end| end.min(frames.len()));
+            frames.into_iter().take(hi).skip(lo)
+        })
+        .collect()
+}
 
-    frames
+/// first frame of a slide whose time is at least `time`; tolerant of `k / fps` written in decimal
+fn frame_index_at_or_after(time: f64, fps: u32) -> usize {
+    (time * fps as f64 - 1e-6).ceil().max(0.0) as usize
 }
 
 fn build_slide_frame_targets(slide_index: usize, duration: f64, fps: u32) -> Vec<Timestamp> {
@@ -1115,6 +1191,41 @@ mod tests {
         assert_eq!(sanitize_file_stem("CON"), "_CON");
         assert_eq!(sanitize_file_stem("COM1"), "_COM1");
         assert_eq!(sanitize_file_stem("Hello\tWorld"), "Hello World");
+    }
+
+    #[test]
+    fn adjacent_video_ranges_tile_the_full_export() {
+        let durations = [1.0, 3.8000000000000003, 0.01, 2.5];
+        let fps = 60;
+        let full = build_frame_targets(&durations, fps, VideoRange::default());
+        assert_eq!(full.len(), 60 + 229 + 1 + 150);
+
+        let cut = |slide, frame: usize| (slide, Some(frame as f64 / fps as f64));
+        let cuts = [(0, None), cut(1, 17), cut(1, 228), (2, None), cut(3, 1)];
+        let mut tiled = Vec::new();
+        for (i, &(first_slide, start_time)) in cuts.iter().enumerate() {
+            let range = match cuts.get(i + 1) {
+                Some(&(slide, Some(end_time))) => VideoRange {
+                    first_slide,
+                    end_slide: Some(slide + 1),
+                    start_time,
+                    end_time: Some(end_time),
+                },
+                Some(&(slide, None)) => VideoRange {
+                    first_slide,
+                    end_slide: Some(slide),
+                    start_time,
+                    end_time: None,
+                },
+                None => VideoRange {
+                    first_slide,
+                    start_time,
+                    ..VideoRange::default()
+                },
+            };
+            tiled.extend(build_frame_targets(&durations, fps, range));
+        }
+        assert_eq!(tiled, full);
     }
 }
 

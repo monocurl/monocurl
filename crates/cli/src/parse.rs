@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow, bail};
-use exporter::DEFAULT_VIDEO_FPS;
+use exporter::{DEFAULT_VIDEO_FPS, VideoRange};
 
 use crate::command::{
     CliAction, CliCommand, CommandKind, HelpTopic, ImageCommand, ResolutionPreset,
@@ -134,6 +134,8 @@ fn parse_video_command(args: &[OsString], mut use_system_latex: bool) -> Result<
     let mut output_path = None;
     let mut resolution = ResolutionPreset::default();
     let mut fps = DEFAULT_VIDEO_FPS;
+    let mut range = VideoRange::default();
+    let mut list_slides = false;
 
     let mut index = 0;
     while index < args.len() {
@@ -157,6 +159,17 @@ fn parse_video_command(args: &[OsString], mut use_system_latex: bool) -> Result<
             if fps == 0 {
                 bail!("video fps must be greater than zero");
             }
+        } else if is_flag(arg, "--slides") {
+            let value = string_value(required_value(args, &mut index, arg)?, arg)?;
+            (range.first_slide, range.end_slide) = parse_slide_range(&value)?;
+        } else if is_flag(arg, "--start-time") {
+            let value = string_value(required_value(args, &mut index, arg)?, arg)?;
+            range.start_time = Some(parse_slide_time(&value)?);
+        } else if is_flag(arg, "--end-time") {
+            let value = string_value(required_value(args, &mut index, arg)?, arg)?;
+            range.end_time = Some(parse_slide_time(&value)?);
+        } else if is_flag(arg, "--list-slides") {
+            list_slides = true;
         } else if is_flag(arg, "--system-latex") {
             use_system_latex = true;
         } else if looks_like_flag(arg) {
@@ -180,8 +193,41 @@ fn parse_video_command(args: &[OsString], mut use_system_latex: bool) -> Result<
         output_path,
         resolution,
         fps,
+        range,
+        list_slides,
         use_system_latex,
     })))
+}
+
+/// `A..B`, `A..` or `A`, zero-based and half open
+fn parse_slide_range(value: &str) -> Result<(usize, Option<usize>)> {
+    let index = |raw: &str| {
+        raw.trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid slide range `{value}`; expected A..B, A.., or A"))
+    };
+    let (first, end) = match value.split_once("..") {
+        Some((first, "")) => (index(first)?, None),
+        Some((first, end)) => (index(first)?, Some(index(end)?)),
+        None => {
+            let first = index(value)?;
+            (first, Some(first + 1))
+        }
+    };
+    if end.is_some_and(|end| end <= first) {
+        bail!("slide range `{value}` is empty");
+    }
+    Ok((first, end))
+}
+
+fn parse_slide_time(value: &str) -> Result<f64> {
+    let time: f64 = value
+        .parse()
+        .with_context(|| format!("invalid time `{value}`"))?;
+    if !time.is_finite() || time < 0.0 {
+        bail!("video range times must be non-negative");
+    }
+    Ok(time)
 }
 
 fn parse_transcript_command(args: &[OsString], mut use_system_latex: bool) -> Result<CliAction> {
@@ -351,6 +397,46 @@ mod tests {
         assert_eq!(command.resolution, ResolutionPreset::Large);
         assert_eq!(command.fps, 30);
         assert!(!command.use_system_latex);
+    }
+
+    #[test]
+    fn parses_video_range() {
+        let parsed = parse_cli(args(&[
+            "video",
+            "scene.mcs",
+            "--slides",
+            "2..5",
+            "--start-time",
+            "1.5",
+            "--end-time",
+            "0.25",
+        ]))
+        .unwrap();
+        let CliAction::Run(CliCommand::Video(command)) = parsed else {
+            panic!("expected video command");
+        };
+        assert_eq!(
+            command.range,
+            VideoRange {
+                first_slide: 2,
+                end_slide: Some(5),
+                start_time: Some(1.5),
+                end_time: Some(0.25),
+            }
+        );
+        assert!(!command.list_slides);
+
+        assert_eq!(parse_slide_range("3..").unwrap(), (3, None));
+        assert_eq!(parse_slide_range("3").unwrap(), (3, Some(4)));
+        assert!(parse_slide_range("4..4").is_err());
+        assert!(parse_slide_range("a..b").is_err());
+
+        let parsed = parse_cli(args(&["video", "scene.mcs", "--list-slides"])).unwrap();
+        let CliAction::Run(CliCommand::Video(command)) = parsed else {
+            panic!("expected video command");
+        };
+        assert!(command.list_slides);
+        assert_eq!(command.range, VideoRange::default());
     }
 
     #[test]

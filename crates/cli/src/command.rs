@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use executor::time::Timestamp;
-use exporter::{DEFAULT_EXPORT_SIZE, ImageExportTimestamp, SceneInspectionTimestamp};
+use exporter::{DEFAULT_EXPORT_SIZE, ImageExportTimestamp, SceneInspectionTimestamp, VideoRange};
 use renderer::RenderSize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -136,6 +136,8 @@ pub(crate) struct VideoCommand {
     pub(crate) output_path: PathBuf,
     pub(crate) resolution: ResolutionPreset,
     pub(crate) fps: u32,
+    pub(crate) range: VideoRange,
+    pub(crate) list_slides: bool,
     pub(crate) use_system_latex: bool,
 }
 

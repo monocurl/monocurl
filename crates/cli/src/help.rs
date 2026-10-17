@@ -38,6 +38,10 @@ Image options:
 
 Video options:
   --fps <number>               frames per second, default {fps}
+  --slides <A..B>              render only zero-based slides A to B-1 (also A.. or A)
+  --start-time <seconds>       start this far into the first slide of the range
+  --end-time <seconds>         stop before this time in the last slide of the range
+  --list-slides                print `index<TAB>frames<TAB>seconds<TAB>name` per slide and exit
 
 Transcript options:
   --slide <index>              zero-based slide to seek; missing timestamp values default to 0
@@ -81,8 +85,17 @@ Options:
   -o, --output <path>          output path; extension is forced to .mp4
   -r, --resolution <preset>    one of: {small}, {medium}, {large}
   --fps <number>               frames per second, default {fps}
+  --slides <A..B>              render only zero-based slides A to B-1 (also A.. or A)
+  --start-time <seconds>       start this far into the first slide of the range
+  --end-time <seconds>         stop before this time in the last slide of the range
+  --list-slides                print `index<TAB>frames<TAB>seconds<TAB>name` per slide and exit
   --system-latex               use latex and dvisvgm from PATH instead of bundled Tectonic
   -h, --help                   show this message
+
+Ranges keep the full export's frame grid: each slide starts on a frame and its frame
+times are multiples of 1/fps, with range times rounded up onto that grid. Rendering
+adjacent ranges and joining them (e.g. `ffmpeg -f concat -c copy`) gives the same
+frames as one full export, so long scenes can be rendered in parallel processes.
 ",
             small = resolution_help(ResolutionPreset::Small),
             medium = resolution_help(ResolutionPreset::Medium),

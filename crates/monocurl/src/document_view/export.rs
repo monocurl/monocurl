@@ -204,7 +204,9 @@ impl DocumentView {
                 RequestedExport::Image => SceneExportKind::Image {
                     timestamp: ImageExportTimestamp::Exact(current_timestamp),
                 },
-                RequestedExport::Video => SceneExportKind::Video,
+                RequestedExport::Video => SceneExportKind::Video {
+                    range: Default::default(),
+                },
                 RequestedExport::SlideVideos => SceneExportKind::SlidesAsVideos,
             },
             settings,
