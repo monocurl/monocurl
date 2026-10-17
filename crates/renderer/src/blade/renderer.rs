@@ -302,6 +302,11 @@ impl BladeRenderer {
 
         let triangles =
             self.create_buffer_with_upload("renderer-triangles", &build_triangle_vertices(mesh));
+        let translucent = mesh
+            .tris
+            .iter()
+            .flat_map(|tri| [tri.a.col.w, tri.b.col.w, tri.c.col.w])
+            .any(|w| w < 1.0);
         let lines = self.create_buffer_with_upload("renderer-lines", &build_line_vertices(mesh));
         let dots = self.create_buffer_with_upload("renderer-dots", &build_dot_instances(mesh));
 
@@ -311,6 +316,7 @@ impl BladeRenderer {
                 mesh: Arc::downgrade(mesh),
                 version,
                 triangles,
+                translucent,
                 lines,
                 dots,
                 last_used_frame: frame_index,
@@ -528,25 +534,31 @@ impl BladeRenderer {
                     })
                     .map_or(self.white_texture.view, |texture| texture.view);
 
-                let mut encoder = pass.with(&self.pipelines.triangles);
-                encoder.bind(
-                    0,
-                    &TrianglesData {
-                        tri_camera: camera,
-                        tri_params: TriShaderParams {
-                            depth_slice: [slice_scale, slice_offset, 0.0, 0.0],
-                            values: [
-                                item.mesh.uniform.alpha as f32,
-                                z_offset,
-                                item.mesh.uniform.gloss,
-                                if item.mesh.uniform.smooth { 1.0 } else { 0.0 },
-                            ],
-                        },
-                        t_color: texture_view,
-                        s_color: self.texture_sampler,
-                        tri_vertices: triangles.buffer.into(),
+                let data = TrianglesData {
+                    tri_camera: camera,
+                    tri_params: TriShaderParams {
+                        depth_slice: [slice_scale, slice_offset, 0.0, 0.0],
+                        values: [
+                            item.mesh.uniform.alpha as f32,
+                            z_offset,
+                            item.mesh.uniform.gloss,
+                            if item.mesh.uniform.smooth { 1.0 } else { 0.0 },
+                        ],
                     },
-                );
+                    t_color: texture_view,
+                    s_color: self.texture_sampler,
+                    tri_vertices: triangles.buffer.into(),
+                };
+                // a translucent mesh lays down its depth first, so it fades as a solid: only its
+                // nearest surface blends, never its own back faces in submission order. coplanar
+                // (2d) triangles tie under LessEqual, so flat scenes draw as before
+                if buffers.translucent || item.mesh.uniform.alpha < 1.0 {
+                    let mut encoder = pass.with(&self.pipelines.triangles_depth);
+                    encoder.bind(0, &data);
+                    encoder.draw(0, triangles.count, 0, 1);
+                }
+                let mut encoder = pass.with(&self.pipelines.triangles);
+                encoder.bind(0, &data);
                 encoder.draw(0, triangles.count, 0, 1);
                 z_offset += DEPTH_STEP;
             }
