@@ -1412,8 +1412,16 @@ pub async fn mk_shader(executor: &mut Executor, stack_idx: usize) -> Result<Valu
         tri.b.col = Float4::ONE;
         tri.c.col = Float4::ONE;
     }
-    // the outline of a picture is not part of the picture
+    // the outline of a picture is not part of the picture; triangle edges that
+    // named its lines become plain boundary edges
     mesh.lins.clear();
+    for tri in &mut mesh.tris {
+        for edge in [&mut tri.ab, &mut tri.bc, &mut tri.ca] {
+            if *edge < 0 {
+                *edge = -1;
+            }
+        }
+    }
     mesh.uniform.img = Some(TextureSource::Pixels(texture));
     Ok(Value::Mesh(std::sync::Arc::new(mesh)))
 }
