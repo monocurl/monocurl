@@ -6,3 +6,5 @@ mod ops;
 mod queries;
 pub(crate) mod result_cache;
 pub(crate) mod tessellation;
+
+pub use tessellation::set_face_reuse;

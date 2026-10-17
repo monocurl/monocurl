@@ -17,6 +17,7 @@ use compiler::{
 use executor::{
     error::{ExecutorError, RuntimeCallFrame, RuntimeError},
     executor::{Executor, SeekOptions, SeekToResult, TextRenderQuality},
+    scene_snapshot::SceneSnapshot,
     time::Timestamp,
 };
 use image::ImageFormat;
@@ -1138,6 +1139,9 @@ fn is_reserved_windows_file_stem(stem: &str) -> bool {
 }
 
 #[cfg(test)]
+mod frame_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{fs, process, time::SystemTime};
@@ -1236,32 +1240,8 @@ async fn render_frame(
     user_timestamp: Timestamp,
     render_size: RenderSize,
 ) -> Result<RgbaImage> {
-    seek_internal_timestamp(
-        executor,
-        executor.user_to_internal_timestamp(user_timestamp),
-        root_text_rope,
-    )
-    .await?;
-    // a frame on an instant should show that instant's zero duration animations,
-    // e.g. a `play Set()` at slide time 0
-    if let Err(error) = executor.settle_current_instant(SeekOptions::fast()).await {
-        bail!(
-            "{}",
-            last_runtime_error_message(executor, root_text_rope, &error)
-        );
-    }
-
-    let scene = executor
-        .capture_stable_scene_snapshot()
-        .await
-        .map_err(|error| {
-            anyhow!(format_runtime_error_message(
-                executor,
-                root_text_rope,
-                &error
-            ))
-        })?;
-
+    let scene =
+        evaluate_frame(executor, root_text_rope, user_timestamp, FrameSeek::from_env()).await?;
     renderer
         .render(&SceneRenderData::from(scene), render_size)
         .with_context(|| {
@@ -1272,6 +1252,65 @@ async fn render_frame(
         })
 }
 
+/// how a frame reaches its timestamp
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FrameSeek {
+    /// continue from where the executor stands when that is not past the frame
+    Advance,
+    /// restore the slide's cached start and replay up to the frame
+    Reseek,
+}
+
+impl FrameSeek {
+    /// `MONOCURL_EXPORT_RESEEK` brings back the replaying path, for comparisons
+    fn from_env() -> Self {
+        if std::env::var_os("MONOCURL_EXPORT_RESEEK").is_some() {
+            Self::Reseek
+        } else {
+            Self::Advance
+        }
+    }
+}
+
+/// the scene at one frame. frames of an export run forward, so each continues from the
+/// previous one instead of replaying its slide from the start, which made a frame cost
+/// grow with its time into the slide
+async fn evaluate_frame(
+    executor: &mut Executor,
+    root_text_rope: &Rope<TextAggregate>,
+    user_timestamp: Timestamp,
+    seek: FrameSeek,
+) -> Result<SceneSnapshot> {
+    let target = executor.user_to_internal_timestamp(user_timestamp);
+    if seek == FrameSeek::Advance
+        && executor.state.timestamp <= target
+        && !executor.state.has_errors()
+    {
+        advance_internal_timestamp(executor, target, root_text_rope).await?;
+    } else {
+        seek_internal_timestamp(executor, target, root_text_rope).await?;
+    }
+    // a frame on an instant should show that instant's zero duration animations,
+    // e.g. a `play Set()` at slide time 0
+    if let Err(error) = executor.settle_current_instant(SeekOptions::fast()).await {
+        bail!(
+            "{}",
+            last_runtime_error_message(executor, root_text_rope, &error)
+        );
+    }
+
+    executor
+        .capture_stable_scene_snapshot()
+        .await
+        .map_err(|error| {
+            anyhow!(format_runtime_error_message(
+                executor,
+                root_text_rope,
+                &error
+            ))
+        })
+}
+
 async fn seek_internal_timestamp(
     executor: &mut Executor,
     target: Timestamp,
@@ -1279,6 +1318,22 @@ async fn seek_internal_timestamp(
 ) -> Result<Timestamp> {
     seek_internal_timestamp_with_options(executor, target, SeekOptions::fast(), root_text_rope)
         .await
+}
+
+async fn advance_internal_timestamp(
+    executor: &mut Executor,
+    target: Timestamp,
+    root_text_rope: &Rope<TextAggregate>,
+) -> Result<Timestamp> {
+    match executor.advance_to_target(target).await {
+        SeekToResult::SeekedTo(timestamp) => Ok(timestamp),
+        SeekToResult::Error(error) => {
+            bail!(
+                "{}",
+                last_runtime_error_message(executor, root_text_rope, &error)
+            )
+        }
+    }
 }
 
 async fn seek_internal_timestamp_with_options(
