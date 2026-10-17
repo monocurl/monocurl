@@ -11,10 +11,11 @@ use executor::executor::SeekOptions;
 use exporter::{
     DEFAULT_VIDEO_FPS, EXPORT_CANCELLED_MESSAGE, ExportKind, ExportRequest, ExportSettings,
     SceneInspectionOutcome, SceneInspectionRequest, export_scene, inspect_scene_with_seek_options,
+    plan_video_slides,
 };
 
 use crate::{
-    command::{CliCommand, CommandKind, TranscriptCommand},
+    command::{CliCommand, CommandKind, TranscriptCommand, VideoCommand},
     progress::TerminalProgress,
     style_trusted_html,
 };
@@ -35,11 +36,14 @@ pub(crate) fn run_command(command: CliCommand) -> Result<()> {
                 fps: DEFAULT_VIDEO_FPS,
             },
         ),
+        CliCommand::Video(command) if command.list_slides => run_list_slides_command(command),
         CliCommand::Video(command) => run_export_command(
             CommandKind::Video,
             command.scene_path,
             command.output_path,
-            ExportKind::Video,
+            ExportKind::Video {
+                range: command.range,
+            },
             ExportSettings {
                 render_size: command.resolution.render_size(),
                 fps: command.fps,
@@ -84,6 +88,36 @@ fn run_export_command(
             Err(error)
         }
     }
+}
+
+/// one `index<TAB>frames<TAB>seconds<TAB>name` line per slide on stdout
+fn run_list_slides_command(command: VideoCommand) -> Result<()> {
+    let scene_path = command.scene_path;
+    let root_text = fs::read_to_string(&scene_path)
+        .with_context(|| format!("failed to read scene {}", scene_path.display()))?;
+    let settings = ExportSettings {
+        render_size: command.resolution.render_size(),
+        fps: command.fps,
+    };
+    let slides = plan_video_slides(
+        &root_text,
+        &scene_path,
+        settings,
+        Arc::new(AtomicBool::new(false)),
+        |_| {},
+    )?;
+
+    let mut stdout = io::stdout().lock();
+    for (index, slide) in slides.iter().enumerate() {
+        writeln!(
+            stdout,
+            "{index}\t{}\t{}\t{}",
+            slide.frames,
+            slide.duration,
+            slide.name.as_deref().unwrap_or_default()
+        )?;
+    }
+    Ok(())
 }
 
 fn run_transcript_command(command: TranscriptCommand) -> Result<()> {
