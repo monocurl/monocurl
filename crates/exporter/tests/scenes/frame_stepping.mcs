@@ -1,0 +1,65 @@
+# frames advanced one after another must equal frames replayed from the slide start: params
+# with stateful meshes, seeded randomness, shaders, tex, write/fade, nested and parallel anim
+# blocks, rate curves and leaders mutated by statements between plays
+
+import std.util
+import std.math
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+background = rgb(0.95, 0.94, 0.92)
+
+param r = 0.3
+param shift_by = 0l
+mesh ring = shift{delta: $shift_by} stroke{BLUE, 3} Circle(radius: $r)
+mesh dots = []
+mesh label = []
+mesh glow = []
+mesh box = center{1.5d} stroke{RED, 2} Square(0.5)
+
+let Swarm = |n, salt| block {
+    for (i in range(0, n)) {
+        let x = seeded_random(i, salt) * 6 - 3
+        let y = seeded_random(i, salt + 1) * 3 - 1.5
+        . center{[x, y, 0]} fill{ORANGE} Circle(0.06)
+    }
+}
+
+slide "params"
+    r = 1.1
+    play Lerp(0.5)
+    shift_by = 1.5r
+    r = 0.6
+    play rate{smooth} Lerp(0.7)
+    play Wait(0.25)
+
+slide "random and text"
+    var salt = 0
+    dots = Swarm(n: 40, salt: salt)
+    play Write(0.6, [&dots])
+    salt = salt + 7
+    dots = Swarm(n: 40, salt: salt)
+    play Lerp(0.4, [&dots])
+    label = center{1.4u} Tex("e^{i \pi} + 1 = 0", 0.7)
+    play Fade(0.5, [&label])
+    label = []
+    play Fade(0.3, [&label])
+
+slide "nested"
+    let Nudge = |&m, d, t| anim {
+        m = shift{d} m
+        play Lerp(t, [&m])
+    }
+    let both = anim {
+        play Nudge(&dots, 0.5u, 0.35)
+        glow = shift{[0, -1, -1]} Shader(|x, y| [0.5 + 0.5 * x / 3, 0.4, 0.6, 0.5], [-3, 3], [-1, 1], 32)
+        play Grow(0.3, [&glow])
+    }
+    play [both, Nudge(&box, 1l, 0.5)]
+    r = 0.2
+    play Set([&r])
+    play Wait(0.2)
+    glow = []
+    play Fade(0.25, [&glow])

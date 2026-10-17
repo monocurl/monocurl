@@ -7,6 +7,8 @@ mod color;
 mod math;
 mod mesh;
 pub mod registry;
+
+pub use mesh::set_face_reuse;
 mod scene;
 mod util;
 

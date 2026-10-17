@@ -282,6 +282,17 @@ fn sample_distance(a: &[[f64; 2]; SAMPLE_POINTS], b: &[[f64; 2]; SAMPLE_POINTS])
 
 thread_local! {
     static REUSABLE: RefCell<VecDeque<ReusableFaces>> = RefCell::default();
+    static REUSE_FACES: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+/// whether morphing outlines may keep last frame's faces. reuse makes a frame's
+/// triangulation depend on the frames before it (an equally valid one, with libtess2's
+/// nudged vertices left out), so tests comparing two orders of evaluation turn it off
+pub fn set_face_reuse(enabled: bool) {
+    REUSE_FACES.set(enabled);
+    if !enabled {
+        REUSABLE.with_borrow_mut(VecDeque::clear);
+    }
 }
 
 /// faces over the returned vertices: the fast path and reused faces index the
@@ -307,7 +318,11 @@ fn triangulate_loops(
 
     let loop_lens: Vec<usize> = contours.iter().map(Vec::len).collect();
     let sample = sample_points(&projected);
+    let reuse = REUSE_FACES.get();
     let reused = REUSABLE.with(|reusable| {
+        if !reuse {
+            return None;
+        }
         let mut reusable = reusable.borrow_mut();
         // the nearest outline of the same loop sizes is the one to try;
         // checking every candidate made a text morph twice as slow
@@ -337,6 +352,9 @@ fn triangulate_loops(
         return Ok((tess.vertices, tess.triangles));
     };
     REUSABLE.with(|reusable| {
+        if !reuse {
+            return;
+        }
         let mut reusable = reusable.borrow_mut();
         reusable.push_front(ReusableFaces {
             loop_lens,
