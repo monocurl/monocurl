@@ -28,6 +28,8 @@ pub(super) struct CachedMesh {
     pub(super) mesh: Weak<Mesh>,
     pub(super) version: u64,
     pub(super) triangles: Option<BufferWithCount>,
+    /// some triangle vertex is partly transparent
+    pub(super) translucent: bool,
     pub(super) lines: Option<BufferWithCount>,
     pub(super) dots: Option<BufferWithCount>,
     pub(super) last_used_frame: u64,

@@ -11,6 +11,8 @@ use super::{
 pub(super) struct Pipelines {
     pub(super) background: gpu::RenderPipeline,
     pub(super) triangles: gpu::RenderPipeline,
+    /// depth only pre-pass for translucent meshes, so that only their nearest surface blends
+    pub(super) triangles_depth: gpu::RenderPipeline,
     pub(super) lines: gpu::RenderPipeline,
     pub(super) dots: gpu::RenderPipeline,
 }
@@ -35,6 +37,11 @@ impl Pipelines {
             format: TARGET_FORMAT,
             blend: Some(gpu::BlendState::ALPHA_BLENDING),
             write_mask: gpu::ColorWrites::default(),
+        }];
+        let depth_only_target = [gpu::ColorTargetState {
+            format: TARGET_FORMAT,
+            blend: None,
+            write_mask: gpu::ColorWrites::empty(),
         }];
         let replace_target = [gpu::ColorTargetState {
             format: TARGET_FORMAT,
@@ -117,6 +124,24 @@ impl Pipelines {
                     ..Default::default()
                 },
             }),
+            triangles_depth: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
+                name: "renderer-triangles-depth",
+                data_layouts: &[&TrianglesData::layout()],
+                vertex: shader.at("vs_triangle"),
+                vertex_fetches: &[],
+                primitive: gpu::PrimitiveState {
+                    topology: gpu::PrimitiveTopology::TriangleList,
+                    front_face: gpu::FrontFace::Ccw,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_write.clone()),
+                fragment: Some(shader.at("fs_triangle")),
+                color_targets: &depth_only_target,
+                multisample_state: gpu::MultisampleState {
+                    sample_count,
+                    ..Default::default()
+                },
+            }),
             lines: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
                 name: "renderer-lines",
                 data_layouts: &[&LinesData::layout()],
@@ -157,6 +182,7 @@ impl Pipelines {
     pub(super) fn destroy(&mut self, gpu: &gpu::Context) {
         gpu.destroy_render_pipeline(&mut self.background);
         gpu.destroy_render_pipeline(&mut self.triangles);
+        gpu.destroy_render_pipeline(&mut self.triangles_depth);
         gpu.destroy_render_pipeline(&mut self.lines);
         gpu.destroy_render_pipeline(&mut self.dots);
     }
