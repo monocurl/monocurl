@@ -61,6 +61,9 @@ pub(crate) struct KernelTier {
     /// whether typed batches run several calls per op on the lane machine;
     /// `MONOCURL_KERNEL_LANES=0` turns it off
     pub(super) lanes: bool,
+    /// whether batches without native code keep short lists of numbers unboxed
+    /// on the typed machine; `MONOCURL_KERNEL_VECTORS=0` turns it off
+    pub(super) vectors: bool,
     /// native code for scalar typed kernels; `MONOCURL_KERNEL_JIT=0` turns it
     /// off
     pub(super) jit: jit::JitCache,
@@ -100,6 +103,8 @@ pub struct KernelStats {
     pub lane_calls: usize,
     /// batch calls that ran as native code (a subset of `typed_calls`)
     pub jit_calls: usize,
+    /// batches that ran on the typed machine with unboxed vectors
+    pub vector_batches: usize,
     /// typed kernels compiled to native code, and the time that took
     pub jit_compiles: usize,
     pub jit_compile_elapsed: Duration,
@@ -140,6 +145,7 @@ impl KernelTier {
             mode,
             typed: typed_kernels_enabled(),
             lanes: env_switch("MONOCURL_KERNEL_LANES"),
+            vectors: env_switch("MONOCURL_KERNEL_VECTORS"),
             jit: jit::JitCache::new(jit::enabled_by_env()),
             kernels: HashMap::new(),
             disabled: FxHashSet::default(),

@@ -263,6 +263,23 @@ impl LVm {
             }
 
             match op {
+                // specs with vectors run on the typed machine only
+                TOp::VMove { .. }
+                | TOp::VPush { .. }
+                | TOp::VIndex { .. }
+                | TOp::NIndex { .. }
+                | TOp::VIndexB { .. }
+                | TOp::VRow { .. }
+                | TOp::VBin { .. }
+                | TOp::VScale { .. }
+                | TOp::VNeg { .. }
+                | TOp::VDot { .. }
+                | TOp::VCross { .. }
+                | TOp::VLerp { .. }
+                | TOp::FLerp { .. }
+                | TOp::BoxV { .. }
+                | TOp::UnboxV { .. }
+                | TOp::ReturnV { .. } => return Err(Fault::Type),
                 TOp::Nop => {}
                 TOp::Nil { dst } => {
                     for lane in 0..LANES {
@@ -615,6 +632,8 @@ fn class_opnd(class: Class, reg: u16) -> Opnd {
         Class::Int => Opnd::I(reg),
         Class::Float => Opnd::F(reg),
         Class::Closure(id) => Opnd::C(id),
-        Class::Boxed | Class::Unset => Opnd::B(reg),
+        Class::Boxed | Class::Unset | Class::Vec(_) | Class::Rows(_) | Class::Nums(_) => {
+            Opnd::B(reg)
+        }
     }
 }

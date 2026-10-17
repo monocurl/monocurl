@@ -31,8 +31,165 @@ pub enum Class {
     Float,
     /// a closure known at translation time, so it needs no register at all
     Closure(ClosureId),
+    /// a list of at most `VEC_MAX` numbers whose length and element kinds are
+    /// known, held unboxed in the register's vector slot (a point, a colour)
+    Vec(Shape),
+    /// a boxed list whose every element is a list of this shape (a table of
+    /// points or colours captured by a callback); indexing it gives a `Vec`
+    Rows(Shape),
+    /// a boxed list of numbers of this class (int or float), too long to keep
+    /// unboxed (a captured table of samples); indexing it gives that class
+    Nums(Scalar),
     /// anything else, kept as a `KVal`
     Boxed,
+}
+
+/// the class of every element of a `Nums` list
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Scalar {
+    Int,
+    Float,
+}
+
+/// the longest list a register keeps unboxed
+pub const VEC_MAX: usize = 4;
+
+/// what an op knows of one element of an unboxed list
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Int,
+    Float,
+    /// a number whose kind is only known at run time
+    Num,
+}
+
+/// the length of an unboxed list and what is known of its elements' kinds:
+/// bit i of `ints` marks an int, bit i of `nums` an element of either kind (the
+/// vector slot carries the kinds at run time as well)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Shape {
+    pub len: u8,
+    pub ints: u8,
+    pub nums: u8,
+}
+
+impl Shape {
+    /// the shape of a list of numbers short enough to keep unboxed
+    pub fn of(elements: &[KVal]) -> Option<Self> {
+        if elements.len() > VEC_MAX {
+            return None;
+        }
+        Self::from_kinds(elements.len(), |i| match elements[i] {
+            KVal::Int(_) => Some(Kind::Int),
+            KVal::Float(_) => Some(Kind::Float),
+            _ => None,
+        })
+    }
+
+    fn from_kinds(len: usize, kind: impl Fn(usize) -> Option<Kind>) -> Option<Self> {
+        let mut shape = Shape {
+            len: len as u8,
+            ints: 0,
+            nums: 0,
+        };
+        for i in 0..len {
+            match kind(i)? {
+                Kind::Int => shape.ints |= 1 << i,
+                Kind::Float => {}
+                Kind::Num => shape.nums |= 1 << i,
+            }
+        }
+        Some(shape)
+    }
+
+    pub fn floats(len: u8) -> Self {
+        Shape {
+            len,
+            ints: 0,
+            nums: 0,
+        }
+    }
+
+    pub fn kind(self, i: usize) -> Kind {
+        if self.nums & (1 << i) != 0 {
+            Kind::Num
+        } else if self.ints & (1 << i) != 0 {
+            Kind::Int
+        } else {
+            Kind::Float
+        }
+    }
+
+    fn all_floats(self) -> bool {
+        self.ints == 0 && self.nums == 0
+    }
+
+    /// the class every element has, when it is the same statically known one
+    fn element(self) -> Option<Class> {
+        let all = (1u8 << self.len) - 1;
+        match (self.nums, self.ints) {
+            (0, 0) => Some(Class::Float),
+            (0, ints) if ints == all => Some(Class::Int),
+            _ => None,
+        }
+    }
+
+    fn push(self, class: Class) -> Option<Self> {
+        let at = self.len as usize;
+        if at >= VEC_MAX {
+            return None;
+        }
+        let ints = match class {
+            Class::Int => self.ints | 1 << at,
+            Class::Float => self.ints,
+            _ => return None,
+        };
+        Some(Shape {
+            len: self.len + 1,
+            ints,
+            nums: self.nums,
+        })
+    }
+
+    /// what two shapes of one length have in common: elements whose kinds may
+    /// differ become numbers of either kind
+    fn union(self, other: Shape) -> Option<Self> {
+        (self.len == other.len).then(|| Shape {
+            len: self.len,
+            ints: self.ints & other.ints,
+            nums: self.nums | other.nums | (self.ints ^ other.ints),
+        })
+    }
+
+    /// each element combined with the matching one of `other` (or a scalar) by
+    /// `kind`, the static form of the dynamic machine's promotion rules
+    fn map(self, kind: impl Fn(Kind) -> Kind) -> Self {
+        Self::from_kinds(self.len as usize, |i| Some(kind(self.kind(i)))).unwrap()
+    }
+
+    fn zip(self, other: Shape, kind: impl Fn(Kind, Kind) -> Kind) -> Self {
+        Self::from_kinds(self.len as usize, |i| Some(kind(self.kind(i), other.kind(i)))).unwrap()
+    }
+}
+
+/// the kind of `a + b` or `a - b` (and of `*` with an int or float scalar)
+fn sum_kind(a: Kind, b: Kind) -> Kind {
+    match (a, b) {
+        (Kind::Float, _) | (_, Kind::Float) => Kind::Float,
+        (Kind::Int, Kind::Int) => Kind::Int,
+        _ => Kind::Num,
+    }
+}
+
+/// what is known of a scalar operand's kind
+fn scalar_kind(class: Class) -> Option<Kind> {
+    match class {
+        Class::Int => Some(Kind::Int),
+        Class::Float => Some(Kind::Float),
+        // a boxed operand is only accepted at run time when it is a number
+        Class::Boxed => Some(Kind::Num),
+        _ => None,
+    }
 }
 
 impl Class {
@@ -45,12 +202,46 @@ impl Class {
         }
     }
 
+    /// `of`, refined for a capture: its value is known for the whole batch, so a
+    /// short list of numbers or a table of them gets its shape
+    fn of_capture(value: &KVal) -> Self {
+        let KVal::List(list) = value else {
+            return Class::of(value);
+        };
+        if let Some(shape) = Shape::of(list) {
+            return Class::Vec(shape);
+        }
+        if list.iter().all(|element| matches!(element, KVal::Float(_))) {
+            return Class::Nums(Scalar::Float);
+        }
+        if list.iter().all(|element| matches!(element, KVal::Int(_))) {
+            return Class::Nums(Scalar::Int);
+        }
+        let mut rows = list.iter().map(|row| match row {
+            KVal::List(row) => Shape::of(row),
+            _ => None,
+        });
+        let Some(first) = rows.next().flatten() else {
+            return Class::Boxed;
+        };
+        rows.try_fold(first, |shape, row| shape.union(row?))
+            .map_or(Class::Boxed, Class::Rows)
+    }
+
+    /// whether the register lives in the vector file
+    pub fn is_vec(self) -> bool {
+        matches!(self, Class::Vec(_))
+    }
+
     /// the class a register has where two paths meet: paths that disagree
     /// leave it boxed, and the scalar path boxes its value on the way in
     fn join(self, other: Class) -> Class {
         match (self, other) {
             (Class::Unset, x) | (x, Class::Unset) => x,
             (a, b) if a == b => a,
+            // the slot keeps its kinds at run time, so only what is known shrinks
+            (Class::Vec(a), Class::Vec(b)) => a.union(b).map_or(Class::Boxed, Class::Vec),
+            (Class::Rows(a), Class::Rows(b)) => a.union(b).map_or(Class::Boxed, Class::Rows),
             _ => Class::Boxed,
         }
     }
@@ -362,6 +553,135 @@ pub enum TOp {
         dst: Reg,
         src: Opnd,
     },
+    /// copies between vector slots
+    VMove {
+        dst: Reg,
+        src: Reg,
+    },
+    /// a list literal's next element, from the word file
+    VPush {
+        list: Reg,
+        value: Reg,
+        at: u8,
+        int: bool,
+    },
+    /// an element of a vector whose elements all have the destination's class
+    VIndex {
+        dst: Reg,
+        list: Reg,
+        index: Reg,
+        len: u8,
+    },
+    /// an element of a vector as a box
+    VIndexB {
+        dst: Reg,
+        list: Reg,
+        index: Reg,
+        len: u8,
+    },
+    /// an element of a boxed list of numbers of the destination's class
+    NIndex {
+        dst: Reg,
+        list: Reg,
+        index: Reg,
+    },
+    /// a row of a boxed table, unboxed into a vector; elements whose kind the
+    /// shape knows are checked
+    VRow {
+        dst: Reg,
+        list: Reg,
+        index: Reg,
+        shape: Shape,
+    },
+    /// elementwise `+` or `-` of two vectors of one length
+    VBin {
+        op: BinKind,
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+        len: u8,
+    },
+    /// `*` or `/` of a vector and a number, the vector on the left or the right;
+    /// a boxed scalar that is not a number faults
+    VScale {
+        op: BinKind,
+        dst: Reg,
+        v: Reg,
+        s: Opnd,
+        len: u8,
+        vec_left: bool,
+    },
+    VNeg {
+        dst: Reg,
+        src: Reg,
+        len: u8,
+    },
+    VDot {
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+        len: u8,
+    },
+    VCross {
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+    },
+    /// `lerp` of a float vector towards a vector of one length, `t` a float
+    VLerp {
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+        t: Reg,
+        len: u8,
+    },
+    /// `lerp` of floats
+    FLerp {
+        dst: Reg,
+        a: Reg,
+        b: Reg,
+        t: Reg,
+    },
+    /// a vector moved into the boxed file as a list
+    BoxV {
+        dst: Reg,
+        src: Reg,
+        len: u8,
+    },
+    /// a boxed list of this shape moved into the register's vector slot
+    UnboxV {
+        reg: Reg,
+        shape: Shape,
+    },
+    ReturnV {
+        src: Reg,
+        len: u8,
+    },
+}
+
+impl TOp {
+    /// whether only the typed machine runs this op
+    pub fn is_vector(&self) -> bool {
+        matches!(
+            self,
+            TOp::VMove { .. }
+                | TOp::VPush { .. }
+                | TOp::VIndex { .. }
+                | TOp::VIndexB { .. }
+                | TOp::NIndex { .. }
+                | TOp::VRow { .. }
+                | TOp::VBin { .. }
+                | TOp::VScale { .. }
+                | TOp::VNeg { .. }
+                | TOp::VDot { .. }
+                | TOp::VCross { .. }
+                | TOp::VLerp { .. }
+                | TOp::FLerp { .. }
+                | TOp::BoxV { .. }
+                | TOp::UnboxV { .. }
+                | TOp::ReturnV { .. }
+        )
+    }
 }
 
 /// bodies up to this many ops are spliced into their callers, so a helper
@@ -392,16 +712,21 @@ pub struct Spec {
     pub entry: Vec<Class>,
     /// the kernel's frame plus scratch registers for operand conversions
     pub frame_size: u16,
+    /// registers hold unboxed vectors, which only the typed machine runs
+    pub vectors: bool,
 }
 
-/// scratch registers a typed frame has beyond the kernel's own
-const SCRATCH: u16 = 2;
+/// scratch registers a typed frame has beyond the kernel's own: up to three
+/// operands of one op converted, plus one
+const SCRATCH: u16 = 4;
 
 /// every specialisation a batch's entry point reaches
 #[derive(Default)]
 pub struct TypedProgram {
     pub specs: Vec<Spec>,
     index: FxHashMap<(ClosureId, Vec<Class>), SpecId>,
+    /// short lists of numbers are kept unboxed
+    vectors: bool,
 }
 
 impl TypedProgram {
@@ -412,11 +737,39 @@ impl TypedProgram {
         entry: ClosureId,
         args: &[KVal],
     ) -> Option<(Self, SpecId)> {
+        Self::specialise_with(arena, entry, args, false)
+    }
+
+    /// `specialise`, keeping short lists of numbers unboxed: list arithmetic,
+    /// `dot` and `lerp` on points and colours then run without allocating, on
+    /// the typed machine only
+    pub fn specialise_vectors(
+        arena: &ClosureArena,
+        entry: ClosureId,
+        args: &[KVal],
+    ) -> Option<(Self, SpecId)> {
+        Self::specialise_with(arena, entry, args, true)
+    }
+
+    fn specialise_with(
+        arena: &ClosureArena,
+        entry: ClosureId,
+        args: &[KVal],
+        vectors: bool,
+    ) -> Option<(Self, SpecId)> {
         let sig: Vec<Class> = args.iter().map(Class::of).collect();
-        let mut program = TypedProgram::default();
+        let mut program = TypedProgram {
+            vectors,
+            ..TypedProgram::default()
+        };
         let mut in_progress = Vec::new();
         let id = program.spec_for(arena, entry, sig, &mut in_progress)?;
         Some((program, id))
+    }
+
+    /// whether any specialisation keeps vectors unboxed
+    pub fn uses_vectors(&self) -> bool {
+        self.specs.iter().any(|spec| spec.vectors)
     }
 
     pub fn spec(&self, id: SpecId) -> &Spec {
@@ -473,7 +826,11 @@ fn specialise_body(
     let mut entry = vec![Class::Unset; frame];
     entry[..total].copy_from_slice(sig);
     for (slot, capture) in entry[total..].iter_mut().zip(kclosure.captures.iter()) {
-        *slot = Class::of(capture);
+        *slot = if program.vectors {
+            Class::of_capture(capture)
+        } else {
+            Class::of(capture)
+        };
     }
 
     // in-state per op, to a fixed point over a worklist
@@ -537,6 +894,7 @@ fn specialise_body(
             op,
             state,
             scratch,
+            ret,
             in_progress,
             &mut emitted,
         )?;
@@ -583,6 +941,12 @@ fn specialise_body(
             *to = entry;
         }
     }
+    let vectors = typed.iter().any(TOp::is_vector)
+        || entry
+            .iter()
+            .chain(sig)
+            .chain([&ret])
+            .any(|class| matches!(class, Class::Vec(_) | Class::Rows(_) | Class::Nums(_)));
     Some(Spec {
         closure,
         kernel,
@@ -591,6 +955,7 @@ fn specialise_body(
         ret,
         entry,
         frame_size: (scratch + SCRATCH).max(extent),
+        vectors,
     })
 }
 
@@ -608,7 +973,13 @@ fn boxing_ops(before: &[Class], after: &[Class]) -> Vec<TOp> {
                 Class::Int => Some(TOp::BoxI { reg }),
                 Class::Float => Some(TOp::BoxF { reg }),
                 Class::Closure(id) => Some(TOp::BoxC { reg, id: *id }),
-                Class::Boxed | Class::Unset => None,
+                Class::Vec(shape) => Some(TOp::BoxV {
+                    dst: reg,
+                    src: reg,
+                    len: shape.len,
+                }),
+                // already a box
+                Class::Rows(_) | Class::Nums(_) | Class::Boxed | Class::Unset => None,
             }
         })
         .collect()
@@ -656,6 +1027,47 @@ fn bin_class(op: BinKind, a: Class, b: Class) -> Class {
     }
 }
 
+/// `bin_class`, with list arithmetic on vectors kept unboxed
+fn vec_bin_class(op: BinKind, a: Class, b: Class) -> Class {
+    use BinKind::*;
+    match (op, a, b) {
+        (Add | Sub, Class::Vec(sa), Class::Vec(sb)) if sa.len == sb.len => {
+            Class::Vec(sa.zip(sb, sum_kind))
+        }
+        (Mul | Div, Class::Vec(shape), scalar) | (Mul | Div, scalar, Class::Vec(shape))
+            if scalar_kind(scalar).is_some() =>
+        {
+            Class::Vec(match op {
+                // int over int is a float too
+                Div => Shape::floats(shape.len),
+                _ => {
+                    let s = scalar_kind(scalar).unwrap();
+                    shape.map(|kind| sum_kind(kind, s))
+                }
+            })
+        }
+        _ => bin_class(op, a, b),
+    }
+}
+
+/// `native_class`, with `cross` and `lerp` of vectors kept unboxed
+fn vec_native_class(intrinsic: KernelIntrinsic, args: &[Class]) -> Class {
+    match (intrinsic, args) {
+        (KernelIntrinsic::Cross, [Class::Vec(a), Class::Vec(b)]) if a.len == 3 && b.len == 3 => {
+            Class::Vec(Shape::floats(3))
+        }
+        (KernelIntrinsic::Lerp, [Class::Float, b, t]) if b.is_scalar() && t.is_scalar() => {
+            Class::Float
+        }
+        (KernelIntrinsic::Lerp, [Class::Vec(a), Class::Vec(b), t])
+            if a.all_floats() && a.len == b.len && t.is_scalar() =>
+        {
+            Class::Vec(Shape::floats(a.len))
+        }
+        _ => native_class(intrinsic, args),
+    }
+}
+
 fn native_class(intrinsic: KernelIntrinsic, args: &[Class]) -> Class {
     use KernelIntrinsic::*;
     let pair = || match (args[0], args[1]) {
@@ -698,7 +1110,7 @@ fn transfer(
             state[dst as usize] = read(&state, src)?
         }
         KOp::Bin { op, dst, a, b, .. } => {
-            state[dst as usize] = bin_class(op, read(&state, a)?, read(&state, b)?)
+            state[dst as usize] = vec_bin_class(op, read(&state, a)?, read(&state, b)?)
         }
         KOp::Neg { dst, src } => {
             state[dst as usize] = match read(&state, src)? {
@@ -725,22 +1137,37 @@ fn transfer(
                 return None;
             }
         }
-        KOp::EmptyList { dst } => state[dst as usize] = Class::Boxed,
-        KOp::Append { list, value } => {
-            read(&state, value)?;
-            if read(&state, list)? != Class::Boxed {
-                return None;
+        KOp::EmptyList { dst } => {
+            state[dst as usize] = if program.vectors {
+                Class::Vec(Shape::floats(0))
+            } else {
+                Class::Boxed
             }
+        }
+        KOp::Append { list, value } => {
+            let value = read(&state, value)?;
+            state[list as usize] = match read(&state, list)? {
+                Class::Vec(shape) => shape.push(value).map_or(Class::Boxed, Class::Vec),
+                Class::Boxed | Class::Rows(_) | Class::Nums(_) => Class::Boxed,
+                _ => return None,
+            };
         }
         KOp::Index { dst, list, index } => {
-            read(&state, index)?;
-            if read(&state, list)? != Class::Boxed {
-                return None;
-            }
-            state[dst as usize] = Class::Boxed;
+            let index = read(&state, index)?;
+            state[dst as usize] = match (read(&state, list)?, index) {
+                (Class::Vec(shape), Class::Int) => shape.element().unwrap_or(Class::Boxed),
+                (Class::Rows(shape), Class::Int) => Class::Vec(shape),
+                (Class::Nums(Scalar::Int), Class::Int) => Class::Int,
+                (Class::Nums(Scalar::Float), Class::Int) => Class::Float,
+                (Class::Vec(_) | Class::Rows(_) | Class::Nums(_) | Class::Boxed, _) => Class::Boxed,
+                _ => return None,
+            };
         }
         KOp::Len { dst, src } => {
-            if read(&state, src)? != Class::Boxed {
+            if !matches!(
+                read(&state, src)?,
+                Class::Boxed | Class::Vec(_) | Class::Rows(_) | Class::Nums(_)
+            ) {
                 return None;
             }
             state[dst as usize] = Class::Int;
@@ -779,7 +1206,7 @@ fn transfer(
             if intrinsic == KernelIntrinsic::Fallthrough {
                 return None;
             }
-            state[start] = native_class(intrinsic, &args);
+            state[start] = vec_native_class(intrinsic, &args);
             for slot in &mut state[start + 1..start + count] {
                 *slot = Class::Unset;
             }
@@ -819,14 +1246,31 @@ fn call_signature(
     (sig.len() == total).then_some(sig)
 }
 
+/// how an op reads a register; a vector has to be boxed first (`operand`)
 fn opnd(state: &[Class], reg: Reg) -> Option<Opnd> {
     Some(match read(state, reg)? {
         Class::Int => Opnd::I(reg),
         Class::Float => Opnd::F(reg),
         Class::Closure(id) => Opnd::C(id),
-        Class::Boxed => Opnd::B(reg),
-        Class::Unset => return None,
+        Class::Boxed | Class::Rows(_) | Class::Nums(_) => Opnd::B(reg),
+        Class::Vec(_) | Class::Unset => return None,
     })
+}
+
+/// `opnd`, boxing a vector into the scratch register `slot` for an op that
+/// only reads boxes
+fn operand(state: &[Class], reg: Reg, slot: Reg, out: &mut Emitted) -> Option<Opnd> {
+    match read(state, reg)? {
+        Class::Vec(shape) => {
+            out.ops.push(TOp::BoxV {
+                dst: slot,
+                src: reg,
+                len: shape.len,
+            });
+            Some(Opnd::B(slot))
+        }
+        _ => opnd(state, reg),
+    }
 }
 
 /// a scalar operand as a float register: an int is converted into a scratch
@@ -845,12 +1289,14 @@ fn as_float(state: &[Class], reg: Reg, scratch: Reg, out: &mut Emitted) -> Optio
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit(
     program: &mut TypedProgram,
     arena: &ClosureArena,
     op: &KOp,
     state: &[Class],
     scratch: Reg,
+    ret: Class,
     in_progress: &mut Vec<(ClosureId, Vec<Class>)>,
     out: &mut Emitted,
 ) -> Option<()> {
@@ -861,7 +1307,8 @@ fn emit(
         KOp::Float { dst, value } => TOp::FConst { dst, value },
         KOp::Move { dst, src } | KOp::Take { dst, src } => match read(state, src)? {
             Class::Int | Class::Float => TOp::MoveS { dst, src },
-            Class::Boxed => TOp::MoveB { dst, src },
+            Class::Boxed | Class::Rows(_) | Class::Nums(_) => TOp::MoveB { dst, src },
+            Class::Vec(_) => TOp::VMove { dst, src },
             // the value is static; nothing to copy
             Class::Closure(_) => TOp::Nop,
             Class::Unset => return None,
@@ -869,6 +1316,39 @@ fn emit(
         KOp::Bin { op, dst, a, b, .. } => {
             let (ca, cb) = (read(state, a)?, read(state, b)?);
             match (ca, cb) {
+                (Class::Vec(sa), Class::Vec(sb)) if matches!(op, Add | Sub) && sa.len == sb.len => {
+                    TOp::VBin {
+                        op,
+                        dst,
+                        a,
+                        b,
+                        len: sa.len,
+                    }
+                }
+                (Class::Vec(shape), scalar)
+                    if matches!(op, Mul | Div) && scalar_kind(scalar).is_some() =>
+                {
+                    TOp::VScale {
+                        op,
+                        dst,
+                        v: a,
+                        s: opnd(state, b)?,
+                        len: shape.len,
+                        vec_left: true,
+                    }
+                }
+                (scalar, Class::Vec(shape))
+                    if matches!(op, Mul | Div) && scalar_kind(scalar).is_some() =>
+                {
+                    TOp::VScale {
+                        op,
+                        dst,
+                        v: b,
+                        s: opnd(state, a)?,
+                        len: shape.len,
+                        vec_left: false,
+                    }
+                }
                 (Class::Int, Class::Int) => match op {
                     Add => TOp::IAdd { dst, a, b },
                     Sub => TOp::ISub { dst, a, b },
@@ -896,8 +1376,8 @@ fn emit(
                 _ => TOp::DynBin {
                     op,
                     dst,
-                    a: opnd(state, a)?,
-                    b: opnd(state, b)?,
+                    a: operand(state, a, scratch, out)?,
+                    b: operand(state, b, scratch + 1, out)?,
                     ret: bin_class(op, ca, cb),
                 },
             }
@@ -905,6 +1385,11 @@ fn emit(
         KOp::Neg { dst, src } => match read(state, src)? {
             Class::Int => TOp::INeg { dst, src },
             Class::Float => TOp::FNeg { dst, src },
+            Class::Vec(shape) => TOp::VNeg {
+                dst,
+                src,
+                len: shape.len,
+            },
             _ => TOp::DynNeg {
                 dst,
                 src: opnd(state, src)?,
@@ -915,7 +1400,7 @@ fn emit(
             Class::Float => TOp::FNot { dst, src },
             _ => TOp::DynNot {
                 dst,
-                src: opnd(state, src)?,
+                src: operand(state, src, scratch, out)?,
             },
         },
         KOp::Jump { to } => TOp::Jump { to },
@@ -923,7 +1408,7 @@ fn emit(
             Class::Int => TOp::JumpIfI { cond, to },
             Class::Float => TOp::JumpIfF { cond, to },
             _ => TOp::DynJumpIf {
-                cond: opnd(state, cond)?,
+                cond: operand(state, cond, scratch, out)?,
                 negate: false,
                 to,
             },
@@ -932,7 +1417,7 @@ fn emit(
             Class::Int => TOp::JumpIfNotI { cond, to },
             Class::Float => TOp::JumpIfNotF { cond, to },
             _ => TOp::DynJumpIf {
-                cond: opnd(state, cond)?,
+                cond: operand(state, cond, scratch, out)?,
                 negate: true,
                 to,
             },
@@ -942,8 +1427,8 @@ fn emit(
                 (Class::Int, Class::Int) => TOp::RangeTestI { current, to },
                 (Class::Float, Class::Float) => TOp::RangeTestF { current, to },
                 _ => TOp::DynRangeTest {
-                    current: opnd(state, current)?,
-                    stop: opnd(state, current + 1)?,
+                    current: operand(state, current, scratch, out)?,
+                    stop: operand(state, current + 1, scratch + 1, out)?,
                     to,
                 },
             }
@@ -951,19 +1436,82 @@ fn emit(
         KOp::Inc { reg } => match read(state, reg)? {
             Class::Int => TOp::IInc { reg },
             Class::Float => TOp::FInc { reg },
+            // a vector is never a loop counter: incrementing it faults, as a list does
+            Class::Vec(_) => return None,
             _ => TOp::DynInc { reg },
         },
+        // a vector slot needs no clearing: its length lives in the class
+        KOp::EmptyList { .. } if program.vectors => TOp::Nop,
         KOp::EmptyList { dst } => TOp::EmptyList { dst },
-        KOp::Append { list, value } => TOp::Append {
-            list,
-            value: opnd(state, value)?,
+        KOp::Append { list, value } => match (read(state, list)?, read(state, value)?) {
+            (Class::Vec(shape), value_class) if shape.push(value_class).is_some() => TOp::VPush {
+                list,
+                value,
+                at: shape.len,
+                int: value_class == Class::Int,
+            },
+            (Class::Vec(shape), _) => {
+                // the list outgrows a vector: it continues as a box
+                out.ops.push(TOp::BoxV {
+                    dst: list,
+                    src: list,
+                    len: shape.len,
+                });
+                TOp::Append {
+                    list,
+                    value: operand(state, value, scratch, out)?,
+                }
+            }
+            _ => TOp::Append {
+                list,
+                value: operand(state, value, scratch, out)?,
+            },
         },
-        KOp::Index { dst, list, index } => TOp::Index {
-            dst,
-            list,
-            index: opnd(state, index)?,
+        KOp::Index { dst, list, index } => match (read(state, list)?, read(state, index)?) {
+            (Class::Vec(shape), Class::Int) if shape.element().is_some() => TOp::VIndex {
+                dst,
+                list,
+                index,
+                len: shape.len,
+            },
+            (Class::Nums(_), Class::Int) => TOp::NIndex { dst, list, index },
+            (Class::Rows(shape), Class::Int) => TOp::VRow {
+                dst,
+                list,
+                index,
+                shape,
+            },
+            (Class::Vec(shape), Class::Int) => TOp::VIndexB {
+                dst,
+                list,
+                index,
+                len: shape.len,
+            },
+            (Class::Vec(shape), _) => {
+                out.ops.push(TOp::BoxV {
+                    dst: scratch,
+                    src: list,
+                    len: shape.len,
+                });
+                TOp::Index {
+                    dst,
+                    list: scratch,
+                    index: operand(state, index, scratch + 1, out)?,
+                }
+            }
+            _ => TOp::Index {
+                dst,
+                list,
+                index: operand(state, index, scratch, out)?,
+            },
         },
-        KOp::Len { dst, src } => TOp::Len { dst, list: src },
+        KOp::Len { dst, src } => match read(state, src)? {
+            Class::Vec(shape) => TOp::IConst {
+                dst,
+                value: shape.len as i64,
+            },
+            _ => TOp::Len { dst, list: src },
+        },
         KOp::Call {
             callee,
             arg_start,
@@ -999,29 +1547,80 @@ fn emit(
                 .map(|reg| read(state, reg as Reg))
                 .collect::<Option<_>>()?;
             let ret = native_class(intrinsic, &args);
-            match typed_native(intrinsic, arg_start, &args, state, scratch, out) {
-                Some(typed) => typed,
-                None => {
-                    if arg_count > 3 {
-                        return None;
-                    }
-                    let mut operands = [Opnd::I(0); 3];
-                    for (slot, reg) in operands.iter_mut().zip(start..start + arg_count as usize) {
-                        *slot = opnd(state, reg as Reg)?;
-                    }
-                    TOp::DynNative {
-                        intrinsic,
-                        dst: arg_start,
-                        args: operands,
-                        arity: arg_count as u8,
-                        ret,
+            let (dst, a, b, c) = (arg_start, arg_start, arg_start + 1, arg_start + 2);
+            match (intrinsic, args.as_slice()) {
+                (KernelIntrinsic::Dot, [Class::Vec(sa), Class::Vec(sb)]) if sa.len == sb.len => {
+                    TOp::VDot {
+                        dst,
+                        a,
+                        b,
+                        len: sa.len,
                     }
                 }
+                (KernelIntrinsic::Cross, [Class::Vec(sa), Class::Vec(sb)])
+                    if sa.len == 3 && sb.len == 3 =>
+                {
+                    TOp::VCross { dst, a, b }
+                }
+                (KernelIntrinsic::Len, [Class::Vec(shape)]) => TOp::IConst {
+                    dst,
+                    value: shape.len as i64,
+                },
+                (KernelIntrinsic::Lerp, [Class::Float, bc, tc])
+                    if bc.is_scalar() && tc.is_scalar() =>
+                {
+                    let b = as_float(state, b, scratch, out)?;
+                    let t = as_float(state, c, scratch + 1, out)?;
+                    TOp::FLerp { dst, a, b, t }
+                }
+                (KernelIntrinsic::Lerp, [Class::Vec(sa), Class::Vec(sb), tc])
+                    if sa.all_floats() && sa.len == sb.len && tc.is_scalar() =>
+                {
+                    let t = as_float(state, c, scratch, out)?;
+                    TOp::VLerp {
+                        dst,
+                        a,
+                        b,
+                        t,
+                        len: sa.len,
+                    }
+                }
+                _ => match typed_native(intrinsic, arg_start, &args, state, scratch, out) {
+                    Some(typed) => typed,
+                    None => {
+                        if arg_count > 3 {
+                            return None;
+                        }
+                        let mut operands = [Opnd::I(0); 3];
+                        for (i, (slot, reg)) in operands
+                            .iter_mut()
+                            .zip(start..start + arg_count as usize)
+                            .enumerate()
+                        {
+                            *slot = operand(state, reg as Reg, scratch + i as Reg, out)?;
+                        }
+                        TOp::DynNative {
+                            intrinsic,
+                            dst: arg_start,
+                            args: operands,
+                            arity: arg_count as u8,
+                            ret,
+                        }
+                    }
+                },
             }
         }
         KOp::Exit => return None,
-        KOp::Return { src } => TOp::Return {
-            src: opnd(state, src)?,
+        KOp::Return { src } => match (read(state, src)?, ret) {
+            (Class::Vec(shape), Class::Vec(returned)) if shape.len == returned.len => {
+                TOp::ReturnV {
+                    src,
+                    len: shape.len,
+                }
+            }
+            _ => TOp::Return {
+                src: operand(state, src, scratch, out)?,
+            },
         },
     };
     out.ops.push(typed);
@@ -1047,7 +1646,8 @@ fn inline_call(
         let (dst, src) = (offset + i as Reg, arg_start + i as Reg);
         match callee.sig[i] {
             Class::Int | Class::Float => out.ops.push(TOp::MoveS { dst, src }),
-            Class::Boxed => out.ops.push(TOp::MoveB { dst, src }),
+            Class::Boxed | Class::Rows(_) | Class::Nums(_) => out.ops.push(TOp::MoveB { dst, src }),
+            Class::Vec(_) => out.ops.push(TOp::VMove { dst, src }),
             Class::Closure(_) | Class::Unset => {}
         }
     }
@@ -1077,6 +1677,9 @@ fn inline_call(
                 index: i as u16,
             },
         });
+        if let Class::Vec(shape) = callee.entry[total + i] {
+            out.ops.push(TOp::UnboxV { reg: dst, shape });
+        }
     }
 
     // a return becomes two ops, so callee indices are mapped rather than
@@ -1088,7 +1691,14 @@ fn inline_call(
         positions.push(out.ops.len() as u32);
         let mut op = *op;
         shift(&mut op, offset);
-        if let TOp::Return { src } = op {
+        if let TOp::ReturnV { src, .. } = op {
+            out.ops.push(TOp::VMove {
+                dst: arg_start,
+                src,
+            });
+            returns.push(out.ops.len());
+            out.ops.push(TOp::Jump { to: u32::MAX });
+        } else if let TOp::Return { src } = op {
             let store = match (callee.ret, src) {
                 (Class::Int | Class::Float, Opnd::I(reg) | Opnd::F(reg)) => TOp::MoveS {
                     dst: arg_start,
@@ -1220,6 +1830,50 @@ fn shift(op: &mut TOp, offset: Reg) {
             args.iter_mut().for_each(shift_opnd);
         }
         TOp::Return { src } => shift_opnd(src),
+        TOp::VMove { dst, src }
+        | TOp::VNeg { dst, src, .. }
+        | TOp::BoxV { dst, src, .. } => {
+            *dst += offset;
+            *src += offset;
+        }
+        TOp::VPush { list, value, .. } => {
+            *list += offset;
+            *value += offset;
+        }
+        TOp::NIndex { dst, list, index }
+        | TOp::VIndexB {
+            dst, list, index, ..
+        }
+        | TOp::VIndex {
+            dst, list, index, ..
+        }
+        | TOp::VRow {
+            dst, list, index, ..
+        } => {
+            *dst += offset;
+            *list += offset;
+            *index += offset;
+        }
+        TOp::VBin { dst, a, b, .. }
+        | TOp::VDot { dst, a, b, .. }
+        | TOp::VCross { dst, a, b, .. } => {
+            *dst += offset;
+            *a += offset;
+            *b += offset;
+        }
+        TOp::VScale { dst, v, s, .. } => {
+            *dst += offset;
+            *v += offset;
+            shift_opnd(s);
+        }
+        TOp::VLerp { dst, a, b, t, .. } | TOp::FLerp { dst, a, b, t } => {
+            *dst += offset;
+            *a += offset;
+            *b += offset;
+            *t += offset;
+        }
+        TOp::UnboxV { reg, .. } => *reg += offset,
+        TOp::ReturnV { src, .. } => *src += offset,
     }
 }
 
