@@ -35,6 +35,8 @@ pub(super) struct TriShaderParams {
 pub(super) struct LineShaderParams {
     pub(super) viewport_and_line_width: [f32; 4],
     pub(super) depth_bias: [f32; 4],
+    /// `[1, last instance, 0, 0]` draws instances last first, see `instance_order`
+    pub(super) instance_order: [u32; 4],
 }
 
 #[repr(C)]
@@ -42,6 +44,8 @@ pub(super) struct LineShaderParams {
 pub(super) struct DotShaderParams {
     pub(super) viewport_and_radius: [f32; 4],
     pub(super) depth_bias: [f32; 4],
+    /// `[1, last instance, 0, 0]` draws instances last first, see `instance_order`
+    pub(super) instance_order: [u32; 4],
 }
 
 #[repr(C)]

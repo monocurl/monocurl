@@ -22,7 +22,7 @@ use self::{
 
 const TARGET_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Bgra8Unorm;
 const TEXTURE_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Rgba8Unorm;
-const DEPTH_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Depth32Float;
+const DEPTH_FORMAT: gpu::TextureFormat = gpu::TextureFormat::Depth32FloatStencil8Uint;
 const MAX_FRAME_TIME_MS: u32 = 10_000;
 const DEPTH_STEP: f32 = 1e-6;
 const DESIRED_MSAA_SAMPLE_COUNT: u32 = 8;

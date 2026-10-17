@@ -102,6 +102,7 @@ export class MonocurlWebGlRenderer {
       alpha: true,
       antialias: true,
       depth: true,
+      stencil: true,
       premultipliedAlpha: false,
       ...options.contextAttributes,
     });
@@ -172,15 +173,34 @@ export class MonocurlWebGlRenderer {
     gl.depthFunc(gl.LEQUAL);
     gl.depthMask(true);
     gl.clearDepth(1);
+    gl.clearStencil(0);
+    gl.disable(gl.STENCIL_TEST);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
 
     const background = snapshot.background?.color ?? [1, 1, 1, 1];
     gl.clearColor(background[0], background[1], background[2], background[3]);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 
     const meshes = sortedVisibleMeshes(snapshot.meshes ?? []);
     const camera = cameraBasis(options.camera ?? snapshot.camera);
     const viewportScale: [number, number] = [1, 1];
     let depthBias = 0;
+    let stencilReference = 0;
+    // a translucent stroke or dot set is one layer: each gets a fresh stencil
+    // value and paints a sample only once, so joins and self crossings do not
+    // darken
+    const paintOnce = (translucent: boolean): void => {
+      if (!translucent) {
+        return;
+      }
+      if (stencilReference === 0xff) {
+        gl.clear(gl.STENCIL_BUFFER_BIT);
+        stencilReference = 0;
+      }
+      stencilReference += 1;
+      gl.enable(gl.STENCIL_TEST);
+      gl.stencilFunc(gl.NOTEQUAL, stencilReference, 0xff);
+    };
 
     for (const mesh of meshes) {
       const triangles = buildTriangleData(mesh);
@@ -191,18 +211,33 @@ export class MonocurlWebGlRenderer {
 
       const lineRadius = meshLineRadiusPx(mesh, this.canvas.width, this.lineWidthPx);
       if (lineRadius > EPSILON) {
-        const lines = buildLineData(mesh);
+        let lines = buildLineData(mesh);
         if (lines.length > 0) {
+          const once =
+            mesh.uniform.alpha < 1 ||
+            mesh.lines.some((line) => line.a.color[3] < 1 || line.b.color[3] < 1);
+          paintOnce(once);
+          if (once) {
+            lines = reversedChunks(lines, LINE_VERTEX_INDICES.length * 14);
+          }
           this.drawLines(lines, mesh, camera, viewportScale, lineRadius, depthBias);
+          gl.disable(gl.STENCIL_TEST);
           depthBias += DEPTH_STEP;
         }
       }
 
       const dotRadius = meshDotRadiusPx(mesh, this.resolvedPixelRatio(), this.dotRadiusPx);
       if (dotRadius > EPSILON) {
-        const dots = buildDotData(mesh, mesh.uniform.dotVertexCount);
+        let dots = buildDotData(mesh, mesh.uniform.dotVertexCount);
         if (dots.length > 0) {
+          const once = mesh.uniform.alpha < 1 || mesh.dots.some((dot) => dot.color[3] < 1);
+          paintOnce(once);
+          if (once) {
+            const dotVertices = Math.max(3, Math.floor(mesh.uniform.dotVertexCount));
+            dots = reversedChunks(dots, (dotVertices - 2) * 3 * 9);
+          }
           this.drawDots(dots, mesh, camera, viewportScale, dotRadius, depthBias);
+          gl.disable(gl.STENCIL_TEST);
           depthBias += DEPTH_STEP;
         }
       }
@@ -961,6 +996,16 @@ function buildLineData(mesh: MeshSnapshot): Float32Array {
     }
   }
   return new Float32Array(out);
+}
+
+// a sample painted once keeps its first fragment, so translucent pieces go
+// last first to let the last one win, as it does when they are opaque
+function reversedChunks(data: Float32Array, chunk: number): Float32Array {
+  const out = new Float32Array(data.length);
+  for (let from = 0; from < data.length; from += chunk) {
+    out.set(data.subarray(from, from + chunk), data.length - from - chunk);
+  }
+  return out;
 }
 
 function lineVisible(line: LineSnapshot): boolean {

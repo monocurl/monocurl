@@ -412,6 +412,128 @@ mod tests {
         );
     }
 
+    fn white_scene(meshes: Vec<Mesh>) -> SceneRenderData {
+        SceneRenderData {
+            background: BackgroundSnapshot {
+                color: (1.0, 1.0, 1.0, 1.0),
+            },
+            camera: CameraSnapshot::default(),
+            meshes: meshes.into_iter().map(Arc::new).collect(),
+        }
+    }
+
+    /// green channel of the darkest stroke pixel, translucent red over white
+    fn darkest_green(image: &image::RgbaImage) -> u8 {
+        image
+            .pixels()
+            .map(|pixel| pixel.0[1])
+            .min()
+            .unwrap_or(u8::MAX)
+    }
+
+    fn green_at(image: &image::RgbaImage, world: Float3, size: RenderSize) -> u8 {
+        let (x, y) = screen_point(world, size);
+        image.get_pixel(x as u32, y as u32).0[1]
+    }
+
+    #[test]
+    fn translucent_stroke_joint_is_not_darker_than_its_segments() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(256, 256);
+        let half_red = Float4::new(1.0, 0.0, 0.0, 0.5);
+        let image = renderer
+            .render(&white_scene(vec![elbow_line_mesh(true, half_red)]), size)
+            .unwrap();
+
+        let segment = green_at(&image, Float3::new(-0.35, 0.0, 0.0), size);
+        assert!(
+            (120..=135).contains(&segment),
+            "expected one half alpha layer mid segment, got green={segment}"
+        );
+        let darkest = darkest_green(&image);
+        assert!(
+            darkest + 1 >= segment,
+            "joint painted twice: darkest green {darkest}, segment {segment}"
+        );
+    }
+
+    #[test]
+    fn translucent_stroke_crossing_itself_is_one_layer() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(256, 256);
+        let half_red = Float4::new(1.0, 0.0, 0.0, 0.5);
+        let mut cross = line_mesh(half_red);
+        let mut vertical = cross.lins[0];
+        vertical.a.pos = Float3::new(0.0, -0.5, 0.0);
+        vertical.b.pos = Float3::new(0.0, 0.5, 0.0);
+        cross.lins = vec![cross.lins[0], vertical].into();
+
+        let image = renderer.render(&white_scene(vec![cross]), size).unwrap();
+        let arm = green_at(&image, Float3::new(0.3, 0.0, 0.0), size);
+        let center = green_at(&image, Float3::ZERO, size);
+        assert_eq!(center, arm, "self crossing painted twice");
+
+        // the later piece is on top, as it is when the stroke is opaque
+        let half_blue = Float4::new(0.0, 0.0, 1.0, 0.5);
+        let mut two_tone = line_mesh(half_red);
+        vertical.a.col = half_blue;
+        vertical.b.col = half_blue;
+        two_tone.lins = vec![two_tone.lins[0], vertical].into();
+        let image = renderer.render(&white_scene(vec![two_tone]), size).unwrap();
+        let (x, y) = screen_point(Float3::ZERO, size);
+        let [b, _, r, _] = image.get_pixel(x as u32, y as u32).0;
+        assert!(
+            b > r,
+            "expected the later blue piece on top, got b={b} r={r}"
+        );
+
+        // separate meshes are separate layers and still stack
+        let image = renderer
+            .render(
+                &white_scene(vec![line_mesh(half_red), line_mesh(half_red)]),
+                size,
+            )
+            .unwrap();
+        let stacked = green_at(&image, Float3::ZERO, size);
+        assert!(
+            stacked + 32 < arm,
+            "two meshes should stack, got {stacked} vs {arm}"
+        );
+    }
+
+    #[test]
+    fn translucent_strokes_stack_after_stencil_references_run_out() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(256, 256);
+        let half_red = Float4::new(1.0, 0.0, 0.0, 0.5);
+        let shifted = |y: f32| {
+            let mut mesh = line_mesh(half_red);
+            let mut lin = mesh.lins[0];
+            lin.a.pos.y = y;
+            lin.b.pos.y = y;
+            mesh.lins = vec![lin].into();
+            mesh
+        };
+        // the first and the 257th translucent strokes share a stencil value
+        // unless the stencil is reset in between
+        let mut meshes = vec![line_mesh(half_red)];
+        meshes.extend((0..255).map(|_| shifted(0.6)));
+        meshes.push(line_mesh(half_red));
+
+        let image = renderer.render(&white_scene(meshes), size).unwrap();
+        let center = green_at(&image, Float3::ZERO, size);
+        assert!(
+            center < 80,
+            "last stroke was masked out, got green={center}"
+        );
+    }
+
     /// Same triangle as `flat_triangle_mesh`, pushed to a given z in world space
     /// so two of them genuinely occlude each other in 3D.
     fn triangle_mesh_at_depth(color: Float4, z_index: i32, z: f32) -> Mesh {

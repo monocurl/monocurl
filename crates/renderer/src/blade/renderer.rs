@@ -307,8 +307,12 @@ impl BladeRenderer {
             .iter()
             .flat_map(|tri| [tri.a.col.w, tri.b.col.w, tri.c.col.w])
             .any(|w| w < 1.0);
-        let lines = self.create_buffer_with_upload("renderer-lines", &build_line_vertices(mesh));
-        let dots = self.create_buffer_with_upload("renderer-dots", &build_dot_instances(mesh));
+        let line_vertices = build_line_vertices(mesh);
+        let translucent_lines = line_vertices.iter().any(|vertex| vertex.col[3] < 1.0);
+        let lines = self.create_buffer_with_upload("renderer-lines", &line_vertices);
+        let dot_instances = build_dot_instances(mesh);
+        let translucent_dots = dot_instances.iter().any(|dot| dot.col[3] < 1.0);
+        let dots = self.create_buffer_with_upload("renderer-dots", &dot_instances);
 
         self.mesh_cache.insert(
             key,
@@ -318,7 +322,9 @@ impl BladeRenderer {
                 triangles,
                 translucent,
                 lines,
+                translucent_lines,
                 dots,
+                translucent_dots,
                 last_used_frame: frame_index,
             },
         );
@@ -473,6 +479,7 @@ impl BladeRenderer {
         let camera = CameraParams::from_basis(basis, view);
         let size = view.output_size;
         let mut z_offset = 0.0;
+        let mut stencil = StencilReferences::default();
         // `items` arrives sorted by (z_index, order), so dedup gives the
         // distinct layers in ascending order.
         let layers: Vec<i32> = {
@@ -563,10 +570,20 @@ impl BladeRenderer {
                 z_offset += DEPTH_STEP;
             }
 
+            let translucent = item.mesh.uniform.alpha < 1.0;
             if let Some(lines) = buffers.lines.as_ref() {
                 let line_radius = mesh_line_radius_px(item.mesh.as_ref(), size, self.style);
                 if line_radius > f32::EPSILON {
-                    let mut encoder = pass.with(&self.pipelines.lines);
+                    let instances = lines.count / LINE_VERTICES_PER_INSTANCE;
+                    let once = translucent || buffers.translucent_lines;
+                    let mut encoder = if once {
+                        let reference = stencil.next(&mut pass, &self.pipelines.stencil_reset);
+                        let mut encoder = pass.with(&self.pipelines.lines_once);
+                        encoder.set_stencil_reference(reference);
+                        encoder
+                    } else {
+                        pass.with(&self.pipelines.lines)
+                    };
                     encoder.bind(
                         0,
                         &LinesData {
@@ -584,16 +601,12 @@ impl BladeRenderer {
                                     slice_scale,
                                     slice_offset,
                                 ],
+                                instance_order: instance_order(once, instances),
                             },
                             line_vertices: lines.buffer.into(),
                         },
                     );
-                    encoder.draw(
-                        0,
-                        LINE_INDICES_PER_INSTANCE,
-                        0,
-                        lines.count / LINE_VERTICES_PER_INSTANCE,
-                    );
+                    encoder.draw(0, LINE_INDICES_PER_INSTANCE, 0, instances);
                     z_offset += DEPTH_STEP;
                 }
             }
@@ -605,7 +618,15 @@ impl BladeRenderer {
                 if dot_radius > f32::EPSILON
                     && let Some(index_buffer) = self.dot_index_buffers.get(&dot_vertex_count)
                 {
-                    let mut encoder = pass.with(&self.pipelines.dots);
+                    let once = translucent || buffers.translucent_dots;
+                    let mut encoder = if once {
+                        let reference = stencil.next(&mut pass, &self.pipelines.stencil_reset);
+                        let mut encoder = pass.with(&self.pipelines.dots_once);
+                        encoder.set_stencil_reference(reference);
+                        encoder
+                    } else {
+                        pass.with(&self.pipelines.dots)
+                    };
                     encoder.bind(
                         0,
                         &DotsData {
@@ -623,6 +644,7 @@ impl BladeRenderer {
                                     slice_scale,
                                     slice_offset,
                                 ],
+                                instance_order: instance_order(once, dots.count),
                             },
                             dot_instances: dots.buffer.into(),
                         },
@@ -752,3 +774,43 @@ fn depth_slice_for(layers: &[i32], z_index: i32) -> [f32; 2] {
 }
 
 const IDENTITY_DEPTH_SLICE: [f32; 2] = [1.0, 0.0];
+
+/// a stroke painted once per sample keeps the first fragment to reach it, so
+/// its pieces go last first to let the last one win, as in an opaque stroke
+fn instance_order(painted_once: bool, instances: u32) -> [u32; 4] {
+    if painted_once {
+        [1, instances.saturating_sub(1), 0, 0]
+    } else {
+        [0; 4]
+    }
+}
+
+/// the value the stencil clears and resets to, never handed out as a reference
+const STENCIL_CLEAR: u8 = u8::MAX;
+
+/// hands each translucent stroke or dot set a stencil value no earlier one in
+/// the pass wrote, resetting the stencil when the 8 bits run out
+#[derive(Default)]
+struct StencilReferences {
+    next: u8,
+}
+
+impl StencilReferences {
+    fn next(&mut self, pass: &mut gpu::RenderCommandEncoder, reset: &gpu::RenderPipeline) -> u32 {
+        if self.next == STENCIL_CLEAR {
+            let mut encoder = pass.with(reset);
+            encoder.set_stencil_reference(STENCIL_CLEAR.into());
+            encoder.bind(
+                0,
+                &BackgroundData {
+                    background: BackgroundParams { color: [0.0; 4] },
+                },
+            );
+            encoder.draw(0, 4, 0, 1);
+            self.next = 0;
+        }
+        let reference = self.next;
+        self.next = self.next.wrapping_add(1);
+        reference.into()
+    }
+}
