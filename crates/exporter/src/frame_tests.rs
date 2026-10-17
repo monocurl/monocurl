@@ -11,7 +11,8 @@ use executor::{scene_snapshot::SceneSnapshot, time::Timestamp};
 
 use super::*;
 
-const FPS: u32 = 30;
+/// debug builds (CI) step coarser: replaying every frame is quadratic in a slide's length
+const FPS: u32 = if cfg!(debug_assertions) { 10 } else { 30 };
 
 /// a shader texture's id is unique per construction, like a mesh's version
 fn without_texture_ids(debug: String) -> String {
