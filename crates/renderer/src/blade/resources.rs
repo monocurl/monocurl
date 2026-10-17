@@ -31,7 +31,11 @@ pub(super) struct CachedMesh {
     /// some triangle vertex is partly transparent
     pub(super) translucent: bool,
     pub(super) lines: Option<BufferWithCount>,
+    /// some stroke vertex is partly transparent
+    pub(super) translucent_lines: bool,
     pub(super) dots: Option<BufferWithCount>,
+    /// some dot is partly transparent
+    pub(super) translucent_dots: bool,
     pub(super) last_used_frame: u64,
 }
 

@@ -19,11 +19,13 @@ struct TriShaderParams {
 struct LineShaderParams {
     viewport_and_line_width: vec4<f32>,
     depth_bias: vec4<f32>,
+    instance_order: vec4<u32>,
 }
 
 struct DotShaderParams {
     viewport_and_radius: vec4<f32>,
     depth_bias: vec4<f32>,
+    instance_order: vec4<u32>,
 }
 
 struct TriVertexPod {
@@ -286,12 +288,19 @@ fn line_vertex_index(local_index: u32) -> u32 {
     }
 }
 
+// a stroke painted once per sample keeps its first fragment, so reversing the
+// instances lets the last piece win, as it does when the stroke is opaque
+fn ordered_instance(instance_index: u32, order: vec4<u32>) -> u32 {
+    return select(instance_index, order.y - instance_index, order.x != 0u);
+}
+
 @vertex
 fn vs_line(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32,
 ) -> ColorOut {
-    let vertex = line_vertices[instance_index * 10u + line_vertex_index(vertex_index % 24u)];
+    let instance = ordered_instance(instance_index, line_params.instance_order);
+    let vertex = line_vertices[instance * 10u + line_vertex_index(vertex_index % 24u)];
     let model = world_to_camera(vertex.pos.xyz, line_camera);
 
     let viewport = max(line_params.viewport_and_line_width.xy, vec2<f32>(1.0));
@@ -341,7 +350,7 @@ fn vs_dot(
     @builtin(vertex_index) vertex_index: u32,
     @builtin(instance_index) instance_index: u32,
 ) -> DotOut {
-    let instance = dot_instances[instance_index];
+    let instance = dot_instances[ordered_instance(instance_index, dot_params.instance_order)];
     let model = world_to_camera(instance.pos.xyz, dot_camera);
     let viewport = max(dot_params.viewport_and_radius.xy, vec2<f32>(1.0));
     let vertex_count = max(u32(dot_params.depth_bias.y), 3u);

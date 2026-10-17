@@ -15,6 +15,11 @@ pub(super) struct Pipelines {
     pub(super) triangles_depth: gpu::RenderPipeline,
     pub(super) lines: gpu::RenderPipeline,
     pub(super) dots: gpu::RenderPipeline,
+    /// translucent strokes and dots, painting each sample at most once per stencil reference
+    pub(super) lines_once: gpu::RenderPipeline,
+    pub(super) dots_once: gpu::RenderPipeline,
+    /// full screen stencil reset, for when the per frame references run out
+    pub(super) stencil_reset: gpu::RenderPipeline,
 }
 
 impl Pipelines {
@@ -87,10 +92,90 @@ impl Pipelines {
             depth_write_enabled: false,
             ..depth_write.clone()
         };
-
-        Self {
-            background: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
-                name: "renderer-background",
+        // a translucent stroke is one layer: its pieces overlap at joins and
+        // self crossings, and blending each would darken those spots. every
+        // translucent stroke (or dot set) gets its own stencil reference, and
+        // a sample takes the first fragment that reaches it and rejects the
+        // rest. depth failures leave the stencil alone, so a hidden piece does
+        // not block a visible one
+        let paint_once = gpu::StencilFaceState {
+            compare: gpu::CompareFunction::NotEqual,
+            fail_op: gpu::StencilOperation::Keep,
+            depth_fail_op: gpu::StencilOperation::Keep,
+            pass_op: gpu::StencilOperation::Replace,
+        };
+        let depth_read_paint_once = gpu::DepthStencilState {
+            stencil: gpu::StencilState {
+                front: paint_once,
+                back: paint_once,
+                read_mask: 0xff,
+                write_mask: 0xff,
+            },
+            ..depth_read_only.clone()
+        };
+        let overwrite = gpu::StencilFaceState {
+            compare: gpu::CompareFunction::Always,
+            fail_op: gpu::StencilOperation::Keep,
+            depth_fail_op: gpu::StencilOperation::Keep,
+            pass_op: gpu::StencilOperation::Replace,
+        };
+        let stencil_overwrite = gpu::DepthStencilState {
+            depth_write_enabled: false,
+            depth_compare: gpu::CompareFunction::Always,
+            stencil: gpu::StencilState {
+                front: overwrite,
+                back: overwrite,
+                read_mask: 0xff,
+                write_mask: 0xff,
+            },
+            ..depth_write.clone()
+        };
+        let no_depth = gpu::DepthStencilState {
+            depth_write_enabled: false,
+            depth_compare: gpu::CompareFunction::Always,
+            ..depth_write.clone()
+        };
+        let lines = |name, depth_stencil: &gpu::DepthStencilState| {
+            gpu.create_render_pipeline(gpu::RenderPipelineDesc {
+                name,
+                data_layouts: &[&LinesData::layout()],
+                vertex: shader.at("vs_line"),
+                vertex_fetches: &[],
+                primitive: gpu::PrimitiveState {
+                    topology: gpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_stencil.clone()),
+                fragment: Some(shader.at("fs_line")),
+                color_targets: &alpha_target,
+                multisample_state: gpu::MultisampleState {
+                    sample_count,
+                    ..Default::default()
+                },
+            })
+        };
+        let dots = |name, depth_stencil: &gpu::DepthStencilState| {
+            gpu.create_render_pipeline(gpu::RenderPipelineDesc {
+                name,
+                data_layouts: &[&DotsData::layout()],
+                vertex: shader.at("vs_dot"),
+                vertex_fetches: &[],
+                primitive: gpu::PrimitiveState {
+                    topology: gpu::PrimitiveTopology::TriangleList,
+                    ..Default::default()
+                },
+                depth_stencil: Some(depth_stencil.clone()),
+                fragment: Some(shader.at("fs_dot")),
+                color_targets: &alpha_target,
+                multisample_state: gpu::MultisampleState {
+                    sample_count,
+                    ..Default::default()
+                },
+            })
+        };
+        let full_screen = |name, depth_stencil: &gpu::DepthStencilState, color_targets| {
+            gpu.create_render_pipeline(gpu::RenderPipelineDesc {
+                name,
                 data_layouts: &[&BackgroundData::layout()],
                 vertex: shader.at("vs_background"),
                 vertex_fetches: &[],
@@ -98,14 +183,23 @@ impl Pipelines {
                     topology: gpu::PrimitiveTopology::TriangleStrip,
                     ..Default::default()
                 },
-                depth_stencil: None,
+                depth_stencil: Some(depth_stencil.clone()),
                 fragment: Some(shader.at("fs_background")),
-                color_targets: &replace_target,
+                color_targets,
                 multisample_state: gpu::MultisampleState {
                     sample_count,
                     ..Default::default()
                 },
-            }),
+            })
+        };
+
+        Self {
+            background: full_screen("renderer-background", &no_depth, &replace_target),
+            stencil_reset: full_screen(
+                "renderer-stencil-reset",
+                &stencil_overwrite,
+                &depth_only_target,
+            ),
             triangles: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
                 name: "renderer-triangles",
                 data_layouts: &[&TrianglesData::layout()],
@@ -142,40 +236,10 @@ impl Pipelines {
                     ..Default::default()
                 },
             }),
-            lines: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
-                name: "renderer-lines",
-                data_layouts: &[&LinesData::layout()],
-                vertex: shader.at("vs_line"),
-                vertex_fetches: &[],
-                primitive: gpu::PrimitiveState {
-                    topology: gpu::PrimitiveTopology::TriangleList,
-                    ..Default::default()
-                },
-                depth_stencil: Some(depth_read_only.clone()),
-                fragment: Some(shader.at("fs_line")),
-                color_targets: &alpha_target,
-                multisample_state: gpu::MultisampleState {
-                    sample_count,
-                    ..Default::default()
-                },
-            }),
-            dots: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
-                name: "renderer-dots",
-                data_layouts: &[&DotsData::layout()],
-                vertex: shader.at("vs_dot"),
-                vertex_fetches: &[],
-                primitive: gpu::PrimitiveState {
-                    topology: gpu::PrimitiveTopology::TriangleList,
-                    ..Default::default()
-                },
-                depth_stencil: Some(depth_read_only.clone()),
-                fragment: Some(shader.at("fs_dot")),
-                color_targets: &alpha_target,
-                multisample_state: gpu::MultisampleState {
-                    sample_count,
-                    ..Default::default()
-                },
-            }),
+            lines: lines("renderer-lines", &depth_read_only),
+            dots: dots("renderer-dots", &depth_read_only),
+            lines_once: lines("renderer-lines-once", &depth_read_paint_once),
+            dots_once: dots("renderer-dots-once", &depth_read_paint_once),
         }
     }
 
@@ -185,6 +249,9 @@ impl Pipelines {
         gpu.destroy_render_pipeline(&mut self.triangles_depth);
         gpu.destroy_render_pipeline(&mut self.lines);
         gpu.destroy_render_pipeline(&mut self.dots);
+        gpu.destroy_render_pipeline(&mut self.lines_once);
+        gpu.destroy_render_pipeline(&mut self.dots_once);
+        gpu.destroy_render_pipeline(&mut self.stencil_reset);
     }
 }
 
