@@ -691,10 +691,39 @@ pub fn native(intrinsic: KernelIntrinsic, args: &[KVal]) -> Result<KVal, Fault> 
             KVal::Float(f) => Ok(KVal::Float(*f)),
             _ => Err(Fault::Type),
         },
+        Lerp => lerp(&args[0], &args[1], as_f64(&args[2])?),
         // palettes live in the arena, so only `native_in` can read them
         KeyframeLerp => Err(Fault::Type),
         Fallthrough => Err(Fault::Type),
     }
+}
+
+/// the stdlib's `lerp` on numbers and lists of them: equal values come back as the first
+/// one (an int stays an int), anything else blends as floats
+fn lerp(a: &KVal, b: &KVal, t: f64) -> Result<KVal, Fault> {
+    let blend = |x: f64, y: f64| KVal::Float((1.0 - t) * x + t * y);
+    Ok(match (a, b) {
+        (KVal::Nil, KVal::Nil) => KVal::Nil,
+        (KVal::Int(x), KVal::Int(y)) if x == y => KVal::Int(*x),
+        (KVal::Float(x), KVal::Float(y)) if x == y => KVal::Float(*x),
+        (KVal::Int(x), KVal::Float(y)) if *x as f64 == *y => KVal::Int(*x),
+        (KVal::Float(x), KVal::Int(y)) if *x == *y as f64 => KVal::Float(*x),
+        (KVal::Int(_) | KVal::Float(_), KVal::Int(_) | KVal::Float(_)) => {
+            blend(as_f64(a)?, as_f64(b)?)
+        }
+        (KVal::List(u), KVal::List(v)) => {
+            if u.len() != v.len() {
+                return Err(Fault::LengthMismatch);
+            }
+            KVal::List(Arc::new(
+                u.iter()
+                    .zip(v.iter())
+                    .map(|(x, y)| lerp(x, y, t))
+                    .collect::<Result<_, _>>()?,
+            ))
+        }
+        _ => return Err(Fault::Type),
+    })
 }
 
 /// the stdlib's `keyframe_lerp` on a converted palette: clamped at both ends,

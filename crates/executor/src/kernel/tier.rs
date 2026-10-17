@@ -396,11 +396,21 @@ const CHEAP_CAPTURE_LEN: usize = 16;
 
 /// whether converting `lambda`'s captures is cheap enough to do per call
 fn cheap_captures(lambda: &Lambda) -> bool {
-    lambda.captures.iter().all(|capture| match capture {
+    lambda.captures.iter().all(cheap_to_convert)
+}
+
+/// whether converting `value` costs little next to one call. a long list (a mesh's triangle
+/// table passed to a lookup helper) would be converted again on every call
+fn cheap_to_convert(value: &Value) -> bool {
+    match value {
         Value::List(list) => list.len() <= CHEAP_CAPTURE_LEN,
         Value::Lambda(inner) => cheap_captures(inner),
+        Value::Lvalue(reference) => cheap_to_convert(&with_heap(|h| h.get(reference.key()).clone())),
+        Value::WeakLvalue(reference) => {
+            cheap_to_convert(&with_heap(|h| h.get(reference.key()).clone()))
+        }
         _ => true,
-    })
+    }
 }
 
 impl Executor {
@@ -423,9 +433,17 @@ impl Executor {
             return None;
         }
         let kernel = tier.kernel_for(lambda)?;
-        if !kernel.worth_single_call() {
+        if !kernel.worth_single_call()
+            || !self
+                .state
+                .stack(stack_idx)
+                .top(num_args)
+                .iter()
+                .all(cheap_to_convert)
+        {
             return None;
         }
+        let tier = &mut self.kernels;
         let mut arena = std::mem::take(&mut tier.arena);
         arena.clear();
         let mut converter = Converter::new(tier, &mut arena);

@@ -338,7 +338,7 @@ pub enum TOp {
     DynNative {
         intrinsic: KernelIntrinsic,
         dst: Reg,
-        args: [Opnd; 2],
+        args: [Opnd; 3],
         arity: u8,
         ret: Class,
     },
@@ -675,7 +675,7 @@ fn native_class(intrinsic: KernelIntrinsic, args: &[Class]) -> Class {
         },
         Mod | Min | Max => pair(),
         Dot => Class::Float,
-        Cross | KeyframeLerp | Fallthrough => Class::Boxed,
+        Cross | KeyframeLerp | Lerp | Fallthrough => Class::Boxed,
     }
 }
 
@@ -1002,10 +1002,10 @@ fn emit(
             match typed_native(intrinsic, arg_start, &args, state, scratch, out) {
                 Some(typed) => typed,
                 None => {
-                    if arg_count > 2 {
+                    if arg_count > 3 {
                         return None;
                     }
-                    let mut operands = [Opnd::I(0); 2];
+                    let mut operands = [Opnd::I(0); 3];
                     for (slot, reg) in operands.iter_mut().zip(start..start + arg_count as usize) {
                         *slot = opnd(state, reg as Reg)?;
                     }
@@ -1303,6 +1303,6 @@ fn typed_native(
         ToInt => TOp::FTrunc { dst, src },
         ToFloat if args[0] == Class::Int => TOp::IToF { dst, src },
         ToFloat => TOp::MoveS { dst, src },
-        Dot | Cross | Len | KeyframeLerp | Fallthrough => return None,
+        Dot | Cross | Len | KeyframeLerp | Lerp | Fallthrough => return None,
     })
 }

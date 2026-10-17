@@ -544,7 +544,7 @@ impl LVm {
                 } => {
                     for lane in 0..LANES {
                         if active!(lane) {
-                            let values: SmallVec<[KVal; 2]> = args[..arity as usize]
+                            let values: SmallVec<[KVal; 3]> = args[..arity as usize]
                                 .iter()
                                 .map(|&arg| self.load(lane, arg))
                                 .collect();

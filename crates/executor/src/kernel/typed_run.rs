@@ -487,7 +487,7 @@ impl TVm {
                     arity,
                     ret,
                 } => {
-                    let values: SmallVec<[KVal; 2]> = args[..arity as usize]
+                    let values: SmallVec<[KVal; 3]> = args[..arity as usize]
                         .iter()
                         .map(|&arg| self.load(base, arg))
                         .collect();

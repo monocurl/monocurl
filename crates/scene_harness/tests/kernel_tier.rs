@@ -900,3 +900,84 @@ fn palettes_the_tier_cannot_read_reach_the_interpreter() {
         Expect::Any,
     );
 }
+
+#[test]
+fn lerp_in_a_colour_callback_runs_as_a_kernel() {
+    check(
+        "
+        let BG = [0.95, 0.94, 0.92, 1]
+        let shade = |k, w| lerp([k[0], k[1], k[2]], [1, 1, 1], w * w)
+        mesh surface = ExplicitFunc2d(
+            |x, y| 0.2 * x * y,
+            [-1, 1, 12],
+            [-1, 1, 9],
+            |x, y, z| {
+                let c = shade([0.9, 0.4, 0.2], 0.5 + 0.5 * x)
+                return [lerp(BG[0], c[0], y * y), lerp(BG[1], c[1], 1), lerp(1, 1, z), lerp(1, 1.0, x)]
+            }
+        )
+        print surface
+        print lerp(2, 2, 0.3)
+        print lerp(2, 2.0, 0.3)
+        print lerp(2.0, 2, 0.3)
+        print lerp([1, [2, 3]], [1, [4, 3.0]], 0.25)
+        ",
+        Expect::Kernels,
+    );
+}
+
+#[test]
+fn lerp_of_lists_of_different_lengths_reports_the_same_error() {
+    check(
+        "
+        mesh surface = ExplicitFunc2d(
+            |x, y| 0,
+            [-1, 1, 4],
+            [-1, 1, 4],
+            |x, y, z| lerp([x, y, z, 1], [1, 1, 1], 0.5)
+        )
+        print surface
+        ",
+        Expect::Any,
+    );
+}
+
+/// a lookup helper handed a mesh's triangle table, as the knot video's `MeshSurf` does: the
+/// colour batch runs as one kernel (the table converted once), and an interpreted call with
+/// the table as an argument is not converted again on every call
+#[test]
+fn long_list_arguments_convert_once_per_batch() {
+    let body = "
+        let T = map(range(0, 300), |i| [i, i + 1, i + 2])
+        let N = map(range(0, 302), |i| [sin(i), cos(i), 0.5])
+        let tri_vid = |T, i, j| {
+            let t = min(i // 3, len(T) - 1)
+            let k = i - 3 * (i // 3)
+            if (k == 0) { return T[t][0] }
+            if (k == 1 and j == 0) { return T[t][1] }
+            return T[t][2]
+        }
+        let lit = |k, n, a| lerp([1, 1, 1], [k[0] * n[0], k[1] * n[1], k[2]], a)
+        mesh surface = ExplicitFunc2d(
+            |x, y| 0,
+            [0, 899, 900],
+            [0, 2, 3],
+            |x, y, z| lit([0.2, 0.5, 0.8], N[tri_vid(T, to_int(round(x)), to_int(round(y)))], 0.9) .. 1
+        )
+        print surface
+        let first_column = |T, n| {
+            var s = 0
+            for (i in range(0, n)) { s = s + T[i][0] }
+            return s
+        }
+        print first_column(T, 40)
+        ";
+    check(body, Expect::Kernels);
+    // `range` and the like still run as single calls; the table's helper must not add one
+    let without = body.replace("print first_column(T, 40)", "");
+    assert_eq!(
+        run(body, KernelMode::On).single_calls,
+        run(&without, KernelMode::On).single_calls,
+        "a call with a long list argument ran as a kernel"
+    );
+}

@@ -72,11 +72,15 @@ const LIST_CAP: usize = 16;
 /// them in a loop
 const LIST_SITES: usize = 4;
 
+/// elements an input list may have (a capture such as a shadow's sample table); a longer
+/// one reads as absent, and indexing it faults to the typed machine
+const INPUT_CAP: usize = 256;
+
 /// words an input takes: its palette id, its length as a list, and the
 /// list's elements and element kinds
-const INPUT_WORDS: usize = 2 + 2 * LIST_CAP;
+const INPUT_WORDS: usize = 2 + 2 * INPUT_CAP;
 
-/// an input that is not a palette, or not a list of at most `LIST_CAP`
+/// an input that is not a palette, or not a list of at most `INPUT_CAP`
 /// scalars
 const ABSENT: u64 = u64::MAX;
 
@@ -153,8 +157,8 @@ fn write_list_input(words: &mut [u64], len: usize, elements: impl Iterator<Item 
     let (palette, rest) = words.split_first_mut().unwrap();
     let (slot, items) = rest.split_first_mut().unwrap();
     *palette = ABSENT;
-    let (values, kinds) = items.split_at_mut(LIST_CAP);
-    let scalars = len <= LIST_CAP
+    let (values, kinds) = items.split_at_mut(INPUT_CAP);
+    let scalars = len <= INPUT_CAP
         && elements
             .zip(values.iter_mut().zip(kinds))
             .all(|(element, (value, kind))| {
@@ -972,7 +976,7 @@ fn step_boxed(
         TOp::DynNative {
             intrinsic: KernelIntrinsic::KeyframeLerp,
             dst,
-            args: [palette, t],
+            args: [palette, t, _],
             ..
         } => {
             if !matches!(palette, Opnd::B(reg) if at(boxed, reg)? == Boxed::Input) {
@@ -1847,13 +1851,13 @@ impl Codegen<'_> {
                     let offset = b.ins().ishl_imm_s(i, 3);
                     let at = b.ins().iadd(address, offset);
                     let value = b.ins().load(types::I64, fixed, at, word(1));
-                    let kind = b.ins().load(types::I64, fixed, at, word(1 + LIST_CAP));
+                    let kind = b.ins().load(types::I64, fixed, at, word(1 + INPUT_CAP));
                     regs.set_num(b, dst, (value, Kind::Dyn(kind)));
                 }
                 TOp::DynNative {
                     intrinsic: KernelIntrinsic::KeyframeLerp,
                     dst,
-                    args: [Opnd::B(palette), t],
+                    args: [Opnd::B(palette), t, _],
                     ..
                 } => {
                     let site = self.facts.sites[pc]?;
@@ -3691,7 +3695,7 @@ mod tests {
                     vec![KVal::list([]), KVal::Int(0)],
                 ]),
         );
-        let long = KVal::list((0..=LIST_CAP as i64).map(KVal::Int));
+        let long = KVal::list((0..=INPUT_CAP as i64).map(KVal::Int));
         assert_eq!(jit.call(&[long, KVal::Int(0)]).err(), Some(Fault::Type));
     }
 }
