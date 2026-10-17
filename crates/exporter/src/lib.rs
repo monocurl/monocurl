@@ -850,6 +850,134 @@ async fn write_video_file(
 ) -> Result<usize> {
     ensure!(!frame_targets.is_empty(), "video has no frames to export");
 
+    let mut sink = VideoSink::spawn(output_path.to_path_buf(), settings);
+    let mut previous_slide = None;
+    let mut timing = PhaseTiming::from_env();
+
+    for (index, timestamp) in frame_targets.iter().copied().enumerate() {
+        emit_progress_checked(
+            cancel_flag,
+            on_progress,
+            video_frame_progress_message(progress_label, index, frame_targets.len()),
+            *completed,
+            total_steps,
+        )?;
+
+        let frame = render_frame_timed(
+            &mut prepared.executor,
+            &prepared.root_text_rope,
+            renderer,
+            timestamp,
+            settings.render_size,
+            timing.as_mut(),
+        )
+        .await?;
+        check_cancelled(cancel_flag)?;
+
+        sink.push(EncodeJob::Frame {
+            frame,
+            timestamp,
+            force_intra: index > 0 && previous_slide != Some(timestamp.slide),
+        })?;
+        previous_slide = Some(timestamp.slide);
+        *completed += 1;
+    }
+
+    emit_progress_checked(
+        cancel_flag,
+        on_progress,
+        video_finalize_progress_message(progress_label),
+        *completed,
+        total_steps,
+    )?;
+
+    let encode_time = sink.finish()?;
+    *completed += 1;
+    if let Some(mut timing) = timing {
+        timing.encode = encode_time;
+        timing.report(frame_targets.len());
+    }
+
+    Ok(frame_targets.len())
+}
+
+/// frames queued for the encoder; each holds a whole rendered image
+const ENCODE_QUEUE: usize = 3;
+
+enum EncodeJob {
+    Frame {
+        frame: RgbaImage,
+        timestamp: Timestamp,
+        force_intra: bool,
+    },
+    Finish,
+}
+
+/// encodes and writes frames on its own thread while the next frames evaluate and render. a
+/// sink dropped before `finish` leaves no file behind
+struct VideoSink {
+    jobs: Option<std::sync::mpsc::SyncSender<EncodeJob>>,
+    worker: Option<std::thread::JoinHandle<Result<std::time::Duration>>>,
+}
+
+impl VideoSink {
+    fn spawn(output_path: PathBuf, settings: ExportSettings) -> Self {
+        let (jobs, queue) = std::sync::mpsc::sync_channel(ENCODE_QUEUE);
+        let worker = std::thread::Builder::new()
+            .name("monocurl-encode".into())
+            .spawn(move || encode_frames(queue, &output_path, settings))
+            .expect("failed to spawn the video encoder thread");
+        Self {
+            jobs: Some(jobs),
+            worker: Some(worker),
+        }
+    }
+
+    fn push(&mut self, job: EncodeJob) -> Result<()> {
+        let sent = self
+            .jobs
+            .as_ref()
+            .is_some_and(|jobs| jobs.send(job).is_ok());
+        if sent {
+            Ok(())
+        } else {
+            // the worker only hangs up after an error, which joining reports
+            self.join()
+                .and_then(|_| bail!("video encoder stopped early"))
+        }
+    }
+
+    fn finish(mut self) -> Result<std::time::Duration> {
+        self.push(EncodeJob::Finish)?;
+        self.join()
+    }
+
+    fn join(&mut self) -> Result<std::time::Duration> {
+        self.jobs = None;
+        match self.worker.take() {
+            Some(worker) => worker
+                .join()
+                .unwrap_or_else(|_| Err(anyhow!("video encoder thread panicked"))),
+            None => bail!("video encoder already finished"),
+        }
+    }
+}
+
+impl Drop for VideoSink {
+    fn drop(&mut self) {
+        if self.worker.is_some() {
+            let _ = self.join();
+        }
+    }
+}
+
+/// the encoder thread: frames in order until `Finish`; a queue that closes before it means the
+/// export stopped. returns the time spent encoding
+fn encode_frames(
+    jobs: std::sync::mpsc::Receiver<EncodeJob>,
+    output_path: &Path,
+    settings: ExportSettings,
+) -> Result<std::time::Duration> {
     let video_size = settings.render_size;
     let mp4_timescale = settings
         .fps
@@ -865,31 +993,23 @@ async fn write_video_file(
     let mut cleanup = PartialOutputCleanup::new(temp_path.clone());
     let mut writer = None;
     let mut sample_start_time = 0_u64;
-    let mut previous_slide = None;
+    let mut encode_time = std::time::Duration::ZERO;
 
-    for (index, timestamp) in frame_targets.iter().copied().enumerate() {
-        emit_progress_checked(
-            cancel_flag,
-            on_progress,
-            video_frame_progress_message(progress_label, index, frame_targets.len()),
-            *completed,
-            total_steps,
-        )?;
-
-        if index > 0 && previous_slide != Some(timestamp.slide) {
+    for index in 0_usize.. {
+        let (frame, timestamp, force_intra) = match jobs.recv() {
+            Ok(EncodeJob::Frame {
+                frame,
+                timestamp,
+                force_intra,
+            }) => (frame, timestamp, force_intra),
+            Ok(EncodeJob::Finish) => break,
+            Err(_) => bail!(EXPORT_CANCELLED_MESSAGE),
+        };
+        if force_intra {
             encoder.force_intra_frame();
         }
 
-        let frame = render_frame(
-            &mut prepared.executor,
-            &prepared.root_text_rope,
-            renderer,
-            timestamp,
-            video_size,
-        )
-        .await?;
-        check_cancelled(cancel_flag)?;
-
+        let started = std::time::Instant::now();
         let encoded = encode_video_sample(&frame, video_size, &mut encoder, &mut parameter_sets)
             .with_context(|| {
                 format!(
@@ -897,14 +1017,13 @@ async fn write_video_file(
                     timestamp.slide, timestamp.time, video_size.width, video_size.height
                 )
             })?;
-        check_cancelled(cancel_flag)?;
+        encode_time += started.elapsed();
 
         if writer.is_none() {
             ensure!(
                 parameter_sets.ready(),
                 "encoder did not emit SPS/PPS parameter sets for the initial video sample"
             );
-            check_cancelled(cancel_flag)?;
             let file = File::create(&temp_path).with_context(|| {
                 format!("failed to create video export {}", temp_path.display())
             })?;
@@ -931,20 +1050,8 @@ async fn write_video_file(
                 },
             )
             .with_context(|| format!("failed to write mp4 sample {}", index + 1))?;
-        check_cancelled(cancel_flag)?;
-
         sample_start_time += u64::from(MP4_FRAME_DURATION);
-        previous_slide = Some(timestamp.slide);
-        *completed += 1;
     }
-
-    emit_progress_checked(
-        cancel_flag,
-        on_progress,
-        video_finalize_progress_message(progress_label),
-        *completed,
-        total_steps,
-    )?;
 
     writer
         .as_mut()
@@ -970,9 +1077,7 @@ async fn write_video_file(
         )
     })?;
     cleanup.keep();
-    *completed += 1;
-
-    Ok(frame_targets.len())
+    Ok(encode_time)
 }
 
 fn new_video_encoder(settings: ExportSettings) -> Result<Encoder> {
@@ -1233,6 +1338,31 @@ mod tests {
     }
 }
 
+/// per-phase wall time of a video export, printed to stderr when `MONOCURL_EXPORT_TIMING` is
+/// set. encoding overlaps the other two, on its own thread
+#[derive(Default)]
+struct PhaseTiming {
+    eval: std::time::Duration,
+    render: std::time::Duration,
+    encode: std::time::Duration,
+}
+
+impl PhaseTiming {
+    fn from_env() -> Option<Self> {
+        std::env::var_os("MONOCURL_EXPORT_TIMING").map(|_| Self::default())
+    }
+
+    fn report(&self, frames: usize) {
+        let per_frame = |d: std::time::Duration| d.as_secs_f64() * 1e3 / frames.max(1) as f64;
+        eprintln!(
+            "export timing ms/frame over {frames} frames: eval {:.1} render {:.1} encode {:.1}",
+            per_frame(self.eval),
+            per_frame(self.render),
+            per_frame(self.encode),
+        );
+    }
+}
+
 async fn render_frame(
     executor: &mut Executor,
     root_text_rope: &Rope<TextAggregate>,
@@ -1240,16 +1370,42 @@ async fn render_frame(
     user_timestamp: Timestamp,
     render_size: RenderSize,
 ) -> Result<RgbaImage> {
+    render_frame_timed(
+        executor,
+        root_text_rope,
+        renderer,
+        user_timestamp,
+        render_size,
+        None,
+    )
+    .await
+}
+
+async fn render_frame_timed(
+    executor: &mut Executor,
+    root_text_rope: &Rope<TextAggregate>,
+    renderer: &mut Renderer,
+    user_timestamp: Timestamp,
+    render_size: RenderSize,
+    timing: Option<&mut PhaseTiming>,
+) -> Result<RgbaImage> {
+    let started = std::time::Instant::now();
     let scene =
         evaluate_frame(executor, root_text_rope, user_timestamp, FrameSeek::from_env()).await?;
-    renderer
+    let evaluated = std::time::Instant::now();
+    let image = renderer
         .render(&SceneRenderData::from(scene), render_size)
         .with_context(|| {
             format!(
                 "failed to render frame at slide {} time {:.3}",
                 user_timestamp.slide, user_timestamp.time
             )
-        })
+        })?;
+    if let Some(timing) = timing {
+        timing.eval += evaluated - started;
+        timing.render += evaluated.elapsed();
+    }
+    Ok(image)
 }
 
 /// how a frame reaches its timestamp
