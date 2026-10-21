@@ -310,6 +310,27 @@ const INTRINSICS: [KernelIntrinsic; 29] = {
     ]
 };
 
+/// the float function an intrinsic applies to its one argument, read as a float
+fn unary_float(intrinsic: KernelIntrinsic) -> Option<fn(f64) -> f64> {
+    use KernelIntrinsic::*;
+    Some(match intrinsic {
+        Sqrt => f64::sqrt,
+        Cbrt => f64::cbrt,
+        Exp => f64::exp,
+        Ln => f64::ln,
+        Sin => f64::sin,
+        Cos => f64::cos,
+        Tan => f64::tan,
+        Asin => f64::asin,
+        Acos => f64::acos,
+        Atan => f64::atan,
+        Sinh => f64::sinh,
+        Cosh => f64::cosh,
+        Tanh => f64::tanh,
+        _ => return None,
+    })
+}
+
 fn intrinsic_code(intrinsic: KernelIntrinsic) -> Option<u64> {
     INTRINSICS
         .iter()
@@ -539,6 +560,8 @@ fn class_code(class: Class) -> u64 {
         Class::Int => 1,
         Class::Float => 2,
         Class::Boxed => 3,
+        // `shape` declines specs with vectors before this
+        Class::Vec(_) | Class::Rows(_) | Class::Nums(_) => 4,
     }
 }
 
@@ -547,7 +570,7 @@ fn ret_code(class: Class) -> Option<u64> {
         Class::Int => Some(1),
         Class::Float => Some(2),
         Class::Boxed => Some(3),
-        Class::Unset | Class::Closure(_) => None,
+        Class::Unset | Class::Closure(_) | Class::Vec(_) | Class::Rows(_) | Class::Nums(_) => None,
     }
 }
 
@@ -565,6 +588,9 @@ fn opnd_code(opnd: Opnd) -> Option<u64> {
 /// literals, and fold into the instructions using them); float constants are
 /// read from the frame, so a changed literal or captured time reuses the code
 fn shape(spec: &Spec) -> Result<Shape, &'static str> {
+    if spec.vectors {
+        return Err("unboxed vectors");
+    }
     let mut key = Vec::with_capacity(spec.ops.len() * 4 + spec.entry.len() + 2);
     let mut consts = Vec::new();
     key.push(spec.frame_size as u64);
@@ -579,6 +605,22 @@ fn shape(spec: &Spec) -> Result<Shape, &'static str> {
     }
     for op in spec.ops.iter() {
         match *op {
+            TOp::VMove { .. }
+            | TOp::VPush { .. }
+            | TOp::VIndex { .. }
+            | TOp::NIndex { .. }
+            | TOp::VIndexB { .. }
+            | TOp::VRow { .. }
+            | TOp::VBin { .. }
+            | TOp::VScale { .. }
+            | TOp::VNeg { .. }
+            | TOp::VDot { .. }
+            | TOp::VCross { .. }
+            | TOp::VLerp { .. }
+            | TOp::FLerp { .. }
+            | TOp::BoxV { .. }
+            | TOp::UnboxV { .. }
+            | TOp::ReturnV { .. } => return Err("unboxed vectors"),
             TOp::Nop => enc!(0),
             TOp::IConst { dst, value } => enc!(1, dst, value),
             TOp::FConst { dst, value } => {
@@ -1068,7 +1110,7 @@ fn analyse(spec: &Spec) -> Result<Facts, Decline> {
             Class::Int => *word = Word::Int,
             Class::Float => *word = Word::Float,
             Class::Boxed => *boxed = Boxed::Input,
-            Class::Unset | Class::Closure(_) => {}
+            Class::Unset | Class::Closure(_) | Class::Vec(_) | Class::Rows(_) | Class::Nums(_) => {}
         }
     }
     let lists: Vec<usize> = (0..ops.len())
@@ -1994,6 +2036,22 @@ impl Codegen<'_> {
                     intrinsic,
                     dst,
                     args,
+                    arity: 1,
+                    ret: Class::Float,
+                } if unary_float(intrinsic).is_some() => {
+                    // a float function of a number of either kind: `run::native`
+                    // reads it as a float, so the shim round trip is not needed
+                    let f = unary_float(intrinsic).unwrap();
+                    let x = regs.operand(b, args[0])?;
+                    let x = promoted(b, x);
+                    let f = b.ins().iconst(self.ptr, f as usize as i64);
+                    let value = self.pure(b, Shim::Unary, &[f, x]);
+                    regs.set_float(b, dst, value)
+                }
+                TOp::DynNative {
+                    intrinsic,
+                    dst,
+                    args,
                     arity,
                     ret,
                 } => {
@@ -2018,7 +2076,13 @@ impl Codegen<'_> {
                         }
                         Class::Int => Some(KIND_INT),
                         Class::Float => Some(KIND_FLOAT),
-                        Class::Unset | Class::Closure(_) => return None,
+                        Class::Unset
+                        | Class::Closure(_)
+                        | Class::Vec(_)
+                        | Class::Rows(_)
+                        | Class::Nums(_) => {
+                            return None;
+                        }
                     };
                     if let Some(expected) = expected {
                         // the typed machine's `store` into a scalar register

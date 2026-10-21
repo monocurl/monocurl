@@ -572,10 +572,33 @@ impl Executor {
         let jit = typed
             .as_deref()
             .and_then(|(program, spec)| tier.jit.prepare(program.spec(*spec), &mut tier.stats));
+        // without native code, short lists of numbers (points, colours) are kept unboxed: the
+        // typed machine then runs list arithmetic without allocating, which beats the lanes
+        let vectors = (tier.typed && tier.vectors && jit.is_none() && call_count > 0)
+            .then(|| TypedProgram::specialise_vectors(&arena, entry, &batch.call(0)))
+            .flatten()
+            .filter(|(program, _)| program.uses_vectors());
+        if super::tier::dump_kernels()
+            && let Some((program, _)) = &vectors
+        {
+            for (id, spec) in program.specs.iter().enumerate() {
+                eprintln!("vector spec {id} of closure {:?} -> {:?}", spec.closure, spec.ret);
+                for (index, op) in spec.ops.iter().enumerate() {
+                    eprintln!("{index:6}  {op:?}");
+                }
+            }
+        }
+        let (typed, lanes) = match vectors {
+            Some(vectors) => {
+                tier.stats.vector_batches += 1;
+                (Some(Arc::new(vectors)), false)
+            }
+            None => (typed, tier.lanes),
+        };
         let plan = Plan {
             typed,
             jit,
-            lanes: tier.lanes,
+            lanes,
             verify: tier.mode == KernelMode::Verify,
             flat,
         };

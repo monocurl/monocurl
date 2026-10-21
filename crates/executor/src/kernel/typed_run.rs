@@ -13,13 +13,15 @@ use smallvec::SmallVec;
 use super::{
     ir::BinKind,
     run::{self, ABORT_CHECK_MASK, CALL_OP_BUDGET, Fault, MAX_DEPTH},
-    typed::{Class, Opnd, Spec, SpecId, TOp, TypedProgram},
+    typed::{Class, Kind, Opnd, Shape, Spec, SpecId, TOp, TypedProgram, VEC_MAX},
+    input::Num,
     value::{ClosureArena, KVal},
 };
 
 pub struct TVm {
     words: Vec<u64>,
     boxed: Vec<KVal>,
+    vecs: Vec<Lanes>,
     depth: u32,
     budget: u64,
     abort: Option<Arc<AtomicBool>>,
@@ -39,6 +41,7 @@ impl TVm {
         Self {
             words: Vec::with_capacity(256),
             boxed: Vec::with_capacity(256),
+            vecs: Vec::with_capacity(256),
             depth: 0,
             budget: CALL_OP_BUDGET,
             abort: None,
@@ -77,8 +80,10 @@ impl TVm {
         if self.warm_entry != Some(spec_id) {
             self.words.clear();
             self.boxed.clear();
+            self.vecs.clear();
             self.words.resize(frame, 0);
             self.boxed.resize(frame, KVal::Nil);
+            self.vecs.resize(frame, Lanes::default());
             let closure = arena.get(spec.closure);
             let total = spec.sig.len();
             for (i, capture) in closure.captures.iter().enumerate() {
@@ -93,6 +98,7 @@ impl TVm {
         } else {
             self.words.truncate(frame);
             self.boxed.truncate(frame);
+            self.vecs.truncate(frame);
         }
         for (i, (arg, class)) in args.iter().zip(&spec.sig).enumerate() {
             self.store(0, i as u16, *class, arg.clone())?;
@@ -122,7 +128,8 @@ impl TVm {
             (Class::Int, KVal::Int(n)) => self.words[slot] = n as u64,
             (Class::Float, KVal::Float(f)) => self.words[slot] = f.to_bits(),
             (Class::Closure(_), KVal::Closure(_)) => {}
-            (Class::Boxed, value) => self.boxed[slot] = value,
+            (Class::Boxed | Class::Rows(_) | Class::Nums(_), value) => self.boxed[slot] = value,
+            (Class::Vec(shape), KVal::List(list)) => self.vecs[slot] = Lanes::unbox(shape, &list)?,
             _ => return Err(Fault::Type),
         }
         Ok(())
@@ -155,13 +162,15 @@ impl TVm {
         let frame = spec.frame_size as usize;
         self.words.resize(base + frame, 0);
         self.boxed.resize(base + frame, KVal::Nil);
+        self.vecs.resize(base + frame, Lanes::default());
         for i in 0..provided {
             match spec.sig[i] {
                 Class::Int | Class::Float => self.words[base + i] = self.words[caller_args + i],
-                Class::Boxed => {
+                Class::Boxed | Class::Rows(_) | Class::Nums(_) => {
                     self.boxed[base + i] =
                         std::mem::replace(&mut self.boxed[caller_args + i], KVal::Nil)
                 }
+                Class::Vec(_) => self.vecs[base + i] = self.vecs[caller_args + i],
                 Class::Closure(_) | Class::Unset => {}
             }
         }
@@ -183,6 +192,7 @@ impl TVm {
         self.depth -= 1;
         self.words.truncate(base);
         self.boxed.truncate(base);
+        self.vecs.truncate(base);
         result
     }
 
@@ -221,6 +231,11 @@ impl TVm {
         macro_rules! boxed {
             ($r:expr) => {
                 self.boxed[base + $r as usize]
+            };
+        }
+        macro_rules! vec {
+            ($r:expr) => {
+                self.vecs[base + $r as usize]
             };
         }
 
@@ -509,7 +524,254 @@ impl TVm {
                     boxed!(dst) = value;
                 }
                 TOp::Return { src } => return Ok(self.load(base, src)),
+                TOp::VMove { dst, src } => vec!(dst) = vec!(src),
+                TOp::VPush {
+                    list,
+                    value,
+                    at,
+                    int,
+                } => {
+                    let word = self.words[base + value as usize];
+                    let lanes = &mut vec!(list);
+                    lanes.words[at as usize] = word;
+                    lanes.set_int(at as usize, int);
+                }
+                TOp::VIndex {
+                    dst,
+                    list,
+                    index,
+                    len,
+                } => {
+                    let index = i!(index) as usize;
+                    if index >= len as usize {
+                        return Err(Fault::Index);
+                    }
+                    self.words[base + dst as usize] = vec!(list).words[index];
+                }
+                TOp::VIndexB {
+                    dst,
+                    list,
+                    index,
+                    len,
+                } => {
+                    let index = i!(index) as usize;
+                    if index >= len as usize {
+                        return Err(Fault::Index);
+                    }
+                    let value = vec!(list).get(index);
+                    boxed!(dst) = value;
+                }
+                TOp::NIndex { dst, list, index } => {
+                    let KVal::List(numbers) = &boxed!(list) else {
+                        return Err(Fault::Type);
+                    };
+                    let word = match numbers.get(i!(index) as usize).ok_or(Fault::Index)? {
+                        KVal::Int(n) => *n as u64,
+                        KVal::Float(f) => f.to_bits(),
+                        _ => return Err(Fault::Type),
+                    };
+                    self.words[base + dst as usize] = word;
+                }
+                TOp::VRow {
+                    dst,
+                    list,
+                    index,
+                    shape,
+                } => {
+                    let index = i!(index) as usize;
+                    let row = match &boxed!(list) {
+                        KVal::List(rows) => match rows.get(index).ok_or(Fault::Index)? {
+                            KVal::List(row) => Lanes::unbox(shape, row)?,
+                            _ => return Err(Fault::Type),
+                        },
+                        _ => return Err(Fault::Type),
+                    };
+                    vec!(dst) = row;
+                }
+                TOp::VBin {
+                    op,
+                    dst,
+                    a,
+                    b,
+                    len,
+                } => {
+                    let (x, y) = (vec!(a), vec!(b));
+                    let mut out = Lanes::default();
+                    for i in 0..len as usize {
+                        out.set(i, run::binary_numbers(op, x.get_num(i), y.get_num(i))?);
+                    }
+                    vec!(dst) = out;
+                }
+                TOp::VScale {
+                    op,
+                    dst,
+                    v,
+                    s,
+                    len,
+                    vec_left,
+                } => {
+                    let scalar = match s {
+                        Opnd::I(reg) => Num::Int(self.words[base + reg as usize] as i64),
+                        Opnd::F(reg) => Num::Float(f64::from_bits(self.words[base + reg as usize])),
+                        Opnd::B(reg) => match boxed!(reg) {
+                            KVal::Int(n) => Num::Int(n),
+                            KVal::Float(f) => Num::Float(f),
+                            _ => return Err(Fault::Type),
+                        },
+                        Opnd::C(_) => return Err(Fault::Type),
+                    };
+                    let x = vec!(v);
+                    let mut out = Lanes::default();
+                    for i in 0..len as usize {
+                        let element = x.get_num(i);
+                        out.set(
+                            i,
+                            if vec_left {
+                                run::binary_numbers(op, element, scalar)?
+                            } else {
+                                run::binary_numbers(op, scalar, element)?
+                            },
+                        );
+                    }
+                    vec!(dst) = out;
+                }
+                TOp::VNeg { dst, src, len } => {
+                    let x = vec!(src);
+                    let mut out = Lanes::default();
+                    for i in 0..len as usize {
+                        out.set(
+                            i,
+                            match x.get_num(i) {
+                                Num::Int(n) => Num::Int(n.wrapping_neg()),
+                                Num::Float(f) => Num::Float(-f),
+                            },
+                        );
+                    }
+                    vec!(dst) = out;
+                }
+                TOp::VDot { dst, a, b, len } => {
+                    let (x, y) = (vec!(a), vec!(b));
+                    let mut sum = 0.0;
+                    for i in 0..len as usize {
+                        sum += x.float(i) * y.float(i);
+                    }
+                    set_f!(dst, sum);
+                }
+                TOp::VCross { dst, a, b } => {
+                    let (x, y) = (vec!(a), vec!(b));
+                    let u = [0, 1, 2].map(|i| x.float(i));
+                    let v = [0, 1, 2].map(|i| y.float(i));
+                    let mut out = Lanes::default();
+                    out.set(0, Num::Float(u[1] * v[2] - u[2] * v[1]));
+                    out.set(1, Num::Float(u[2] * v[0] - u[0] * v[2]));
+                    out.set(2, Num::Float(u[0] * v[1] - u[1] * v[0]));
+                    vec!(dst) = out;
+                }
+                TOp::VLerp { dst, a, b, t, len } => {
+                    let (x, y, t) = (vec!(a), vec!(b), f!(t));
+                    let mut out = Lanes::default();
+                    for i in 0..len as usize {
+                        out.set(i, Num::Float(lerp_float(x.float(i), y.float(i), t)));
+                    }
+                    vec!(dst) = out;
+                }
+                TOp::FLerp { dst, a, b, t } => set_f!(dst, lerp_float(f!(a), f!(b), f!(t))),
+                TOp::BoxV { dst, src, len } => {
+                    let value = vec!(src).boxed(len);
+                    boxed!(dst) = value;
+                }
+                TOp::UnboxV { reg, shape } => {
+                    let lanes = match &boxed!(reg) {
+                        KVal::List(list) => Lanes::unbox(shape, list)?,
+                        _ => return Err(Fault::Type),
+                    };
+                    vec!(reg) = lanes;
+                }
+                TOp::ReturnV { src, len } => return Ok(vec!(src).boxed(len)),
             }
         }
+    }
+}
+
+/// `run::lerp` of a float towards a number: equal values keep the first
+fn lerp_float(a: f64, b: f64, t: f64) -> f64 {
+    if a == b { a } else { (1.0 - t) * a + t * b }
+}
+
+/// one register's vector slot: elements as words, and which of them are ints
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Lanes {
+    words: [u64; VEC_MAX],
+    ints: u8,
+}
+
+impl Lanes {
+    fn set_int(&mut self, i: usize, int: bool) {
+        if int {
+            self.ints |= 1 << i;
+        } else {
+            self.ints &= !(1 << i);
+        }
+    }
+
+    fn set(&mut self, i: usize, value: Num) {
+        match value {
+            Num::Int(n) => {
+                self.words[i] = n as u64;
+                self.set_int(i, true);
+            }
+            Num::Float(f) => {
+                self.words[i] = f.to_bits();
+                self.set_int(i, false);
+            }
+        }
+    }
+
+    fn get_num(&self, i: usize) -> Num {
+        if self.ints & (1 << i) != 0 {
+            Num::Int(self.words[i] as i64)
+        } else {
+            Num::Float(f64::from_bits(self.words[i]))
+        }
+    }
+
+    /// as the dynamic machine reads a number into float arithmetic
+    fn float(&self, i: usize) -> f64 {
+        match self.get_num(i) {
+            Num::Int(n) => n as f64,
+            Num::Float(f) => f,
+        }
+    }
+
+    fn get(&self, i: usize) -> KVal {
+        match self.get_num(i) {
+            Num::Int(n) => KVal::Int(n),
+            Num::Float(f) => KVal::Float(f),
+        }
+    }
+
+    fn boxed(&self, len: u8) -> KVal {
+        KVal::List(Arc::new((0..len as usize).map(|i| self.get(i)).collect()))
+    }
+
+    /// a list of `shape`'s length; elements whose kind the shape knows must have it
+    fn unbox(shape: Shape, list: &[KVal]) -> Result<Self, Fault> {
+        if list.len() != shape.len as usize {
+            return Err(Fault::Type);
+        }
+        let mut lanes = Lanes::default();
+        for (i, element) in list.iter().enumerate() {
+            let value = match element {
+                KVal::Int(n) => Num::Int(*n),
+                KVal::Float(f) => Num::Float(*f),
+                _ => return Err(Fault::Type),
+            };
+            match (shape.kind(i), value) {
+                (Kind::Num, _) | (Kind::Int, Num::Int(_)) | (Kind::Float, Num::Float(_)) => {}
+                _ => return Err(Fault::Type),
+            }
+            lanes.set(i, value);
+        }
+        Ok(lanes)
     }
 }

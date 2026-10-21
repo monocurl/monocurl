@@ -13,6 +13,7 @@ use std::sync::{
 use smallvec::SmallVec;
 
 use super::{
+    input::Num,
     ir::{BinKind, KOp, KernelIntrinsic},
     value::{ClosureArena, ClosureId, KClosure, KList, KPalette, KVal},
 };
@@ -486,6 +487,21 @@ pub fn binary(arena: &ClosureArena, op: BinKind, a: &KVal, b: &KVal) -> Result<K
                 .collect::<Result<KList, _>>()?;
             Ok(KVal::List(Arc::new(applied)))
         }
+        _ => Err(Fault::Type),
+    }
+}
+
+/// `binary` on two numbers, for unboxed lists: an op with a non-number result faults
+pub(super) fn binary_numbers(op: BinKind, a: Num, b: Num) -> Result<Num, Fault> {
+    let value = match (a, b) {
+        (Num::Int(x), Num::Int(y)) => int_binary(op, x, y)?,
+        (Num::Int(x), Num::Float(y)) => float_binary(op, x as f64, y)?,
+        (Num::Float(x), Num::Int(y)) => float_binary(op, x, y as f64)?,
+        (Num::Float(x), Num::Float(y)) => float_binary(op, x, y)?,
+    };
+    match value {
+        KVal::Int(n) => Ok(Num::Int(n)),
+        KVal::Float(f) => Ok(Num::Float(f)),
         _ => Err(Fault::Type),
     }
 }

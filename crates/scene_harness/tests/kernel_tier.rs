@@ -28,6 +28,7 @@ struct Outcome {
     single_calls: usize,
     typed_calls: usize,
     jit_calls: usize,
+    vector_batches: usize,
     regions: usize,
     faults: usize,
 }
@@ -49,6 +50,7 @@ fn run(body: &str, mode: KernelMode) -> Outcome {
         single_calls: run.kernel_stats.single_calls,
         typed_calls: run.kernel_stats.typed_calls,
         jit_calls: run.kernel_stats.jit_calls,
+        vector_batches: run.kernel_stats.vector_batches,
         regions: run.kernel_stats.regions,
         faults: run.kernel_stats.faults,
     }
@@ -979,5 +981,115 @@ fn long_list_arguments_convert_once_per_batch() {
         run(body, KernelMode::On).single_calls,
         run(&without, KernelMode::On).single_calls,
         "a call with a long list argument ran as a kernel"
+    );
+}
+
+/// shading code: list arithmetic on points and colours, `dot`, `cross`, `lerp` and rows of a
+/// captured table. without native code the typed machine keeps the short lists unboxed
+const SHADING: &str = "
+    let N = map(range(0, 40), |i| [cos(i * 0.3), sin(i * 0.3), 0.5])
+    let K = [0.9, 0.4, 0.2]
+    let KEY = [0.3, 0.5, 0.8]
+    let unit3 = |d| d * (1 / sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]))
+    let shade = |k, nv, v| {
+        var n = nv
+        if (dot(nv, v) < 0) { n = nv * -1 }
+        let w = 0.5 + 0.5 * dot(n, unit3(KEY))
+        let kk = [k[0], k[1], k[2]]
+        let c = lerp(kk * 0.7, lerp(kk, [1, 1, 1], 0.14), w * w)
+        let h = max(0, dot(n, unit3(KEY + v)))
+        return c + ([1, 1, 1] - c) * (0.1 * h ^ 10)
+    }
+    let colour = |x, y, z| {
+        let gi = mod(to_int(round(x)), 40)
+        let nv = unit3(N[gi] + cross(N[gi], [0, 0, 1]) * y)
+        let c = shade(K, nv, [0, 0, 1])
+        if (z > 0.5) { return [c[0], c[1], c[2], 1] }
+        return [lerp(0.95, c[0], 0.5), lerp(0.94, c[1], 1), c[2] / 2, 1]
+    }
+";
+
+fn vector_scene(tail: &str) -> String {
+    format!("{SHADING}\n{tail}")
+}
+
+#[test]
+fn shading_with_points_and_colours_runs_unboxed() {
+    let body = vector_scene(
+        "
+        mesh surface = ExplicitFunc2d(|x, y| 0.4 * sin(x) * y, [0, 39, 40], [-1, 1, 12], colour)
+        print surface
+        ",
+    );
+    check(&body, Expect::Kernels);
+    let on = run(&body, KernelMode::On);
+    assert!(on.vector_batches > 0, "no batch kept its vectors unboxed");
+}
+
+#[test]
+fn unboxed_lists_keep_int_and_float_elements_apart() {
+    check(
+        "
+        let P = [[1, 2, 3], [4, 5, 6]]
+        let f = |x, y| {
+            let row = P[mod(to_int(x), 2)]
+            let a = row + [1, 1, 1]
+            let b = row * 2
+            let c = row / 2
+            let d = 3 * row
+            let e = [1, 2.5, 3] - row
+            let g = -row
+            return [a[0] + b[1] + d[2] + g[0], c[0], e[1] + len(row), dot(row, row)]
+        }
+        mesh m = ExplicitFunc2d(|x, y| 0, [0, 5, 6], [0, 1, 2], |x, y, z| f(x, y))
+        print m
+        print f(1, 0)
+        ",
+        Expect::Kernels,
+    );
+}
+
+#[test]
+fn unboxed_lists_fault_like_boxed_ones() {
+    for (name, expr) in [
+        ("length mismatch", "[1.0, 2.0] + [x, y, z]"),
+        ("division by zero", "[x, y, z] / (x - x)"),
+        ("index past the end", "[x, y, z][3]"),
+        ("negative index", "[x, y, z][-1]"),
+        ("int division by zero", "[1, 2, 3] / 0"),
+        ("lerp of different lengths", "lerp([x, y], [x, y, z], 0.5)"),
+    ] {
+        let body = format!(
+            "
+            mesh m = ExplicitFunc2d(|x, y| 0, [0, 1, 3], [0, 1, 3], |x, y, z| {{
+                let v = {expr}
+                return [0.5, 0.5, 0.5, 1]
+            }})
+            print m
+            "
+        );
+        println!("{name}");
+        check(&body, Expect::Any);
+    }
+}
+
+#[test]
+fn lists_that_outgrow_a_vector_or_change_shape_are_boxed() {
+    check(
+        "
+        let f = |x, y, z| {
+            var l = []
+            for (i in range(0, 6)) { l .= i * x }
+            var c = [x, y, z]
+            if (x > 0.5) { c = [1, 2] }
+            var p = [x, y]
+            if (y > 0.5) { p = [y, x] }
+            let same = [x, y] == [x, y]
+            return [l[5] + len(c) + p[0] + same, 0, 0, 1]
+        }
+        mesh m = ExplicitFunc2d(|x, y| 0, [0, 1, 4], [0, 1, 4], f)
+        print m
+        ",
+        Expect::Kernels,
     );
 }
