@@ -417,6 +417,18 @@ fn unary_float(intrinsic: KernelIntrinsic) -> Option<fn(f64) -> f64> {
     })
 }
 
+/// the float function an intrinsic rounds with before taking the int
+fn rounding(intrinsic: KernelIntrinsic) -> Option<fn(f64) -> f64> {
+    use KernelIntrinsic::*;
+    Some(match intrinsic {
+        Floor => f64::floor,
+        Ceil => f64::ceil,
+        Round => f64::round,
+        Trunc => f64::trunc,
+        _ => return None,
+    })
+}
+
 fn intrinsic_code(intrinsic: KernelIntrinsic) -> Option<u64> {
     INTRINSICS
         .iter()
@@ -2578,6 +2590,68 @@ impl Codegen<'_> {
                     regs.set_float(b, dst, value)
                 }
                 TOp::DynNative {
+                    intrinsic,
+                    dst,
+                    args,
+                    arity: 1,
+                    ret: Class::Int,
+                } if rounding(intrinsic).is_some() => set_int!(dst, {
+                    // `run::native`'s `f(x as f64) as i64`, as `FToI` does it
+                    let f = rounding(intrinsic).unwrap();
+                    let x = regs.operand(b, args[0])?;
+                    let x = promoted(b, x);
+                    let f = b.ins().iconst(self.ptr, f as usize as i64);
+                    let y = pure!(Shim::Unary, [f, x]);
+                    b.ins().fcvt_to_sint_sat(types::I64, y)
+                }),
+                TOp::DynNative {
+                    intrinsic: intrinsic @ (KernelIntrinsic::Min | KernelIntrinsic::Max),
+                    dst,
+                    args,
+                    arity: 2,
+                    ret,
+                } => {
+                    // `run::native` on a number pair: two ints stay ints,
+                    // anything else compares as floats
+                    let max = intrinsic == KernelIntrinsic::Max;
+                    let (x, y) = (regs.operand(b, args[0])?, regs.operand(b, args[1])?);
+                    let ints = |b: &mut FunctionBuilder| {
+                        let cc = if max {
+                            IntCC::SignedGreaterThanOrEqual
+                        } else {
+                            IntCC::SignedLessThanOrEqual
+                        };
+                        let keep = b.ins().icmp(cc, x.0, y.0);
+                        b.ins().select(keep, x.0, y.0)
+                    };
+                    let floats = |b: &mut FunctionBuilder| {
+                        let (fx, fy) = (promoted(b, x), promoted(b, y));
+                        let shim = if max { Shim::FloatMax } else { Shim::FloatMin };
+                        let value = self.pure(b, shim, &[fx, fy]);
+                        bits(b, value)
+                    };
+                    let (value, kind) = match both_ints(b, x.1, y.1) {
+                        Cond::Known(true) => (ints(b), Kind::Int),
+                        Cond::Known(false) => (floats(b), Kind::Float),
+                        Cond::Flag(both) => {
+                            let (int, float) = (ints(b), floats(b));
+                            let value = b.ins().select(both, int, float);
+                            let int_kind = b.ins().iconst(types::I64, KIND_INT);
+                            let float_kind = b.ins().iconst(types::I64, KIND_FLOAT);
+                            (value, Kind::Dyn(b.ins().select(both, int_kind, float_kind)))
+                        }
+                    };
+                    match (ret, kind) {
+                        (Class::Boxed, _) => regs.set_num(b, dst, (value, kind)),
+                        (Class::Int, Kind::Int) => regs.set_int(b, dst, value),
+                        (Class::Float, Kind::Float) => {
+                            let value = from_bits(b, value);
+                            regs.set_float(b, dst, value)
+                        }
+                        _ => return None,
+                    }
+                }
+                TOp::DynNative {
                     intrinsic: KernelIntrinsic::Lerp,
                     dst,
                     args: [a, to, t],
@@ -4016,6 +4090,65 @@ mod tests {
         assert!(spec.ops.iter().any(|op| matches!(op, TOp::VScale { .. })));
         jit.agree(samples(12, 300).map(|(_, x)| vec![KVal::Float(x)]));
         jit.agree([0.0, -0.0, 1.0, 2.0].map(|x| vec![KVal::Float(x)]));
+    }
+
+    #[test]
+    fn rounding_min_and_max_of_boxed_numbers_match_the_typed_machine() {
+        // v = x > 0 ? 2 : 0.75 (boxed at the merge), then
+        // max(round(v * x), min(v, 1))
+        let native = |intrinsic, arg_start, arg_count| KOp::Native {
+            intrinsic,
+            arg_start,
+            arg_count,
+        };
+        let ops = vec![
+            KOp::Int { dst: 1, value: 2 },
+            KOp::Float { dst: 2, value: 0.0 },
+            KOp::Bin {
+                op: BinKind::Gt,
+                dst: 2,
+                a: 0,
+                b: 2,
+                take: false,
+            },
+            KOp::JumpIfNot { cond: 2, to: 5 },
+            KOp::Float {
+                dst: 1,
+                value: 0.75,
+            },
+            KOp::Bin {
+                op: BinKind::Mul,
+                dst: 3,
+                a: 1,
+                b: 0,
+                take: false,
+            },
+            native(KernelIntrinsic::Round, 3, 1),
+            KOp::Move { dst: 4, src: 1 },
+            KOp::Int { dst: 5, value: 1 },
+            native(KernelIntrinsic::Min, 4, 2),
+            KOp::Move { dst: 6, src: 3 },
+            KOp::Move { dst: 7, src: 4 },
+            native(KernelIntrinsic::Max, 6, 2),
+            KOp::Return { src: 6 },
+        ];
+        let jit = compiled(1, 8, ops, &[KVal::Float(1.5)]);
+        let spec = jit.program.spec(jit.spec);
+        for wanted in [
+            KernelIntrinsic::Round,
+            KernelIntrinsic::Min,
+            KernelIntrinsic::Max,
+        ] {
+            assert!(
+                spec.ops.iter().any(|op| matches!(
+                    op,
+                    TOp::DynNative { intrinsic, .. } if *intrinsic == wanted
+                )),
+                "{wanted:?} is not dynamic"
+            );
+        }
+        jit.agree(samples(13, 300).map(|(_, x)| vec![KVal::Float(x)]));
+        jit.agree([0.0, -0.0, 0.5, -0.5, 1.0, f64::NAN, 1e300].map(|x| vec![KVal::Float(x)]));
     }
 
     #[test]
