@@ -90,7 +90,7 @@ fn run_export_command(
     }
 }
 
-/// one `index<TAB>frames<TAB>seconds<TAB>name` line per slide on stdout
+/// one `index<TAB>frames<TAB>seconds<TAB>digest<TAB>name` line per slide on stdout
 fn run_list_slides_command(command: VideoCommand) -> Result<()> {
     let scene_path = command.scene_path;
     let root_text = fs::read_to_string(&scene_path)
@@ -111,9 +111,10 @@ fn run_list_slides_command(command: VideoCommand) -> Result<()> {
     for (index, slide) in slides.iter().enumerate() {
         writeln!(
             stdout,
-            "{index}\t{}\t{}\t{}",
+            "{index}\t{}\t{}\t{:016x}\t{}",
             slide.frames,
             slide.duration,
+            slide.digest,
             slide.name.as_deref().unwrap_or_default()
         )?;
     }

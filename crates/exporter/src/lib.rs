@@ -40,6 +40,7 @@ use stdlib::registry::registry;
 use structs::rope::{Rope, TextAggregate};
 use yuv::I420Frame;
 
+mod slide_digest;
 mod yuv;
 
 pub const DEFAULT_EXPORT_SIZE: RenderSize = RenderSize::new(1920, 1080);
@@ -97,6 +98,9 @@ pub struct SlidePlan {
     pub name: Option<String>,
     pub duration: f64,
     pub frames: usize,
+    /// changes whenever anything the slide's frames depend on changes: its code,
+    /// every earlier section's, and the files they name
+    pub digest: u64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -405,14 +409,19 @@ pub fn plan_video_slides(
         )?;
         emit_progress_checked(&cancel_flag, &mut on_progress, "Evaluating timeline", 2, 3)?;
         let plan = prepare_video_render_plan(&mut prepared, settings).await?;
+        let sections = prepared.executor.sections();
+        let digests = slide_digest::cumulative_section_digests(sections);
+        let first_slide = sections.len() - prepared.executor.real_slide_count();
         let mut names = plan.slide_names.into_iter();
         Ok(plan
             .slide_durations
             .into_iter()
-            .map(|duration| SlidePlan {
+            .zip(&digests[first_slide..])
+            .map(|(duration, &digest)| SlidePlan {
                 name: names.next().flatten(),
                 duration,
                 frames: frame_count_for_duration(duration, settings.fps),
+                digest,
             })
             .collect())
     })
@@ -1304,6 +1313,44 @@ mod tests {
         assert_eq!(sanitize_file_stem("CON"), "_CON");
         assert_eq!(sanitize_file_stem("COM1"), "_COM1");
         assert_eq!(sanitize_file_stem("Hello\tWorld"), "Hello World");
+    }
+
+    #[test]
+    fn slide_digests_change_from_the_edited_slide_on() {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
+        // safety: tests that read the assets dir all set it to this same path
+        unsafe { std::env::set_var("MONOCURL_ASSETS_DIR", assets.canonicalize().unwrap()) };
+        let scene = |third: &str| {
+            format!(
+                "import std.util\nimport std.math\nimport std.color\nimport std.mesh\n\
+                 import std.anim\nimport std.scene\n\
+                 mesh dot = Circle(0.5)\n\
+                 slide \"one\"\n    play Lerp(1)\n\
+                 slide \"two\"\n    dot = Circle(1)\n    play Lerp(1)\n\
+                 slide \"three\"\n    dot = Circle({third})\n    play Lerp(1)\n\
+                 slide \"four\"\n    play Lerp(0.5)\n"
+            )
+        };
+        let plan = |text: &str| {
+            plan_video_slides(
+                text,
+                Path::new("digest_test.mcs"),
+                ExportSettings::default(),
+                Arc::new(AtomicBool::new(false)),
+                |_| {},
+            )
+            .unwrap()
+            .iter()
+            .map(|slide| slide.digest)
+            .collect::<Vec<_>>()
+        };
+        let before = plan(&scene("1.5"));
+        assert_eq!(before, plan(&scene("1.5")), "digests are not repeatable");
+        let after = plan(&scene("2.5"));
+        assert_eq!(before.len(), 4);
+        assert_eq!(before[..2], after[..2]);
+        assert_ne!(before[2], after[2]);
+        assert_ne!(before[3], after[3]);
     }
 
     #[test]
