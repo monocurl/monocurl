@@ -1092,7 +1092,7 @@ fn new_video_encoder(settings: ExportSettings) -> Result<Encoder> {
             .skip_frames(false)
             .rate_control_mode(RateControlMode::Quality)
             .complexity(Complexity::High)
-            .usage_type(UsageType::ScreenContentRealTime)
+            .usage_type(UsageType::CameraVideoRealTime)
             .adaptive_quantization(false)
             .background_detection(false)
             .max_frame_rate(FrameRate::from_hz(settings.fps as f32))
