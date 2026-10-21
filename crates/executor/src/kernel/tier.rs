@@ -105,6 +105,8 @@ pub struct KernelStats {
     pub jit_calls: usize,
     /// batches that ran on the typed machine with unboxed vectors
     pub vector_batches: usize,
+    /// of those, the batches whose vector program ran as native code
+    pub vector_jit_batches: usize,
     /// typed kernels compiled to native code, and the time that took
     pub jit_compiles: usize,
     pub jit_compile_elapsed: Duration,

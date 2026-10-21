@@ -24,6 +24,13 @@
 //! call the specialiser did not inline, is declined and stays with the typed
 //! and lane machines.
 //!
+//! a batch's vector program (short lists of numbers kept unboxed) compiles too:
+//! each element of a vector register is a word and a kind, the kind static
+//! where the analysis knows it, so point and colour arithmetic is straight-line
+//! float code. captured vectors, tables of rows and lists of numbers are copied
+//! once per batch into buffers the frame points to, and a vector that is boxed
+//! becomes a list at a site of its own.
+//!
 //! compiled code is cached by the spec's shape: its entry classes and ops with
 //! every float constant replaced by a slot of the frame. the code is a pure
 //! function of that key, so a bytecode change can never reuse stale code, and
@@ -55,7 +62,7 @@ use super::{
     output::FLAT_MAX,
     run::{self, CALL_OP_BUDGET, Fault, Keyframe},
     tier::dump_kernels,
-    typed::{Class, Opnd, Spec, TOp},
+    typed::{self, Class, Opnd, Scalar, Spec, TOp, VEC_MAX},
     value::{ClosureArena, KPalette, KVal, PaletteId},
 };
 
@@ -68,9 +75,9 @@ const CACHE_MAX: usize = 256;
 /// on the typed machine
 const LIST_CAP: usize = 16;
 
-/// lists a body may build: one per `EmptyList` or palette lookup, none of
-/// them in a loop
-const LIST_SITES: usize = 4;
+/// lists a body may build: one per `EmptyList`, boxed vector or palette
+/// lookup, none of them in a loop
+const LIST_SITES: usize = 8;
 
 /// elements an input list may have (a capture such as a shadow's sample table); a longer
 /// one reads as absent, and indexing it faults to the typed machine
@@ -115,6 +122,85 @@ impl Layout {
     fn input(&self, consts: usize, index: usize) -> usize {
         self.consts + consts + index * INPUT_WORDS
     }
+
+    /// the address and row count of table `index`, past a frame's `inputs`
+    fn table(&self, consts: usize, inputs: usize, index: usize) -> usize {
+        self.input(consts, inputs) + 2 * index
+    }
+}
+
+/// the entry registers holding unboxed vectors or tables of numbers, in the order
+/// their tables are laid out. a table is a buffer of rows of (word, kind) pairs
+/// filled once per batch: a vector is one row, a table of rows one row per element,
+/// a list of numbers one single-element row per number
+fn tables(spec: &Spec) -> impl Iterator<Item = (Reg, Class)> + '_ {
+    spec.entry
+        .iter()
+        .enumerate()
+        .filter(|(_, class)| matches!(class, Class::Vec(_) | Class::Rows(_) | Class::Nums(_)))
+        .map(|(reg, &class)| (reg as Reg, class))
+}
+
+/// the elements per row of a table of `class`
+fn row_len(class: Class) -> usize {
+    match class {
+        Class::Vec(shape) | Class::Rows(shape) => shape.len as usize,
+        _ => 1,
+    }
+}
+
+/// a table's rows as (word, kind) pairs, or `None` when `value` does not have the
+/// class it was specialised to
+fn table_words(class: Class, value: &KVal) -> Option<Box<[u64]>> {
+    let KVal::List(list) = value else {
+        return None;
+    };
+    // rows of nothing have no address to step by; the typed machine runs those
+    if row_len(class) == 0 {
+        return None;
+    }
+    let row = |row: &KVal, shape: typed::Shape| match row {
+        KVal::List(row) if row.len() == shape.len as usize => Some(row.clone()),
+        _ => None,
+    };
+    let mut words = Vec::with_capacity(2 * row_len(class) * list.len().max(1));
+    let mut push = |element: &KVal, kind: typed::Kind| {
+        let (word, element_kind) = number_word(element)?;
+        let fits = match kind {
+            typed::Kind::Int => element_kind == KIND_INT as u64,
+            typed::Kind::Float => element_kind == KIND_FLOAT as u64,
+            typed::Kind::Num => true,
+        };
+        words.extend([word, element_kind]);
+        fits.then_some(())
+    };
+    match class {
+        Class::Vec(shape) => {
+            let row = row(value, shape)?;
+            for (i, element) in row.iter().enumerate() {
+                push(element, shape.kind(i))?;
+            }
+        }
+        Class::Rows(shape) => {
+            for element in list.iter() {
+                let row = row(element, shape)?;
+                for (i, element) in row.iter().enumerate() {
+                    push(element, shape.kind(i))?;
+                }
+            }
+        }
+        Class::Nums(scalar) => {
+            let kind = match scalar {
+                Scalar::Int => typed::Kind::Int,
+                Scalar::Float => typed::Kind::Float,
+            };
+            for element in list.iter() {
+                push(element, kind)?;
+            }
+        }
+        _ => return None,
+    }
+    Some(words.into_boxed_slice())
 }
 
 /// the boxed entry registers and the `Capture` and `Default` ops, in the order
@@ -560,9 +646,15 @@ fn class_code(class: Class) -> u64 {
         Class::Int => 1,
         Class::Float => 2,
         Class::Boxed => 3,
-        // `shape` declines specs with vectors before this
-        Class::Vec(_) | Class::Rows(_) | Class::Nums(_) => 4,
+        Class::Vec(shape) => 4 | vec_shape_code(shape) << 8,
+        Class::Rows(shape) => 5 | vec_shape_code(shape) << 8,
+        Class::Nums(Scalar::Int) => 6,
+        Class::Nums(Scalar::Float) => 7,
     }
+}
+
+fn vec_shape_code(shape: typed::Shape) -> u64 {
+    shape.len as u64 | (shape.ints as u64) << 8 | (shape.nums as u64) << 16
 }
 
 fn ret_code(class: Class) -> Option<u64> {
@@ -588,9 +680,6 @@ fn opnd_code(opnd: Opnd) -> Option<u64> {
 /// literals, and fold into the instructions using them); float constants are
 /// read from the frame, so a changed literal or captured time reuses the code
 fn shape(spec: &Spec) -> Result<Shape, &'static str> {
-    if spec.vectors {
-        return Err("unboxed vectors");
-    }
     let mut key = Vec::with_capacity(spec.ops.len() * 4 + spec.entry.len() + 2);
     let mut consts = Vec::new();
     key.push(spec.frame_size as u64);
@@ -605,22 +694,63 @@ fn shape(spec: &Spec) -> Result<Shape, &'static str> {
     }
     for op in spec.ops.iter() {
         match *op {
-            TOp::VMove { .. }
-            | TOp::VPush { .. }
-            | TOp::VIndex { .. }
-            | TOp::NIndex { .. }
-            | TOp::VIndexB { .. }
-            | TOp::VRow { .. }
-            | TOp::VBin { .. }
-            | TOp::VScale { .. }
-            | TOp::VNeg { .. }
-            | TOp::VDot { .. }
-            | TOp::VCross { .. }
-            | TOp::VLerp { .. }
-            | TOp::FLerp { .. }
-            | TOp::BoxV { .. }
-            | TOp::UnboxV { .. }
-            | TOp::ReturnV { .. } => return Err("unboxed vectors"),
+            TOp::UnboxV { reg, shape } => enc!(77, reg, vec_shape_code(shape)),
+            TOp::BoxV { dst, src, len } => enc!(76, dst, src, len),
+            TOp::DynNative {
+                intrinsic: KernelIntrinsic::Lerp,
+                dst,
+                args,
+                arity: 3,
+                ret: class,
+            } => enc!(
+                75,
+                dst,
+                opnd(args[0])?,
+                opnd(args[1])?,
+                opnd(args[2])?,
+                ret(class)?
+            ),
+            TOp::VMove { dst, src } => enc!(61, dst, src),
+            TOp::VPush {
+                list,
+                value,
+                at,
+                int,
+            } => enc!(62, list, value, at, int),
+            TOp::VIndex {
+                dst,
+                list,
+                index,
+                len,
+            } => enc!(63, dst, list, index, len),
+            TOp::VIndexB {
+                dst,
+                list,
+                index,
+                len,
+            } => enc!(64, dst, list, index, len),
+            TOp::NIndex { dst, list, index } => enc!(65, dst, list, index),
+            TOp::VRow {
+                dst,
+                list,
+                index,
+                shape,
+            } => enc!(66, dst, list, index, vec_shape_code(shape)),
+            TOp::VBin { op, dst, a, b, len } => enc!(67, bin_code(op), dst, a, b, len),
+            TOp::VScale {
+                op,
+                dst,
+                v,
+                s,
+                len,
+                vec_left,
+            } => enc!(68, bin_code(op), dst, v, opnd(s)?, len, vec_left),
+            TOp::VNeg { dst, src, len } => enc!(69, dst, src, len),
+            TOp::VDot { dst, a, b, len } => enc!(70, dst, a, b, len),
+            TOp::VCross { dst, a, b } => enc!(71, dst, a, b),
+            TOp::VLerp { dst, a, b, t, len } => enc!(72, dst, a, b, t, len),
+            TOp::FLerp { dst, a, b, t } => enc!(73, dst, a, b, t),
+            TOp::ReturnV { src, len } => enc!(74, src, len),
             TOp::Nop => enc!(0),
             TOp::IConst { dst, value } => enc!(1, dst, value),
             TOp::FConst { dst, value } => {
@@ -715,7 +845,7 @@ fn shape(spec: &Spec) -> Result<Shape, &'static str> {
             TOp::Capture { dst, .. } | TOp::Default { dst, .. } => enc!(58, dst),
             TOp::Call { .. } => return Err("a call that was not inlined"),
             TOp::Index { dst, list, index } => enc!(60, dst, list, opnd(index)?),
-            TOp::Len { .. } => return Err("a len"),
+            TOp::Len { dst, list } => enc!(78, dst, list),
         }
     }
     Ok(Shape {
@@ -752,6 +882,9 @@ enum Boxed {
     Num,
     /// a boxed argument or capture, read only by an index or as a palette
     Input,
+    /// a captured table (`Rows` or `Nums`) of the entry register it was captured
+    /// in, read only by `VRow` and `NIndex`
+    Table(Reg),
     /// anything else, which nothing may read
     Opaque,
 }
@@ -810,7 +943,8 @@ fn writes(op: &TOp, words: &[Word]) -> Option<(Reg, Word)> {
         | TOp::ISign { dst, .. }
         | TOp::IMod { dst, .. }
         | TOp::IMin { dst, .. }
-        | TOp::IMax { dst, .. } => (dst, Word::Int),
+        | TOp::IMax { dst, .. }
+        | TOp::Len { dst, .. } => (dst, Word::Int),
         TOp::IInc { reg } => (reg, Word::Int),
         TOp::FConst { dst, .. }
         | TOp::IToF { dst, .. }
@@ -874,6 +1008,7 @@ fn successors(op: &TOp, pc: u32) -> impl Iterator<Item = u32> {
         | TOp::DynJumpIf { to, .. }
         | TOp::DynRangeTest { to, .. } => (Some(pc + 1), Some(to)),
         TOp::Return { .. }
+        | TOp::ReturnV { .. }
         | TOp::IBin {
             op: BinKind::In, ..
         }
@@ -892,6 +1027,7 @@ fn successors(op: &TOp, pc: u32) -> impl Iterator<Item = u32> {
 struct State {
     words: Vec<Word>,
     boxed: Vec<Boxed>,
+    vectors: Vec<Vector>,
 }
 
 impl State {
@@ -904,6 +1040,11 @@ impl State {
             *old = joined;
         }
         for (old, new) in self.boxed.iter_mut().zip(&other.boxed) {
+            let joined = old.join(*new);
+            changed |= joined != *old;
+            *old = joined;
+        }
+        for (old, new) in self.vectors.iter_mut().zip(&other.vectors) {
             let joined = old.join(*new);
             changed |= joined != *old;
             *old = joined;
@@ -949,7 +1090,7 @@ fn step_boxed(
     // a copy of a boxed register: a number is copied, a list is shared
     let copy = |boxed: &mut [Boxed], dst: Reg, src: Reg| {
         let value = match at(boxed, src)? {
-            held @ (Boxed::Num | Boxed::Input) => held,
+            held @ (Boxed::Num | Boxed::Input | Boxed::Table(_)) => held,
             held => {
                 let sites = held
                     .sites()
@@ -981,7 +1122,8 @@ fn step_boxed(
             set(boxed, dst, Boxed::Input)?;
             None
         }
-        TOp::EmptyList { dst } => {
+        // a boxed vector is a list built at a site, its elements copied in
+        TOp::EmptyList { dst } | TOp::BoxV { dst, .. } => {
             let site = site_of(site_pcs)?;
             set(boxed, dst, Boxed::List(site))?;
             Some(site)
@@ -1074,10 +1216,232 @@ fn step_boxed(
             }
             None
         }
+        TOp::VIndexB { dst, .. } => {
+            set(boxed, dst, Boxed::Num)?;
+            None
+        }
+        TOp::NIndex { list, .. } | TOp::VRow { list, .. } => match at(boxed, list)? {
+            Boxed::Table(_) => None,
+            _ => return Err("a row of something other than a captured table"),
+        },
+        TOp::VScale { s, .. } => {
+            numeric(boxed, s)?;
+            None
+        }
+        TOp::UnboxV { reg, .. } => match at(boxed, reg)? {
+            Boxed::Input => None,
+            _ => return Err("a vector unboxed from something other than an input"),
+        },
+        TOp::Len { list, .. } => match at(boxed, list)? {
+            Boxed::Input | Boxed::Table(_) | Boxed::List(_) | Boxed::Shared(_) => None,
+            _ => return Err("a len of something it does not model"),
+        },
         TOp::Call { .. } => return Err("a call that was not inlined"),
-        TOp::Len { .. } => return Err("a len"),
         _ => None,
     })
+}
+
+/// what one element of an unboxed vector holds at one point
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Elem {
+    Int,
+    Float,
+    /// an int or a float, which of the two known only at run time
+    Num,
+}
+
+impl Elem {
+    fn of(kind: typed::Kind) -> Self {
+        match kind {
+            typed::Kind::Int => Elem::Int,
+            typed::Kind::Float => Elem::Float,
+            typed::Kind::Num => Elem::Num,
+        }
+    }
+
+    fn join(self, other: Elem) -> Elem {
+        if self == other { self } else { Elem::Num }
+    }
+
+    /// the kind of `a op b` for `+ - * /`, the way `run::binary` promotes
+    fn arith(op: BinKind, a: Elem, b: Elem) -> Elem {
+        match (op, a, b) {
+            (BinKind::Div, _, _) | (_, Elem::Float, _) | (_, _, Elem::Float) => Elem::Float,
+            (_, Elem::Int, Elem::Int) => Elem::Int,
+            _ => Elem::Num,
+        }
+    }
+}
+
+/// what a register of the vector file holds at one point
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Vector {
+    Nothing,
+    Of {
+        len: u8,
+        elems: [Elem; VEC_MAX],
+    },
+    /// vectors of different lengths, which nothing may read
+    Mixed,
+}
+
+impl Vector {
+    fn of(shape: typed::Shape) -> Self {
+        let mut elems = [Elem::Float; VEC_MAX];
+        for (i, elem) in elems.iter_mut().enumerate().take(shape.len as usize) {
+            *elem = Elem::of(shape.kind(i));
+        }
+        Vector::Of {
+            len: shape.len,
+            elems,
+        }
+    }
+
+    fn join(self, other: Vector) -> Vector {
+        match (self, other) {
+            (Vector::Nothing, x) | (x, Vector::Nothing) => x,
+            (
+                Vector::Of { len, elems },
+                Vector::Of {
+                    len: other_len,
+                    elems: other,
+                },
+            ) if len == other_len => Vector::Of {
+                len,
+                elems: std::array::from_fn(|i| elems[i].join(other[i])),
+            },
+            (a, b) if a == b => a,
+            _ => Vector::Mixed,
+        }
+    }
+
+    /// the elements of a vector of `len`, or why it cannot be read
+    fn elems(self, len: u8) -> Result<[Elem; VEC_MAX], Decline> {
+        match self {
+            Vector::Of { len: actual, elems } if actual == len => Ok(elems),
+            _ => Err("a vector whose length is not one on every path"),
+        }
+    }
+}
+
+/// the effect of a vector op on the vector and word files; an error when it
+/// reads a vector or table the jit cannot follow
+fn step_vectors(op: &TOp, spec: &Spec, state: &mut State) -> Result<(), Decline> {
+    let vector = |state: &State, reg: Reg| state.vectors.get(reg as usize).copied().ok_or(OUTSIDE);
+    let set = |state: &mut State, reg: Reg, len: u8, elems: [Elem; VEC_MAX]| {
+        *state.vectors.get_mut(reg as usize).ok_or(OUTSIDE)? = Vector::Of { len, elems };
+        Ok::<_, Decline>(())
+    };
+    let set_word = |state: &mut State, reg: Reg, word: Word| {
+        *state.words.get_mut(reg as usize).ok_or(OUTSIDE)? = word;
+        Ok::<_, Decline>(())
+    };
+    // the entry register a table read comes from, and its class
+    let table = |state: &State, list: Reg| match state.boxed.get(list as usize) {
+        Some(Boxed::Table(entry)) => Ok(spec.entry[*entry as usize]),
+        _ => Err("a row of something other than a captured table"),
+    };
+    let floats = [Elem::Float; VEC_MAX];
+    match *op {
+        TOp::VMove { dst, src } => match vector(state, src)? {
+            Vector::Of { len, elems } => set(state, dst, len, elems)?,
+            _ => return Err("a vector whose length is not one on every path"),
+        },
+        TOp::VPush { list, at, int, .. } => {
+            let mut elems = match at {
+                0 => floats,
+                _ => vector(state, list)?.elems(at)?,
+            };
+            elems[at as usize] = if int { Elem::Int } else { Elem::Float };
+            set(state, list, at + 1, elems)?;
+        }
+        TOp::VIndex { dst, list, len, .. } => {
+            let elems = vector(state, list)?.elems(len)?;
+            let used = &elems[..len as usize];
+            let word = if used.iter().all(|&e| e == Elem::Int) {
+                Word::Int
+            } else if used.iter().all(|&e| e == Elem::Float) {
+                Word::Float
+            } else {
+                return Err("an element of mixed kinds read as a scalar");
+            };
+            set_word(state, dst, word)?;
+        }
+        TOp::VIndexB { list, len, .. } | TOp::ReturnV { src: list, len } => {
+            vector(state, list)?.elems(len)?;
+        }
+        TOp::NIndex { dst, list, .. } => {
+            let word = match table(state, list)? {
+                Class::Nums(Scalar::Int) => Word::Int,
+                Class::Nums(Scalar::Float) => Word::Float,
+                _ => return Err("a number read from a table of rows"),
+            };
+            set_word(state, dst, word)?;
+        }
+        TOp::VRow {
+            dst, list, shape, ..
+        } => {
+            if table(state, list)? != Class::Rows(shape) {
+                return Err("a row of another shape than its table's");
+            }
+            let Vector::Of { len, elems } = Vector::of(shape) else {
+                unreachable!()
+            };
+            set(state, dst, len, elems)?;
+        }
+        TOp::VBin { op, dst, a, b, len } => {
+            let (x, y) = (vector(state, a)?.elems(len)?, vector(state, b)?.elems(len)?);
+            set(
+                state,
+                dst,
+                len,
+                std::array::from_fn(|i| Elem::arith(op, x[i], y[i])),
+            )?;
+        }
+        TOp::VScale {
+            op, dst, v, s, len, ..
+        } => {
+            let x = vector(state, v)?.elems(len)?;
+            let scalar = match s {
+                Opnd::I(_) => Elem::Int,
+                Opnd::F(_) => Elem::Float,
+                Opnd::B(_) => Elem::Num,
+                Opnd::C(_) => return Err("a closure operand"),
+            };
+            set(state, dst, len, x.map(|e| Elem::arith(op, e, scalar)))?;
+        }
+        TOp::VNeg { dst, src, len } => {
+            let x = vector(state, src)?.elems(len)?;
+            set(state, dst, len, x)?;
+        }
+        TOp::VDot { dst, a, b, len } => {
+            vector(state, a)?.elems(len)?;
+            vector(state, b)?.elems(len)?;
+            set_word(state, dst, Word::Float)?;
+        }
+        TOp::VCross { dst, a, b } => {
+            vector(state, a)?.elems(3)?;
+            vector(state, b)?.elems(3)?;
+            set(state, dst, 3, floats)?;
+        }
+        TOp::VLerp { dst, a, b, len, .. } => {
+            let x = vector(state, a)?.elems(len)?;
+            if x[..len as usize].iter().any(|&e| e != Elem::Float) {
+                return Err("a lerp from a vector that is not all floats");
+            }
+            vector(state, b)?.elems(len)?;
+            set(state, dst, len, floats)?;
+        }
+        TOp::FLerp { dst, .. } => set_word(state, dst, Word::Float)?,
+        TOp::UnboxV { reg, shape } => {
+            let Vector::Of { len, elems } = Vector::of(shape) else {
+                unreachable!()
+            };
+            set(state, reg, len, elems)?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 /// what codegen needs to know about each op beyond the op itself
@@ -1086,6 +1450,12 @@ struct Facts {
     float_moves: Vec<bool>,
     /// for an `EmptyList` or an `Append`, the site of its list
     sites: Vec<Option<u8>>,
+    /// for a vector op, the vector file it reads
+    vectors: Vec<Option<Box<[Vector]>>>,
+    /// for a `VRow` or an `NIndex`, the entry register of its table
+    tables: Vec<Option<Reg>>,
+    /// for a `Len`, what its list is
+    lens: Vec<Option<Boxed>>,
 }
 
 /// the facts codegen needs, checked along with every boxed read. an error
@@ -1099,18 +1469,16 @@ fn analyse(spec: &Spec) -> Result<Facts, Decline> {
     let mut entry = State {
         words: vec![Word::Nothing; regs],
         boxed: vec![Boxed::Nothing; regs],
+        vectors: vec![Vector::Nothing; regs],
     };
-    for ((word, boxed), class) in entry
-        .words
-        .iter_mut()
-        .zip(entry.boxed.iter_mut())
-        .zip(&spec.entry)
-    {
-        match class {
-            Class::Int => *word = Word::Int,
-            Class::Float => *word = Word::Float,
-            Class::Boxed => *boxed = Boxed::Input,
-            Class::Unset | Class::Closure(_) | Class::Vec(_) | Class::Rows(_) | Class::Nums(_) => {}
+    for (reg, class) in spec.entry.iter().enumerate() {
+        match *class {
+            Class::Int => entry.words[reg] = Word::Int,
+            Class::Float => entry.words[reg] = Word::Float,
+            Class::Boxed => entry.boxed[reg] = Boxed::Input,
+            Class::Vec(shape) => entry.vectors[reg] = Vector::of(shape),
+            Class::Rows(_) | Class::Nums(_) => entry.boxed[reg] = Boxed::Table(reg as Reg),
+            Class::Unset | Class::Closure(_) => {}
         }
     }
     let lists: Vec<usize> = (0..ops.len())
@@ -1118,6 +1486,7 @@ fn analyse(spec: &Spec) -> Result<Facts, Decline> {
             matches!(
                 ops[pc],
                 TOp::EmptyList { .. }
+                    | TOp::BoxV { .. }
                     | TOp::DynNative {
                         intrinsic: KernelIntrinsic::KeyframeLerp,
                         ..
@@ -1147,6 +1516,7 @@ fn analyse(spec: &Spec) -> Result<Facts, Decline> {
             *state.words.get_mut(reg as usize).ok_or(OUTSIDE)? = word;
         }
         step_boxed(op, pc as usize, &lists, &mut state.boxed)?;
+        step_vectors(op, spec, &mut state)?;
         for succ in successors(op, pc) {
             let Some(slot) = states.get_mut(succ as usize) else {
                 continue;
@@ -1165,6 +1535,9 @@ fn analyse(spec: &Spec) -> Result<Facts, Decline> {
     let mut facts = Facts {
         float_moves: vec![false; ops.len()],
         sites: vec![None; ops.len()],
+        vectors: vec![None; ops.len()],
+        tables: vec![None; ops.len()],
+        lens: vec![None; ops.len()],
     };
     for (pc, op) in ops.iter().enumerate() {
         let Some(state) = &states[pc] else {
@@ -1178,6 +1551,17 @@ fn analyse(spec: &Spec) -> Result<Facts, Decline> {
                     return Err("a copy of a register not one class on every path");
                 }
             };
+        }
+        if op.is_vector() {
+            facts.vectors[pc] = Some(state.vectors.clone().into_boxed_slice());
+        }
+        if let TOp::VRow { list, .. } | TOp::NIndex { list, .. } = *op
+            && let Some(Boxed::Table(entry)) = state.boxed.get(list as usize)
+        {
+            facts.tables[pc] = Some(*entry);
+        }
+        if let TOp::Len { list, .. } = *op {
+            facts.lens[pc] = state.boxed.get(list as usize).copied();
         }
         let mut boxed = state.boxed.clone();
         facts.sites[pc] = step_boxed(op, pc, &lists, &mut boxed)?;
@@ -1245,6 +1629,8 @@ struct Registers {
     ints: Vec<Option<Variable>>,
     floats: Vec<Option<Variable>>,
     nums: Vec<Option<(Variable, Variable)>>,
+    /// a word and a kind for each element of an unboxed vector
+    vectors: Vec<[Option<(Variable, Variable)>; VEC_MAX]>,
 }
 
 impl Registers {
@@ -1293,6 +1679,51 @@ impl Registers {
 
     fn set_num(&mut self, builder: &mut FunctionBuilder, reg: Reg, (word, kind): (Value, Kind)) {
         let vars = self.num_vars(builder, reg);
+        let kind = kind.value(builder);
+        builder.def_var(vars.0, word);
+        builder.def_var(vars.1, kind);
+    }
+
+    fn elem_vars(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        reg: Reg,
+        i: usize,
+    ) -> (Variable, Variable) {
+        *self.vectors[reg as usize][i].get_or_insert_with(|| {
+            (
+                builder.declare_var(types::I64),
+                builder.declare_var(types::I64),
+            )
+        })
+    }
+
+    /// element `i` of a vector as a number, its kind static where the
+    /// analysis knows it
+    fn elem(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        reg: Reg,
+        i: usize,
+        elem: Elem,
+    ) -> (Value, Kind) {
+        let (word, kind) = self.elem_vars(builder, reg, i);
+        let kind = match elem {
+            Elem::Int => Kind::Int,
+            Elem::Float => Kind::Float,
+            Elem::Num => Kind::Dyn(builder.use_var(kind)),
+        };
+        (builder.use_var(word), kind)
+    }
+
+    fn set_elem(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        reg: Reg,
+        i: usize,
+        (word, kind): (Value, Kind),
+    ) {
+        let vars = self.elem_vars(builder, reg, i);
         let kind = kind.value(builder);
         builder.def_var(vars.0, word);
         builder.def_var(vars.1, kind);
@@ -1394,6 +1825,30 @@ fn by_kind(
             b.ins().select(is_int, as_int, as_float)
         }
     }
+}
+
+/// `values[i]`, for an `i` already checked to be in range
+fn pick(b: &mut FunctionBuilder, i: Value, values: &[Value]) -> Value {
+    let (&last, rest) = values.split_last().unwrap();
+    rest.iter()
+        .enumerate()
+        .rev()
+        .fold(last, |picked, (at, &value)| {
+            let hit = b.ins().icmp_imm_s(IntCC::Equal, i, at as i64);
+            b.ins().select(hit, value, picked)
+        })
+}
+
+/// `typed_run`'s `lerp_float`: equal values keep the first, anything else is
+/// `(1 - t) * a + t * b`
+fn lerp_float(b: &mut FunctionBuilder, from: Value, to: Value, t: Value) -> Value {
+    let one = b.ins().f64const(1.0);
+    let rest = b.ins().fsub(one, t);
+    let kept = b.ins().fmul(rest, from);
+    let moved = b.ins().fmul(t, to);
+    let blended = b.ins().fadd(kept, moved);
+    let equal = b.ins().fcmp(FloatCC::Equal, from, to);
+    b.ins().select(equal, from, blended)
 }
 
 /// the fault blocks, one per fault code
@@ -1679,6 +2134,53 @@ impl Codegen<'_> {
         })
     }
 
+    /// the vector file a vector op reads
+    fn vectors(&self, pc: usize) -> Option<&[Vector]> {
+        self.facts.vectors[pc].as_deref()
+    }
+
+    /// what the analysis knows of the elements of `reg`, a vector of `len`
+    fn elems(&self, pc: usize, reg: Reg, len: u8) -> Option<[Elem; VEC_MAX]> {
+        self.vectors(pc)?.get(reg as usize)?.elems(len).ok()
+    }
+
+    /// an index fault unless `0 <= i < len`, `run`'s `i as usize` bound
+    fn check_index(
+        &self,
+        b: &mut FunctionBuilder,
+        faults: &mut Faults,
+        i: Value,
+        len: u8,
+    ) -> Option<()> {
+        if len == 0 {
+            return None;
+        }
+        let outside = b
+            .ins()
+            .icmp_imm_s(IntCC::UnsignedGreaterThanOrEqual, i, len as i64);
+        faults.guard(b, outside, Fault::Index);
+        Some(())
+    }
+
+    /// the address of row `i` of the table in `list`, rows of `len` (word, kind)
+    /// pairs, after an index fault unless the row exists
+    fn row(
+        &self,
+        b: &mut FunctionBuilder,
+        regs: &mut Registers,
+        faults: &mut Faults,
+        list: Reg,
+        i: Value,
+        len: usize,
+    ) -> Value {
+        let (address, rows) = regs.num(b, list);
+        let rows = rows.value(b);
+        let outside = b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, i, rows);
+        faults.guard(b, outside, Fault::Index);
+        let offset = b.ins().imul_imm_s(i, (16 * len) as i64);
+        b.ins().iadd(address, offset)
+    }
+
     fn emit(&self, b: &mut FunctionBuilder) -> Option<()> {
         let ops = &self.spec.ops;
         let len = ops.len();
@@ -1712,6 +2214,7 @@ impl Codegen<'_> {
             ints: vec![None; frame_size],
             floats: vec![None; frame_size],
             nums: vec![None; frame_size],
+            vectors: vec![[None; VEC_MAX]; frame_size],
         };
         let mut faults = Faults::default();
         let mut back_edges: Vec<BackEdge> = Vec::new();
@@ -1756,6 +2259,32 @@ impl Codegen<'_> {
                     regs.set_float(b, reg as Reg, value);
                 }
                 _ => {}
+            }
+        }
+        // a table register holds its rows' address and count; a captured
+        // vector is loaded into its elements
+        let input_count = inputs(self.spec);
+        for (index, (reg, class)) in tables(self.spec).enumerate() {
+            let at = layout.table(consts, input_count, index);
+            let address = b.ins().load(types::I64, fixed, frame, word(at));
+            match class {
+                Class::Vec(shape) => {
+                    for i in 0..shape.len as usize {
+                        let value = b.ins().load(types::I64, fixed, address, word(2 * i));
+                        let kind = match Elem::of(shape.kind(i)) {
+                            Elem::Int => Kind::Int,
+                            Elem::Float => Kind::Float,
+                            Elem::Num => {
+                                Kind::Dyn(b.ins().load(types::I64, fixed, address, word(2 * i + 1)))
+                            }
+                        };
+                        regs.set_elem(b, reg, i, (value, kind));
+                    }
+                }
+                _ => {
+                    let rows = b.ins().load(types::I64, fixed, frame, word(at + 1));
+                    regs.set_num(b, reg, (address, Kind::Dyn(rows)));
+                }
             }
         }
         // float constants are read from the frame where they are used
@@ -2049,6 +2578,51 @@ impl Codegen<'_> {
                     regs.set_float(b, dst, value)
                 }
                 TOp::DynNative {
+                    intrinsic: KernelIntrinsic::Lerp,
+                    dst,
+                    args: [a, to, t],
+                    arity: 3,
+                    ret,
+                } => {
+                    // `run::lerp` on numbers: equal values give the first back
+                    // unchanged (two ints compare as ints), anything else blends
+                    let (x, y, t) = (
+                        regs.operand(b, a)?,
+                        regs.operand(b, to)?,
+                        regs.operand(b, t)?,
+                    );
+                    let (fx, fy, t) = (promoted(b, x), promoted(b, y), promoted(b, t));
+                    let float_equal = b.ins().fcmp(FloatCC::Equal, fx, fy);
+                    let equal = match both_ints(b, x.1, y.1) {
+                        Cond::Known(true) => b.ins().icmp(IntCC::Equal, x.0, y.0),
+                        Cond::Known(false) => float_equal,
+                        Cond::Flag(both) => {
+                            let int_equal = b.ins().icmp(IntCC::Equal, x.0, y.0);
+                            b.ins().select(both, int_equal, float_equal)
+                        }
+                    };
+                    let one = b.ins().f64const(1.0);
+                    let rest = b.ins().fsub(one, t);
+                    let kept = b.ins().fmul(rest, fx);
+                    let moved = b.ins().fmul(t, fy);
+                    let blended = b.ins().fadd(kept, moved);
+                    let blended = bits(b, blended);
+                    let value = b.ins().select(equal, x.0, blended);
+                    match (ret, x.1) {
+                        (Class::Boxed, _) => {
+                            let first = x.1.value(b);
+                            let float = b.ins().iconst(types::I64, KIND_FLOAT);
+                            let kind = b.ins().select(equal, first, float);
+                            regs.set_num(b, dst, (value, Kind::Dyn(kind)))
+                        }
+                        (Class::Float, Kind::Float) => {
+                            let value = from_bits(b, value);
+                            regs.set_float(b, dst, value)
+                        }
+                        _ => return None,
+                    }
+                }
+                TOp::DynNative {
                     intrinsic,
                     dst,
                     args,
@@ -2095,6 +2669,71 @@ impl Codegen<'_> {
                             regs.set_float(b, dst, value)
                         }
                     }
+                }
+                TOp::UnboxV { reg, shape } => {
+                    // `Lanes::unbox` on the input's copy: its length and every
+                    // element whose kind the shape knows must match
+                    let (_, Kind::Dyn(address)) = regs.num(b, reg) else {
+                        return None;
+                    };
+                    let len = b.ins().load(types::I64, fixed, address, 0);
+                    let mismatch = b.ins().icmp_imm_s(IntCC::NotEqual, len, shape.len as i64);
+                    faults.guard(b, mismatch, Fault::Type);
+                    for i in 0..shape.len as usize {
+                        let value = b.ins().load(types::I64, fixed, address, word(1 + i));
+                        let kind =
+                            b.ins()
+                                .load(types::I64, fixed, address, word(1 + INPUT_CAP + i));
+                        let expected = match Elem::of(shape.kind(i)) {
+                            Elem::Int => Some(KIND_INT),
+                            Elem::Float => Some(KIND_FLOAT),
+                            Elem::Num => None,
+                        };
+                        if let Some(expected) = expected {
+                            let wrong = b.ins().icmp_imm_s(IntCC::NotEqual, kind, expected);
+                            faults.guard(b, wrong, Fault::Type);
+                        }
+                        regs.set_elem(b, reg, i, (value, Kind::Dyn(kind)));
+                    }
+                }
+                TOp::Len { dst, list } => {
+                    let (held, kind) = regs.num(b, list);
+                    let len = match self.facts.lens[pc]? {
+                        // a list too long or not of scalars reads as absent;
+                        // the typed machine counts those
+                        Boxed::Input => {
+                            let Kind::Dyn(address) = kind else {
+                                return None;
+                            };
+                            let len = b.ins().load(types::I64, fixed, address, 0);
+                            let absent = b.ins().icmp_imm_s(IntCC::Equal, len, ABSENT as i64);
+                            faults.guard(b, absent, Fault::Type);
+                            len
+                        }
+                        Boxed::Table(_) => kind.value(b),
+                        Boxed::List(_) | Boxed::Shared(_) => held,
+                        _ => return None,
+                    };
+                    set_int!(dst, len)
+                }
+                TOp::BoxV { dst, src, len } => {
+                    let site = self.facts.sites[pc]?;
+                    // an empty literal that goes on to grow reads no elements
+                    let x = match len {
+                        0 => [Elem::Float; VEC_MAX],
+                        _ => self.elems(pc, src, len)?,
+                    };
+                    let first = Layout::site(site);
+                    for i in 0..len as usize {
+                        let (value, kind) = regs.elem(b, src, i, x[i]);
+                        let kind = kind.value(b);
+                        b.ins().store(flags, value, items, word(first + i));
+                        b.ins()
+                            .store(flags, kind, items, word(first + LIST_CAP + i));
+                    }
+                    let count = b.ins().iconst(types::I64, len as i64);
+                    let kind = b.ins().iconst(types::I64, KIND_LIST + site as i64);
+                    regs.set_num(b, dst, (count, Kind::Dyn(kind)));
                 }
                 TOp::EmptyList { dst } => {
                     let site = self.facts.sites[pc]?;
@@ -2334,6 +2973,250 @@ impl Codegen<'_> {
                     let (x, y) = (float!(a), float!(rhs));
                     pure!(Shim::FloatAtan2, [x, y])
                 }),
+                TOp::VMove { dst, src } => {
+                    let Vector::Of { len, elems } = self.vectors(pc)?[src as usize] else {
+                        return None;
+                    };
+                    let values: Vec<_> = (0..len as usize)
+                        .map(|i| regs.elem(b, src, i, elems[i]))
+                        .collect();
+                    for (i, value) in values.into_iter().enumerate() {
+                        regs.set_elem(b, dst, i, value);
+                    }
+                }
+                TOp::VPush {
+                    list,
+                    value,
+                    at,
+                    int,
+                } => {
+                    let word = if int {
+                        int!(value)
+                    } else {
+                        let x = float!(value);
+                        bits(b, x)
+                    };
+                    regs.set_elem(b, list, at as usize, (word, Kind::of(!int)));
+                }
+                TOp::VIndex {
+                    dst,
+                    list,
+                    index,
+                    len,
+                } => {
+                    let elems = self.elems(pc, list, len)?;
+                    let i = int!(index);
+                    self.check_index(b, &mut faults, i, len)?;
+                    let words: Vec<_> = (0..len as usize)
+                        .map(|at| regs.elem(b, list, at, elems[at]).0)
+                        .collect();
+                    let word = pick(b, i, &words);
+                    match elems[0] {
+                        Elem::Int => regs.set_int(b, dst, word),
+                        _ => {
+                            let x = from_bits(b, word);
+                            regs.set_float(b, dst, x)
+                        }
+                    }
+                }
+                TOp::VIndexB {
+                    dst,
+                    list,
+                    index,
+                    len,
+                } => {
+                    let elems = self.elems(pc, list, len)?;
+                    let i = int!(index);
+                    self.check_index(b, &mut faults, i, len)?;
+                    let (words, kinds): (Vec<_>, Vec<_>) = (0..len as usize)
+                        .map(|at| {
+                            let (word, kind) = regs.elem(b, list, at, elems[at]);
+                            (word, kind.value(b))
+                        })
+                        .unzip();
+                    let word = pick(b, i, &words);
+                    let kind = pick(b, i, &kinds);
+                    regs.set_num(b, dst, (word, Kind::Dyn(kind)));
+                }
+                TOp::NIndex { dst, list, index } => {
+                    let table = self.facts.tables[pc]?;
+                    let i = int!(index);
+                    let at = self.row(b, &mut regs, &mut faults, list, i, 1);
+                    let word = b.ins().load(types::I64, fixed, at, 0);
+                    match self.spec.entry[table as usize] {
+                        Class::Nums(Scalar::Int) => regs.set_int(b, dst, word),
+                        Class::Nums(Scalar::Float) => {
+                            let x = from_bits(b, word);
+                            regs.set_float(b, dst, x)
+                        }
+                        _ => return None,
+                    }
+                }
+                TOp::VRow {
+                    dst,
+                    list,
+                    index,
+                    shape,
+                } => {
+                    let len = shape.len as usize;
+                    let i = int!(index);
+                    let at = self.row(b, &mut regs, &mut faults, list, i, len);
+                    for i in 0..len {
+                        let value = b.ins().load(types::I64, fixed, at, word(2 * i));
+                        let kind = match Elem::of(shape.kind(i)) {
+                            Elem::Int => Kind::Int,
+                            Elem::Float => Kind::Float,
+                            Elem::Num => {
+                                Kind::Dyn(b.ins().load(types::I64, fixed, at, word(2 * i + 1)))
+                            }
+                        };
+                        regs.set_elem(b, dst, i, (value, kind));
+                    }
+                }
+                TOp::VBin {
+                    op,
+                    dst,
+                    a,
+                    b: rhs,
+                    len,
+                } => {
+                    let (x, y) = (self.elems(pc, a, len)?, self.elems(pc, rhs, len)?);
+                    let mut results = Vec::with_capacity(len as usize);
+                    for i in 0..len as usize {
+                        let (l, r) = (regs.elem(b, a, i, x[i]), regs.elem(b, rhs, i, y[i]));
+                        results.push(self.number_binary(b, &mut faults, out, op, l, r)?);
+                    }
+                    for (i, result) in results.into_iter().enumerate() {
+                        regs.set_elem(b, dst, i, result);
+                    }
+                }
+                TOp::VScale {
+                    op,
+                    dst,
+                    v,
+                    s,
+                    len,
+                    vec_left,
+                } => {
+                    let x = self.elems(pc, v, len)?;
+                    let scalar = regs.operand(b, s)?;
+                    let mut results = Vec::with_capacity(len as usize);
+                    for (i, &elem) in x.iter().enumerate().take(len as usize) {
+                        let element = regs.elem(b, v, i, elem);
+                        let (l, r) = if vec_left {
+                            (element, scalar)
+                        } else {
+                            (scalar, element)
+                        };
+                        results.push(self.number_binary(b, &mut faults, out, op, l, r)?);
+                    }
+                    for (i, result) in results.into_iter().enumerate() {
+                        regs.set_elem(b, dst, i, result);
+                    }
+                }
+                TOp::VNeg { dst, src, len } => {
+                    let x = self.elems(pc, src, len)?;
+                    let negated: Vec<_> = (0..len as usize)
+                        .map(|i| {
+                            let element = regs.elem(b, src, i, x[i]);
+                            let word = by_kind(
+                                b,
+                                element,
+                                |b, x| b.ins().ineg(x),
+                                |b, x| {
+                                    let negated = b.ins().fneg(x);
+                                    bits(b, negated)
+                                },
+                            );
+                            (word, element.1)
+                        })
+                        .collect();
+                    for (i, result) in negated.into_iter().enumerate() {
+                        regs.set_elem(b, dst, i, result);
+                    }
+                }
+                TOp::VDot {
+                    dst,
+                    a,
+                    b: rhs,
+                    len,
+                } => {
+                    let (x, y) = (self.elems(pc, a, len)?, self.elems(pc, rhs, len)?);
+                    // `sum += x * y` from 0.0, in order, as `typed_run` adds
+                    let mut sum = b.ins().f64const(0.0);
+                    for i in 0..len as usize {
+                        let l = regs.elem(b, a, i, x[i]);
+                        let r = regs.elem(b, rhs, i, y[i]);
+                        let (l, r) = (promoted(b, l), promoted(b, r));
+                        let product = b.ins().fmul(l, r);
+                        sum = b.ins().fadd(sum, product);
+                    }
+                    regs.set_float(b, dst, sum);
+                }
+                TOp::VCross { dst, a, b: rhs } => {
+                    let (x, y) = (self.elems(pc, a, 3)?, self.elems(pc, rhs, 3)?);
+                    let u: [Value; 3] = std::array::from_fn(|i| {
+                        let element = regs.elem(b, a, i, x[i]);
+                        promoted(b, element)
+                    });
+                    let v: [Value; 3] = std::array::from_fn(|i| {
+                        let element = regs.elem(b, rhs, i, y[i]);
+                        promoted(b, element)
+                    });
+                    let minus = |b: &mut FunctionBuilder, (p, q): (usize, usize)| {
+                        let left = b.ins().fmul(u[p], v[q]);
+                        let right = b.ins().fmul(u[q], v[p]);
+                        let difference = b.ins().fsub(left, right);
+                        bits(b, difference)
+                    };
+                    let cross = [minus(b, (1, 2)), minus(b, (2, 0)), minus(b, (0, 1))];
+                    for (i, word) in cross.into_iter().enumerate() {
+                        regs.set_elem(b, dst, i, (word, Kind::Float));
+                    }
+                }
+                TOp::VLerp {
+                    dst,
+                    a,
+                    b: rhs,
+                    t,
+                    len,
+                } => {
+                    let (x, y) = (self.elems(pc, a, len)?, self.elems(pc, rhs, len)?);
+                    let t = float!(t);
+                    let mut results = Vec::with_capacity(len as usize);
+                    for i in 0..len as usize {
+                        let from = regs.elem(b, a, i, x[i]);
+                        let to = regs.elem(b, rhs, i, y[i]);
+                        let (from, to) = (promoted(b, from), promoted(b, to));
+                        let blended = lerp_float(b, from, to, t);
+                        results.push(bits(b, blended));
+                    }
+                    for (i, word) in results.into_iter().enumerate() {
+                        regs.set_elem(b, dst, i, (word, Kind::Float));
+                    }
+                }
+                TOp::FLerp { dst, a, b: rhs, t } => set_float!(dst, {
+                    let (from, to, t) = (float!(a), float!(rhs), float!(t));
+                    lerp_float(b, from, to, t)
+                }),
+                TOp::ReturnV { src, len } => {
+                    // into the first list site's area, as a returned list
+                    let x = self.elems(pc, src, len)?;
+                    let area = Layout::site(0);
+                    for i in 0..len as usize {
+                        let (value, kind) = regs.elem(b, src, i, x[i]);
+                        let kind = kind.value(b);
+                        b.ins().store(flags, value, items, word(area + i));
+                        b.ins().store(flags, kind, items, word(area + LIST_CAP + i));
+                    }
+                    let count = b.ins().iconst(types::I64, len as i64);
+                    let kind = b.ins().iconst(types::I64, KIND_LIST);
+                    b.ins().store(flags, count, frame, word(layout.result));
+                    b.ins().store(flags, kind, frame, word(layout.kind));
+                    let ok = b.ins().iconst(types::I32, 0);
+                    b.ins().return_(&[ok]);
+                    open = false;
+                }
                 TOp::Return { src } => {
                     let (value, kind) = regs.operand(b, src)?;
                     let kind = kind.value(b);
@@ -2383,6 +3266,9 @@ impl Codegen<'_> {
 pub struct JitEntry {
     compiled: Arc<Compiled>,
     consts: Box<[u64]>,
+    /// the batch's captured tables, built by its first machine and shared by
+    /// the rest; `None` when a capture does not have its specialised class
+    tables: OnceLock<Option<Box<[Box<[u64]>]>>>,
 }
 
 /// compiled bodies by shape, owned by the kernel tier
@@ -2438,6 +3324,7 @@ impl JitCache {
         Some(Arc::new(JitEntry {
             compiled,
             consts: shape.consts.into_boxed_slice(),
+            tables: OnceLock::new(),
         }))
     }
 }
@@ -2465,7 +3352,9 @@ impl JitVm {
     ) -> Self {
         let layout = Layout::of(spec.frame_size);
         let consts = entry.consts.len();
-        let mut words = vec![0; layout.input(consts, inputs(spec))];
+        let input_count = inputs(spec);
+        let table_count = tables(spec).count();
+        let mut words = vec![0; layout.table(consts, input_count, table_count)];
         words[layout.consts..layout.consts + consts].copy_from_slice(&entry.consts);
         // the inputs in the order codegen reads them: boxed entry registers,
         // then the inlined captures and defaults
@@ -2476,19 +3365,41 @@ impl JitVm {
             .map(|&class| (class == Class::Boxed).then(|| next.next().unwrap()))
             .collect();
         let total = spec.sig.len();
-        let ready = arena
-            .get(spec.closure)
-            .captures
-            .iter()
-            .zip(&entries[total..])
-            .enumerate()
-            .all(|(i, (capture, input))| match input {
-                Some(at) => {
-                    write_input(&mut words[*at..*at + INPUT_WORDS], capture);
-                    true
+        let captures = &arena.get(spec.closure).captures;
+        let mut ready =
+            captures
+                .iter()
+                .zip(&entries[total..])
+                .enumerate()
+                .all(
+                    |(i, (capture, input))| match (input, spec.entry[total + i]) {
+                        (Some(at), _) => {
+                            write_input(&mut words[*at..*at + INPUT_WORDS], capture);
+                            true
+                        }
+                        // laid out as tables below
+                        (None, Class::Vec(_) | Class::Rows(_) | Class::Nums(_)) => true,
+                        (None, class) => store(&mut words, total + i, class, capture),
+                    },
+                );
+        let built = entry.tables.get_or_init(|| {
+            tables(spec)
+                .map(|(reg, class)| {
+                    let capture = captures.get((reg as usize).checked_sub(total)?)?;
+                    table_words(class, capture)
+                })
+                .collect()
+        });
+        match built {
+            Some(built) => {
+                for (index, ((_, class), data)) in tables(spec).zip(built.iter()).enumerate() {
+                    let at = layout.table(consts, input_count, index);
+                    words[at] = data.as_ptr() as u64;
+                    words[at + 1] = (data.len() / (2 * row_len(class))) as u64;
                 }
-                None => store(&mut words, total + i, spec.entry[total + i], capture),
-            });
+            }
+            None => ready = false,
+        }
         for op in spec.ops.iter() {
             let value = match *op {
                 TOp::Capture { closure, index, .. } => &arena.get(closure).captures[index as usize],
@@ -2727,6 +3638,27 @@ mod tests {
     fn compiled(total_args: u16, frame_size: u16, ops: Vec<KOp>, sample: &[KVal]) -> Compiled {
         let (arena, id) = closure(total_args, frame_size, ops);
         let (program, spec) = TypedProgram::specialise(&arena, id, sample).expect("typed");
+        let entry = JitCache::new(true)
+            .prepare(program.spec(spec), &mut KernelStats::default())
+            .expect("compiled");
+        Compiled {
+            arena,
+            program,
+            spec,
+            entry,
+        }
+    }
+
+    /// `compiled` on the program that keeps short lists of numbers unboxed
+    fn compiled_vectors(
+        total_args: u16,
+        frame_size: u16,
+        ops: Vec<KOp>,
+        sample: &[KVal],
+    ) -> Compiled {
+        let (arena, id) = closure(total_args, frame_size, ops);
+        let (program, spec) = TypedProgram::specialise_vectors(&arena, id, sample).expect("typed");
+        assert!(program.uses_vectors(), "the program keeps no vectors");
         let entry = JitCache::new(true)
             .prepare(program.spec(spec), &mut KernelStats::default())
             .expect("compiled");
@@ -3036,7 +3968,58 @@ mod tests {
     }
 
     #[test]
-    fn boxed_arguments_and_list_reads_are_declined() {
+    fn vector_arithmetic_and_boxed_list_literals_match_the_typed_machine() {
+        // v = x > 0 ? 0.5 : 0 (boxed at the merge), then
+        // [v, x] when x > 1, else -([x, 2] * 3 - [1, x]) / x
+        let bin = |op, dst, a, b| KOp::Bin {
+            op,
+            dst,
+            a,
+            b,
+            take: false,
+        };
+        let ops = vec![
+            KOp::Int { dst: 1, value: 0 },
+            KOp::Float { dst: 2, value: 0.0 },
+            bin(BinKind::Gt, 2, 0, 2),
+            KOp::JumpIfNot { cond: 2, to: 5 },
+            KOp::Float { dst: 1, value: 0.5 },
+            KOp::Float { dst: 2, value: 1.0 },
+            bin(BinKind::Gt, 2, 0, 2),
+            KOp::JumpIfNot { cond: 2, to: 12 },
+            KOp::EmptyList { dst: 3 },
+            KOp::Append { list: 3, value: 1 },
+            KOp::Append { list: 3, value: 0 },
+            KOp::Return { src: 3 },
+            KOp::EmptyList { dst: 3 },
+            KOp::Append { list: 3, value: 0 },
+            KOp::Int { dst: 4, value: 2 },
+            KOp::Append { list: 3, value: 4 },
+            KOp::Int { dst: 4, value: 3 },
+            bin(BinKind::Mul, 3, 3, 4),
+            KOp::EmptyList { dst: 4 },
+            KOp::Int { dst: 5, value: 1 },
+            KOp::Append { list: 4, value: 5 },
+            KOp::Append { list: 4, value: 0 },
+            bin(BinKind::Sub, 3, 3, 4),
+            KOp::Neg { dst: 3, src: 3 },
+            bin(BinKind::Div, 3, 3, 0),
+            KOp::Return { src: 3 },
+        ];
+        let jit = compiled_vectors(1, 6, ops, &[KVal::Float(2.0)]);
+        let spec = jit.program.spec(jit.spec);
+        assert!(
+            spec.ops
+                .iter()
+                .any(|op| matches!(op, TOp::BoxV { len: 0, .. }))
+        );
+        assert!(spec.ops.iter().any(|op| matches!(op, TOp::VScale { .. })));
+        jit.agree(samples(12, 300).map(|(_, x)| vec![KVal::Float(x)]));
+        jit.agree([0.0, -0.0, 1.0, 2.0].map(|x| vec![KVal::Float(x)]));
+    }
+
+    #[test]
+    fn a_returned_boxed_argument_is_declined() {
         let ops = vec![KOp::Return { src: 0 }];
         let (arena, id) = closure(1, 1, ops);
         let list = KVal::list([KVal::Int(1)]);
@@ -3044,16 +4027,29 @@ mod tests {
         let mut cache = JitCache::new(true);
         let mut stats = KernelStats::default();
         assert!(cache.prepare(program.spec(spec), &mut stats).is_none());
+    }
 
+    #[test]
+    fn lengths_of_built_lists_and_inputs_match_the_typed_machine() {
+        // len(xs) + len([n, n])
         let ops = vec![
-            KOp::EmptyList { dst: 1 },
-            KOp::Append { list: 1, value: 0 },
-            KOp::Len { dst: 2, src: 1 },
+            KOp::Len { dst: 2, src: 0 },
+            KOp::EmptyList { dst: 3 },
+            KOp::Append { list: 3, value: 1 },
+            KOp::Append { list: 3, value: 1 },
+            KOp::Len { dst: 4, src: 3 },
+            KOp::Bin {
+                op: BinKind::Add,
+                dst: 2,
+                a: 2,
+                b: 4,
+                take: false,
+            },
             KOp::Return { src: 2 },
         ];
-        let (arena, id) = closure(1, 3, ops);
-        let (program, spec) = TypedProgram::specialise(&arena, id, &[KVal::Int(0)]).unwrap();
-        assert!(cache.prepare(program.spec(spec), &mut stats).is_none());
+        let list = |n: i64| KVal::list((0..n.rem_euclid(20)).map(KVal::Int));
+        let jit = compiled(2, 5, ops, &[list(3), KVal::Int(1)]);
+        jit.agree(samples(11, 200).map(|(n, _)| vec![list(n), KVal::Int(n)]));
     }
 
     #[test]
