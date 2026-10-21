@@ -125,6 +125,7 @@ fn run_batches(first: u64, count: u64, print: bool, stats: bool, keep_going: boo
         totals.faults += on.faults;
         totals.rejected_bodies += on.rejected_bodies;
         totals.vector_batches += on.vector_batches;
+        totals.vector_jit_batches += on.vector_jit_batches;
         for reason in &case.discarded {
             *discarded.entry(reason).or_default() += 1;
         }
@@ -134,11 +135,12 @@ fn run_batches(first: u64, count: u64, print: bool, stats: bool, keep_going: boo
     println!("{agreeing} of {count} batch cases agree ({errors} ending in a runtime error)");
     if stats {
         println!(
-            "kernels on: {} batches ({} with unboxed vectors), {} calls ({} typed, {} on lanes, \
+            "kernels on: {} batches ({} with unboxed vectors, {} of them native), {} calls ({} typed, {} on lanes, \
              {} native), {} single calls, {} typed declines, {} faults, {} rejected bodies; \
              {typed_cases} cases ran typed",
             totals.batches,
             totals.vector_batches,
+            totals.vector_jit_batches,
             totals.calls,
             totals.typed_calls,
             totals.lane_calls,

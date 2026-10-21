@@ -573,7 +573,8 @@ impl Executor {
             .as_deref()
             .and_then(|(program, spec)| tier.jit.prepare(program.spec(*spec), &mut tier.stats));
         // without native code, short lists of numbers (points, colours) are kept unboxed: the
-        // typed machine then runs list arithmetic without allocating, which beats the lanes
+        // typed machine then runs list arithmetic without allocating, which beats the lanes,
+        // and the jit gets a second chance at the vector program
         let vectors = (tier.typed && tier.vectors && jit.is_none() && call_count > 0)
             .then(|| TypedProgram::specialise_vectors(&arena, entry, &batch.call(0)))
             .flatten()
@@ -588,12 +589,15 @@ impl Executor {
                 }
             }
         }
-        let (typed, lanes) = match vectors {
+        let (typed, jit, lanes) = match vectors {
             Some(vectors) => {
                 tier.stats.vector_batches += 1;
-                (Some(Arc::new(vectors)), false)
+                let (program, spec) = &vectors;
+                let jit = tier.jit.prepare(program.spec(*spec), &mut tier.stats);
+                tier.stats.vector_jit_batches += usize::from(jit.is_some());
+                (Some(Arc::new(vectors)), jit, false)
             }
-            None => (typed, tier.lanes),
+            None => (typed, jit, tier.lanes),
         };
         let plan = Plan {
             typed,

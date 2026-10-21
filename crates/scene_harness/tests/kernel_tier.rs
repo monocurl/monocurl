@@ -29,6 +29,7 @@ struct Outcome {
     typed_calls: usize,
     jit_calls: usize,
     vector_batches: usize,
+    vector_jit_batches: usize,
     regions: usize,
     faults: usize,
 }
@@ -51,6 +52,7 @@ fn run(body: &str, mode: KernelMode) -> Outcome {
         typed_calls: run.kernel_stats.typed_calls,
         jit_calls: run.kernel_stats.jit_calls,
         vector_batches: run.kernel_stats.vector_batches,
+        vector_jit_batches: run.kernel_stats.vector_jit_batches,
         regions: run.kernel_stats.regions,
         faults: run.kernel_stats.faults,
     }
@@ -1024,6 +1026,78 @@ fn shading_with_points_and_colours_runs_unboxed() {
     check(&body, Expect::Kernels);
     let on = run(&body, KernelMode::On);
     assert!(on.vector_batches > 0, "no batch kept its vectors unboxed");
+}
+
+/// `check` with `Expect::Native`, and a batch's vector program ran as native code
+fn check_native_vectors(body: &str) {
+    check(body, Expect::Native);
+    if jit::enabled_by_env() {
+        let on = run(body, KernelMode::On);
+        assert!(
+            on.vector_jit_batches > 0,
+            "no vector program ran as native code for:\n{body}"
+        );
+    }
+}
+
+#[test]
+fn shading_with_points_and_colours_runs_as_native_code() {
+    check_native_vectors(&vector_scene(
+        "
+        mesh surface = ExplicitFunc2d(|x, y| 0.4 * sin(x) * y, [0, 39, 40], [-1, 1, 12], colour)
+        print surface
+        ",
+    ));
+}
+
+#[test]
+fn long_captured_tables_of_mixed_rows_run_as_native_code() {
+    // 300 rows is past what an input list holds, and W's rows mix ints and floats
+    check_native_vectors(
+        "
+        let T = map(range(0, 300), |i| [cos(i * 0.1), sin(i * 0.1), i * 0.01])
+        let W = map(range(0, 300), |i| {
+            if (mod(i, 3) == 0) { return [1, 0, 2] }
+            return [0.5, i, 1.5]
+        })
+        let S = map(range(0, 300), |i| 0.5 + 0.001 * i)
+        let colour = |x, y, z| {
+            let i = mod(to_int(round(x * 7)), 300)
+            let j = mod(to_int(round(y * 5)), 300)
+            let p = T[i] * S[j] + T[j]
+            let w = W[i]
+            let q = p * w[1] + cross(p, w) / (1 + dot(w, w))
+            var c = lerp(p, q, 0.25)
+            if (dot(c, w) < 0) { c = c * -1 }
+            if (x > 3) { return [c[0], c[1], -c[2], 1] }
+            return [lerp(w[0], 1, 0.5), lerp(w[2], 2, y), lerp(c[2], w[0], 0.5), 1]
+        }
+        mesh m = ExplicitFunc2d(|x, y| 0, [0, 39, 40], [0, 29, 30], colour)
+        print m
+        ",
+    );
+}
+
+#[test]
+fn vectors_captured_by_inlined_helpers_and_lengths_run_as_native_code() {
+    check_native_vectors(
+        "
+        let K = [0.9, 0.4, 2]
+        let tint = |c| c * K[0] + K * 0.1
+        let R = map(range(0, 300), |i| [i * 0.5, 1, 2.5])
+        let L = map(range(0, 300), |i| i * 0.25)
+        let colour = |x, y, z| {
+            let i = mod(to_int(round(x * 5)), len(R))
+            var acc = []
+            acc .= x
+            acc .= y
+            let v = tint(R[i])
+            return [v[0] * 0.01, v[1] + len(L) * 0.001, v[2] * len(acc), 1]
+        }
+        mesh m = ExplicitFunc2d(|x, y| 0, [0, 39, 40], [0, 29, 30], colour)
+        print m
+        ",
+    );
 }
 
 #[test]
