@@ -30,7 +30,6 @@ use openh264::{
         BitRate, Complexity, Encoder, EncoderConfig, FrameRate, FrameType, IntraFramePeriod,
         QpRange, RateControlMode, UsageType,
     },
-    formats::{BgraSliceU8, YUVBuffer},
 };
 use parser::{
     import_context::ParseImportContext,
@@ -39,6 +38,9 @@ use parser::{
 use renderer::{RenderOptions, RenderSize, Renderer, RgbaImage, SceneRenderData};
 use stdlib::registry::registry;
 use structs::rope::{Rope, TextAggregate};
+use yuv::I420Frame;
+
+mod yuv;
 
 pub const DEFAULT_EXPORT_SIZE: RenderSize = RenderSize::new(1920, 1080);
 pub const DEFAULT_VIDEO_FPS: u32 = 60;
@@ -984,6 +986,7 @@ fn encode_frames(
         .checked_mul(MP4_FRAME_DURATION)
         .ok_or_else(|| anyhow!("mp4 timescale overflow"))?;
     let mut encoder = new_video_encoder(settings)?;
+    let mut planes = I420Frame::new(video_size.width as usize, video_size.height as usize);
     let mut parameter_sets = AvcParameterSets::default();
     // mp4 keeps its moov atom at the end, so a half-written file is unplayable
     // while still looking finished. encode to a sibling .part and rename only
@@ -1010,7 +1013,8 @@ fn encode_frames(
         }
 
         let started = std::time::Instant::now();
-        let encoded = encode_video_sample(&frame, video_size, &mut encoder, &mut parameter_sets)
+        planes.read_bgra(frame.as_raw());
+        let encoded = encode_video_sample(&planes, &mut encoder, &mut parameter_sets)
             .with_context(|| {
                 format!(
                     "failed to encode H.264 sample at slide {} time {:.3} ({}x{})",
@@ -1553,14 +1557,11 @@ fn start_mp4_writer(
 }
 
 fn encode_video_sample(
-    frame: &RgbaImage,
-    size: RenderSize,
+    planes: &I420Frame,
     encoder: &mut Encoder,
     parameter_sets: &mut AvcParameterSets,
 ) -> Result<EncodedSample> {
-    let bgra = BgraSliceU8::new(frame.as_raw(), (size.width as usize, size.height as usize));
-    let yuv = YUVBuffer::from_rgb_source(bgra);
-    let stream = encoder.encode(&yuv)?;
+    let stream = encoder.encode(&planes.slices())?;
 
     let mut bytes = Vec::new();
     for layer_index in 0..stream.num_layers() {
