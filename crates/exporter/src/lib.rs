@@ -38,8 +38,10 @@ use parser::{
 use renderer::{RenderOptions, RenderSize, Renderer, RgbaImage, SceneRenderData};
 use stdlib::registry::registry;
 use structs::rope::{Rope, TextAggregate};
+use repeat::{Repeats, StreamParams};
 use yuv::I420Frame;
 
+mod repeat;
 mod slide_digest;
 mod yuv;
 
@@ -902,10 +904,11 @@ async fn write_video_file(
         total_steps,
     )?;
 
-    let encode_time = sink.finish()?;
+    let encoded = sink.finish()?;
     *completed += 1;
     if let Some(mut timing) = timing {
-        timing.encode = encode_time;
+        timing.encode = encoded.time;
+        timing.repeated = encoded.repeated;
         timing.report(frame_targets.len());
     }
 
@@ -928,7 +931,14 @@ enum EncodeJob {
 /// sink dropped before `finish` leaves no file behind
 struct VideoSink {
     jobs: Option<std::sync::mpsc::SyncSender<EncodeJob>>,
-    worker: Option<std::thread::JoinHandle<Result<std::time::Duration>>>,
+    worker: Option<std::thread::JoinHandle<Result<EncodeStats>>>,
+}
+
+/// what the encoder thread did: time spent encoding and frames repeated without it
+#[derive(Default)]
+struct EncodeStats {
+    time: std::time::Duration,
+    repeated: usize,
 }
 
 impl VideoSink {
@@ -958,12 +968,12 @@ impl VideoSink {
         }
     }
 
-    fn finish(mut self) -> Result<std::time::Duration> {
+    fn finish(mut self) -> Result<EncodeStats> {
         self.push(EncodeJob::Finish)?;
         self.join()
     }
 
-    fn join(&mut self) -> Result<std::time::Duration> {
+    fn join(&mut self) -> Result<EncodeStats> {
         self.jobs = None;
         match self.worker.take() {
             Some(worker) => worker
@@ -988,7 +998,7 @@ fn encode_frames(
     jobs: std::sync::mpsc::Receiver<EncodeJob>,
     output_path: &Path,
     settings: ExportSettings,
-) -> Result<std::time::Duration> {
+) -> Result<EncodeStats> {
     let video_size = settings.render_size;
     let mp4_timescale = settings
         .fps
@@ -1005,7 +1015,12 @@ fn encode_frames(
     let mut cleanup = PartialOutputCleanup::new(temp_path.clone());
     let mut writer = None;
     let mut sample_start_time = 0_u64;
-    let mut encode_time = std::time::Duration::ZERO;
+    let mut stats = EncodeStats::default();
+    // a frame identical to the last one is written as a skipped frame instead of
+    // being encoded; `MONOCURL_EXPORT_NO_REPEATS` encodes every frame, for comparisons
+    let repeat_frames = std::env::var_os("MONOCURL_EXPORT_NO_REPEATS").is_none();
+    let mut repeats: Option<Repeats> = None;
+    let mut previous: Option<RgbaImage> = None;
 
     for index in 0_usize.. {
         let (frame, timestamp, force_intra) = match jobs.recv() {
@@ -1022,21 +1037,55 @@ fn encode_frames(
         }
 
         let started = std::time::Instant::now();
-        planes.read_bgra(frame.as_raw());
-        let encoded = encode_video_sample(&planes, &mut encoder, &mut parameter_sets)
-            .with_context(|| {
-                format!(
-                    "failed to encode H.264 sample at slide {} time {:.3} ({}x{})",
-                    timestamp.slide, timestamp.time, video_size.width, video_size.height
-                )
-            })?;
-        encode_time += started.elapsed();
+        let unchanged = repeat_frames
+            && previous
+                .as_ref()
+                .is_some_and(|previous| previous.as_raw() == frame.as_raw());
+        let repeated = repeats
+            .as_mut()
+            .filter(|_| unchanged)
+            .and_then(Repeats::skipped);
+        let encoded = match repeated {
+            Some(bytes) => {
+                stats.repeated += 1;
+                EncodedSample {
+                    bytes,
+                    is_sync: false,
+                }
+            }
+            None => {
+                planes.read_bgra(frame.as_raw());
+                let mut encoded =
+                    encode_video_sample(&planes, &mut encoder, &mut parameter_sets)
+                        .with_context(|| {
+                            format!(
+                                "failed to encode H.264 sample at slide {} time {:.3} ({}x{})",
+                                timestamp.slide,
+                                timestamp.time,
+                                video_size.width,
+                                video_size.height
+                            )
+                        })?;
+                if let Some(repeats) = repeats.as_mut() {
+                    encoded.bytes = repeats.renumber(encoded.bytes);
+                }
+                encoded
+            }
+        };
+        stats.time += started.elapsed();
+        previous = Some(frame);
 
         if writer.is_none() {
             ensure!(
                 parameter_sets.ready(),
                 "encoder did not emit SPS/PPS parameter sets for the initial video sample"
             );
+            if repeat_frames {
+                let (sps, pps) = (parameter_sets.sps.as_deref(), parameter_sets.pps.as_deref());
+                repeats = Some(Repeats::new(
+                    sps.zip(pps).and_then(|(sps, pps)| StreamParams::parse(sps, pps)),
+                ));
+            }
             let file = File::create(&temp_path).with_context(|| {
                 format!("failed to create video export {}", temp_path.display())
             })?;
@@ -1090,7 +1139,7 @@ fn encode_frames(
         )
     })?;
     cleanup.keep();
-    Ok(encode_time)
+    Ok(stats)
 }
 
 fn new_video_encoder(settings: ExportSettings) -> Result<Encoder> {
@@ -1396,6 +1445,7 @@ struct PhaseTiming {
     eval: std::time::Duration,
     render: std::time::Duration,
     encode: std::time::Duration,
+    repeated: usize,
 }
 
 impl PhaseTiming {
@@ -1406,10 +1456,12 @@ impl PhaseTiming {
     fn report(&self, frames: usize) {
         let per_frame = |d: std::time::Duration| d.as_secs_f64() * 1e3 / frames.max(1) as f64;
         eprintln!(
-            "export timing ms/frame over {frames} frames: eval {:.1} render {:.1} encode {:.1}",
+            "export timing ms/frame over {frames} frames: eval {:.1} render {:.1} encode {:.1}, \
+             {} repeated without encoding",
             per_frame(self.eval),
             per_frame(self.render),
             per_frame(self.encode),
+            self.repeated,
         );
     }
 }
