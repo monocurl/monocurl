@@ -19,6 +19,25 @@ For all platforms, once you have done the required environment setup (see below)
 cargo run --package monocurl
 ```
 
+## Fast optimized builds
+
+`--release` is what ships: fat LTO with one codegen unit, so after editing a
+workspace crate a rebuild relinks everything (about 7 minutes on an M-series
+laptop at `-j 3`). For iterating on performance or rendering videos locally, the
+`release-fast` profile keeps release's optimization level but turns LTO off,
+uses 16 codegen units and builds incrementally:
+
+```sh
+cargo build --profile release-fast -p monocurl
+# the binary is target/release-fast/monocurl
+```
+
+Measured on the same machine: a rebuild after a one-line change in `executor` or
+`exporter` takes 12-29 seconds instead of 6m45s, and render CPU time is within
+about 7% of `--release` (same output). A first build from scratch takes about as
+long as `--release`. Benchmarks and anything you publish should still use
+`--release`.
+
 ## macOS
 
 Install Xcode's command-line tools, Rust, and the native package. 
