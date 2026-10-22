@@ -1158,7 +1158,10 @@ fn step_boxed(
             Opnd::C(_) => return Err("a closure operand"),
         },
         TOp::Index { dst, list, index } => {
-            if at(boxed, list)? != Boxed::Input {
+            if !matches!(
+                at(boxed, list)?,
+                Boxed::Input | Boxed::List(_) | Boxed::Shared(_)
+            ) {
                 return Err("an index");
             }
             match index {
@@ -1466,7 +1469,7 @@ struct Facts {
     vectors: Vec<Option<Box<[Vector]>>>,
     /// for a `VRow` or an `NIndex`, the entry register of its table
     tables: Vec<Option<Reg>>,
-    /// for a `Len`, what its list is
+    /// for a `Len` or an `Index`, what its list is
     lens: Vec<Option<Boxed>>,
 }
 
@@ -1572,7 +1575,7 @@ fn analyse(spec: &Spec) -> Result<Facts, Decline> {
         {
             facts.tables[pc] = Some(*entry);
         }
-        if let TOp::Len { list, .. } = *op {
+        if let TOp::Len { list, .. } | TOp::Index { list, .. } = *op {
             facts.lens[pc] = state.boxed.get(list as usize).copied();
         }
         let mut boxed = state.boxed.clone();
@@ -2413,10 +2416,6 @@ impl Codegen<'_> {
                     regs.set_num(b, dst, pair);
                 }
                 TOp::Index { dst, list, index } => {
-                    // `run`'s `list.get(index as usize)` on the input's copy
-                    let (_, Kind::Dyn(address)) = regs.num(b, list) else {
-                        return None;
-                    };
                     let (i, kind) = regs.operand(b, index)?;
                     match kind {
                         Kind::Int => {}
@@ -2426,6 +2425,32 @@ impl Codegen<'_> {
                             faults.guard(b, not_int, Fault::Type);
                         }
                     }
+                    if let Boxed::List(_) | Boxed::Shared(_) = self.facts.lens[pc]? {
+                        // a list the body built: its length, and a kind naming its
+                        // site (a palette lookup may have left a number instead)
+                        let (count, Kind::Dyn(list_kind)) = regs.num(b, list) else {
+                            return None;
+                        };
+                        let number =
+                            b.ins()
+                                .icmp_imm_s(IntCC::SignedLessThan, list_kind, KIND_LIST);
+                        faults.guard(b, number, Fault::Type);
+                        let outside = b.ins().icmp(IntCC::UnsignedGreaterThanOrEqual, i, count);
+                        faults.guard(b, outside, Fault::Index);
+                        let site = b.ins().iadd_imm_s(list_kind, -KIND_LIST);
+                        let site = b.ins().imul_imm_s(site, word(Layout::site(1)) as i64);
+                        let offset = b.ins().ishl_imm_s(i, 3);
+                        let at = b.ins().iadd(site, offset);
+                        let at = b.ins().iadd(items, at);
+                        let value = b.ins().load(types::I64, flags, at, 0);
+                        let kind = b.ins().load(types::I64, flags, at, word(LIST_CAP));
+                        regs.set_num(b, dst, (value, Kind::Dyn(kind)));
+                        continue;
+                    }
+                    // `run`'s `list.get(index as usize)` on the input's copy
+                    let (_, Kind::Dyn(address)) = regs.num(b, list) else {
+                        return None;
+                    };
                     let len = b.ins().load(types::I64, fixed, address, 0);
                     let absent = b.ins().icmp_imm_s(IntCC::Equal, len, ABSENT as i64);
                     faults.guard(b, absent, Fault::Type);
@@ -4152,6 +4177,36 @@ mod tests {
     }
 
     #[test]
+    fn indexing_a_built_list_matches_the_typed_machine() {
+        // [x * 2, n, x + n][n] with n anywhere, including past the end and negative
+        let bin = |op, dst, a, b| KOp::Bin {
+            op,
+            dst,
+            a,
+            b,
+            take: false,
+        };
+        let ops = vec![
+            KOp::EmptyList { dst: 2 },
+            KOp::Int { dst: 3, value: 2 },
+            bin(BinKind::Mul, 3, 1, 3),
+            KOp::Append { list: 2, value: 3 },
+            KOp::Append { list: 2, value: 0 },
+            bin(BinKind::Add, 3, 1, 0),
+            KOp::Append { list: 2, value: 3 },
+            KOp::Index {
+                dst: 4,
+                list: 2,
+                index: 0,
+            },
+            KOp::Return { src: 4 },
+        ];
+        let jit = compiled(2, 5, ops, &[KVal::Int(1), KVal::Float(0.5)]);
+        jit.agree((-2..6).map(|n| vec![KVal::Int(n), KVal::Float(0.25 * n as f64)]));
+        jit.agree(samples(14, 200).map(|(n, x)| vec![KVal::Int(n.rem_euclid(4)), KVal::Float(x)]));
+    }
+
+    #[test]
     fn a_returned_boxed_argument_is_declined() {
         let ops = vec![KOp::Return { src: 0 }];
         let (arena, id) = closure(1, 1, ops);
@@ -4634,20 +4689,10 @@ mod tests {
     }
 
     #[test]
-    fn a_merged_list_read_other_than_by_a_return_is_declined() {
-        let index = vec![
-            KOp::Int { dst: 6, value: 0 },
-            KOp::Index {
-                dst: 6,
-                list: 4,
-                index: 6,
-            },
-            KOp::Return { src: 6 },
-        ];
+    fn a_merged_list_appended_to_or_read_as_a_number_is_declined() {
         let append = vec![KOp::Append { list: 4, value: 0 }, KOp::Return { src: 4 }];
         let add = vec![bin(BinKind::Add, 6, 4, 1), KOp::Return { src: 6 }];
         for (after, reason) in [
-            (index, "an index"),
             (append, "an append to a copied or merged list"),
             (add, "a list read as a number"),
         ] {
@@ -4657,6 +4702,29 @@ mod tests {
                     Err(reason)
                 );
             }
+        }
+    }
+
+    #[test]
+    fn indexing_a_merged_list_matches_the_typed_machine() {
+        // the merged list's element 1, which only one branch's list has
+        let index = vec![
+            KOp::Int { dst: 6, value: 1 },
+            KOp::Index {
+                dst: 6,
+                list: 4,
+                index: 6,
+            },
+            KOp::Return { src: 6 },
+        ];
+        for direct in [false, true] {
+            let jit = compiled(
+                2,
+                7,
+                merged_lists(2, 1, direct, index.clone()),
+                &[KVal::Int(3), KVal::Float(0.5)],
+            );
+            jit.agree(samples(15, 100).map(|(n, x)| vec![KVal::Int(n), KVal::Float(x)]));
         }
     }
 
@@ -4834,26 +4902,34 @@ mod tests {
     }
 
     #[test]
-    fn a_palette_lookup_read_other_than_by_a_return_is_declined() {
-        let index = vec![
-            KOp::Int { dst: 4, value: 0 },
+    fn a_palette_lookup_read_as_a_number_is_declined() {
+        let mut ops = lookup();
+        ops.pop();
+        ops.extend([bin(BinKind::Add, 2, 2, 0), KOp::Return { src: 2 }]);
+        let (arena, id) = capturing(1, 5, ops, colours());
+        let (program, spec) = TypedProgram::specialise(&arena, id, &[KVal::Float(0.5)]).unwrap();
+        assert_eq!(
+            analyse(program.spec(spec)).map(|_| ()),
+            Err("a list read as a number")
+        );
+    }
+
+    #[test]
+    fn indexing_a_palette_lookup_matches_the_typed_machine() {
+        // keyframe_lerp(palette, t)[2]
+        let mut ops = lookup();
+        ops.pop();
+        ops.extend([
+            KOp::Int { dst: 4, value: 2 },
             KOp::Index {
                 dst: 4,
                 list: 2,
                 index: 4,
             },
             KOp::Return { src: 4 },
-        ];
-        let add = vec![bin(BinKind::Add, 2, 2, 0), KOp::Return { src: 2 }];
-        for (after, reason) in [(index, "an index"), (add, "a list read as a number")] {
-            let mut ops = lookup();
-            ops.pop();
-            ops.extend(after);
-            let (arena, id) = capturing(1, 5, ops, colours());
-            let (program, spec) =
-                TypedProgram::specialise(&arena, id, &[KVal::Float(0.5)]).unwrap();
-            assert_eq!(analyse(program.spec(spec)).map(|_| ()), Err(reason));
-        }
+        ]);
+        let jit = compiled_capturing(1, 5, ops, colours(), &[KVal::Float(0.5)]);
+        jit.agree(times().into_iter().map(|t| vec![KVal::Float(t)]));
     }
 
     #[test]
