@@ -128,3 +128,11 @@ blade-graphics = { path = "vendor/blade-graphics-0.7.1" }
 [profile.release]
 lto = true
 codegen-units = 1
+
+# local iteration: release's optimization without lto, parallel and incremental codegen.
+# rebuilds take seconds instead of minutes; `release` is what ships (see BUILDING.md)
+[profile.release-fast]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true
