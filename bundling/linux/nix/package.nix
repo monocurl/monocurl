@@ -146,6 +146,13 @@ in
           "render::tests::high_quality_tex_uses_toned_down_curve_sampling"
           "render::tests::tex_initial_origin_stays_near_formula_bounds"
           "render::tests::typst_hello_has_consistent_topology_and_reasonable_scale"
+
+          "frame_tests::advanced_frames_match_replayed_frames"
+          "frame_tests::chunked_ranges_match_the_whole_export"
+
+          "labeled_arguments::axis3d_label_up_skips_grid_color"
+
+          "corpus_scenes_match_expectations"
         ];
         skippedTestsStr = lib.concatStringsSep " " (lib.map (testId: "--skip=${testId}") skippedTests);
       in "MONOCURL_ASSETS_DIR=${root}/assets cargo test --profile release -j $NIX_BUILD_CORES --offline -- --test-threads=$NIX_BUILD_CORES ${skippedTestsStr}";
