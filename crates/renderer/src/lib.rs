@@ -414,6 +414,36 @@ mod tests {
     }
 
     #[test]
+    fn sharp_corner_bevels_instead_of_spiking() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(1024, 1024);
+        // a 40 degree corner opening toward +x; its miter would reach ~2.9 radii
+        // past the apex along -x, past the default limit
+        let half = 20f32.to_radians();
+        let arm = |sign: f32| Float3::new(0.5 * half.cos(), sign * 0.5 * half.sin(), 0.0);
+        let mut mesh = elbow_line_mesh(true, Float4::new(1.0, 0.0, 0.0, 1.0));
+        mesh.lins[0].a.pos = arm(1.0);
+        mesh.lins[0].b.pos = Float3::ZERO;
+        mesh.lins[1].a.pos = Float3::ZERO;
+        mesh.lins[1].b.pos = arm(-1.0);
+        let image = renderer.render(&white_scene(vec![mesh]), size).unwrap();
+
+        let radius_px = 24.0 * size.width as f32 / 1480.0;
+        let (x, y) = screen_point(Float3::ZERO, size);
+        let is_red = |offset: f32| {
+            let [b, g, r, _] = image.get_pixel((x as f32 - offset) as u32, y as u32).0;
+            r > 200 && g < 150 && b < 150
+        };
+        assert!(is_red(0.0), "expected the corner itself to be stroked");
+        assert!(
+            !is_red(1.5 * radius_px),
+            "expected the sharp join to bevel rather than spike past the apex"
+        );
+    }
+
+    #[test]
     fn linked_polyline_populates_outer_corner_miter_region() {
         let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
             return;

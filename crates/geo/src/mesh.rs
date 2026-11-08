@@ -125,7 +125,9 @@ pub struct Uniforms {
     pub z_index: i32,
 }
 
-pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 4.0;
+/// joins sharper than about 47 degrees bevel instead of spiking; 60 degree corners
+/// (equilateral triangles) still miter
+pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 2.5;
 pub const DEFAULT_STROKE_RADIUS: f32 = 1.0;
 pub const DEFAULT_STROKE_BEHIND: bool = true;
 pub const DEFAULT_DOT_RADIUS: f32 = 4.0;

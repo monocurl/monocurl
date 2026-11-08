@@ -71,7 +71,7 @@ type LineVertex = {
 const DEFAULT_CAMERA_FOV = 1.0247789;
 const MIN_CAMERA_NEAR = 0.01;
 const REFERENCE_WIDTH = 1480;
-const DEFAULT_LINE_MITER_SCALE = 4;
+const DEFAULT_LINE_MITER_SCALE = 2.5;
 const DEPTH_STEP = 1e-6;
 const EPSILON = 1e-6;
 
