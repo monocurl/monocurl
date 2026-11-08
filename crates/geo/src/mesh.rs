@@ -115,6 +115,8 @@ pub struct Uniforms {
     pub alpha: f64,
     pub stroke_miter_radius_scale: f32,
     pub stroke_radius: f32,
+    /// draw strokes before the fill so an opaque fill hides their inner half
+    pub stroke_behind: bool,
     pub dot_radius: f32,
     pub dot_vertex_count: u16,
     pub smooth: bool,
@@ -123,8 +125,11 @@ pub struct Uniforms {
     pub z_index: i32,
 }
 
-pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 4.0;
+/// joins sharper than about 47 degrees bevel instead of spiking; 60 degree corners
+/// (equilateral triangles) still miter
+pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 2.5;
 pub const DEFAULT_STROKE_RADIUS: f32 = 1.0;
+pub const DEFAULT_STROKE_BEHIND: bool = true;
 pub const DEFAULT_DOT_RADIUS: f32 = 4.0;
 pub const DEFAULT_DOT_VERTEX_COUNT: u16 = 8;
 pub const DEFAULT_SMOOTH: bool = false;
@@ -137,6 +142,7 @@ impl Default for Uniforms {
             alpha: 1.0,
             stroke_miter_radius_scale: DEFAULT_STROKE_MITER_RADIUS_SCALE,
             stroke_radius: DEFAULT_STROKE_RADIUS,
+            stroke_behind: DEFAULT_STROKE_BEHIND,
             dot_radius: DEFAULT_DOT_RADIUS,
             dot_vertex_count: DEFAULT_DOT_VERTEX_COUNT,
             smooth: DEFAULT_SMOOTH,

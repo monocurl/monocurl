@@ -118,6 +118,7 @@ export interface MeshUniforms {
   alpha: number;
   strokeMiterRadiusScale: number;
   strokeRadius: number;
+  strokeBehind: boolean;
   dotRadius: number;
   dotVertexCount: number;
   smooth: boolean;

@@ -273,13 +273,16 @@ mod tests {
         let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
             return;
         };
+        // the fill hides the inner half, so the outer half must span a pixel
+        let mut mesh = stroked_triangle_mesh(
+            Float4::new(0.0, 0.0, 1.0, 1.0),
+            Float4::new(1.0, 0.0, 0.0, 1.0),
+        );
+        mesh.uniform.stroke_radius = 24.0;
         let scene = SceneRenderData {
             background: BackgroundSnapshot::default(),
             camera: CameraSnapshot::default(),
-            meshes: vec![Arc::new(stroked_triangle_mesh(
-                Float4::new(0.0, 0.0, 1.0, 1.0),
-                Float4::new(1.0, 0.0, 0.0, 1.0),
-            ))],
+            meshes: vec![Arc::new(mesh)],
         };
 
         let image = renderer.render(&scene, RenderSize::new(128, 128)).unwrap();
@@ -305,6 +308,42 @@ mod tests {
         assert!(
             red_pixels > 0,
             "expected stroked triangle render to produce visible red stroke pixels"
+        );
+    }
+
+    #[test]
+    fn stroke_behind_hides_the_inner_half_under_the_fill() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(256, 256);
+        // pixels 2px either side of the bottom edge, inside a ~5px stroke radius
+        let (x, y) = screen_point(Float3::new(0.0, -0.5, 0.0), size);
+        let inside = (x as u32, (y - 2) as u32);
+        let outside = (x as u32, (y + 2) as u32);
+
+        let mut render = |stroke_behind| {
+            let mut mesh = stroked_triangle_mesh(
+                Float4::new(0.0, 0.0, 1.0, 1.0),
+                Float4::new(1.0, 0.0, 0.0, 1.0),
+            );
+            mesh.uniform.stroke_radius = 30.0;
+            mesh.uniform.stroke_behind = stroke_behind;
+            let image = renderer.render(&white_scene(vec![mesh]), size).unwrap();
+            let [b, _, r, _] = image.get_pixel(inside.0, inside.1).0;
+            let [ob, _, or, _] = image.get_pixel(outside.0, outside.1).0;
+            (r > b, or > ob)
+        };
+
+        assert_eq!(
+            render(false),
+            (true, true),
+            "a stroke on top covers both sides"
+        );
+        assert_eq!(
+            render(true),
+            (false, true),
+            "a stroke behind shows only outside"
         );
     }
 
@@ -371,6 +410,36 @@ mod tests {
         assert!(
             joined_red > disconnected_red,
             "expected linked polyline join to add visible corner pixels, got joined={joined_red} disconnected={disconnected_red}"
+        );
+    }
+
+    #[test]
+    fn sharp_corner_bevels_instead_of_spiking() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(1024, 1024);
+        // a 40 degree corner opening toward +x; its miter would reach ~2.9 radii
+        // past the apex along -x, past the default limit
+        let half = 20f32.to_radians();
+        let arm = |sign: f32| Float3::new(0.5 * half.cos(), sign * 0.5 * half.sin(), 0.0);
+        let mut mesh = elbow_line_mesh(true, Float4::new(1.0, 0.0, 0.0, 1.0));
+        mesh.lins[0].a.pos = arm(1.0);
+        mesh.lins[0].b.pos = Float3::ZERO;
+        mesh.lins[1].a.pos = Float3::ZERO;
+        mesh.lins[1].b.pos = arm(-1.0);
+        let image = renderer.render(&white_scene(vec![mesh]), size).unwrap();
+
+        let radius_px = 24.0 * size.width as f32 / 1480.0;
+        let (x, y) = screen_point(Float3::ZERO, size);
+        let is_red = |offset: f32| {
+            let [b, g, r, _] = image.get_pixel((x as f32 - offset) as u32, y as u32).0;
+            r > 200 && g < 150 && b < 150
+        };
+        assert!(is_red(0.0), "expected the corner itself to be stroked");
+        assert!(
+            !is_red(1.5 * radius_px),
+            "expected the sharp join to bevel rather than spike past the apex"
         );
     }
 
@@ -630,6 +699,7 @@ mod tests {
                 alpha: 1.0,
                 stroke_miter_radius_scale: geo::mesh::DEFAULT_STROKE_MITER_RADIUS_SCALE,
                 stroke_radius: geo::mesh::DEFAULT_STROKE_RADIUS,
+                stroke_behind: geo::mesh::DEFAULT_STROKE_BEHIND,
                 dot_radius: geo::mesh::DEFAULT_DOT_RADIUS,
                 dot_vertex_count: geo::mesh::DEFAULT_DOT_VERTEX_COUNT,
                 smooth: geo::mesh::DEFAULT_SMOOTH,

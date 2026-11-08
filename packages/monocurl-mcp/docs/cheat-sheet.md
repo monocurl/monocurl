@@ -45,7 +45,7 @@ import std.scene
 - Placement: `shift`, `center`, `scale`, `rotate`, `in_space`, `next_to`,
   `matched_edge`, `to_side`, `to_corner`, `camera_transfer`,
   `orient_to_camera`, `projected`.
-- Styling: `fill`, `stroke`, `color`, `fade`, `dotted`, `dashed`, `gloss`,
+- Styling: `fill`, `stroke`, `stroke_behind`, `color`, `fade`, `dotted`, `dashed`, `gloss`,
   `textured`, `z_index`.
 - Identity and subsets: `tag`, `text_tag`, `tag_filter`, `tag_split`,
   `tag_map`, `subset_map`, `contour_separate`.

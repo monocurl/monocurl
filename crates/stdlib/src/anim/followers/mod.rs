@@ -192,6 +192,11 @@ pub(super) fn lerp_uniforms(start: &Uniforms, end: &Uniforms, t: f32) -> Uniform
         stroke_miter_radius_scale: start.stroke_miter_radius_scale
             + (end.stroke_miter_radius_scale - start.stroke_miter_radius_scale) * t,
         stroke_radius: start.stroke_radius + (end.stroke_radius - start.stroke_radius) * t,
+        stroke_behind: if t < 0.5 {
+            start.stroke_behind
+        } else {
+            end.stroke_behind
+        },
         dot_radius: start.dot_radius + (end.dot_radius - start.dot_radius) * t,
         dot_vertex_count: ((1.0 - t) * start.dot_vertex_count as f32
             + t * end.dot_vertex_count as f32) as u16,

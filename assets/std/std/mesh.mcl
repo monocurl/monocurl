@@ -1104,6 +1104,20 @@ let stroke = operator |target, color, stroke_width = nil, filter = nil| {
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
+## [overview]
+## Choose whether strokes are drawn behind the fill (the default) or on top of it.
+## [description]
+## A stroke is centered on its outline. By default it is drawn first and the fill over it, so an opaque fill hides the inner half and the stroke reads as an outer outline that never eats into text or thin shapes. A translucent fill only partly hides that inner half. `stroke_behind{0}` draws the stroke on top instead, covering the edge of the fill; then the full stroke width shows.
+## [parameters]
+## behind: truthy to draw strokes behind the fill, falsey to draw them on top
+## filter: optional tag predicate
+## [example]
+## ```mcl image
+## mesh behind = center{0.6u} stroke{RED, 6} fill{BLUE} Text("Campo de Fuerzas", 1.4)
+## mesh on_top = center{0.6d} stroke_behind{0} stroke{RED, 6} fill{BLUE} Text("Campo de Fuerzas", 1.4)
+## ```
+let stroke_behind = operator |target, behind = 1, filter = nil| [target, __monocurl__native__ op_stroke_behind(target, behind, filter)]
+
 ## [options]
 ## important: true
 ## [overview]

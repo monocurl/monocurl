@@ -485,6 +485,7 @@ fn uniforms_exactly_equal(a: &geo::mesh::Uniforms, b: &geo::mesh::Uniforms) -> b
     canonical_f64_bits(a.alpha) == canonical_f64_bits(b.alpha)
         && a.stroke_miter_radius_scale.to_bits() == b.stroke_miter_radius_scale.to_bits()
         && a.stroke_radius.to_bits() == b.stroke_radius.to_bits()
+        && a.stroke_behind == b.stroke_behind
         && a.dot_radius.to_bits() == b.dot_radius.to_bits()
         && a.dot_vertex_count == b.dot_vertex_count
         && a.smooth == b.smooth

@@ -359,6 +359,36 @@ pub async fn op_with_zindex(
     Ok(tree.into_value())
 }
 
+fn op_stroke_behind_sync(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Option<Result<Value, ExecutorError>> {
+    let mut tree = try_read_mesh_tree_arg(executor, stack_idx, -3)?;
+    if !has_no_tag_filter(executor, stack_idx, -1) {
+        return None;
+    }
+    Some((|| {
+        let behind = crate::read_float(executor, stack_idx, -2, "behind")? != 0.0;
+        tree.for_each_mut(&mut |mesh| mesh.uniform.stroke_behind = behind);
+        Ok(tree.into_value())
+    })())
+}
+
+#[stdlib_func(sync = op_stroke_behind_sync)]
+pub async fn op_stroke_behind(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    let mut tree = read_mesh_tree_arg(executor, stack_idx, -3, "target").await?;
+    let behind = crate::read_float(executor, stack_idx, -2, "behind")? != 0.0;
+    let filter = read_optional_tag_filter(executor, stack_idx, -1, "filter")?;
+    tree.for_each_filtered(executor, filter.as_ref(), &mut |mesh| {
+        mesh.uniform.stroke_behind = behind;
+    })
+    .await?;
+    Ok(tree.into_value())
+}
+
 fn op_gloss_sync(
     executor: &mut Executor,
     stack_idx: usize,
