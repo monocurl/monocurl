@@ -530,84 +530,97 @@ impl BladeRenderer {
             };
             let [slice_scale, slice_offset] = depth_slice_for(&layers, item.z_index);
 
-            if let Some(triangles) = buffers.triangles.as_ref() {
-                let texture_view = item
-                    .texture
-                    .as_ref()
-                    .and_then(|key| {
-                        self.texture_cache
-                            .get(key)
-                            .and_then(|entry| entry.texture.as_ref())
-                    })
-                    .map_or(self.white_texture.view, |texture| texture.view);
+            let translucent = item.mesh.uniform.alpha < 1.0;
+            // a stroke drawn behind goes first; lines never write depth, so the
+            // fill then covers its inner half
+            let parts = if item.mesh.uniform.stroke_behind {
+                [MeshPart::Lines, MeshPart::Triangles]
+            } else {
+                [MeshPart::Triangles, MeshPart::Lines]
+            };
+            for part in parts {
+                if part == MeshPart::Triangles
+                    && let Some(triangles) = buffers.triangles.as_ref()
+                {
+                    let texture_view = item
+                        .texture
+                        .as_ref()
+                        .and_then(|key| {
+                            self.texture_cache
+                                .get(key)
+                                .and_then(|entry| entry.texture.as_ref())
+                        })
+                        .map_or(self.white_texture.view, |texture| texture.view);
 
-                let data = TrianglesData {
-                    tri_camera: camera,
-                    tri_params: TriShaderParams {
-                        depth_slice: [slice_scale, slice_offset, 0.0, 0.0],
-                        values: [
-                            item.mesh.uniform.alpha as f32,
-                            z_offset,
-                            item.mesh.uniform.gloss,
-                            if item.mesh.uniform.smooth { 1.0 } else { 0.0 },
-                        ],
-                    },
-                    t_color: texture_view,
-                    s_color: self.texture_sampler,
-                    tri_vertices: triangles.buffer.into(),
-                };
-                // a translucent mesh lays down its depth first, so it fades as a solid: only its
-                // nearest surface blends, never its own back faces in submission order. coplanar
-                // (2d) triangles tie under LessEqual, so flat scenes draw as before
-                if buffers.translucent || item.mesh.uniform.alpha < 1.0 {
-                    let mut encoder = pass.with(&self.pipelines.triangles_depth);
+                    let data = TrianglesData {
+                        tri_camera: camera,
+                        tri_params: TriShaderParams {
+                            depth_slice: [slice_scale, slice_offset, 0.0, 0.0],
+                            values: [
+                                item.mesh.uniform.alpha as f32,
+                                z_offset,
+                                item.mesh.uniform.gloss,
+                                if item.mesh.uniform.smooth { 1.0 } else { 0.0 },
+                            ],
+                        },
+                        t_color: texture_view,
+                        s_color: self.texture_sampler,
+                        tri_vertices: triangles.buffer.into(),
+                    };
+                    // a translucent mesh lays down its depth first, so it fades as a solid: only its
+                    // nearest surface blends, never its own back faces in submission order. coplanar
+                    // (2d) triangles tie under LessEqual, so flat scenes draw as before
+                    if buffers.translucent || item.mesh.uniform.alpha < 1.0 {
+                        let mut encoder = pass.with(&self.pipelines.triangles_depth);
+                        encoder.bind(0, &data);
+                        encoder.draw(0, triangles.count, 0, 1);
+                    }
+                    let mut encoder = pass.with(&self.pipelines.triangles);
                     encoder.bind(0, &data);
                     encoder.draw(0, triangles.count, 0, 1);
-                }
-                let mut encoder = pass.with(&self.pipelines.triangles);
-                encoder.bind(0, &data);
-                encoder.draw(0, triangles.count, 0, 1);
-                z_offset += DEPTH_STEP;
-            }
-
-            let translucent = item.mesh.uniform.alpha < 1.0;
-            if let Some(lines) = buffers.lines.as_ref() {
-                let line_radius = mesh_line_radius_px(item.mesh.as_ref(), size, self.style);
-                if line_radius > f32::EPSILON {
-                    let instances = lines.count / LINE_VERTICES_PER_INSTANCE;
-                    let once = translucent || buffers.translucent_lines;
-                    let mut encoder = if once {
-                        let reference = stencil.next(&mut pass, &self.pipelines.stencil_reset);
-                        let mut encoder = pass.with(&self.pipelines.lines_once);
-                        encoder.set_stencil_reference(reference);
-                        encoder
-                    } else {
-                        pass.with(&self.pipelines.lines)
-                    };
-                    encoder.bind(
-                        0,
-                        &LinesData {
-                            line_camera: camera,
-                            line_params: LineShaderParams {
-                                viewport_and_line_width: [
-                                    size.width as f32,
-                                    size.height as f32,
-                                    line_radius,
-                                    item.mesh.uniform.alpha as f32,
-                                ],
-                                depth_bias: [
-                                    z_offset,
-                                    mesh_line_miter_scale(item.mesh.as_ref()),
-                                    slice_scale,
-                                    slice_offset,
-                                ],
-                                instance_order: instance_order(once, instances),
-                            },
-                            line_vertices: lines.buffer.into(),
-                        },
-                    );
-                    encoder.draw(0, LINE_INDICES_PER_INSTANCE, 0, instances);
                     z_offset += DEPTH_STEP;
+                }
+
+                if part == MeshPart::Lines
+                    && let Some(lines) = buffers.lines.as_ref()
+                {
+                    let line_radius = mesh_line_radius_px(item.mesh.as_ref(), size, self.style);
+                    if line_radius > f32::EPSILON {
+                        let instances = lines.count / LINE_VERTICES_PER_INSTANCE;
+                        let once = translucent || buffers.translucent_lines;
+                        let mut encoder = if once {
+                            let reference = stencil.next(&mut pass, &self.pipelines.stencil_reset);
+                            let mut encoder = pass.with(&self.pipelines.lines_once);
+                            encoder.set_stencil_reference(reference);
+                            encoder
+                        } else {
+                            pass.with(&self.pipelines.lines)
+                        };
+                        encoder.bind(
+                            0,
+                            &LinesData {
+                                line_camera: camera,
+                                line_params: LineShaderParams {
+                                    viewport_and_line_width: [
+                                        size.width as f32,
+                                        size.height as f32,
+                                        line_radius,
+                                        item.mesh.uniform.alpha as f32,
+                                    ],
+                                    depth_bias: [
+                                        z_offset,
+                                        mesh_line_miter_scale(item.mesh.as_ref()),
+                                        slice_scale,
+                                        slice_offset,
+                                    ],
+                                    instance_order: instance_order(once, instances),
+                                },
+                                line_vertices: lines.buffer.into(),
+                            },
+                        );
+                        encoder.draw(0, LINE_INDICES_PER_INSTANCE, 0, instances);
+                        z_offset += DEPTH_STEP;
+                    }
                 }
             }
 
@@ -790,6 +803,12 @@ const STENCIL_CLEAR: u8 = u8::MAX;
 
 /// hands each translucent stroke or dot set a stencil value no earlier one in
 /// the pass wrote, resetting the stencil when the 8 bits run out
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MeshPart {
+    Triangles,
+    Lines,
+}
+
 #[derive(Default)]
 struct StencilReferences {
     next: u8,

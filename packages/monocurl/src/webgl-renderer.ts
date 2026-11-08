@@ -203,14 +203,18 @@ export class MonocurlWebGlRenderer {
     };
 
     for (const mesh of meshes) {
-      const triangles = buildTriangleData(mesh);
-      if (triangles.length > 0) {
-        this.drawTriangles(triangles, mesh, camera, viewportScale, depthBias);
-        depthBias += DEPTH_STEP;
-      }
-
-      const lineRadius = meshLineRadiusPx(mesh, this.canvas.width, this.lineWidthPx);
-      if (lineRadius > EPSILON) {
+      const drawFill = (): void => {
+        const triangles = buildTriangleData(mesh);
+        if (triangles.length > 0) {
+          this.drawTriangles(triangles, mesh, camera, viewportScale, depthBias);
+          depthBias += DEPTH_STEP;
+        }
+      };
+      const drawStroke = (): void => {
+        const lineRadius = meshLineRadiusPx(mesh, this.canvas.width, this.lineWidthPx);
+        if (lineRadius <= EPSILON) {
+          return;
+        }
         let lines = buildLineData(mesh);
         if (lines.length > 0) {
           const once =
@@ -224,6 +228,18 @@ export class MonocurlWebGlRenderer {
           gl.disable(gl.STENCIL_TEST);
           depthBias += DEPTH_STEP;
         }
+      };
+
+      // a stroke drawn behind goes first without writing depth, so the fill
+      // then covers its inner half
+      if (mesh.uniform.strokeBehind) {
+        gl.depthMask(false);
+        drawStroke();
+        gl.depthMask(true);
+        drawFill();
+      } else {
+        drawFill();
+        drawStroke();
       }
 
       const dotRadius = meshDotRadiusPx(mesh, this.resolvedPixelRatio(), this.dotRadiusPx);

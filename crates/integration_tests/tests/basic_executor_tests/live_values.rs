@@ -906,6 +906,31 @@ fn test_stroke_operator_explicit_nil_width_preserves_existing_stroke_width() {
 }
 
 #[test]
+fn test_stroke_behind_operator_sets_flag() {
+    let r = run_with_stdlib(
+        "
+        let result = [
+            stroke_behind{} Circle(1),
+            stroke_behind{0} stroke_behind{} Circle(1),
+            stroke_behind{1, |tags| 1 in tags} [tag{1} Circle(1), tag{2} Circle(1)]
+        ]
+    ",
+        &["mesh"],
+    );
+    r.assert_ok();
+
+    let value = r.value.as_ref().expect("expected result value");
+    let mut meshes = Vec::new();
+    flatten_mesh_leaves(value, &mut meshes);
+
+    let behind = meshes
+        .iter()
+        .map(|mesh| mesh.uniform.stroke_behind)
+        .collect::<Vec<_>>();
+    assert_eq!(behind, [true, false, true, false]);
+}
+
+#[test]
 fn test_stroke_operator_uses_third_argument_filter_when_width_is_present() {
     let r = run_with_stdlib(
         "

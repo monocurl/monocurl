@@ -309,6 +309,42 @@ mod tests {
     }
 
     #[test]
+    fn stroke_behind_hides_the_inner_half_under_the_fill() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(256, 256);
+        // pixels 2px either side of the bottom edge, inside a ~5px stroke radius
+        let (x, y) = screen_point(Float3::new(0.0, -0.5, 0.0), size);
+        let inside = (x as u32, (y - 2) as u32);
+        let outside = (x as u32, (y + 2) as u32);
+
+        let mut render = |stroke_behind| {
+            let mut mesh = stroked_triangle_mesh(
+                Float4::new(0.0, 0.0, 1.0, 1.0),
+                Float4::new(1.0, 0.0, 0.0, 1.0),
+            );
+            mesh.uniform.stroke_radius = 30.0;
+            mesh.uniform.stroke_behind = stroke_behind;
+            let image = renderer.render(&white_scene(vec![mesh]), size).unwrap();
+            let [b, _, r, _] = image.get_pixel(inside.0, inside.1).0;
+            let [ob, _, or, _] = image.get_pixel(outside.0, outside.1).0;
+            (r > b, or > ob)
+        };
+
+        assert_eq!(
+            render(false),
+            (true, true),
+            "a stroke on top covers both sides"
+        );
+        assert_eq!(
+            render(true),
+            (false, true),
+            "a stroke behind shows only outside"
+        );
+    }
+
+    #[test]
     fn renders_clockwise_triangle_pixels() {
         let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
             return;
@@ -630,6 +666,7 @@ mod tests {
                 alpha: 1.0,
                 stroke_miter_radius_scale: geo::mesh::DEFAULT_STROKE_MITER_RADIUS_SCALE,
                 stroke_radius: geo::mesh::DEFAULT_STROKE_RADIUS,
+                stroke_behind: geo::mesh::DEFAULT_STROKE_BEHIND,
                 dot_radius: geo::mesh::DEFAULT_DOT_RADIUS,
                 dot_vertex_count: geo::mesh::DEFAULT_DOT_VERTEX_COUNT,
                 smooth: geo::mesh::DEFAULT_SMOOTH,

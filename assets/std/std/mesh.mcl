@@ -1104,6 +1104,19 @@ let stroke = operator |target, color, stroke_width = nil, filter = nil| {
     return [go(c: color, level: 0), go(c: color, level: 1)]
 }
 
+## [overview]
+## Draw strokes behind the fill, for an outer stroke.
+## [description]
+## A stroke is centered on its outline, so a thick stroke normally covers half of the fill, which eats into text and thin shapes. `stroke_behind{}` draws the stroke first and the fill over it, so only the outer half of the stroke shows. Since half the width is hidden, double `stroke_width` to keep the visible outline as thick as before. The fill only hides the stroke where it is opaque: through a translucent fill the inner half still shows. Pass `0` to draw strokes on top again.
+## [parameters]
+## behind: truthy to draw strokes behind the fill, falsey to draw them on top
+## filter: optional tag predicate
+## [example]
+## ```mcl image
+## mesh title = center{ORIGIN} stroke_behind{} stroke{RED, 6} fill{BLUE} Text("Campo de Fuerzas", 1.4)
+## ```
+let stroke_behind = operator |target, behind = 1, filter = nil| [target, __monocurl__native__ op_stroke_behind(target, behind, filter)]
+
 ## [options]
 ## important: true
 ## [overview]
