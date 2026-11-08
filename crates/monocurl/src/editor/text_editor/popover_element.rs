@@ -64,7 +64,7 @@ impl PopoverElement {
         let scroll = handle
             .offset()
             .y
-            .clamp(-handle.max_offset().height, px(0.0));
+            .clamp(-handle.max_offset().height.max(px(0.0)), px(0.0));
         point(editor_pos.x, editor_pos.y + scroll)
     }
 

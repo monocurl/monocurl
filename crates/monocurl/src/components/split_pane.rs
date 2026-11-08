@@ -130,8 +130,9 @@ impl Element for Split {
         };
         let (min_first, min_second) =
             scaled_min_sizes(main_axis, self.min_first_size, self.min_second_size);
-        let min_flex = (min_first / main_axis).max(0.0);
+        // scaled mins can sum to exactly main_axis, so rounding may invert the bounds
         let max_flex = (1.0 - min_second / main_axis).min(1.0);
+        let min_flex = (min_first / main_axis).max(0.0).min(max_flex);
         let flex = flex_handle.get().clamp(min_flex, max_flex);
         let split_pos = main_axis * flex;
 
@@ -258,6 +259,9 @@ fn paint_split_handle(layout: &mut SplitLayout, window: &mut Window, _cx: &mut A
         move |event: &MouseMoveEvent, phase, window, cx| {
             if phase.bubble() && is_dragging.get() {
                 let container_size = bounds.size.along(axis);
+                if container_size <= px(0.0) {
+                    return;
+                }
                 let offset = (event.position - bounds.origin).along(axis);
                 let min_px = min_first;
                 let max_px = container_size - min_second;
