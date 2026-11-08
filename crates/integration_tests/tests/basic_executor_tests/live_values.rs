@@ -910,9 +910,9 @@ fn test_stroke_behind_operator_sets_flag() {
     let r = run_with_stdlib(
         "
         let result = [
-            stroke_behind{} Circle(1),
-            stroke_behind{0} stroke_behind{} Circle(1),
-            stroke_behind{1, |tags| 1 in tags} [tag{1} Circle(1), tag{2} Circle(1)]
+            Circle(1),
+            stroke_behind{0} Circle(1),
+            stroke_behind{0, |tags| 1 in tags} [tag{1} Circle(1), tag{2} Circle(1)]
         ]
     ",
         &["mesh"],
@@ -927,7 +927,7 @@ fn test_stroke_behind_operator_sets_flag() {
         .iter()
         .map(|mesh| mesh.uniform.stroke_behind)
         .collect::<Vec<_>>();
-    assert_eq!(behind, [true, false, true, false]);
+    assert_eq!(behind, [true, false, false, true]);
 }
 
 #[test]

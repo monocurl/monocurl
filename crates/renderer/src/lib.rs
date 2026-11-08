@@ -273,13 +273,16 @@ mod tests {
         let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
             return;
         };
+        // the fill hides the inner half, so the outer half must span a pixel
+        let mut mesh = stroked_triangle_mesh(
+            Float4::new(0.0, 0.0, 1.0, 1.0),
+            Float4::new(1.0, 0.0, 0.0, 1.0),
+        );
+        mesh.uniform.stroke_radius = 24.0;
         let scene = SceneRenderData {
             background: BackgroundSnapshot::default(),
             camera: CameraSnapshot::default(),
-            meshes: vec![Arc::new(stroked_triangle_mesh(
-                Float4::new(0.0, 0.0, 1.0, 1.0),
-                Float4::new(1.0, 0.0, 0.0, 1.0),
-            ))],
+            meshes: vec![Arc::new(mesh)],
         };
 
         let image = renderer.render(&scene, RenderSize::new(128, 128)).unwrap();

@@ -115,7 +115,7 @@ pub struct Uniforms {
     pub alpha: f64,
     pub stroke_miter_radius_scale: f32,
     pub stroke_radius: f32,
-    /// draw strokes before the fill so the fill hides their inner half
+    /// draw strokes before the fill so an opaque fill hides their inner half
     pub stroke_behind: bool,
     pub dot_radius: f32,
     pub dot_vertex_count: u16,
@@ -127,7 +127,7 @@ pub struct Uniforms {
 
 pub const DEFAULT_STROKE_MITER_RADIUS_SCALE: f32 = 4.0;
 pub const DEFAULT_STROKE_RADIUS: f32 = 1.0;
-pub const DEFAULT_STROKE_BEHIND: bool = false;
+pub const DEFAULT_STROKE_BEHIND: bool = true;
 pub const DEFAULT_DOT_RADIUS: f32 = 4.0;
 pub const DEFAULT_DOT_VERTEX_COUNT: u16 = 8;
 pub const DEFAULT_SMOOTH: bool = false;
