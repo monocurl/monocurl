@@ -3,6 +3,9 @@ name: Release
 on:
   push:
     tags: ['v*']
+    # dry run: push a release-check/<anything> branch to build, sign and smoke
+    # test every platform without publishing
+    branches: ['release-check/**']
 
 jobs:
   # nothing ships unless the full test gate passes, including the kernel
@@ -99,7 +102,12 @@ jobs:
 
       - name: Derive version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          else
+            echo "version=0.0.0" >> $GITHUB_OUTPUT
+          fi
 
       - name: Apply bundle version
         run: perl -0pi -e 's/^version = "[^"]+"/version = "$ENV{MONOCURL_VERSION}"/m' crates/monocurl/Cargo.toml
@@ -152,6 +160,11 @@ jobs:
           APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
           APPLE_NOTARY_TEAM_ID: ${{ secrets.APPLE_NOTARY_TEAM_ID }}
 
+      - name: Smoke test the DMG
+        run: bash bundling/macos/smoke-test.sh dist/macos/Monocurl-macos-*.dmg
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -195,12 +208,19 @@ jobs:
             libssl-dev \
             libicu-dev \
             patchelf \
-            pkg-config
+            pkg-config \
+            xvfb \
+            mesa-vulkan-drivers
           pkg-config --modversion graphite2 freetype2 libpng icu-uc fontconfig openssl
 
       - name: Derive version
         id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          else
+            echo "version=0.0.0" >> $GITHUB_OUTPUT
+          fi
 
       - name: Apply bundle version
         run: perl -0pi -e 's/^version = "[^"]+"/version = "$ENV{MONOCURL_VERSION}"/m' crates/monocurl/Cargo.toml
@@ -214,6 +234,9 @@ jobs:
 
       - name: Bundle
         run: bash bundling/linux/post-bundle.sh "${{ steps.version.outputs.version }}" "${{ matrix.target }}"
+
+      - name: Smoke test the tarball
+        run: xvfb-run -a -s "-screen 0 1920x1080x24" bash bundling/linux/smoke-test.sh dist/linux/Monocurl-linux-*.tar.gz
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -294,7 +317,12 @@ jobs:
       - name: Derive version
         id: version
         shell: bash
-        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+          else
+            echo "version=0.0.0" >> $GITHUB_OUTPUT
+          fi
 
       - name: Apply bundle version
         shell: bash
@@ -309,7 +337,14 @@ jobs:
 
       - name: Install rcedit
         shell: pwsh
-        run: choco install rcedit -y --no-progress
+        run: |
+          foreach ($attempt in 1..5) {
+            choco install rcedit -y --no-progress
+            if (Get-Command rcedit -ErrorAction SilentlyContinue) { exit 0 }
+            Write-Host "rcedit missing after attempt $attempt; retrying"
+            Start-Sleep -Seconds (15 * $attempt)
+          }
+          throw "could not install rcedit"
 
       - name: Embed Windows app icon
         shell: pwsh
@@ -378,6 +413,12 @@ jobs:
             }
           }
 
+      - name: Smoke test the installer
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path "${{ github.workspace }}\dist\windows" -Filter "*.exe" | Select-Object -First 1
+          ./bundling/windows/smoke-test.ps1 $installer.FullName
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -387,6 +428,7 @@ jobs:
   publish:
     name: Publish release
     needs: [build-macos, build-linux, build-windows]
+    if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write

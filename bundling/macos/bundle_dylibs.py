@@ -3,6 +3,7 @@
 # Discovers all non-system Homebrew dylibs the binary (transitively) depends on,
 # copies them into frameworks_dir, and rewrites all load commands to use
 # @executable_path/../Frameworks (for the exe) or @loader_path (for dylibs).
+# Exits non-zero if any bundled object still depends on something outside the app.
 
 import os
 import shutil
@@ -10,91 +11,96 @@ import subprocess
 import sys
 from collections import deque
 
+SYSTEM_PREFIXES = ("/usr/lib/", "/System/Library/")
+
 
 def otool_deps(path, skip_id=False):
     out = subprocess.check_output(["otool", "-L", path], text=True)
     lines = out.splitlines()[1:]  # drop the object name line
     if skip_id and lines:
         lines = lines[1:]  # first entry is the dylib's own install name
-    deps = []
-    for line in lines:
-        dep = line.strip().split(" (")[0]
-        if dep:
-            deps.append(dep)
-    return deps
+    return [dep for line in lines if (dep := line.strip().split(" (")[0])]
 
 
-def original_install_name(path):
-    out = subprocess.check_output(["otool", "-L", path], text=True)
-    lines = out.splitlines()
-    if len(lines) < 2:
-        return None
-    return lines[1].strip().split(" (")[0]
+def rpaths(path):
+    lines = [line.strip() for line in subprocess.check_output(["otool", "-l", path], text=True).splitlines()]
+    return [
+        follow[len("path "):].split(" (offset")[0]
+        for i, line in enumerate(lines)
+        if line == "cmd LC_RPATH"
+        for follow in lines[i + 1:i + 3]
+        if follow.startswith("path ")
+    ]
 
 
-def resolve_dep(dep, obj, skip_id=False):
-    if dep.startswith("@loader_path/"):
-        suffix = dep[len("@loader_path/"):]
-        candidate = os.path.join(os.path.dirname(obj), suffix)
-        if os.path.isfile(candidate):
-            return candidate
-        if skip_id:
-            install_name = original_install_name(obj)
-            if install_name and install_name.startswith("/"):
-                candidate = os.path.join(os.path.dirname(install_name), suffix)
-                if os.path.isfile(candidate):
-                    return candidate
-        return None
-    if dep.startswith("/"):
-        return dep
-    return None
+def resolve_dep(dep, src):
+    # src is where the referencing object came from, so @loader_path and
+    # @rpath expand against its original directory, not the copy in the bundle
+    base = os.path.dirname(src)
+
+    def expand(path):
+        for token in ("@loader_path", "@executable_path"):
+            if path.startswith(token):
+                return base + path[len(token):]
+        return path
+
+    if dep.startswith("@rpath/"):
+        rest = dep[len("@rpath/"):]
+        candidates = [os.path.join(expand(r), rest) for r in rpaths(src)]
+    elif dep.startswith(("@loader_path/", "@executable_path/")):
+        candidates = [expand(dep)]
+    elif dep.startswith("/"):
+        candidates = [dep]
+    else:
+        candidates = []
+    return next((c for c in candidates if os.path.isfile(c)), None)
 
 
-def should_bundle(path):
-    if path is None:
-        return False
-    skip_prefixes = ("/usr/lib/", "/System/Library/")
-    if any(path.startswith(p) for p in skip_prefixes):
-        return False
-    return os.path.isfile(path)
+def is_system(dep):
+    return dep.startswith(SYSTEM_PREFIXES)
 
 
 def bundle(exe, frameworks_dir):
     os.makedirs(frameworks_dir, exist_ok=True)
 
+    source = {exe: exe}  # bundled path -> original path
     queue = deque([exe])
-    copied = []
-
     while queue:
         cur = queue.popleft()
-        is_dylib = cur.startswith(frameworks_dir + os.sep)
-        for dep in otool_deps(cur, skip_id=is_dylib):
-            resolved = resolve_dep(dep, cur, skip_id=is_dylib)
-            if resolved is None or not should_bundle(resolved):
+        for dep in otool_deps(cur, skip_id=cur != exe):
+            if is_system(dep) or (resolved := resolve_dep(dep, source[cur])) is None:
                 continue
             dst = os.path.join(frameworks_dir, os.path.basename(dep))
-            if not os.path.exists(dst):
+            if dst not in source:
                 shutil.copy2(resolved, dst)
                 os.chmod(dst, os.stat(dst).st_mode | 0o200)
-                copied.append(dst)
+                source[dst] = resolved
                 queue.append(dst)
 
-    def rewrite_refs(obj, ref_prefix, skip_id=False):
-        for dep in otool_deps(obj, skip_id=skip_id):
-            resolved = resolve_dep(dep, obj, skip_id=skip_id)
-            if resolved is None or not should_bundle(resolved):
-                continue
+    for obj in source:
+        prefix = "@executable_path/../Frameworks" if obj == exe else "@loader_path"
+        for dep in otool_deps(obj, skip_id=obj != exe):
             name = os.path.basename(dep)
-            new_dep = f"{ref_prefix}/{name}"
-            if dep != new_dep and os.path.exists(os.path.join(frameworks_dir, name)):
-                subprocess.check_call([
-                    "install_name_tool", "-change", dep,
-                    new_dep, obj
-                ])
+            new_dep = f"{prefix}/{name}"
+            if not is_system(dep) and dep != new_dep and os.path.join(frameworks_dir, name) in source:
+                subprocess.check_call(["install_name_tool", "-change", dep, new_dep, obj])
 
-    rewrite_refs(exe, "@executable_path/../Frameworks", skip_id=False)
-    for dylib in copied:
-        rewrite_refs(dylib, "@loader_path", skip_id=True)
+    verify(exe, frameworks_dir, source)
+
+
+def verify(exe, frameworks_dir, bundled):
+    broken = []
+    for obj in bundled:
+        prefix = "@executable_path/../Frameworks/" if obj == exe else "@loader_path/"
+        for dep in otool_deps(obj, skip_id=obj != exe):
+            if is_system(dep):
+                continue
+            name = dep.removeprefix(prefix)
+            if name == dep or not os.path.isfile(os.path.join(frameworks_dir, name)):
+                broken.append(f"{os.path.basename(obj)} -> {dep}")
+    if broken:
+        sys.exit("[error] dylib dependencies left outside the bundle:\n  " + "\n  ".join(broken))
+    print(f"[ok] bundled {len(bundled) - 1} dylibs")
 
 
 if __name__ == "__main__":
