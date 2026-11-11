@@ -5,7 +5,7 @@ use structs::rope::{Rope, TextAggregate};
 use crate::{services::ServiceManagerMessage, state::diagnostics::Diagnostic};
 
 use super::{
-    ExecutionService, ExecutionSnapshot, ExecutionStatus, diagnostics::format_runtime_error_message,
+    ExecutionService, ExecutionSnapshot, ExecutionStatus, diagnostics::runtime_error_report,
 };
 
 impl ExecutionService {
@@ -39,12 +39,15 @@ impl ExecutionService {
                 .state
                 .errors
                 .iter()
-                .map(|runtime_error| Diagnostic {
-                    dtype: crate::state::diagnostics::DiagnosticType::RuntimeError,
-                    span: runtime_error.span.clone(),
-                    title: "Runtime Error".into(),
-                    message: format_runtime_error_message(executor, root_text_rope, runtime_error),
-                    hint: runtime_error.hint.clone(),
+                .map(|runtime_error| {
+                    let report = runtime_error_report(executor, root_text_rope, runtime_error);
+                    Diagnostic {
+                        dtype: crate::state::diagnostics::DiagnosticType::RuntimeError,
+                        span: runtime_error.span.clone(),
+                        title: "Runtime Error".into(),
+                        message: report.message,
+                        hint: report.hint,
+                    }
                 })
                 .collect()
         });

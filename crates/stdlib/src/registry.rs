@@ -45,6 +45,7 @@ impl Registry {
         self.entries
             .iter()
             .map(|entry| NativeFunction {
+                name: entry.name,
                 call: entry.func,
                 call_sync: entry.sync_func,
                 intrinsic: kernel_intrinsic(entry.name),

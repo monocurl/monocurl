@@ -41,6 +41,7 @@ pub type StdlibSyncFunc = fn(&mut Executor, usize) -> Option<Result<Value, Execu
 /// not, which lets the interpreter run it without building a future at all
 #[derive(Clone, Copy)]
 pub struct NativeFunction {
+    pub name: &'static str,
     pub call: StdlibFunc,
     pub call_sync: Option<StdlibSyncFunc>,
     /// present when the kernel tier evaluates this native itself; see

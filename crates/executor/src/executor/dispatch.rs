@@ -575,7 +575,10 @@ impl Executor {
                 let is_root = section.flags.is_root_module;
                 let root_slide_index = self.root_slide_index_for_transcript_entry(section_idx);
                 let annotation_idx = self.state.stack(stack_idx).ip.1.saturating_sub(1) as usize;
-                let span = section.annotations[annotation_idx].source_loc.clone();
+                let span = self.bytecode.root_span(
+                    section_idx,
+                    section.annotations[annotation_idx].source_loc.clone(),
+                );
                 let text = crate::transcript::stringify_for_transcript(&resolved);
                 self.state.transcript.append(
                     section_idx,

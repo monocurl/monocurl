@@ -2,8 +2,8 @@
 "before"
 
 # runtime errors
-type error: expected lambda, got int
-type error: expected lambda, got int
+type error: expected lambda, but got int
+type error: expected lambda, but got int
 
 # end timestamp
 (none)

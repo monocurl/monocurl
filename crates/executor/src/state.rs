@@ -313,6 +313,10 @@ impl ExecutionState {
             stack.var_stack = var_stack;
         }
         if let Some(idx) = self.spare_stack_slots.pop() {
+            // a stale trace parent may name the very slot being reused
+            if stack.trace_parent_idx == Some(idx) {
+                stack.trace_parent_idx = None;
+            }
             if let ExecutionStackSlot::Ghost(ghost) = &mut self.execution_stacks[idx] {
                 stack.call_stack = std::mem::take(&mut ghost.call_stack);
                 stack.call_stack.clear();

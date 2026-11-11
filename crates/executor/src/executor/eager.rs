@@ -415,7 +415,10 @@ impl Executor {
     {
         Box::pin(async move {
             let full_args = prepare_eager_call_args(args, lambda)?;
-            self.eagerly_invoke_lambda(lambda, full_args, None).await
+            // called from inside a builtin: trace back to the stack running it
+            let trace_parent_idx = Some(self.state.last_stack_idx);
+            self.eagerly_invoke_lambda(lambda, full_args, trace_parent_idx)
+                .await
         })
     }
 

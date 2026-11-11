@@ -372,7 +372,7 @@ impl Interpreter {
             Val::Lambda(closure) => closure,
             other => {
                 return error(format!(
-                    "type error: expected lambda, got {}",
+                    "type error: expected lambda, but got {}",
                     other.type_name()
                 ));
             }
@@ -544,7 +544,7 @@ fn native_call(native: Native, args: &[Val]) -> Eval<Val> {
             Val::List(items) => Val::Int(items.len() as i64),
             other => {
                 return error(format!(
-                    "type error: expected list / map / string, got {}",
+                    "type error: expected list / map / string, but got {}",
                     other.type_name()
                 ));
             }
@@ -578,7 +578,7 @@ fn native_call(native: Native, args: &[Val]) -> Eval<Val> {
 
 fn type_error(expected: &str, got: &Val, target: &str) -> String {
     format!(
-        "type error: expected {expected}, got {} for {target}",
+        "type error: expected {expected} for `{target}`, but got {}",
         got.type_name()
     )
 }
@@ -677,14 +677,14 @@ fn truthy(value: &Val) -> Eval<bool> {
 fn list_position(index: &Val, len: usize) -> Eval<usize> {
     let Val::Int(index) = index else {
         return error(format!(
-            "type error: expected int, got {}",
+            "type error: expected int, but got {}",
             index.type_name()
         ));
     };
     // negative indices wrap to huge positions, exactly as the message reports them
     let index = *index as usize;
     if index >= len {
-        return error(format!("index {index} out of bounds (len {len})"));
+        return error(format!("index {index} is out of bounds for a list of length {len}"));
     }
     Ok(index)
 }

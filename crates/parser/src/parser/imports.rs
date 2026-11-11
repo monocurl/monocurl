@@ -266,11 +266,9 @@ impl Parser {
         f: PreparsedFile,
         cursor: Option<Count8>,
     ) -> (Arc<SectionBundle>, ParseArtifacts) {
-        let mut documentation = documentation::extract(
-            &f.text_rope.iterator(0).collect::<String>(),
-            &f.path,
-            f.root_import_span.is_none(),
-        );
+        let text: String = f.text_rope.iterator(0).collect();
+        let mut documentation =
+            documentation::extract(&text, &f.path, f.root_import_span.is_none());
         let file_index = currently_parsed.len();
         let imported_files = Self::imported_file_indices(currently_parsed, &f.imports);
 
@@ -307,6 +305,7 @@ impl Parser {
                 imported_files,
                 sections: parsed_sections,
                 root_import_span: f.root_import_span,
+                source_text: None,
                 was_cached: false,
             });
             (ret, artifacts)
@@ -331,6 +330,7 @@ impl Parser {
                     imported_files,
                     sections: vec![section],
                     root_import_span: f.root_import_span,
+                    source_text: Some(text.into()),
                     was_cached: false,
                 }),
                 artifacts,

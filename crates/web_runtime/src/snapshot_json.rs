@@ -150,7 +150,9 @@ struct SerializableRuntimeError {
 impl From<&RuntimeError> for SerializableRuntimeError {
     fn from(error: &RuntimeError) -> Self {
         Self {
-            message: error.error.to_string(),
+            message: error
+                .error
+                .message_in_native(error.callstack.last().and_then(|frame| frame.native)),
             span: SerializableSpan {
                 start: error.span.start,
                 end: error.span.end,
@@ -169,7 +171,10 @@ impl From<&RuntimeError> for SerializableRuntimeError {
 #[serde(rename_all = "camelCase")]
 struct SerializableRuntimeCallFrame {
     section: u16,
+    /// into the section's own file: the scene for root sections, the library otherwise
     span: SerializableSpan,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    native: Option<&'static str>,
 }
 
 impl From<&RuntimeCallFrame> for SerializableRuntimeCallFrame {
@@ -180,6 +185,7 @@ impl From<&RuntimeCallFrame> for SerializableRuntimeCallFrame {
                 start: frame.span.start,
                 end: frame.span.end,
             },
+            native: frame.native,
         }
     }
 }

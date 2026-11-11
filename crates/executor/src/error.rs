@@ -77,14 +77,22 @@ pub enum ExecutorError {
 #[derive(Debug, Clone)]
 pub struct RuntimeCallFrame {
     pub section: u16,
+    /// span into the section's own source file (the root document for root
+    /// sections, the library file for imported ones)
     pub span: Span8,
+    /// builtin this frame was inside of when the error happened
+    pub native: Option<&'static str>,
 }
 
 #[derive(Debug, Clone)]
 pub struct RuntimeError {
     pub error: ExecutorError,
+    /// span into the root document
     pub span: Span8,
+    /// outermost call first
     pub callstack: Vec<RuntimeCallFrame>,
+    /// frames dropped from the middle of `callstack` to bound its length
+    pub omitted_frames: usize,
     pub hint: Option<String>,
 }
 
@@ -196,15 +204,19 @@ impl fmt::Display for ExecutorError {
                 if let Some(target) = target {
                     write!(
                         f,
-                        "type error: expected {}, got {} for {}",
-                        expected, got, target
+                        "type error: expected {} for `{}`, but got {}",
+                        expected, target, got
                     )
                 } else {
-                    write!(f, "type error: expected {}, got {}", expected, got)
+                    write!(f, "type error: expected {}, but got {}", expected, got)
                 }
             }
             Self::IndexOutOfBounds { index, len } => {
-                write!(f, "index {} out of bounds (len {})", index, len)
+                write!(
+                    f,
+                    "index {} is out of bounds for a list of length {}",
+                    index, len
+                )
             }
             Self::DivisionByZero => write!(f, "division by zero"),
             Self::CannotAssignTo(ty) => write!(
@@ -213,7 +225,7 @@ impl fmt::Display for ExecutorError {
                 ty
             ),
             Self::CannotSubscript(ty) => write!(f, "cannot subscript {}", ty),
-            Self::CannotAttribute(ty) => write!(f, "attribute access on {}", ty),
+            Self::CannotAttribute(ty) => write!(f, "cannot access an attribute of {}", ty),
             Self::TooFewArguments {
                 minimum,
                 got,
@@ -282,7 +294,7 @@ impl fmt::Display for ExecutorError {
             }
             Self::UnknownParameter(name) => write!(f, "unknown parameter '{}'", name),
             Self::NativeFuncError(msg) => write!(f, "{}", msg),
-            Self::MissingArgument(name) => write!(f, "{}: missing argument", name),
+            Self::MissingArgument(name) => write!(f, "missing required argument `{}`", name),
             Self::UnsupportedBinaryOp { op, lhs, rhs } => {
                 write!(f, "unsupported binary op {} on {} and {}", op, lhs, rhs)
             }
@@ -334,6 +346,87 @@ impl fmt::Display for ExecutorError {
 }
 
 impl std::error::Error for ExecutorError {}
+
+impl ExecutorError {
+    /// the message, phrased as coming from inside the builtin `native`
+    pub fn message_in_native(&self, native: Option<&str>) -> String {
+        let Some(native) = native else {
+            return self.to_string();
+        };
+        match self {
+            Self::TypeError {
+                expected,
+                got,
+                target: Some(target),
+            } => format!(
+                "type error: `{}` expected {} for argument `{}`, but got {}",
+                native, expected, target, got
+            ),
+            Self::TypeError {
+                expected,
+                got,
+                target: None,
+            } => format!(
+                "type error: `{}` expected {}, but got {}",
+                native, expected, got
+            ),
+            Self::InvalidArgument { arg, message } => {
+                format!("invalid argument `{}` to `{}`: {}", arg, native, message)
+            }
+            Self::MissingArgument(name) => {
+                format!("`{}` is missing required argument `{}`", native, name)
+            }
+            other => format!("{} (in `{}`)", other, native),
+        }
+    }
+
+    /// general advice for this kind of error, independent of where it happened
+    pub fn general_hint(&self) -> Option<String> {
+        let is_number = |ty: &str| matches!(ty, "int" | "float" | "number" | "complex");
+        let hint = match self {
+            Self::TypeError { expected, got, .. }
+                if expected.starts_with("list") && is_number(got) =>
+            {
+                "a single number was used where a list (such as a vector `[x, y, z]`) was \
+                 expected. If one of your functions returns a plain number like `0` in some \
+                 branch, make every branch return a list instead, e.g. `[0, 0, 0]`"
+                    .into()
+            }
+            Self::TypeError { expected, got, .. } if is_number(expected) && *got == "list" => {
+                "a list was used where a single number was expected. Index into it (`v[0]`) \
+                 or reduce it (e.g. `norm(v)`) first"
+                    .into()
+            }
+            Self::TypeError { got: "nil", .. } => {
+                "the value is `nil`. A function that reaches its end without `return` (or a \
+                 missing default) produces `nil`"
+                    .into()
+            }
+            Self::IndexOutOfBounds { len: 0, .. } => "the list is empty".into(),
+            Self::IndexOutOfBounds { len, .. } => format!(
+                "lists are indexed from 0, so valid indices are 0 to {}",
+                len - 1
+            ),
+            Self::CannotSubscript(_) => {
+                "only lists, maps and strings can be indexed with `[...]`".into()
+            }
+            Self::UnsupportedBinaryOp { lhs, rhs, .. } if lhs != rhs => format!(
+                "the two sides have different types ({lhs} and {rhs}); convert one of them first"
+            ),
+            Self::ListLengthMismatch { .. } => {
+                "element-wise list operations need both lists to have the same length".into()
+            }
+            Self::StackOverflow => {
+                "this is usually a recursive function that never reaches its base case".into()
+            }
+            Self::DivisionByZero => {
+                "check that the divisor is nonzero before dividing".into()
+            }
+            _ => return None,
+        };
+        Some(hint)
+    }
+}
 
 impl fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
