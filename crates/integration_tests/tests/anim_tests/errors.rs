@@ -1283,3 +1283,51 @@ fn test_flash_traces_window_and_restores_reference_target() {
 }
 
 // -- regression: while loop before play --
+
+#[test]
+fn test_error_in_stdlib_callback_traces_back_to_scene() {
+    let src = r#"
+let div = |a, b| {
+    if (b < 0.1 and b > -0.1) {
+        return 0
+    }
+    return [a[0]/b, a[1]/b, a[2]/b]
+}
+mesh field = VectorField(|p| div(1u - p, norm(1u - p)^2), [-2, 2, 13], [-2, 2, 13])
+"#;
+    let (mut executor, _) = match build_anim_executor(
+        &[(src, SectionType::Slide)],
+        &stdlib_bundles(["util", "math", "mesh", "color", "anim"]),
+    ) {
+        Ok(data) => data,
+        Err(result) => panic!("failed to build executor: {:?}", result.errors),
+    };
+    let target = executor.user_to_internal_timestamp(user_timestamp(0, 0.0));
+    smol::block_on(async {
+        let _ = executor.seek_to(target).await;
+    });
+
+    let runtime_error = executor.state.errors.first().expect("expected runtime error");
+    let call_start = src.find("VectorField(").expect("missing VectorField call");
+    assert_eq!(runtime_error.span.start, call_start);
+    assert_eq!(
+        runtime_error.callstack.last().and_then(|frame| frame.native),
+        Some("dot")
+    );
+
+    let report = executor::error_report::RuntimeErrorReport::new(&executor, src, runtime_error);
+    assert!(
+        report.message.contains("`dot` expected list for argument `u`, but got int"),
+        "{}",
+        report.message
+    );
+    assert!(report.message.contains("std/mesh.mcl:"), "{}", report.message);
+    assert!(
+        report.message.contains("mesh field = VectorField("),
+        "{}",
+        report.message
+    );
+    let hint = report.hint.expect("expected hint");
+    assert!(hint.contains("[0, 0, 0]"), "{hint}");
+    assert!(hint.contains("line 8 of your scene"), "{hint}");
+}

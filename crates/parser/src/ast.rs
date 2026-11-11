@@ -29,6 +29,8 @@ pub struct SectionBundle {
     pub imported_files: Vec<usize>,
     pub sections: Vec<Section>,
     pub root_import_span: Option<Span8>,
+    /// full file text, kept for imported files so runtime errors can quote them
+    pub source_text: Option<std::sync::Arc<str>>,
 }
 
 impl SectionBundle {

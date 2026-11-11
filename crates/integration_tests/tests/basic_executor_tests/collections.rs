@@ -422,7 +422,7 @@ fn test_nested_subscript_out_of_bounds_reports_inner_length() {
         let grid = [[1, 2], [3, 4]]
         let result = grid[1][5]
     ");
-    r.assert_error("index 5 out of bounds (len 2)");
+    r.assert_error("index 5 is out of bounds for a list of length 2");
 }
 
 #[test]

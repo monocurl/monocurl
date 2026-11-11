@@ -278,6 +278,7 @@ pub(crate) struct CompileBundle {
     path: Option<PathBuf>,
     is_root_bundle: bool,
     import_display_index: Option<usize>,
+    source_text: Option<Arc<str>>,
     exports: HashMap<String, Arc<Symbol>>,
     errors: Vec<CompileError>,
     warnings: Vec<CompileWarning>,
@@ -296,6 +297,8 @@ struct Compiler {
 
     // output
     compile_bundles: Vec<Arc<CompileBundle>>,
+    /// root import span of each entry of `compile_bundles`
+    bundle_import_spans: Vec<Option<Span8>>,
     errors: Vec<CompileError>,     // mounted onto root bundle
     warnings: Vec<CompileWarning>, // mounted onto root bundle
     // only applicable to root bundle
@@ -324,6 +327,7 @@ impl Compiler {
             }],
             current_bundle: None,
             compile_bundles: Vec::new(),
+            bundle_import_spans: Vec::new(),
             errors: Vec::new(),
             warnings: Vec::new(),
             bundle_root_import_span: None,
@@ -347,13 +351,19 @@ impl Compiler {
             .iter()
             .flat_map(|sec| sec.bytecode.iter().cloned())
             .collect();
+        let import_spans = self
+            .compile_bundles
+            .iter()
+            .zip(&self.bundle_import_spans)
+            .flat_map(|(bundle, span)| std::iter::repeat_n(span.clone(), bundle.bytecode.len()))
+            .collect();
 
         let cache = CompilerCache {
             last_bundles: self.compile_bundles,
         };
 
         let result = CompileResult {
-            bytecode: Bytecode::new(bytecode_sections),
+            bytecode: Bytecode::new(bytecode_sections).with_import_spans(import_spans),
             errors: self.errors,
             warnings: self.warnings,
             possible_cursor_identifiers,
@@ -440,6 +450,7 @@ impl Compiler {
             path: None,
             is_root_bundle: true,
             import_display_index: None,
+            source_text: None,
             exports: HashMap::default(),
             errors: Vec::default(),
             warnings: Vec::default(),
@@ -494,6 +505,8 @@ impl Compiler {
             .filter(|sym| !sym.1.imported)
             .collect();
         self.compile_bundles.push(Arc::new(bundle));
+        self.bundle_import_spans
+            .push(self.bundle_root_import_span.clone());
     }
 
     fn emit_cached_bundle(
@@ -527,6 +540,8 @@ impl Compiler {
         }
 
         self.compile_bundles.push(cached_bundle);
+        self.bundle_import_spans
+            .push(self.bundle_root_import_span.clone());
     }
 
     fn compile_bundle(&mut self, bundle: &SectionBundle) {
@@ -576,6 +591,7 @@ impl Compiler {
                     .count()
                     + 1
             }),
+            source_text: bundle.source_text.clone(),
             exports: HashMap::default(),
             errors: Vec::default(),
             warnings: Vec::default(),
@@ -626,6 +642,7 @@ impl Compiler {
                 .map(|name| name.to_string_lossy().into_owned())
         });
         bytecode.import_display_index = current_bundle.import_display_index;
+        bytecode.source_text = current_bundle.source_text.clone();
         self.current_bundle.as_mut().unwrap().current_bytecode = Some(bytecode);
 
         // covers the section's nested closures too, so one scan decides every
@@ -667,13 +684,9 @@ impl Compiler {
             self.error(src.clone(), "too many instructions in section");
         }
         self.current_section_mut().instructions.push(instruction);
-
-        let real_span = self.bundle_root_import_span.clone().unwrap_or(src);
         self.current_section_mut()
             .annotations
-            .push(InstructionAnnotation {
-                source_loc: real_span,
-            });
+            .push(InstructionAnnotation { source_loc: src });
     }
 
     fn emit_push(&mut self, instruction: Instruction, src: Span8) {

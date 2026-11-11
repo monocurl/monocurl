@@ -1661,7 +1661,13 @@ pub(super) async fn invoke_callable_many_input<T>(
 ) -> Result<Vec<T>, ExecutorError> {
     let lambda = callable_lambda(callable, name)?;
     executor
-        .eagerly_invoke_lambda_many_input(&lambda, input, None, from_kernel, from_value)
+        .eagerly_invoke_lambda_many_input(
+            &lambda,
+            input,
+            Some(executor.state.last_stack_idx),
+            from_kernel,
+            from_value,
+        )
         .await
 }
 
@@ -1676,7 +1682,12 @@ pub(super) async fn invoke_callable_many_flat<T: FlatOutput>(
 ) -> Result<Vec<T>, ExecutorError> {
     let lambda = callable_lambda(callable, name)?;
     executor
-        .eagerly_invoke_lambda_many_flat(&lambda, input, None, from_value)
+        .eagerly_invoke_lambda_many_flat(
+            &lambda,
+            input,
+            Some(executor.state.last_stack_idx),
+            from_value,
+        )
         .await
 }
 

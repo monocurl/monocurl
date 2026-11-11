@@ -1,5 +1,6 @@
 pub mod camera;
 pub mod error;
+pub mod error_report;
 pub mod executor;
 pub mod heap;
 pub mod kernel;

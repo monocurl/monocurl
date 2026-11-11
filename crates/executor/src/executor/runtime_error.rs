@@ -8,7 +8,12 @@ use crate::{
 
 use super::Executor;
 
-const RUNTIME_ERROR_CALLSTACK_LIMIT: usize = 5;
+/// outermost frames always kept, so the trace still reaches the scene
+const RUNTIME_ERROR_OUTER_FRAMES: usize = 2;
+/// innermost frames always kept, so the trace still shows where it failed
+const RUNTIME_ERROR_INNER_FRAMES: usize = 10;
+/// guards against a corrupted (cyclic) chain of trace parents
+const MAX_RECOVERED_FRAMES: usize = 4096;
 
 impl Executor {
     pub fn record_runtime_error(&mut self, error: ExecutorError) -> RuntimeError {
@@ -46,31 +51,64 @@ impl Executor {
         stack_idx: usize,
     ) -> RuntimeError {
         let fallback_span = self.current_instruction_span(stack_idx);
-        let mut recovered_callstack = Vec::new();
-
-        for frame in self.recover_call_stack(stack_idx) {
-            let span = self.best_effort_span(frame.stack_idx, frame.next_ip);
-            recovered_callstack.push(RuntimeCallFrame {
+        let mut recovered_callstack: Vec<_> = self
+            .recover_call_stack(stack_idx)
+            .map(|frame| RuntimeCallFrame {
                 section: frame.next_ip.0,
-                span: span.clone(),
-            });
-        }
-
+                span: self.best_effort_span(frame.stack_idx, frame.next_ip),
+                native: self.native_called_before(frame.next_ip),
+            })
+            .collect();
         recovered_callstack.reverse();
+
+        let root_span =
+            |frame: &RuntimeCallFrame| self.bytecode.root_span(frame.section as usize, frame.span.clone());
+        // prefer the deepest frame in the scene file itself, then the import
+        // of the deepest user library frame, then wherever the failure was
         let primary_span = recovered_callstack
             .iter()
             .rev()
-            .find(|frame| self.is_user_code_section(frame.section as usize))
-            .map(|frame| frame.span.clone())
-            .or_else(|| recovered_callstack.last().map(|frame| frame.span.clone()))
+            .find(|frame| self.is_scene_section(frame.section as usize))
+            .or_else(|| {
+                recovered_callstack
+                    .iter()
+                    .rev()
+                    .find(|frame| self.is_user_code_section(frame.section as usize))
+            })
+            .or(recovered_callstack.last())
+            .map(root_span)
             .unwrap_or(fallback_span);
-        recovered_callstack.truncate(RUNTIME_ERROR_CALLSTACK_LIMIT);
+
+        let omitted_frames = recovered_callstack
+            .len()
+            .saturating_sub(RUNTIME_ERROR_OUTER_FRAMES + RUNTIME_ERROR_INNER_FRAMES);
+        if omitted_frames > 0 {
+            recovered_callstack.drain(
+                RUNTIME_ERROR_OUTER_FRAMES..RUNTIME_ERROR_OUTER_FRAMES + omitted_frames,
+            );
+        }
 
         RuntimeError {
+            hint: error.general_hint(),
             error,
             span: primary_span,
             callstack: recovered_callstack,
-            hint: None,
+            omitted_frames,
+        }
+    }
+
+    /// the builtin a frame was executing, when its last instruction called one
+    fn native_called_before(&self, next_ip: InstructionPointer) -> Option<&'static str> {
+        let section = self.bytecode.sections.get(next_ip.0 as usize)?;
+        let instruction = section
+            .instructions
+            .get(next_ip.1.checked_sub(1)? as usize)?;
+        match instruction {
+            bytecode::Instruction::NativeInvoke { index, .. } => self
+                .native_funcs
+                .get(*index as usize)
+                .map(|native| native.name),
+            _ => None,
         }
     }
 
@@ -81,9 +119,18 @@ impl Executor {
             .is_some_and(|section| !section.flags.is_stdlib)
     }
 
+    fn is_scene_section(&self, section_idx: usize) -> bool {
+        self.bytecode
+            .sections
+            .get(section_idx)
+            .is_some_and(|section| section.flags.is_root_module && !section.flags.is_stdlib)
+    }
+
+    /// span of the instruction a stack is executing, in the root document
     pub(super) fn current_instruction_span(&self, stack_idx: usize) -> Span8 {
         let ip = self.state.stack_ip(stack_idx);
-        self.best_effort_span(stack_idx, ip)
+        self.bytecode
+            .root_span(ip.0 as usize, self.best_effort_span(stack_idx, ip))
     }
 
     fn best_effort_span(&self, _stack_idx: usize, ip: InstructionPointer) -> Span8 {
@@ -157,6 +204,7 @@ impl Executor {
             .sections
             .iter()
             .rev()
+            .filter(|section| section.flags.is_root_module)
             .find_map(|section| section_fallback_span_from_annotations(&section.annotations))
     }
 
@@ -164,7 +212,9 @@ impl Executor {
         let mut frames = Vec::new();
         let mut cursor = Some(stack_idx);
 
-        while let Some(idx) = cursor {
+        while let Some(idx) = cursor
+            && frames.len() < MAX_RECOVERED_FRAMES
+        {
             let direct_parent_idx = self.state.stack_parent_idx(idx);
             let trace_parent_idx = self.state.stack_trace_parent_idx(idx);
             let parent_idx = trace_parent_idx.or(direct_parent_idx);
@@ -184,7 +234,7 @@ impl Executor {
                         next_ip,
                     }),
             );
-            cursor = parent_idx;
+            cursor = parent_idx.filter(|&parent| parent != idx);
         }
 
         frames.into_iter()

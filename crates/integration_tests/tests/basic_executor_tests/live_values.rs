@@ -2274,7 +2274,7 @@ fn test_append_assign_to_live_scalar_result_is_rejected() {
         var v = f(2)
         v .= 3
     ");
-    r.assert_error("expected list, got live function");
+    r.assert_error("expected list, but got live function");
 }
 
 // -- dotted --

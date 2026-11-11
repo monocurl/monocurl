@@ -50,6 +50,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         })
     }
@@ -107,6 +108,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
         let root_bundle = Arc::new(SectionBundle {
@@ -119,6 +121,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
 
@@ -163,6 +166,7 @@ mod test {
                 name: Some("Intro".into()),
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
 
@@ -418,6 +422,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
@@ -432,6 +437,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
         no_errors(&test_compile(&[bundle0, bundle1]));
@@ -454,6 +460,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
@@ -474,6 +481,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
         let result = test_compile(&[bundle0, bundle1]);
@@ -498,6 +506,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
@@ -517,6 +526,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
 
@@ -567,6 +577,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
         let slide_bundle = Arc::new(SectionBundle {
@@ -579,6 +590,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
 
@@ -743,6 +755,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
         let bundle1 = Arc::new(SectionBundle {
@@ -761,6 +774,7 @@ mod test {
                 name: None,
             }],
             root_import_span: None,
+            source_text: None,
             was_cached: false,
         });
 

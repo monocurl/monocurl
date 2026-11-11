@@ -90,7 +90,10 @@ export interface RuntimeErrorSnapshot {
 
 export interface RuntimeCallFrameSnapshot {
   section: number;
+  /** into the section's own file: the scene for root sections, the library otherwise */
   span: SourceSpan;
+  /** builtin the frame was inside of when the error happened */
+  native?: string;
 }
 
 export interface BackgroundSnapshot {

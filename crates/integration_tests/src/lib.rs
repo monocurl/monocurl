@@ -56,12 +56,19 @@ pub fn make_section_bundle(
     sections: Vec<Section>,
     root_import_span: Option<Span8>,
 ) -> Arc<SectionBundle> {
+    let file_path = file_path.into();
+    let source_text = root_import_span
+        .is_some()
+        .then(|| std::fs::read_to_string(&file_path).ok())
+        .flatten()
+        .map(Into::into);
     Arc::new(SectionBundle {
-        file_path: file_path.into(),
+        file_path,
         file_index,
         imported_files,
         sections,
         root_import_span,
+        source_text,
         was_cached: false,
     })
 }

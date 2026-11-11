@@ -241,6 +241,9 @@ pub struct SectionBytecode {
     pub source_file_name: Option<String>,
     pub source_file_path: Option<PathBuf>,
     pub import_display_index: Option<usize>,
+    /// text of the file this section was compiled from, kept for imported
+    /// sections so runtime errors can quote library source lines
+    pub source_text: Option<Arc<str>>,
     pub instructions: Vec<Instruction>,
     pub annotations: Vec<InstructionAnnotation>,
     pub int_pool: Vec<i64>,
@@ -260,6 +263,7 @@ impl SectionBytecode {
             source_file_name: None,
             source_file_path: None,
             import_display_index: None,
+            source_text: None,
             instructions: Vec::new(),
             annotations: Vec::new(),
             int_pool: Vec::new(),
@@ -274,12 +278,39 @@ impl SectionBytecode {
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct Bytecode {
     pub sections: Vec<Arc<SectionBytecode>>,
+    /// per section, the root `import` statement that pulled it in. annotations
+    /// of imported sections hold spans into their own file, so anything that
+    /// highlights the root document maps them through this
+    pub import_spans: Vec<Option<Span8>>,
 }
 
 impl Bytecode {
     pub fn new(sections: Vec<Arc<SectionBytecode>>) -> Self {
         assert!(!sections.is_empty());
-        Self { sections }
+        Self {
+            sections,
+            import_spans: Vec::new(),
+        }
+    }
+
+    pub fn with_import_spans(mut self, import_spans: Vec<Option<Span8>>) -> Self {
+        self.import_spans = import_spans;
+        self
+    }
+
+    pub fn import_span(&self, section_idx: usize) -> Option<&Span8> {
+        self.import_spans.get(section_idx)?.as_ref()
+    }
+
+    /// `span` of an instruction in `section_idx`, as a span into the root document
+    pub fn root_span(&self, section_idx: usize, span: Span8) -> Span8 {
+        match self.sections.get(section_idx) {
+            Some(section) if !section.flags.is_root_module => self
+                .import_span(section_idx)
+                .cloned()
+                .unwrap_or(span),
+            _ => span,
+        }
     }
 
     pub fn library_sections(&self) -> usize {
