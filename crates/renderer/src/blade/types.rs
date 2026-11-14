@@ -1,6 +1,6 @@
 use blade_graphics as gpu;
 use bytemuck::{Pod, Zeroable};
-use executor::camera::CameraBasis;
+use executor::camera::{CameraBasis, Projection, tan_half};
 use geo::simd::{Float3, Float4};
 
 use crate::RenderView;
@@ -20,6 +20,8 @@ pub(super) struct CameraParams {
     pub(super) forward: [f32; 4],
     pub(super) clip: [f32; 4],
     pub(super) viewport: [f32; 4],
+    /// x: 1 when orthographic, else 0; y: half the visible height when orthographic
+    pub(super) projection: [f32; 4],
 }
 
 #[repr(C)]
@@ -128,10 +130,18 @@ impl CameraParams {
             clip: [
                 basis.near,
                 basis.far,
-                (basis.fov * 0.5).tan().max(0.05),
+                match basis.projection {
+                    Projection::Perspective { fov } => tan_half(fov),
+                    // unused by the orthographic path in the shader
+                    Projection::Orthographic { .. } => 0.0,
+                },
                 aspect.max(0.1),
             ],
             viewport: [viewport_scale_x, viewport_scale_y, 0.0, 0.0],
+            projection: match basis.projection {
+                Projection::Perspective { .. } => [0.0; 4],
+                Projection::Orthographic { height } => [1.0, height * 0.5, 0.0, 0.0],
+            },
         }
     }
 }

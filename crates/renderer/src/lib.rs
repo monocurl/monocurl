@@ -155,7 +155,7 @@ impl Default for Renderer {
 mod tests {
     use std::sync::Arc;
 
-    use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot};
+    use executor::scene_snapshot::{BackgroundSnapshot, CameraSnapshot, Projection};
     use geo::{
         mesh::{Dot, Lin, LinVertex, Mesh, PixelTexture, TextureSource, Tri, TriVertex, Uniforms},
         simd::{Float2, Float3, Float4},
@@ -759,6 +759,83 @@ mod tests {
         assert_eq!(dominant(sample(Float3::new(0.5, -0.5, 0.0))), "white");
     }
 
+    fn square_mesh(z: f32, half: f32) -> Mesh {
+        let vertex = |x: f32, y: f32| TriVertex {
+            pos: Float3::new(x, y, z),
+            col: Float4::new(1.0, 0.0, 0.0, 1.0),
+            uv: Float2::ZERO,
+        };
+        let tri = |a: TriVertex, b: TriVertex, c: TriVertex| Tri {
+            a,
+            b,
+            c,
+            ab: -1,
+            bc: -1,
+            ca: -1,
+            is_dom_sib: false,
+        };
+        let mut mesh = flat_triangle_mesh(Float4::new(1.0, 0.0, 0.0, 1.0), 0);
+        mesh.tris = vec![
+            tri(vertex(-half, -half), vertex(half, -half), vertex(half, half)),
+            tri(vertex(-half, -half), vertex(half, half), vertex(-half, half)),
+        ]
+        .into();
+        mesh
+    }
+
+    /// inclusive pixel bounds of the solid red fill; the image is bgra
+    fn red_pixel_bounds(image: &image::RgbaImage) -> Option<(u32, u32, u32, u32)> {
+        image
+            .enumerate_pixels()
+            .filter(|(_, _, pixel)| {
+                let [b, g, r, a] = pixel.0;
+                a > 0 && r > 200 && g < 60 && b < 60
+            })
+            .fold(None, |bounds, (x, y, _)| match bounds {
+                None => Some((x, x, y, y)),
+                Some((x0, x1, y0, y1)) => Some((x0.min(x), x1.max(x), y0.min(y), y1.max(y))),
+            })
+    }
+
+    #[test]
+    fn orthographic_projection_keeps_size_independent_of_depth() {
+        let Ok(mut renderer) = Renderer::try_new(RenderOptions::default()) else {
+            return;
+        };
+        let size = RenderSize::new(128, 128);
+        let mut bounds = |projection: Projection, z: f32| {
+            let scene = SceneRenderData {
+                background: BackgroundSnapshot::default(),
+                camera: CameraSnapshot {
+                    projection,
+                    ..CameraSnapshot::default()
+                },
+                meshes: vec![Arc::new(square_mesh(z, 1.0))],
+            };
+            let image = renderer.render(&scene, size).unwrap();
+            red_pixel_bounds(&image)
+        };
+
+        let orthographic = Projection::Orthographic { height: 4.0 };
+        let near = bounds(orthographic, 0.0).expect("square should be visible");
+        let far = bounds(orthographic, -30.0).expect("square should be visible");
+        assert_eq!(near, far, "orthographic size must not depend on depth");
+
+        // half the 4-unit visible height spans 64px of the 128px frame
+        let width = near.1 - near.0 + 1;
+        assert!(
+            (width as i32 - 64).abs() <= 3,
+            "expected a 64px square, got {width}px"
+        );
+
+        let perspective = Projection::default();
+        assert_ne!(
+            bounds(perspective, 0.0),
+            bounds(perspective, -30.0),
+            "perspective size should shrink with depth"
+        );
+    }
+
     /// a unit square with the UV convention `Image` and `Shader` use: row 0 of
     /// the texture along the top edge
     fn textured_quad_mesh() -> Mesh {
@@ -802,10 +879,10 @@ mod tests {
         let model_x = relative.dot(basis.right);
         let model_y = relative.dot(basis.up);
         let model_z = relative.dot(basis.forward);
-        let tan_half_fov = (basis.fov * 0.5).tan().max(0.05);
+        let half_height = basis.half_height_at(model_z);
         let aspect = size.width.max(1) as f32 / size.height.max(1) as f32;
-        let ndc_x = model_x / (model_z * tan_half_fov * aspect);
-        let ndc_y = model_y / (model_z * tan_half_fov);
+        let ndc_x = model_x / (half_height * aspect);
+        let ndc_y = model_y / half_height;
         let x = ((ndc_x + 1.0) * 0.5 * size.width as f32).round() as i32;
         let y = ((1.0 - (ndc_y + 1.0) * 0.5) * size.height as f32).round() as i32;
         (x, y)

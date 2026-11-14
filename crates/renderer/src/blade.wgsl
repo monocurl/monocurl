@@ -9,6 +9,8 @@ struct CameraParams {
     forward: vec4<f32>,
     clip: vec4<f32>,
     viewport: vec4<f32>,
+    // x: 1 when orthographic, else 0; y: half the visible height when orthographic
+    projection: vec4<f32>,
 }
 
 struct TriShaderParams {
@@ -152,6 +154,14 @@ fn vector_to_camera(vector: vec3<f32>, camera: CameraParams) -> vec3<f32> {
     );
 }
 
+// half the visible height at an eye depth: grows with depth under perspective, constant otherwise
+fn view_extent(camera: CameraParams, eye_depth: f32) -> f32 {
+    if (camera.projection.x > 0.5) {
+        return max(camera.projection.y, 1e-6);
+    }
+    return eye_depth * max(camera.clip.z, 0.05);
+}
+
 fn project_camera(
     model: vec3<f32>,
     camera: CameraParams,
@@ -169,9 +179,13 @@ fn project_camera(
     let near = camera.clip.x;
     let far = max(camera.clip.y, near + 0.0001);
 
-    let clip_w = -camera_z;
-    let clip_x = camera_x / (tan_half_fov * aspect) * viewport_scale.x;
-    let clip_y = camera_y / tan_half_fov * viewport_scale.y;
+    // orthographic keeps w at 1 so screen position is independent of depth
+    let orthographic = camera.projection.x > 0.5;
+    let half_height = max(camera.projection.y, 1e-6);
+    let clip_w = select(-camera_z, 1.0, orthographic);
+    let extent = select(tan_half_fov, half_height, orthographic);
+    let clip_x = camera_x / (extent * aspect) * viewport_scale.x;
+    let clip_y = camera_y / extent * viewport_scale.y;
 
     // With eye_bias == 0.0 this is bit-identical to the unbiased projection.
     // A positive eye_bias slides the point toward the camera along its view ray
@@ -180,7 +194,10 @@ fn project_camera(
     if (eye_bias > 0.0) {
         biased_camera_z = min(camera_z + eye_bias, -near);
     }
-    let clip_z = -far * biased_camera_z / (far - near) - (far * near) / (far - near);
+    let perspective_z = -far * biased_camera_z / (far - near) - (far * near) / (far - near);
+    // same 0 at near, 1 at far convention as the perspective depth above
+    let orthographic_z = -biased_camera_z / (far - near) - near / (far - near);
+    let clip_z = select(perspective_z, orthographic_z, orthographic);
 
     var clip = vec4<f32>(clip_x, clip_y, clip_z, clip_w);
     clip.z -= depth_bias * clip.w;
@@ -317,10 +334,9 @@ fn vs_line(
     if (abs(miter_dot) > 1e-6) {
         unclipped = miter_clip / miter_dot;
     }
-    let tan_half_fov = max(line_camera.clip.z, 0.05);
     let aspect = max(line_camera.clip.w, 0.1);
     let eye_depth = max(-model.z, line_camera.clip.x);
-    let width_eye = 2.0 * radius_px * eye_depth * tan_half_fov * aspect / viewport.x;
+    let width_eye = 2.0 * radius_px * view_extent(line_camera, eye_depth) * aspect / viewport.x;
     let scale = width_eye * extrude;
     let max_miter_scale = max(line_params.depth_bias.y, 0.0);
     let unclipped_length_sq = dot(unclipped, unclipped);
@@ -359,10 +375,9 @@ fn vs_dot(
     let radius_px = max(dot_params.viewport_and_radius.z, 0.0);
     let offset_ndc = local * radius_px * vec2<f32>(2.0 / viewport.x, 2.0 / viewport.y);
 
-    let tan_half_fov = max(dot_camera.clip.z, 0.05);
     let aspect = max(dot_camera.clip.w, 0.1);
     let eye_depth = max(-model.z, dot_camera.clip.x);
-    let width_eye = 2.0 * radius_px * eye_depth * tan_half_fov * aspect / viewport.x;
+    let width_eye = 2.0 * radius_px * view_extent(dot_camera, eye_depth) * aspect / viewport.x;
     let eye_bias = min(width_eye * DECAL_SCALE, eye_depth * DECAL_MAX_FRACTION);
     let projected = project_camera(model, dot_camera, dot_params.depth_bias.x, eye_bias, dot_params.depth_bias.zw);
 

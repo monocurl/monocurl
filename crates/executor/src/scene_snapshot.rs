@@ -14,7 +14,7 @@ use crate::{
     },
 };
 
-pub use crate::camera::CameraSnapshot;
+pub use crate::camera::{CameraSnapshot, Projection};
 
 const SCENE_SHAPE_ERROR_HINT: &str =
     "the last executed line of the section was highlighted; the actual error may be elsewhere";

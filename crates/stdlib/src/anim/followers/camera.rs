@@ -1,5 +1,5 @@
 use executor::{
-    camera::{CameraSnapshot, camera_value_from_snapshot, parse_camera_arg},
+    camera::{CameraSnapshot, Projection, camera_value_from_snapshot, parse_camera_arg},
     error::ExecutorError,
     executor::Executor,
     value::Value,
@@ -53,6 +53,25 @@ fn camera_lerp_snapshot(start: &CameraSnapshot, end: &CameraSnapshot, t: f32) ->
         up: slerp(start_basis.up, end_basis.up, t),
         near: lerp_f32(start.near, end.near, t),
         far: lerp_f32(start.far, end.far, t),
+        projection: lerp_projection(start.projection, end.projection, t),
+    }
+}
+
+/// switching between perspective and orthographic has no meaningful midpoint, so it flips halfway
+fn lerp_projection(start: Projection, end: Projection, t: f32) -> Projection {
+    match (start, end) {
+        (Projection::Perspective { fov: a }, Projection::Perspective { fov: b }) => {
+            Projection::Perspective {
+                fov: lerp_f32(a, b, t),
+            }
+        }
+        (Projection::Orthographic { height: a }, Projection::Orthographic { height: b }) => {
+            Projection::Orthographic {
+                height: lerp_f32(a, b, t),
+            }
+        }
+        _ if t < 0.5 => start,
+        _ => end,
     }
 }
 
@@ -101,6 +120,7 @@ mod tests {
             up: Float3::Y,
             near: 0.1,
             far: 10.0,
+            projection: Projection::Perspective { fov: 1.0 },
         };
         let end = CameraSnapshot {
             position: Float3::new(2.0, 0.0, 0.0),
@@ -108,6 +128,7 @@ mod tests {
             up: Float3::Z,
             near: 0.5,
             far: 20.0,
+            projection: Projection::Perspective { fov: 2.0 },
         };
 
         let midpoint = camera_lerp_snapshot(&start, &end, 0.5);

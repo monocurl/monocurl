@@ -2180,6 +2180,31 @@ fn test_camera_stdlib_uses_look_at_surface() {
     }
 }
 
+#[test]
+fn test_orthographic_and_perspective_cameras_record_their_projection() {
+    let r = run_with_stdlib(
+        "
+        let ortho = OrthographicCamera([0, 0, 5], [0, 0, 0], [0, 1, 0], 0.5, 40, 6)
+        let persp = Camera([0, 0, 5], [0, 0, 0], [0, 1, 0], 0.5, 40, 0.5)
+        let result = [ortho[\"projection\"], ortho[\"height\"], persp[\"projection\"], persp[\"fov\"]]
+    ",
+        &["scene"],
+    );
+    r.assert_ok();
+    let Some(Value::List(list)) = &r.value else {
+        panic!("expected a list of projection fields");
+    };
+    let elems: Vec<_> = list
+        .elements()
+        .iter()
+        .map(|elem| with_heap(|h| h.get(elem.key()).clone()))
+        .collect();
+    assert!(matches!(&elems[0], Value::String(s) if s.as_ref() == "orthographic"));
+    assert!(matches!(elems[1], Value::Float(f) if (f - 6.0).abs() < 1e-9));
+    assert!(matches!(&elems[2], Value::String(s) if s.as_ref() == "perspective"));
+    assert!(matches!(elems[3], Value::Float(f) if (f - 0.5).abs() < 1e-9));
+}
+
 // -- stack overflow --
 
 // -- live call results used as plain values --

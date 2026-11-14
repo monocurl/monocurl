@@ -1,4 +1,5 @@
 use executor::{
+    camera::DEFAULT_CAMERA_FOV,
     error::ExecutorError,
     executor::Executor,
     heap::VRc,
@@ -39,34 +40,31 @@ fn tagged_map(
     Value::Map(map)
 }
 
+/// the last argument is the projection's size: fov for perspective, height for orthographic
 fn camera_value(
     executor: &Executor,
     stack_idx: usize,
-    position_idx: i32,
-    look_at_idx: i32,
-    up_idx: i32,
-    near_idx: i32,
-    far_idx: i32,
+    projection: &'static str,
+    size_name: &'static str,
 ) -> Result<Value, ExecutorError> {
     Ok(tagged_map(
         "camera",
         [
-            (
-                "position",
-                read_value(executor, stack_idx, position_idx, "position"),
-            ),
-            (
-                "look_at",
-                read_value(executor, stack_idx, look_at_idx, "look_at"),
-            ),
-            ("up", read_value(executor, stack_idx, up_idx, "up")),
+            ("position", read_value(executor, stack_idx, -6, "position")),
+            ("look_at", read_value(executor, stack_idx, -5, "look_at")),
+            ("up", read_value(executor, stack_idx, -4, "up")),
             (
                 "near",
-                Value::Float(read_float(executor, stack_idx, near_idx, "near")?),
+                Value::Float(read_float(executor, stack_idx, -3, "near")?),
             ),
             (
                 "far",
-                Value::Float(read_float(executor, stack_idx, far_idx, "far")?),
+                Value::Float(read_float(executor, stack_idx, -2, "far")?),
+            ),
+            ("projection", Value::String(projection.into())),
+            (
+                size_name,
+                Value::Float(read_float(executor, stack_idx, -1, size_name)?),
             ),
         ],
     ))
@@ -94,6 +92,8 @@ pub fn initial_camera(
             ),
             ("near", Value::Float(0.1)),
             ("far", Value::Integer(100)),
+            ("projection", Value::String("perspective".into())),
+            ("fov", Value::Float(DEFAULT_CAMERA_FOV as f64)),
         ],
     ))
 }
@@ -127,5 +127,13 @@ pub fn aspect_ratio(
 
 #[stdlib_func]
 pub fn mk_camera(executor: &mut Executor, stack_idx: usize) -> Result<Value, ExecutorError> {
-    camera_value(executor, stack_idx, -5, -4, -3, -2, -1)
+    camera_value(executor, stack_idx, "perspective", "fov")
+}
+
+#[stdlib_func]
+pub fn mk_orthographic_camera(
+    executor: &mut Executor,
+    stack_idx: usize,
+) -> Result<Value, ExecutorError> {
+    camera_value(executor, stack_idx, "orthographic", "height")
 }
