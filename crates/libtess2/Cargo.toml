@@ -1,6 +1,6 @@
 [package]
 name = "libtess2"
-version = "0.1.0"
+version.workspace = true
 edition = "2024"
 license-file = "upstream/LICENSE.txt"
 links = "tess2_upstream"

@@ -2,7 +2,13 @@ use ash::{
     khr,
     vk::{self},
 };
-use std::{mem, num::NonZeroU32, path::PathBuf, ptr, sync::Mutex};
+use std::{
+    mem,
+    num::NonZeroU32,
+    path::PathBuf,
+    ptr,
+    sync::{Mutex, PoisonError},
+};
 
 mod command;
 mod descriptor;
@@ -480,7 +486,7 @@ impl crate::traits::CommandDevice for Context {
 
     fn submit(&self, encoder: &mut CommandEncoder) -> SyncPoint {
         let raw_cmd_buf = encoder.finish();
-        let mut queue = self.queue.lock().unwrap();
+        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         queue.last_progress += 1;
         let progress = queue.last_progress;
         let command_buffers = [raw_cmd_buf];
@@ -532,7 +538,11 @@ impl crate::traits::CommandDevice for Context {
     fn wait_for(&self, sp: &SyncPoint, timeout_ms: u32) -> bool {
         //Note: technically we could get away without locking the queue,
         // but also this isn't time-sensitive, so it's fine.
-        let timeline_semaphore = self.queue.lock().unwrap().timeline_semaphore;
+        let timeline_semaphore = self
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .timeline_semaphore;
         let semaphores = [timeline_semaphore];
         let semaphore_values = [sp.progress];
         let wait_info = vk::SemaphoreWaitInfoKHR::default()

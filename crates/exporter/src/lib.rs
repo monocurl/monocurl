@@ -110,7 +110,7 @@ pub struct SlidePlan {
 pub enum ExportKind {
     Image { timestamp: ImageExportTimestamp },
     Video { range: VideoRange },
-    SlidesAsVideos,
+    SlidesAsVideos { numbered_prefix: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -311,7 +311,7 @@ async fn export_scene_async(
     check_cancelled(cancel_flag)?;
 
     match request.kind {
-        ExportKind::SlidesAsVideos => {
+        ExportKind::SlidesAsVideos { .. } => {
             std::fs::create_dir_all(&request.output_path).with_context(|| {
                 format!(
                     "failed to create export directory {}",
@@ -370,7 +370,7 @@ async fn export_scene_async(
             )
             .await
         }
-        ExportKind::SlidesAsVideos => {
+        ExportKind::SlidesAsVideos { numbered_prefix } => {
             let prepared = prepare_scene(
                 &request.root_text,
                 &request.root_path,
@@ -384,6 +384,7 @@ async fn export_scene_async(
                 prepared,
                 request.output_path,
                 request.settings,
+                numbered_prefix,
                 cancel_flag,
                 on_progress,
             )
@@ -688,6 +689,7 @@ async fn export_slide_videos(
     mut prepared: PreparedScene,
     output_dir: PathBuf,
     settings: ExportSettings,
+    numbered_prefix: bool,
     cancel_flag: &AtomicBool,
     on_progress: &mut dyn FnMut(ExportProgress),
 ) -> Result<ExportOutcome> {
@@ -697,7 +699,8 @@ async fn export_slide_videos(
     let plan = prepare_video_render_plan(&mut prepared, settings).await?;
     let slide_count = plan.slide_durations.len();
     ensure!(slide_count > 0, "scene has no slides to export");
-    let output_paths = slide_video_output_paths(&output_dir, &plan.slide_names, slide_count)?;
+    let output_paths =
+        slide_video_output_paths(&output_dir, &plan.slide_names, slide_count, numbered_prefix)?;
     check_cancelled(cancel_flag)?;
 
     let total_frames: usize = plan
@@ -1198,9 +1201,11 @@ fn slide_video_output_paths(
     output_dir: &Path,
     slide_names: &[Option<String>],
     slide_count: usize,
+    numbered_prefix: bool,
 ) -> Result<Vec<PathBuf>> {
     let mut occupied = occupied_file_names(output_dir)?;
     let mut paths = Vec::with_capacity(slide_count);
+    let number_width = slide_count.to_string().len();
 
     for slide_index in 0..slide_count {
         let fallback = format!("Slide {}", slide_index + 1);
@@ -1212,6 +1217,9 @@ fn slide_video_output_paths(
         let mut stem = sanitize_file_stem(raw_name);
         if stem.is_empty() {
             stem = fallback;
+        }
+        if numbered_prefix {
+            stem = format!("{:0number_width$} {stem}", slide_index + 1);
         }
         let file_name = unique_file_name(output_dir, &mut occupied, &stem, "mp4");
         paths.push(output_dir.join(file_name));
@@ -1338,7 +1346,7 @@ mod tests {
             None,
             Some("Intro".to_string()),
         ];
-        let paths = slide_video_output_paths(&dir, &names, names.len()).unwrap();
+        let paths = slide_video_output_paths(&dir, &names, names.len(), false).unwrap();
         let file_names = paths
             .iter()
             .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
@@ -1353,6 +1361,30 @@ mod tests {
                 "Intro (2).mp4",
             ]
         );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn slide_video_output_paths_zero_pad_slide_numbers_to_sort_lexically() {
+        let dir = temp_export_dir("slide_numbers");
+        fs::create_dir_all(&dir).unwrap();
+
+        let names = (0..12)
+            .map(|index| (index == 1).then(|| "Intro".to_string()))
+            .collect::<Vec<_>>();
+        let paths = slide_video_output_paths(&dir, &names, names.len(), true).unwrap();
+        let file_names = paths
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(file_names[0], "01 Slide 1.mp4");
+        assert_eq!(file_names[1], "02 Intro.mp4");
+        assert_eq!(file_names[11], "12 Slide 12.mp4");
+        let mut sorted = file_names.clone();
+        sorted.sort();
+        assert_eq!(sorted, file_names);
 
         let _ = fs::remove_dir_all(&dir);
     }
