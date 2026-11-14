@@ -6,7 +6,7 @@ use compiler::{
     cache::CompilerCache,
     compiler::{CompileError, CompileWarning, compile},
 };
-use executor::scene_snapshot::CameraSnapshot;
+use executor::scene_snapshot::{CameraSnapshot, Projection};
 use geo::simd::Float3;
 use lexer::lex_rope_from_str;
 use parser::{
@@ -299,6 +299,15 @@ struct WebCameraSnapshot {
     up: [f32; 3],
     near: f32,
     far: f32,
+    #[serde(default)]
+    projection: Option<WebProjection>,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum WebProjection {
+    Perspective { fov: f32 },
+    Orthographic { height: f32 },
 }
 
 impl CompilationDiagnostic {
@@ -391,6 +400,11 @@ impl From<WebCameraSnapshot> for CameraSnapshot {
             up: Float3::new(snapshot.up[0], snapshot.up[1], snapshot.up[2]),
             near: snapshot.near,
             far: snapshot.far,
+            projection: match snapshot.projection {
+                None => Projection::default(),
+                Some(WebProjection::Perspective { fov }) => Projection::Perspective { fov },
+                Some(WebProjection::Orthographic { height }) => Projection::Orthographic { height },
+            },
         }
     }
 }

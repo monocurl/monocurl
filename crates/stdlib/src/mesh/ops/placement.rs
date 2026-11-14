@@ -1,5 +1,5 @@
 use executor::{
-    camera::{CameraBasis, DEFAULT_CAMERA_FOV, initial_camera_snapshot, parse_camera_arg},
+    camera::{CameraBasis, initial_camera_snapshot, parse_camera_arg},
     error::ExecutorError,
     executor::Executor,
     value::Value,
@@ -11,10 +11,10 @@ use crate::mesh::helpers::*;
 
 use super::*;
 
-fn viewport_half_extents(depth: f32, aspect_ratio: f32) -> (f32, f32) {
+fn viewport_half_extents(camera: CameraBasis, depth: f32, aspect_ratio: f32) -> (f32, f32) {
     let depth = depth.max(executor::camera::MIN_CAMERA_NEAR);
-    let tan_half_fov = (DEFAULT_CAMERA_FOV * 0.5).tan().max(0.05);
-    (depth * tan_half_fov * aspect_ratio, depth * tan_half_fov)
+    let half_height = camera.half_height_at(depth);
+    (half_height * aspect_ratio, half_height)
 }
 
 fn camera_space_placement_delta(
@@ -41,7 +41,7 @@ fn camera_space_placement_delta(
             let x = relative.dot(camera.right);
             let y = relative.dot(camera.up);
             let z = relative.dot(camera.forward).max(camera.near);
-            let (half_width, half_height) = viewport_half_extents(z, aspect_ratio);
+            let (half_width, half_height) = viewport_half_extents(camera, z, aspect_ratio);
             let x_limit = (half_width - buffer).max(0.0);
             let y_limit = (half_height - buffer).max(0.0);
 

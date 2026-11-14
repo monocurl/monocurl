@@ -11,7 +11,24 @@ use crate::{
 };
 
 pub const DEFAULT_CAMERA_FOV: f32 = 1.024_778_9;
+pub const DEFAULT_ORTHOGRAPHIC_HEIGHT: f32 = 8.0;
 pub const MIN_CAMERA_NEAR: f32 = 0.01;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Projection {
+    /// vertical field of view in radians
+    Perspective { fov: f32 },
+    /// world-space height of the visible region, constant with depth
+    Orthographic { height: f32 },
+}
+
+impl Default for Projection {
+    fn default() -> Self {
+        Self::Perspective {
+            fov: DEFAULT_CAMERA_FOV,
+        }
+    }
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CameraSnapshot {
@@ -20,6 +37,7 @@ pub struct CameraSnapshot {
     pub up: Float3,
     pub near: f32,
     pub far: f32,
+    pub projection: Projection,
 }
 
 pub fn initial_camera_snapshot() -> CameraSnapshot {
@@ -29,6 +47,7 @@ pub fn initial_camera_snapshot() -> CameraSnapshot {
         up: Float3::Y,
         near: 0.1,
         far: 100.0,
+        projection: Projection::default(),
     }
 }
 
@@ -40,6 +59,7 @@ impl Default for CameraSnapshot {
             up: Float3::Y,
             near: 0.1,
             far: 100.0,
+            projection: Projection::default(),
         }
     }
 }
@@ -52,7 +72,26 @@ pub struct CameraBasis {
     pub forward: Float3,
     pub near: f32,
     pub far: f32,
-    pub fov: f32,
+    pub projection: Projection,
+}
+
+impl CameraBasis {
+    /// half the vertical extent of the view at the given eye-space depth
+    pub fn half_height_at(&self, depth: f32) -> f32 {
+        match self.projection {
+            Projection::Perspective { fov } => depth * tan_half(fov),
+            Projection::Orthographic { height } => height * 0.5,
+        }
+    }
+
+    pub fn is_orthographic(&self) -> bool {
+        matches!(self.projection, Projection::Orthographic { .. })
+    }
+}
+
+/// tangent of the half angle, clamped away from zero so the projection stays finite
+pub fn tan_half(fov: f32) -> f32 {
+    (fov * 0.5).tan().max(0.05)
 }
 
 impl CameraSnapshot {
@@ -81,7 +120,7 @@ impl CameraSnapshot {
             forward,
             near,
             far: self.far.max(near),
-            fov: DEFAULT_CAMERA_FOV,
+            projection: self.projection,
         }
     }
 }
@@ -105,30 +144,28 @@ fn float3_value(value: Float3) -> Value {
 
 pub fn camera_value_from_snapshot(snapshot: &CameraSnapshot) -> Value {
     let mut map = Map::new();
-    map.insert(
-        HashableKey::String("kind".to_string()),
-        crate::heap::VRc::new(Value::String("camera".into())),
-    );
-    map.insert(
-        HashableKey::String("position".to_string()),
-        crate::heap::VRc::new(float3_value(snapshot.position)),
-    );
-    map.insert(
-        HashableKey::String("look_at".to_string()),
-        crate::heap::VRc::new(float3_value(snapshot.look_at)),
-    );
-    map.insert(
-        HashableKey::String("up".to_string()),
-        crate::heap::VRc::new(float3_value(snapshot.up)),
-    );
-    map.insert(
-        HashableKey::String("near".to_string()),
-        crate::heap::VRc::new(Value::Float(snapshot.near as f64)),
-    );
-    map.insert(
-        HashableKey::String("far".to_string()),
-        crate::heap::VRc::new(Value::Float(snapshot.far as f64)),
-    );
+    let mut insert = |key: &str, value: Value| {
+        map.insert(
+            HashableKey::String(key.to_string()),
+            crate::heap::VRc::new(value),
+        );
+    };
+    insert("kind", Value::String("camera".into()));
+    insert("position", float3_value(snapshot.position));
+    insert("look_at", float3_value(snapshot.look_at));
+    insert("up", float3_value(snapshot.up));
+    insert("near", Value::Float(snapshot.near as f64));
+    insert("far", Value::Float(snapshot.far as f64));
+    match snapshot.projection {
+        Projection::Perspective { fov } => {
+            insert("projection", Value::String("perspective".into()));
+            insert("fov", Value::Float(fov as f64));
+        }
+        Projection::Orthographic { height } => {
+            insert("projection", Value::String("orthographic".into()));
+            insert("height", Value::Float(height as f64));
+        }
+    }
     Value::Map(map)
 }
 
@@ -186,6 +223,52 @@ async fn read_float3(
     Ok(Float3::from_array(components))
 }
 
+async fn read_projection(executor: &mut Executor, map: &Map) -> Result<Projection, ExecutorError> {
+    let kind = match map_field_value(map, "projection") {
+        Some(value) => match value.elide_wrappers_rec(executor).await? {
+            Value::String(kind) => kind.to_string(),
+            other => {
+                return Err(ExecutorError::type_error_for(
+                    "string",
+                    other.type_name(),
+                    "camera.projection",
+                ));
+            }
+        },
+        None => "perspective".to_string(),
+    };
+
+    match kind.as_str() {
+        "perspective" => {
+            let fov = match map_field_value(map, "fov") {
+                Some(value) => read_f32(executor, value, "camera.fov").await?,
+                None => DEFAULT_CAMERA_FOV,
+            };
+            if !(fov > 0.0 && fov < std::f32::consts::PI) {
+                return Err(ExecutorError::invalid_scene(format!(
+                    "camera.fov must be strictly between 0 and PI radians, got {fov}"
+                )));
+            }
+            Ok(Projection::Perspective { fov })
+        }
+        "orthographic" => {
+            let height = match map_field_value(map, "height") {
+                Some(value) => read_f32(executor, value, "camera.height").await?,
+                None => DEFAULT_ORTHOGRAPHIC_HEIGHT,
+            };
+            if !(height > 0.0) {
+                return Err(ExecutorError::invalid_scene(format!(
+                    "camera.height must be positive, got {height}"
+                )));
+            }
+            Ok(Projection::Orthographic { height })
+        }
+        other => Err(ExecutorError::invalid_scene(format!(
+            "camera.projection must be \"perspective\" or \"orthographic\", got \"{other}\""
+        ))),
+    }
+}
+
 pub async fn parse_camera_value(
     executor: &mut Executor,
     value: Value,
@@ -230,6 +313,7 @@ pub async fn parse_camera_value(
     let Some(far) = map_field_value(&map, "far") else {
         return Err(ExecutorError::missing_field("camera", "far"));
     };
+    let projection = read_projection(executor, &map).await?;
 
     Ok(CameraSnapshot {
         position,
@@ -237,6 +321,7 @@ pub async fn parse_camera_value(
         up: read_float3(executor, up, "camera.up").await?,
         near: read_f32(executor, near, "camera.near").await?,
         far: read_f32(executor, far, "camera.far").await?,
+        projection,
     })
 }
 
@@ -254,7 +339,7 @@ pub async fn parse_camera_arg(
 mod tests {
     use geo::simd::Float3;
 
-    use super::CameraSnapshot;
+    use super::{CameraSnapshot, Projection};
 
     fn assert_float3_close(actual: Float3, expected: Float3) {
         let delta = actual - expected;
@@ -283,11 +368,33 @@ mod tests {
             up: Float3::Y,
             near: 0.1,
             far: 100.0,
+            projection: Projection::default(),
         }
         .basis();
 
         assert!(Float3::X.dot(basis.right) > 0.999);
         assert!(Float3::Y.dot(basis.up) > 0.999);
         assert!(Float3::Z.dot(-basis.forward) > 0.999);
+    }
+
+    #[test]
+    fn orthographic_half_height_ignores_depth() {
+        let basis = CameraSnapshot {
+            projection: Projection::Orthographic { height: 6.0 },
+            ..CameraSnapshot::default()
+        }
+        .basis();
+
+        assert_eq!(basis.half_height_at(1.0), 3.0);
+        assert_eq!(basis.half_height_at(50.0), 3.0);
+        assert!(basis.is_orthographic());
+    }
+
+    #[test]
+    fn perspective_half_height_grows_with_depth() {
+        let basis = CameraSnapshot::default().basis();
+
+        assert!(!basis.is_orthographic());
+        assert!(basis.half_height_at(20.0) > basis.half_height_at(10.0));
     }
 }

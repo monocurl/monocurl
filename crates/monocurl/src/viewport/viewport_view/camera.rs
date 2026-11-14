@@ -1,7 +1,7 @@
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use executor::{
-    camera::{DEFAULT_CAMERA_FOV, MIN_CAMERA_NEAR},
+    camera::{DEFAULT_CAMERA_FOV, MIN_CAMERA_NEAR, Projection},
     scene_snapshot::CameraSnapshot,
 };
 use geo::simd::Float3;
@@ -239,6 +239,17 @@ fn cameras_close(a: &CameraSnapshot, b: &CameraSnapshot) -> bool {
         && (a.up - b.up).len_sq() <= CAMERA_COMPARE_EPS * CAMERA_COMPARE_EPS
         && (a.near - b.near).abs() <= CAMERA_COMPARE_EPS
         && (a.far - b.far).abs() <= CAMERA_COMPARE_EPS
+        && projections_close(a.projection, b.projection)
+}
+
+fn projections_close(a: Projection, b: Projection) -> bool {
+    match (a, b) {
+        (Projection::Perspective { fov: a }, Projection::Perspective { fov: b })
+        | (Projection::Orthographic { height: a }, Projection::Orthographic { height: b }) => {
+            (a - b).abs() <= CAMERA_COMPARE_EPS
+        }
+        _ => false,
+    }
 }
 
 fn orbit_camera(
@@ -271,6 +282,7 @@ fn orbit_camera(
         up: world_up,
         near: camera.near,
         far: camera.far,
+        projection: camera.projection,
     }
 }
 
@@ -287,8 +299,7 @@ fn pan_camera(
         .dot(basis.forward)
         .max(MIN_CAMERA_NEAR);
     let aspect = (width / height).max(0.1);
-    let tan_half_fov = (DEFAULT_CAMERA_FOV * 0.5).tan().max(0.05);
-    let half_height = depth * tan_half_fov;
+    let half_height = basis.half_height_at(depth);
     let half_width = half_height * aspect;
     let translation = basis.right * (2.0 * half_width * dx / width)
         + basis.up * (2.0 * half_height * dy / height);
@@ -299,16 +310,27 @@ fn pan_camera(
         up: camera.up,
         near: camera.near,
         far: camera.far,
+        projection: camera.projection,
     }
 }
 
 fn format_camera_surface(camera: &CameraSnapshot) -> String {
-    format!(
-        "Camera({}, {}, {})",
-        format_camera_point(camera.position),
-        format_camera_point(camera.look_at),
-        format_axis_vector(camera.up)
-    )
+    let position = format_camera_point(camera.position);
+    let look_at = format_camera_point(camera.look_at);
+    let up = format_axis_vector(camera.up);
+    match camera.projection {
+        Projection::Perspective { fov }
+            if (fov - DEFAULT_CAMERA_FOV).abs() <= CAMERA_COMPARE_EPS =>
+        {
+            format!("Camera({position}, {look_at}, {up})")
+        }
+        Projection::Perspective { fov } => {
+            format!("Camera(position: {position}, target: {look_at}, up: {up}, fov: {fov:.4})")
+        }
+        Projection::Orthographic { height } => format!(
+            "OrthographicCamera(position: {position}, target: {look_at}, up: {up}, height: {height:.2})"
+        ),
+    }
 }
 
 fn format_camera_point(point: Float3) -> String {
@@ -367,7 +389,7 @@ fn format_axis_scalar(value: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use executor::scene_snapshot::CameraSnapshot;
+    use executor::scene_snapshot::{CameraSnapshot, Projection};
     use geo::simd::Float3;
 
     use super::{format_axis_vector, format_camera_surface};
@@ -394,11 +416,29 @@ mod tests {
             up: Float3::Y,
             near: 0.1,
             far: 100.0,
+            projection: Projection::default(),
         };
 
         assert_eq!(
             format_camera_surface(&camera),
             "Camera([0.00, -1.23, 4.00], [0.00, 2.00, 0.00], 1.00u)"
+        );
+    }
+
+    #[test]
+    fn format_camera_surface_emits_orthographic_height() {
+        let camera = CameraSnapshot {
+            position: Float3::new(0.0, 0.0, 4.0),
+            look_at: Float3::ZERO,
+            up: Float3::Y,
+            near: 0.1,
+            far: 100.0,
+            projection: Projection::Orthographic { height: 6.0 },
+        };
+
+        assert_eq!(
+            format_camera_surface(&camera),
+            "OrthographicCamera(position: [0.00, 0.00, 4.00], target: [0.00, 0.00, 0.00], up: 1.00u, height: 6.00)"
         );
     }
 }

@@ -1,6 +1,6 @@
 use executor::{
     error::{RuntimeCallFrame, RuntimeError},
-    scene_snapshot::{BackgroundSnapshot, CameraSnapshot},
+    scene_snapshot::{BackgroundSnapshot, CameraSnapshot, Projection},
     transcript::{SectionTranscript, TranscriptEntry},
 };
 use geo::{
@@ -219,6 +219,14 @@ struct SerializableCameraSnapshot {
     up: [f64; 3],
     near: f64,
     far: f64,
+    projection: SerializableProjection,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum SerializableProjection {
+    Perspective { fov: f64 },
+    Orthographic { height: f64 },
 }
 
 impl From<&CameraSnapshot> for SerializableCameraSnapshot {
@@ -229,6 +237,14 @@ impl From<&CameraSnapshot> for SerializableCameraSnapshot {
             up: vec3(snapshot.up),
             near: snapshot.near.into(),
             far: snapshot.far.into(),
+            projection: match snapshot.projection {
+                Projection::Perspective { fov } => {
+                    SerializableProjection::Perspective { fov: fov.into() }
+                }
+                Projection::Orthographic { height } => SerializableProjection::Orthographic {
+                    height: height.into(),
+                },
+            },
         }
     }
 }
