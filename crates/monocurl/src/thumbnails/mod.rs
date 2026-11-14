@@ -5,6 +5,7 @@ mod cache;
 use std::{
     collections::HashMap,
     fs, mem,
+    panic::{self, AssertUnwindSafe},
     path::{Path, PathBuf},
     sync::{Arc, atomic::AtomicBool},
     time::{Duration, Instant},
@@ -280,7 +281,11 @@ impl Job {
                 partial,
                 image,
             } => {
-                let result = render(&source, &partial)
+                // gpui's background workers have no unwind guard, so a panic from the
+                // gpu renderer here would kill the worker and eventually the dispatcher
+                let rendered = panic::catch_unwind(AssertUnwindSafe(|| render(&source, &partial)))
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("thumbnail renderer panicked")));
+                let result = rendered
                     .and_then(|()| {
                         fs::rename(&partial, &image).context("unable to store thumbnail")
                     })

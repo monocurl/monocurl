@@ -921,7 +921,7 @@ dependencies = [
 
 [[package]]
 name = "bytecode"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "structs",
 ]
@@ -1234,7 +1234,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "compiler",
@@ -1405,7 +1405,7 @@ dependencies = [
 
 [[package]]
 name = "compiler"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "bytecode",
  "lexer",
@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "executor"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "bytecode",
  "cranelift-codegen",
@@ -2350,7 +2350,7 @@ dependencies = [
 
 [[package]]
 name = "exporter"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "bytecode",
@@ -2806,7 +2806,7 @@ dependencies = [
 
 [[package]]
 name = "geo"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "rustc-hash 2.1.2",
  "smallvec",
@@ -4353,7 +4353,7 @@ dependencies = [
 
 [[package]]
 name = "integration_tests"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "compiler",
  "executor",
@@ -4689,7 +4689,7 @@ checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
 
 [[package]]
 name = "lexer"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "structs",
 ]
@@ -4740,7 +4740,7 @@ dependencies = [
 
 [[package]]
 name = "libtess2"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "cc",
  "geo",
@@ -5821,7 +5821,7 @@ dependencies = [
 
 [[package]]
 name = "parser"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "itertools 0.14.0",
  "lexer",
@@ -6849,7 +6849,7 @@ dependencies = [
 
 [[package]]
 name = "renderer"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "blade-graphics",
@@ -6995,7 +6995,7 @@ dependencies = [
 
 [[package]]
 name = "runtime"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "bytecode",
  "executor",
@@ -7060,7 +7060,7 @@ dependencies = [
 
 [[package]]
 name = "rust_scene"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "rust_scene_macros",
  "trybuild",
@@ -7068,7 +7068,7 @@ dependencies = [
 
 [[package]]
 name = "rust_scene_macros"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7251,7 +7251,7 @@ dependencies = [
 
 [[package]]
 name = "scene_harness"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "compiler",
  "executor",
@@ -7789,7 +7789,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stdlib"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "executor",
  "geo",
@@ -7803,7 +7803,7 @@ dependencies = [
 
 [[package]]
 name = "stdlib-macros"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7827,7 +7827,7 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "structs"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "arraydeque",
  "arrayvec",
@@ -8561,7 +8561,7 @@ dependencies = [
 
 [[package]]
 name = "text"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "anyhow",
  "geo",
@@ -9423,7 +9423,7 @@ dependencies = [
 
 [[package]]
 name = "ui_cli_shared"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "schemars",
 ]
@@ -10280,7 +10280,7 @@ dependencies = [
 
 [[package]]
 name = "web_runtime"
-version = "0.1.0"
+version = "0.3.4"
 dependencies = [
  "compiler",
  "executor",

@@ -134,13 +134,17 @@ impl Editor {
         }
     }
 
+    /// events report the resolved directory, so symlinked or relative paths must be resolved
+    /// the same way before they can be compared
     fn absolute_path(path: &Path) -> PathBuf {
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map(|cwd| cwd.join(path))
-                .unwrap_or_else(|_| path.to_path_buf())
+        let Ok(absolute) = std::path::absolute(path) else {
+            return path.to_path_buf();
+        };
+        match (absolute.parent(), absolute.file_name()) {
+            (Some(parent), Some(name)) => std::fs::canonicalize(parent)
+                .map(|parent| parent.join(name))
+                .unwrap_or(absolute),
+            _ => absolute,
         }
     }
 
@@ -307,5 +311,26 @@ impl Render for Editor {
         _cx: &mut gpui::Context<Self>,
     ) -> impl IntoElement {
         self.editor.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_and_relative_paths_resolve_to_the_event_path() {
+        let root = std::env::temp_dir().join(format!("monocurl-watch-{}", std::process::id()));
+        let real_dir = root.join("real");
+        let link_dir = root.join("link");
+        std::fs::create_dir_all(&real_dir).unwrap();
+        std::os::unix::fs::symlink(&real_dir, &link_dir).unwrap();
+
+        let via_link = Editor::absolute_path(&link_dir.join("scene.mcl"));
+        let event_path = Editor::absolute_path(&real_dir.join("scene.mcl"));
+        assert_eq!(via_link, event_path);
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

@@ -1,6 +1,14 @@
 use ash::vk;
 use gpu_alloc_ash::AshMemoryDevice;
-use std::{mem, ptr};
+use std::{
+    mem, ptr,
+    sync::{Mutex, MutexGuard, PoisonError},
+};
+
+/// a panic while the lock was held (e.g. on device loss) must not take later frees down with it
+fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 struct Allocation {
     memory: vk::DeviceMemory,
@@ -16,7 +24,7 @@ impl super::Context {
         requirements: vk::MemoryRequirements,
         memory: crate::Memory,
     ) -> Allocation {
-        let mut manager = self.memory.lock().unwrap();
+        let mut manager = lock_ignoring_poison(&self.memory);
         let device_address_usage = if self.device.ray_tracing.is_some() {
             gpu_alloc::UsageFlags::DEVICE_ADDRESS
         } else {
@@ -148,7 +156,7 @@ impl super::Context {
     }
 
     fn free_memory(&self, handle: usize) {
-        let mut manager = self.memory.lock().unwrap();
+        let mut manager = lock_ignoring_poison(&self.memory);
         let block = manager.slab.remove(handle);
         unsafe {
             manager

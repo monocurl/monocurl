@@ -443,6 +443,45 @@ impl DocumentView {
                 .into_any_element()
         });
 
+        let slide_numbering = (modal.kind == RequestedExport::SlideVideos).then(|| {
+            let checked = modal.number_slides;
+            div()
+                .id("export-slide-numbering")
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .cursor_pointer()
+                .child(
+                    div()
+                        .size(px(14.0))
+                        .rounded(px(3.0))
+                        .border_1()
+                        .border_color(if checked {
+                            theme.accent
+                        } else {
+                            theme.navbar_border
+                        })
+                        .bg(if checked {
+                            theme.accent
+                        } else {
+                            theme.tab_active_background
+                        }),
+                )
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.text_primary)
+                        .child("Prefix file names with slide number"),
+                )
+                .on_click(cx.listener(|this, _, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.toggle_export_slide_numbering(cx);
+                }))
+                .into_any_element()
+        });
+
         Some(
             div()
                 .absolute()
@@ -505,6 +544,7 @@ impl DocumentView {
                                 ),
                         )
                         .children(fps_controls)
+                        .children(slide_numbering)
                         .child(
                             div()
                                 .flex()

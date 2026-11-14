@@ -22,6 +22,9 @@
 }: let
   root = ../../..;
 
+  # single source of truth: the app crate's manifest, which the release workflow stamps
+  version = (lib.importTOML "${root}/crates/monocurl/Cargo.toml").package.version;
+
   # https://github.com/ipetkov/crane/issues/400#issuecomment-1739612918
   dummySrc = craneLib.mkDummySrc {
     src = craneLib.path root;
@@ -78,6 +81,8 @@
 in
   craneLib.buildPackage (baseArgs
     // {
+      pname = "monocurl";
+      inherit version;
       src = root;
       strictDeps = true;
 

@@ -148,8 +148,16 @@ impl DocumentView {
             aspect_ratio,
             resolution: ExportResolutionPreset::Medium,
             fps: DEFAULT_VIDEO_FPS,
+            number_slides: false,
         });
         cx.notify();
+    }
+
+    pub(super) fn toggle_export_slide_numbering(&mut self, cx: &mut Context<Self>) {
+        if let Some(modal) = &mut self.export_settings_modal {
+            modal.number_slides = !modal.number_slides;
+            cx.notify();
+        }
     }
 
     pub(super) fn set_export_resolution(
@@ -180,7 +188,13 @@ impl DocumentView {
             return;
         };
         let settings = modal.settings();
-        self.start_export(modal.kind, modal.output_path, settings, cx);
+        self.start_export(
+            modal.kind,
+            modal.output_path,
+            settings,
+            modal.number_slides,
+            cx,
+        );
     }
 
     fn start_export(
@@ -188,6 +202,7 @@ impl DocumentView {
         kind: RequestedExport,
         output_path: PathBuf,
         settings: ExportSettings,
+        number_slides: bool,
         cx: &mut Context<Self>,
     ) {
         if self.export_overlay.running {
@@ -207,7 +222,9 @@ impl DocumentView {
                 RequestedExport::Video => SceneExportKind::Video {
                     range: Default::default(),
                 },
-                RequestedExport::SlideVideos => SceneExportKind::SlidesAsVideos,
+                RequestedExport::SlideVideos => SceneExportKind::SlidesAsVideos {
+                    numbered_prefix: number_slides,
+                },
             },
             settings,
         };

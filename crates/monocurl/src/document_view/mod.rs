@@ -213,6 +213,7 @@ struct ExportSettingsModalState {
     aspect_ratio: f32,
     resolution: ExportResolutionPreset,
     fps: u32,
+    number_slides: bool,
 }
 
 impl ExportSettingsModalState {
