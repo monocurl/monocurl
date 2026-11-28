@@ -54,6 +54,7 @@ param offset = [0.0, 0.0, 0.0]
 slide "Shapes"
     mesh ball = fill{alpha{0.7} BLUE} Sphere(radius: $radius)
     mesh bar = shift{delta: $offset} fill{alpha{0.7} ORANGE} Cylinder(radius: 0.3, height: $height)
+    play Set()
 `;
 
     // Slider bounds are chosen by the page. The snapshot only carries names and current values.
@@ -146,7 +147,8 @@ slide "Shapes"
       }
     });
 
-    loop.seekTo({ slide: 0, time: 0 });
+    // slide indices come from the compile report, not from the source order
+    loop.seekTo({ slide: report.slides[0].index, time: Infinity });
   </script>
 </body>
 </html>
