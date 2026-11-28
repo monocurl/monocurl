@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monocurl: conic sections</title>
+  <!-- after `npm install monocurl`, drop this importmap and import from "monocurl" as usual -->
+  <script type="importmap">
+    { "imports": { "monocurl": "../dist/index.js" } }
+  </script>
+  <style>
+    :root { --bg: #090a13; --panel: #11131f; --line: #23263a; --text: #e6e8f2; --muted: #8a90a8; --accent: #ffd34d; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 24px; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; }
+    h2 { margin: 0 0 4px; font-weight: 600; letter-spacing: 0.01em; }
+    .hint { color: var(--muted); font-size: 14px; margin: 0 0 16px; max-width: 72ch; line-height: 1.45; }
+    .hint b { color: var(--text); font-weight: 500; }
+    #stage { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+    canvas { width: min(960px, 100%); aspect-ratio: 16 / 9; height: auto; border: 1px solid var(--line); border-radius: 10px; cursor: grab; background: #090a13; display: block; }
+    canvas:active { cursor: grabbing; }
+    #controls { width: 260px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+    .row { margin-bottom: 14px; }
+    .row header { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 4px; }
+    .row .value { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+    input[type=range] { width: 100%; accent-color: var(--accent); }
+    #verdict { border-top: 1px solid var(--line); padding-top: 12px; margin: 4px 0 14px; font-size: 13px; line-height: 1.45; color: var(--muted); }
+    #verdict strong { display: block; font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    button { background: #1b1e2e; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; font: inherit; font-size: 13px; }
+    button:hover { border-color: #3a3f5c; }
+    #status { color: #ff8a80; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h2>Slicing a cone</h2>
+  <p class="hint">
+    Every circle, ellipse, parabola and hyperbola is a slice of one double cone. The cone's sides
+    (its <b>generators</b>, like the white line) rise at <b>60&deg;</b>. Tilt the plane and compare its slope
+    with theirs: <b>flatter</b> than a generator gives an ellipse, <b>steeper</b> cuts both halves and gives a hyperbola.
+    Find the one tilt that gives a parabola. Drag to orbit, shift-drag to pan.
+  </p>
+
+  <div id="stage">
+    <canvas id="viewport" width="1920" height="1080"></canvas>
+    <div id="controls">
+      <div id="sliders"></div>
+      <div id="verdict"><strong></strong><span></span></div>
+      <button id="reset-camera">Reset camera</button>
+    </div>
+  </div>
+  <div id="status"></div>
+
+  <script type="module">
+    import {
+      createMonocurlLoop,
+      installMonocurlCameraController,
+    } from "monocurl";
+
+    // only the slice and the curve read $params; the cone, generator, axis and floor are static
+    const source = `
+import std.color
+import std.math
+import std.mesh
+import std.anim
+import std.scene
+
+param tilt = 35.0
+param height = 0.9
+
+let H = 2.0
+let ALPHA = 30 * PI / 180
+let TA = tan(ALPHA)
+let GEN = 90 - 30
+
+let kind = |deg| {
+    if (deg < 0.25) { return 0 }
+    if (abs(deg - GEN) < 0.25) { return 2 }
+    if (deg < GEN) { return 1 }
+    return 3
+}
+let conic_color = |deg, a| [[0.45, 0.85, 1.0, a], [0.5, 0.95, 0.6, a], [1.0, 0.82, 0.3, a], [1.0, 0.45, 0.5, a]][kind(deg)]
+
+# cone point at signed height s and angle u
+let cone_at = |s, u| [s * TA * cos(u), s * TA * sin(u), s]
+
+# s(u) for the plane through (0, 0, h) with normal (sin th, 0, cos th)
+let Branch = |c, k, h, center, half| {
+    let w = max(half, 0.0)
+    return ParametricFunc(|u| cone_at(h * c / (c + k * cos(u)), u) * 1.03, [center - w, center + w, 128])
+}
+
+let Curve = |deg, h| {
+    let th = deg * PI / 180
+    let c = cos(th)
+    let k = max(sin(th) * TA, 0.000001)
+    let m = abs(h * c) / H
+    let a = arccos(clamp(-1, (m - c) / k, 1))
+    let b = arccos(clamp(-1, (m + c) / k, 1))
+    return stroke{conic_color(deg, 1), 8} [Branch(c, k, h, 0, a), Branch(c, k, h, PI, b)]
+}
+
+let Slice = |deg, h| {
+    let th = deg * PI / 180
+    let sn = max(sin(th), 0.01)
+    let cap = 1.7 + 1.9 * sin(th)
+    let t0 = -min(cap, (H + 0.2 - h) / sn)
+    let t1 = min(cap, (H + 0.2 + h) / sn)
+    let e1 = [cos(th), 0, -sin(th)]
+    let e2 = [0, 1.6, 0]
+    let p = [0, 0, h]
+    return fill{conic_color(deg, 0.28)} stroke{conic_color(deg, 0.95), 3} Polygon([p + t0 * e1 - e2, p + t1 * e1 - e2, p + t1 * e1 + e2, p + t0 * e1 + e2])
+}
+
+background = rgb(0.035, 0.04, 0.075)
+camera = Camera([2.3, -5.6, 1.3], [0, 0, -0.1], [0, 0, 1])
+
+slide "Conic sections"
+    mesh floor = stroke{rgb(0.45, 0.55, 0.8, 0.22), 1} shift{[0, 0, -H - 0.02]} LineGrid([-3, 3, 13], [-3, 3, 13])
+    mesh cone = fill{rgb(0.3, 0.36, 0.62)} gloss{0.4} [Cone([0, 0, 0], [0, 0, H], H * TA, 64), Cone([0, 0, 0], [0, 0, -H], H * TA, 64)]
+    mesh generator = stroke{rgb(1, 1, 1, 0.85), 4} Line(cone_at(-H, PI) * 1.03, cone_at(H, PI) * 1.03)
+    mesh axis = stroke{rgb(0.8, 0.8, 0.9, 0.45), 1.5} DashedLine([0, 0, -H - 0.3], [0, 0, H + 0.5], [0.12, 0.08])
+    mesh slice = Slice(deg: $tilt, h: $height)
+    mesh curve = Curve(deg: $tilt, h: $height)
+    play Set()
+`;
+
+    // slider bounds and labels are chosen by the page; the snapshot only carries names and values
+    const bounds = {
+      tilt: { label: "Plane tilt (degrees)", min: 0, max: 80, step: 0.5, digits: 1 },
+      height: { label: "Plane height on the axis", min: 0.4, max: 1.6, step: 0.05, digits: 2 },
+    };
+
+    // mirrors `kind` in the scene: the generator rises at 60 degrees
+    const GENERATOR = 60;
+    const conics = [
+      { name: "Circle", color: "#73d9ff", why: "The plane is level, so it meets every generator at the same height." },
+      { name: "Ellipse", color: "#80f299", why: "The plane is flatter than the generators, so it closes up inside one half of the cone." },
+      { name: "Parabola", color: "#ffd14d", why: "The plane is exactly parallel to a generator, so one side never closes." },
+      { name: "Hyperbola", color: "#ff7380", why: "The plane is steeper than the generators, so it cuts both halves of the cone." },
+    ];
+    const kind = (deg) => (deg < 0.25 ? 0 : Math.abs(deg - GENERATOR) < 0.25 ? 2 : deg < GENERATOR ? 1 : 3);
+
+    const canvas = document.querySelector("#viewport");
+    const status = document.querySelector("#status");
+    const sliderRoot = document.querySelector("#sliders");
+    const verdictName = document.querySelector("#verdict strong");
+    const verdictWhy = document.querySelector("#verdict span");
+
+    function showVerdict(deg) {
+      const conic = conics[kind(deg)];
+      verdictName.textContent = conic.name;
+      verdictName.style.color = conic.color;
+      const gap = deg - GENERATOR;
+      const compare = Math.abs(gap) < 0.25 ? "equal to" : `${Math.abs(gap).toFixed(1)}° ${gap < 0 ? "flatter than" : "steeper than"}`;
+      verdictWhy.textContent = `${conic.why} Tilt ${deg.toFixed(1)}°, ${compare} the 60° generator.`;
+    }
+
+    const loop = await createMonocurlLoop();
+    const camera = installMonocurlCameraController(canvas, loop);
+    document.querySelector("#reset-camera").onclick = () => camera.reset();
+
+    const report = loop.loadSource(source);
+    if (!report.ok) {
+      status.textContent = report.diagnostics.map((d) => `${d.title}: ${d.message}`).join("\n");
+      throw new Error("Monocurl compile failed");
+    }
+
+    const sliders = new Map();
+
+    function buildSlider(entry) {
+      const range = bounds[entry.name] ?? { label: entry.name, min: -5, max: 5, step: 0.01, digits: 2 };
+      const row = document.createElement("div");
+      row.className = "row";
+      const header = document.createElement("header");
+      const title = document.createElement("span");
+      title.textContent = range.label;
+      const readout = document.createElement("span");
+      readout.className = "value";
+      header.append(title, readout);
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = range.min;
+      input.max = range.max;
+      input.step = range.step;
+      input.addEventListener("input", () => {
+        const value = Number(input.value);
+        loop.updateParameter(entry.target, { kind: "float", value });
+        readout.textContent = value.toFixed(range.digits);
+        if (entry.name === "tilt") showVerdict(value);
+      });
+      row.append(header, input);
+      sliderRoot.append(row);
+      return { input, readout, digits: range.digits };
+    }
+
+    loop.addSnapshotListener((snapshot) => {
+      for (const entry of snapshot.parameters?.params ?? []) {
+        if (entry.value.kind !== "float") continue;
+        if (!sliders.has(entry.name)) sliders.set(entry.name, buildSlider(entry));
+        const { input, readout, digits } = sliders.get(entry.name);
+        if (document.activeElement !== input) input.value = entry.value.value;
+        readout.textContent = entry.value.value.toFixed(digits);
+        if (entry.name === "tilt") showVerdict(entry.value.value);
+      }
+      status.textContent = snapshot.errors?.length ? snapshot.errors.map((e) => e.message).join("\n") : "";
+    });
+
+    // slide indices come from the compile report, not from the source order
+    loop.seekTo({ slide: report.slides[0].index, time: Infinity });
+  </script>
+</body>
+</html>
