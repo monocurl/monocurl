@@ -122,6 +122,44 @@ loop.play({ until: { slide: report.slides[1].index, time: 0 } });
 When the loop reaches or crosses that timestamp, it seeks to the exact limit,
 emits a final paused snapshot there, and stops scheduling playback frames.
 
+## Sliders and parameters in a page
+
+A `param` declared at the top level of a scene shows up in
+`snapshot.parameters.params`. Each entry carries a `name`, a `value` (with a
+`kind` such as `float` or `vectorFloat`) and a `target`. Build a control from
+those, then write the new value back with `loop.updateParameter(target, value)`:
+
+```ts
+loop.addSnapshotListener((snapshot) => {
+  for (const entry of snapshot.parameters?.params ?? []) {
+    // create or update a slider for entry.name using entry.value
+  }
+});
+
+slider.addEventListener("input", () => {
+  loop.updateParameter(entry.target, { kind: "float", value: Number(slider.value) });
+});
+```
+
+The snapshot does not include slider bounds, so the page chooses min, max and
+step for each control. Scene code reacts to the change through `$name`, for
+example `mesh ball = Sphere(radius: $radius)`. Only `param` values can be
+driven this way. Use `mesh` attributes and `target.kind = "meshAttribute"`
+for those.
+
+A full working page is in [`examples/interactive-params.html`](examples/interactive-params.html).
+It builds with `npm run build` and runs from any static file server at the
+package root. It shows a 3D sphere and a cylinder driven by sliders, with orbit
+and shift-drag pan on the canvas.
+
+## Camera controls
+
+`installMonocurlCameraController(canvas, loop)` lets viewers orbit the scene by
+dragging the canvas. Holding Shift while dragging pans instead. The camera
+controller also accepts `enabled: false` to turn off pointer input, and
+`reset()` returns to the scene's own camera. Scene code can still set the
+camera with `Camera(...)` and `CameraLerp`.
+
 Text/Tex rendering in wasm uses the package's `mathjax-full` dependency.
 `createMonocurlLoop()` installs that renderer automatically; callers do not
 provide, load, or configure MathJax. The renderer emits standalone SVG markup

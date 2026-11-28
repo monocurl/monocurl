@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Monocurl: interactive parameters</title>
+  <!-- after `npm install monocurl`, drop this importmap and import from "monocurl" as usual -->
+  <script type="importmap">
+    { "imports": { "monocurl": "../dist/index.js" } }
+  </script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; color: #222; }
+    #stage { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+    canvas { width: 720px; height: 450px; border: 1px solid #ccc; border-radius: 6px; cursor: grab; }
+    #controls { min-width: 240px; }
+    #controls label { display: block; margin: 10px 0 2px; font-size: 14px; }
+    #controls input[type=range] { width: 100%; }
+    #controls .value { font-variant-numeric: tabular-nums; color: #555; font-size: 12px; }
+    #slides button, #controls button { margin: 4px 4px 4px 0; }
+    #status { color: #a00; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: 12px; }
+    .hint { color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h2>Sphere and bar, driven by sliders</h2>
+  <p class="hint">Drag to orbit. Shift-drag to pan. Sliders edit the live runtime, and the scene reacts without recompiling.</p>
+
+  <div id="stage">
+    <canvas id="viewport" width="1440" height="900"></canvas>
+    <div id="controls">
+      <div id="sliders"></div>
+      <button id="play">Play / pause</button>
+      <button id="reset-camera">Reset camera</button>
+      <div id="slides"></div>
+    </div>
+  </div>
+  <div id="status"></div>
+
+  <script type="module">
+    import {
+      createMonocurlLoop,
+      installMonocurlCameraController,
+    } from "monocurl";
+
+    const source = `
+import std.color
+import std.mesh
+import std.anim
+import std.scene
+
+param radius = 1.0
+param height = 2.0
+param offset = [0.0, 0.0, 0.0]
+
+slide "Shapes"
+    mesh ball = fill{alpha{0.7} BLUE} Sphere(radius: $radius)
+    mesh bar = shift{delta: $offset} fill{alpha{0.7} ORANGE} Cylinder(radius: 0.3, height: $height)
+`;
+
+    // Slider bounds are chosen by the page. The snapshot only carries names and current values.
+    const bounds = {
+      radius: { min: 0.2, max: 2, step: 0.01 },
+      height: { min: 0.5, max: 4, step: 0.01 },
+      offset: { min: -2, max: 2, step: 0.01 },
+    };
+
+    const canvas = document.querySelector("#viewport");
+    const status = document.querySelector("#status");
+    const sliderRoot = document.querySelector("#sliders");
+    const slideRoot = document.querySelector("#slides");
+
+    const loop = await createMonocurlLoop();
+    const camera = installMonocurlCameraController(canvas, loop, {
+      rendererOptions: { pixelRatio: 1 },
+    });
+
+    const report = loop.loadSource(source);
+    if (!report.ok) {
+      status.textContent = report.diagnostics.map((d) => `${d.title}: ${d.message}`).join("\n");
+      throw new Error("Monocurl compile failed");
+    }
+
+    for (const slide of report.slides) {
+      const button = document.createElement("button");
+      button.textContent = slide.name ?? `Slide ${slide.index + 1}`;
+      button.onclick = () => loop.seekTo({ slide: slide.index, time: 0 });
+      slideRoot.append(button);
+    }
+
+    document.querySelector("#play").onclick = () => loop.togglePlay();
+    document.querySelector("#reset-camera").onclick = () => camera.reset();
+
+    // Sliders are built once from the first snapshot that lists parameters,
+    // then kept in sync with the runtime each time it reports a value.
+    const sliders = new Map();
+
+    function buildSlider(entry) {
+      const range = bounds[entry.name] ?? { min: -5, max: 5, step: 0.01 };
+      const components = entry.value.kind === "vectorFloat" ? entry.value.value : [entry.value.value];
+      const wrap = document.createElement("div");
+      const title = document.createElement("label");
+      title.textContent = entry.name;
+      wrap.append(title);
+
+      const inputs = components.map((_, index) => {
+        const input = document.createElement("input");
+        input.type = "range";
+        input.min = range.min;
+        input.max = range.max;
+        input.step = range.step;
+        input.addEventListener("input", () => {
+          const next = inputs.map((el) => Number(el.value));
+          const value =
+            entry.value.kind === "vectorFloat"
+              ? { kind: "vectorFloat", value: next }
+              : { kind: "float", value: next[0] };
+          loop.updateParameter(entry.target, value);
+          readout.textContent = next.map((n) => n.toFixed(2)).join(", ");
+        });
+        wrap.append(input);
+        return input;
+      });
+      const readout = document.createElement("div");
+      readout.className = "value";
+      wrap.append(readout);
+      sliderRoot.append(wrap);
+      return { inputs, readout, entry };
+    }
+
+    function syncSliders(snapshot) {
+      for (const entry of snapshot.parameters?.params ?? []) {
+        if (entry.value.kind !== "float" && entry.value.kind !== "vectorFloat") continue;
+        if (!sliders.has(entry.name)) sliders.set(entry.name, buildSlider(entry));
+        const { inputs, readout } = sliders.get(entry.name);
+        const current = entry.value.kind === "vectorFloat" ? entry.value.value : [entry.value.value];
+        current.forEach((n, i) => {
+          if (document.activeElement !== inputs[i]) inputs[i].value = n;
+        });
+        readout.textContent = current.map((n) => n.toFixed(2)).join(", ");
+      }
+    }
+
+    loop.addSnapshotListener((snapshot) => {
+      syncSliders(snapshot);
+      if (snapshot.errors?.length) {
+        status.textContent = snapshot.errors.map((e) => e.message).join("\n");
+      }
+    });
+
+    loop.seekTo({ slide: 0, time: 0 });
+  </script>
+</body>
+</html>
